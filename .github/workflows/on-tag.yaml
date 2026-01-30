@@ -46,41 +46,67 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
+      - name: Setup Flox
+        uses: ./.github/actions/setup-flox
 
-      # Setup, Test, and Lint
-      - name: Run Go CI (setup, test, lint)
-        uses: ./.github/actions/go-ci
+      - name: Cache Go modules and build
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
         with:
-          go_version: ${{ steps.versions.outputs.go }}
-          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
-          addlicense_version: ${{ steps.versions.outputs.addlicense }}
-          coverage_report: 'false'
+          path: |
+            .flox/cache/go
+            .flox/cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Tidy Modules
+        uses: ./.github/actions/flox-run
+        with:
+          command: make tidy
+
+      - name: Run Tests
+        uses: ./.github/actions/flox-run
+        with:
+          command: CGO_ENABLED=1 make test
+
+      - name: Lint Go
+        uses: ./.github/actions/flox-run
+        with:
+          command: golangci-lint run --timeout=5m
+
+      - name: Ensure License Headers
+        uses: ./.github/actions/flox-run
+        with:
+          command: make license
 
       # Build and Release
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+        with:
+          registry: ghcr.io
+
       - name: Build and Release
         id: release
-        uses: ./.github/actions/go-build-release
+        uses: ./.github/actions/flox-run
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          command: make release
 
       - name: Attest eidosd image
         uses: ./.github/actions/attest-image-from-tag
         with:
           image_name: ghcr.io/${{ github.repository_owner }}/eidosd
           tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
 
       - name: Attest eidos image
         uses: ./.github/actions/attest-image-from-tag
         with:
           image_name: ghcr.io/${{ github.repository_owner }}/eidos
           tag: ${{ github.ref_name }}
-          crane_version: ${{ steps.versions.outputs.crane }}
 
       # Deploy to Cloud Run
       - name: Deploy API to Cloud Run
-        if: steps.release.outputs.release_outcome == 'success'
         uses: ./.github/actions/cloud-run-deploy
         with:
           project_id: ${{ env.PROJECT_ID }}

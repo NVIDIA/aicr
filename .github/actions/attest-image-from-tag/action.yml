@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Resolve digest and attest image'
-description: 'Resolves an image digest from a tag and generates SBOM + provenance attestations'
+description: 'Resolves an image digest from a tag and generates SBOM + provenance attestations. Requires Flox to be set up first.'
 
 inputs:
   image_name:
@@ -22,10 +22,6 @@ inputs:
   tag:
     description: 'Image tag to resolve (e.g. v1.2.3)'
     required: true
-  crane_version:
-    description: 'crane version to install (e.g. v0.20.6)'
-    required: false
-    default: 'v0.20.6'
 
 outputs:
   image_digest:
@@ -51,23 +47,18 @@ runs:
     - name: Authenticate to registry
       uses: ./.github/actions/ghcr-login
 
-    - name: Setup crane
-      uses: ./.github/actions/setup-build-tools
-      with:
-        install_crane: 'true'
-        crane_version: ${{ inputs.crane_version }}
-
     - name: Resolve image digest
       id: digest
-      shell: bash
-      run: |
-        set -euo pipefail
-        DIGEST="$(crane digest "${{ inputs.image_name }}:${{ inputs.tag }}")"
-        if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
-          echo "::error::unexpected digest format: $DIGEST"
-          exit 1
-        fi
-        echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+      uses: ./.github/actions/flox-run
+      with:
+        command: |
+          set -euo pipefail
+          DIGEST="$(crane digest "${{ inputs.image_name }}:${{ inputs.tag }}")"
+          if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::unexpected digest format: $DIGEST"
+            exit 1
+          fi
+          echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
 
     - name: Generate SBOM and attestations
       uses: ./.github/actions/sbom-and-attest

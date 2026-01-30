@@ -3,6 +3,8 @@ version = 1
 
 [install]
 addlicense.pkg-path = "addlicense"
+crane.pkg-path = "crane"
+ctlptl.pkg-path = "ctlptl"
 git.pkg-path = "git"
 gnumake.pkg-path = "gnumake"
 go.pkg-path = "go"
@@ -10,7 +12,12 @@ go.version = "^1.25"
 golangci-lint.pkg-path = "golangci-lint"
 goreleaser.pkg-path = "goreleaser"
 grype.pkg-path = "grype"
+helm.pkg-path = "kubernetes-helm"
+kind.pkg-path = "kind"
 ko.pkg-path = "ko"
+kubectl.pkg-path = "kubectl"
+syft.pkg-path = "syft"
+tilt.pkg-path = "tilt"
 yamllint.pkg-path = "yamllint"
 yq-go.pkg-path = "yq-go"
 

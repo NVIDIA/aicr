@@ -12,28 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Language Versions
-languages:
-  go: '1.25'
+name: 'Flox Run'
+description: 'Run a command inside the Flox environment'
 
-# Build Tools
-build_tools:
-  goreleaser: 'v2'
-  ko: 'v0.18.0'
-  crane: 'v0.20.6'
+inputs:
+  command:
+    description: 'Command to run inside flox activate'
+    required: true
 
-# Linting
-linting:
-  golangci_lint: 'v2.6'
-  addlicense: 'v1.1.1'
-
-# Security Tools
-security_tools:
-  grype: 'v0.107.0'
-
-# E2E Testing Tools
-testing_tools:
-  kind: '0.27.0'
-  ctlptl: '0.8.43'
-  tilt: '0.35.0'
-  helm: 'v3.17.0'
+runs:
+  using: 'composite'
+  steps:
+    - name: Run in Flox environment
+      shell: bash
+      env:
+        _FLOX_CMD: ${{ inputs.command }}
+      run: |
+        SCRIPT=$(mktemp)
+        trap "rm -f $SCRIPT" EXIT
+        printf '%s\n' "$_FLOX_CMD" > "$SCRIPT"
+        chmod +x "$SCRIPT"
+        flox activate -- bash "$SCRIPT"

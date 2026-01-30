@@ -37,6 +37,7 @@ concurrency:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   e2e-test:
@@ -48,15 +49,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Set up Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: true
+      - name: Setup Flox
+        uses: ./.github/actions/setup-flox
 
       - name: Free up disk space
         run: |
@@ -72,47 +66,50 @@ jobs:
           sudo sysctl -w fs.inotify.max_user_watches=524288
           sudo sysctl -w fs.inotify.max_user_instances=1024
 
-      - name: Install E2E testing tools
-        uses: ./.github/actions/install-e2e-tools
-
       - name: Create Kind cluster
-        run: make cluster-create
+        uses: ./.github/actions/flox-run
+        with:
+          command: make cluster-create
 
       - name: Run Tilt CI
-        run: make tilt-ci
+        uses: ./.github/actions/flox-run
+        with:
+          command: make tilt-ci
 
       - name: Build and push Eidos image to local registry
-        run: |
-          # Build and push eidos image for snapshot agent
-          KO_DOCKER_REPO=localhost:5001/eidos ko build --bare --tags=local ./cmd/eidos
-          # Verify image is available
-          curl -sf http://localhost:5001/v2/eidos/tags/list
+        uses: ./.github/actions/flox-run
+        with:
+          command: |
+            KO_DOCKER_REPO=localhost:5001/eidos ko build --bare --tags=local ./cmd/eidos
+            curl -sf http://localhost:5001/v2/eidos/tags/list
 
       - name: Set up fake GPU environment
-        run: |
-          # Create gpu-operator namespace
-          kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
-
-          # Inject fake nvidia-smi into Kind worker nodes
-          for node in $(docker ps --filter "name=-worker" --format "{{.Names}}"); do
-            echo "Injecting fake nvidia-smi into $node"
-            docker cp tools/fake-nvidia-smi "${node}:/usr/local/bin/nvidia-smi"
-            docker exec "$node" chmod +x /usr/local/bin/nvidia-smi
-            # Verify it works
-            docker exec "$node" nvidia-smi --version
-          done
+        uses: ./.github/actions/flox-run
+        with:
+          command: |
+            kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
+            for node in $(docker ps --filter "name=-worker" --format "{{.Names}}"); do
+              echo "Injecting fake nvidia-smi into $node"
+              docker cp tools/fake-nvidia-smi "${node}:/usr/local/bin/nvidia-smi"
+              docker exec "$node" chmod +x /usr/local/bin/nvidia-smi
+              docker exec "$node" nvidia-smi --version
+            done
 
       - name: Set up port forwarding
-        run: |
-          kubectl port-forward -n eidos svc/eidosd 8080:8080 &
-          sleep 5
-          curl -sf http://localhost:8080/health || exit 1
+        uses: ./.github/actions/flox-run
+        with:
+          command: |
+            kubectl port-forward -n eidos svc/eidosd 8080:8080 &
+            sleep 5
+            curl -sf http://localhost:8080/health || exit 1
 
       - name: Run E2E tests
+        uses: ./.github/actions/flox-run
         env:
           EIDOS_IMAGE: localhost:5001/eidos:local
           FAKE_GPU_ENABLED: "true"
-        run: ./tests/e2e/run.sh
+        with:
+          command: ./tests/e2e/run.sh
 
       - name: Collect debug artifacts
         if: failure()

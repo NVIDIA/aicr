@@ -43,30 +43,100 @@ concurrency:
 
 jobs:
 
+  # Run test, lint, and security scan in parallel
   test:
-    name: Test Code
+    name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
-
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
+      - name: Setup Flox
+        uses: ./.github/actions/setup-flox
 
-      # Setup, Test, and Lint
-      - name: Run Go CI (setup, test, lint)
-        uses: ./.github/actions/go-ci
+      - name: Cache Go modules and build
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
         with:
-          go_version: ${{ steps.versions.outputs.go }}
-          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
-          addlicense_version: ${{ steps.versions.outputs.addlicense }}
-          coverage_report: 'true'
-          coverage_threshold: '70'
+          path: |
+            .flox/cache/go
+            .flox/cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
 
-      # Scan for Vulnerabilities
+      - name: Tidy Modules
+        uses: ./.github/actions/flox-run
+        with:
+          command: make tidy
+
+      - name: Run Tests with Coverage
+        uses: ./.github/actions/flox-run
+        with:
+          command: CGO_ENABLED=1 make test
+
+      - name: Upload Coverage to Codecov
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de  # v5.5.2
+        with:
+          files: ./coverage.out
+          flags: unit
+          fail_ci_if_error: false
+          verbose: true
+          use_oidc: ${{ secrets.CODECOV_TOKEN == '' }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Flox
+        uses: ./.github/actions/setup-flox
+
+      - name: Cache Go modules and build
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            .flox/cache/go
+            .flox/cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Cache golangci-lint
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: ~/.cache/golangci-lint
+          key: golangci-lint-${{ runner.os }}-${{ hashFiles('.golangci.yaml', 'go.sum') }}
+          restore-keys: |
+            golangci-lint-${{ runner.os }}-
+
+      - name: Lint Go
+        uses: ./.github/actions/flox-run
+        with:
+          command: golangci-lint run --timeout=5m
+
+      - name: Lint YAML
+        uses: ./.github/actions/flox-run
+        with:
+          command: make lint-yaml
+
+      - name: Ensure License Headers
+        uses: ./.github/actions/flox-run
+        with:
+          command: make license
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
       - name: Security Scan
         uses: ./.github/actions/security-scan
         with:
