@@ -2,20 +2,6 @@
 
 This demo walks through the recipe metadata system, showing how multi-level inheritance, criteria matching, and component configuration work together.
 
-## Prerequisites
-
-Install CLI:
-
-```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s --
-```
-
-Test CLI:
-
-```shell
-eidos -h
-```
-
 ## Intro 
 
 > Rule-based configuration engine over Metadata composes optimized REcipes for given set of criteria

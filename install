@@ -26,12 +26,12 @@ Install utility for $BIN_NAME
 Usage: $0 [-d install_dir]
 
 Environment Variables:
-  GITHUB_TOKEN    Optional GitHub token to avoid API rate limits
+  GITHUB_TOKEN    GitHub token for private repo access (requires 'repo' scope)
 
 Examples:
-  $0                    # Install to /usr/local/bin
+  $0                    # Install to /usr/local/bin (public repo)
   $0 -d ~/bin           # Install to custom directory
-  GITHUB_TOKEN=xyz $0   # Install with authentication
+  GITHUB_TOKEN=xyz $0   # Install from private repository
 EOF
   exit 1
 }
@@ -74,61 +74,90 @@ get_binary_name() {
 # GitHub API Functions
 # ==============================================================================
 
-github_curl() {
+github_api_curl() {
   local url="$1"
-  local output_file="${2:-}"
-  local curl_opts=(-w "%{http_code}")
-  
+  local curl_opts=(-s)
+
   [[ -n "${GITHUB_TOKEN:-}" ]] && curl_opts+=(-H "Authorization: token $GITHUB_TOKEN")
-  
-  if [[ -n "$output_file" ]]; then
-    # Show progress bar for file downloads (can be large)
-    curl_opts+=(-# -Lo "$output_file")
-  else
-    # Silent for API calls
-    curl_opts+=(-s)
-  fi
-  
+
   curl "${curl_opts[@]}" "$url"
+}
+
+download_release_asset() {
+  local url="$1"
+  local output="$2"
+  local desc="${3:-file}"
+  local curl_opts=(-# -L -o "$output" -w "%{http_code}")
+  local http_code
+
+  # For private repos, we need to use the API URL with Accept header
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    curl_opts+=(-H "Authorization: token $GITHUB_TOKEN")
+    curl_opts+=(-H "Accept: application/octet-stream")
+  fi
+
+  msg "Downloading $desc..."
+  http_code=$(curl "${curl_opts[@]}" "$url" | tail -c 3)
+
+  [[ "$http_code" == "200" ]] || err "Failed to download $desc (HTTP $http_code): $url"
 }
 
 fetch_latest_release() {
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
   local response
-  
+
   msg "Fetching latest release from GitHub..."
-  response=$(github_curl "$api_url")
-  
+  response=$(github_api_curl "$api_url")
+
   [[ -z "$response" ]] && err "Failed to fetch release information from GitHub API"
-  
+
   if grep -q "API rate limit exceeded" <<< "$response"; then
     err "GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable or try again later."
   fi
-  
+
+  if grep -q "Not Found" <<< "$response"; then
+    err "Repository not found or no releases available. For private repos, set GITHUB_TOKEN environment variable."
+  fi
+
   echo "$response"
 }
 
 extract_version() {
   local json="$1"
   local version
-  
+
   version=$(grep -m 1 '"tag_name"' <<< "$json" | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-  
+
   [[ -z "$version" || "$version" == "null" ]] && err "Failed to extract version from GitHub API response"
-  
+
   echo "$version"
 }
 
-download_file() {
-  local url="$1"
-  local output="$2"
-  local desc="${3:-file}"
-  local http_code
-  
-  msg "Downloading $desc..."
-  http_code=$(github_curl "$url" "$output" | tail -c 3)
-  
-  [[ "$http_code" == "200" ]] || err "Failed to download $desc (HTTP $http_code): $url"
+# Extract asset API URL from release JSON by asset name
+extract_asset_url() {
+  local json="$1"
+  local asset_name="$2"
+  local url
+
+  # For private repos with token, use the API URL (id-based)
+  # For public repos, use browser_download_url
+  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    # Extract the asset ID and construct API URL
+    local asset_id
+    asset_id=$(echo "$json" | grep -B5 "\"name\": \"$asset_name\"" | grep '"id":' | head -1 | sed -E 's/.*"id":[[:space:]]*([0-9]+).*/\1/')
+    if [[ -n "$asset_id" ]]; then
+      url="https://api.github.com/repos/${REPO}/releases/assets/${asset_id}"
+    fi
+  fi
+
+  # Fallback to browser_download_url (works for public repos)
+  if [[ -z "$url" ]]; then
+    url=$(echo "$json" | grep -A1 "\"name\": \"$asset_name\"" | grep '"browser_download_url"' | sed -E 's/.*"browser_download_url":[[:space:]]*"([^"]+)".*/\1/')
+  fi
+
+  [[ -z "$url" ]] && err "Asset '$asset_name' not found in release"
+
+  echo "$url"
 }
 
 
@@ -168,12 +197,14 @@ main() {
   # Download and verify binary
   temp_dir=$(mktemp -d)
   trap "rm -rf $temp_dir" EXIT
-  
-  local binary_url="${REPO}/releases/download/${version}/${binary_name}"
-  local checksum_url="${REPO}/releases/download/${version}/${CHECKSUMS_FILE}"
-  
-  download_file "https://github.com/${binary_url}" "${temp_dir}/${binary_name}" "$binary_name"
-  download_file "https://github.com/${checksum_url}" "${temp_dir}/checksums.txt" "checksums"
+
+  # Extract asset URLs from release JSON (handles both public and private repos)
+  local binary_url checksum_url
+  binary_url=$(extract_asset_url "$release_json" "$binary_name")
+  checksum_url=$(extract_asset_url "$release_json" "$CHECKSUMS_FILE")
+
+  download_release_asset "$binary_url" "${temp_dir}/${binary_name}" "$binary_name"
+  download_release_asset "$checksum_url" "${temp_dir}/checksums.txt" "checksums"
   
   # Verify checksum
   msg "Verifying checksum..."
@@ -183,7 +214,12 @@ main() {
   # Install binary
   chmod +x "${temp_dir}/${binary_name}"
   msg "Installing $BIN_NAME to $INSTALL_DIR"
-  sudo mv "${temp_dir}/${binary_name}" "${INSTALL_DIR}/${BIN_NAME}"
+  mkdir -p "$INSTALL_DIR"
+  if [[ -w "$INSTALL_DIR" ]]; then
+    mv "${temp_dir}/${binary_name}" "${INSTALL_DIR}/${BIN_NAME}"
+  else
+    sudo mv "${temp_dir}/${binary_name}" "${INSTALL_DIR}/${BIN_NAME}"
+  fi
   
   # Verify installation
   msg "$BIN_NAME installed successfully!"

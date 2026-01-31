@@ -21,11 +21,22 @@ Install the latest version using the installation script:
 curl -sfL https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s --
 ```
 
+**Private Repository Access**: If the repository is private, set your GitHub token first:
+
+```shell
+export GITHUB_TOKEN="your_github_token"
+curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s --
+```
+
+You can generate a personal access token at [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens). The token needs `repo` scope for private repository access.
+
 This script:
 - Detects your OS and architecture automatically
 - Downloads the appropriate binary from GitHub releases
 - Installs to `/usr/local/bin/eidos` (requires sudo)
 - Verifies the installation
+- Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 
 > **Supply Chain Security**: Eidos includes SLSA Build Level 3 compliance with signed SBOMs and verifiable attestations. See [SECURITY](../SECURITY.md#supply-chain-security) for verification instructions.
 

@@ -1,17 +1,5 @@
 # Eidos Extendability Demo
 
-## Install
-
-```shell
-curl -sfL https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s --
-```
-
-Test CLI:
-
-```shell
-eidos -h
-```
-
 ## Embedded Data
 
 View embedded data files structure:
