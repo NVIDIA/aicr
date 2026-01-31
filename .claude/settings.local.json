@@ -18,7 +18,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
       "Skill(commit-commands:commit)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:downloads.flox.dev)"
     ]
   }
 }

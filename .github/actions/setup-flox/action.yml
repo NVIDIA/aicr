@@ -13,31 +13,82 @@
 # limitations under the License.
 
 name: 'Setup Flox Environment'
-description: 'Install Flox. Use .github/actions/flox-run to run commands.'
+description: 'Install Flox with Nix caching. Use .github/actions/flox-run to run commands.'
 
 runs:
   using: 'composite'
   steps:
     - name: Install Flox
-      uses: flox/install-flox-action@74a05bf80df0461f277202a8cbb7039fb55e7a67  # v2.2.0
-      with:
-        disable-metrics: 'true'
+      shell: bash
+      run: |
+        # Download and install Flox deb package for x86_64 Linux
+        FLOX_VERSION="1.8.3"
+        curl -fsSL "https://downloads.flox.dev/by-env/stable/deb/flox-${FLOX_VERSION}.x86_64-linux.deb" -o /tmp/flox.deb
+        sudo apt-get update
+        sudo apt-get install -y /tmp/flox.deb
+        rm /tmp/flox.deb
+
+        # Disable telemetry
+        mkdir -p ~/.config/flox
+        echo 'disable_metrics = true' > ~/.config/flox/flox.toml
 
     - name: Configure Nix for unsigned cache
       shell: bash
       run: |
-        # magic-nix-cache stores unsigned paths; this is acceptable since
-        # the GHA cache is scoped to the repo and branch
+        # Allow unsigned paths for GitHub Actions cache
+        # This is acceptable since the GHA cache is scoped to the repo and branch
         sudo tee -a /etc/nix/nix.conf > /dev/null <<< "require-sigs = false"
         # Restart nix-daemon to pick up config changes
         sudo systemctl restart nix-daemon
 
-    - name: Setup Nix Cache
-      uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
-      with:
-        use-flakehub: false
+    - name: Setup Magic Nix Cache
+      shell: bash
+      run: |
+        # Download magic-nix-cache binary
+        CACHE_VERSION="v0.1.6"
+        curl -fsSL "https://github.com/DeterminateSystems/magic-nix-cache/releases/download/${CACHE_VERSION}/magic-nix-cache-X64-Linux" \
+          -o /tmp/magic-nix-cache
+        chmod +x /tmp/magic-nix-cache
+
+        # Create startup notification file
+        STARTUP_FILE="/tmp/magic-nix-cache-startup"
+
+        # Start the cache daemon in background
+        # ACTIONS_CACHE_URL and ACTIONS_RUNTIME_TOKEN are set by GitHub Actions
+        /tmp/magic-nix-cache \
+          --listen "127.0.0.1:37515" \
+          --upstream "https://cache.nixos.org" \
+          --diagnostic-endpoint "" \
+          --use-gha-cache Enabled \
+          --startup-notification-file "$STARTUP_FILE" \
+          > /tmp/magic-nix-cache.log 2>&1 &
+
+        # Save PID for cleanup
+        echo $! > /tmp/magic-nix-cache.pid
+
+        # Wait for daemon to be ready (max 30s)
+        for i in {1..30}; do
+          if [ -f "$STARTUP_FILE" ]; then
+            echo "Magic Nix Cache daemon is ready"
+            break
+          fi
+          sleep 1
+        done
+
+        if [ ! -f "$STARTUP_FILE" ]; then
+          echo "Warning: Magic Nix Cache daemon startup timed out"
+          cat /tmp/magic-nix-cache.log || true
+        fi
+
+        # Configure Nix to use the local cache daemon as extra substituter
+        sudo tee -a /etc/nix/nix.conf > /dev/null << 'EOF'
+        extra-substituters = http://127.0.0.1:37515
+        extra-trusted-substituters = http://127.0.0.1:37515
+        EOF
+        sudo systemctl restart nix-daemon
 
     - name: Verify Flox environment
       shell: bash
       run: |
+        flox --version
         flox activate -- bash -c 'env | grep FLOX && flox list'
