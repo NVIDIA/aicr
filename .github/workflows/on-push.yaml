@@ -75,15 +75,11 @@ jobs:
         with:
           command: CGO_ENABLED=1 make test
 
-      - name: Upload Coverage to Codecov
-        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de  # v5.5.2
+      - name: Coverage Report
+        uses: ./.github/actions/go-coverage
         with:
-          files: ./coverage.out
-          flags: unit
-          fail_ci_if_error: false
-          verbose: true
-          use_oidc: ${{ secrets.CODECOV_TOKEN == '' }}
-          token: ${{ secrets.CODECOV_TOKEN }}
+          coverage_file: 'coverage.out'
+          threshold: '70'
 
   lint:
     name: Lint
