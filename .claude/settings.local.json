@@ -17,7 +17,8 @@
       "WebFetch(domain:goreleaser.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
-      "Skill(commit-commands:commit)"
+      "Skill(commit-commands:commit)",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }

@@ -107,6 +107,7 @@ jobs:
 
       # Deploy to Cloud Run
       - name: Deploy API to Cloud Run
+        if: steps.release.outcome == 'success'
         uses: ./.github/actions/cloud-run-deploy
         with:
           project_id: ${{ env.PROJECT_ID }}
