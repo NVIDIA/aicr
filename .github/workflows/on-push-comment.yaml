@@ -25,6 +25,7 @@ on:
       - completed
 
 permissions:
+  actions: read        # Required to download artifacts from other workflow runs
   pull-requests: write
 
 jobs:
