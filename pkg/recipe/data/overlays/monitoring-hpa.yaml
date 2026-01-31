@@ -26,11 +26,11 @@ spec:
 
   componentRefs:
     # Prometheus Adapter enables Kubernetes HPA with custom GPU metrics
-    # Requires prometheus to be deployed (included in base)
+    # Requires kube-prometheus-stack to be deployed (included in base)
     - name: prometheus-adapter
       type: Helm
       source: https://prometheus-community.github.io/helm-charts
       version: 4.14.0
       valuesFile: components/prometheus-adapter/values.yaml
       dependencyRefs:
-        - prometheus
+        - kube-prometheus-stack

@@ -230,8 +230,8 @@ func TestResolveChartName(t *testing.T) {
 		expected      string
 	}{
 		{
-			name:          "prometheus resolves to kube-prometheus-stack",
-			componentName: "prometheus",
+			name:          "kube-prometheus-stack resolves to kube-prometheus-stack",
+			componentName: "kube-prometheus-stack",
 			expected:      "kube-prometheus-stack",
 		},
 		{

@@ -138,10 +138,11 @@ components:
         tolerationPaths:
           - kubeletPlugin.tolerations
 
-  - name: prometheus
-    displayName: prometheus
+  - name: kube-prometheus-stack
+    displayName: kube-prometheus-stack
     valueOverrideKeys:
       - prometheus
+      - kubeprometheusstack
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
