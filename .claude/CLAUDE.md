@@ -352,7 +352,8 @@ When choosing between approaches, prioritize in this order:
 
 | File | Purpose |
 |------|---------|
-| `CONTRIBUTING.md` | Development setup, design principles, PR process, DCO |
+| `CONTRIBUTING.md` | Contribution guidelines, PR process, DCO |
+| `DEVELOPMENT.md` | Development setup, architecture, Make targets |
 | `RELEASING.md` | Release process for maintainers (tags, workflows, verification) |
 | `.versions.yaml` | Tool versions (single source of truth) |
 | `pkg/recipe/data/registry.yaml` | Declarative component configuration |
@@ -363,10 +364,14 @@ When choosing between approaches, prioritize in this order:
 
 See `CONTRIBUTING.md` for contributor documentation:
 - Design principles (reproducibility, provenance, idiomatic experience)
-- Development setup and tool installation
-- Project architecture and key components
 - PR process and code review checklist
 - DCO sign-off requirements
+
+See `DEVELOPMENT.md` for development documentation:
+- Development setup and tool installation
+- Project architecture and key components
+- Make targets reference
+- Local Kubernetes development (Tilt, Kind)
 
 See `RELEASING.md` for maintainer documentation:
 - Release methods (automatic, manual, hotfix)
