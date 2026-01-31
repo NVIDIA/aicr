@@ -963,35 +963,50 @@ Eidos uses a **three-layer composite actions architecture** for reusability:
 
 **Key Workflows:**
 
-**on-push.yaml** (CI validation):
+**on-push.yaml** (CI validation - runs unit, integration, e2e in parallel):
 ```yaml
 jobs:
-  validate:
+  unit:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/go-ci
         with:
           go_version: '1.25'
-          golangci_lint_version: 'v2.6'
-          upload_codecov: 'true'
+          golangci_lint_version: 'v2.6.2'
+          coverage_report: 'true'
       - uses: ./.github/actions/security-scan
+  integration:
+    steps:
+      - uses: ./.github/actions/integration
+  e2e:
+    steps:
+      - uses: ./.github/actions/e2e
 ```
 
-**on-tag.yaml** (Release pipeline):
+**on-tag.yaml** (Release pipeline - tests → build → attest → deploy):
 ```yaml
 jobs:
-  release:
+  unit:        # parallel
+  integration: # parallel
+  e2e:         # parallel
+  build:
+    needs: [unit, integration, e2e]
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/go-ci
-      - id: release
-        uses: ./.github/actions/go-build-release
+      - uses: ./.github/actions/go-build-release
+  attest:
+    needs: [build]
+    steps:
       - uses: ./.github/actions/attest-image-from-tag
         with:
           image_name: 'ghcr.io/nvidia/eidos'
-          image_tag: ${{ github.ref_name }}
-      - if: steps.release.outputs.release_outcome == 'success'
-        uses: ./.github/actions/cloud-run-deploy
+          tag: ${{ github.ref_name }}
+  deploy:
+    needs: [attest]
+    steps:
+      - uses: ./.github/actions/cloud-run-deploy
+        with:
+          source_image: 'ghcr.io/nvidia/eidosd:${{ github.ref_name }}'
+          target_registry: 'us-docker.pkg.dev/eidosx/demo'
 ```
 
 **Supply Chain Security:**

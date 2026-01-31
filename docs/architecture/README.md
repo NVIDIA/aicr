@@ -1058,24 +1058,53 @@ Eidos uses GitHub Actions with a three-layer composite actions architecture for 
 
 **Trigger**: Every push to `main` or pull request
 
-**Pipeline**:
+**Pipeline** (parallel jobs):
 ```
-Checkout → Go CI (Setup + Test + Lint) → Security Scan → Upload Results
+┌─────────────────────────────────────────────────────────────┐
+│                      On Push                                 │
+├─────────────────┬─────────────────┬─────────────────────────┤
+│ Unit Tests      │ Integration     │ E2E Tests               │
+│ (go-ci +        │ Tests           │ (Kind cluster +         │
+│  security-scan) │ (tools/e2e)     │  fake GPU)              │
+└─────────────────┴─────────────────┴─────────────────────────┘
 ```
 
 **Components**:
-- **go-ci** composite action: Go setup (1.25), tests with race detector, golangci-lint (v2.6), Codecov upload
+- **go-ci** composite action: Go setup (1.25), tests with race detector, golangci-lint (v2.6.2), GitHub-native coverage
+- **integration** composite action: CLI integration tests via tools/e2e
+- **e2e** composite action: Full E2E tests with Kind cluster and fake GPU environment
 - **security-scan** composite action: Trivy vulnerability scanning (MEDIUM+), SARIF upload to Security tab
 
 **Permissions**: `contents: read`, `id-token: write`, `security-events: write`
 
 ### Release Automation (on-tag.yaml)
 
-**Trigger**: Semantic version tags (e.g., `v0.8.12`)
+**Trigger**: Semantic version tags (e.g., `v0.1.5`)
 
 **Pipeline**:
 ```
-Checkout → Validate (Go CI) → Build & Release → Attest Images → Deploy
+┌─────────────────────────────────────────────────────────────┐
+│                      On Tag                                  │
+├─────────────────┬─────────────────┬─────────────────────────┤
+│ Unit Tests      │ Integration     │ E2E Tests               │
+└────────┬────────┴────────┬────────┴────────┬────────────────┘
+         │                 │                 │
+         └─────────────────┴─────────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │ Build &     │
+                    │ Release     │
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │ Attest      │
+                    │ Images      │
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │ Deploy to   │
+                    │ Cloud Run   │
+                    └─────────────┘
 ```
 
 **Build & Release** (`go-build-release` action):
@@ -1097,8 +1126,8 @@ Checkout → Validate (Go CI) → Build & Release → Attest Images → Deploy
 
 **Deployment** (`cloud-run-deploy` action):
 - Authenticate with Workload Identity Federation (keyless)
-- Deploy eidosd to Google Cloud Run
-- Update service with new image version
+- Copy image from GHCR to Artifact Registry (us-docker.pkg.dev/eidosx/demo)
+- Deploy eidosd to Google Cloud Run from Artifact Registry
 
 **Permissions**: `attestations: write`, `contents: write`, `id-token: write`, `packages: write`
 

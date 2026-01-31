@@ -460,9 +460,11 @@ None / Describe any breaking changes
 
 1. **Automated Checks** (GitHub Actions `on-push` workflow):
    - ✓ Go tests with race detector
-   - ✓ golangci-lint (v2.6)
+   - ✓ golangci-lint (v2.6.2)
    - ✓ Trivy security scan (MEDIUM, HIGH, CRITICAL)
-   - ✓ Code coverage upload to Codecov
+   - ✓ GitHub-native code coverage tracking
+   - ✓ Integration tests (CLI workflows)
+   - ✓ E2E tests (Kind cluster with fake GPU)
    - Must pass before merge
 2. **Maintainer Review**: A maintainer will review your code for:
    - Correctness and functionality

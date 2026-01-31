@@ -7,12 +7,14 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 ### Core CI/CD Actions
 
 #### `go-ci/`
-**Purpose**: Complete Go project CI pipeline (setup, test, lint)  
-**When to use**: Every workflow that needs to validate Go code  
+**Purpose**: Complete Go project CI pipeline (setup, test, lint)
+**When to use**: Every workflow that needs to validate Go code
 **Inputs**:
 - `go_version` (required): Go version (e.g., "1.25")
 - `golangci_lint_version` (required): golangci-lint version (e.g., "v2.6")
-- `upload_codecov` (optional): Whether to upload coverage to Codecov (default: "false")
+- `addlicense_version` (optional): addlicense version (default: "v1.1.1")
+- `coverage_report` (optional): Whether to generate GitHub-native coverage report (default: "false")
+- `coverage_threshold` (optional): Minimum coverage percentage required (default: "70")
 
 **Example**:
 ```yaml
@@ -20,7 +22,8 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
   with:
     go_version: '1.25'
     golangci_lint_version: 'v2.6'
-    upload_codecov: 'true'
+    coverage_report: 'true'
+    coverage_threshold: '70'
 ```
 
 #### `security-scan/`
@@ -101,14 +104,15 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ```
 
 #### `go-build-release/`
-**Purpose**: Complete build and release pipeline (tools + auth + make release)  
-**When to use**: Release workflows that build and publish artifacts  
+**Purpose**: Complete build and release pipeline (tools + auth + make release)
+**When to use**: Release workflows that build and publish artifacts
 **Inputs**:
 - `registry` (optional): Container registry (default: "ghcr.io")
-- `ko_docker_repo` (optional): KO_DOCKER_REPO override (default: "")
 
 **Outputs**:
 - `release_outcome`: Release step outcome (success/failure)
+
+**Note**: Image repository paths are fully specified in `.goreleaser.yaml` under `kos.repositories`.
 
 **Example**:
 ```yaml
@@ -169,47 +173,62 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ### Deployment Actions
 
 #### `cloud-run-deploy/`
-**Purpose**: Deploy to Google Cloud Run with Workload Identity  
-**When to use**: Cloud Run deployments from CI/CD  
+**Purpose**: Copy image from GHCR to Artifact Registry and deploy to Cloud Run
+**When to use**: Cloud Run deployments from CI/CD
 **Inputs**:
 - `project_id` (required): GCP project ID
 - `workload_identity_provider` (required): WIF provider resource name
 - `service_account` (required): Service account email
 - `region` (required): Cloud Run region
 - `service` (required): Cloud Run service name
-- `image` (required): Container image reference
+- `source_image` (required): Source image to copy (e.g., "ghcr.io/nvidia/eidosd:v1.0.0")
+- `target_registry` (required): Target Artifact Registry path (e.g., "us-docker.pkg.dev/project/repo")
+- `image_name` (optional): Image name in target registry (default: "eidosd")
+- `ghcr_token` (required): GitHub token for GHCR authentication (use `github.token`)
+
+**Flow**: GHCR → Artifact Registry → Cloud Run
 
 **Example**:
 ```yaml
 - uses: ./.github/actions/cloud-run-deploy
   with:
-    project_id: 'my-project'
-    workload_identity_provider: 'projects/.../providers/github'
-    service_account: 'deployer@my-project.iam.gserviceaccount.com'
+    project_id: 'eidosx'
+    workload_identity_provider: 'projects/.../providers/github-actions-provider'
+    service_account: 'github-actions@eidosx.iam.gserviceaccount.com'
     region: 'us-west1'
     service: 'api'
-    image: 'ghcr.io/org/api:v1.0.0'
+    source_image: 'ghcr.io/nvidia/eidosd:v1.0.0'
+    target_registry: 'us-docker.pkg.dev/eidosx/demo'
+    image_name: 'eidosd'
+    ghcr_token: ${{ github.token }}
 ```
 
 ## Workflows
 
 ### `on-push.yaml`
-**Trigger**: Push to main, PRs to main  
-**Purpose**: CI validation  
-**Steps**:
-1. Checkout
-2. Go CI (setup, test, lint)
-3. Security scan
+**Trigger**: Push to main, PRs to main
+**Purpose**: CI validation
+**Jobs** (run in parallel):
+1. **Unit Tests**: Go CI (setup, test, lint) + security scan
+2. **Integration Tests**: CLI integration tests via `tools/e2e`
+3. **E2E Tests**: Full end-to-end tests using Kind cluster (via `.github/actions/e2e`)
 
 ### `on-tag.yaml`
-**Trigger**: Semantic version tags (v*.*.*)  
-**Purpose**: Build, release, attest, deploy  
-**Steps**:
-1. Checkout
-2. Go CI (setup, test, lint)
-3. Build and release
-4. Attest images (eidosd, eidos)
-5. Deploy to Cloud Run
+**Trigger**: Semantic version tags (v*.*.*)
+**Purpose**: Build, release, attest, deploy
+**Jobs**:
+1. **Unit Tests** (parallel): Go CI + security scan
+2. **Integration Tests** (parallel): CLI integration tests
+3. **E2E Tests** (parallel): Full end-to-end tests
+4. **Build and Release** (after tests): GoReleaser builds binaries and images to GHCR
+5. **Attest Images** (after build): SBOM and provenance for eidos and eidosd images
+6. **Deploy API Server** (after attest): Copy image to Artifact Registry and deploy to Cloud Run
+
+### `test-deploy.yaml`
+**Trigger**: Manual (workflow_dispatch)
+**Purpose**: Isolated testing of the deploy action
+**Inputs**:
+- `image_tag`: Image tag to deploy (e.g., "v0.1.5")
 
 ## Architecture Principles
 
@@ -264,10 +283,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: ./.github/actions/load-versions
+        id: versions
       - uses: ./.github/actions/go-ci
         with:
-          go_version: '1.25'
-          golangci_lint_version: 'v2.6'
+          go_version: ${{ steps.versions.outputs.go }}
+          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
+          coverage_report: 'true'
       - uses: ./.github/actions/security-scan
 ```
 
@@ -278,16 +300,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: ./.github/actions/load-versions
+        id: versions
       - uses: ./.github/actions/go-ci
         with:
-          go_version: '1.25'
-          golangci_lint_version: 'v2.6'
+          go_version: ${{ steps.versions.outputs.go }}
+          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
       - uses: ./.github/actions/go-build-release
         id: release
       - uses: ./.github/actions/attest-image-from-tag
         with:
-          image_name: ghcr.io/org/app
+          image_name: ghcr.io/nvidia/eidosd
           tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
 ```
 
 ### For custom tool combinations
@@ -343,5 +368,6 @@ To use these actions in other repositories:
 - uses: NVIDIA/eidos/.github/actions/go-ci@main
   with:
     go_version: '1.25'
-    golangci_lint_version: 'v2.6'
+    golangci_lint_version: 'v2.6.2'
+    coverage_report: 'true'
 ```
