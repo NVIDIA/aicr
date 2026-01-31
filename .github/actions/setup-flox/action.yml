@@ -15,46 +15,62 @@
 name: 'Setup Flox Environment'
 description: 'Install Flox with Nix caching. Use .github/actions/flox-run to run commands.'
 
+inputs:
+  flox-version:
+    description: 'Flox version to install'
+    required: false
+    default: '1.8.3'
+  magic-nix-cache-version:
+    description: 'Magic Nix Cache version to install'
+    required: false
+    default: '0.1.6'
+
 runs:
   using: 'composite'
   steps:
+    - name: Cache Flox and Magic Nix Cache binaries
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+      id: binary-cache
+      with:
+        path: |
+          /tmp/flox.deb
+          /tmp/magic-nix-cache
+        key: flox-${{ inputs.flox-version }}-mnc-${{ inputs.magic-nix-cache-version }}
+
+    - name: Download binaries
+      if: steps.binary-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        FLOX_VERSION: ${{ inputs.flox-version }}
+        MNC_VERSION: ${{ inputs.magic-nix-cache-version }}
+      run: |
+        curl -fsSL "https://downloads.flox.dev/by-env/stable/deb/flox-${FLOX_VERSION}.x86_64-linux.deb" -o /tmp/flox.deb
+        # Binary is XZ compressed - download and decompress
+        curl -fsSL "https://github.com/DeterminateSystems/magic-nix-cache/releases/download/v${MNC_VERSION}/magic-nix-cache-X64-Linux" \
+          | xz -d > /tmp/magic-nix-cache
+
     - name: Install Flox
       shell: bash
       run: |
-        # Download and install Flox deb package for x86_64 Linux
-        FLOX_VERSION="1.8.3"
-        curl -fsSL "https://downloads.flox.dev/by-env/stable/deb/flox-${FLOX_VERSION}.x86_64-linux.deb" -o /tmp/flox.deb
-        sudo apt-get update
-        sudo apt-get install -y /tmp/flox.deb
-        rm /tmp/flox.deb
+        chmod +x /tmp/magic-nix-cache
+        sudo dpkg -i /tmp/flox.deb
 
         # Disable telemetry
         mkdir -p ~/.config/flox
         echo 'disable_metrics = true' > ~/.config/flox/flox.toml
 
-    - name: Configure Nix for unsigned cache
+    - name: Configure Nix and start cache daemon
       shell: bash
       run: |
-        # Allow unsigned paths for GitHub Actions cache
-        # This is acceptable since the GHA cache is scoped to the repo and branch
-        sudo tee -a /etc/nix/nix.conf > /dev/null <<< "require-sigs = false"
-        # Restart nix-daemon to pick up config changes
-        sudo systemctl restart nix-daemon
-
-    - name: Setup Magic Nix Cache
-      shell: bash
-      run: |
-        # Download magic-nix-cache binary
-        CACHE_VERSION="v0.1.6"
-        curl -fsSL "https://github.com/DeterminateSystems/magic-nix-cache/releases/download/${CACHE_VERSION}/magic-nix-cache-X64-Linux" \
-          -o /tmp/magic-nix-cache
-        chmod +x /tmp/magic-nix-cache
-
-        # Create startup notification file
-        STARTUP_FILE="/tmp/magic-nix-cache-startup"
+        # Configure all Nix settings at once
+        sudo tee -a /etc/nix/nix.conf > /dev/null << 'EOF'
+        require-sigs = false
+        extra-substituters = http://127.0.0.1:37515
+        extra-trusted-substituters = http://127.0.0.1:37515
+        EOF
 
         # Start the cache daemon in background
-        # ACTIONS_CACHE_URL and ACTIONS_RUNTIME_TOKEN are set by GitHub Actions
+        STARTUP_FILE="/tmp/magic-nix-cache-startup"
         /tmp/magic-nix-cache \
           --listen "127.0.0.1:37515" \
           --upstream "https://cache.nixos.org" \
@@ -62,11 +78,12 @@ runs:
           --use-gha-cache Enabled \
           --startup-notification-file "$STARTUP_FILE" \
           > /tmp/magic-nix-cache.log 2>&1 &
-
-        # Save PID for cleanup
         echo $! > /tmp/magic-nix-cache.pid
 
-        # Wait for daemon to be ready (max 30s)
+        # Single restart to pick up all config changes
+        sudo systemctl restart nix-daemon
+
+        # Wait for cache daemon to be ready (max 30s)
         for i in {1..30}; do
           if [ -f "$STARTUP_FILE" ]; then
             echo "Magic Nix Cache daemon is ready"
@@ -79,13 +96,6 @@ runs:
           echo "Warning: Magic Nix Cache daemon startup timed out"
           cat /tmp/magic-nix-cache.log || true
         fi
-
-        # Configure Nix to use the local cache daemon as extra substituter
-        sudo tee -a /etc/nix/nix.conf > /dev/null << 'EOF'
-        extra-substituters = http://127.0.0.1:37515
-        extra-trusted-substituters = http://127.0.0.1:37515
-        EOF
-        sudo systemctl restart nix-daemon
 
     - name: Verify Flox environment
       shell: bash
