@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Resolve digest and attest image'
-description: 'Resolves an image digest from a tag and generates SBOM + provenance attestations. Requires Flox to be set up first.'
+description: 'Resolves an image digest from a tag and generates SBOM + provenance attestations'
 
 inputs:
   image_name:
