@@ -75,3 +75,4 @@ runs:
       with:
         sarif_file: ${{ inputs.output_file }}
         category: ${{ inputs.category }}
+      continue-on-error: true  # Don't fail if code scanning is unavailable
