@@ -98,62 +98,31 @@ runs:
         echo "| Threshold | $THRESHOLD% |" >> $GITHUB_STEP_SUMMARY
         echo "| Status | $([ \"$PASS\" = \"true\" ] && echo '✅ Pass' || echo '❌ Fail') |" >> $GITHUB_STEP_SUMMARY
 
-    - name: Post PR Comment
+    # Save coverage data as artifact for workflow_run to post comment
+    # This avoids permission issues with fork PRs
+    - name: Save PR Coverage Data
       if: github.event_name == 'pull_request'
-      uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+      shell: bash
+      run: |
+        mkdir -p coverage-comment-data
+        cat > coverage-comment-data/coverage-data.json << 'EOF'
+        {
+          "coverage": "${{ steps.coverage.outputs.coverage }}",
+          "threshold": "${{ inputs.threshold }}",
+          "pass": "${{ steps.coverage.outputs.pass }}",
+          "color": "${{ steps.coverage.outputs.color }}",
+          "pr_number": "${{ github.event.pull_request.number }}"
+        }
+        EOF
+        cat coverage-comment-data/coverage-data.json
+
+    - name: Upload Coverage Data
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
-        script: |
-          const coverage = '${{ steps.coverage.outputs.coverage }}';
-          const threshold = '${{ inputs.threshold }}';
-          const pass = '${{ steps.coverage.outputs.pass }}' === 'true';
-          const color = '${{ steps.coverage.outputs.color }}';
-
-          const status = pass ? '✅' : '❌';
-          const statusText = pass ? 'Pass' : 'Fail';
-
-          const body = `## Coverage Report ${status}
-
-          | Metric | Value |
-          |--------|-------|
-          | Coverage | **${coverage}%** |
-          | Threshold | ${threshold}% |
-          | Status | ${statusText} |
-
-          <details>
-          <summary>Coverage Badge</summary>
-
-          \`\`\`
-          ![Coverage](https://img.shields.io/badge/coverage-${coverage}%25-${color})
-          \`\`\`
-          </details>`;
-
-          // Find existing comment
-          const { data: comments } = await github.rest.issues.listComments({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            issue_number: context.issue.number,
-          });
-
-          const botComment = comments.find(comment =>
-            comment.user.type === 'Bot' &&
-            comment.body.includes('## Coverage Report')
-          );
-
-          if (botComment) {
-            await github.rest.issues.updateComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: botComment.id,
-              body: body
-            });
-          } else {
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
-          }
+        name: coverage-comment-data
+        path: coverage-comment-data/
+        retention-days: 1
 
     - name: Update Badge Gist
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.badge_gist_id != '' && inputs.badge_gist_token != ''
