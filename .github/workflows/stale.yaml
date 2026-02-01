@@ -1,0 +1,83 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Stale Issue and PR Management
+#
+# Automatically marks inactive issues/PRs as stale and eventually closes them.
+# This keeps the issue tracker focused on active work.
+#
+# Timelines:
+#   Issues: 60 days → stale, 14 more days → closed
+#   PRs: 30 days → stale, 14 more days → closed
+#
+# Exemptions:
+#   - lifecycle/frozen: Never goes stale
+#   - priority/critical: Never goes stale
+#   - do-not-merge: PR won't be closed
+#
+# Pattern from: gpu-operator
+
+name: Stale Issues and PRs
+
+on:
+  schedule:
+    # Run daily at 6am UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    name: Mark stale issues and PRs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/stale@997185467fa4f803885201cee163a9f38240193d  # v10.1.0
+        with:
+          # Issue settings
+          stale-issue-message: |
+            This issue has been marked as stale due to 60 days of inactivity.
+            It will be closed in 14 days unless there is new activity.
+
+            To keep this issue open:
+            - Add a comment with an update
+            - Add the `lifecycle/frozen` label
+
+            If this issue is no longer relevant, it's okay to let it close.
+          days-before-stale: 60
+          stale-issue-label: 'lifecycle/stale'
+          exempt-issue-labels: 'lifecycle/frozen,priority/critical,good first issue'
+
+          # PR settings (shorter timeline)
+          stale-pr-message: |
+            This PR has been marked as stale due to 30 days of inactivity.
+            It will be closed in 14 days unless there is new activity.
+
+            To keep this PR open:
+            - Push new commits or add a comment
+            - Add the `lifecycle/frozen` label
+
+            If this work is no longer needed, it's okay to let it close.
+          days-before-pr-stale: 30
+          stale-pr-label: 'lifecycle/stale'
+          exempt-pr-labels: 'lifecycle/frozen,do-not-merge'
+
+          # Closing settings
+          days-before-close: 14
+
+          # Performance
+          operations-per-run: 500
