@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2026-02-01
+
+### Bug Fixes
+
+- Preserve manual changelog edits during version bump by @mchmarny
+
 ## [0.2.1] - 2026-02-01
 
 ### Bug Fixes
