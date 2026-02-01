@@ -44,6 +44,7 @@ jobs:
   stale:
     name: Mark stale issues and PRs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/stale@997185467fa4f803885201cee163a9f38240193d  # v10.1.0
@@ -77,6 +78,18 @@ jobs:
           exempt-pr-labels: 'lifecycle/frozen,do-not-merge'
 
           # Closing settings
+          close-issue-message: |
+            This issue was automatically closed due to inactivity after being marked as stale.
+
+            If you believe this issue is still relevant:
+            - Reopen with a comment providing updated details or context
+            - Add the `lifecycle/frozen` label to prevent it from being closed again
+          close-pr-message: |
+            This pull request was automatically closed due to inactivity after being marked as stale.
+
+            If you would like to continue this work:
+            - Reopen and push new commits or add a comment with an update
+            - Add the `lifecycle/frozen` label to prevent it from being closed again
           days-before-close: 14
 
           # Performance
