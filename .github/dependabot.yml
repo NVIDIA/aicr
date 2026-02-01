@@ -21,6 +21,16 @@ updates:
     labels: ["dependencies"]
     commit-message:
       prefix: "chore: deps"
+    # Group related Kubernetes dependencies into single PRs
+    # Reduces PR noise and ensures compatible versions
+    groups:
+      kubernetes:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+        exclude-patterns:
+          # klog has independent versioning
+          - "k8s.io/klog/*"
 
   - package-ecosystem: "github-actions"
     directories:
