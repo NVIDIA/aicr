@@ -33,6 +33,8 @@ on:
     - cron: '0 5 * * 1'
 
 permissions:
+  # Required to checkout the repository
+  contents: read
   # Required for CodeQL to upload results to GitHub Security tab
   security-events: write
 
