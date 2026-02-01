@@ -30,7 +30,7 @@ updates:
           - "sigs.k8s.io/*"
         exclude-patterns:
           # klog has independent versioning
-          - "k8s.io/klog/*"
+          - "k8s.io/klog/v2"
 
   - package-ecosystem: "github-actions"
     directories:
