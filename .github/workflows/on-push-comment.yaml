@@ -35,8 +35,33 @@ jobs:
     # Run for PRs regardless of conclusion - coverage might exist even if other steps failed
     if: github.event.workflow_run.event == 'pull_request'
     steps:
-      - name: Download Coverage Data
-        id: download
+      - name: Checkout for go.mod version
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          sparse-checkout: go.mod
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install go-coverage-report
+        run: go install github.com/fgrosse/go-coverage-report/cmd/go-coverage-report@v1.2.0
+
+      - name: Download PR Coverage
+        id: download-pr
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
+        continue-on-error: true
+        with:
+          name: coverage-pr
+          path: pr-coverage
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Download Coverage Metadata
+        id: download-meta
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16  # v4.1.8
         continue-on-error: true
         with:
@@ -45,14 +70,94 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
-      - name: Check Artifact Exists
-        if: steps.download.outcome == 'failure'
+      - name: Download Baseline Coverage
+        id: download-baseline
+        if: steps.download-pr.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "No coverage data artifact found - skipping comment"
-          exit 0
+          set -e
+          mkdir -p baseline-coverage
+
+          # Find last successful main run
+          LAST_RUN=$(gh run list \
+            --repo ${{ github.repository }} \
+            --workflow "On Push Qualification" \
+            --branch main \
+            --status success \
+            --event push \
+            --json databaseId \
+            --limit 1 \
+            -q '.[0].databaseId' 2>/dev/null || echo "")
+
+          if [[ -n "$LAST_RUN" ]]; then
+            echo "Found baseline run: $LAST_RUN"
+            if gh run download "$LAST_RUN" \
+              --repo ${{ github.repository }} \
+              --name coverage-baseline \
+              --dir baseline-coverage 2>/dev/null; then
+              echo "baseline_found=true" >> $GITHUB_OUTPUT
+              echo "✅ Baseline coverage downloaded"
+            else
+              echo "baseline_found=false" >> $GITHUB_OUTPUT
+              echo "⚠️ Failed to download baseline (first run?)"
+              # Create empty baseline
+              echo "mode: set" > baseline-coverage/coverage.out
+            fi
+          else
+            echo "baseline_found=false" >> $GITHUB_OUTPUT
+            echo "⚠️ No successful baseline run found"
+            echo "mode: set" > baseline-coverage/coverage.out
+          fi
+
+      - name: Checkout for changed-files action
+        if: steps.download-pr.outcome == 'success'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Get Changed Files
+        id: changed-files
+        if: steps.download-pr.outcome == 'success'
+        uses: tj-actions/changed-files@aa08304bd477b800d468db44fe10f6c61f7f7b11  # v46.0.5
+        with:
+          write_output_files: true
+          json: true
+          files: "**.go"
+          files_ignore: |
+            vendor/**
+            **_test.go
+          output_dir: .github/outputs
+
+      - name: Generate Coverage Delta Report
+        id: delta
+        if: steps.download-pr.outcome == 'success' && steps.changed-files.outputs.any_changed == 'true' && steps.download-baseline.outputs.baseline_found == 'true'
+        run: |
+          set -e
+
+          # Generate delta report
+          if go-coverage-report \
+            -root=github.com/NVIDIA/eidos \
+            baseline-coverage/coverage.out \
+            pr-coverage/coverage.out \
+            .github/outputs/all_modified_files.json > delta-report.md 2> delta-error.log; then
+            echo "delta_generated=true" >> $GITHUB_OUTPUT
+          else
+            echo "delta_generated=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Delta generation failed:"
+            cat delta-error.log || true
+          fi
+
+          # Check if report shows no change (to reduce noise)
+          if grep -q "will \*\*not change\*\* overall coverage" delta-report.md 2>/dev/null; then
+            echo "no_change=true" >> $GITHUB_OUTPUT
+          else
+            echo "no_change=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Post PR Comment
-        if: steps.download.outcome == 'success'
+        if: steps.download-pr.outcome == 'success' && steps.download-meta.outcome == 'success'
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
         with:
           script: |
@@ -68,6 +173,28 @@ jobs:
             const status = pass ? '✅' : '❌';
             const statusText = pass ? 'Pass' : 'Fail';
 
+            // Check if we have a delta report
+            let deltaSection = '';
+            const deltaGenerated = '${{ steps.delta.outputs.delta_generated }}' === 'true';
+            const noChange = '${{ steps.delta.outputs.no_change }}' === 'true';
+            const anyChanged = '${{ steps.changed-files.outputs.any_changed }}' === 'true';
+            const baselineFound = '${{ steps.download-baseline.outputs.baseline_found }}' === 'true';
+
+            if (deltaGenerated && !noChange) {
+              try {
+                const deltaReport = fs.readFileSync('delta-report.md', 'utf8');
+                deltaSection = `\n\n${deltaReport}`;
+              } catch (e) {
+                console.log('No delta report found');
+              }
+            } else if (!anyChanged) {
+              deltaSection = '\n\n*No Go source files changed in this PR.*';
+            } else if (noChange) {
+              deltaSection = '\n\n*Coverage unchanged by this PR.*';
+            } else if (!baselineFound) {
+              deltaSection = '\n\n*No baseline coverage available yet. Delta reporting will be available after the next main branch build.*';
+            }
+
             const body = `## Coverage Report ${status}
 
             | Metric | Value |
@@ -82,7 +209,7 @@ jobs:
             \`\`\`
             ![Coverage](https://img.shields.io/badge/coverage-${coverage}%25-${color})
             \`\`\`
-            </details>`;
+            </details>${deltaSection}`;
 
             // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({

@@ -124,6 +124,24 @@ runs:
         path: coverage-comment-data/
         retention-days: 1
 
+    # Upload PR coverage for delta comparison (short retention)
+    - name: Upload PR Coverage
+      if: github.event_name == 'pull_request'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      with:
+        name: coverage-pr
+        path: ${{ inputs.coverage_file }}
+        retention-days: 1
+
+    # Upload baseline coverage for future PR comparisons (long retention)
+    - name: Upload Baseline Coverage
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      with:
+        name: coverage-baseline
+        path: ${{ inputs.coverage_file }}
+        retention-days: 90
+
     - name: Update Badge Gist
       if: github.event_name == 'push' && github.ref == 'refs/heads/main' && inputs.badge_gist_id != '' && inputs.badge_gist_token != ''
       shell: bash
