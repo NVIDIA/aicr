@@ -175,7 +175,8 @@ Override snapshot-detected criteria:
 			} else if criteriaFilePath != "" {
 				// Load criteria from file
 				slog.Info("loading criteria from file", "path", criteriaFilePath)
-				criteria, loadErr := recipe.LoadCriteriaFromFile(criteriaFilePath)
+				// TODO: Add context support to LoadCriteriaFromFile for HTTP URL timeout/cancellation
+				criteria, loadErr := recipe.LoadCriteriaFromFile(criteriaFilePath) //nolint:contextcheck // serializer.FromFile doesn't support context yet
 				if loadErr != nil {
 					return fmt.Errorf("failed to load criteria from %q: %w", criteriaFilePath, loadErr)
 				}

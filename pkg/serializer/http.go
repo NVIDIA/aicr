@@ -307,12 +307,10 @@ func (r *HttpReader) Read(url string) ([]byte, error) {
 
 // ReadWithContext fetches data from the specified URL and returns it as a byte slice.
 // The request is bound to the provided context for cancellation and deadlines.
-func (r *HttpReader) ReadWithContext(ctx context.Context, url string) ([]byte, error) {
+// Callers must provide a non-nil context.
+func (r *HttpReader) ReadWithContext(ctx context.Context, url string) ([]byte, error) { //nolint:contextcheck // ctx is used via NewRequestWithContext below
 	if url == "" {
 		return nil, fmt.Errorf("url is empty")
-	}
-	if ctx == nil {
-		ctx = context.Background()
 	}
 
 	if r.Client == nil {

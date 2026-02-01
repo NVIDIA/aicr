@@ -192,6 +192,7 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
 	// Ensure cleanup on error or success
+	//nolint:contextcheck // intentional: need fresh context for cleanup when parent is canceled
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

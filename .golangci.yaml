@@ -66,7 +66,11 @@ linters:
     - gosec           # Security checks
 
     # HTTP/Context
+    - contextcheck    # Context propagation in function calls
     - noctx           # HTTP requests without context
+
+    # Dependency management
+    - depguard        # Ban deprecated/unwanted packages
 
     # Testing
     - tparallel       # t.Parallel() usage
@@ -111,6 +115,16 @@ linters:
           disabled: false
           arguments:
             - disableStutteringCheck
+
+    depguard:
+      rules:
+        main:
+          list-mode: lax
+          deny:
+            - pkg: io/ioutil
+              desc: "Deprecated since Go 1.16. Use io and os packages instead."
+            - pkg: math/rand$
+              desc: "Use math/rand/v2 for new code, or crypto/rand for security-sensitive code."
 
   exclusions:
     generated: lax

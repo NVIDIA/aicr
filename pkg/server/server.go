@@ -148,7 +148,8 @@ func (s *Server) Start(ctx context.Context) error {
 	// Wait for context cancellation or server error
 	select {
 	case <-ctx.Done():
-		return s.Shutdown(context.Background())
+		// Use fresh context for shutdown - parent context is already canceled
+		return s.Shutdown(context.Background()) //nolint:contextcheck // intentional: need fresh context for graceful shutdown
 	case err := <-errChan:
 		return err
 	}
