@@ -71,7 +71,7 @@ jobs:
           build-mode: manual
 
       - name: Build
-        run: make build
+        run: go build ./...
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
