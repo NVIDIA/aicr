@@ -38,7 +38,7 @@ Eidos separates **validated configuration knowledge** from **how that knowledge 
 
 This separation allows the same validated configuration to be applied consistently across different environments and automation systems.
 
-*For example, a configuration validated for gb200 on Ubuntu 22.04 with Kubernetes 1.29 can be rendered into Helm values and manifests suitable for use in an existing GitOps pipeline.*
+*For example, a configuration validated for GB200 on Ubuntu 22.04 with Kubernetes 1.34 can be rendered into Helm values and manifests suitable for use in an existing GitOps pipeline.*
 
 ## Get Started
 
@@ -68,6 +68,18 @@ Get started quickly with Eidos:
    - Workload intent (for example, training or inference)
 3. Apply the validated configuration guidance using your existing tools (Helm, kubectl, CI/CD, or GitOps).
 4. Validate and iterate as platforms and workloads evolve.
+
+**Example:** Generate a validated configuration for GB200 on EKS with Ubuntu, optimized for training:
+
+```bash
+# Generate a recipe for your environment
+eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training -o recipe.yaml
+
+# Render the recipe into Helm values for your GitOps pipeline
+eidos bundle --recipe recipe.yaml -o ./bundles
+```
+
+The generated `bundles/` directory contains a Helm umbrella chart ready to deploy or commit to your GitOps repository. See [CLI Reference](docs/user-guide/cli-reference.md) for more options.
 
 ### Get Started by Use Case
 
