@@ -177,6 +177,38 @@ else
 	else \
 		printf "%-20s %-15s %-15s %s\n" "kubectl" "$$expected" "-" "✗"; \
 	fi
+	@# tilt (installed >= expected is OK)
+	@expected=$$($(YQ) '.testing_tools.tilt' .versions.yaml); \
+	if command -v tilt >/dev/null 2>&1; then \
+		installed=$$(tilt version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
+		exp_major=$$(echo "$$expected" | cut -d. -f1); \
+		exp_minor=$$(echo "$$expected" | cut -d. -f2); \
+		inst_major=$$(echo "$$installed" | cut -d. -f1); \
+		inst_minor=$$(echo "$$installed" | cut -d. -f2); \
+		if [ "$$inst_major" -gt "$$exp_major" ] || { [ "$$inst_major" -eq "$$exp_major" ] && [ "$$inst_minor" -ge "$$exp_minor" ]; }; then \
+			printf "%-20s %-15s %-15s %s\n" "tilt" "$$expected" "$$installed" "✓"; \
+		else \
+			printf "%-20s %-15s %-15s %s\n" "tilt" "$$expected" "$$installed" "⚠"; \
+		fi; \
+	else \
+		printf "%-20s %-15s %-15s %s\n" "tilt" "$$expected" "-" "✗"; \
+	fi
+	@# ctlptl (installed >= expected is OK)
+	@expected=$$($(YQ) '.testing_tools.ctlptl' .versions.yaml); \
+	if command -v ctlptl >/dev/null 2>&1; then \
+		installed=$$(ctlptl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
+		exp_major=$$(echo "$$expected" | cut -d. -f1); \
+		exp_minor=$$(echo "$$expected" | cut -d. -f2); \
+		inst_major=$$(echo "$$installed" | cut -d. -f1); \
+		inst_minor=$$(echo "$$installed" | cut -d. -f2); \
+		if [ "$$inst_major" -gt "$$exp_major" ] || { [ "$$inst_major" -eq "$$exp_major" ] && [ "$$inst_minor" -ge "$$exp_minor" ]; }; then \
+			printf "%-20s %-15s %-15s %s\n" "ctlptl" "$$expected" "$$installed" "✓"; \
+		else \
+			printf "%-20s %-15s %-15s %s\n" "ctlptl" "$$expected" "$$installed" "⚠"; \
+		fi; \
+	else \
+		printf "%-20s %-15s %-15s %s\n" "ctlptl" "$$expected" "-" "✗"; \
+	fi
 	@# docker (no version requirement)
 	@if command -v docker >/dev/null 2>&1; then \
 		installed=$$(docker version --format '{{.Server.Version}}' 2>/dev/null | tr -d '\n' || true); \
