@@ -54,6 +54,8 @@ make qualify        # Full check: test + lint + e2e + scan
 | goreleaser | Release automation |
 | helm | Kubernetes package manager |
 | kind | Local Kubernetes clusters |
+| ctlptl | Local cluster + registry management (for Tilt) |
+| tilt | Local Kubernetes dev environment with hot reload |
 | kubectl | Kubernetes CLI |
 
 ### Linux-Specific Setup
