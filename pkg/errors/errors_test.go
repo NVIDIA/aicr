@@ -36,6 +36,37 @@ func TestNew(t *testing.T) {
 	}
 }
 
+func TestNewWithContext(t *testing.T) {
+	ctx := map[string]any{
+		"component": "gpu-collector",
+		"timeout":   "10s",
+	}
+
+	err := NewWithContext(ErrCodeTimeout, "collection timed out", ctx)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+		return
+	}
+	if err.Code != ErrCodeTimeout {
+		t.Errorf("expected code %s, got %s", ErrCodeTimeout, err.Code)
+	}
+	if err.Message != "collection timed out" {
+		t.Errorf("expected message 'collection timed out', got %s", err.Message)
+	}
+	if err.Context == nil {
+		t.Fatal("expected context to be set")
+	}
+	if err.Context["component"] != "gpu-collector" {
+		t.Errorf("expected component to be gpu-collector, got %v", err.Context["component"])
+	}
+	if err.Context["timeout"] != "10s" {
+		t.Errorf("expected timeout to be 10s, got %v", err.Context["timeout"])
+	}
+	if err.Cause != nil {
+		t.Errorf("expected nil cause, got %v", err.Cause)
+	}
+}
+
 func TestWrap(t *testing.T) {
 	cause := errors.New("underlying error")
 	err := Wrap(ErrCodeInternal, "operation failed", cause)
