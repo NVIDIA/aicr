@@ -26,6 +26,7 @@ on:
 
 permissions:
   actions: read        # Required to download artifacts from other workflow runs
+  contents: read       # Required to checkout repository for go.mod and changed-files
   pull-requests: write
 
 jobs:
