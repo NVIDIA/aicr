@@ -57,7 +57,7 @@ jobs:
         continue-on-error: true
         with:
           name: coverage-pr
-          path: pr-coverage
+          path: /tmp/pr-coverage
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
@@ -67,7 +67,7 @@ jobs:
         continue-on-error: true
         with:
           name: coverage-comment-data
-          path: coverage-comment-data
+          path: /tmp/coverage-comment-data
           github-token: ${{ secrets.GITHUB_TOKEN }}
           run-id: ${{ github.event.workflow_run.id }}
 
@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-          mkdir -p baseline-coverage
+          mkdir -p /tmp/baseline-coverage
 
           # Find last successful main run
           LAST_RUN=$(gh run list \
@@ -96,19 +96,19 @@ jobs:
             if gh run download "$LAST_RUN" \
               --repo ${{ github.repository }} \
               --name coverage-baseline \
-              --dir baseline-coverage 2>/dev/null; then
+              --dir /tmp/baseline-coverage 2>/dev/null; then
               echo "baseline_found=true" >> $GITHUB_OUTPUT
               echo "✅ Baseline coverage downloaded"
             else
               echo "baseline_found=false" >> $GITHUB_OUTPUT
               echo "⚠️ Failed to download baseline (first run?)"
               # Create empty baseline
-              echo "mode: set" > baseline-coverage/coverage.out
+              echo "mode: set" > /tmp/baseline-coverage/coverage.out
             fi
           else
             echo "baseline_found=false" >> $GITHUB_OUTPUT
             echo "⚠️ No successful baseline run found"
-            echo "mode: set" > baseline-coverage/coverage.out
+            echo "mode: set" > /tmp/baseline-coverage/coverage.out
           fi
 
       - name: Checkout for changed-files action
@@ -140,8 +140,8 @@ jobs:
           # Generate delta report
           if go-coverage-report \
             -root=github.com/NVIDIA/eidos \
-            baseline-coverage/coverage.out \
-            pr-coverage/coverage.out \
+            /tmp/baseline-coverage/coverage.out \
+            /tmp/pr-coverage/coverage.out \
             .github/outputs/all_modified_files.json > delta-report.md 2> delta-error.log; then
             echo "delta_generated=true" >> $GITHUB_OUTPUT
           else
@@ -163,7 +163,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const data = JSON.parse(fs.readFileSync('coverage-comment-data/coverage-data.json', 'utf8'));
+            const data = JSON.parse(fs.readFileSync('/tmp/coverage-comment-data/coverage-data.json', 'utf8'));
 
             const coverage = data.coverage;
             const threshold = data.threshold;
