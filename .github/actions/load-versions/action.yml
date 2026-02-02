@@ -34,6 +34,9 @@ outputs:
   addlicense:
     description: 'addlicense version'
     value: ${{ steps.versions.outputs.addlicense }}
+  go_licenses:
+    description: 'go-licenses version'
+    value: ${{ steps.versions.outputs.go_licenses }}
   kind:
     description: 'Kind version'
     value: ${{ steps.versions.outputs.kind }}
@@ -75,6 +78,7 @@ runs:
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .versions.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .versions.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "go_licenses=$(yq eval '.linting.go_licenses' .versions.yaml)" >> $GITHUB_OUTPUT
 
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .versions.yaml)" >> $GITHUB_OUTPUT
@@ -97,6 +101,7 @@ runs:
         echo "  golangci_lint: ${{ steps.versions.outputs.golangci_lint }}"
         echo "  yamllint: ${{ steps.versions.outputs.yamllint }}"
         echo "  addlicense: ${{ steps.versions.outputs.addlicense }}"
+        echo "  go_licenses: ${{ steps.versions.outputs.go_licenses }}"
         echo "  grype: ${{ steps.versions.outputs.grype }}"
         echo "  kubectl: ${{ steps.versions.outputs.kubectl }}"
         echo "  kind: ${{ steps.versions.outputs.kind }}"

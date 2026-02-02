@@ -28,6 +28,7 @@ linting:
   golangci_lint: 'v2.6.2'
   yamllint: '1.35.0'
   addlicense: 'v1.1.1'
+  go_licenses: 'v1.6.0'
 
 # Security Tools
 security_tools:
