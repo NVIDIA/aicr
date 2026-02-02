@@ -23,6 +23,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/logging"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/serializer"
@@ -135,8 +136,9 @@ func Execute() {
 	}
 
 	if err := cmd.Run(context.Background(), os.Args); err != nil {
-		slog.Error("command failed", "error", err)
-		os.Exit(1)
+		exitCode := errors.ExitCodeFromError(err)
+		slog.Error("command failed", "error", err, "exitCode", exitCode)
+		os.Exit(exitCode)
 	}
 }
 
