@@ -55,8 +55,8 @@ spec:
       version: v0.11.1
       valuesFile: components/skyhook-operator/values.yaml
 
-    - name: prometheus
+    - name: kube-prometheus-stack
       type: Helm
       source: https://prometheus-community.github.io/helm-charts
       version: 81.2.2
-      valuesFile: components/prometheus/values.yaml
+      valuesFile: components/kube-prometheus-stack/values.yaml
