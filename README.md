@@ -101,6 +101,7 @@ You are responsible for deploying and operating GPU-accelerated Kubernetes clust
 You are contributing code, extending functionality, or working on Eidos internals. 
 
 - **[Contributing Guide](CONTRIBUTING.md)** – Development setup, testing, and PR process
+- **[Development Guide](DEVELOPMENT.md)** – Local development, Make targets, and tooling
 - **[Architecture Overview](docs/architecture/README.md)** – System design and components
 - **[Bundler Development](docs/architecture/component.md)** – How to create new bundlers
 - **[Data Architecture](docs/architecture/data.md)** – Recipe data model and query matching
