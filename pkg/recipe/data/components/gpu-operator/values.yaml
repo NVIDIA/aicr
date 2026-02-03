@@ -74,6 +74,15 @@ devicePlugin:
 migManager:
   enabled: true
 
+validator:
+  plugin:
+    # Note: env must have at least one entry due to gpu-operator chart template bug.
+    # When env is empty/null, the chart renders spec.validator.plugin as null instead
+    # of an empty object, causing validation error: "must be of type object: null"
+    env:
+      - name: WITH_WORKLOAD
+        value: "false"
+
 # Node Feature Discovery sub-chart
 node-feature-discovery:
   fullnameOverride: node-feature-discovery
