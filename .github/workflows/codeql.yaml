@@ -9,6 +9,7 @@ on:
     - cron: '0 5 * * 1'
 
 permissions:
+  contents: read
   security-events: write
 
 jobs:
