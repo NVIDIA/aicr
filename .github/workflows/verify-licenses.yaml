@@ -16,13 +16,9 @@ name: Verify Licenses
 
 on:
   push:
-    branches: [main]
-    paths:
-      - 'go.mod'
-      - 'go.sum'
-      - '.github/workflows/verify-licenses.yaml'
-  pull_request:
-    branches: [main]
+    branches:
+      - main
+      - "pull-request/[0-9]+"
     paths:
       - 'go.mod'
       - 'go.sum'
