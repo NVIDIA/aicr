@@ -1,0 +1,28 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 5 * * 1'
+
+permissions:
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: go
+      - run: make build
+      - uses: github/codeql-action/analyze@v3
