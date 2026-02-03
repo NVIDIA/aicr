@@ -15,6 +15,10 @@
 # Network Operator Helm values
 # Base configuration for all deployments
 
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+operator:
+  fullnameOverride: network-operator
+
 deployCR: true
 
 nfd:

@@ -15,6 +15,9 @@
 # GPU Operator Helm values
 # Base configuration for all deployments
 
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: gpu-operator
+
 operator:
   upgradeCRD: true
   resources:
@@ -70,3 +73,7 @@ devicePlugin:
 
 migManager:
   enabled: true
+
+# Node Feature Discovery sub-chart
+node-feature-discovery:
+  fullnameOverride: node-feature-discovery

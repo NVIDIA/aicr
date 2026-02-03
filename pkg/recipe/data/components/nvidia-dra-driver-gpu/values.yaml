@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# NVIDIA DRA Driver GPU Helm values
+
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: nvidia-dra-driver-gpu
+
 # Specify the driver root on the host.
 # If the NVIDIA GPU driver is managed using the NVIDIA GPU Driver Container,
 # this is typically /run/nvidia/driver.

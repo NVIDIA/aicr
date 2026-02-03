@@ -15,6 +15,9 @@
 # Kube Prometheus Stack Helm values
 # Comprehensive monitoring stack with Prometheus, Grafana, and AlertManager
 
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: kube-prometheus
+
 # Prometheus configuration
 prometheus:
   prometheusSpec:
@@ -47,6 +50,7 @@ prometheus:
 # Grafana configuration
 grafana:
   enabled: true
+  fullnameOverride: grafana
   adminPassword: admin  # Change in production
   resources:
     requests:
@@ -73,5 +77,5 @@ nodeExporter:
   enabled: true
 
 # kube-state-metrics - for Kubernetes object metrics
-kubeStateMetrics:
-  enabled: true
+kube-state-metrics:
+  fullnameOverride: kube-state-metrics
