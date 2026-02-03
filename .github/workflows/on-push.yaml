@@ -23,6 +23,7 @@ on:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
+  create: {}  # Triggers when copy-pr-bot creates pull-request/N branches
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -42,6 +43,8 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # For create events, only run on pull-request/N branches (push/workflow_dispatch already filtered)
+    if: github.event_name != 'create' || startsWith(github.ref, 'refs/heads/pull-request/')
     steps:
 
       - name: Checkout Code
@@ -70,6 +73,7 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    if: github.event_name != 'create' || startsWith(github.ref, 'refs/heads/pull-request/')
     steps:
 
       - name: Checkout Code
@@ -88,6 +92,7 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    if: github.event_name != 'create' || startsWith(github.ref, 'refs/heads/pull-request/')
     steps:
 
       - name: Checkout Code
