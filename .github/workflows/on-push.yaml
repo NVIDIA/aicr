@@ -18,12 +18,17 @@ on:
   push:
     branches:
       - main
-      - "pull-request/[0-9]+"
     paths-ignore:
       - '**.md'
       - 'docs/**'
       - 'LICENSE'
-  create: {}  # Triggers when copy-pr-bot creates pull-request/N branches
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -43,8 +48,6 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    # Only run in main repo (not forks), and for create events only on pull-request/N branches
-    if: github.repository == 'NVIDIA/eidos' && (github.event_name != 'create' || startsWith(github.ref, 'refs/heads/pull-request/'))
     steps:
 
       - name: Checkout Code
@@ -73,7 +76,6 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    if: github.repository == 'NVIDIA/eidos' && (github.event_name != 'create' || startsWith(github.ref, 'refs/heads/pull-request/'))
     steps:
 
       - name: Checkout Code
@@ -92,7 +94,6 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    if: github.repository == 'NVIDIA/eidos' && (github.event_name != 'create' || startsWith(github.ref, 'refs/heads/pull-request/'))
     steps:
 
       - name: Checkout Code
