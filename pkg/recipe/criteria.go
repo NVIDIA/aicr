@@ -35,11 +35,12 @@ type CriteriaServiceType string
 
 // CriteriaServiceType constants for supported Kubernetes services.
 const (
-	CriteriaServiceAny CriteriaServiceType = "any"
-	CriteriaServiceEKS CriteriaServiceType = "eks"
-	CriteriaServiceGKE CriteriaServiceType = "gke"
-	CriteriaServiceAKS CriteriaServiceType = "aks"
-	CriteriaServiceOKE CriteriaServiceType = "oke"
+	CriteriaServiceAny  CriteriaServiceType = "any"
+	CriteriaServiceEKS  CriteriaServiceType = "eks"
+	CriteriaServiceGKE  CriteriaServiceType = "gke"
+	CriteriaServiceAKS  CriteriaServiceType = "aks"
+	CriteriaServiceOKE  CriteriaServiceType = "oke"
+	CriteriaServiceKind CriteriaServiceType = "kind"
 )
 
 // ParseCriteriaServiceType parses a string into a CriteriaServiceType.
@@ -55,6 +56,8 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceAKS, nil
 	case "oke":
 		return CriteriaServiceOKE, nil
+	case "kind":
+		return CriteriaServiceKind, nil
 	default:
 		return CriteriaServiceAny, fmt.Errorf("invalid service type: %s", s)
 	}
@@ -62,7 +65,7 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 
 // GetCriteriaServiceTypes returns all supported service types sorted alphabetically.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "eks", "gke", "oke"}
+	return []string{"aks", "eks", "gke", "kind", "oke"}
 }
 
 // CriteriaAcceleratorType represents the GPU/accelerator type.
