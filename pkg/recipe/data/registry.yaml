@@ -135,9 +135,16 @@ components:
       system:
         nodeSelectorPaths:
           - global.systemNodeSelector
-      accelerated:
+          - labeler.nodeSelector
         tolerationPaths:
           - global.tolerations
+          - labeler.tolerations
+      accelerated:
+        nodeSelectorPaths:
+          - platformConnector.nodeSelector
+        tolerationPaths:
+          - global.tolerations
+          - platformConnector.tolerations
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu
@@ -148,9 +155,13 @@ components:
       defaultChart: nvidia/nvidia-dra-driver-gpu
     nodeScheduling:
       system:
+        nodeSelectorPaths:
+          - controller.nodeSelector
         tolerationPaths:
           - controller.tolerations
       accelerated:
+        nodeSelectorPaths:
+          - kubeletPlugin.nodeSelector
         tolerationPaths:
           - kubeletPlugin.tolerations
 
@@ -170,11 +181,19 @@ components:
           - alertmanager.alertmanagerSpec.nodeSelector
           - grafana.nodeSelector
           - prometheusOperator.nodeSelector
+          - prometheusOperator.admissionWebhooks.patch.nodeSelector
+          - kube-state-metrics.nodeSelector
+          - prometheus-node-exporter.nodeSelector
+          - thanosRuler.thanosRulerSpec.nodeSelector
         tolerationPaths:
           - prometheus.prometheusSpec.tolerations
           - alertmanager.alertmanagerSpec.tolerations
           - grafana.tolerations
           - prometheusOperator.tolerations
+          - prometheusOperator.admissionWebhooks.patch.tolerations
+          - kube-state-metrics.tolerations
+          - prometheus-node-exporter.tolerations
+          - thanosRuler.thanosRulerSpec.tolerations
 
   - name: prometheus-adapter
     displayName: prometheus-adapter
@@ -219,3 +238,9 @@ components:
     helm:
       defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations

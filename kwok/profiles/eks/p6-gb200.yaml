@@ -1,0 +1,50 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# EKS Accelerated Node Profile: p6.48xlarge (GB200)
+#
+# NVIDIA GB200 Grace Blackwell instance for next-gen training workloads:
+# - 8x NVIDIA GB200 GPUs (Blackwell architecture)
+# - 288 ARM vCPUs (Grace CPU), 3072 GiB memory
+# - NVLink 5.0 interconnect
+
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: KWOKNodeProfile
+metadata:
+  name: p6-gb200
+  labels:
+    provider: eks
+    nodeType: accelerated
+    accelerator: gb200
+
+spec:
+  # Instance specifications
+  instanceType: p6.48xlarge
+  arch: arm64  # Grace CPU is ARM-based
+  osImage: Amazon Linux 2023
+
+  # Resource capacity
+  resources:
+    cpu: "288"
+    memory: 3072Gi
+    storage: 7600Gi
+
+  # GPU specifications
+  gpu:
+    product: NVIDIA-GB200-192GB-HBM3e
+    count: 8
+    memory: 196608  # MiB per GPU (192GB)
+    driver: "580.82.07"
+    driverMajor: "580"
+    driverMinor: "82"

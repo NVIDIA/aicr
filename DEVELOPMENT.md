@@ -10,6 +10,7 @@ This guide covers project setup, architecture, development workflows, and toolin
 - [Project Architecture](#project-architecture)
 - [Development Workflow](#development-workflow)
 - [Local Kubernetes Development](#local-kubernetes-development)
+- [KWOK Simulated Cluster Testing](#kwok-simulated-cluster-testing)
 - [Make Targets Reference](#make-targets-reference)
 - [Debugging](#debugging)
 
@@ -300,6 +301,10 @@ make e2e
 
 # With local Kubernetes cluster (requires make dev-env first)
 make e2e-tilt
+
+# KWOK simulated cluster tests (no GPU hardware required)
+make kwok-test-all                    # All recipes
+make kwok-e2e RECIPE=eks-training     # Single recipe
 ```
 
 ### 6. Security Scan
@@ -486,6 +491,28 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
 └─────────────────────────────────────────────────────────┘
 ```
 
+## KWOK Simulated Cluster Testing
+
+KWOK (Kubernetes WithOut Kubelet) tests recipe configurations and bundle scheduling without GPU hardware.
+
+```bash
+make kwok-test-all                      # Test all recipes
+make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
+```
+
+Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
+
+| Command | Description |
+|---------|-------------|
+| `make kwok-test-all` | Test all recipes in shared cluster |
+| `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
+| `make kwok-cluster` | Create Kind cluster with KWOK |
+| `make kwok-status` | Show cluster and node status |
+| `make kwok-cluster-delete` | Delete cluster |
+
+See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troubleshooting.
+
+
 ## Make Targets Reference
 
 ### Quality & Testing
@@ -502,6 +529,8 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
 | `make e2e-tilt` | E2E tests with Tilt cluster |
 | `make scan` | Vulnerability scan with grype |
 | `make bench` | Run benchmarks |
+| `make kwok-test-all` | Test all recipes with KWOK simulated clusters |
+| `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 
 ### Build & Release
 

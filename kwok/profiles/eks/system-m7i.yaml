@@ -12,33 +12,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Language Versions
-languages:
-  go: '1.25'
+# EKS System Node Profile: m7i.4xlarge
+#
+# Intel-based general purpose instance for control plane workloads:
+# - Cert-manager, Prometheus, GPU Operator controller
+# - No GPU resources
 
-# Build Tools
-build_tools:
-  goreleaser: 'v2'
-  ko: 'v0.18.0'
-  crane: 'v0.20.6'
-  git_cliff: '2.12.0'
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: KWOKNodeProfile
+metadata:
+  name: system-m7i
+  labels:
+    provider: eks
+    nodeType: system
 
-# Linting
-linting:
-  golangci_lint: 'v2.6.2'
-  yamllint: '1.35.0'
-  addlicense: 'v1.1.1'
-  go_licenses: 'v1.6.0'
+spec:
+  # Instance specifications
+  instanceType: m7i.4xlarge
+  arch: amd64
+  osImage: Amazon Linux 2023
 
-# Security Tools
-security_tools:
-  grype: 'v0.107.0'
-
-# E2E Testing Tools
-testing_tools:
-  kubectl: 'v1.35.0'
-  kind: '0.31.0'
-  ctlptl: '0.8.43'
-  tilt: '0.35.0'
-  helm: 'v4.1.0'
-  kwok: 'v0.7.0'
+  # Resource capacity
+  resources:
+    cpu: "16"
+    memory: 64Gi
+    storage: 100Gi
