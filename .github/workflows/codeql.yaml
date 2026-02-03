@@ -25,5 +25,5 @@ jobs:
       - uses: github/codeql-action/init@v3
         with:
           languages: go
-      - run: make build
+      - run: go build ./...
       - uses: github/codeql-action/analyze@v3
