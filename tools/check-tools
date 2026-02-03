@@ -1,0 +1,225 @@
+#!/usr/bin/env bash
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# check-tools: Verifies required tools are installed and shows version comparison
+#
+# This script dynamically reads from .versions.yaml and checks each tool.
+# Adding a new tool to .versions.yaml automatically includes it in the check
+# (as long as the tool metadata is defined in TOOL_METADATA below).
+#
+# Usage:
+#   ./tools/check-tools              # Run tool check
+#   DEBUG=true ./tools/check-tools   # Run with debug output
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/common
+. "${DIR}/common"
+VERSIONS_FILE="${REPO_ROOT}/.versions.yaml"
+
+# Check if yq is available
+if ! command -v yq &>/dev/null; then
+    log_error "yq is required for this script"
+    log_info "Install: brew install yq (macOS) or see https://github.com/mikefarah/yq"
+    exit 1
+fi
+
+# Check if .versions.yaml exists
+if [[ ! -f "${VERSIONS_FILE}" ]]; then
+    log_error "Version file not found: ${VERSIONS_FILE}"
+    exit 1
+fi
+
+# Tool metadata: defines how to detect versions and compare them
+# Format: "yaml_key:::command_name:::version_cmd:::match_strategy"
+#
+# yaml_key: The key name in .versions.yaml (e.g., "go", "golangci_lint")
+# command_name: The actual command name to check (e.g., "go", "golangci-lint")
+# version_cmd: Command to extract version
+# match_strategy: How to compare versions
+#   - exact: Full version must match
+#   - major: Only major version must match
+#   - major_minor: Major.minor must match
+#   - presence: Only check if installed (no version comparison)
+#
+# To add a new tool:
+# 1. Add it to .versions.yaml under the appropriate category
+# 2. Add its metadata entry here with the yaml_key matching the key in .versions.yaml
+
+declare -A TOOL_METADATA=(
+    # Languages
+    ["go"]="go:::go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | sed 's/go//':::major_minor"
+
+    # Build tools
+    ["goreleaser"]="goreleaser:::goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p':::major"
+    ["ko"]="ko:::ko version 2>/dev/null | head -1:::major_minor"
+    ["crane"]="crane:::crane version 2>/dev/null:::major_minor"
+    ["git_cliff"]="git-cliff:::git-cliff --version 2>/dev/null | awk '{print \$2}':::major"
+
+    # Linting
+    ["golangci_lint"]="golangci-lint:::golangci-lint version --short 2>/dev/null:::major"
+    ["yamllint"]="yamllint:::yamllint --version 2>/dev/null | awk '{print \$2}':::major"
+    ["addlicense"]="addlicense:::echo installed:::presence"
+    ["go_licenses"]="go-licenses:::go-licenses version 2>/dev/null || echo installed:::presence"
+
+    # Security tools
+    ["grype"]="grype:::grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\[' || echo installed:::presence"
+
+    # Testing tools
+    ["kubectl"]="kubectl:::kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\.[0-9]+' || echo installed:::major"
+    ["kind"]="kind:::kind version 2>/dev/null | awk '{print \$2}' | sed 's/^v//':::major_minor"
+    ["ctlptl"]="ctlptl:::ctlptl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+    ["tilt"]="tilt:::tilt version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+    ["helm"]="helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
+
+    # Optional tools (no version in .versions.yaml)
+    ["docker"]="docker:::docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'not running':::presence"
+)
+
+# Extract major version from a version string
+get_major() {
+    local version="$1"
+    echo "$version" | sed 's/^v//' | cut -d. -f1
+}
+
+# Extract major.minor version from a version string
+get_major_minor() {
+    local version="$1"
+    echo "$version" | sed 's/^v//' | cut -d. -f1,2
+}
+
+# Compare versions based on strategy
+# Returns: 0 if match, 1 if mismatch
+compare_versions() {
+    local expected="$1"
+    local installed="$2"
+    local strategy="$3"
+
+    case "$strategy" in
+        exact)
+            [[ "$installed" == "$expected" ]]
+            ;;
+        major)
+            local exp_major inst_major
+            exp_major=$(get_major "$expected")
+            inst_major=$(get_major "$installed")
+            [[ "$exp_major" == "$inst_major" ]]
+            ;;
+        major_minor)
+            local exp_mm inst_mm
+            exp_mm=$(get_major_minor "$expected")
+            inst_mm=$(get_major_minor "$installed")
+            [[ "$exp_mm" == "$inst_mm" ]]
+            ;;
+        presence)
+            # Any version is acceptable
+            return 0
+            ;;
+        *)
+            log_error "Unknown match strategy: $strategy"
+            return 1
+            ;;
+    esac
+}
+
+# Print a formatted row
+print_row() {
+    local tool="$1"
+    local expected="$2"
+    local installed="$3"
+    local status="$4"
+    printf "%-20s %-15s %-15s %s\n" "$tool" "$expected" "$installed" "$status"
+}
+
+# Check a single tool
+check_tool() {
+    local yaml_key="$1"
+    local expected_version="$2"
+
+    # Look up tool metadata
+    local metadata="${TOOL_METADATA[$yaml_key]:-}"
+    if [[ -z "$metadata" ]]; then
+        log_debug "No metadata for tool: $yaml_key (skipping)"
+        return
+    fi
+
+    # Parse metadata (using ::: as delimiter to avoid conflicts with pipes in commands)
+    cmd_name="${metadata%%:::*}"
+    local rest="${metadata#*:::}"
+    version_cmd="${rest%%:::*}"
+    match_strategy="${rest##*:::}"
+
+    # Check if command exists
+    if ! command -v "$cmd_name" &>/dev/null; then
+        print_row "$cmd_name" "$expected_version" "-" "✗"
+        return
+    fi
+
+    # Get installed version
+    local installed_version
+    installed_version=$(eval "$version_cmd" 2>/dev/null || echo "unknown")
+
+    # Handle special case for docker not running
+    if [[ "$installed_version" == "not running" ]]; then
+        print_row "$cmd_name" "-" "not running" "⚠"
+        return
+    fi
+
+    # Compare versions
+    if compare_versions "$expected_version" "$installed_version" "$match_strategy"; then
+        print_row "$cmd_name" "$expected_version" "$installed_version" "✓"
+    else
+        print_row "$cmd_name" "$expected_version" "$installed_version" "⚠"
+    fi
+}
+
+# Main
+echo "=== Tool Version Check ==="
+echo ""
+print_row "Tool" "Expected" "Installed" "Status"
+print_row "----" "--------" "---------" "------"
+
+# Get all categories from .versions.yaml
+categories=$(yq 'keys | .[]' "${VERSIONS_FILE}")
+
+# Iterate through each category
+for category in $categories; do
+    # Get all tools in this category
+    tools=$(yq ".$category | keys | .[]" "${VERSIONS_FILE}" 2>/dev/null || true)
+
+    for tool in $tools; do
+        # Get expected version
+        expected=$(yq ".$category.$tool" "${VERSIONS_FILE}")
+
+        # Check the tool
+        check_tool "$tool" "$expected"
+    done
+done
+
+# Check docker separately (not in .versions.yaml but useful to show)
+if command -v docker &>/dev/null; then
+    installed=$(docker version --format '{{.Server.Version}}' 2>/dev/null | tr -d '\n' || true)
+    if [[ -z "$installed" ]]; then
+        print_row "docker" "-" "not running" "⚠"
+    else
+        print_row "docker" "-" "$installed" "✓"
+    fi
+else
+    print_row "docker" "-" "-" "✗"
+fi
+
+echo ""
+echo "Legend: ✓ = installed, ⚠ = version mismatch or warning, ✗ = missing"
