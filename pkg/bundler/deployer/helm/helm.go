@@ -181,6 +181,12 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		"helm install eidos-stack . -n eidos-stack --create-namespace",
 	}
 
+	// Add post-install step if there are post-install manifests
+	if len(input.ManifestContents) > 0 {
+		output.DeploymentSteps = append(output.DeploymentSteps,
+			"kubectl apply -f post-install/ -n eidos-stack  # Apply CRD-dependent resources")
+	}
+
 	slog.Debug("umbrella chart generated",
 		"files", len(output.Files),
 		"total_size", output.TotalSize,
@@ -505,7 +511,9 @@ func SortComponentsByDeploymentOrder(components []string, deploymentOrder []stri
 	return sorted
 }
 
-// generateTemplates creates the templates directory with manifest files.
+// generateTemplates creates the post-install directory with manifest files.
+// These manifests contain Custom Resources that depend on CRDs installed by sub-charts,
+// so they must be applied after the main Helm install completes.
 func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput, outputDir string) ([]string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -515,9 +523,11 @@ func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput
 		return nil, 0, nil
 	}
 
-	templatesDir := filepath.Join(outputDir, "templates")
-	if err := os.MkdirAll(templatesDir, 0755); err != nil {
-		return nil, 0, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", err)
+	// Write manifests to post-install/ directory instead of templates/
+	// This ensures CRD-dependent resources are applied after helm install
+	postInstallDir := filepath.Join(outputDir, "post-install")
+	if err := os.MkdirAll(postInstallDir, 0755); err != nil {
+		return nil, 0, errors.Wrap(errors.ErrCodeInternal, "failed to create post-install directory", err)
 	}
 
 	files := make([]string, 0, len(input.ManifestContents))
@@ -525,16 +535,121 @@ func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput
 
 	for path, content := range input.ManifestContents {
 		filename := filepath.Base(path)
-		outputPath := filepath.Join(templatesDir, filename)
+		outputPath := filepath.Join(postInstallDir, filename)
 
-		if err := os.WriteFile(outputPath, content, 0600); err != nil {
-			return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write template", err,
+		// Process Helm template syntax to plain YAML for kubectl apply
+		processedContent := g.processManifestForKubectl(content, input)
+
+		// Skip if template evaluated to empty (conditional was false)
+		if len(processedContent) == 0 {
+			slog.Debug("skipping empty manifest (conditional evaluated to false)",
+				"filename", filename)
+			continue
+		}
+
+		if err := os.WriteFile(outputPath, processedContent, 0600); err != nil {
+			return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write post-install manifest", err,
 				map[string]any{"filename": filename})
 		}
 
 		files = append(files, outputPath)
-		totalSize += int64(len(content))
+		totalSize += int64(len(processedContent))
+	}
+
+	// Remove post-install directory if no files were written
+	if len(files) == 0 {
+		os.RemoveAll(postInstallDir)
 	}
 
 	return files, totalSize, nil
+}
+
+// processManifestForKubectl converts Helm template manifests to plain YAML for kubectl apply.
+// It renders the Go template with the actual values to produce valid Kubernetes YAML.
+func (g *Generator) processManifestForKubectl(content []byte, input *GeneratorInput) []byte {
+	// Convert component values to map[string]any for template compatibility
+	valuesAny := make(map[string]any)
+	for k, v := range input.ComponentValues {
+		valuesAny[k] = v
+	}
+
+	// Build template data matching Helm's structure
+	templateData := map[string]any{
+		"Values": valuesAny,
+		"Release": map[string]any{
+			"Namespace": "eidos-stack",
+			"Service":   "Helm",
+			"Name":      "eidos-stack",
+		},
+		"Chart": map[string]any{
+			"Name":    "eidos-stack",
+			"Version": input.Version,
+		},
+	}
+
+	// Parse and execute the template
+	tmpl, err := template.New("manifest").Funcs(template.FuncMap{
+		"default": func(defaultVal, val any) any {
+			if val == nil || val == "" {
+				return defaultVal
+			}
+			return val
+		},
+		"toYaml": func(v any) string {
+			out, _ := yaml.Marshal(v)
+			return string(out)
+		},
+		"nindent": func(indent int, s string) string {
+			pad := strings.Repeat(" ", indent)
+			lines := strings.Split(s, "\n")
+			for i, line := range lines {
+				if line != "" {
+					lines[i] = pad + line
+				}
+			}
+			return "\n" + strings.Join(lines, "\n")
+		},
+		"index": func(m any, key string) any {
+			switch v := m.(type) {
+			case map[string]any:
+				return v[key]
+			case map[string]map[string]any:
+				return v[key]
+			default:
+				return nil
+			}
+		},
+		"eq": func(a, b any) bool {
+			return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
+		},
+		"and": func(args ...any) bool {
+			for _, arg := range args {
+				if arg == nil || arg == false || arg == "" {
+					return false
+				}
+			}
+			return true
+		},
+	}).Parse(string(content))
+
+	if err != nil {
+		slog.Warn("failed to parse manifest template, returning original content",
+			"error", err)
+		return content
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, templateData); err != nil {
+		slog.Warn("failed to execute manifest template, returning original content",
+			"error", err)
+		return content
+	}
+
+	// Remove empty output (template conditionals evaluated to false)
+	result := strings.TrimSpace(buf.String())
+	if result == "" || result == "---" {
+		return nil
+	}
+
+	return []byte(result)
 }

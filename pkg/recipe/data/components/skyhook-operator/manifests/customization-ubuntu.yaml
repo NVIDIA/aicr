@@ -51,6 +51,8 @@ spec:
   {{- end }}
   packages:
     tuning:
+      image: ghcr.io/nvidia/skyhook-packages/tuning
+      version: "1.1.4"
       configInterrupts:
         grub.conf:
           type: reboot
