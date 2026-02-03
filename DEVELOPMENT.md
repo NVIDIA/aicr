@@ -430,7 +430,6 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
 | `make clean-all` | Deep clean including module cache |
 | `make cleanup` | Clean up Eidos Kubernetes resources |
 | `make help` | Show all available targets |
-| `make help-full` | Show targets grouped by category |
 
 ## Debugging
 
