@@ -433,6 +433,21 @@ func TestValidator_Validate_ContextCancellation(t *testing.T) {
 	}
 }
 
+// TestNewValidationResult tests the NewValidationResult constructor.
+func TestNewValidationResult(t *testing.T) {
+	result := NewValidationResult()
+
+	if result == nil {
+		t.Fatal("expected non-nil ValidationResult")
+	}
+	if result.Results == nil {
+		t.Error("expected Results slice to be initialized, got nil")
+	}
+	if len(result.Results) != 0 {
+		t.Errorf("expected Results to be empty, got %d elements", len(result.Results))
+	}
+}
+
 // TestEvaluateConstraint tests the standalone EvaluateConstraint function.
 func TestEvaluateConstraint(t *testing.T) {
 	snapshot := &snapshotter.Snapshot{
