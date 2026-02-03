@@ -51,6 +51,7 @@ spec:
   {{- end }}
   packages:
     tuning:
+      version: "1.0.0"
       configInterrupts:
         grub.conf:
           type: reboot
