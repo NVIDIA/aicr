@@ -174,3 +174,24 @@ components:
           - nodeSelector
         tolerationPaths:
           - tolerations
+
+  - name: aws-ebs-csi-driver
+    displayName: aws-ebs-csi-driver
+    valueOverrideKeys:
+      - ebscsidriver
+      - awsebscsidriver
+    helm:
+      defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+      defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
+      defaultVersion: 2.55.0
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.nodeSelector
+        tolerationPaths:
+          - controller.tolerations
+      accelerated:
+        nodeSelectorPaths:
+          - node.nodeSelector
+        tolerationPaths:
+          - node.tolerations

@@ -39,6 +39,8 @@ yamllint.pkg-path = "yamllint"
 yq.pkg-path = "yq-go"
 jq.pkg-path = "jq"
 curl.pkg-path = "curl"
+tilt.pkg-path = "tilt"
+ctlptl.pkg-path = "ctlptl"
 
 # Container tools (tilt and ctlptl may need manual install)
 # tilt.pkg-path = "tilt"  # May not be in nixpkgs

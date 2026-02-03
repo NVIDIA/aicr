@@ -29,3 +29,11 @@ spec:
   constraints:
     - name: K8s.server.version
       value: ">= 1.28"
+
+  # EKS-specific components
+  componentRefs:
+    - name: aws-ebs-csi-driver
+      type: Helm
+      source: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+      version: 2.55.0
+      valuesFile: components/aws-ebs-csi-driver/values.yaml
