@@ -18,26 +18,33 @@ on:
   push:
     branches:
       - main
-      - "pull-request/[0-9]+"
-    tags:
-      - 'v*'
-  workflow_dispatch: {}
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+  workflow_dispatch: {}  # Allow manual runs
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+  pull-requests: write
+  security-events: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
-
-permissions:
-  contents: read
-  actions: write
-  pull-requests: write
-  id-token: write
-  security-events: write
+  cancel-in-progress: true
 
 jobs:
 
   unit:
-    if: github.repository == 'nvidia/eidos'
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -66,7 +73,6 @@ jobs:
           category: 'trivy-fs'
 
   integration:
-    if: github.repository == 'nvidia/eidos'
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -85,7 +91,6 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
 
   e2e:
-    if: github.repository == 'nvidia/eidos'
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
