@@ -15,6 +15,9 @@
 # NVSentinel Helm values
 # Base configuration for all deployments
 
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: nvsentinel
+
 global: {}
 
 platformConnector:

@@ -15,6 +15,9 @@
 # cert-manager Helm values
 # Base configuration for all deployments
 
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: cert-manager
+
 resources:
   requests:
     memory: "90Mi"

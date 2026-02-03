@@ -18,8 +18,8 @@
 # Prometheus connection configuration
 prometheus:
   # URL of the Prometheus service deployed by kube-prometheus-stack
-  # Format: http://<release-name>-kube-prometheus-prometheus.<namespace>.svc
-  url: http://prometheus-kube-prometheus-prometheus
+  # With fullnameOverride: kube-prometheus, the service name is kube-prometheus-prometheus
+  url: http://kube-prometheus-prometheus
   port: 9090
 
 # Custom metrics rules for GPU-based autoscaling
