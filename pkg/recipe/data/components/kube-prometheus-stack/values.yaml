@@ -35,14 +35,12 @@ prometheus:
         memory: 2Gi
 
     # Storage configuration
+    # Use emptyDir for local testing (no PVC required, data lost on pod restart)
+    # For EKS deployments with persistent storage, this is overridden via overlay.
     storageSpec:
-      volumeClaimTemplate:
-        spec:
-          storageClassName: ""  # Use default storage class
-          accessModes: ["ReadWriteOnce"]
-          resources:
-            requests:
-              storage: 50Gi
+      emptyDir:
+        medium: ""
+        sizeLimit: 10Gi
 
     # Data retention
     retention: 15d

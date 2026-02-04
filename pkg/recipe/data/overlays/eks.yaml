@@ -37,3 +37,18 @@ spec:
       source: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       version: 2.55.0
       valuesFile: components/aws-ebs-csi-driver/values.yaml
+
+    # Enable Prometheus persistent storage for EKS (requires EBS CSI driver)
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        prometheus:
+          prometheusSpec:
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: ""  # Use default storage class
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi

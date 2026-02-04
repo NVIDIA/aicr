@@ -49,3 +49,7 @@ cainjector:
     limits:
       memory: "320Mi"
       cpu: "50m"
+
+# Startup API check job - increase timeout from default 1m for slow clusters
+startupapicheck:
+  timeout: 5m
