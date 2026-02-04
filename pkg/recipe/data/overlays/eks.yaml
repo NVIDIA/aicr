@@ -52,3 +52,7 @@ spec:
                   resources:
                     requests:
                       storage: 50Gi
+    - name: aws-efa
+      type: Helm
+      version: v0.5.3
+      valuesFile: components/aws-efa/values.yaml
