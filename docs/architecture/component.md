@@ -180,6 +180,12 @@ The component registry (`pkg/recipe/data/registry.yaml`) supports these fields:
 - Create overlay values (`values-<context>.yaml`) for specific scenarios
 - Document non-obvious settings with comments
 - Use consistent formatting (2-space indent for YAML)
+- **Override release name prefix**: Use `fullnameOverride` to avoid the `eidos-stack-` prefix in resource names. This makes resource names cleaner and more predictable. For example, in `kube-prometheus-stack/values.yaml`:
+  ```yaml
+  # Override release name prefix to avoid eidos-stack- prefix in resource names
+  fullnameOverride: kube-prometheus
+  ```
+  Without this override, resources would be named `eidos-stack-kube-prometheus-*` instead of `kube-prometheus-*`.
 
 ### Custom Manifests
 
@@ -194,6 +200,117 @@ The component registry (`pkg/recipe/data/registry.yaml`) supports these fields:
 - Test recipe generation: `eidos recipe --service eks --accelerator gb200`
 - Test bundle generation: `eidos bundle -r recipe.yaml -o ./test-bundle`
 - Verify generated `values.yaml` contains expected settings
+
+#### Testing in a Local Kind Cluster
+
+**Step 0: Create a local kind cluster**
+
+Create a local kind cluster for end-to-end testing.
+
+```bash
+make dev
+```
+
+This creates a kind cluster with two nodes and starts Tilt.
+
+**Step 1: Build the eidos binary**
+
+Build the CLI with embedded recipe data and install it:
+
+```bash
+make build && cp dist/eidos_darwin_all/eidos /usr/local/bin/
+```
+
+This compiles the Go code and embeds all files from `pkg/recipe/data/` into the binary. The binary is copied to `/usr/local/bin/` for global access.
+
+**Step 2: Generate the recipe**
+
+Generate a recipe optimized for Kind clusters:
+
+```bash
+eidos recipe --service kind -o recipe.yaml
+```
+
+This creates a `recipe.yaml` file with:
+- Components configured for local development (reduced resources, emptyDir storage)
+- GPU operator with driver installation disabled (uses host drivers via passthrough)
+- cert-manager with extended startupapicheck timeout
+- nvsentinel with network policy disabled
+
+**Step 3: Generate the Helm bundle**
+
+Convert the recipe into a Helm umbrella chart:
+
+```bash
+eidos bundle --recipe recipe.yaml --output bundle
+```
+
+This generates a `bundle/` directory containing:
+- `Chart.yaml` - Helm chart metadata with component dependencies
+- `values.yaml` - Combined values for all components
+- `post-install/` - CRD-dependent resources to apply after install
+- `README.md` - Deployment instructions
+
+**Step 4: Download Helm dependencies**
+
+Fetch the sub-charts from their repositories:
+
+```bash
+cd bundle
+helm dependency update
+```
+
+> **Note:** If the download fails due to file size limits, set `HELM_MAX_FILESIZE=50000000` before running the command. Some charts (e.g., nvsentinel from OCI registry) exceed Helm's default 5MB limit.
+
+**Step 5: Install the Helm chart**
+
+Deploy the stack to the Kind cluster in the namespace `eidos-stack`:
+
+```bash
+helm upgrade --install eidos-stack . -n eidos-stack --create-namespace --wait
+```
+
+**Step 6: Apply post-install resources**
+
+Apply CRD-dependent resources that couldn't be included in the Helm chart:
+
+```bash
+kubectl apply -f post-install/ -n eidos-stack
+```
+
+These resources (e.g., Skyhook Customizations) depend on CRDs installed by the sub-charts and must be applied after the main install completes.
+
+**Step 7: Verify the deployment**
+
+Check that all pods are running:
+
+```bash
+kubectl get pods -n eidos-stack
+```
+
+All pods should show `Running` or `Completed` status. Common issues:
+- **Pending pods**: Check for resource constraints with `kubectl describe pod <name> -n eidos-stack`
+- **CrashLoopBackOff**: Check logs with `kubectl logs <pod-name> -n eidos-stack`
+- **ImagePullBackOff**: Verify network connectivity and image registry access
+
+**Cleanup:**
+
+To remove the deployment:
+
+```bash
+helm uninstall eidos-stack -n eidos-stack
+kubectl delete namespace eidos-stack
+```
+
+Note: Some cluster-scoped resources (CRDs, ClusterRoles, Webhooks) may need manual cleanup:
+
+```bash
+# Delete leftover webhooks
+kubectl delete mutatingwebhookconfiguration,validatingwebhookconfiguration -l app.kubernetes.io/instance=eidos-stack
+
+# Delete leftover cluster roles
+kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance=eidos-stack
+```
 
 ### Documentation
 
