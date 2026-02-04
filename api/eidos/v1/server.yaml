@@ -120,6 +120,14 @@ paths:
             type: string
             enum: [ubuntu, rhel, cos, amazonlinux, any]
             default: any
+        - name: platform
+          in: query
+          required: false
+          description: Platform/framework type. If omitted, treated as "any" (wildcard).
+          schema:
+            type: string
+            enum: [pytorch, runai, any]
+            default: any
         - name: nodes
           in: query
           required: false

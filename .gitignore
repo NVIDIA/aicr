@@ -116,5 +116,6 @@ tags
 \#*\#
 .\#*
 
-
+# Claude
 .claude/settings.local.json
+.claude/GITHUB.md

@@ -9,7 +9,8 @@ eidos recipe \
   --service eks \
   --accelerator gb200 \
   --os ubuntu \
-  --intent training | yq .
+  --intent training \
+  --platform pytorch | yq .
 ```
 
 From criteria file:
@@ -26,6 +27,7 @@ spec:
   accelerator: gb200
   os: ubuntu
   intent: training
+  platform: pytorch
 EOF
 
 # Generate recipe from criteria file
@@ -82,12 +84,13 @@ Check Snapshot in ConfigMap:
 kubectl -n gpu-operator get cm eidos-snapshot -o jsonpath='{.data.snapshot\.yaml}' | yq .
 ```
 
-Recipe from Snapshot: 
+Recipe from Snapshot:
 
 ```shell
 eidos recipe \
   --snapshot cm://gpu-operator/eidos-snapshot \
   --intent training \
+  --platform pytorch \
   --output recipe.yaml
 ```
 

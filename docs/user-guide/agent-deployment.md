@@ -524,11 +524,11 @@ kubectl get configmap eidos-snapshot -n gpu-operator -o yaml
 
 ```shell
 # Option 1: Use ConfigMap directly (no file needed)
-eidos recipe --snapshot cm://gpu-operator/eidos-snapshot --intent training --output recipe.yaml
+eidos recipe --snapshot cm://gpu-operator/eidos-snapshot --intent training --platform pytorch --output recipe.yaml
 
 # Option 2: Save snapshot to file first
 kubectl get configmap eidos-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}' > snapshot.yaml
-eidos recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
+eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch --output recipe.yaml
 
 # Generate bundle
 eidos bundle --recipe recipe.yaml --output ./bundles
@@ -557,6 +557,7 @@ eidos recipe \
   --snapshot cm://gpu-operator/eidos-snapshot \
   --kubeconfig ~/.kube/config \
   --intent training \
+  --platform pytorch \
   --output recipe.yaml
 
 # Step 3: Create deployment bundle

@@ -430,11 +430,12 @@ test_all_recipe_data_files() {
     basename=$(basename "$recipe_file" .yaml)
     
     # Extract criteria from the recipe metadata file
-    local service accelerator os_val intent
+    local service accelerator os_val intent platform
     service=$(awk '/^  criteria:/{in_crit=1;next} in_crit && /^  [a-z]/{exit} in_crit && /service:/{gsub(/.*service: /,""); print}' "$recipe_file")
     accelerator=$(awk '/^  criteria:/{in_crit=1;next} in_crit && /^  [a-z]/{exit} in_crit && /accelerator:/{gsub(/.*accelerator: /,""); print}' "$recipe_file")
     os_val=$(awk '/^  criteria:/{in_crit=1;next} in_crit && /^  [a-z]/{exit} in_crit && /os:/{gsub(/.*os: /,""); print}' "$recipe_file")
     intent=$(awk '/^  criteria:/{in_crit=1;next} in_crit && /^  [a-z]/{exit} in_crit && /intent:/{gsub(/.*intent: /,""); print}' "$recipe_file")
+    platform=$(awk '/^  criteria:/{in_crit=1;next} in_crit && /^  [a-z]/{exit} in_crit && /platform:/{gsub(/.*platform: /,""); print}' "$recipe_file")
     
     # Skip intermediate recipes (those without complete criteria)
     # Go tests validate intermediate recipes; here we only test CLI with leaf recipes
@@ -452,6 +453,9 @@ test_all_recipe_data_files() {
     local recipe_cmd="${EIDOS_BIN} recipe --accelerator $accelerator --os $os_val --intent $intent"
     if [ -n "$service" ]; then
       recipe_cmd="$recipe_cmd --service $service"
+    fi
+    if [ -n "$platform" ]; then
+      recipe_cmd="$recipe_cmd --platform $platform"
     fi
     recipe_cmd="$recipe_cmd -o $recipe_result"
     

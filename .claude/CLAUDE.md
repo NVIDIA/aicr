@@ -249,6 +249,9 @@ eidos recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
 eidos bundle --recipe recipe.yaml --bundlers gpu-operator --output ./bundles
 eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
 
+# Recipe with platform
+eidos recipe --service eks --accelerator h100 --intent training --os ubuntu --platform pytorch
+
 # With overrides
 eidos bundle -r recipe.yaml -b gpu-operator \
   --set gpuoperator:driver.version=570.86.16 \

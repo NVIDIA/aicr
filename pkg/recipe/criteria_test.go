@@ -222,6 +222,72 @@ func TestCriteriaMatches(t *testing.T) {
 			},
 			want: false, // Query doesn't specify accelerator, but recipe requires gb200
 		},
+		{
+			name: "platform any recipe matches specific platform query",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformAny,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			want: true, // Recipe platform is generic, matches any query value
+		},
+		{
+			name: "specific platform recipe does not match any platform query",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformAny,
+			},
+			want: false, // Query "any" only matches generic recipes
+		},
+		{
+			name: "same platform matches",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			want: true,
+		},
+		{
+			name: "different platform does not match",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformRunAI,
+			},
+			want: false,
+		},
+		{
+			name: "full criteria with platform matches",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -251,6 +317,7 @@ func TestCriteriaSpecificity(t *testing.T) {
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			want: 1,
@@ -262,6 +329,7 @@ func TestCriteriaSpecificity(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			want: 3,
@@ -273,9 +341,10 @@ func TestCriteriaSpecificity(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
 				Nodes:       100,
 			},
-			want: 5,
+			want: 6,
 		},
 	}
 
@@ -308,6 +377,7 @@ func TestBuildCriteria(t *testing.T) {
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 			},
 		},
 		{
@@ -322,6 +392,18 @@ func TestBuildCriteria(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
+			},
+		},
+		{
+			name: "with platform",
+			opts: []CriteriaOption{WithCriteriaPlatform("pytorch")},
+			want: &Criteria{
+				Service:     CriteriaServiceAny,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformPyTorch,
 			},
 		},
 		{
@@ -332,6 +414,11 @@ func TestBuildCriteria(t *testing.T) {
 		{
 			name:    "invalid accelerator",
 			opts:    []CriteriaOption{WithCriteriaAccelerator("v100")},
+			wantErr: true,
+		},
+		{
+			name:    "invalid platform",
+			opts:    []CriteriaOption{WithCriteriaPlatform("invalid")},
 			wantErr: true,
 		},
 		{
@@ -353,7 +440,8 @@ func TestBuildCriteria(t *testing.T) {
 			}
 			if got.Service != tt.want.Service ||
 				got.Accelerator != tt.want.Accelerator ||
-				got.Intent != tt.want.Intent {
+				got.Intent != tt.want.Intent ||
+				got.Platform != tt.want.Platform {
 
 				t.Errorf("BuildCriteria() = %v, want %v", got, tt.want)
 			}
@@ -376,18 +464,20 @@ func TestParseCriteriaFromValues(t *testing.T) {
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
 		},
 		{
 			name:  "all parameters",
-			query: "service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8",
+			query: "service=eks&accelerator=h100&intent=training&os=ubuntu&platform=pytorch&nodes=8",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
 				Nodes:       8,
 			},
 			wantErr: false,
@@ -400,6 +490,7 @@ func TestParseCriteriaFromValues(t *testing.T) {
 				Accelerator: CriteriaAcceleratorGB200,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -412,6 +503,20 @@ func TestParseCriteriaFromValues(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:  "platform parameter",
+			query: "platform=runai",
+			want: &Criteria{
+				Service:     CriteriaServiceAny,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformRunAI,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -437,7 +542,8 @@ func TestParseCriteriaFromValues(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			query:   "os=invalid",
+			name:    "invalid platform",
+			query:   "platform=invalid",
 			wantErr: true,
 		},
 		{
@@ -476,8 +582,8 @@ func TestParseCriteriaFromValues(t *testing.T) {
 			if got.OS != tt.want.OS {
 				t.Errorf("OS = %v, want %v", got.OS, tt.want.OS)
 			}
-			if got.OS != tt.want.OS {
-				t.Errorf("OS = %v, want %v", got.OS, tt.want.OS)
+			if got.Platform != tt.want.Platform {
+				t.Errorf("Platform = %v, want %v", got.Platform, tt.want.Platform)
 			}
 			if got.Nodes != tt.want.Nodes {
 				t.Errorf("Nodes = %v, want %v", got.Nodes, tt.want.Nodes)
@@ -567,7 +673,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "eks", "gke", "oke"}
+	expected := []string{"aks", "eks", "gke", "kind", "oke"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -659,6 +765,60 @@ func TestGetCriteriaOSTypes(t *testing.T) {
 	}
 }
 
+func TestParseCriteriaPlatformType(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    CriteriaPlatformType
+		wantErr bool
+	}{
+		{"empty", "", CriteriaPlatformAny, false},
+		{"any", "any", CriteriaPlatformAny, false},
+		{"pytorch", "pytorch", CriteriaPlatformPyTorch, false},
+		{"PyTorch uppercase", "PyTorch", CriteriaPlatformPyTorch, false},
+		{"runai", "runai", CriteriaPlatformRunAI, false},
+		{"RunAI uppercase", "RunAI", CriteriaPlatformRunAI, false},
+		{"invalid", "invalid", CriteriaPlatformAny, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseCriteriaPlatformType(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseCriteriaPlatformType() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want {
+				t.Errorf("ParseCriteriaPlatformType() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetCriteriaPlatformTypes(t *testing.T) {
+	types := GetCriteriaPlatformTypes()
+
+	// Should return sorted list
+	expected := []string{"pytorch", "runai"}
+	if len(types) != len(expected) {
+		t.Errorf("GetCriteriaPlatformTypes() returned %d types, want %d", len(types), len(expected))
+	}
+
+	for i, exp := range expected {
+		if types[i] != exp {
+			t.Errorf("GetCriteriaPlatformTypes()[%d] = %s, want %s", i, types[i], exp)
+		}
+	}
+
+	// Verify each type can be parsed
+	for _, pt := range types {
+		_, err := ParseCriteriaPlatformType(pt)
+		if err != nil {
+			t.Errorf("ParseCriteriaPlatformType(%s) error = %v", pt, err)
+		}
+	}
+}
+
 func TestParseCriteriaOSType_AllAliases(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -714,6 +874,7 @@ spec:
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       4,
 			},
 			wantErr: false,
@@ -727,6 +888,7 @@ spec:
 				Accelerator: CriteriaAcceleratorA100,
 				Intent:      CriteriaIntentInference,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -745,6 +907,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -768,6 +931,7 @@ spec: {}`,
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -782,6 +946,7 @@ spec: {}`,
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -849,6 +1014,54 @@ spec:
   nodes: -5`,
 			wantErr: true,
 		},
+		{
+			name:     "valid YAML file with platform",
+			filename: "criteria_with_platform.yaml",
+			content: `kind: recipeCriteria
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  name: eks-h100-training-pytorch
+spec:
+  service: eks
+  accelerator: h100
+  intent: training
+  os: ubuntu
+  platform: pytorch
+  nodes: 4
+`,
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
+				Nodes:       4,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "valid JSON file with platform runai",
+			filename: "criteria_runai.json",
+			content:  `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","metadata":{"name":"runai-config"},"spec":{"service":"gke","accelerator":"a100","platform":"runai"}}`,
+			want: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformRunAI,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "invalid platform type",
+			filename: "invalid_platform.yaml",
+			content: `kind: recipeCriteria
+apiVersion: eidos.nvidia.com/v1alpha1
+spec:
+  platform: invalid-platform`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -883,6 +1096,9 @@ spec:
 			if got.Nodes != tt.want.Nodes {
 				t.Errorf("Nodes = %v, want %v", got.Nodes, tt.want.Nodes)
 			}
+			if got.Platform != tt.want.Platform {
+				t.Errorf("Platform = %v, want %v", got.Platform, tt.want.Platform)
+			}
 		})
 	}
 }
@@ -911,6 +1127,7 @@ func TestParseCriteriaFromBody(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -931,6 +1148,7 @@ spec:
 				Accelerator: CriteriaAcceleratorGB200,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSCOS,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -948,6 +1166,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       8,
 			},
 			wantErr: false,
@@ -961,6 +1180,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -974,6 +1194,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -1024,9 +1245,64 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
+		},
+		{
+			name:        "JSON body with platform pytorch",
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"pytorch"}}`,
+			contentType: "application/json",
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformPyTorch,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "JSON body with platform runai",
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"gke","platform":"runai"}}`,
+			contentType: "application/json",
+			want: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformRunAI,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name: "YAML body with platform",
+			body: `kind: recipeCriteria
+apiVersion: eidos.nvidia.com/v1alpha1
+spec:
+  service: eks
+  accelerator: h100
+  intent: training
+  platform: pytorch`,
+			contentType: "application/x-yaml",
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformPyTorch,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "invalid platform in JSON body",
+			body:        `{"spec":{"platform":"invalid-platform"}}`,
+			contentType: "application/json",
+			wantErr:     true,
 		},
 	}
 
@@ -1052,6 +1328,9 @@ spec:
 			}
 			if got.OS != tt.want.OS {
 				t.Errorf("OS = %v, want %v", got.OS, tt.want.OS)
+			}
+			if got.Platform != tt.want.Platform {
+				t.Errorf("Platform = %v, want %v", got.Platform, tt.want.Platform)
 			}
 			if got.Nodes != tt.want.Nodes {
 				t.Errorf("Nodes = %v, want %v", got.Nodes, tt.want.Nodes)
