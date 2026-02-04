@@ -72,6 +72,22 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
 
+  - name: aws-efa
+    displayName: aws-efa
+    valueOverrideKeys:
+      - awsefa
+      - efa
+    helm:
+      defaultRepository: https://aws.github.io/eks-charts
+      defaultChart: aws-efa-k8s-device-plugin
+      defaultVersion: v0.5.3
+    nodeScheduling:
+      accelerated:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
   - name: cert-manager
     displayName: cert-manager
     valueOverrideKeys:
