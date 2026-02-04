@@ -348,11 +348,13 @@ kubectl get configmap eidos-snapshot -n gpu-operator -o jsonpath='{.data.snapsho
 # Using CLI (local or in another Job)
 eidos recipe --snapshot cm://gpu-operator/eidos-snapshot \
              --intent training \
+             --platform pytorch \
              --output recipe.yaml
 
 # Or write recipe back to ConfigMap
 eidos recipe --snapshot cm://gpu-operator/eidos-snapshot \
              --intent training \
+             --platform pytorch \
              --output cm://gpu-operator/eidos-recipe
 ```
 

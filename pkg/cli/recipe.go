@@ -85,6 +85,10 @@ Override snapshot-detected criteria:
 				Name:  "os",
 				Usage: fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
 			},
+			&cli.StringFlag{
+				Name:  "platform",
+				Usage: fmt.Sprintf("Platform/framework type (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
+			},
 			&cli.IntFlag{
 				Name:  "nodes",
 				Usage: "Number of worker/GPU nodes in the cluster",
@@ -197,7 +201,7 @@ Override snapshot-detected criteria:
 
 				// Validate that at least some criteria was provided
 				if criteria.Specificity() == 0 {
-					return fmt.Errorf("no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --nodes, --criteria, or use --snapshot to load from a snapshot file")
+					return fmt.Errorf("no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --platform, --nodes, --criteria, or use --snapshot to load from a snapshot file")
 				}
 
 				slog.Info("building recipe from criteria", "criteria", criteria.String())
@@ -251,6 +255,9 @@ func buildCriteriaFromCmd(cmd *cli.Command) (*recipe.Criteria, error) {
 	}
 	if s := cmd.String("os"); s != "" {
 		opts = append(opts, recipe.WithCriteriaOS(s))
+	}
+	if s := cmd.String("platform"); s != "" {
+		opts = append(opts, recipe.WithCriteriaPlatform(s))
 	}
 	if n := cmd.Int("nodes"); n > 0 {
 		opts = append(opts, recipe.WithCriteriaNodes(n))
@@ -413,6 +420,19 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 				"override", parsed)
 		}
 		criteria.OS = parsed
+	}
+	if s := cmd.String("platform"); s != "" {
+		parsed, err := recipe.ParseCriteriaPlatformType(s)
+		if err != nil {
+			return err
+		}
+		if criteria.Platform != "" && criteria.Platform != parsed {
+			slog.Info("CLI flag overriding snapshot-detected value",
+				"field", "platform",
+				"detected", criteria.Platform,
+				"override", parsed)
+		}
+		criteria.Platform = parsed
 	}
 	if n := cmd.Int("nodes"); n > 0 {
 		if criteria.Nodes > 0 && criteria.Nodes != n {

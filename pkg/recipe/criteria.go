@@ -167,6 +167,35 @@ func GetCriteriaOSTypes() []string {
 	return []string{"amazonlinux", "cos", "rhel", "ubuntu"}
 }
 
+// CriteriaPlatformType represents a platform/framework type.
+type CriteriaPlatformType string
+
+// CriteriaPlatformType constants for supported platforms.
+const (
+	CriteriaPlatformAny     CriteriaPlatformType = "any"
+	CriteriaPlatformPyTorch CriteriaPlatformType = "pytorch"
+	CriteriaPlatformRunAI   CriteriaPlatformType = "runai"
+)
+
+// ParseCriteriaPlatformType parses a string into a CriteriaPlatformType.
+func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", criteriaAnyValue:
+		return CriteriaPlatformAny, nil
+	case "pytorch":
+		return CriteriaPlatformPyTorch, nil
+	case "runai":
+		return CriteriaPlatformRunAI, nil
+	default:
+		return CriteriaPlatformAny, fmt.Errorf("invalid platform type: %s", s)
+	}
+}
+
+// GetCriteriaPlatformTypes returns all supported platform types sorted alphabetically.
+func GetCriteriaPlatformTypes() []string {
+	return []string{"pytorch", "runai"}
+}
+
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
@@ -182,6 +211,9 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
+	// Platform is the platform/framework type (pytorch, runai).
+	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
+
 	// Nodes is the number of worker nodes (0 means any/unspecified).
 	Nodes int `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 }
@@ -193,6 +225,7 @@ func NewCriteria() *Criteria {
 		Accelerator: CriteriaAcceleratorAny,
 		Intent:      CriteriaIntentAny,
 		OS:          CriteriaOSAny,
+		Platform:    CriteriaPlatformAny,
 		Nodes:       0,
 	}
 }
@@ -236,6 +269,11 @@ func (c *Criteria) Matches(other *Criteria) bool {
 
 	// OS matching
 	if !matchesCriteriaField(string(c.OS), string(other.OS)) {
+		return false
+	}
+
+	// Platform matching
+	if !matchesCriteriaField(string(c.Platform), string(other.Platform)) {
 		return false
 	}
 
@@ -298,6 +336,9 @@ func (c *Criteria) Specificity() int {
 	if c.OS != CriteriaOSAny {
 		score++
 	}
+	if c.Platform != CriteriaPlatformAny {
+		score++
+	}
 	if c.Nodes != 0 {
 		score++
 	}
@@ -318,6 +359,9 @@ func (c *Criteria) String() string {
 	}
 	if c.OS != CriteriaOSAny {
 		parts = append(parts, fmt.Sprintf("os=%s", c.OS))
+	}
+	if c.Platform != CriteriaPlatformAny {
+		parts = append(parts, fmt.Sprintf("platform=%s", c.Platform))
 	}
 	if c.Nodes != 0 {
 		parts = append(parts, fmt.Sprintf("nodes=%d", c.Nodes))
@@ -375,6 +419,18 @@ func WithCriteriaOS(s string) CriteriaOption {
 			return err
 		}
 		c.OS = ot
+		return nil
+	}
+}
+
+// WithCriteriaPlatform sets the platform type.
+func WithCriteriaPlatform(s string) CriteriaOption {
+	return func(c *Criteria) error {
+		pt, err := ParseCriteriaPlatformType(s)
+		if err != nil {
+			return err
+		}
+		c.Platform = pt
 		return nil
 	}
 }
@@ -459,6 +515,15 @@ func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 		c.OS = ot
 	}
 
+	// Parse platform
+	if s := values.Get("platform"); s != "" {
+		pt, err := ParseCriteriaPlatformType(s)
+		if err != nil {
+			return nil, err
+		}
+		c.Platform = pt
+	}
+
 	// Parse nodes count
 	if s := values.Get("nodes"); s != "" {
 		var n int
@@ -518,6 +583,7 @@ type rawCriteriaSpec struct {
 	Accelerator string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 	Intent      string `json:"intent,omitempty" yaml:"intent,omitempty"`
 	OS          string `json:"os,omitempty" yaml:"os,omitempty"`
+	Platform    string `json:"platform,omitempty" yaml:"platform,omitempty"`
 	Nodes       int    `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 }
 
@@ -565,6 +631,14 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 			return nil, err
 		}
 		c.OS = ot
+	}
+
+	if raw.Platform != "" {
+		pt, err := ParseCriteriaPlatformType(raw.Platform)
+		if err != nil {
+			return nil, err
+		}
+		c.Platform = pt
 	}
 
 	if raw.Nodes < 0 {

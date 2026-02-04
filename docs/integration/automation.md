@@ -100,9 +100,9 @@ generate_recipe:
   image: ghcr.io/nvidia/eidos:latest
   script:
     # Option 1: Use ConfigMap directly (no artifact needed)
-    - eidos recipe -s cm://gpu-operator/eidos-snapshot --intent training -o recipe.yaml
+    - eidos recipe -s cm://gpu-operator/eidos-snapshot --intent training --platform pytorch -o recipe.yaml
     # Option 2: Use snapshot file from previous stage
-    # - eidos recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
+    # - eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch --output recipe.yaml
   artifacts:
     paths:
       - recipe.yaml
@@ -231,9 +231,9 @@ for cluster_config in "${CLUSTERS[@]}"; do
   
   # Generate recipe (can use ConfigMap directly or file)
   # Option 1: Use ConfigMap
-  eidos recipe -s "cm://gpu-operator/eidos-snapshot" --intent training -o "recipe-${CLUSTER}.yaml"
+  eidos recipe -s "cm://gpu-operator/eidos-snapshot" --intent training --platform pytorch -o "recipe-${CLUSTER}.yaml"
   # Option 2: Use saved file
-  # eidos recipe --snapshot "snapshot-${CLUSTER}.yaml" --intent training --output "recipe-${CLUSTER}.yaml"
+  # eidos recipe --snapshot "snapshot-${CLUSTER}.yaml" --intent training --platform pytorch --output "recipe-${CLUSTER}.yaml"
   
   # Create bundle
   eidos bundle \

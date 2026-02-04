@@ -270,6 +270,7 @@ Generate recipes using direct system parameters:
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, a100, l40 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux |
+| `--platform` | | string | Platform/framework type: pytorch, runai |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-f` | string | Format: json, yaml (default: yaml) |
@@ -288,6 +289,14 @@ eidos recipe \
   --os ubuntu \
   --nodes 8 \
   --format yaml
+
+# PyTorch training workload
+eidos recipe \
+  --service eks \
+  --accelerator h100 \
+  --intent training \
+  --os ubuntu \
+  --platform pytorch
 
 # Save to file (--gpu is an alias for --accelerator)
 eidos recipe --os ubuntu --gpu h100 --output recipe.yaml
