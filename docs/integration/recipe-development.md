@@ -67,10 +67,14 @@ overlays/base.yaml (foundation)
             │
             └── overlays/eks-training.yaml (training optimizations)
                     │
-                    └── overlays/gb200-eks-training.yaml (GB200 + training overrides)
+                    └── overlays/h100-eks-training.yaml (H100 + training overrides)
                             │
-                            └── overlays/gb200-eks-ubuntu-training.yaml (full criteria: OS + all specifics)
+                            └── overlays/h100-eks-ubuntu-training.yaml (+ OS specifics)
+                                    │
+                                    └── overlays/h100-eks-ubuntu-training-pytorch.yaml (+ platform specifics)
 ```
+
+**Note:** Platform (pytorch, runai) is always the most specific criteria and appears at the end of the inheritance chain.
 
 ### Creating an Intermediate Recipe
 
@@ -388,11 +392,23 @@ gds:
 
 File names are for human readability only—the recipe engine matches based on `spec.criteria` fields, not file names. Consistent naming helps with discovery and maintenance.
 
+**Overlay Naming Order:** `{accelerator}-{service}-{os}-{intent}-{platform}.yaml`
+
+The naming convention places criteria in order of specificity, with **platform always at the end**:
+1. Accelerator (h100, gb200)
+2. Service (eks, gke)
+3. OS (ubuntu, rhel)
+4. Intent (training, inference)
+5. Platform (pytorch, runai)
+
 | File Type | Naming Pattern | Examples |
 |-----------|---------------|----------|
 | Base recipe | `overlays/base.yaml` | `overlays/base.yaml` |
-| Intermediate recipe (service) | `{service}.yaml` | `eks.yaml`, `gke.yaml` |
-| Intermediate recipe (intent) | `{service}-{intent}.yaml` | `eks-training.yaml`, `gke-inference.yaml` |
+| Service overlay | `{service}.yaml` | `eks.yaml`, `gke.yaml` |
+| Service + intent | `{service}-{intent}.yaml` | `eks-training.yaml` |
+| Accelerator + service + intent | `{accel}-{service}-{intent}.yaml` | `h100-eks-training.yaml` |
+| Full criteria | `{accel}-{service}-{os}-{intent}.yaml` | `h100-eks-ubuntu-training.yaml` |
+| Full criteria + platform | `{accel}-{service}-{os}-{intent}-{platform}.yaml` | `h100-eks-ubuntu-training-pytorch.yaml` |
 | Component values (base) | `base.yaml` or `values.yaml` | `components/gpu-operator/base.yaml` |
 | Component values (overlay) | `values-{service}-{intent}.yaml` | `components/gpu-operator/values-eks-training.yaml` |
 
@@ -726,7 +742,7 @@ All recipe metadata and component values are automatically validated by the test
 | Test Category | What It Validates |
 |---------------|-------------------|
 | Schema Conformance | All YAML files parse correctly with expected structure |
-| Criteria Validation | Valid enum values for service, accelerator, intent, OS |
+| Criteria Validation | Valid enum values for service, accelerator, intent, OS, platform |
 | Reference Validation | valuesFile paths exist, dependencyRefs resolve, component names valid |
 | Constraint Syntax | Measurement paths use valid types, operators are valid |
 | Uniqueness | No duplicate criteria combinations across overlays |

@@ -22,6 +22,7 @@ pkg/recipe/data/
 │   ├── eks-training.yaml          # EKS + training overlay
 │   ├── gb200-eks-training.yaml    # GB200 + EKS + training overlay
 │   ├── gb200-eks-ubuntu-training.yaml # Full criteria leaf recipe
+│   ├── h100-eks-ubuntu-training-pytorch.yaml # H100 + EKS + Ubuntu + training + PyTorch
 │   └── h100-ubuntu-inference.yaml # H100 inference overlay
 └── components/                    # Component value configurations
     ├── cert-manager/
@@ -29,6 +30,15 @@ pkg/recipe/data/
     ├── gpu-operator/
     └── ...
 ```
+
+**Recipe Naming Convention:**
+Recipe file names follow a specific ordering convention for consistency:
+`{accelerator}-{service}-{os}-{intent}-{platform}.yaml`
+
+Examples:
+- `h100-eks-training.yaml` (accelerator + service + intent)
+- `h100-eks-ubuntu-training.yaml` (accelerator + service + os + intent)
+- `h100-eks-ubuntu-training-pytorch.yaml` (accelerator + service + os + intent + platform)
 
 ## Overview
 

@@ -584,6 +584,7 @@ eidos recipe \
   --accelerator gb200 \
   --intent training \
   --os ubuntu \
+  --platform pytorch \
   --nodes 8 \
   --format yaml
 

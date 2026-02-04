@@ -77,7 +77,7 @@ make server   # Start API server locally
 3. **Test workflow**:
    ```bash
    eidos snapshot --output snapshot.yaml
-   eidos recipe --snapshot snapshot.yaml --intent training
+   eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch
    ```
 
 → See Extended Reference: Adding a New Collector for full example
@@ -523,7 +523,7 @@ make qualify      # Full check (test + lint + scan)
 
 # Workflow
 eidos snapshot --output snapshot.yaml
-eidos recipe --snapshot snapshot.yaml --intent training
+eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch
 eidos bundle --recipe recipe.yaml --output ./bundles
 
 # Override bundle values at generation time
@@ -1028,6 +1028,7 @@ eidos snapshot --output snapshot.yaml
 eidos recipe \
   --snapshot snapshot.yaml \
   --intent training \
+  --platform pytorch \
   --format yaml \
   --output recipe.yaml
 
@@ -1052,6 +1053,7 @@ eidos snapshot -o cm://gpu-operator/eidos-snapshot
 # 2. Generate recipe from ConfigMap snapshot
 eidos recipe -s cm://gpu-operator/eidos-snapshot \
   --intent training \
+  --platform pytorch \
   -o cm://gpu-operator/eidos-recipe
 
 # 3. Create bundle from ConfigMap recipe

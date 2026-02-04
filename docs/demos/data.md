@@ -147,6 +147,7 @@ eidos recipe \
     --accelerator gb200 \
     --intent training \
     --os ubuntu \
+    --platform pytorch \
     | yq .metadata
 ```
 
@@ -159,6 +160,7 @@ This matches all levels:
     - eks-training
     - gb200-eks-training
     - gb200-eks-ubuntu-training
+    # If a pytorch-specific overlay exists, it would be applied here
 ```
 
 ## Deployment Order
@@ -177,6 +179,7 @@ eidos recipe \
     --accelerator gb200 \
     --intent training \
     --os ubuntu \
+    --platform pytorch \
     | yq .deploymentOrder
 ```
 

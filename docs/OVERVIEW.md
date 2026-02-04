@@ -8,7 +8,7 @@ NVIDIA Eidos (Eidos) is a suite of tooling designed to automate the complexity o
 |------|-------------|
 | **Snapshot** | A captured state of a system including OS, kernel, Kubernetes, GPU, and SystemD configuration. Created by `eidos snapshot` or the Kubernetes agent. |
 | **Recipe** | A generated configuration recommendation containing component references, constraints, and deployment order. Created by `eidos recipe` based on criteria or snapshot analysis. |
-| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke), `accelerator` (h100/gb200/a100/l40), `intent` (training/inference), `os` (ubuntu/rhel/cos), and `nodes`. |
+| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke), `accelerator` (h100/gb200/a100/l40), `intent` (training/inference), `os` (ubuntu/rhel/cos), `platform` (pytorch/runai), and `nodes`. |
 | **Overlay** | A recipe metadata file that extends the base recipe for specific environments. Overlays are matched against criteria using asymmetric matching. |
 | **Bundle** | Deployment artifacts generated from a recipe: Helm values files, Kubernetes manifests, installation scripts, and checksums. |
 | **Bundler** | A plugin that generates bundle artifacts for a specific component (e.g., GPU Operator bundler, Network Operator bundler). |
@@ -144,11 +144,11 @@ curl -sfL https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s 
 
 ```shell
 # Query mode: direct parameters
-eidos recipe --service eks --accelerator h100 --intent training
+eidos recipe --service eks --accelerator h100 --intent training --platform pytorch
 
 # Snapshot mode: analyze captured state
 eidos snapshot -o snapshot.yaml
-eidos recipe --snapshot snapshot.yaml --intent training
+eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch
 ```
 
 ### Create Bundle

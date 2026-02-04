@@ -35,7 +35,7 @@ Snapshot captured from a GB200 NVL72 system. Contents:
 **Usage**: Generate recipe for GB200 training workloads
 
 ```bash
-eidos recipe --snapshot examples/snapshots/gb200.yaml --intent training
+eidos recipe --snapshot examples/snapshots/gb200.yaml --intent training --platform pytorch
 ```
 
 ### H100 System ([h100.yaml](snapshots/h100.yaml))
@@ -78,6 +78,7 @@ eidos recipe \
   --accelerator gb200 \
   --os ubuntu \
   --intent training \
+  --platform pytorch \
   --output my-recipe.yaml
 ```
 
@@ -155,6 +156,7 @@ cat examples/snapshots/gb200.yaml
 eidos recipe \
   --snapshot examples/snapshots/gb200.yaml \
   --intent training \
+  --platform pytorch \
   --output my-recipe.yaml
 
 # 3. Compare with provided recipe
@@ -199,7 +201,7 @@ From snapshot or query:
 
 ```bash
 # From snapshot
-eidos recipe --snapshot my-snapshot.yaml --intent training --output my-recipe.yaml
+eidos recipe --snapshot my-snapshot.yaml --intent training --platform pytorch --output my-recipe.yaml
 
 # From query parameters
 eidos recipe \
@@ -209,6 +211,7 @@ eidos recipe \
   --osv 24.04 \
   --k8s 1.33 \
   --intent training \
+  --platform pytorch \
   --output my-recipe.yaml
 ```
 

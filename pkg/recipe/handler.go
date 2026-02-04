@@ -87,6 +87,7 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 		"accelerator", criteria.Accelerator,
 		"intent", criteria.Intent,
 		"os", criteria.OS,
+		"platform", criteria.Platform,
 		"nodes", criteria.Nodes,
 	)
 
