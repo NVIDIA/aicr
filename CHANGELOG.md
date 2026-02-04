@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-02-04
+
+### Bug Fixes
+
+- Add contents:read permission for coverage comment workflow  by [@dims](https://github.com/dims)
+- Use /tmp paths for coverage artifacts  by [@dims](https://github.com/dims)
+- Rename prometheus component to kube-prometheus-stack  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Remove namespaceOverride from nvidia-dra-driver-gpu values  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### CI/CD
+
+- Add license verification workflow  by [@dims](https://github.com/dims)
+- Add license verification workflow  by [@dims](https://github.com/dims)
+- Add CodeQL security analysis workflow  by [@dims](https://github.com/dims)
+- Use copy-pr-bot branch pattern for PR workflows  by [@dims](https://github.com/dims)
+- Trigger workflows on branch create for copy-pr-bot  by [@dims](https://github.com/dims)
+- Skip workflows on forks to prevent duplicate check runs  by [@dims](https://github.com/dims)
+- Match nvsentinel workflow pattern for copy-pr-bot  by [@dims](https://github.com/dims)
+
+### Features
+
+- Add coverage delta reporting for PRs  by [@dims](https://github.com/dims)
+- Link GitHub usernames in changelog  by [@dims](https://github.com/dims)
+- Add structured CLI exit codes for predictable scripting  by [@dims](https://github.com/dims)
+- Add fullnameOverride to remove release prefix from deployment names  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Tasks
+
+- Rename default claude file to follow convention by [@mchmarny](https://github.com/mchmarny)
+- Add .claude/settings.local.json to ignore by [@mchmarny](https://github.com/mchmarny)
+- Add copy-pr-bot configuration  by [@dims](https://github.com/dims)
+- Refactor tools-check into standalone script  by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.2.2] - 2026-02-01
 
 ### Bug Fixes
