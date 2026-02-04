@@ -89,7 +89,7 @@ bump_version() {
   if git diff --cached --quiet; then
     msg "No changelog changes to commit"
   else
-    git commit -m "build: $new_version release"
+    git commit -m "build: release $new_version"
     msg "Committed CHANGELOG.md update"
   fi
 

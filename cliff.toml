@@ -79,7 +79,7 @@ commit_parsers = [
     { message = "^chore: readme", skip = true },
     { message = "^chore: bump version", skip = true },
     { message = "^chore: update CHANGELOG", skip = true },
-    { message = "^build: v[0-9]+\\.[0-9]+\\.[0-9]+ release", skip = true },
+    { message = "^build: release v[0-9]+\\.[0-9]+\\.[0-9]+", skip = true },
     # Default group for other commits
     { message = ".*", group = "Other" },
 ]
