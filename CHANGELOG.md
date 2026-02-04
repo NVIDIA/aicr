@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-02-04
+
+### Features
+
+- Add aws-efa component  by [@Kevin-Hawkins](https://github.com/Kevin-Hawkins)
+
+### Refactor
+
+- Use structured errors and improve test coverage by [@mchmarny](https://github.com/mchmarny)
+
+### Tasks
+
+- Remove daily scan from blocking prs by [@mchmarny](https://github.com/mchmarny)
+- Add Claude instructions to not co-authored commits by [@mchmarny](https://github.com/mchmarny)
+- Allow attribution but not co-authoring by [@mchmarny](https://github.com/mchmarny)
+- Moved coauthoring into main claude doc by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.3.0] - 2026-02-04
 
 ### Bug Fixes
