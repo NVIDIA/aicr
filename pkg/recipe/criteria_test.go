@@ -222,6 +222,72 @@ func TestCriteriaMatches(t *testing.T) {
 			},
 			want: false, // Query doesn't specify accelerator, but recipe requires gb200
 		},
+		{
+			name: "platform any recipe matches specific platform query",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformAny,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			want: true, // Recipe platform is generic, matches any query value
+		},
+		{
+			name: "specific platform recipe does not match any platform query",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformAny,
+			},
+			want: false, // Query "any" only matches generic recipes
+		},
+		{
+			name: "same platform matches",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			want: true,
+		},
+		{
+			name: "different platform does not match",
+			criteria: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:  CriteriaServiceEKS,
+				Platform: CriteriaPlatformRunAI,
+			},
+			want: false,
+		},
+		{
+			name: "full criteria with platform matches",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
+			},
+			other: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -808,6 +874,7 @@ spec:
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       4,
 			},
 			wantErr: false,
@@ -821,6 +888,7 @@ spec:
 				Accelerator: CriteriaAcceleratorA100,
 				Intent:      CriteriaIntentInference,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -839,6 +907,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -862,6 +931,7 @@ spec: {}`,
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -876,6 +946,7 @@ spec: {}`,
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -943,6 +1014,54 @@ spec:
   nodes: -5`,
 			wantErr: true,
 		},
+		{
+			name:     "valid YAML file with platform",
+			filename: "criteria_with_platform.yaml",
+			content: `kind: recipeCriteria
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  name: eks-h100-training-pytorch
+spec:
+  service: eks
+  accelerator: h100
+  intent: training
+  os: ubuntu
+  platform: pytorch
+  nodes: 4
+`,
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSUbuntu,
+				Platform:    CriteriaPlatformPyTorch,
+				Nodes:       4,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "valid JSON file with platform runai",
+			filename: "criteria_runai.json",
+			content:  `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","metadata":{"name":"runai-config"},"spec":{"service":"gke","accelerator":"a100","platform":"runai"}}`,
+			want: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorA100,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformRunAI,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "invalid platform type",
+			filename: "invalid_platform.yaml",
+			content: `kind: recipeCriteria
+apiVersion: eidos.nvidia.com/v1alpha1
+spec:
+  platform: invalid-platform`,
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -977,6 +1096,9 @@ spec:
 			if got.Nodes != tt.want.Nodes {
 				t.Errorf("Nodes = %v, want %v", got.Nodes, tt.want.Nodes)
 			}
+			if got.Platform != tt.want.Platform {
+				t.Errorf("Platform = %v, want %v", got.Platform, tt.want.Platform)
+			}
 		})
 	}
 }
@@ -1005,6 +1127,7 @@ func TestParseCriteriaFromBody(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -1025,6 +1148,7 @@ spec:
 				Accelerator: CriteriaAcceleratorGB200,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSCOS,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -1042,6 +1166,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       8,
 			},
 			wantErr: false,
@@ -1055,6 +1180,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -1068,6 +1194,7 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -1118,9 +1245,64 @@ spec:
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
 				Nodes:       0,
 			},
 			wantErr: false,
+		},
+		{
+			name:        "JSON body with platform pytorch",
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"pytorch"}}`,
+			contentType: "application/json",
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformPyTorch,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "JSON body with platform runai",
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"gke","platform":"runai"}}`,
+			contentType: "application/json",
+			want: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformRunAI,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name: "YAML body with platform",
+			body: `kind: recipeCriteria
+apiVersion: eidos.nvidia.com/v1alpha1
+spec:
+  service: eks
+  accelerator: h100
+  intent: training
+  platform: pytorch`,
+			contentType: "application/x-yaml",
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformPyTorch,
+				Nodes:       0,
+			},
+			wantErr: false,
+		},
+		{
+			name:        "invalid platform in JSON body",
+			body:        `{"spec":{"platform":"invalid-platform"}}`,
+			contentType: "application/json",
+			wantErr:     true,
 		},
 	}
 
@@ -1146,6 +1328,9 @@ spec:
 			}
 			if got.OS != tt.want.OS {
 				t.Errorf("OS = %v, want %v", got.OS, tt.want.OS)
+			}
+			if got.Platform != tt.want.Platform {
+				t.Errorf("Platform = %v, want %v", got.Platform, tt.want.Platform)
 			}
 			if got.Nodes != tt.want.Nodes {
 				t.Errorf("Nodes = %v, want %v", got.Nodes, tt.want.Nodes)

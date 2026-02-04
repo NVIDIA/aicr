@@ -178,6 +178,12 @@ func TestRecipeEndpointPOST(t *testing.T) {
 			wantStatus:  http.StatusOK,
 		},
 		{
+			name:        "valid JSON body with platform",
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"pytorch"}}`,
+			contentType: "application/json",
+			wantStatus:  http.StatusOK,
+		},
+		{
 			name:        "empty body",
 			body:        "",
 			contentType: "application/json",
@@ -258,8 +264,20 @@ func TestRecipeEndpointWithValidQueryParams(t *testing.T) {
 			query: "?nodes=4",
 		},
 		{
+			name:  "platform pytorch",
+			query: "?platform=pytorch",
+		},
+		{
+			name:  "platform runai",
+			query: "?platform=runai",
+		},
+		{
 			name:  "multiple params",
 			query: "?accelerator=h100&service=eks&intent=training",
+		},
+		{
+			name:  "multiple params with platform",
+			query: "?accelerator=h100&service=eks&intent=training&platform=pytorch",
 		},
 		{
 			name:  "no params",
@@ -309,6 +327,10 @@ func TestRecipeEndpointWithInvalidQueryParams(t *testing.T) {
 		{
 			name:  "invalid os",
 			query: "?os=invalid-os",
+		},
+		{
+			name:  "invalid platform",
+			query: "?platform=invalid-platform",
 		},
 		{
 			name:  "invalid nodes negative",
