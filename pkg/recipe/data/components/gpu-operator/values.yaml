@@ -58,8 +58,6 @@ driver:
   version: 580.105.08
   enabled: true
   useOpenKernelModules: true
-  kernelModuleConfig:
-    name: "kernel-module-params"
   maxParallelUpgrades: 5
   rdma:
     enabled: true

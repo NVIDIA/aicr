@@ -18,11 +18,13 @@
 # This ConfigMap contains kernel module parameters required for GB200 accelerator.
 # The nvidia.conf file sets NVreg_GrdmaPciTopoCheckOverride=1 which is needed
 # for proper RDMA/PCIe topology handling on GB200 systems.
+{{- $gpuOp := index .Values "gpu-operator" }}
+{{- if and $gpuOp $gpuOp.driver $gpuOp.driver.kernelModuleConfig $gpuOp.driver.kernelModuleConfig.name }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: kernel-module-params
+  name: {{ $gpuOp.driver.kernelModuleConfig.name | default "kernel-module-params" }}
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
