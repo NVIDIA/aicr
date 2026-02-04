@@ -15,6 +15,8 @@ This guide covers project setup, architecture, development workflows, and toolin
 
 ## Quick Start
 
+Set environment variable `AUTO_MODE=true` to avoid having to approve each tool install.
+
 ```bash
 # 1. Clone and setup
 git clone https://github.com/NVIDIA/eidos.git && cd eidos

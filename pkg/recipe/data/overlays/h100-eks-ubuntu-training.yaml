@@ -42,10 +42,10 @@ spec:
 
   componentRefs:
 
-    # Override with Ubuntu customization for Skyhook
-    - name: skyhook-operator
+    # Ubuntu node customizations via skyhook-customizations component
+    - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-operator/manifests/customization-ubuntu.yaml
-      overrides:
-        customization: ubuntu
+        - components/skyhook-customizations/manifests/h100-eks-ubuntu-training.yaml
+      dependencyRefs:
+        - skyhook-operator
