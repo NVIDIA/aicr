@@ -320,15 +320,96 @@ This runs: `test` → `lint` → `e2e` → `scan`
 
 ## Local Kubernetes Development
 
-Eidos includes a full local development environment using Kind and Tilt.
+Eidos includes a full local development environment using Kind and Tilt for rapid iteration with hot reload.
+
+### Prerequisites
+
+Ensure these tools are installed (included in `make tools-setup`):
+
+- **kind** - Local Kubernetes clusters
+- **ctlptl** - Cluster + registry management for Tilt
+- **tilt** - Local dev environment with hot reload
+- **ko** - Fast Go container builds
 
 ### Quick Start
 
 ```bash
-# Create cluster and start Tilt (opens browser UI)
+# Create cluster and start Tilt (opens browser UI at http://localhost:10350)
 make dev-env
 
 # Stop Tilt and delete cluster
+make dev-env-clean
+```
+
+### Step-by-Step Tilt Workflow
+
+#### 1. Create the Local Cluster
+
+```bash
+# Create Kind cluster with local registry
+make cluster-create
+
+# Verify cluster is running
+make cluster-status
+kubectl get nodes
+```
+
+This creates:
+- A Kind cluster named `kind-eidos`
+- A local container registry at `localhost:5001`
+
+#### 2. Start Tilt
+
+```bash
+# Start Tilt (opens browser UI automatically)
+make tilt-up
+```
+
+The Tilt UI at http://localhost:10350 shows:
+- Build status for `eidosd`
+- Pod logs and status
+- Port forwards (API: 8080, Metrics: 9090)
+
+#### 3. Develop with Hot Reload
+
+Tilt watches for changes in `cmd/eidosd/` and `pkg/`. When you save a file:
+1. Tilt rebuilds the container using `ko` (fast Go builds)
+2. Pushes to the local registry
+3. Kubernetes rolls out the new pod
+4. Port forwards reconnect automatically
+
+#### 4. Test the API
+
+```bash
+# Health check
+curl http://localhost:8080/health
+
+# Readiness check
+curl http://localhost:8080/ready
+
+# Generate a recipe
+curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100"
+
+# View metrics
+curl http://localhost:9090/metrics
+```
+
+#### 5. View Logs
+
+```bash
+# Stream logs from Tilt UI, or use kubectl
+kubectl logs -f -n eidos deployment/eidosd
+
+# Or view in Tilt UI at http://localhost:10350
+```
+
+#### 6. Clean Up
+
+```bash
+# Stop Tilt but keep cluster (for quick restart)
+make tilt-down
+
+# Full cleanup (removes cluster and registry)
 make dev-env-clean
 ```
 
@@ -350,7 +431,19 @@ make dev-restart      # Restart Tilt without recreating cluster
 make dev-reset        # Full reset (tear down and recreate)
 ```
 
-### Testing the API Server Locally
+### Running E2E Tests with Tilt
+
+```bash
+# Start the dev environment
+make dev-env
+
+# In another terminal, run E2E tests against the Tilt cluster
+make e2e-tilt
+```
+
+### Testing the API Server Locally (without Kubernetes)
+
+For quick iteration without Kubernetes:
 
 ```bash
 # Start API server in debug mode
@@ -360,6 +453,37 @@ make server
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
 curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
+```
+
+### Tilt Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Developer Machine                     │
+├─────────────────────────────────────────────────────────┤
+│  ┌─────────┐    ┌──────────┐    ┌───────────────────┐  │
+│  │  Tilt   │───▶│    ko    │───▶│ localhost:5001    │  │
+│  │ (watch) │    │ (build)  │    │ (local registry)  │  │
+│  └─────────┘    └──────────┘    └─────────┬─────────┘  │
+│       │                                    │            │
+│       │         ┌──────────────────────────┘            │
+│       ▼         ▼                                       │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │              Kind Cluster (kind-eidos)          │   │
+│  │  ┌─────────────────────────────────────────┐    │   │
+│  │  │           Namespace: eidos              │    │   │
+│  │  │  ┌─────────────┐  ┌─────────────────┐   │    │   │
+│  │  │  │   eidosd    │  │    Service      │   │    │   │
+│  │  │  │ Deployment  │◀─│  (ClusterIP)    │   │    │   │
+│  │  │  └─────────────┘  └─────────────────┘   │    │   │
+│  │  └─────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────┘   │
+│       │                                                 │
+│       │ Port Forwards                                   │
+│       ▼                                                 │
+│  localhost:8080 (API)                                   │
+│  localhost:9090 (Metrics)                               │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ## Make Targets Reference
