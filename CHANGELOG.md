@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2026-02-04
+
+### Tasks
+
+- Include non-conventional commits in changelog by [@mchmarny](https://github.com/mchmarny)
+- Update release commit message format by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.3.1] - 2026-02-04
 
 ### Features
