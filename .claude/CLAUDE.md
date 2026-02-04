@@ -50,6 +50,10 @@ Act as a Principal Distributed Systems Architect with deep expertise in Go and c
 
 Commit all changes by default to the `main` branch, no the old `master` branch. 
 
+## Co-Authorship
+
+Organization policies prevent co-authoring commits or PRs. Do not add `Co-Authored-By` lines to commits.
+
 ## Project Overview
 
 NVIDIA Eidos (Eidos) generates validated GPU-accelerated Kubernetes configurations.
