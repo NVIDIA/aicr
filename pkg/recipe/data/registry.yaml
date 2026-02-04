@@ -211,3 +211,11 @@ components:
           - node.nodeSelector
         tolerationPaths:
           - node.tolerations
+
+  - name: k8s-ephemeral-storage-metrics
+    displayName: k8s-ephemeral-storage-metrics
+    valueOverrideKeys:
+      - k8sephemeralstoragemetrics
+    helm:
+      defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
+      defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics

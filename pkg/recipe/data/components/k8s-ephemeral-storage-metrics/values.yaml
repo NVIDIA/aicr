@@ -1,0 +1,39 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# -- Set metrics you want to enable
+metrics:
+  # -- Percentage of ephemeral storage used by a container in a pod
+  ephemeral_storage_container_limit_percentage: true
+  # -- Current ephemeral storage used by a container's volume in a pod
+  ephemeral_storage_container_volume_usage: true
+  # -- Percentage of ephemeral storage used by a container's volume in a pod
+  ephemeral_storage_container_volume_limit_percentage: true
+  # -- Current ephemeral byte usage of pod
+  ephemeral_storage_pod_usage: true
+  # -- Available ephemeral storage for a node
+  ephemeral_storage_node_available: true
+  # -- Capacity of ephemeral storage for a node
+  ephemeral_storage_node_capacity: true
+  # -- Percentage of ephemeral storage used on a node
+  ephemeral_storage_node_percentage: true
+  # -- Create the ephemeral_storage_adjusted_polling_rate metrics to report Adjusted Poll Rate in milliseconds. Typically used for testing.
+  adjusted_polling_rate: false
+
+log_level: info
+# -- Set as Deployment for single controller to query all nodes or Daemonset
+deploy_type: Deployment
+prometheus:
+  enable: true
+  release: kube-prometheus-stack

@@ -60,3 +60,11 @@ spec:
       source: https://prometheus-community.github.io/helm-charts
       version: 81.2.2
       valuesFile: components/kube-prometheus-stack/values.yaml
+
+    - name: k8s-ephemeral-storage-metrics
+      type: Helm
+      source: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
+      version: 1.19.2
+      valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
+      dependencyRefs:
+        - kube-prometheus-stack
