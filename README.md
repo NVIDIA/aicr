@@ -69,11 +69,11 @@ Get started quickly with Eidos:
 3. Apply the validated configuration guidance using your existing tools (Helm, kubectl, CI/CD, or GitOps).
 4. Validate and iterate as platforms and workloads evolve.
 
-**Example:** Generate a validated configuration for GB200 on EKS with Ubuntu, optimized for training:
+**Example:** Generate a validated configuration for GB200 on EKS with Ubuntu, optimized for PyTorch training:
 
 ```bash
 # Generate a recipe for your environment
-eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training -o recipe.yaml
+eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training --platform pytorch -o recipe.yaml
 
 # Render the recipe into Helm values for your GitOps pipeline
 eidos bundle --recipe recipe.yaml -o ./bundles

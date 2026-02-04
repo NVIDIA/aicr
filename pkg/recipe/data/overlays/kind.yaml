@@ -1,0 +1,152 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: recipeMetadata
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  name: kind
+
+spec:
+  # Inherits from base (implicit when spec.base is empty)
+  # This recipe contains kind-specific settings for local development/testing
+
+  criteria:
+    service: kind
+
+  # Kind-specific constraints
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.25"
+
+  # Kind-specific component overrides
+  componentRefs:
+    # cert-manager: disable startupapicheck due to nvsentinel network policy issue
+    - name: cert-manager
+      type: Helm
+      overrides:
+        startupapicheck:
+          enabled: false
+
+    # gpu-operator: configure for kind with GPU passthrough
+    # Assumes host has NVIDIA drivers pre-installed and GPUs passed through to kind
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        driver:
+          # Disable driver installation - use pre-installed host drivers
+          enabled: false
+        toolkit:
+          enabled: true
+          env:
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
+              value: "false"
+            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS
+              value: "true"
+        # Reduce resource requests for local development
+        operator:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 200Mi
+            limits:
+              cpu: 500m
+              memory: 500Mi
+
+    # kube-prometheus-stack: use emptyDir storage (default), reduce resources
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        prometheus:
+          prometheusSpec:
+            # Smaller storage for local testing
+            storageSpec:
+              emptyDir:
+                medium: ""
+                sizeLimit: 5Gi
+            # Reduced resources for local development
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+              limits:
+                cpu: 1
+                memory: 1Gi
+            # Shorter retention for local testing
+            retention: 7d
+        grafana:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+        alertmanager:
+          alertmanagerSpec:
+            resources:
+              requests:
+                cpu: 50m
+                memory: 64Mi
+              limits:
+                cpu: 250m
+                memory: 256Mi
+
+    # nvsentinel: reduce resources for local development
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        platformConnector:
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 200m
+              memory: 512Mi
+
+    # skyhook-operator: reduce resources for local development
+    - name: skyhook-operator
+      type: Helm
+      overrides:
+        controllerManager:
+          manager:
+            resources:
+              requests:
+                cpu: 250m
+                memory: 512Mi
+              limits:
+                cpu: 500m
+                memory: 1Gi
+
+    # nvidia-dra-driver-gpu: DRA driver for GPU resource management
+    # For kind with GPU passthrough, use "/" as driver root (host drivers)
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia
+      version: "25.8.1"
+      valuesFile: components/nvidia-dra-driver-gpu/values.yaml
+      dependencyRefs:
+        - gpu-operator
+      overrides:
+        # Use "/" for host-installed drivers (kind GPU passthrough)
+        nvidiaDriverRoot: "/"
+
+    # network-operator: NVIDIA Network Operator for high-performance networking
+    - name: network-operator
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia
+      version: "25.1.0"
+      valuesFile: components/network-operator/values.yaml
+      dependencyRefs:
+        - cert-manager

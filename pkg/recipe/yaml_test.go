@@ -672,8 +672,8 @@ func TestNoDuplicateCriteriaAcrossOverlays(t *testing.T) {
 
 		// Create criteria key
 		c := metadata.Spec.Criteria
-		key := fmt.Sprintf("service=%s,accelerator=%s,os=%s,intent=%s",
-			c.Service, c.Accelerator, c.OS, c.Intent)
+		key := fmt.Sprintf("service=%s,accelerator=%s,os=%s,intent=%s,platform=%s",
+			c.Service, c.Accelerator, c.OS, c.Intent, c.Platform)
 
 		if existing, found := criteriaMap[key]; found {
 			t.Errorf("duplicate criteria found:\n  %s: %s\n  %s: %s",
