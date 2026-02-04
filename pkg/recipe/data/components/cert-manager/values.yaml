@@ -50,6 +50,9 @@ cainjector:
       memory: "320Mi"
       cpu: "50m"
 
-# Startup API check job - increase timeout from default 1m for slow clusters
+# Startup API check job - disabled as workaround for nvsentinel network policy
+# blocking webhook traffic (port 10250). The metrics-access policy only allows
+# ports 2112 and 9216, causing the API check to hang.
+# TODO: Re-enable when nvsentinel provides a way to disable the network policy
 startupapicheck:
-  timeout: 5m
+  enabled: false
