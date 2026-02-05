@@ -388,7 +388,7 @@ eidos validate [flags]
 |------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
 | `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (required) |
-| `--phase` | | string | Validation phase to run: pre-deployment (default), deployment, performance, conformance, all |
+| `--phase` | | string | Validation phase to run: readiness (default), deployment, performance, conformance, all |
 | `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
 | `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
 | `--format` | `-t` | string | Output format: json, yaml, table (default: yaml) |
@@ -405,7 +405,7 @@ Validation can be run in different phases to validate different aspects of the d
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `pre-deployment` | Validates infrastructure prerequisites (K8s version, OS, kernel) and runs pre-deployment checks | Before deploying any components |
+| `readiness` | Validates infrastructure prerequisites (K8s version, OS, kernel) and runs readiness checks | Before deploying any components |
 | `deployment` | Validates component deployment health and expected resources | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
@@ -442,7 +442,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 **Examples:**
 
 ```shell
-# Validate snapshot against recipe (default: pre-deployment phase)
+# Validate snapshot against recipe (default: readiness phase)
 eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Validate specific phase
@@ -468,11 +468,11 @@ eidos validate \
   --snapshot cm://gpu-operator/eidos-snapshot \
   --output validation-results.yaml
 
-# Validate pre-deployment phase before installing components
+# Validate readiness phase before installing components
 eidos validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
-  --phase pre-deployment \
+  --phase readiness \
   --fail-on-error
 
 # Validate deployment phase after components are installed
@@ -517,7 +517,7 @@ summary:
   status: pass
   duration: 20.5µs
 phases:
-  preDeployment:
+  readiness:
     status: pass
     constraints:
       - name: K8s.server.version
@@ -555,7 +555,7 @@ summary:
   status: pass
   duration: 58.4µs
 phases:
-  preDeployment:
+  readiness:
     status: pass
     constraints:
       - name: K8s.server.version

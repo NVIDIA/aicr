@@ -840,22 +840,22 @@ test_validate_multiphase() {
     return 0
   fi
 
-  # Test 1: Pre-deployment phase (default)
-  msg "--- Test: Validate with --phase pre-deployment ---"
-  echo -e "${DIM}  \$ eidos validate --phase pre-deployment${NC}"
+  # Test 1: Readiness phase (default)
+  msg "--- Test: Validate with --phase readiness ---"
+  echo -e "${DIM}  \$ eidos validate --phase readiness${NC}"
   local predeployment_result="${validate_dir}/validation-predeployment.yaml"
   local predeployment_output
   predeployment_output=$("${EIDOS_BIN}" validate \
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --phase pre-deployment \
+    --phase readiness \
     --output "$predeployment_result" 2>&1) || true
 
-  if echo "$predeployment_output" | grep -q "preDeployment"; then
-    detail "Pre-deployment phase: PASS"
+  if echo "$predeployment_output" | grep -q "readiness"; then
+    detail "Readiness phase: PASS"
     pass "validate/phase-predeployment"
   else
-    fail "validate/phase-predeployment" "Pre-deployment phase not found in output"
+    fail "validate/phase-predeployment" "Readiness phase not found in output"
   fi
 
   # Test 2: Deployment phase
@@ -903,7 +903,7 @@ test_validate_multiphase() {
 
   # Check that all phases are present in the output
   local phases_found=0
-  echo "$all_output" | grep -q "preDeployment" && ((phases_found++)) || true
+  echo "$all_output" | grep -q "readiness" && ((phases_found++)) || true
   echo "$all_output" | grep -q "deployment" && ((phases_found++)) || true
   echo "$all_output" | grep -q "performance" && ((phases_found++)) || true
   echo "$all_output" | grep -q "conformance" && ((phases_found++)) || true
@@ -921,7 +921,7 @@ test_validate_multiphase() {
     echo -e "${DIM}  \$ yq '.phases' validation-all.yaml${NC}"
 
     # Check if phases field exists
-    if yq '.phases' "$all_result" | grep -q "preDeployment"; then
+    if yq '.phases' "$all_result" | grep -q "readiness"; then
       detail "Phase result structure: PASS"
       pass "validate/result-structure"
     else

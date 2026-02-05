@@ -32,7 +32,7 @@ criteria:
   intent: training
   os: ubuntu
 
-# Constraints validated during pre-deployment phase
+# Constraints validated during readiness phase
 constraints:
   - name: K8s.server.version
     value: '>= 1.32.4'
@@ -53,8 +53,8 @@ constraints:
 
 # Multi-phase validation configuration
 validation:
-  # Pre-deployment phase: Validate infrastructure before installing components
-  preDeployment:
+  # Readiness phase: Validate infrastructure before installing components
+  readiness:
     checks:
       - gpu-hardware-detection
       - kernel-parameters

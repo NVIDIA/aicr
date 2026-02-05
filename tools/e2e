@@ -1056,10 +1056,10 @@ measurements:
 EOF
 
   # -------------------------------------------------------------------------
-  # Test 1: Default phase (pre-deployment)
+  # Test 1: Default phase (readiness)
   # -------------------------------------------------------------------------
   msg ""
-  msg "--- Test 1: Default Phase (pre-deployment) ---"
+  msg "--- Test 1: Default Phase (readiness) ---"
 
   local output
   output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" 2>&1) || true
@@ -1071,18 +1071,18 @@ EOF
   fi
 
   # -------------------------------------------------------------------------
-  # Test 2: Explicit pre-deployment phase
+  # Test 2: Explicit readiness phase
   # -------------------------------------------------------------------------
   msg ""
-  msg "--- Test 2: Explicit --phase pre-deployment ---"
+  msg "--- Test 2: Explicit --phase readiness ---"
 
   output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
-    --phase pre-deployment 2>&1) || true
+    --phase readiness 2>&1) || true
 
-  if echo "$output" | grep -q "preDeployment"; then
+  if echo "$output" | grep -q "readiness"; then
     test_pass "validate/phase-predeployment"
   else
-    test_fail "validate/phase-predeployment" "Pre-deployment phase not found"
+    test_fail "validate/phase-predeployment" "Readiness phase not found"
   fi
 
   # -------------------------------------------------------------------------
@@ -1142,7 +1142,7 @@ EOF
 
   # Check for multiple phases in output
   local phase_count=0
-  echo "$output" | grep -q "pre-deployment" && ((phase_count++)) || true
+  echo "$output" | grep -q "readiness" && ((phase_count++)) || true
   echo "$output" | grep -q "deployment" && ((phase_count++)) || true
   echo "$output" | grep -q "performance" && ((phase_count++)) || true
 
@@ -1160,7 +1160,7 @@ EOF
     msg "--- Test 7: Verify Phase Result Structure ---"
 
     if grep -q "phases:" "$all_phases_file" && \
-       grep -q "preDeployment:" "$all_phases_file"; then
+       grep -q "readiness:" "$all_phases_file"; then
       test_pass "validate/result-structure"
     else
       test_fail "validate/result-structure" "phases field not found in output"

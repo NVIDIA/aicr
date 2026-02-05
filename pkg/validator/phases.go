@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 )
@@ -27,8 +28,8 @@ import (
 type ValidationPhaseName string
 
 const (
-	// PhasePreDeployment is the pre-deployment validation phase.
-	PhasePreDeployment ValidationPhaseName = "preDeployment"
+	// PhaseReadiness is the readiness validation phase.
+	PhaseReadiness ValidationPhaseName = "readiness"
 
 	// PhaseDeployment is the deployment validation phase.
 	PhaseDeployment ValidationPhaseName = "deployment"
@@ -51,9 +52,10 @@ func (v *Validator) ValidatePhase(
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
+
 	switch phase {
-	case PhasePreDeployment:
-		return v.validatePreDeployment(ctx, recipeResult, snap)
+	case PhaseReadiness:
+		return v.validateReadiness(ctx, recipeResult, snap)
 	case PhaseDeployment:
 		return v.validateDeployment(ctx, recipeResult, snap)
 	case PhasePerformance:
@@ -63,19 +65,21 @@ func (v *Validator) ValidatePhase(
 	case PhaseAll:
 		return v.validateAll(ctx, recipeResult, snap)
 	default:
-		return v.validatePreDeployment(ctx, recipeResult, snap)
+		return v.validateReadiness(ctx, recipeResult, snap)
 	}
 }
 
-// validatePreDeployment validates pre-deployment phase.
+// validateReadiness validates readiness phase.
 // Skeleton implementation - just passes all checks.
-func (v *Validator) validatePreDeployment(
+func (v *Validator) validateReadiness(
 	ctx context.Context,
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
+
+	_ = ctx // Context will be used when real checks are implemented
 	start := time.Now()
-	slog.Info("running pre-deployment validation phase")
+	slog.Info("running readiness validation phase")
 
 	result := NewValidationResult()
 	phaseResult := &PhaseResult{
@@ -99,7 +103,7 @@ func (v *Validator) validatePreDeployment(
 				Reason: "skeleton implementation - check not yet implemented",
 			}
 			phaseResult.Checks = append(phaseResult.Checks, check)
-			slog.Debug("pre-deployment check passed (skeleton)", "check", checkName)
+			slog.Debug("readiness check passed (skeleton)", "check", checkName)
 		}
 	}
 
@@ -107,10 +111,13 @@ func (v *Validator) validatePreDeployment(
 	failedCount := 0
 	passedCount := 0
 	for _, cv := range phaseResult.Constraints {
-		if cv.Status == ConstraintStatusFailed {
+		switch cv.Status {
+		case ConstraintStatusFailed:
 			failedCount++
-		} else if cv.Status == ConstraintStatusPassed {
+		case ConstraintStatusPassed:
 			passedCount++
+		case ConstraintStatusSkipped:
+			// Skipped constraints don't affect pass/fail count
 		}
 	}
 
@@ -121,7 +128,7 @@ func (v *Validator) validatePreDeployment(
 	}
 
 	phaseResult.Duration = time.Since(start)
-	result.Phases[string(PhasePreDeployment)] = phaseResult
+	result.Phases[string(PhaseReadiness)] = phaseResult
 
 	// Update summary
 	result.Summary.Status = phaseResult.Status
@@ -130,7 +137,7 @@ func (v *Validator) validatePreDeployment(
 	result.Summary.Total = len(phaseResult.Constraints)
 	result.Summary.Duration = phaseResult.Duration
 
-	slog.Info("pre-deployment validation completed",
+	slog.Info("readiness validation completed",
 		"status", phaseResult.Status,
 		"constraints", len(phaseResult.Constraints),
 		"checks", len(phaseResult.Checks),
@@ -146,6 +153,9 @@ func (v *Validator) validateDeployment(
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
+
+	_ = ctx  // Context will be used when real checks are implemented
+	_ = snap // Snapshot will be used when real checks are implemented
 	start := time.Now()
 	slog.Info("running deployment validation phase")
 
@@ -207,6 +217,9 @@ func (v *Validator) validatePerformance(
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
+
+	_ = ctx  // Context will be used when real checks are implemented
+	_ = snap // Snapshot will be used when real checks are implemented
 	start := time.Now()
 	slog.Info("running performance validation phase")
 
@@ -264,6 +277,9 @@ func (v *Validator) validateConformance(
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
+
+	_ = ctx  // Context will be used when real checks are implemented
+	_ = snap // Snapshot will be used when real checks are implemented
 	start := time.Now()
 	slog.Info("running conformance validation phase")
 
@@ -315,15 +331,16 @@ func (v *Validator) validateAll(
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
+
 	start := time.Now()
 	slog.Info("running all validation phases")
 
 	result := NewValidationResult()
 	overallStatus := ValidationStatusPass
 
-	// Phase order: preDeployment → deployment → performance → conformance
+	// Phase order: readiness → deployment → performance → conformance
 	phases := []ValidationPhaseName{
-		PhasePreDeployment,
+		PhaseReadiness,
 		PhaseDeployment,
 		PhasePerformance,
 		PhaseConformance,
@@ -351,14 +368,17 @@ func (v *Validator) validateAll(
 		var err error
 
 		switch phase {
-		case PhasePreDeployment:
-			phaseResultDoc, err = v.validatePreDeployment(ctx, recipeResult, snap)
+		case PhaseReadiness:
+			phaseResultDoc, err = v.validateReadiness(ctx, recipeResult, snap)
 		case PhaseDeployment:
 			phaseResultDoc, err = v.validateDeployment(ctx, recipeResult, snap)
 		case PhasePerformance:
 			phaseResultDoc, err = v.validatePerformance(ctx, recipeResult, snap)
 		case PhaseConformance:
 			phaseResultDoc, err = v.validateConformance(ctx, recipeResult, snap)
+		case PhaseAll:
+			// PhaseAll should never reach here as it's handled in ValidatePhase
+			return nil, errors.New(errors.ErrCodeInternal, "PhaseAll cannot be called within validateAll")
 		}
 
 		if err != nil {
@@ -403,6 +423,10 @@ func (v *Validator) validateAll(
 				totalFailed++
 			case ValidationStatusSkipped:
 				totalSkipped++
+			case ValidationStatusWarning:
+				// Warnings don't affect pass/fail count
+			case ValidationStatusPartial:
+				// Partial status is not expected at check level
 			}
 		}
 	}

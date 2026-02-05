@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Features
 
-- Add multi-phase validation system with pre-deployment, deployment, performance, and conformance phases
+- Add multi-phase validation system with readiness, deployment, performance, and conformance phases
 - Add `--phase` flag to `eidos validate` command to run specific validation phases
 - Extend recipe schema with `ValidationConfig` for phase-specific checks and constraints
 - Extend `Constraint` schema with optional `severity`, `remediation`, and `unit` fields

@@ -515,7 +515,7 @@ Recipes can include a `validation` section that defines phase-specific validatio
 
 ```yaml
 validation:
-  preDeployment:
+  readiness:
     checks:
       - gpu-hardware-detection
       - kernel-parameters
@@ -548,7 +548,7 @@ validation:
 
 | Phase | Fields | Description |
 |-------|--------|-------------|
-| `preDeployment` | `checks` | Pre-deployment validation checks (infrastructure readiness) |
+| `readiness` | `checks` | Readiness validation checks (infrastructure readiness) |
 | `deployment` | `constraints`, `checks`, `expectedResources` | Component deployment validation |
 | `performance` | `infrastructure`, `checks` | Performance and network fabric validation |
 | `conformance` | `checks` | Workload-specific conformance validation |
@@ -604,7 +604,7 @@ spec:
       value: ubuntu
 
   validation:
-    preDeployment:
+    readiness:
       checks:
         - gpu-hardware-detection
         - kernel-parameters
@@ -629,8 +629,8 @@ spec:
 **Run phase-specific validation:**
 
 ```bash
-# Validate pre-deployment phase
-eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase pre-deployment
+# Validate readiness phase
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase readiness
 
 # Validate all phases
 eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase all

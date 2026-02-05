@@ -16,7 +16,7 @@ This directory contains example recipe files demonstrating various configuration
 - **`eks-gb200-ubuntu-training-with-validation.yaml`** - Demonstrates multi-phase validation configuration
   - Shows how to configure validation checks for different deployment phases
   - Includes constraints with severity levels and remediation guidance
-  - Demonstrates pre-deployment, deployment, and performance validation phases
+  - Demonstrates readiness, deployment, and performance validation phases
 
 ## Using Example Recipes
 
@@ -39,7 +39,7 @@ eidos bundle \
 # Capture cluster snapshot
 eidos snapshot --output snapshot.yaml
 
-# Validate pre-deployment phase (default)
+# Validate readiness phase (default)
 eidos validate \
   --recipe eks-gb200-ubuntu-training-with-validation.yaml \
   --snapshot snapshot.yaml
@@ -63,7 +63,7 @@ The `eks-gb200-ubuntu-training-with-validation.yaml` example demonstrates the mu
 
 ### Validation Phases
 
-1. **Pre-deployment**: Validates infrastructure prerequisites
+1. **Readiness**: Validates infrastructure prerequisites
    - K8s version, OS, kernel compatibility
    - GPU hardware detection
    - System parameter configuration

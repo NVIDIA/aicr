@@ -70,10 +70,10 @@ Run validation without failing on constraint errors (informational mode):
 			},
 			&cli.StringFlag{
 				Name:  "phase",
-				Value: "pre-deployment",
+				Value: "readiness",
 				Usage: `Validation phase to run.
-	Options: "pre-deployment", "deployment", "performance", "conformance", "all".
-	Default: "pre-deployment" (quick pre-deployment check).`,
+	Options: "readiness", "deployment", "performance", "conformance", "all".
+	Default: "readiness" (quick readiness check).`,
 			},
 			&cli.BoolFlag{
 				Name:  "fail-on-error",
@@ -100,8 +100,8 @@ Run validation without failing on constraint errors (informational mode):
 			// Parse phase
 			var phase validator.ValidationPhaseName
 			switch phaseStr {
-			case "pre-deployment":
-				phase = validator.PhasePreDeployment
+			case "readiness":
+				phase = validator.PhaseReadiness
 			case "deployment":
 				phase = validator.PhaseDeployment
 			case "performance":
@@ -111,7 +111,7 @@ Run validation without failing on constraint errors (informational mode):
 			case "all":
 				phase = validator.PhaseAll
 			default:
-				return fmt.Errorf("invalid phase %q: must be one of: pre-deployment, deployment, performance, conformance, all", phaseStr)
+				return fmt.Errorf("invalid phase %q: must be one of: readiness, deployment, performance, conformance, all", phaseStr)
 			}
 
 			slog.Info("loading recipe", "uri", recipeFilePath)

@@ -34,8 +34,8 @@ func TestValidatePhase(t *testing.T) {
 		wantPhases int // Number of phases in result
 	}{
 		{
-			name:       "pre-deployment phase",
-			phase:      PhasePreDeployment,
+			name:       "readiness phase",
+			phase:      PhaseReadiness,
 			wantStatus: ValidationStatusPass,
 			wantPhases: 1,
 		},
@@ -148,7 +148,7 @@ func TestValidatePreDeployment(t *testing.T) {
 				Validation:  tt.validationConfig,
 			}
 
-			result, err := v.validatePreDeployment(context.Background(), recipeResult, snapshot)
+			result, err := v.validateReadiness(context.Background(), recipeResult, snapshot)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -157,9 +157,9 @@ func TestValidatePreDeployment(t *testing.T) {
 				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
 			}
 
-			phaseResult := result.Phases[string(PhasePreDeployment)]
+			phaseResult := result.Phases[string(PhaseReadiness)]
 			if phaseResult == nil {
-				t.Fatal("preDeployment phase result is nil")
+				t.Fatal("readiness phase result is nil")
 			}
 
 			if len(phaseResult.Constraints) != tt.wantConstraints {
@@ -363,17 +363,17 @@ func TestValidateAll_PhaseOrder(t *testing.T) {
 	}
 
 	// Verify all phases are present
-	expectedPhases := []string{"preDeployment", "deployment", "performance", "conformance"}
+	expectedPhases := []string{"readiness", "deployment", "performance", "conformance"}
 	for _, phaseName := range expectedPhases {
 		if result.Phases[phaseName] == nil {
 			t.Errorf("phase %q is missing from result", phaseName)
 		}
 	}
 
-	// Verify pre-deployment has constraint results
-	preDeployPhase := result.Phases["preDeployment"]
+	// Verify readiness has constraint results
+	preDeployPhase := result.Phases["readiness"]
 	if len(preDeployPhase.Constraints) == 0 {
-		t.Error("preDeployment phase should have constraint results")
+		t.Error("readiness phase should have constraint results")
 	}
 
 	// Verify deployment has check results
