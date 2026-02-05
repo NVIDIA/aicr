@@ -40,14 +40,3 @@ spec:
       value: "24.04"
     - name: OS.sysctl./proc/sys/kernel/osrelease
       value: ">= 6.8"
-
-  componentRefs:
-
-    # Skyhook customization inherited from parent (Ubuntu settings)
-    # TODO: Add PyTorch-specific component overrides when available
-    - name: skyhook-operator
-      type: Helm
-      manifestFiles:
-        - components/skyhook-operator/manifests/customization-ubuntu.yaml
-      overrides:
-        customization: ubuntu

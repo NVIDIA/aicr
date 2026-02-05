@@ -51,12 +51,6 @@ spec:
         gdrcopy:
           enabled: true
 
-    # Override with basic Linux training customization for Skyhook
-    - name: skyhook-operator
-      type: Helm
-      overrides:
-        customization: training
-
     # Add nvidia-dra-driver-gpu for GB200
     - name: nvidia-dra-driver-gpu
       type: Helm

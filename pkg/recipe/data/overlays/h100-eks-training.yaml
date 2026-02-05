@@ -50,9 +50,3 @@ spec:
           default: false
         gdrcopy:
           enabled: true
-
-    # Override with basic Linux training customization for Skyhook
-    - name: skyhook-operator
-      type: Helm
-      overrides:
-        customization: training
