@@ -20,6 +20,10 @@ on:
   workflow_dispatch: {}  # allow manual runs for testing
   push:
     branches: [main]  # scan main after merges
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
 
 permissions:
   contents: read
