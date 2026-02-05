@@ -267,7 +267,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
-      defaultVersion: v2.1.0
+      defaultVersion: 0.0.0-sha-48e7a93
     nodeScheduling:
       system:
         nodeSelectorPaths:
