@@ -208,7 +208,7 @@ The component registry (`pkg/recipe/data/registry.yaml`) supports these fields:
 Create a local kind cluster for end-to-end testing.
 
 ```bash
-make dev
+make dev-env
 ```
 
 This creates a kind cluster with two nodes and starts Tilt.
@@ -248,7 +248,7 @@ eidos bundle --recipe recipe.yaml --output bundle
 This generates a `bundle/` directory containing:
 - `Chart.yaml` - Helm chart metadata with component dependencies
 - `values.yaml` - Combined values for all components
-- `post-install/` - CRD-dependent resources to apply after install
+- `templates/` - Additional manifests (ConfigMaps, CRs with Helm hooks)
 - `README.md` - Deployment instructions
 
 **Step 4: Download Helm dependencies**
@@ -270,17 +270,7 @@ Deploy the stack to the Kind cluster in the namespace `eidos-stack`:
 helm upgrade --install eidos-stack . -n eidos-stack --create-namespace --wait
 ```
 
-**Step 6: Apply post-install resources**
-
-Apply CRD-dependent resources that couldn't be included in the Helm chart:
-
-```bash
-kubectl apply -f post-install/ -n eidos-stack
-```
-
-These resources (e.g., Skyhook Customizations) depend on CRDs installed by the sub-charts and must be applied after the main install completes.
-
-**Step 7: Verify the deployment**
+**Step 6: Verify the deployment**
 
 Check that all pods are running:
 
