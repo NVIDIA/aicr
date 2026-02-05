@@ -584,7 +584,7 @@ eidos recipe \
   --accelerator gb200 \
   --intent training \
   --os ubuntu \
-  --platform pytorch \
+  --platform kubeflow \
   --nodes 8 \
   --format yaml
 

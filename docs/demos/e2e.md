@@ -10,7 +10,7 @@ eidos recipe \
   --accelerator gb200 \
   --os ubuntu \
   --intent training \
-  --platform pytorch | yq .
+  --platform kubeflow | yq .
 ```
 
 From criteria file:
@@ -27,7 +27,7 @@ spec:
   accelerator: gb200
   os: ubuntu
   intent: training
-  platform: pytorch
+  platform: kubeflow
 EOF
 
 # Generate recipe from criteria file
@@ -90,7 +90,7 @@ Recipe from Snapshot:
 eidos recipe \
   --snapshot cm://gpu-operator/eidos-snapshot \
   --intent training \
-  --platform pytorch \
+  --platform kubeflow \
   --output recipe.yaml
 ```
 

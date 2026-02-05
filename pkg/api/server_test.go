@@ -179,7 +179,7 @@ func TestRecipeEndpointPOST(t *testing.T) {
 		},
 		{
 			name:        "valid JSON body with platform",
-			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"pytorch"}}`,
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},
@@ -264,12 +264,8 @@ func TestRecipeEndpointWithValidQueryParams(t *testing.T) {
 			query: "?nodes=4",
 		},
 		{
-			name:  "platform pytorch",
-			query: "?platform=pytorch",
-		},
-		{
-			name:  "platform runai",
-			query: "?platform=runai",
+			name:  "platform kubeflow",
+			query: "?platform=kubeflow",
 		},
 		{
 			name:  "multiple params",
@@ -277,7 +273,7 @@ func TestRecipeEndpointWithValidQueryParams(t *testing.T) {
 		},
 		{
 			name:  "multiple params with platform",
-			query: "?accelerator=h100&service=eks&intent=training&platform=pytorch",
+			query: "?accelerator=h100&service=eks&intent=training&platform=kubeflow",
 		},
 		{
 			name:  "no params",

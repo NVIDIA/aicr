@@ -142,13 +142,13 @@ type Reading interface {
 
 **Query Mode** - Direct generation from parameters:
 ```bash
-eidos recipe --os ubuntu --gpu h100 --service eks --intent training --platform pytorch
+eidos recipe --os ubuntu --gpu h100 --service eks --intent training --platform kubeflow
 ```
 
 **Snapshot Mode (File)** - Analyze captured snapshot:
 ```bash
 eidos snapshot --output system.yaml
-eidos recipe --snapshot system.yaml --intent training --platform pytorch
+eidos recipe --snapshot system.yaml --intent training --platform kubeflow
 ```
 
 **Snapshot Mode (ConfigMap)** - Read from Kubernetes:
@@ -157,12 +157,12 @@ eidos recipe --snapshot system.yaml --intent training --platform pytorch
 eidos snapshot --output cm://gpu-operator/eidos-snapshot
 
 # CLI reads from ConfigMap to generate recipe
-eidos recipe --snapshot cm://gpu-operator/eidos-snapshot --intent training --platform pytorch
+eidos recipe --snapshot cm://gpu-operator/eidos-snapshot --intent training --platform kubeflow
 
 # Recipe can also be written to ConfigMap
 eidos recipe --snapshot cm://gpu-operator/eidos-snapshot \
             --intent training \
-            --platform pytorch \
+            --platform kubeflow \
             --output cm://gpu-operator/eidos-recipe
 ```
 

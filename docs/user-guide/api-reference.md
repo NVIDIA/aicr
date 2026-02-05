@@ -100,7 +100,7 @@ Generate an optimized configuration recipe based on environment parameters.
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `any` |
-| `platform` | string | any | Platform/framework: `pytorch`, `runai`, `any` |
+| `platform` | string | any | Platform/framework: `kubeflow`, `any` |
 | `nodes` | integer | 0 | GPU node count (0 = any) |
 
 **Examples:**
@@ -146,7 +146,7 @@ spec:
   accelerator: gb200
   os: ubuntu
   intent: training
-  platform: pytorch
+  platform: kubeflow
   nodes: 8
 ```
 

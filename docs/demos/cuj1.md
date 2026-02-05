@@ -10,7 +10,7 @@ eidos recipe \
   --accelerator h100 \
   --intent training \
   --os ubuntu \
-  --platform pytorch \
+  --platform kubeflow \
   --output recipe.yaml
 ```
 
@@ -56,13 +56,37 @@ eidos validate \
 
 ## Run Job
 
-> TODO: Migrate to [TrainJob-v2](https://www.kubeflow.org/docs/components/trainer/operator-guides/migration/#new-trainjob-v2)
+Run a simple distributed PyTorch training job using the [Kubeflow TrainJob API](https://blog.kubeflow.org/trainer/intro/):
 
 ```shell
-kubectl apply -f https://raw.githubusercontent.com/kubeflow/training-operator/master/examples/pytorch/simple.yaml
-kubectl get pytorchjobs
-kubectl get pods -l training.kubeflow.org/job-name=pytorch-simple
-kubectl logs -f pytorch-simple-master-0
+# Create the TrainJob
+kubectl apply -f - <<EOF
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainJob
+metadata:
+  name: pytorch-mnist
+  namespace: kubeflow
+spec:
+  trainer:
+    numNodes: 2
+    image: docker.io/kubeflowkatib/pytorch-mnist:v1beta1-45c5727
+    command:
+      - "python3"
+      - "/opt/pytorch-mnist/mnist.py"
+      - "--epochs=1"
+    resourcesPerNode:
+      requests:
+        nvidia.com/gpu: 1
+  runtimeRef:
+    name: torch-distributed
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+EOF
+
+# Monitor the TrainJob
+kubectl get trainjobs -n kubeflow
+kubectl get pods -n kubeflow -l trainer.kubeflow.org/job-name=pytorch-mnist
+kubectl logs -f -n kubeflow -l trainer.kubeflow.org/job-name=pytorch-mnist
 ```
 
 ## Success
