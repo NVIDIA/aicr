@@ -181,12 +181,6 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		"helm install eidos-stack . -n eidos-stack --create-namespace",
 	}
 
-	// Add post-install step if there are post-install manifests
-	if len(input.ManifestContents) > 0 {
-		output.DeploymentSteps = append(output.DeploymentSteps,
-			"kubectl apply -f post-install/ -n eidos-stack  # Apply CRD-dependent resources")
-	}
-
 	slog.Debug("umbrella chart generated",
 		"files", len(output.Files),
 		"total_size", output.TotalSize,
@@ -511,9 +505,10 @@ func SortComponentsByDeploymentOrder(components []string, deploymentOrder []stri
 	return sorted
 }
 
-// generateTemplates creates the post-install directory with manifest files.
-// These manifests contain Custom Resources that depend on CRDs installed by sub-charts,
-// so they must be applied after the main Helm install completes.
+// generateTemplates creates manifest files in the templates/ directory.
+//   - Standard K8s resources (ConfigMaps, Secrets, etc.) are deployed normally during helm install
+//   - CRD-dependent resources (Custom Resources) get Helm post-install hook annotations,
+//     so they are applied after all sub-charts (including CRDs) are installed
 func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput, outputDir string) ([]string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -523,11 +518,9 @@ func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput
 		return nil, 0, nil
 	}
 
-	// Write manifests to post-install/ directory instead of templates/
-	// This ensures CRD-dependent resources are applied after helm install
-	postInstallDir := filepath.Join(outputDir, "post-install")
-	if err := os.MkdirAll(postInstallDir, 0755); err != nil {
-		return nil, 0, errors.Wrap(errors.ErrCodeInternal, "failed to create post-install directory", err)
+	templatesDir := filepath.Join(outputDir, "templates")
+	if err := os.MkdirAll(templatesDir, 0755); err != nil {
+		return nil, 0, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", err)
 	}
 
 	files := make([]string, 0, len(input.ManifestContents))
@@ -535,121 +528,181 @@ func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput
 
 	for path, content := range input.ManifestContents {
 		filename := filepath.Base(path)
-		outputPath := filepath.Join(postInstallDir, filename)
 
-		// Process Helm template syntax to plain YAML for kubectl apply
-		processedContent := g.processManifestForKubectl(content, input)
+		// Determine if this is a CRD-dependent resource (Custom Resource)
+		isCRDDependent := g.isCRDDependentResource(content)
 
-		// Skip if template evaluated to empty (conditional was false)
-		if len(processedContent) == 0 {
-			slog.Debug("skipping empty manifest (conditional evaluated to false)",
-				"filename", filename)
-			continue
+		var processedContent []byte
+		if isCRDDependent {
+			// Add Helm post-install hook annotation to CRD-dependent resources
+			// This ensures they are applied after all sub-charts (including CRDs) are installed
+			processedContent = g.addHelmHookAnnotation(content)
+		} else {
+			// Standard K8s resources are deployed normally
+			processedContent = content
 		}
 
+		outputPath := filepath.Join(templatesDir, filename)
+
 		if err := os.WriteFile(outputPath, processedContent, 0600); err != nil {
-			return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write post-install manifest", err,
+			return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write template", err,
 				map[string]any{"filename": filename})
 		}
 
 		files = append(files, outputPath)
 		totalSize += int64(len(processedContent))
-	}
 
-	// Remove post-install directory if no files were written
-	if len(files) == 0 {
-		os.RemoveAll(postInstallDir)
+		slog.Debug("wrote template",
+			"filename", filename,
+			"crd_dependent", isCRDDependent,
+			"helm_hook", isCRDDependent)
 	}
 
 	return files, totalSize, nil
 }
 
-// processManifestForKubectl converts Helm template manifests to plain YAML for kubectl apply.
-// It renders the Go template with the actual values to produce valid Kubernetes YAML.
-func (g *Generator) processManifestForKubectl(content []byte, input *GeneratorInput) []byte {
-	// Convert component values to map[string]any for template compatibility
-	valuesAny := make(map[string]any)
-	for k, v := range input.ComponentValues {
-		valuesAny[k] = v
+// isCRDDependentResource checks if a manifest contains a Custom Resource
+// that depends on a CRD installed by a sub-chart.
+// Standard K8s resources (v1, apps/v1, etc.) return false.
+// Custom Resources (custom apiVersion like *.nvidia.com/*) return true.
+func (g *Generator) isCRDDependentResource(content []byte) bool {
+	// Parse just enough to get the apiVersion
+	var manifest struct {
+		APIVersion string `yaml:"apiVersion"`
 	}
 
-	// Build template data matching Helm's structure
-	templateData := map[string]any{
-		"Values": valuesAny,
-		"Release": map[string]any{
-			"Namespace": "eidos-stack",
-			"Service":   "Helm",
-			"Name":      "eidos-stack",
-		},
-		"Chart": map[string]any{
-			"Name":    "eidos-stack",
-			"Version": input.Version,
-		},
+	// Handle Helm template conditionals - look for the actual resource definition
+	// Skip lines that are pure Helm template directives
+	lines := strings.Split(string(content), "\n")
+	var yamlContent strings.Builder
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip Helm template-only lines
+		if strings.HasPrefix(trimmed, "{{-") && strings.HasSuffix(trimmed, "}}") {
+			continue
+		}
+		yamlContent.WriteString(line)
+		yamlContent.WriteString("\n")
 	}
 
-	// Parse and execute the template
-	tmpl, err := template.New("manifest").Funcs(template.FuncMap{
-		"default": func(defaultVal, val any) any {
-			if val == nil || val == "" {
-				return defaultVal
+	if err := yaml.Unmarshal([]byte(yamlContent.String()), &manifest); err != nil {
+		// If we can't parse, assume it's a standard resource
+		return false
+	}
+
+	// Standard Kubernetes API groups that don't require CRDs
+	standardAPIs := []string{
+		"v1",                            // Core API (ConfigMap, Secret, Service, Pod, etc.)
+		"apps/v1",                       // Deployments, StatefulSets, DaemonSets, ReplicaSets
+		"batch/v1",                      // Jobs, CronJobs
+		"networking.k8s.io/",            // NetworkPolicy, Ingress
+		"rbac.authorization.k8s.io/",    // Roles, RoleBindings, ClusterRoles
+		"policy/v1",                     // PodDisruptionBudget
+		"autoscaling/",                  // HorizontalPodAutoscaler
+		"storage.k8s.io/",               // StorageClass, CSIDriver
+		"admissionregistration.k8s.io/", // ValidatingWebhookConfiguration
+		"certificates.k8s.io/",          // CertificateSigningRequest
+		"coordination.k8s.io/",          // Lease
+		"discovery.k8s.io/",             // EndpointSlice
+		"events.k8s.io/",                // Event
+		"flowcontrol.apiserver.k8s.io/", // FlowSchema, PriorityLevelConfiguration
+		"node.k8s.io/",                  // RuntimeClass
+		"scheduling.k8s.io/",            // PriorityClass
+	}
+
+	apiVersion := manifest.APIVersion
+	for _, stdAPI := range standardAPIs {
+		if apiVersion == stdAPI || strings.HasPrefix(apiVersion, stdAPI) {
+			return false
+		}
+	}
+
+	// If apiVersion is not in the standard list, it's likely a Custom Resource
+	return apiVersion != ""
+}
+
+// addHelmHookAnnotation adds Helm post-install/post-upgrade hook annotations to a manifest.
+// This ensures CRD-dependent resources are applied after all sub-charts (including CRDs) are installed.
+// The before-hook-creation delete policy ensures old CRs are cleaned up before upgrade/install.
+func (g *Generator) addHelmHookAnnotation(content []byte) []byte {
+	lines := strings.Split(string(content), "\n")
+	var result strings.Builder
+	hookAdded := false
+
+	// Helm hook annotations to add
+	hookAnnotations := []string{
+		"\"helm.sh/hook\": post-install,post-upgrade",
+		"\"helm.sh/hook-weight\": \"10\"",
+		"\"helm.sh/hook-delete-policy\": before-hook-creation",
+	}
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// When we find metadata:, check what follows and insert annotations appropriately
+		if trimmed == "metadata:" {
+			result.WriteString(line)
+			result.WriteString("\n")
+
+			// Find the indentation level for metadata fields
+			metadataIndent := "  " // default
+			nextIdx := i + 1
+			for nextIdx < len(lines) {
+				nextLine := lines[nextIdx]
+				nextTrimmed := strings.TrimSpace(nextLine)
+				// Skip empty lines and pure template directives
+				if nextTrimmed == "" || (strings.HasPrefix(nextTrimmed, "{{-") && strings.HasSuffix(nextTrimmed, "}}")) {
+					nextIdx++
+					continue
+				}
+				// Found a non-empty line, get its indentation
+				metadataIndent = nextLine[:len(nextLine)-len(strings.TrimLeft(nextLine, " \t"))]
+				break
 			}
-			return val
-		},
-		"toYaml": func(v any) string {
-			out, _ := yaml.Marshal(v)
-			return string(out)
-		},
-		"nindent": func(indent int, s string) string {
-			pad := strings.Repeat(" ", indent)
-			lines := strings.Split(s, "\n")
-			for i, line := range lines {
-				if line != "" {
-					lines[i] = pad + line
+
+			// Check if annotations: already exists in metadata
+			hasAnnotations := false
+			for j := i + 1; j < len(lines); j++ {
+				checkTrimmed := strings.TrimSpace(lines[j])
+				// Stop if we hit spec: or another top-level field
+				if len(lines[j]) > 0 && lines[j][0] != ' ' && lines[j][0] != '\t' && !strings.HasPrefix(checkTrimmed, "{{") {
+					break
+				}
+				if checkTrimmed == "annotations:" {
+					hasAnnotations = true
+					break
 				}
 			}
-			return "\n" + strings.Join(lines, "\n")
-		},
-		"index": func(m any, key string) any {
-			switch v := m.(type) {
-			case map[string]any:
-				return v[key]
-			case map[string]map[string]any:
-				return v[key]
-			default:
-				return nil
-			}
-		},
-		"eq": func(a, b any) bool {
-			return fmt.Sprintf("%v", a) == fmt.Sprintf("%v", b)
-		},
-		"and": func(args ...any) bool {
-			for _, arg := range args {
-				if arg == nil || arg == false || arg == "" {
-					return false
+
+			if !hasAnnotations {
+				// Insert annotations: with helm hooks right after metadata:
+				result.WriteString(metadataIndent + "annotations:\n")
+				for _, ann := range hookAnnotations {
+					result.WriteString(metadataIndent + "  " + ann + "\n")
 				}
+				hookAdded = true
 			}
-			return true
-		},
-	}).Parse(string(content))
+			continue
+		}
 
-	if err != nil {
-		slog.Warn("failed to parse manifest template, returning original content",
-			"error", err)
-		return content
+		// If annotations: exists, add our hooks right after it
+		if !hookAdded && trimmed == "annotations:" {
+			result.WriteString(line)
+			result.WriteString("\n")
+			// Get the indentation of the annotations line and add one more level
+			annotationsIndent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			hookIndent := annotationsIndent + "  "
+			for _, ann := range hookAnnotations {
+				result.WriteString(hookIndent + ann + "\n")
+			}
+			hookAdded = true
+			continue
+		}
+
+		result.WriteString(line)
+		result.WriteString("\n")
 	}
 
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, templateData); err != nil {
-		slog.Warn("failed to execute manifest template, returning original content",
-			"error", err)
-		return content
-	}
-
-	// Remove empty output (template conditionals evaluated to false)
-	result := strings.TrimSpace(buf.String())
-	if result == "" || result == "---" {
-		return nil
-	}
-
-	return []byte(result)
+	return []byte(result.String())
 }
