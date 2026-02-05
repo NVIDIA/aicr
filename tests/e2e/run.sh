@@ -543,14 +543,17 @@ setup_fake_gpu() {
     return 1
   fi
 
+  # Create namespace for snapshot tests (if it doesn't exist)
+  kubectl create namespace "$SNAPSHOT_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+
   # Create RBAC for snapshot agent
   msg "Creating RBAC for snapshot agent"
-  kubectl apply -f - << 'EOF'
+  kubectl apply -f - << EOF
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: eidos
-  namespace: gpu-operator
+  namespace: ${SNAPSHOT_NAMESPACE}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -568,7 +571,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: eidos
-  namespace: gpu-operator
+  namespace: ${SNAPSHOT_NAMESPACE}
 roleRef:
   kind: ClusterRole
   name: eidos-e2e-reader
