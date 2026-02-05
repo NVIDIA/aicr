@@ -32,3 +32,4 @@ metadata:
 data:
   nvidia.conf: |
     options nvidia NVreg_GrdmaPciTopoCheckOverride=1
+{{- end }}
