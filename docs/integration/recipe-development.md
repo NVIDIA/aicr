@@ -418,16 +418,22 @@ Constraints define deployment requirements that can be validated against a clust
 
 ### Constraint Structure
 
-Each constraint has two fields:
+Each constraint has the following fields:
 
 ```yaml
 constraints:
   - name: <measurement-path>   # What to check
     value: <expression>        # Expected value or comparison
+    severity: <level>          # Optional: error (default), warning
+    remediation: <string>      # Optional: How to fix if failed
+    unit: <string>             # Optional: Unit of measurement
 ```
 
 - **`name`**: A fully qualified measurement path in the format `{Type}.{Subtype}.{Key}`
 - **`value`**: An exact match string or comparison expression with operator
+- **`severity`**: Optional severity level (`error` or `warning`). Defaults to `error`.
+- **`remediation`**: Optional guidance on how to resolve a constraint failure
+- **`unit`**: Optional unit of measurement (e.g., `GB`, `cores`, `seconds`)
 
 ### Measurement Path Format
 
@@ -499,6 +505,138 @@ spec:
   componentRefs:
     - name: gpu-operator
       # ... component configuration
+```
+
+## Validation Configuration
+
+Recipes can include a `validation` section that defines phase-specific validation checks beyond basic constraints. This enables multi-phase validation during the deployment lifecycle.
+
+### Validation Structure
+
+```yaml
+validation:
+  preDeployment:
+    checks:
+      - gpu-hardware-detection
+      - kernel-parameters
+      - os-prerequisites
+  deployment:
+    constraints:
+      - name: gpu-operator.version
+        value: "== v25.10.1"
+    checks:
+      - operator-health
+      - expected-resources
+    expectedResources:
+      - apiVersion: v1
+        kind: Pod
+        namespace: gpu-operator
+        selector:
+          matchLabels:
+            app: nvidia-operator-validator
+  performance:
+    infrastructure: nccl-doctor
+    checks:
+      - nccl-bandwidth-test
+      - fabric-health-check
+  conformance:
+    checks:
+      - ai-workload-validation
+```
+
+### Validation Phases
+
+| Phase | Fields | Description |
+|-------|--------|-------------|
+| `preDeployment` | `checks` | Pre-deployment validation checks (infrastructure readiness) |
+| `deployment` | `constraints`, `checks`, `expectedResources` | Component deployment validation |
+| `performance` | `infrastructure`, `checks` | Performance and network fabric validation |
+| `conformance` | `checks` | Workload-specific conformance validation |
+
+### Phase Fields
+
+- **`checks`**: List of check names to execute in this phase
+- **`constraints`**: Phase-specific constraints (in addition to recipe-level constraints)
+- **`expectedResources`**: Kubernetes resources that should exist after deployment
+- **`infrastructure`**: Infrastructure component to deploy for testing (e.g., `nccl-doctor`)
+
+### Node Selection
+
+Validation checks can target specific node types using `nodeSelection`:
+
+```yaml
+validation:
+  performance:
+    nodeSelection:
+      gpu:
+        nodeSelector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - key: nvidia.com/gpu
+            operator: Equal
+            value: present
+            effect: NoSchedule
+```
+
+### When to Add Validation Configuration
+
+**Add validation configuration when:**
+- Recipe deploys components that require health checks
+- Performance testing is critical for the workload
+- Specific Kubernetes resources must be verified
+- Phase-specific validation is needed beyond basic constraints
+
+**Example: Training Workload with Multi-Phase Validation**
+
+```yaml
+# gb200-eks-ubuntu-training.yaml
+spec:
+  criteria:
+    service: eks
+    accelerator: gb200
+    os: ubuntu
+    intent: training
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+    - name: OS.release.ID
+      value: ubuntu
+
+  validation:
+    preDeployment:
+      checks:
+        - gpu-hardware-detection
+        - kernel-parameters
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+    performance:
+      infrastructure: nccl-doctor
+      checks:
+        - nccl-bandwidth-test
+        - fabric-health-check
+
+  componentRefs:
+    - name: gpu-operator
+      version: v25.3.4
+      valuesFile: components/gpu-operator/gb200-eks-training.yaml
+```
+
+### Testing Validation Configuration
+
+**Run phase-specific validation:**
+
+```bash
+# Validate pre-deployment phase
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase pre-deployment
+
+# Validate all phases
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase all
+
+# Validate specific phase
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
 ### Testing Constraints

@@ -240,8 +240,19 @@ eidos/
 
 #### Validator
 - **Location**: `pkg/validator/`
-- **Purpose**: Constraint evaluation against snapshots
-- **Features**: Component health checks, validation result reporting
+- **Purpose**: Multi-phase validation of cluster configuration against recipe requirements
+- **Phases**:
+  - **Pre-deployment**: Validates infrastructure prerequisites (K8s version, OS, kernel) and runs pre-deployment checks
+  - **Deployment**: Validates component deployment health and expected resources
+  - **Performance**: Validates system performance and network fabric health
+  - **Conformance**: Validates workload-specific requirements and conformance
+- **Features**:
+  - Phase-based validation with dependency logic (fail → skip subsequent)
+  - Constraint evaluation against snapshots using version comparison operators
+  - Check execution framework (skeleton implementation)
+  - Structured validation results with per-phase status
+- **CLI**: `eidos validate --phase <phase>` (default: pre-deployment)
+- **Implementation**: `pkg/validator/phases.go` contains phase validation logic
 
 ### Architecture Principle
 

@@ -68,6 +68,13 @@ Run validation without failing on constraint errors (informational mode):
 				Usage: `Path/URI to snapshot file containing actual system measurements.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).`,
 			},
+			&cli.StringFlag{
+				Name:  "phase",
+				Value: "pre-deployment",
+				Usage: `Validation phase to run.
+	Options: "pre-deployment", "deployment", "performance", "conformance", "all".
+	Default: "pre-deployment" (quick pre-deployment check).`,
+			},
 			&cli.BoolFlag{
 				Name:  "fail-on-error",
 				Value: true,
@@ -87,7 +94,25 @@ Run validation without failing on constraint errors (informational mode):
 			recipeFilePath := cmd.String("recipe")
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
+			phaseStr := cmd.String("phase")
 			failOnError := cmd.Bool("fail-on-error")
+
+			// Parse phase
+			var phase validator.ValidationPhaseName
+			switch phaseStr {
+			case "pre-deployment":
+				phase = validator.PhasePreDeployment
+			case "deployment":
+				phase = validator.PhaseDeployment
+			case "performance":
+				phase = validator.PhasePerformance
+			case "conformance":
+				phase = validator.PhaseConformance
+			case "all":
+				phase = validator.PhaseAll
+			default:
+				return fmt.Errorf("invalid phase %q: must be one of: pre-deployment, deployment, performance, conformance, all", phaseStr)
+			}
 
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
@@ -105,9 +130,10 @@ Run validation without failing on constraint errors (informational mode):
 				return fmt.Errorf("failed to load snapshot from %q: %w", snapshotFilePath, err)
 			}
 
-			slog.Info("validating constraints",
+			slog.Info("running validation",
 				"recipe", recipeFilePath,
 				"snapshot", snapshotFilePath,
+				"phase", phase,
 				"constraints", len(rec.Constraints))
 
 			// Create validator
@@ -115,8 +141,8 @@ Run validation without failing on constraint errors (informational mode):
 				validator.WithVersion(version),
 			)
 
-			// Validate
-			result, err := v.Validate(ctx, rec, snap)
+			// Validate with phase support
+			result, err := v.ValidatePhase(ctx, phase, rec, snap)
 			if err != nil {
 				return fmt.Errorf("validation failed: %w", err)
 			}

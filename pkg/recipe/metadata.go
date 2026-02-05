@@ -38,6 +38,15 @@ type Constraint struct {
 
 	// Value is the constraint expression (e.g., ">= 1.30", "ubuntu").
 	Value string `json:"value" yaml:"value"`
+
+	// Severity indicates the constraint severity ("error" or "warning").
+	Severity string `json:"severity,omitempty" yaml:"severity,omitempty"`
+
+	// Remediation provides actionable guidance for fixing failed constraints.
+	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`
+
+	// Unit specifies the unit for numeric constraints (e.g., "GB/s").
+	Unit string `json:"unit,omitempty" yaml:"unit,omitempty"`
 }
 
 // ComponentRef represents a reference to a deployable component.
@@ -77,6 +86,72 @@ type ComponentRef struct {
 
 	// Path is the path within the repository to the kustomization (for Kustomize).
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
+
+	// Cleanup indicates whether to uninstall this component after validation.
+	// Used for validation infrastructure components (e.g., nccl-doctor).
+	Cleanup bool `json:"cleanup,omitempty" yaml:"cleanup,omitempty"`
+
+	// ExpectedResources lists Kubernetes resources that should exist after deployment.
+	// Used by deployment phase validation to verify component health.
+	ExpectedResources []ExpectedResource `json:"expectedResources,omitempty" yaml:"expectedResources,omitempty"`
+}
+
+// ExpectedResource represents a Kubernetes resource that should exist after deployment.
+type ExpectedResource struct {
+	// Kind is the resource kind (e.g., "Deployment", "DaemonSet").
+	Kind string `json:"kind" yaml:"kind"`
+
+	// Name is the resource name.
+	Name string `json:"name" yaml:"name"`
+
+	// Namespace is the resource namespace (optional for cluster-scoped resources).
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+}
+
+// ValidationConfig defines validation phases and settings.
+type ValidationConfig struct {
+	// PreDeployment defines pre-deployment validation phase settings.
+	PreDeployment *ValidationPhase `json:"preDeployment,omitempty" yaml:"preDeployment,omitempty"`
+
+	// Deployment defines deployment validation phase settings.
+	Deployment *ValidationPhase `json:"deployment,omitempty" yaml:"deployment,omitempty"`
+
+	// Performance defines performance validation phase settings.
+	Performance *ValidationPhase `json:"performance,omitempty" yaml:"performance,omitempty"`
+
+	// Conformance defines conformance validation phase settings.
+	Conformance *ValidationPhase `json:"conformance,omitempty" yaml:"conformance,omitempty"`
+}
+
+// ValidationPhase represents a single validation phase configuration.
+type ValidationPhase struct {
+	// Timeout is the maximum duration for this phase (e.g., "10m").
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+
+	// Constraints are phase-level constraints to evaluate.
+	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+
+	// Checks are named validation checks to run in this phase.
+	Checks []string `json:"checks,omitempty" yaml:"checks,omitempty"`
+
+	// NodeSelection defines which nodes to include in validation.
+	NodeSelection *NodeSelection `json:"nodeSelection,omitempty" yaml:"nodeSelection,omitempty"`
+
+	// Infrastructure references a componentRef that provides validation infrastructure.
+	// Example: "nccl-doctor" for performance testing.
+	Infrastructure string `json:"infrastructure,omitempty" yaml:"infrastructure,omitempty"`
+}
+
+// NodeSelection defines node filtering for validation scope.
+type NodeSelection struct {
+	// Selector specifies label-based node selection.
+	Selector map[string]string `json:"selector,omitempty" yaml:"selector,omitempty"`
+
+	// MaxNodes limits the number of nodes to validate.
+	MaxNodes int `json:"maxNodes,omitempty" yaml:"maxNodes,omitempty"`
+
+	// ExcludeNodes lists node names to exclude from validation.
+	ExcludeNodes []string `json:"excludeNodes,omitempty" yaml:"excludeNodes,omitempty"`
 }
 
 // ApplyRegistryDefaults fills in ComponentRef fields from ComponentConfig defaults.
@@ -131,6 +206,10 @@ type RecipeMetadataSpec struct {
 
 	// ComponentRefs is the list of components to deploy.
 	ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+
+	// Validation defines multi-phase validation configuration.
+	// Presence of a phase implies it is enabled.
+	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
 }
 
 // RecipeMetadataHeader contains the Kubernetes-style header fields.
@@ -213,6 +292,10 @@ type RecipeResult struct {
 	// DeploymentOrder is the topologically sorted component names for deployment.
 	// Components should be deployed in this order to satisfy dependencies.
 	DeploymentOrder []string `json:"deploymentOrder" yaml:"deploymentOrder"`
+
+	// Validation defines multi-phase validation configuration.
+	// Inherited from recipe metadata during merging.
+	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
 }
 
 // Merge merges another RecipeMetadataSpec into this one.

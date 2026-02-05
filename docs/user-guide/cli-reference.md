@@ -376,7 +376,7 @@ constraints:
 
 ### eidos validate
 
-Validate a system snapshot against the constraints defined in a recipe to verify cluster compatibility.
+Validate a system snapshot against the constraints defined in a recipe to verify cluster compatibility. Supports multi-phase validation with different validation stages.
 
 **Synopsis:**
 ```shell
@@ -388,6 +388,7 @@ eidos validate [flags]
 |------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
 | `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (required) |
+| `--phase` | | string | Validation phase to run: pre-deployment (default), deployment, performance, conformance, all |
 | `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
 | `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
 | `--format` | `-t` | string | Output format: json, yaml, table (default: yaml) |
@@ -397,6 +398,23 @@ eidos validate [flags]
 - **File**: Local file path (`./recipe.yaml`, `./snapshot.yaml`)
 - **URL**: HTTP/HTTPS URL (`https://example.com/recipe.yaml`)
 - **ConfigMap**: Kubernetes ConfigMap URI (`cm://namespace/configmap-name`)
+
+**Validation Phases:**
+
+Validation can be run in different phases to validate different aspects of the deployment:
+
+| Phase | Description | When to Run |
+|-------|-------------|-------------|
+| `pre-deployment` | Validates infrastructure prerequisites (K8s version, OS, kernel) and runs pre-deployment checks | Before deploying any components |
+| `deployment` | Validates component deployment health and expected resources | After deploying components |
+| `performance` | Validates system performance and network fabric health | After components are running |
+| `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
+| `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
+
+**Phase Dependencies:**
+- Phases run sequentially when using `--phase all`
+- If a phase fails, subsequent phases are skipped
+- Use individual phases for targeted validation during specific deployment stages
 
 **Constraint Format:**
 
@@ -424,8 +442,20 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 **Examples:**
 
 ```shell
-# Validate snapshot against recipe (output to stdout)
+# Validate snapshot against recipe (default: pre-deployment phase)
 eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
+
+# Validate specific phase
+eidos validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --phase deployment
+
+# Run all validation phases
+eidos validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --phase all
 
 # Load snapshot from ConfigMap
 eidos validate \
@@ -438,11 +468,24 @@ eidos validate \
   --snapshot cm://gpu-operator/eidos-snapshot \
   --output validation-results.yaml
 
-# Fail on any constraint violation (for CI/CD)
+# Validate pre-deployment phase before installing components
 eidos validate \
   --recipe recipe.yaml \
   --snapshot snapshot.yaml \
+  --phase pre-deployment \
   --fail-on-error
+
+# Validate deployment phase after components are installed
+eidos validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --phase deployment
+
+# Run performance validation
+eidos validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --phase performance
 
 # JSON output format
 eidos validate \
@@ -457,7 +500,7 @@ eidos validate \
   --kubeconfig ~/.kube/prod-cluster
 ```
 
-**Output Structure:**
+**Output Structure (Pre-Deployment Phase):**
 ```yaml
 apiVersion: eidos.nvidia.com/v1alpha1
 kind: ValidationResult
@@ -467,21 +510,92 @@ metadata:
 recipeSource: recipe.yaml
 snapshotSource: cm://gpu-operator/eidos-snapshot
 summary:
-  passed: 4
+  passed: 5
   failed: 0
   skipped: 0
-  total: 4
+  total: 5
   status: pass
-  duration: 9.5µs
-results:
-  - name: K8s.server.version
-    expected: '>= 1.30'
-    actual: v1.30.14-eks-3025e55
-    status: passed
-  - name: OS.release.ID
-    expected: ubuntu
-    actual: ubuntu
-    status: passed
+  duration: 20.5µs
+phases:
+  preDeployment:
+    status: pass
+    constraints:
+      - name: K8s.server.version
+        expected: '>= 1.30'
+        actual: v1.30.14-eks-3025e55
+        status: passed
+      - name: OS.release.ID
+        expected: ubuntu
+        actual: ubuntu
+        status: passed
+    checks:
+      - name: gpu-hardware-detection
+        status: pass
+      - name: kernel-parameters
+        status: pass
+      - name: os-prerequisites
+        status: pass
+    duration: 20.5µs
+```
+
+**Output Structure (All Phases):**
+```yaml
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: ValidationResult
+metadata:
+  timestamp: "2025-12-31T10:30:00Z"
+  version: v0.14.0
+recipeSource: recipe.yaml
+snapshotSource: snapshot.yaml
+summary:
+  passed: 10
+  failed: 0
+  skipped: 0
+  total: 10
+  status: pass
+  duration: 58.4µs
+phases:
+  preDeployment:
+    status: pass
+    constraints:
+      - name: K8s.server.version
+        expected: '>= 1.32.4'
+        actual: v1.35.0
+        status: passed
+      - name: OS.release.ID
+        expected: ubuntu
+        actual: ubuntu
+        status: passed
+    checks:
+      - name: gpu-hardware-detection
+        status: pass
+      - name: kernel-parameters
+        status: pass
+      - name: os-prerequisites
+        status: pass
+    duration: 20.7µs
+  deployment:
+    status: pass
+    checks:
+      - name: gpu-operator.version
+        status: pass
+      - name: operator-health
+        status: pass
+      - name: expected-resources
+        status: pass
+    duration: 1.2µs
+  performance:
+    status: pass
+    checks:
+      - name: nccl-bandwidth-test
+        status: pass
+      - name: fabric-health-check
+        status: pass
+    duration: 1.2µs
+  conformance:
+    status: skipped
+    reason: conformance phase not configured in recipe
+    duration: 0.8µs
 ```
 
 **Validation Statuses:**

@@ -32,6 +32,12 @@ const (
 
 	// ValidationStatusPartial indicates some constraints couldn't be evaluated.
 	ValidationStatusPartial ValidationStatus = "partial"
+
+	// ValidationStatusSkipped indicates a phase was skipped (due to dependency failure).
+	ValidationStatusSkipped ValidationStatus = "skipped"
+
+	// ValidationStatusWarning indicates warnings but no hard failures.
+	ValidationStatusWarning ValidationStatus = "warning"
 )
 
 // ConstraintStatus represents the outcome of evaluating a single constraint.
@@ -61,8 +67,11 @@ type ValidationResult struct {
 	// Summary contains aggregate validation statistics.
 	Summary ValidationSummary `json:"summary" yaml:"summary"`
 
-	// Results contains per-constraint validation details.
-	Results []ConstraintValidation `json:"results" yaml:"results"`
+	// Results contains per-constraint validation details (legacy, for backward compatibility).
+	Results []ConstraintValidation `json:"results,omitempty" yaml:"results,omitempty"`
+
+	// Phases contains per-phase validation results (multi-phase validation).
+	Phases map[string]*PhaseResult `json:"phases,omitempty" yaml:"phases,omitempty"`
 }
 
 // ValidationSummary contains aggregate statistics about the validation.
@@ -108,5 +117,39 @@ type ConstraintValidation struct {
 func NewValidationResult() *ValidationResult {
 	return &ValidationResult{
 		Results: make([]ConstraintValidation, 0),
+		Phases:  make(map[string]*PhaseResult),
 	}
+}
+
+// PhaseResult represents the result of a single validation phase.
+type PhaseResult struct {
+	// Status is the overall status of this phase.
+	Status ValidationStatus `json:"status" yaml:"status"`
+
+	// Constraints contains per-constraint results for this phase.
+	Constraints []ConstraintValidation `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+
+	// Checks contains results of named validation checks.
+	Checks []CheckResult `json:"checks,omitempty" yaml:"checks,omitempty"`
+
+	// Reason explains why the phase was skipped or failed.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+
+	// Duration is how long this phase took to run.
+	Duration time.Duration `json:"duration,omitempty" yaml:"duration,omitempty"`
+}
+
+// CheckResult represents the result of a named validation check.
+type CheckResult struct {
+	// Name is the check identifier.
+	Name string `json:"name" yaml:"name"`
+
+	// Status is the check outcome.
+	Status ValidationStatus `json:"status" yaml:"status"`
+
+	// Reason explains why the check failed or was skipped.
+	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+
+	// Remediation provides actionable guidance for fixing failures.
+	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`
 }

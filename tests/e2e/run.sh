@@ -815,6 +815,121 @@ test_validate() {
   fi
 }
 
+test_validate_multiphase() {
+  msg "=========================================="
+  msg "Testing multi-phase validation"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "validate/multi-phase" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local validate_dir="${OUTPUT_DIR}/validate-multiphase"
+  mkdir -p "$validate_dir"
+
+  # Generate a recipe for testing
+  local recipe_file="${validate_dir}/recipe.yaml"
+  "${EIDOS_BIN}" recipe \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --intent training \
+    --output "$recipe_file" 2>&1 || true
+
+  if [ ! -f "$recipe_file" ]; then
+    skip "validate/multi-phase" "Could not generate recipe"
+    return 0
+  fi
+
+  # Test 1: Pre-deployment phase (default)
+  msg "--- Test: Validate with --phase pre-deployment ---"
+  echo -e "${DIM}  \$ eidos validate --phase pre-deployment${NC}"
+  local predeployment_result="${validate_dir}/validation-predeployment.yaml"
+  local predeployment_output
+  predeployment_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase pre-deployment \
+    --output "$predeployment_result" 2>&1) || true
+
+  if echo "$predeployment_output" | grep -q "preDeployment"; then
+    detail "Pre-deployment phase: PASS"
+    pass "validate/phase-predeployment"
+  else
+    fail "validate/phase-predeployment" "Pre-deployment phase not found in output"
+  fi
+
+  # Test 2: Deployment phase
+  msg "--- Test: Validate with --phase deployment ---"
+  echo -e "${DIM}  \$ eidos validate --phase deployment${NC}"
+  local deployment_output
+  deployment_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment 2>&1) || true
+
+  if echo "$deployment_output" | grep -q "deployment"; then
+    detail "Deployment phase: PASS"
+    pass "validate/phase-deployment"
+  else
+    fail "validate/phase-deployment" "Deployment phase not found in output"
+  fi
+
+  # Test 3: Performance phase
+  msg "--- Test: Validate with --phase performance ---"
+  echo -e "${DIM}  \$ eidos validate --phase performance${NC}"
+  local performance_output
+  performance_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase performance 2>&1) || true
+
+  if echo "$performance_output" | grep -q "performance"; then
+    detail "Performance phase: PASS"
+    pass "validate/phase-performance"
+  else
+    fail "validate/phase-performance" "Performance phase not found in output"
+  fi
+
+  # Test 4: All phases
+  msg "--- Test: Validate with --phase all ---"
+  echo -e "${DIM}  \$ eidos validate --phase all${NC}"
+  local all_result="${validate_dir}/validation-all.yaml"
+  local all_output
+  all_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase all \
+    --output "$all_result" 2>&1) || true
+
+  # Check that all phases are present in the output
+  local phases_found=0
+  echo "$all_output" | grep -q "preDeployment" && ((phases_found++)) || true
+  echo "$all_output" | grep -q "deployment" && ((phases_found++)) || true
+  echo "$all_output" | grep -q "performance" && ((phases_found++)) || true
+  echo "$all_output" | grep -q "conformance" && ((phases_found++)) || true
+
+  if [ $phases_found -ge 3 ]; then
+    detail "All phases: PASS (found $phases_found phases)"
+    pass "validate/phase-all"
+  else
+    fail "validate/phase-all" "Expected at least 3 phases, found $phases_found"
+  fi
+
+  # Test 5: Verify phase result structure
+  if [ -f "$all_result" ]; then
+    msg "--- Test: Verify phase result structure ---"
+    echo -e "${DIM}  \$ yq '.phases' validation-all.yaml${NC}"
+
+    # Check if phases field exists
+    if yq '.phases' "$all_result" | grep -q "preDeployment"; then
+      detail "Phase result structure: PASS"
+      pass "validate/result-structure"
+    else
+      fail "validate/result-structure" "phases field not found in result"
+    fi
+  fi
+}
+
 # =============================================================================
 # External Data Tests (--data flag)
 # =============================================================================
@@ -1232,6 +1347,7 @@ main() {
     test_snapshot
     test_recipe_from_snapshot
     test_validate
+    test_validate_multiphase
     test_oci_bundle
     cleanup_e2e
   else

@@ -1,0 +1,94 @@
+# Example Recipes
+
+This directory contains example recipe files demonstrating various configurations and features.
+
+## Files
+
+### Basic Recipes
+
+- **`kind.yaml`** - Recipe for local Kind cluster with fake GPU
+- **`eks-training.yaml`** - EKS recipe optimized for training workloads
+- **`eks-gb200-training.yaml`** - EKS recipe for GB200 hardware with training optimizations
+- **`eks-gb200-ubuntu-training.yaml`** - Complete recipe for GB200 on EKS with Ubuntu
+
+### Advanced Examples
+
+- **`eks-gb200-ubuntu-training-with-validation.yaml`** - Demonstrates multi-phase validation configuration
+  - Shows how to configure validation checks for different deployment phases
+  - Includes constraints with severity levels and remediation guidance
+  - Demonstrates pre-deployment, deployment, and performance validation phases
+
+## Using Example Recipes
+
+### Generate Bundle from Recipe
+
+```shell
+# Generate deployment bundle
+eidos bundle --recipe eks-gb200-ubuntu-training.yaml --output ./bundles
+
+# Generate bundle with value overrides
+eidos bundle \
+  --recipe eks-gb200-ubuntu-training.yaml \
+  --set gpuoperator:driver.version=580.82.07 \
+  --output ./bundles
+```
+
+### Validate Recipe Against Cluster
+
+```shell
+# Capture cluster snapshot
+eidos snapshot --output snapshot.yaml
+
+# Validate pre-deployment phase (default)
+eidos validate \
+  --recipe eks-gb200-ubuntu-training-with-validation.yaml \
+  --snapshot snapshot.yaml
+
+# Validate all phases
+eidos validate \
+  --recipe eks-gb200-ubuntu-training-with-validation.yaml \
+  --snapshot snapshot.yaml \
+  --phase all
+
+# Validate specific phase
+eidos validate \
+  --recipe eks-gb200-ubuntu-training-with-validation.yaml \
+  --snapshot snapshot.yaml \
+  --phase deployment
+```
+
+## Multi-Phase Validation
+
+The `eks-gb200-ubuntu-training-with-validation.yaml` example demonstrates the multi-phase validation system:
+
+### Validation Phases
+
+1. **Pre-deployment**: Validates infrastructure prerequisites
+   - K8s version, OS, kernel compatibility
+   - GPU hardware detection
+   - System parameter configuration
+
+2. **Deployment**: Validates component deployment
+   - Component versions
+   - Operator health checks
+   - Expected resources present
+
+3. **Performance**: Validates system performance
+   - NCCL bandwidth testing
+   - Network fabric health
+
+4. **Conformance**: Validates workload-specific requirements
+   - (Optional) AI/ML workload conformance
+
+### Constraint Features
+
+Constraints in the validation example demonstrate:
+- **Severity levels**: `error` (blocks deployment) vs `warning` (informational)
+- **Remediation guidance**: Actionable steps to resolve failures
+- **Version comparisons**: `>=`, `<=`, `==` operators for semantic versioning
+
+## See Also
+
+- [CLI Reference](../../docs/user-guide/cli-reference.md) - Complete CLI command documentation
+- [Recipe Development Guide](../../docs/integration/recipe-development.md) - Creating and modifying recipes
+- [Validation Documentation](../../docs/user-guide/cli-reference.md#eidos-validate) - Multi-phase validation details

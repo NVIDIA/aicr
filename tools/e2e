@@ -1011,6 +1011,182 @@ EOF
 }
 
 # ============================================================================
+# VALIDATION MULTI-PHASE TESTS (--phase flag)
+# ============================================================================
+
+test_validate_phases() {
+  msg ""
+  msg "=========================================="
+  msg "Testing Multi-Phase Validation (--phase flag)"
+  msg "=========================================="
+
+  # Note: This test doesn't require a real snapshot, just tests CLI flags
+  # Create a mock recipe and snapshot for testing
+
+  local validate_test_dir="${OUTPUT_DIR}/validate-phases"
+  mkdir -p "$validate_test_dir"
+
+  # Use an existing recipe if available
+  local recipe_file="$RECIPE_FILE"
+  if [ -z "$recipe_file" ] || [ ! -f "$recipe_file" ]; then
+    msg "Note: No recipe available, generating one for validation tests"
+    recipe_file="${validate_test_dir}/test-recipe.yaml"
+    if ! "${EIDOS_BIN}" recipe --service eks --accelerator h100 --intent training \
+      -o "$recipe_file" 2>&1; then
+      test_fail "validate/setup" "Failed to generate recipe for validation test"
+      return 0
+    fi
+  fi
+
+  # Create a mock snapshot for testing (minimal valid structure)
+  local snapshot_file="${validate_test_dir}/mock-snapshot.yaml"
+  cat > "$snapshot_file" << 'EOF'
+measurements:
+  - type: K8s
+    subtypes:
+      - name: server
+        data:
+          version: v1.33.0
+  - type: OS
+    subtypes:
+      - name: release
+        data:
+          ID: ubuntu
+          VERSION_ID: "24.04"
+EOF
+
+  # -------------------------------------------------------------------------
+  # Test 1: Default phase (pre-deployment)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 1: Default Phase (pre-deployment) ---"
+
+  local output
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" 2>&1) || true
+
+  if echo "$output" | grep -q "validation completed"; then
+    test_pass "validate/default-phase"
+  else
+    test_fail "validate/default-phase" "Validation failed"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 2: Explicit pre-deployment phase
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 2: Explicit --phase pre-deployment ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase pre-deployment 2>&1) || true
+
+  if echo "$output" | grep -q "preDeployment"; then
+    test_pass "validate/phase-predeployment"
+  else
+    test_fail "validate/phase-predeployment" "Pre-deployment phase not found"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 3: Deployment phase
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 3: --phase deployment ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase deployment 2>&1) || true
+
+  if echo "$output" | grep -q "deployment"; then
+    test_pass "validate/phase-deployment"
+  else
+    test_fail "validate/phase-deployment" "Deployment phase not found"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 4: Performance phase
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 4: --phase performance ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase performance 2>&1) || true
+
+  if echo "$output" | grep -q "performance"; then
+    test_pass "validate/phase-performance"
+  else
+    test_fail "validate/phase-performance" "Performance phase not found"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 5: Conformance phase
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 5: --phase conformance ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase conformance 2>&1) || true
+
+  if echo "$output" | grep -q "conformance"; then
+    test_pass "validate/phase-conformance"
+  else
+    test_fail "validate/phase-conformance" "Conformance phase not found"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 6: All phases
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 6: --phase all ---"
+
+  local all_phases_file="${validate_test_dir}/all-phases-result.yaml"
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase all -o "$all_phases_file" 2>&1) || true
+
+  # Check for multiple phases in output
+  local phase_count=0
+  echo "$output" | grep -q "preDeployment" && ((phase_count++)) || true
+  echo "$output" | grep -q "deployment" && ((phase_count++)) || true
+  echo "$output" | grep -q "performance" && ((phase_count++)) || true
+
+  if [ $phase_count -ge 3 ]; then
+    test_pass "validate/phase-all (found $phase_count phases)"
+  else
+    test_fail "validate/phase-all" "Expected 3+ phases, found $phase_count"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 7: Verify phase structure in output file
+  # -------------------------------------------------------------------------
+  if [ -f "$all_phases_file" ]; then
+    msg ""
+    msg "--- Test 7: Verify Phase Result Structure ---"
+
+    if grep -q "phases:" "$all_phases_file" && \
+       grep -q "preDeployment:" "$all_phases_file"; then
+      test_pass "validate/result-structure"
+    else
+      test_fail "validate/result-structure" "phases field not found in output"
+    fi
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 8: Invalid phase (should fail)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 8: Invalid --phase value (should fail) ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase invalid-phase 2>&1) || true
+
+  if echo "$output" | grep -qi "invalid phase"; then
+    test_pass "validate/invalid-phase"
+  else
+    test_fail "validate/invalid-phase" "Expected error for invalid phase"
+  fi
+
+  msg ""
+  msg "Multi-phase validation tests completed"
+}
+
+# ============================================================================
 # EXTERNAL DATA DIRECTORY TESTS (--data flag)
 # ============================================================================
 
@@ -1199,6 +1375,9 @@ test_criteria_file_flag
 
 # Step 6: Test external data directory (--data flag)
 test_external_data_flag
+
+# Step 7: Test multi-phase validation (--phase flag)
+test_validate_phases
 
 # Print summary
 echo ""

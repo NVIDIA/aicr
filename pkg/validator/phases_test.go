@@ -1,0 +1,472 @@
+// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package validator
+
+import (
+	"context"
+	"testing"
+
+	"github.com/NVIDIA/eidos/pkg/measurement"
+	"github.com/NVIDIA/eidos/pkg/recipe"
+	"github.com/NVIDIA/eidos/pkg/snapshotter"
+)
+
+func TestValidatePhase(t *testing.T) {
+	snapshot := createTestSnapshot()
+	recipeResult := createTestRecipeWithValidation()
+
+	tests := []struct {
+		name       string
+		phase      ValidationPhaseName
+		wantStatus ValidationStatus
+		wantPhases int // Number of phases in result
+	}{
+		{
+			name:       "pre-deployment phase",
+			phase:      PhasePreDeployment,
+			wantStatus: ValidationStatusPass,
+			wantPhases: 1,
+		},
+		{
+			name:       "deployment phase",
+			phase:      PhaseDeployment,
+			wantStatus: ValidationStatusPass,
+			wantPhases: 1,
+		},
+		{
+			name:       "performance phase",
+			phase:      PhasePerformance,
+			wantStatus: ValidationStatusPass,
+			wantPhases: 1,
+		},
+		{
+			name:       "conformance phase",
+			phase:      PhaseConformance,
+			wantStatus: ValidationStatusSkipped, // Not configured in test recipe
+			wantPhases: 1,
+		},
+		{
+			name:       "all phases",
+			phase:      PhaseAll,
+			wantStatus: ValidationStatusPass,
+			wantPhases: 4, // All 4 phases
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"))
+			result, err := v.ValidatePhase(context.Background(), tt.phase, recipeResult, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Status != tt.wantStatus {
+				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
+			}
+
+			if len(result.Phases) != tt.wantPhases {
+				t.Errorf("Phases count = %d, want %d", len(result.Phases), tt.wantPhases)
+			}
+		})
+	}
+}
+
+func TestValidatePreDeployment(t *testing.T) {
+	snapshot := createTestSnapshot()
+
+	tests := []struct {
+		name             string
+		constraints      []recipe.Constraint
+		validationConfig *recipe.ValidationConfig
+		wantStatus       ValidationStatus
+		wantConstraints  int
+		wantChecks       int
+	}{
+		{
+			name: "with constraints and checks",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1.32.4"},
+				{Name: "OS.release.ID", Value: "ubuntu"},
+			},
+			validationConfig: &recipe.ValidationConfig{
+				PreDeployment: &recipe.ValidationPhase{
+					Checks: []string{"gpu-hardware-detection", "kernel-parameters"},
+				},
+			},
+			wantStatus:      ValidationStatusPass,
+			wantConstraints: 2,
+			wantChecks:      2,
+		},
+		{
+			name: "constraints only",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1.32.4"},
+			},
+			validationConfig: nil,
+			wantStatus:       ValidationStatusPass,
+			wantConstraints:  1,
+			wantChecks:       0,
+		},
+		{
+			name:             "no constraints or checks",
+			constraints:      []recipe.Constraint{},
+			validationConfig: nil,
+			wantStatus:       ValidationStatusPass,
+			wantConstraints:  0,
+			wantChecks:       0,
+		},
+		{
+			name: "failing constraint",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 99.0"}, // Will fail
+			},
+			validationConfig: nil,
+			wantStatus:       ValidationStatusFail,
+			wantConstraints:  1,
+			wantChecks:       0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"))
+			recipeResult := &recipe.RecipeResult{
+				Constraints: tt.constraints,
+				Validation:  tt.validationConfig,
+			}
+
+			result, err := v.validatePreDeployment(context.Background(), recipeResult, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Status != tt.wantStatus {
+				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
+			}
+
+			phaseResult := result.Phases[string(PhasePreDeployment)]
+			if phaseResult == nil {
+				t.Fatal("preDeployment phase result is nil")
+			}
+
+			if len(phaseResult.Constraints) != tt.wantConstraints {
+				t.Errorf("Constraints count = %d, want %d", len(phaseResult.Constraints), tt.wantConstraints)
+			}
+
+			if len(phaseResult.Checks) != tt.wantChecks {
+				t.Errorf("Checks count = %d, want %d", len(phaseResult.Checks), tt.wantChecks)
+			}
+		})
+	}
+}
+
+func TestValidateDeployment(t *testing.T) {
+	snapshot := createTestSnapshot()
+
+	tests := []struct {
+		name             string
+		validationConfig *recipe.ValidationConfig
+		wantStatus       ValidationStatus
+		wantChecks       int
+	}{
+		{
+			name: "with checks",
+			validationConfig: &recipe.ValidationConfig{
+				Deployment: &recipe.ValidationPhase{
+					Checks: []string{"operator-health", "expected-resources"},
+				},
+			},
+			wantStatus: ValidationStatusPass,
+			wantChecks: 2,
+		},
+		{
+			name:             "not configured",
+			validationConfig: nil,
+			wantStatus:       ValidationStatusSkipped,
+			wantChecks:       0,
+		},
+		{
+			name: "with constraints",
+			validationConfig: &recipe.ValidationConfig{
+				Deployment: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "gpu-operator.version", Value: "== v25.10.1"},
+					},
+					Checks: []string{"operator-health"},
+				},
+			},
+			wantStatus: ValidationStatusPass,
+			wantChecks: 2, // 1 constraint + 1 check (both as checks in skeleton)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"))
+			recipeResult := &recipe.RecipeResult{
+				Validation: tt.validationConfig,
+			}
+
+			result, err := v.validateDeployment(context.Background(), recipeResult, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Status != tt.wantStatus {
+				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
+			}
+
+			phaseResult := result.Phases[string(PhaseDeployment)]
+			if phaseResult == nil {
+				t.Fatal("deployment phase result is nil")
+			}
+
+			if len(phaseResult.Checks) != tt.wantChecks {
+				t.Errorf("Checks count = %d, want %d", len(phaseResult.Checks), tt.wantChecks)
+			}
+		})
+	}
+}
+
+func TestValidatePerformance(t *testing.T) {
+	snapshot := createTestSnapshot()
+
+	tests := []struct {
+		name             string
+		validationConfig *recipe.ValidationConfig
+		wantStatus       ValidationStatus
+		wantChecks       int
+	}{
+		{
+			name: "with checks and infrastructure",
+			validationConfig: &recipe.ValidationConfig{
+				Performance: &recipe.ValidationPhase{
+					Infrastructure: "nccl-doctor",
+					Checks:         []string{"nccl-bandwidth-test", "fabric-health"},
+				},
+			},
+			wantStatus: ValidationStatusPass,
+			wantChecks: 2,
+		},
+		{
+			name:             "not configured",
+			validationConfig: nil,
+			wantStatus:       ValidationStatusSkipped,
+			wantChecks:       0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"))
+			recipeResult := &recipe.RecipeResult{
+				Validation: tt.validationConfig,
+			}
+
+			result, err := v.validatePerformance(context.Background(), recipeResult, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Status != tt.wantStatus {
+				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
+			}
+
+			phaseResult := result.Phases[string(PhasePerformance)]
+			if phaseResult == nil {
+				t.Fatal("performance phase result is nil")
+			}
+
+			if len(phaseResult.Checks) != tt.wantChecks {
+				t.Errorf("Checks count = %d, want %d", len(phaseResult.Checks), tt.wantChecks)
+			}
+		})
+	}
+}
+
+func TestValidateConformance(t *testing.T) {
+	snapshot := createTestSnapshot()
+
+	tests := []struct {
+		name             string
+		validationConfig *recipe.ValidationConfig
+		wantStatus       ValidationStatus
+		wantChecks       int
+	}{
+		{
+			name: "with checks",
+			validationConfig: &recipe.ValidationConfig{
+				Conformance: &recipe.ValidationPhase{
+					Checks: []string{"ai-workload-validation"},
+				},
+			},
+			wantStatus: ValidationStatusPass,
+			wantChecks: 1,
+		},
+		{
+			name:             "not configured",
+			validationConfig: nil,
+			wantStatus:       ValidationStatusSkipped,
+			wantChecks:       0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"))
+			recipeResult := &recipe.RecipeResult{
+				Validation: tt.validationConfig,
+			}
+
+			result, err := v.validateConformance(context.Background(), recipeResult, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Status != tt.wantStatus {
+				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
+			}
+
+			phaseResult := result.Phases[string(PhaseConformance)]
+			if phaseResult == nil {
+				t.Fatal("conformance phase result is nil")
+			}
+
+			if len(phaseResult.Checks) != tt.wantChecks {
+				t.Errorf("Checks count = %d, want %d", len(phaseResult.Checks), tt.wantChecks)
+			}
+		})
+	}
+}
+
+func TestValidateAll_PhaseOrder(t *testing.T) {
+	snapshot := createTestSnapshot()
+	recipeResult := createTestRecipeWithValidation()
+
+	v := New(WithVersion("test"))
+	result, err := v.validateAll(context.Background(), recipeResult, snapshot)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify all phases are present
+	expectedPhases := []string{"preDeployment", "deployment", "performance", "conformance"}
+	for _, phaseName := range expectedPhases {
+		if result.Phases[phaseName] == nil {
+			t.Errorf("phase %q is missing from result", phaseName)
+		}
+	}
+
+	// Verify pre-deployment has constraint results
+	preDeployPhase := result.Phases["preDeployment"]
+	if len(preDeployPhase.Constraints) == 0 {
+		t.Error("preDeployment phase should have constraint results")
+	}
+
+	// Verify deployment has check results
+	deployPhase := result.Phases["deployment"]
+	if len(deployPhase.Checks) == 0 {
+		t.Error("deployment phase should have check results")
+	}
+}
+
+func TestValidateAll_PhaseDependencies(t *testing.T) {
+	// This test would verify phase dependency logic (fail → skip subsequent)
+	// For skeleton implementation, all phases pass, so we can't test skip logic yet
+	// TODO: Add test when we have real validation that can fail
+
+	snapshot := createTestSnapshot()
+	recipeResult := createTestRecipeWithValidation()
+
+	v := New(WithVersion("test"))
+	result, err := v.validateAll(context.Background(), recipeResult, snapshot)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// In skeleton, all phases should pass
+	if result.Summary.Status != ValidationStatusPass {
+		t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, ValidationStatusPass)
+	}
+
+	// No phases should be skipped (all pass in skeleton)
+	for phaseName, phase := range result.Phases {
+		if phaseName == "conformance" {
+			// Conformance is not configured, so it should be skipped
+			if phase.Status != ValidationStatusSkipped {
+				t.Errorf("conformance phase Status = %v, want %v", phase.Status, ValidationStatusSkipped)
+			}
+		} else {
+			if phase.Status != ValidationStatusPass {
+				t.Errorf("%s phase Status = %v, want %v", phaseName, phase.Status, ValidationStatusPass)
+			}
+		}
+	}
+}
+
+// Helper functions
+
+func createTestSnapshot() *snapshotter.Snapshot {
+	return &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("v1.35.0"),
+						},
+					},
+				},
+			},
+			{
+				Type: measurement.TypeOS,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "release",
+						Data: map[string]measurement.Reading{
+							"ID":         measurement.Str("ubuntu"),
+							"VERSION_ID": measurement.Str("24.04"),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func createTestRecipeWithValidation() *recipe.RecipeResult {
+	return &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{
+			{Name: "K8s.server.version", Value: ">= 1.32.4"},
+			{Name: "OS.release.ID", Value: "ubuntu"},
+		},
+		Validation: &recipe.ValidationConfig{
+			PreDeployment: &recipe.ValidationPhase{
+				Checks: []string{"gpu-hardware-detection", "kernel-parameters", "os-prerequisites"},
+			},
+			Deployment: &recipe.ValidationPhase{
+				Checks: []string{"operator-health", "expected-resources"},
+			},
+			Performance: &recipe.ValidationPhase{
+				Infrastructure: "nccl-doctor",
+				Checks:         []string{"nccl-bandwidth-test", "fabric-health"},
+			},
+			// Conformance not configured (will be skipped)
+		},
+	}
+}

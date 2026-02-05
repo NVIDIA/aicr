@@ -15,7 +15,9 @@ NVIDIA Eidos (Eidos) is a suite of tooling designed to automate the complexity o
 | **Deployer** | A plugin that transforms bundle artifacts into deployment-specific formats: `helm` (Helm umbrella charts, default), `argocd` (Applications with sync-waves). |
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator, cert-manager). Components have versions, Helm sources, and configuration values. |
 | **ComponentRef** | A reference to a component in a recipe, including version, source repository, values file, and dependency references. |
-| **Constraint** | A validation rule in a recipe specifying required system conditions (e.g., `K8s.server.version >= 1.31`, `OS.release.ID == ubuntu`). |
+| **Constraint** | A validation rule in a recipe specifying required system conditions (e.g., `K8s.server.version >= 1.31`, `OS.release.ID == ubuntu`). Constraints can have severity (error/warning), remediation guidance, and units. |
+| **Validation Phase** | A stage of validation in the deployment lifecycle: pre-deployment (infrastructure), deployment (components), performance (system), conformance (workloads). |
+| **ValidationConfig** | Configuration in a recipe defining phase-specific checks, constraints, expected resources, and node selection for validation. |
 | **Measurement** | A captured data point from the system organized by type (K8s, OS, GPU, SystemD), subtype, and key-value readings. |
 | **Specificity** | A score indicating how specific a recipe's criteria is (number of non-"any" fields). More specific recipes are applied later during merge. |
 | **Asymmetric Matching** | The criteria matching algorithm where recipe "any" = wildcard (matches any query), but query "any" ≠ specific recipe (prevents overly-specific matches). |
@@ -64,10 +66,15 @@ Once the system state is known, Eidos generates a "Recipe"—a set of configurat
 
 ### Step 3: Validate (Check Compatibility)
 
-Before deploying, Eidos can validate that a target cluster meets the recipe requirements.
-*   **What it does:** It compares recipe constraints (version requirements, configuration settings) against actual measurements from a cluster snapshot.
+Before deploying, Eidos can validate that a target cluster meets the recipe requirements using multi-phase validation.
+*   **What it does:** It compares recipe constraints (version requirements, configuration settings) against actual measurements from a cluster snapshot across different validation phases.
+*   **Validation Phases:**
+    - **Pre-deployment**: Validates infrastructure prerequisites (K8s version, OS, kernel, GPU hardware)
+    - **Deployment**: Validates component deployment health and expected resources
+    - **Performance**: Validates system performance and network fabric health
+    - **Conformance**: Validates workload-specific requirements
 *   **Constraint Types:** Supports version comparisons (`>=`, `<=`, `>`, `<`), equality (`==`, `!=`), and exact match for configuration values.
-*   **How it helps:** It catches compatibility issues before deployment, preventing failed rollouts and configuration drift. Ideal for CI/CD pipelines with `--fail-on-error` flag.
+*   **How it helps:** It catches compatibility issues before deployment, validates component health after deployment, and ensures performance requirements are met. Ideal for CI/CD pipelines with `--fail-on-error` flag and phased deployment validation.
 
 ### Step 4: Bundle (Create Artifacts)
 
@@ -149,6 +156,16 @@ eidos recipe --service eks --accelerator h100 --intent training --platform pytor
 # Snapshot mode: analyze captured state
 eidos snapshot -o snapshot.yaml
 eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch
+```
+
+### Validate Configuration
+
+```shell
+# Validate pre-deployment phase (default)
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
+
+# Validate all phases
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase all
 ```
 
 ### Create Bundle
