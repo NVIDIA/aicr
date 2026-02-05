@@ -242,15 +242,15 @@ func TestBuilder_BuildFromCriteriaWithEvaluator(t *testing.T) {
 // TestConstraintWarning tests the ConstraintWarning struct.
 func TestConstraintWarning(t *testing.T) {
 	warning := ConstraintWarning{
-		Overlay:    "gb200-eks-training",
+		Overlay:    "h100-eks-ubuntu-training-kubeflow",
 		Constraint: "K8s.server.version",
 		Expected:   ">= 1.32.4",
 		Actual:     "1.30.0",
 		Reason:     "expected >= 1.32.4, got 1.30.0",
 	}
 
-	if warning.Overlay != "gb200-eks-training" {
-		t.Errorf("expected overlay gb200-eks-training, got %q", warning.Overlay)
+	if warning.Overlay != "h100-eks-ubuntu-training-kubeflow" {
+		t.Errorf("expected overlay h100-eks-ubuntu-training-kubeflow, got %q", warning.Overlay)
 	}
 	if warning.Constraint != "K8s.server.version" {
 		t.Errorf("expected constraint K8s.server.version, got %q", warning.Constraint)

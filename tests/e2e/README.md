@@ -107,12 +107,12 @@ brew install kind tilt-dev/tap/tilt tilt-dev/tap/ctlptl ko
 [PASS] setup/fake-nvidia-smi
 
 [INFO] --- Test: Recipe with query parameters ---
-  $ eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training -o basic.yaml
+  $ eidos recipe --service eks --accelerator h100 --os ubuntu --intent training -o basic.yaml
      → Generated recipe with 11 components
 [PASS] cli/recipe/query-params
 
 [INFO] --- Test: Recipe with external data ---
-  $ eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training --data ./examples/data
+  $ eidos recipe --service eks --accelerator h100 --os ubuntu --intent training --data ./examples/data
      → External component 'dgxc-teleport' included in recipe
 [PASS] cli/external-data/recipe
 
