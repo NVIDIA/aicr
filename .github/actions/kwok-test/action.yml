@@ -1,0 +1,224 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'KWOK Cluster Test'
+description: 'Test a recipe using KWOK simulated nodes in an isolated Kind cluster'
+
+inputs:
+  recipe:
+    description: 'Recipe name to test (e.g., eks-training, gb200-eks-training)'
+    required: true
+  go_version:
+    description: 'Go version to install'
+    required: true
+  kind_version:
+    description: 'Kind version to install'
+    required: false
+    default: '0.31.0'
+  helm_version:
+    description: 'Helm version to install'
+    required: false
+    default: 'v4.1.0'
+  kwok_version:
+    description: 'KWOK version to install'
+    required: false
+    default: 'v0.7.0'
+  kubectl_version:
+    description: 'kubectl version to install'
+    required: false
+    default: 'v1.35.0'
+  upload_artifacts:
+    description: 'Whether to upload debug artifacts on failure'
+    required: false
+    default: 'true'
+  artifact_retention_days:
+    description: 'Number of days to retain debug artifacts'
+    required: false
+    default: '7'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+      with:
+        go-version: ${{ inputs.go_version }}
+        cache: true
+
+    - name: Free up disk space
+      shell: bash
+      run: |
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        docker system prune -f
+
+    - name: Install Kind
+      shell: bash
+      run: |
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v${{ inputs.kind_version }}/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+        kind version
+
+    - name: Install Helm
+      shell: bash
+      run: |
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | \
+          DESIRED_VERSION=${{ inputs.helm_version }} bash
+        helm version
+
+    - name: Install kubectl
+      shell: bash
+      run: |
+        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        curl -fsSL -o kubectl "https://dl.k8s.io/release/${{ inputs.kubectl_version }}/bin/linux/${ARCH}/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/kubectl
+        kubectl version --client
+
+    - name: Install yq
+      shell: bash
+      run: |
+        sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+        sudo chmod +x /usr/local/bin/yq
+        yq --version
+
+    - name: Prep system for Kind cluster
+      shell: bash
+      run: |
+        sudo sysctl -w net.ipv4.ip_forward=1
+        sudo sysctl -w fs.inotify.max_user_watches=524288
+        sudo sysctl -w fs.inotify.max_user_instances=1024
+
+    - name: Install GoReleaser
+      uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6.4.0
+      with:
+        install-only: true
+
+    - name: Build eidos binary
+      shell: bash
+      run: |
+        make build
+        ls -la dist/
+
+    - name: Create Kind cluster for ${{ inputs.recipe }}
+      shell: bash
+      env:
+        KWOK_CLUSTER: kwok-${{ inputs.recipe }}
+      run: |
+        echo "Creating Kind cluster: ${KWOK_CLUSTER}"
+        kind create cluster \
+          --name "${KWOK_CLUSTER}" \
+          --config kwok/kind-config.yaml \
+          --wait 60s
+        kubectl config use-context "kind-${KWOK_CLUSTER}"
+        kubectl wait --for=condition=Ready node --all --timeout=60s
+
+    - name: Install KWOK controller
+      shell: bash
+      run: |
+        echo "Installing KWOK controller..."
+        helm repo add kwok https://kwok.sigs.k8s.io/charts/ --force-update
+        # Note: Helm chart versions differ from KWOK release versions
+        # (e.g., KWOK v0.7.0 = chart 0.2.0), so we use latest chart
+        helm upgrade --install kwok-controller kwok/kwok \
+          --namespace kube-system \
+          --set hostNetwork=true \
+          --wait
+        helm upgrade --install kwok-stage-fast kwok/stage-fast \
+          --namespace kube-system
+
+        # Patch kindnet to not run on KWOK nodes (if it exists)
+        if kubectl get daemonset -n kube-system kindnet &>/dev/null; then
+          echo "Patching kindnet to exclude KWOK nodes..."
+          kubectl patch daemonset -n kube-system kindnet --type=json -p='[
+            {"op": "add", "path": "/spec/template/spec/affinity", "value": {
+              "nodeAffinity": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                  "nodeSelectorTerms": [{
+                    "matchExpressions": [{
+                      "key": "type",
+                      "operator": "NotIn",
+                      "values": ["kwok"]
+                    }]
+                  }]
+                }
+              }
+            }}
+          ]' 2>/dev/null || true
+        fi
+
+    - name: Create KWOK nodes for ${{ inputs.recipe }}
+      shell: bash
+      run: |
+        echo "Creating KWOK nodes for recipe: ${{ inputs.recipe }}"
+        bash kwok/scripts/apply-nodes.sh "${{ inputs.recipe }}"
+        echo "KWOK nodes created:"
+        kubectl get nodes -l type=kwok
+
+    - name: Validate scheduling for ${{ inputs.recipe }}
+      id: validate
+      shell: bash
+      run: |
+        echo "Validating scheduling for recipe: ${{ inputs.recipe }}"
+        bash kwok/scripts/validate-scheduling.sh "${{ inputs.recipe }}"
+
+    - name: Collect debug artifacts
+      if: failure()
+      shell: bash
+      env:
+        KWOK_CLUSTER: kwok-${{ inputs.recipe }}
+      run: |
+        mkdir -p /tmp/debug-artifacts-${{ inputs.recipe }}
+        kubectl get all --all-namespaces > /tmp/debug-artifacts-${{ inputs.recipe }}/all-resources.txt || true
+        kubectl get nodes -o wide > /tmp/debug-artifacts-${{ inputs.recipe }}/nodes.txt || true
+        kubectl get nodes -l type=kwok -o yaml > /tmp/debug-artifacts-${{ inputs.recipe }}/kwok-nodes.yaml || true
+        kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts-${{ inputs.recipe }}/events.txt || true
+        kubectl get pods --all-namespaces -o wide > /tmp/debug-artifacts-${{ inputs.recipe }}/pods.txt || true
+
+        # Get pending pod details
+        for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
+          for pod in $(kubectl get pods -n "$ns" --field-selector=status.phase=Pending -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            kubectl describe pod -n "$ns" "$pod" > "/tmp/debug-artifacts-${{ inputs.recipe }}/pending-${ns}-${pod}.txt" 2>/dev/null || true
+          done
+        done
+
+    - name: Export Kind logs
+      if: failure()
+      shell: bash
+      env:
+        KWOK_CLUSTER: kwok-${{ inputs.recipe }}
+      run: |
+        mkdir -p /tmp/kind-logs-${{ inputs.recipe }}
+        kind export logs /tmp/kind-logs-${{ inputs.recipe }} --name "${KWOK_CLUSTER}" || true
+
+    - name: Upload debug artifacts
+      if: failure() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      with:
+        name: kwok-debug-${{ inputs.recipe }}-${{ github.run_id }}
+        path: |
+          /tmp/debug-artifacts-${{ inputs.recipe }}/
+          /tmp/kind-logs-${{ inputs.recipe }}/
+        retention-days: ${{ inputs.artifact_retention_days }}
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      env:
+        KWOK_CLUSTER: kwok-${{ inputs.recipe }}
+      run: |
+        kind delete cluster --name "${KWOK_CLUSTER}" || true
+        docker system prune -f || true

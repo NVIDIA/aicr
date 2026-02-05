@@ -20,3 +20,8 @@ cdi:
   default: false
 hostPaths:
   driverInstallDir: /run/nvidia/driver
+validator:
+  plugin:
+    env:
+      - name: WITH_WORKLOAD
+        value: "false"

@@ -1,0 +1,77 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Unified node template for KWOK simulation (system and accelerated nodes)
+# GPU labels/resources are only included when GPU_PRODUCT is set.
+
+apiVersion: v1
+kind: Node
+metadata:
+  name: ${NODE_NAME}
+  labels:
+    type: kwok
+    kubernetes.io/hostname: ${NODE_NAME}
+    kubernetes.io/os: linux
+    kubernetes.io/arch: ${ARCH}
+    node.kubernetes.io/instance-type: ${INSTANCE_TYPE}
+    topology.kubernetes.io/region: ${REGION}
+    topology.kubernetes.io/zone: ${ZONE}
+    eidos.nvidia.com/node-type: ${NODE_TYPE}
+${EXTRA_LABELS}
+${GPU_LABELS}
+  annotations:
+    kwok.x-k8s.io/node: "fake"
+${GPU_ANNOTATIONS}
+spec:
+  taints:
+    - key: kwok.x-k8s.io/node
+      value: fake
+      effect: NoSchedule
+status:
+  nodeInfo:
+    architecture: ${ARCH}
+    containerRuntimeVersion: containerd://1.7.0
+    kernelVersion: 6.1.0-fake
+    kubeletVersion: ${K8S_VERSION}
+    operatingSystem: linux
+    osImage: ${OS_IMAGE}
+  capacity:
+    cpu: "${CPU}"
+    memory: ${MEMORY}
+    ephemeral-storage: ${STORAGE}
+    pods: "${MAX_PODS}"
+${GPU_CAPACITY}
+  allocatable:
+    cpu: "${CPU}"
+    memory: ${MEMORY}
+    ephemeral-storage: ${STORAGE}
+    pods: "${MAX_PODS}"
+${GPU_ALLOCATABLE}
+  conditions:
+    - type: Ready
+      status: "True"
+      reason: KubeletReady
+      message: kubelet is posting ready status
+    - type: MemoryPressure
+      status: "False"
+      reason: KubeletHasSufficientMemory
+    - type: DiskPressure
+      status: "False"
+      reason: KubeletHasNoDiskPressure
+    - type: PIDPressure
+      status: "False"
+      reason: KubeletHasSufficientPID
+  addresses:
+    - type: Hostname
+      address: ${NODE_NAME}
