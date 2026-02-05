@@ -8,7 +8,7 @@ KWOK (Kubernetes WithOut Kubelet) tests Eidos bundles against simulated GPU clus
 make build                              # Build eidos binary
 make kwok-test-all                      # Test all recipes (serial)
 make kwok-test-all-parallel             # Test all recipes (parallel, faster)
-make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
+make kwok-e2e RECIPE=h100-eks-ubuntu-training-kubeflow # Test single recipe
 ```
 
 ## Architecture
@@ -41,8 +41,8 @@ The script reads recipe criteria and selects matching profiles:
 
 | Service | Accelerator | GPU Profile |
 |---------|-------------|-------------|
-| eks | gb200 | `eks/p6-gb200.yaml` |
 | eks | h100 (default) | `eks/p5-h100.yaml` |
+| eks | gb200 | `eks/p6-gb200.yaml` |
 | gke | any | `eks/p5-h100.yaml` (fallback) |
 
 ### Cluster Defaults

@@ -18,7 +18,7 @@
 #
 # Reads the recipe overlay to determine:
 #   - criteria.service → cloud provider (eks, gke)
-#   - criteria.accelerator → GPU type (h100, gb200)
+#   - criteria.accelerator → GPU type (h100 default, gb200)
 #
 # Fixed defaults: 2 system nodes, 4 GPU nodes
 

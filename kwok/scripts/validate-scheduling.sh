@@ -17,7 +17,7 @@
 #
 # Usage:
 #   ./validate-scheduling.sh <recipe-name>
-#   ./validate-scheduling.sh gb200-eks-training
+#   ./validate-scheduling.sh h100-eks-ubuntu-training-kubeflow
 #
 # This script:
 # 1. Generates a recipe from the cluster config
@@ -425,7 +425,7 @@ main() {
             -*)
                 echo "Unknown option: $1"
                 echo "Usage: $0 [--keep-namespace] <recipe-name>"
-                echo "Example: $0 gb200-eks-training"
+                echo "Example: $0 h100-eks-ubuntu-training-kubeflow"
                 echo "         $0 --keep-namespace eks-training"
                 exit 1
                 ;;
@@ -438,7 +438,7 @@ main() {
 
     if [[ -z "$recipe" ]]; then
         echo "Usage: $0 [--keep-namespace] <recipe-name>"
-        echo "Example: $0 gb200-eks-training"
+        echo "Example: $0 h100-eks-ubuntu-training-kubeflow"
         echo "         $0 --keep-namespace eks-training"
         exit 1
     fi
