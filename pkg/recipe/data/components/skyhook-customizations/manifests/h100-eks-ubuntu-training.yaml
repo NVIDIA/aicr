@@ -20,6 +20,7 @@
 # - Containerd service limits
 # - Sysctl kernel tuning parameters
 {{- $cust := index .Values "skyhook-customizations" }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
 ---
 apiVersion: skyhook.nvidia.com/v1alpha1
 kind: Skyhook
@@ -72,3 +73,4 @@ spec:
         apply_check.sh: |-
           #!/bin/bash
           grep 'MACAddressPolicy=none' $DROPIN_FOLDER/$CONFIG_FILE
+{{- end }}

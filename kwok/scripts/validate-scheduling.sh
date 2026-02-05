@@ -313,7 +313,7 @@ generate_bundle() {
         --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
-        --set "skyhook-operator:customization=disabled" \
+        --set "skyhook-customizations:enabled=false" \
         --set "networkoperator:operator.tolerations[2].key=eidos.nvidia.com/kwok-test" \
         --set "networkoperator:operator.tolerations[2].operator=Equal" \
         --set "networkoperator:operator.tolerations[2].value=true" \
