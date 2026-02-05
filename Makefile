@@ -335,6 +335,116 @@ cluster-status: ## Shows cluster and registry status
 	fi
 
 # =============================================================================
+# KWOK Cluster Simulation
+# =============================================================================
+
+# KWOK version for simulated GPU nodes (from .versions.yaml)
+KWOK_VERSION ?= $(shell yq -r '.testing_tools.kwok' .versions.yaml 2>/dev/null)
+ifeq ($(KWOK_VERSION),)
+KWOK_VERSION := v0.7.0
+endif
+CTLPTL_KWOK_CONFIG_FILE := .ctlptl-kwok.yaml
+
+.PHONY: kwok-cluster
+kwok-cluster: ## Creates KWOK cluster for GPU simulation (control-plane only)
+	@echo "Creating KWOK cluster..."
+	@if ! command -v ctlptl >/dev/null 2>&1; then \
+		echo "Error: ctlptl is not installed."; \
+		echo "Install: brew install tilt-dev/tap/ctlptl"; \
+		exit 1; \
+	fi
+	@if ! command -v kind >/dev/null 2>&1; then \
+		echo "Error: kind is not installed."; \
+		echo "Install: brew install kind"; \
+		exit 1; \
+	fi
+	ctlptl apply -f $(CTLPTL_KWOK_CONFIG_FILE)
+	@echo "Installing KWOK controller..."
+	kubectl apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/kwok.yaml"
+	kubectl apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/$(KWOK_VERSION)/stage-fast.yaml"
+	@echo "Waiting for KWOK controller to be ready..."
+	kubectl wait --for=condition=Available deployment/kwok-controller -n kube-system --timeout=120s
+	@echo "Tainting control-plane to force workloads to KWOK nodes..."
+	kubectl taint nodes -l node-role.kubernetes.io/control-plane node-role.kubernetes.io/control-plane:NoSchedule --overwrite 2>/dev/null || true
+	@echo "KWOK cluster created. Use 'make kwok-nodes RECIPE=<name>' to add simulated nodes."
+
+.PHONY: kwok-cluster-delete
+kwok-cluster-delete: ## Deletes KWOK cluster
+	@echo "Deleting KWOK cluster..."
+	ctlptl delete -f $(CTLPTL_KWOK_CONFIG_FILE) || echo "Cluster not found"
+
+.PHONY: kwok-nodes
+kwok-nodes: ## Creates KWOK nodes from recipe overlay (RECIPE=gb200-eks-training)
+ifndef RECIPE
+	@echo "Error: RECIPE is required"
+	@echo "Usage: make kwok-nodes RECIPE=gb200-eks-training"
+	@echo "Available recipes (with service criteria):"
+	@for f in pkg/recipe/data/overlays/*.yaml; do \
+		name=$$(basename "$$f" .yaml); \
+		service=$$(yq eval '.spec.criteria.service // ""' "$$f" 2>/dev/null); \
+		if [ -n "$$service" ] && [ "$$service" != "null" ] && [ "$$service" != "any" ]; then \
+			echo "  $$name (service=$$service)"; \
+		fi; \
+	done
+	@exit 1
+endif
+	@echo "Creating KWOK nodes for recipe: $(RECIPE)"
+	bash kwok/scripts/apply-nodes.sh "$(RECIPE)"
+
+.PHONY: kwok-nodes-delete
+kwok-nodes-delete: ## Deletes all KWOK-simulated nodes
+	@echo "Deleting KWOK nodes..."
+	kubectl delete nodes -l type=kwok --ignore-not-found
+
+.PHONY: kwok-test
+kwok-test: ## Validates bundle scheduling on KWOK cluster (RECIPE=gb200-eks-training)
+ifndef RECIPE
+	@echo "Error: RECIPE is required"
+	@echo "Usage: make kwok-test RECIPE=gb200-eks-training"
+	@exit 1
+endif
+	@echo "Validating scheduling for recipe: $(RECIPE)"
+	bash kwok/scripts/validate-scheduling.sh "$(RECIPE)"
+
+.PHONY: kwok-status
+kwok-status: ## Shows KWOK cluster and node status
+	@echo "=== KWOK Cluster Status ==="
+	@if kubectl cluster-info >/dev/null 2>&1; then \
+		echo "Context: $$(kubectl config current-context)"; \
+		echo ""; \
+		echo "KWOK Controller:"; \
+		kubectl get deployment -n kube-system kwok-controller 2>/dev/null || echo "  Not installed"; \
+		echo ""; \
+		echo "KWOK Nodes:"; \
+		kubectl get nodes -l type=kwok -o wide 2>/dev/null || echo "  None"; \
+		echo ""; \
+		echo "GPU Resources:"; \
+		kubectl get nodes -l type=kwok -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.capacity.nvidia\.com/gpu}{" GPUs\n"}{end}' 2>/dev/null || true; \
+	else \
+		echo "No active cluster"; \
+	fi
+
+.PHONY: kwok-e2e
+kwok-e2e: ## Full KWOK e2e workflow: cluster, nodes, validate (RECIPE=gb200-eks-training)
+ifndef RECIPE
+	@echo "Error: RECIPE is required"
+	@echo "Usage: make kwok-e2e RECIPE=gb200-eks-training"
+	@exit 1
+endif
+	@echo "Running full KWOK e2e workflow for recipe: $(RECIPE)"
+	$(MAKE) kwok-cluster
+	$(MAKE) kwok-nodes RECIPE=$(RECIPE)
+	$(MAKE) kwok-test RECIPE=$(RECIPE)
+
+.PHONY: kwok-test-all
+kwok-test-all: build ## Run all KWOK recipe tests in a shared cluster
+	@bash kwok/scripts/run-all-recipes.sh
+
+.PHONY: kwok-test-all-parallel
+kwok-test-all-parallel: build ## Run all KWOK recipe tests in parallel across multiple clusters
+	@bash kwok/scripts/run-all-recipes-parallel.sh
+
+# =============================================================================
 # Combined Development Targets
 # =============================================================================
 
@@ -356,3 +466,67 @@ help: ## Displays available commands
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk \
 		'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
+.PHONY: help-full
+help-full: ## Displays commands grouped by category
+	@echo ""
+	@echo "\033[1m=== Quality & Testing ===\033[0m"
+	@echo "  make qualify        Full qualification (test + lint + e2e + scan)"
+	@echo "  make test           Unit tests with race detector"
+	@echo "  make test-coverage  Tests with coverage threshold enforcement"
+	@echo "  make lint           Lint Go, YAML, and license headers"
+	@echo "  make e2e            CLI end-to-end tests"
+	@echo "  make e2e-tilt       E2E tests with Tilt cluster"
+	@echo "  make scan           Vulnerability scan with grype"
+	@echo "  make bench          Run benchmarks"
+	@echo ""
+	@echo "\033[1m=== Build & Release ===\033[0m"
+	@echo "  make build          Build binaries for current OS/arch"
+	@echo "  make image          Build and push container image"
+	@echo "  make release        Full release with goreleaser"
+	@echo "  make bump-major     Bump major version (1.2.3 -> 2.0.0)"
+	@echo "  make bump-minor     Bump minor version (1.2.3 -> 1.3.0)"
+	@echo "  make bump-patch     Bump patch version (1.2.3 -> 1.2.4)"
+	@echo ""
+	@echo "\033[1m=== Local Development ===\033[0m"
+	@echo "  make dev-env        Create cluster and start Tilt (full setup)"
+	@echo "  make dev-env-clean  Stop Tilt and delete cluster (full cleanup)"
+	@echo "  make dev-restart    Restart Tilt without recreating cluster"
+	@echo "  make dev-reset      Full reset (tear down and recreate everything)"
+	@echo "  make cluster-create Create Kind cluster with registry"
+	@echo "  make cluster-delete Delete Kind cluster and registry"
+	@echo "  make cluster-status Show cluster and registry status"
+	@echo "  make tilt-up        Start Tilt development environment"
+	@echo "  make tilt-down      Stop Tilt development environment"
+	@echo "  make server         Start local development server"
+	@echo ""
+	@echo "\033[1m=== KWOK Cluster Simulation ===\033[0m"
+	@echo "  make kwok-cluster   Create KWOK cluster for GPU simulation"
+	@echo "  make kwok-cluster-delete Delete KWOK cluster"
+	@echo "  make kwok-nodes     Create simulated nodes (RECIPE=<name>)"
+	@echo "  make kwok-nodes-delete Delete all KWOK nodes"
+	@echo "  make kwok-test      Validate bundle scheduling (RECIPE=<name>)"
+	@echo "  make kwok-status    Show KWOK cluster and node status"
+	@echo "  make kwok-e2e       Full KWOK workflow (RECIPE=<name>)"
+	@echo "  make kwok-test-all  Run all recipes in shared cluster"
+	@echo "  make kwok-test-all-parallel  Run all recipes in parallel clusters (faster)"
+	@echo ""
+	@echo "\033[1m=== Code Maintenance ===\033[0m"
+	@echo "  make tidy           Format code and update dependencies"
+	@echo "  make fmt-check      Check code formatting (CI-friendly)"
+	@echo "  make upgrade        Upgrade all dependencies"
+	@echo "  make generate       Run go generate"
+	@echo "  make license        Add/verify license headers"
+	@echo ""
+	@echo "\033[1m=== Tools ===\033[0m"
+	@echo "  make tools-check    Check tools and compare versions"
+	@echo "  make tools-setup    Install all development tools"
+	@echo "  make flox-manifest  Generate Flox manifest (alternative setup)"
+	@echo ""
+	@echo "\033[1m=== Utilities ===\033[0m"
+	@echo "  make info           Print project info"
+	@echo "  make docs           Serve Go documentation"
+	@echo "  make demos          Create demo GIFs (requires vhs)"
+	@echo "  make clean          Clean build artifacts"
+	@echo "  make clean-all      Deep clean including module cache"
+	@echo "  make cleanup        Clean up Eidos Kubernetes resources"
+	@echo ""

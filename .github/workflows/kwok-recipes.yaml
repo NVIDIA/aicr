@@ -1,0 +1,153 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: KWOK Cluster Validation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pkg/recipe/data/**'
+      - 'kwok/**'
+      - '.github/workflows/kwok-recipes.yaml'
+      - '.github/actions/kwok-test/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'pkg/recipe/data/**'
+      - 'kwok/**'
+      - '.github/workflows/kwok-recipes.yaml'
+      - '.github/actions/kwok-test/**'
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: 'Specific recipe to test (leave empty to test all with service criteria)'
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Discover testable recipes (those with service criteria defined)
+  discover:
+    name: Discover Recipes
+    runs-on: ubuntu-latest
+    outputs:
+      recipes: ${{ steps.find.outputs.recipes }}
+      recipe_count: ${{ steps.find.outputs.recipe_count }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Find testable recipes
+        id: find
+        run: |
+          # If a specific recipe was requested via workflow_dispatch, use only that
+          if [[ -n "${{ github.event.inputs.recipe }}" ]]; then
+            recipe="${{ github.event.inputs.recipe }}"
+            if [[ -f "pkg/recipe/data/overlays/${recipe}.yaml" ]]; then
+              recipes=$(echo "[\"${recipe}\"]")
+              echo "Testing specific recipe: ${recipe}"
+            else
+              echo "Error: Recipe overlay '${recipe}' not found in pkg/recipe/data/overlays/"
+              exit 1
+            fi
+          else
+            # Discover recipes that have a service criteria (eks, gke, etc.)
+            # These are the ones that represent testable cloud configurations
+            recipes="[]"
+            for overlay in pkg/recipe/data/overlays/*.yaml; do
+              name=$(basename "$overlay" .yaml)
+              service=$(yq eval '.spec.criteria.service // ""' "$overlay")
+
+              # Skip overlays without a service (base, monitoring-hpa, etc.)
+              if [[ -n "$service" && "$service" != "null" && "$service" != "any" ]]; then
+                recipes=$(echo "$recipes" | jq -c --arg name "$name" '. + [$name]')
+                echo "Found testable recipe: $name (service=$service)"
+              fi
+            done
+
+            if [[ "$recipes" == "[]" ]]; then
+              echo "No testable recipes found (recipes must have spec.criteria.service defined)"
+              exit 1
+            fi
+          fi
+
+          recipe_count=$(echo "$recipes" | jq 'length')
+          echo "recipes=$recipes" >> "$GITHUB_OUTPUT"
+          echo "recipe_count=$recipe_count" >> "$GITHUB_OUTPUT"
+          echo "Found $recipe_count testable recipe(s)"
+
+  # Test each recipe in parallel with dedicated Kind clusters
+  test:
+    name: Test ${{ matrix.recipe }}
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        recipe: ${{ fromJSON(needs.discover.outputs.recipes) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run KWOK test for ${{ matrix.recipe }}
+        uses: ./.github/actions/kwok-test
+        with:
+          recipe: ${{ matrix.recipe }}
+          go_version: ${{ steps.versions.outputs.go }}
+          kind_version: ${{ steps.versions.outputs.kind }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          kwok_version: ${{ steps.versions.outputs.kwok }}
+          kubectl_version: ${{ steps.versions.outputs.kubectl }}
+
+  # Summary job that depends on all tests
+  summary:
+    name: KWOK Test Summary
+    needs: [discover, test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "## KWOK Cluster Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Tested **${{ needs.discover.outputs.recipe_count }}** recipe(s)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Some recipe validations failed - check individual job logs" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi

@@ -1,0 +1,50 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# EKS Accelerated Node Profile: p5.48xlarge (H100)
+#
+# NVIDIA H100 GPU instance for training/inference workloads:
+# - 8x NVIDIA H100 80GB HBM3 GPUs
+# - 192 vCPUs, 2048 GiB memory
+# - 3200 Gbps network bandwidth (EFA)
+
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: KWOKNodeProfile
+metadata:
+  name: p5-h100
+  labels:
+    provider: eks
+    nodeType: accelerated
+    accelerator: h100
+
+spec:
+  # Instance specifications
+  instanceType: p5.48xlarge
+  arch: amd64
+  osImage: Amazon Linux 2023
+
+  # Resource capacity
+  resources:
+    cpu: "192"
+    memory: 2048Gi
+    storage: 3800Gi
+
+  # GPU specifications
+  gpu:
+    product: NVIDIA-H100-80GB-HBM3
+    count: 8
+    memory: 81920  # MiB per GPU
+    driver: "570.86.16"
+    driverMajor: "570"
+    driverMinor: "86"

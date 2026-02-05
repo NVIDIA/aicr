@@ -29,6 +29,9 @@ ignore: |
   # Helm templates (contain Go template syntax, not valid YAML)
   pkg/recipe/data/components/*/manifests/
 
+  # KWOK templates (contain shell variable syntax, not valid YAML)
+  kwok/templates/
+
   # Git directory
   .git/
 
