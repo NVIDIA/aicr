@@ -1142,7 +1142,7 @@ EOF
 
   # Check for multiple phases in output
   local phase_count=0
-  echo "$output" | grep -q "preDeployment" && ((phase_count++)) || true
+  echo "$output" | grep -q "pre-deployment" && ((phase_count++)) || true
   echo "$output" | grep -q "deployment" && ((phase_count++)) || true
   echo "$output" | grep -q "performance" && ((phase_count++)) || true
 
