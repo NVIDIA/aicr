@@ -189,10 +189,10 @@ test_cli_recipe() {
   # Test 1: Basic recipe with query parameters
   msg "--- Test: Recipe with query parameters ---"
   local basic_recipe="${recipe_dir}/basic.yaml"
-  echo -e "${DIM}  \$ eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training -o basic.yaml${NC}"
+  echo -e "${DIM}  \$ eidos recipe --service eks --accelerator h100 --os ubuntu --intent training -o basic.yaml${NC}"
   if "${EIDOS_BIN}" recipe \
     --service eks \
-    --accelerator gb200 \
+    --accelerator h100 \
     --os ubuntu \
     --intent training \
     --output "$basic_recipe" 2>&1; then
@@ -216,10 +216,10 @@ test_cli_recipe() {
 kind: recipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: gb200-eks-training
+  name: h100-eks-ubuntu-training
 spec:
   service: eks
-  accelerator: gb200
+  accelerator: h100
   os: ubuntu
   intent: training
 EOF
@@ -263,11 +263,11 @@ test_api_recipe() {
 
   # Test 1: GET /v1/recipe with query params
   msg "--- Test: GET /v1/recipe ---"
-  echo -e "${DIM}  \$ curl ${eidosd_URL}/v1/recipe?service=eks&accelerator=gb200&intent=training${NC}"
+  echo -e "${DIM}  \$ curl ${eidosd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training${NC}"
   local get_recipe="${recipe_dir}/get.json"
   local http_code
   http_code=$(curl -s -w "%{http_code}" -o "$get_recipe" \
-    "${eidosd_URL}/v1/recipe?service=eks&accelerator=gb200&intent=training")
+    "${eidosd_URL}/v1/recipe?service=eks&accelerator=h100&intent=training")
 
   if [ "$http_code" = "200" ] && [ -s "$get_recipe" ]; then
     detail "HTTP ${http_code} OK"
@@ -285,10 +285,10 @@ test_api_recipe() {
     -d 'kind: recipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: gb200-training
+  name: h100-training
 spec:
   service: eks
-  accelerator: gb200
+  accelerator: h100
   intent: training')
 
   if [ "$http_code" = "200" ] && [ -s "$post_recipe" ]; then
@@ -311,7 +311,7 @@ test_cli_bundle() {
   local recipe_file="${OUTPUT_DIR}/bundle-test-recipe.yaml"
   "${EIDOS_BIN}" recipe \
     --service eks \
-    --accelerator gb200 \
+    --accelerator h100 \
     --os ubuntu \
     --intent training \
     --output "$recipe_file" 2>&1 || true
@@ -952,10 +952,10 @@ test_external_data() {
   # Test 1: Recipe with external data (should include dgxc-teleport)
   msg "--- Test: Recipe with external data ---"
   local recipe_file="${external_dir}/recipe-with-external.yaml"
-  echo -e "${DIM}  \$ eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training --data ./examples/data${NC}"
+  echo -e "${DIM}  \$ eidos recipe --service eks --accelerator h100 --os ubuntu --intent training --data ./examples/data${NC}"
   if "${EIDOS_BIN}" recipe \
     --service eks \
-    --accelerator gb200 \
+    --accelerator h100 \
     --os ubuntu \
     --intent training \
     --data "$data_dir" \

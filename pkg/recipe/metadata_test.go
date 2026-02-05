@@ -390,13 +390,15 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 		t.Error("network-operator has no dependencies (should depend on cert-manager)")
 	}
 
-	// Build recipe for EKS GB200 training workload
-	// gb200-eks-training.yaml adds nvidia-dra-driver-gpu which is NOT in base.yaml
+	// Build recipe for EKS H100 training workload with kubeflow platform
+	// h100-eks-ubuntu-training-kubeflow.yaml adds kubeflow-trainer which is NOT in base.yaml
 	builder = NewBuilder()
 	criteria = NewCriteria()
-	criteria.Accelerator = CriteriaAcceleratorGB200
+	criteria.Accelerator = CriteriaAcceleratorH100
 	criteria.Intent = CriteriaIntentTraining
 	criteria.Service = CriteriaServiceEKS
+	criteria.OS = CriteriaOSUbuntu
+	criteria.Platform = CriteriaPlatformKubeflow
 
 	result, err = builder.BuildFromCriteria(ctx, criteria)
 	if err != nil {
@@ -408,16 +410,16 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 	}
 
 	// Verify overlay-added component exists
-	draDriverOp := result.GetComponentRef("nvidia-dra-driver-gpu")
-	if draDriverOp == nil {
-		t.Fatalf("nvidia-dra-driver-gpu not found (should be added by gb200 overlay)")
+	kubeflowTrainer := result.GetComponentRef("kubeflow-trainer")
+	if kubeflowTrainer == nil {
+		t.Fatalf("kubeflow-trainer not found (should be added by h100 kubeflow overlay)")
 	}
 
 	t.Logf("Successfully verified overlay can add new components")
 	t.Logf("   Base components: %d", len(baseComponents))
 	t.Logf("   Total components: %d", len(result.ComponentRefs))
 	t.Logf("   network-operator version: %s", networkOp.Version)
-	t.Logf("   nvidia-dra-driver-gpu version: %s", draDriverOp.Version)
+	t.Logf("   kubeflow-trainer version: %s", kubeflowTrainer.Version)
 }
 
 // TestOverlayMergeDoesNotLoseBaseComponents verifies that when overlays add
@@ -466,17 +468,18 @@ func TestOverlayMergeDoesNotLoseBaseComponents(t *testing.T) {
 }
 
 // TestInheritanceChain verifies that multi-level inheritance chains work correctly.
-// Tests the chain: base → eks → eks-training → gb200-eks-training
+// Tests the chain: base → eks → eks-training → h100-eks-training → h100-eks-ubuntu-training → h100-eks-ubuntu-training-kubeflow
 func TestInheritanceChain(t *testing.T) {
 	ctx := context.Background()
 	builder := NewBuilder()
 
-	// Build GB200 EKS training recipe (full chain: base → eks → eks-training → gb200-eks-training)
+	// Build H100 EKS training recipe with kubeflow platform
 	criteria := NewCriteria()
 	criteria.Service = CriteriaServiceEKS
-	criteria.Accelerator = CriteriaAcceleratorGB200
+	criteria.Accelerator = CriteriaAcceleratorH100
 	criteria.OS = CriteriaOSUbuntu
 	criteria.Intent = CriteriaIntentTraining
+	criteria.Platform = CriteriaPlatformKubeflow
 
 	result, err := builder.BuildFromCriteria(ctx, criteria)
 	if err != nil {
@@ -484,7 +487,6 @@ func TestInheritanceChain(t *testing.T) {
 	}
 
 	// Verify applied overlays includes the full chain
-	// Should include: base, eks, eks-training, gb200-eks-training
 	appliedOverlays := result.Metadata.AppliedOverlays
 	t.Logf("Applied overlays: %v", appliedOverlays)
 
@@ -501,24 +503,17 @@ func TestInheritanceChain(t *testing.T) {
 		}
 	}
 
-	// Verify gpu-operator has GB200-specific overrides (from gb200-eks-training)
+	// Verify kubeflow-trainer was added by the kubeflow overlay
+	kubeflowTrainer := result.GetComponentRef("kubeflow-trainer")
+	if kubeflowTrainer == nil {
+		t.Error("kubeflow-trainer should be added by h100-eks-ubuntu-training-kubeflow overlay")
+	}
+
+	// Verify gpu-operator has training values file (from eks-training)
 	gpuOp := result.GetComponentRef("gpu-operator")
 	if gpuOp == nil {
 		t.Fatal("gpu-operator not found")
 	}
-	if gpuOp.Overrides == nil {
-		t.Error("gpu-operator should have overrides from gb200-eks-training")
-	} else {
-		if driver, ok := gpuOp.Overrides["driver"].(map[string]any); ok {
-			if version, ok := driver["version"].(string); ok {
-				if version != "580.82.07" {
-					t.Errorf("Expected GB200 driver version 580.82.07, got %s", version)
-				}
-			}
-		}
-	}
-
-	// Verify gpu-operator has training values file (from eks-training)
 	if gpuOp.ValuesFile != "components/gpu-operator/values-eks-training.yaml" {
 		t.Errorf("Expected gpu-operator valuesFile from eks-training, got %q", gpuOp.ValuesFile)
 	}
@@ -529,17 +524,18 @@ func TestInheritanceChain(t *testing.T) {
 	t.Logf("   GPU operator valuesFile: %s", gpuOp.ValuesFile)
 }
 
-// TestInheritanceChainGB200 verifies that GB200 inherits correctly from eks-training.
-func TestInheritanceChainGB200(t *testing.T) {
+// TestInheritanceChainKubeflow verifies that kubeflow platform inherits correctly from eks-training.
+func TestInheritanceChainKubeflow(t *testing.T) {
 	ctx := context.Background()
 	builder := NewBuilder()
 
-	// Build GB200 EKS training recipe
+	// Build H100 EKS training recipe with kubeflow platform
 	criteria := NewCriteria()
 	criteria.Service = CriteriaServiceEKS
-	criteria.Accelerator = CriteriaAcceleratorGB200
+	criteria.Accelerator = CriteriaAcceleratorH100
 	criteria.OS = CriteriaOSUbuntu
 	criteria.Intent = CriteriaIntentTraining
+	criteria.Platform = CriteriaPlatformKubeflow
 
 	result, err := builder.BuildFromCriteria(ctx, criteria)
 	if err != nil {
@@ -549,19 +545,16 @@ func TestInheritanceChainGB200(t *testing.T) {
 	// Verify applied overlays
 	t.Logf("Applied overlays: %v", result.Metadata.AppliedOverlays)
 
-	// Verify gpu-operator has GB200-specific overrides
+	// Verify kubeflow-trainer was added
+	kubeflowTrainer := result.GetComponentRef("kubeflow-trainer")
+	if kubeflowTrainer == nil {
+		t.Fatal("kubeflow-trainer not found")
+	}
+
+	// Verify gpu-operator exists and has training values file
 	gpuOp := result.GetComponentRef("gpu-operator")
 	if gpuOp == nil {
 		t.Fatal("gpu-operator not found")
-	}
-
-	// GB200 should have gdrcopy enabled
-	if gpuOp.Overrides != nil {
-		if gdrcopy, ok := gpuOp.Overrides["gdrcopy"].(map[string]any); ok {
-			if enabled, ok := gdrcopy["enabled"].(bool); ok && !enabled {
-				t.Error("GB200 should have gdrcopy enabled")
-			}
-		}
 	}
 
 	// Verify training values file is inherited
@@ -569,7 +562,7 @@ func TestInheritanceChainGB200(t *testing.T) {
 		t.Errorf("Expected gpu-operator valuesFile from eks-training, got %q", gpuOp.ValuesFile)
 	}
 
-	t.Logf("GB200 inheritance chain test passed")
+	t.Logf("Kubeflow inheritance chain test passed")
 }
 
 // TestInheritanceChainDoesNotDuplicateRecipes verifies that recipes in the inheritance
@@ -580,8 +573,10 @@ func TestInheritanceChainDoesNotDuplicateRecipes(t *testing.T) {
 
 	criteria := NewCriteria()
 	criteria.Service = CriteriaServiceEKS
-	criteria.Accelerator = CriteriaAcceleratorGB200
+	criteria.Accelerator = CriteriaAcceleratorH100
 	criteria.Intent = CriteriaIntentTraining
+	criteria.OS = CriteriaOSUbuntu
+	criteria.Platform = CriteriaPlatformKubeflow
 
 	result, err := builder.BuildFromCriteria(ctx, criteria)
 	if err != nil {

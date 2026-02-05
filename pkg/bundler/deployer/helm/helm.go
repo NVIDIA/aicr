@@ -211,6 +211,11 @@ func (g *Generator) generateChartYAML(ctx context.Context, input *GeneratorInput
 		if !ok {
 			continue
 		}
+		// Skip manifest-only components (no Helm chart source)
+		// These components only contribute manifestFiles and shouldn't be in Chart.yaml dependencies
+		if ref.Source == "" {
+			continue
+		}
 		dep := Dependency{
 			Name:       resolveChartName(ref.Name),
 			Version:    ref.Version,
@@ -224,6 +229,10 @@ func (g *Generator) generateChartYAML(ctx context.Context, input *GeneratorInput
 
 	// Add any components not in deployment order (shouldn't happen, but be safe)
 	for _, ref := range input.RecipeResult.ComponentRefs {
+		// Skip manifest-only components (no Helm chart source)
+		if ref.Source == "" {
+			continue
+		}
 		chartName := resolveChartName(ref.Name)
 		found := false
 		for _, d := range deps {

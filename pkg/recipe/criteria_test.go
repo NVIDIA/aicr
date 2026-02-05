@@ -230,7 +230,7 @@ func TestCriteriaMatches(t *testing.T) {
 			},
 			other: &Criteria{
 				Service:  CriteriaServiceEKS,
-				Platform: CriteriaPlatformPyTorch,
+				Platform: CriteriaPlatformKubeflow,
 			},
 			want: true, // Recipe platform is generic, matches any query value
 		},
@@ -238,7 +238,7 @@ func TestCriteriaMatches(t *testing.T) {
 			name: "specific platform recipe does not match any platform query",
 			criteria: &Criteria{
 				Service:  CriteriaServiceEKS,
-				Platform: CriteriaPlatformPyTorch,
+				Platform: CriteriaPlatformKubeflow,
 			},
 			other: &Criteria{
 				Service:  CriteriaServiceEKS,
@@ -250,25 +250,13 @@ func TestCriteriaMatches(t *testing.T) {
 			name: "same platform matches",
 			criteria: &Criteria{
 				Service:  CriteriaServiceEKS,
-				Platform: CriteriaPlatformPyTorch,
+				Platform: CriteriaPlatformKubeflow,
 			},
 			other: &Criteria{
 				Service:  CriteriaServiceEKS,
-				Platform: CriteriaPlatformPyTorch,
+				Platform: CriteriaPlatformKubeflow,
 			},
 			want: true,
-		},
-		{
-			name: "different platform does not match",
-			criteria: &Criteria{
-				Service:  CriteriaServiceEKS,
-				Platform: CriteriaPlatformPyTorch,
-			},
-			other: &Criteria{
-				Service:  CriteriaServiceEKS,
-				Platform: CriteriaPlatformRunAI,
-			},
-			want: false,
 		},
 		{
 			name: "full criteria with platform matches",
@@ -277,14 +265,14 @@ func TestCriteriaMatches(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 			},
 			other: &Criteria{
 				Service:     CriteriaServiceEKS,
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 			},
 			want: true,
 		},
@@ -341,7 +329,7 @@ func TestCriteriaSpecificity(t *testing.T) {
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 				Nodes:       100,
 			},
 			want: 6,
@@ -397,13 +385,13 @@ func TestBuildCriteria(t *testing.T) {
 		},
 		{
 			name: "with platform",
-			opts: []CriteriaOption{WithCriteriaPlatform("pytorch")},
+			opts: []CriteriaOption{WithCriteriaPlatform("kubeflow")},
 			want: &Criteria{
 				Service:     CriteriaServiceAny,
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 			},
 		},
 		{
@@ -471,13 +459,13 @@ func TestParseCriteriaFromValues(t *testing.T) {
 		},
 		{
 			name:  "all parameters",
-			query: "service=eks&accelerator=h100&intent=training&os=ubuntu&platform=pytorch&nodes=8",
+			query: "service=eks&accelerator=h100&intent=training&os=ubuntu&platform=kubeflow&nodes=8",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 				Nodes:       8,
 			},
 			wantErr: false,
@@ -510,13 +498,13 @@ func TestParseCriteriaFromValues(t *testing.T) {
 		},
 		{
 			name:  "platform parameter",
-			query: "platform=runai",
+			query: "platform=kubeflow",
 			want: &Criteria{
 				Service:     CriteriaServiceAny,
 				Accelerator: CriteriaAcceleratorAny,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformRunAI,
+				Platform:    CriteriaPlatformKubeflow,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -774,10 +762,8 @@ func TestParseCriteriaPlatformType(t *testing.T) {
 	}{
 		{"empty", "", CriteriaPlatformAny, false},
 		{"any", "any", CriteriaPlatformAny, false},
-		{"pytorch", "pytorch", CriteriaPlatformPyTorch, false},
-		{"PyTorch uppercase", "PyTorch", CriteriaPlatformPyTorch, false},
-		{"runai", "runai", CriteriaPlatformRunAI, false},
-		{"RunAI uppercase", "RunAI", CriteriaPlatformRunAI, false},
+		{"kubeflow", "kubeflow", CriteriaPlatformKubeflow, false},
+		{"Kubeflow uppercase", "Kubeflow", CriteriaPlatformKubeflow, false},
 		{"invalid", "invalid", CriteriaPlatformAny, true},
 	}
 
@@ -799,7 +785,7 @@ func TestGetCriteriaPlatformTypes(t *testing.T) {
 	types := GetCriteriaPlatformTypes()
 
 	// Should return sorted list
-	expected := []string{"pytorch", "runai"}
+	expected := []string{"kubeflow"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaPlatformTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -1020,13 +1006,13 @@ spec:
 			content: `kind: recipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: eks-h100-training-pytorch
+  name: eks-h100-training-kubeflow
 spec:
   service: eks
   accelerator: h100
   intent: training
   os: ubuntu
-  platform: pytorch
+  platform: kubeflow
   nodes: 4
 `,
 			want: &Criteria{
@@ -1034,22 +1020,8 @@ spec:
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSUbuntu,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 				Nodes:       4,
-			},
-			wantErr: false,
-		},
-		{
-			name:     "valid JSON file with platform runai",
-			filename: "criteria_runai.json",
-			content:  `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","metadata":{"name":"runai-config"},"spec":{"service":"gke","accelerator":"a100","platform":"runai"}}`,
-			want: &Criteria{
-				Service:     CriteriaServiceGKE,
-				Accelerator: CriteriaAcceleratorA100,
-				Intent:      CriteriaIntentAny,
-				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformRunAI,
-				Nodes:       0,
 			},
 			wantErr: false,
 		},
@@ -1251,29 +1223,15 @@ spec:
 			wantErr: false,
 		},
 		{
-			name:        "JSON body with platform pytorch",
-			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"pytorch"}}`,
+			name:        "JSON body with platform kubeflow",
+			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentAny,
 				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformPyTorch,
-				Nodes:       0,
-			},
-			wantErr: false,
-		},
-		{
-			name:        "JSON body with platform runai",
-			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"gke","platform":"runai"}}`,
-			contentType: "application/json",
-			want: &Criteria{
-				Service:     CriteriaServiceGKE,
-				Accelerator: CriteriaAcceleratorAny,
-				Intent:      CriteriaIntentAny,
-				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformRunAI,
+				Platform:    CriteriaPlatformKubeflow,
 				Nodes:       0,
 			},
 			wantErr: false,
@@ -1286,14 +1244,14 @@ spec:
   service: eks
   accelerator: h100
   intent: training
-  platform: pytorch`,
+  platform: kubeflow`,
 			contentType: "application/x-yaml",
 			want: &Criteria{
 				Service:     CriteriaServiceEKS,
 				Accelerator: CriteriaAcceleratorH100,
 				Intent:      CriteriaIntentTraining,
 				OS:          CriteriaOSAny,
-				Platform:    CriteriaPlatformPyTorch,
+				Platform:    CriteriaPlatformKubeflow,
 				Nodes:       0,
 			},
 			wantErr: false,

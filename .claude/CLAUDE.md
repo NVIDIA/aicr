@@ -254,7 +254,7 @@ eidos bundle --recipe recipe.yaml --bundlers gpu-operator --output ./bundles
 eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Recipe with platform
-eidos recipe --service eks --accelerator h100 --intent training --os ubuntu --platform pytorch
+eidos recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow
 
 # With overrides
 eidos bundle -r recipe.yaml -b gpu-operator \

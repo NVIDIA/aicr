@@ -77,7 +77,7 @@ make server   # Start API server locally
 3. **Test workflow**:
    ```bash
    eidos snapshot --output snapshot.yaml
-   eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch
+   eidos recipe --snapshot snapshot.yaml --intent training --platform kubeflow
    ```
 
 → See Extended Reference: Adding a New Collector for full example
@@ -523,7 +523,7 @@ make qualify      # Full check (test + lint + scan)
 
 # Workflow
 eidos snapshot --output snapshot.yaml
-eidos recipe --snapshot snapshot.yaml --intent training --platform pytorch
+eidos recipe --snapshot snapshot.yaml --intent training --platform kubeflow
 eidos bundle --recipe recipe.yaml --output ./bundles
 
 # Override bundle values at generation time
@@ -930,7 +930,7 @@ func TestRecipeHandler(t *testing.T) {
     server := httptest.NewServer(handler)
     defer server.Close()
     
-    resp, err := http.Get(server.URL + "/v1/recipe?os=ubuntu&gpu=gb200")
+    resp, err := http.Get(server.URL + "/v1/recipe?os=ubuntu&accelerator=h100&platform=kubeflow")
     if err != nil {
         t.Fatal(err)
     }
@@ -1028,7 +1028,7 @@ eidos snapshot --output snapshot.yaml
 eidos recipe \
   --snapshot snapshot.yaml \
   --intent training \
-  --platform pytorch \
+  --platform kubeflow \
   --format yaml \
   --output recipe.yaml
 
@@ -1053,7 +1053,7 @@ eidos snapshot -o cm://gpu-operator/eidos-snapshot
 # 2. Generate recipe from ConfigMap snapshot
 eidos recipe -s cm://gpu-operator/eidos-snapshot \
   --intent training \
-  --platform pytorch \
+  --platform kubeflow \
   -o cm://gpu-operator/eidos-recipe
 
 # 3. Create bundle from ConfigMap recipe
@@ -1069,9 +1069,9 @@ kubectl get configmap eidos-recipe -n gpu-operator -o yaml
 **E2E Testing with Agent:**
 ```bash
 # Run full E2E test (snapshot → recipe → bundle)
-./tools/e2e -s examples/snapshots/gb200.yaml \
-           -r examples/recipes/gb200-eks-ubuntu-training.yaml \
-           -b examples/bundles/gb200-eks-ubuntu-training
+./tools/e2e -s examples/snapshots/h100.yaml \
+           -r examples/recipes/h100-eks-ubuntu-training.yaml \
+           -b examples/bundles/h100-eks-ubuntu-training
 
 # The script:
 # 1. Deploys agent Job to cluster

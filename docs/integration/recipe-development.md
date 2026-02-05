@@ -71,10 +71,10 @@ overlays/base.yaml (foundation)
                             │
                             └── overlays/h100-eks-ubuntu-training.yaml (+ OS specifics)
                                     │
-                                    └── overlays/h100-eks-ubuntu-training-pytorch.yaml (+ platform specifics)
+                                    └── overlays/h100-eks-ubuntu-training-kubeflow.yaml (+ platform specifics)
 ```
 
-**Note:** Platform (pytorch, runai) is always the most specific criteria and appears at the end of the inheritance chain.
+**Note:** Platform (kubeflow) is always the most specific criteria and appears at the end of the inheritance chain.
 
 ### Creating an Intermediate Recipe
 
@@ -399,7 +399,7 @@ The naming convention places criteria in order of specificity, with **platform a
 2. Service (eks, gke)
 3. OS (ubuntu, rhel)
 4. Intent (training, inference)
-5. Platform (pytorch, runai)
+5. Platform (kubeflow)
 
 | File Type | Naming Pattern | Examples |
 |-----------|---------------|----------|
@@ -408,7 +408,7 @@ The naming convention places criteria in order of specificity, with **platform a
 | Service + intent | `{service}-{intent}.yaml` | `eks-training.yaml` |
 | Accelerator + service + intent | `{accel}-{service}-{intent}.yaml` | `h100-eks-training.yaml` |
 | Full criteria | `{accel}-{service}-{os}-{intent}.yaml` | `h100-eks-ubuntu-training.yaml` |
-| Full criteria + platform | `{accel}-{service}-{os}-{intent}-{platform}.yaml` | `h100-eks-ubuntu-training-pytorch.yaml` |
+| Full criteria + platform | `{accel}-{service}-{os}-{intent}-{platform}.yaml` | `h100-eks-ubuntu-training-kubeflow.yaml` |
 | Component values (base) | `base.yaml` or `values.yaml` | `components/gpu-operator/base.yaml` |
 | Component values (overlay) | `values-{service}-{intent}.yaml` | `components/gpu-operator/values-eks-training.yaml` |
 

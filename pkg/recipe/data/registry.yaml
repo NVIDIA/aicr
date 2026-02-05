@@ -258,3 +258,19 @@ components:
           - nodeSelector
         tolerationPaths:
           - tolerations
+
+  - name: kubeflow-trainer
+    displayName: kubeflow-trainer
+    valueOverrideKeys:
+      - kubeflowtrainer
+      - trainer
+    helm:
+      defaultRepository: oci://ghcr.io/kubeflow/charts
+      defaultChart: kubeflow-trainer
+      defaultVersion: 2.1.0
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controllerManager.nodeSelector
+        tolerationPaths:
+          - controllerManager.tolerations

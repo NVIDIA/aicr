@@ -173,9 +173,8 @@ type CriteriaPlatformType string
 
 // CriteriaPlatformType constants for supported platforms.
 const (
-	CriteriaPlatformAny     CriteriaPlatformType = "any"
-	CriteriaPlatformPyTorch CriteriaPlatformType = "pytorch"
-	CriteriaPlatformRunAI   CriteriaPlatformType = "runai"
+	CriteriaPlatformAny      CriteriaPlatformType = "any"
+	CriteriaPlatformKubeflow CriteriaPlatformType = "kubeflow"
 )
 
 // ParseCriteriaPlatformType parses a string into a CriteriaPlatformType.
@@ -183,10 +182,8 @@ func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", criteriaAnyValue:
 		return CriteriaPlatformAny, nil
-	case "pytorch":
-		return CriteriaPlatformPyTorch, nil
-	case "runai":
-		return CriteriaPlatformRunAI, nil
+	case "kubeflow":
+		return CriteriaPlatformKubeflow, nil
 	default:
 		return CriteriaPlatformAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid platform type: %s", s))
 	}
@@ -194,7 +191,7 @@ func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
 
 // GetCriteriaPlatformTypes returns all supported platform types sorted alphabetically.
 func GetCriteriaPlatformTypes() []string {
-	return []string{"pytorch", "runai"}
+	return []string{"kubeflow"}
 }
 
 // Criteria represents the input parameters for recipe matching.
@@ -212,7 +209,7 @@ type Criteria struct {
 	// OS is the worker node operating system type.
 	OS CriteriaOSType `json:"os,omitempty" yaml:"os,omitempty"`
 
-	// Platform is the platform/framework type (pytorch, runai).
+	// Platform is the platform/framework type (kubeflow).
 	Platform CriteriaPlatformType `json:"platform,omitempty" yaml:"platform,omitempty"`
 
 	// Nodes is the number of worker nodes (0 means any/unspecified).

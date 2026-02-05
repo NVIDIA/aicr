@@ -19,9 +19,17 @@ on:
     branches:
       - main
       - "pull-request/[0-9]+"
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
   schedule:
     - cron: '0 5 * * 1'
 

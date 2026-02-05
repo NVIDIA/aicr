@@ -17,7 +17,7 @@ description: 'Test a recipe using KWOK simulated nodes in an isolated Kind clust
 
 inputs:
   recipe:
-    description: 'Recipe name to test (e.g., eks-training, gb200-eks-training)'
+    description: 'Recipe name to test (e.g., eks-training, h100-eks-ubuntu-training-kubeflow)'
     required: true
   go_version:
     description: 'Go version to install'

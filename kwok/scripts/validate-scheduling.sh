@@ -17,7 +17,7 @@
 #
 # Usage:
 #   ./validate-scheduling.sh <recipe-name>
-#   ./validate-scheduling.sh gb200-eks-training
+#   ./validate-scheduling.sh h100-eks-ubuntu-training-kubeflow
 #
 # This script:
 # 1. Generates a recipe from the cluster config
@@ -313,7 +313,7 @@ generate_bundle() {
         --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
-        --set "skyhook-operator:customization=disabled" \
+        --set "skyhook-customizations:enabled=false" \
         --set "networkoperator:operator.tolerations[2].key=eidos.nvidia.com/kwok-test" \
         --set "networkoperator:operator.tolerations[2].operator=Equal" \
         --set "networkoperator:operator.tolerations[2].value=true" \
@@ -425,7 +425,7 @@ main() {
             -*)
                 echo "Unknown option: $1"
                 echo "Usage: $0 [--keep-namespace] <recipe-name>"
-                echo "Example: $0 gb200-eks-training"
+                echo "Example: $0 h100-eks-ubuntu-training-kubeflow"
                 echo "         $0 --keep-namespace eks-training"
                 exit 1
                 ;;
@@ -438,7 +438,7 @@ main() {
 
     if [[ -z "$recipe" ]]; then
         echo "Usage: $0 [--keep-namespace] <recipe-name>"
-        echo "Example: $0 gb200-eks-training"
+        echo "Example: $0 h100-eks-ubuntu-training-kubeflow"
         echo "         $0 --keep-namespace eks-training"
         exit 1
     fi

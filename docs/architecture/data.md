@@ -94,7 +94,7 @@ spec:
     accelerator: gb200   # GPU type
     os: ubuntu           # Operating system
     intent: training     # Workload purpose
-    platform: pytorch    # Platform/framework (optional)
+    platform: kubeflow    # Platform/framework (optional)
   
   constraints:           # Deployment requirements
     - name: K8s.server.version
@@ -132,7 +132,7 @@ Criteria define when a recipe matches a user query:
 | `accelerator` | String | GPU hardware type | `h100`, `gb200`, `a100`, `l40` |
 | `os` | String | Operating system | `ubuntu`, `rhel`, `cos`, `amazonlinux` |
 | `intent` | String | Workload purpose | `training`, `inference` |
-| `platform` | String | Platform/framework type | `pytorch`, `runai` |
+| `platform` | String | Platform/framework type | `kubeflow` |
 | `nodes` | Integer | Node count (0 = any) | `8`, `16` |
 
 **All fields are optional.** Unpopulated fields act as wildcards (match any value).

@@ -15,19 +15,21 @@
 kind: recipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: gb200-eks-ubuntu-training
+  name: h100-eks-ubuntu-training-kubeflow
 
 spec:
-  # Inherits from gb200-eks-training recipe (EKS + Ubuntu + training settings)
-  base: gb200-eks-training
+  # Inherits from h100-eks-ubuntu-training recipe (H100 + EKS + Ubuntu + training settings)
+  # This overlay adds Kubeflow Training Operator for distributed training with TrainJob
+  base: h100-eks-ubuntu-training
 
   criteria:
     service: eks
-    accelerator: gb200
+    accelerator: h100
     os: ubuntu
     intent: training
+    platform: kubeflow
 
-  # Specific constraints for GB200 on EKS training workloads
+  # Constraints for H100 on EKS with Ubuntu for Kubeflow training workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
@@ -39,12 +41,8 @@ spec:
     - name: OS.sysctl./proc/sys/kernel/osrelease
       value: ">= 6.8"
 
+  # Kubeflow Training Operator for TrainJob support
   componentRefs:
-
-    # Ubuntu node customizations via skyhook-customizations component
-    - name: skyhook-customizations
+    - name: kubeflow-trainer
       type: Helm
-      manifestFiles:
-        - components/skyhook-customizations/manifests/gb200-eks-ubuntu-training.yaml
-      dependencyRefs:
-        - skyhook-operator
+      valuesFile: components/kubeflow-trainer/values.yaml

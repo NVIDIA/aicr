@@ -81,7 +81,7 @@ Generate optimized configuration recipe based on environment parameters.
 | `gpu` | string | No | any | Alias for `accelerator` (backwards compatibility) |
 | `intent` | string | No | any | Workload intent: training, inference, any |
 | `os` | string | No | any | GPU node OS: ubuntu, rhel, cos, amazonlinux, any |
-| `platform` | string | No | any | Platform/framework type: pytorch, runai, any |
+| `platform` | string | No | any | Platform/framework type: kubeflow, any |
 | `nodes` | integer | No | 0 | Number of GPU nodes (0 = any/unspecified) |
 
 **Request Headers:**
