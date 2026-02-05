@@ -178,7 +178,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.DeploymentSteps = []string{
 		fmt.Sprintf("cd %s", outputDir),
 		"helm dependency update",
-		"helm install eidos-stack . -n eidos-stack --create-namespace",
+		"helm install eidos-stack . -n eidos-stack --create-namespace --wait --timeout 10m",
 	}
 
 	slog.Debug("umbrella chart generated",
