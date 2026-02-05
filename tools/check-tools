@@ -44,9 +44,8 @@ if [[ ! -f "${VERSIONS_FILE}" ]]; then
 fi
 
 # Tool metadata: defines how to detect versions and compare them
-# Format: "yaml_key:::command_name:::version_cmd:::match_strategy"
+# Format: "command_name:::version_cmd:::match_strategy"
 #
-# yaml_key: The key name in .versions.yaml (e.g., "go", "golangci_lint")
 # command_name: The actual command name to check (e.g., "go", "golangci-lint")
 # version_cmd: Command to extract version
 # match_strategy: How to compare versions
@@ -57,37 +56,73 @@ fi
 #
 # To add a new tool:
 # 1. Add it to .versions.yaml under the appropriate category
-# 2. Add its metadata entry here with the yaml_key matching the key in .versions.yaml
+# 2. Add its metadata entry in get_tool_metadata() with the yaml_key matching the key in .versions.yaml
 
-declare -A TOOL_METADATA=(
-    # Languages
-    ["go"]="go:::go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | sed 's/go//':::major_minor"
-
-    # Build tools
-    ["goreleaser"]="goreleaser:::goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p':::major"
-    ["ko"]="ko:::ko version 2>/dev/null | head -1:::major_minor"
-    ["crane"]="crane:::crane version 2>/dev/null:::major_minor"
-    ["git_cliff"]="git-cliff:::git-cliff --version 2>/dev/null | awk '{print \$2}':::major"
-
-    # Linting
-    ["golangci_lint"]="golangci-lint:::golangci-lint version --short 2>/dev/null:::major"
-    ["yamllint"]="yamllint:::yamllint --version 2>/dev/null | awk '{print \$2}':::major"
-    ["addlicense"]="addlicense:::echo installed:::presence"
-    ["go_licenses"]="go-licenses:::go-licenses version 2>/dev/null || echo installed:::presence"
-
-    # Security tools
-    ["grype"]="grype:::grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\[' || echo installed:::presence"
-
-    # Testing tools
-    ["kubectl"]="kubectl:::kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\.[0-9]+' || echo installed:::major"
-    ["kind"]="kind:::kind version 2>/dev/null | awk '{print \$2}' | sed 's/^v//':::major_minor"
-    ["ctlptl"]="ctlptl:::ctlptl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
-    ["tilt"]="tilt:::tilt version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
-    ["helm"]="helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
-
-    # Optional tools (no version in .versions.yaml)
-    ["docker"]="docker:::docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'not running':::presence"
-)
+# Returns tool metadata for a given yaml_key
+# Compatible with bash 3.x (no associative arrays)
+get_tool_metadata() {
+    local yaml_key="$1"
+    case "$yaml_key" in
+        # Languages
+        go)
+            echo "go:::go version 2>/dev/null | grep -oE 'go[0-9]+\.[0-9]+' | sed 's/go//':::major_minor"
+            ;;
+        # Build tools
+        goreleaser)
+            echo "goreleaser:::goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p':::major"
+            ;;
+        ko)
+            echo "ko:::ko version 2>/dev/null | head -1:::major_minor"
+            ;;
+        crane)
+            echo "crane:::crane version 2>/dev/null:::major_minor"
+            ;;
+        git_cliff)
+            echo "git-cliff:::git-cliff --version 2>/dev/null | awk '{print \$2}':::major"
+            ;;
+        # Linting
+        golangci_lint)
+            echo "golangci-lint:::golangci-lint version --short 2>/dev/null:::major"
+            ;;
+        yamllint)
+            echo "yamllint:::yamllint --version 2>/dev/null | awk '{print \$2}':::major"
+            ;;
+        addlicense)
+            echo "addlicense:::echo installed:::presence"
+            ;;
+        go_licenses)
+            echo "go-licenses:::go-licenses version 2>/dev/null || echo installed:::presence"
+            ;;
+        # Security tools
+        grype)
+            echo "grype:::grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\[' || echo installed:::presence"
+            ;;
+        # Testing tools
+        kubectl)
+            echo "kubectl:::kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\.[0-9]+' || echo installed:::major"
+            ;;
+        kind)
+            echo "kind:::kind version 2>/dev/null | awk '{print \$2}' | sed 's/^v//':::major_minor"
+            ;;
+        ctlptl)
+            echo "ctlptl:::ctlptl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            ;;
+        tilt)
+            echo "tilt:::tilt version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            ;;
+        helm)
+            echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
+            ;;
+        # Optional tools (no version in .versions.yaml)
+        docker)
+            echo "docker:::docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'not running':::presence"
+            ;;
+        *)
+            # Unknown tool - return empty
+            echo ""
+            ;;
+    esac
+}
 
 # Extract major version from a version string
 get_major() {
@@ -150,7 +185,8 @@ check_tool() {
     local expected_version="$2"
 
     # Look up tool metadata
-    local metadata="${TOOL_METADATA[$yaml_key]:-}"
+    local metadata
+    metadata=$(get_tool_metadata "$yaml_key")
     if [[ -z "$metadata" ]]; then
         log_debug "No metadata for tool: $yaml_key (skipping)"
         return
