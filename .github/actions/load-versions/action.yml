@@ -58,6 +58,9 @@ outputs:
   kubectl:
     description: 'kubectl version'
     value: ${{ steps.versions.outputs.kubectl }}
+  kwok:
+    description: 'KWOK version'
+    value: ${{ steps.versions.outputs.kwok }}
 
 runs:
   using: 'composite'
@@ -89,6 +92,7 @@ runs:
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .versions.yaml)" >> $GITHUB_OUTPUT
         echo "tilt=$(yq eval '.testing_tools.tilt' .versions.yaml)" >> $GITHUB_OUTPUT
         echo "helm=$(yq eval '.testing_tools.helm' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "kwok=$(yq eval '.testing_tools.kwok' .versions.yaml)" >> $GITHUB_OUTPUT
 
     - name: Display loaded versions
       shell: bash
@@ -108,3 +112,4 @@ runs:
         echo "  ctlptl: ${{ steps.versions.outputs.ctlptl }}"
         echo "  tilt: ${{ steps.versions.outputs.tilt }}"
         echo "  helm: ${{ steps.versions.outputs.helm }}"
+        echo "  kwok: ${{ steps.versions.outputs.kwok }}"

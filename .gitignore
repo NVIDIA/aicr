@@ -89,7 +89,7 @@ terraform.rc
 # Credentials & Secrets
 # =============================================================================
 .env
-.envrc
+.envrc.local
 gha-creds-*.json
 
 # =============================================================================
@@ -118,3 +118,6 @@ tags
 
 # Claude
 .claude/settings.local.json
+
+# KWOK
+kwok/logs/

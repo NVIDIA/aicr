@@ -224,6 +224,7 @@ GOLANGCI_LINT_VERSION=$(yq '.linting.golangci_lint' .versions.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .versions.yaml)
 GRYPE_VERSION=$(yq '.security_tools.grype' .versions.yaml)
 KIND_VERSION=$(yq '.testing_tools.kind' .versions.yaml)
+KUBECTL_VERSION=$(yq '.testing_tools.kubectl' .versions.yaml)
 CTLPTL_VERSION=$(yq '.testing_tools.ctlptl' .versions.yaml)
 TILT_VERSION=$(yq '.testing_tools.tilt' .versions.yaml)
 HELM_VERSION=$(yq '.testing_tools.helm' .versions.yaml)
@@ -236,6 +237,7 @@ echo "  Go:              ${GO_VERSION}"
 echo "  golangci-lint:   ${GOLANGCI_LINT_VERSION}"
 echo "  grype:           ${GRYPE_VERSION}"
 echo "  kind:            ${KIND_VERSION}"
+echo "  kubectl:         ${KUBECTL_VERSION}"
 echo "  tilt:            ${TILT_VERSION}"
 echo "  helm:            ${HELM_VERSION}"
 echo "  git-cliff:       ${GIT_CLIFF_VERSION}"
@@ -312,24 +314,22 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     if command_exists kubectl; then
         log_success "kubectl already installed: $(kubectl version --client --short 2>/dev/null || kubectl version --client)"
     else
-        log_info "Installing kubectl..."
+        log_info "Installing kubectl ${KUBECTL_VERSION}..."
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install kubectl
             elif [[ "${OS}" == "linux" ]]; then
-                log_debug "Fetching latest kubectl version..."
-                KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
                 KUBECTL_URL="https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${GO_ARCH}/kubectl"
 
                 if verify_download_url "$KUBECTL_URL" "kubectl ${KUBECTL_VERSION} for Linux ${GO_ARCH}"; then
-                    sudo curl -L "$KUBECTL_URL" -o /usr/local/bin/kubectl
+                    sudo curl -fsSL "$KUBECTL_URL" -o /usr/local/bin/kubectl
                     sudo chmod +x /usr/local/bin/kubectl
                 else
                     log_error "Failed to install kubectl. Please install manually."
                     exit 1
                 fi
             fi
-            log_success "kubectl installed"
+            log_success "kubectl ${KUBECTL_VERSION} installed"
         fi
     fi
 
