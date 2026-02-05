@@ -50,7 +50,7 @@ spec:
   {{- end }}
   # Static: Baked-in tuning for H100 Ubuntu training
   packages:
-    fix_mac_address_policy:
+    fix-mac-address-policy:
       image: ghcr.io/nvidia/skyhook-packages/shellscript
       version: "1.1.1"
       env:

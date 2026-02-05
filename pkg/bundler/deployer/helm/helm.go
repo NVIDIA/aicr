@@ -575,27 +575,19 @@ func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput
 // Standard K8s resources (v1, apps/v1, etc.) return false.
 // Custom Resources (custom apiVersion like *.nvidia.com/*) return true.
 func (g *Generator) isCRDDependentResource(content []byte) bool {
-	// Parse just enough to get the apiVersion
-	var manifest struct {
-		APIVersion string `yaml:"apiVersion"`
-	}
-
-	// Handle Helm template conditionals - look for the actual resource definition
-	// Skip lines that are pure Helm template directives
-	lines := strings.Split(string(content), "\n")
-	var yamlContent strings.Builder
-	for _, line := range lines {
+	// Extract apiVersion using string matching instead of YAML parsing.
+	// Manifests may contain unquoted Helm template expressions (e.g., {{ .Chart.Name }})
+	// that break YAML parsing, so we scan for the apiVersion line directly.
+	var apiVersion string
+	for _, line := range strings.Split(string(content), "\n") {
 		trimmed := strings.TrimSpace(line)
-		// Skip Helm template-only lines
-		if strings.HasPrefix(trimmed, "{{-") && strings.HasSuffix(trimmed, "}}") {
-			continue
+		if strings.HasPrefix(trimmed, "apiVersion:") {
+			apiVersion = strings.TrimSpace(strings.TrimPrefix(trimmed, "apiVersion:"))
+			break
 		}
-		yamlContent.WriteString(line)
-		yamlContent.WriteString("\n")
 	}
 
-	if err := yaml.Unmarshal([]byte(yamlContent.String()), &manifest); err != nil {
-		// If we can't parse, assume it's a standard resource
+	if apiVersion == "" {
 		return false
 	}
 
@@ -619,7 +611,6 @@ func (g *Generator) isCRDDependentResource(content []byte) bool {
 		"scheduling.k8s.io/",            // PriorityClass
 	}
 
-	apiVersion := manifest.APIVersion
 	for _, stdAPI := range standardAPIs {
 		if apiVersion == stdAPI || strings.HasPrefix(apiVersion, stdAPI) {
 			return false
@@ -627,7 +618,7 @@ func (g *Generator) isCRDDependentResource(content []byte) bool {
 	}
 
 	// If apiVersion is not in the standard list, it's likely a Custom Resource
-	return apiVersion != ""
+	return true
 }
 
 // addHelmHookAnnotation adds Helm post-install/post-upgrade hook annotations to a manifest.

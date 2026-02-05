@@ -468,3 +468,62 @@ func TestGenerate_NoTimestampInOutput(t *testing.T) {
 		t.Fatalf("failed to walk directory: %v", err)
 	}
 }
+
+func TestIsCRDDependentResource(t *testing.T) {
+	g := NewGenerator()
+
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		{
+			name:     "standard ConfigMap",
+			content:  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test",
+			expected: false,
+		},
+		{
+			name:     "standard Deployment",
+			content:  "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test",
+			expected: false,
+		},
+		{
+			name:     "custom resource",
+			content:  "apiVersion: skyhook.nvidia.com/v1alpha1\nkind: Skyhook\nmetadata:\n  name: test",
+			expected: true,
+		},
+		{
+			name: "custom resource with Helm template expressions",
+			content: `{{- $cust := index .Values "skyhook-customizations" }}
+---
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+  name: test
+  namespace: {{ .Release.Namespace }}`,
+			expected: true,
+		},
+		{
+			name:     "no apiVersion",
+			content:  "kind: ConfigMap\nmetadata:\n  name: test",
+			expected: false,
+		},
+		{
+			name:     "RBAC resource",
+			content:  "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: test",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := g.isCRDDependentResource([]byte(tt.content))
+			if result != tt.expected {
+				t.Errorf("isCRDDependentResource() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
