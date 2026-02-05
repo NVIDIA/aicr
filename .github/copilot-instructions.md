@@ -930,7 +930,7 @@ func TestRecipeHandler(t *testing.T) {
     server := httptest.NewServer(handler)
     defer server.Close()
     
-    resp, err := http.Get(server.URL + "/v1/recipe?os=ubuntu&gpu=gb200")
+    resp, err := http.Get(server.URL + "/v1/recipe?os=ubuntu&accelerator=h100&platform=kubeflow")
     if err != nil {
         t.Fatal(err)
     }
@@ -1069,9 +1069,9 @@ kubectl get configmap eidos-recipe -n gpu-operator -o yaml
 **E2E Testing with Agent:**
 ```bash
 # Run full E2E test (snapshot → recipe → bundle)
-./tools/e2e -s examples/snapshots/gb200.yaml \
-           -r examples/recipes/gb200-eks-ubuntu-training.yaml \
-           -b examples/bundles/gb200-eks-ubuntu-training
+./tools/e2e -s examples/snapshots/h100.yaml \
+           -r examples/recipes/h100-eks-ubuntu-training.yaml \
+           -b examples/bundles/h100-eks-ubuntu-training
 
 # The script:
 # 1. Deploys agent Job to cluster
