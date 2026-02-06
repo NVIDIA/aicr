@@ -25,6 +25,11 @@
 apiVersion: skyhook.nvidia.com/v1alpha1
 kind: Skyhook
 metadata:
+  annotations:
+    # Helm hooks ensure this CR is applied after skyhook-operator CRD is installed
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
   labels:
     app.kubernetes.io/part-of: skyhook-operator
     app.kubernetes.io/created-by: eidos
@@ -50,7 +55,7 @@ spec:
   {{- end }}
   # Static: Baked-in tuning for H100 Ubuntu training
   packages:
-    fix_mac_address_policy:
+    fix-mac-address-policy:
       image: ghcr.io/nvidia/skyhook-packages/shellscript
       version: "1.1.1"
       env:

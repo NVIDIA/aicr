@@ -178,7 +178,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.DeploymentSteps = []string{
 		fmt.Sprintf("cd %s", outputDir),
 		"helm dependency update",
-		"helm install eidos-stack . -n eidos-stack --create-namespace",
+		"helm install eidos-stack . -n eidos-stack --create-namespace --wait --timeout 10m",
 	}
 
 	slog.Debug("umbrella chart generated",
@@ -515,9 +515,9 @@ func SortComponentsByDeploymentOrder(components []string, deploymentOrder []stri
 }
 
 // generateTemplates creates manifest files in the templates/ directory.
-//   - Standard K8s resources (ConfigMaps, Secrets, etc.) are deployed normally during helm install
-//   - CRD-dependent resources (Custom Resources) get Helm post-install hook annotations,
-//     so they are applied after all sub-charts (including CRDs) are installed
+// Manifest files are copied as-is. CRD-dependent resources (Custom Resources) must
+// include Helm hook annotations in the source manifest to ensure proper deployment
+// ordering. This is validated by TestManifestHelmHooksRequired in yaml_test.go.
 func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput, outputDir string) ([]string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, 0, err
@@ -537,181 +537,18 @@ func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput
 
 	for path, content := range input.ManifestContents {
 		filename := filepath.Base(path)
-
-		// Determine if this is a CRD-dependent resource (Custom Resource)
-		isCRDDependent := g.isCRDDependentResource(content)
-
-		var processedContent []byte
-		if isCRDDependent {
-			// Add Helm post-install hook annotation to CRD-dependent resources
-			// This ensures they are applied after all sub-charts (including CRDs) are installed
-			processedContent = g.addHelmHookAnnotation(content)
-		} else {
-			// Standard K8s resources are deployed normally
-			processedContent = content
-		}
-
 		outputPath := filepath.Join(templatesDir, filename)
 
-		if err := os.WriteFile(outputPath, processedContent, 0600); err != nil {
+		if err := os.WriteFile(outputPath, content, 0600); err != nil {
 			return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write template", err,
 				map[string]any{"filename": filename})
 		}
 
 		files = append(files, outputPath)
-		totalSize += int64(len(processedContent))
+		totalSize += int64(len(content))
 
-		slog.Debug("wrote template",
-			"filename", filename,
-			"crd_dependent", isCRDDependent,
-			"helm_hook", isCRDDependent)
+		slog.Debug("wrote template", "filename", filename)
 	}
 
 	return files, totalSize, nil
-}
-
-// isCRDDependentResource checks if a manifest contains a Custom Resource
-// that depends on a CRD installed by a sub-chart.
-// Standard K8s resources (v1, apps/v1, etc.) return false.
-// Custom Resources (custom apiVersion like *.nvidia.com/*) return true.
-func (g *Generator) isCRDDependentResource(content []byte) bool {
-	// Parse just enough to get the apiVersion
-	var manifest struct {
-		APIVersion string `yaml:"apiVersion"`
-	}
-
-	// Handle Helm template conditionals - look for the actual resource definition
-	// Skip lines that are pure Helm template directives
-	lines := strings.Split(string(content), "\n")
-	var yamlContent strings.Builder
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Skip Helm template-only lines
-		if strings.HasPrefix(trimmed, "{{-") && strings.HasSuffix(trimmed, "}}") {
-			continue
-		}
-		yamlContent.WriteString(line)
-		yamlContent.WriteString("\n")
-	}
-
-	if err := yaml.Unmarshal([]byte(yamlContent.String()), &manifest); err != nil {
-		// If we can't parse, assume it's a standard resource
-		return false
-	}
-
-	// Standard Kubernetes API groups that don't require CRDs
-	standardAPIs := []string{
-		"v1",                            // Core API (ConfigMap, Secret, Service, Pod, etc.)
-		"apps/v1",                       // Deployments, StatefulSets, DaemonSets, ReplicaSets
-		"batch/v1",                      // Jobs, CronJobs
-		"networking.k8s.io/",            // NetworkPolicy, Ingress
-		"rbac.authorization.k8s.io/",    // Roles, RoleBindings, ClusterRoles
-		"policy/v1",                     // PodDisruptionBudget
-		"autoscaling/",                  // HorizontalPodAutoscaler
-		"storage.k8s.io/",               // StorageClass, CSIDriver
-		"admissionregistration.k8s.io/", // ValidatingWebhookConfiguration
-		"certificates.k8s.io/",          // CertificateSigningRequest
-		"coordination.k8s.io/",          // Lease
-		"discovery.k8s.io/",             // EndpointSlice
-		"events.k8s.io/",                // Event
-		"flowcontrol.apiserver.k8s.io/", // FlowSchema, PriorityLevelConfiguration
-		"node.k8s.io/",                  // RuntimeClass
-		"scheduling.k8s.io/",            // PriorityClass
-	}
-
-	apiVersion := manifest.APIVersion
-	for _, stdAPI := range standardAPIs {
-		if apiVersion == stdAPI || strings.HasPrefix(apiVersion, stdAPI) {
-			return false
-		}
-	}
-
-	// If apiVersion is not in the standard list, it's likely a Custom Resource
-	return apiVersion != ""
-}
-
-// addHelmHookAnnotation adds Helm post-install/post-upgrade hook annotations to a manifest.
-// This ensures CRD-dependent resources are applied after all sub-charts (including CRDs) are installed.
-// The before-hook-creation delete policy ensures old CRs are cleaned up before upgrade/install.
-func (g *Generator) addHelmHookAnnotation(content []byte) []byte {
-	lines := strings.Split(string(content), "\n")
-	var result strings.Builder
-	hookAdded := false
-
-	// Helm hook annotations to add
-	hookAnnotations := []string{
-		"\"helm.sh/hook\": post-install,post-upgrade",
-		"\"helm.sh/hook-weight\": \"10\"",
-		"\"helm.sh/hook-delete-policy\": before-hook-creation",
-	}
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-
-		// When we find metadata:, check what follows and insert annotations appropriately
-		if trimmed == "metadata:" {
-			result.WriteString(line)
-			result.WriteString("\n")
-
-			// Find the indentation level for metadata fields
-			metadataIndent := "  " // default
-			nextIdx := i + 1
-			for nextIdx < len(lines) {
-				nextLine := lines[nextIdx]
-				nextTrimmed := strings.TrimSpace(nextLine)
-				// Skip empty lines and pure template directives
-				if nextTrimmed == "" || (strings.HasPrefix(nextTrimmed, "{{-") && strings.HasSuffix(nextTrimmed, "}}")) {
-					nextIdx++
-					continue
-				}
-				// Found a non-empty line, get its indentation
-				metadataIndent = nextLine[:len(nextLine)-len(strings.TrimLeft(nextLine, " \t"))]
-				break
-			}
-
-			// Check if annotations: already exists in metadata
-			hasAnnotations := false
-			for j := i + 1; j < len(lines); j++ {
-				checkTrimmed := strings.TrimSpace(lines[j])
-				// Stop if we hit spec: or another top-level field
-				if len(lines[j]) > 0 && lines[j][0] != ' ' && lines[j][0] != '\t' && !strings.HasPrefix(checkTrimmed, "{{") {
-					break
-				}
-				if checkTrimmed == "annotations:" {
-					hasAnnotations = true
-					break
-				}
-			}
-
-			if !hasAnnotations {
-				// Insert annotations: with helm hooks right after metadata:
-				result.WriteString(metadataIndent + "annotations:\n")
-				for _, ann := range hookAnnotations {
-					result.WriteString(metadataIndent + "  " + ann + "\n")
-				}
-				hookAdded = true
-			}
-			continue
-		}
-
-		// If annotations: exists, add our hooks right after it
-		if !hookAdded && trimmed == "annotations:" {
-			result.WriteString(line)
-			result.WriteString("\n")
-			// Get the indentation of the annotations line and add one more level
-			annotationsIndent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
-			hookIndent := annotationsIndent + "  "
-			for _, ann := range hookAnnotations {
-				result.WriteString(hookIndent + ann + "\n")
-			}
-			hookAdded = true
-			continue
-		}
-
-		result.WriteString(line)
-		result.WriteString("\n")
-	}
-
-	return []byte(result.String())
 }

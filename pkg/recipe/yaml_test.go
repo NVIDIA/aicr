@@ -43,12 +43,13 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+	"k8s.io/client-go/kubernetes/scheme"
 )
 
 // testMetadataFS embeds all recipe data files for testing.
-// This uses a separate embed directive to include component values files.
+// This uses a separate embed directive to include component values files and manifests.
 //
-//go:embed data/overlays/*.yaml data/components/**/*.yaml
+//go:embed data/overlays/*.yaml data/components/*/*.yaml data/components/*/manifests/*.yaml
 var testMetadataFS embed.FS
 
 // validMeasurementTypes are the valid top-level measurement types for constraints.
@@ -879,6 +880,313 @@ func TestAllComponentTypesValid(t *testing.T) {
 }
 
 // ============================================================================
+// Manifest Helm Hooks Validation Tests
+// ============================================================================
+
+// standardK8sAPIVersions returns the set of Kubernetes API versions that don't require CRDs.
+// Resources with these apiVersions don't need Helm hook annotations.
+// The list is derived from k8s.io/client-go/kubernetes/scheme which contains all standard K8s types.
+var standardK8sAPIVersions = func() map[string]bool {
+	versions := make(map[string]bool)
+	for gv := range scheme.Scheme.AllKnownTypes() {
+		// Format: "group/version" or just "version" for core API
+		var apiVersion string
+		if gv.Group == "" {
+			apiVersion = gv.Version // e.g., "v1"
+		} else {
+			apiVersion = gv.Group + "/" + gv.Version // e.g., "apps/v1"
+		}
+		versions[apiVersion] = true
+	}
+	return versions
+}()
+
+// TestManifestHelmHooksRequired validates that CRD-dependent manifests
+// have the required Helm hook annotations for proper deployment ordering.
+//
+// Custom Resources (CRs) depend on CRDs installed by sub-charts. Without
+// Helm hooks, the CR may be applied before its CRD exists, causing installation
+// failures. This test ensures manifest authors add the required annotations.
+//
+// Required annotations for CRD-dependent resources:
+//
+//	metadata:
+//	  annotations:
+//	    "helm.sh/hook": post-install,post-upgrade
+//	    "helm.sh/hook-weight": "10"
+//	    "helm.sh/hook-delete-policy": before-hook-creation
+//
+// To opt-out (not recommended), add:
+//
+//	metadata:
+//	  annotations:
+//	    eidos/skip-hook-validation: "true"
+func TestManifestHelmHooksRequired(t *testing.T) {
+	// Patterns to extract apiVersion and check for annotations
+	// Using regex to avoid YAML parsing issues with Helm template syntax
+	apiVersionPattern := regexp.MustCompile(`(?m)^apiVersion:\s*(\S+)`)
+	helmHookPattern := regexp.MustCompile(`(?m)["']?helm\.sh/hook["']?:\s*`)
+	skipValidationPattern := regexp.MustCompile(`(?m)["']?eidos/skip-hook-validation["']?:\s*["']?true["']?`)
+
+	manifestFiles := collectManifestFiles(t)
+	if len(manifestFiles) == 0 {
+		t.Log("no manifest files found in data/components/*/manifests/")
+		return
+	}
+
+	for _, path := range manifestFiles {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			content, err := testMetadataFS.ReadFile(path)
+			if err != nil {
+				t.Fatalf("failed to read %s: %v", path, err)
+			}
+
+			contentStr := string(content)
+
+			// Extract apiVersion
+			matches := apiVersionPattern.FindStringSubmatch(contentStr)
+			if len(matches) < 2 {
+				t.Logf("no apiVersion found in %s, skipping", path)
+				return
+			}
+			apiVersion := matches[1]
+
+			// Check if this is a standard K8s API (no hooks needed)
+			if isStandardK8sAPI(apiVersion) {
+				return // Standard K8s resource, no hooks required
+			}
+
+			// This is a CRD-dependent resource - check for required annotations
+
+			// Check for opt-out annotation
+			if skipValidationPattern.MatchString(contentStr) {
+				t.Logf("%s has eidos/skip-hook-validation annotation, skipping validation", path)
+				return
+			}
+
+			// Check for helm.sh/hook annotation
+			if !helmHookPattern.MatchString(contentStr) {
+				t.Errorf(`manifest %q has custom apiVersion %q but is missing required Helm hook annotations.
+
+CRD-dependent resources must include these annotations to ensure proper deployment ordering:
+
+  metadata:
+    annotations:
+      "helm.sh/hook": post-install,post-upgrade
+      "helm.sh/hook-weight": "10"
+      "helm.sh/hook-delete-policy": before-hook-creation
+
+To skip this validation (not recommended), add:
+  metadata:
+    annotations:
+      eidos/skip-hook-validation: "true"
+`, filepath.Base(path), apiVersion)
+			}
+		})
+	}
+}
+
+// TestManifestHelmHooksValidation tests the validation logic with controlled inputs
+// to ensure missing annotations are caught and skip annotations work correctly.
+func TestManifestHelmHooksValidation(t *testing.T) {
+	apiVersionPattern := regexp.MustCompile(`(?m)^apiVersion:\s*(\S+)`)
+	helmHookPattern := regexp.MustCompile(`(?m)["']?helm\.sh/hook["']?:\s*`)
+	skipValidationPattern := regexp.MustCompile(`(?m)["']?eidos/skip-hook-validation["']?:\s*["']?true["']?`)
+
+	tests := []struct {
+		name        string
+		content     string
+		expectError bool
+	}{
+		{
+			name: "custom_resource_missing_hooks_should_fail",
+			content: `apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: test-recipe
+spec:
+  template: {}`,
+			expectError: true,
+		},
+		{
+			name: "custom_resource_with_hooks_should_pass",
+			content: `apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: test-recipe
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+spec:
+  template: {}`,
+			expectError: false,
+		},
+		{
+			name: "custom_resource_with_skip_annotation_should_pass",
+			content: `apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: test-recipe
+  annotations:
+    eidos/skip-hook-validation: "true"
+spec:
+  template: {}`,
+			expectError: false,
+		},
+		{
+			name: "standard_k8s_resource_without_hooks_should_pass",
+			content: `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-config
+data:
+  key: value`,
+			expectError: false,
+		},
+		{
+			name: "apps_v1_resource_without_hooks_should_pass",
+			content: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-deployment
+spec:
+  replicas: 1`,
+			expectError: false,
+		},
+		{
+			name: "custom_resource_with_helm_template_syntax_missing_hooks_should_fail",
+			content: `apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: {{ .Release.Name }}-recipe
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  template: {}`,
+			expectError: true,
+		},
+		{
+			name: "custom_resource_with_helm_template_and_hooks_should_pass",
+			content: `apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: {{ .Release.Name }}-recipe
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  template: {}`,
+			expectError: false,
+		},
+		{
+			name: "networking_k8s_io_resource_should_pass",
+			content: `apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: test-policy
+spec:
+  podSelector: {}`,
+			expectError: false,
+		},
+		{
+			name: "rbac_resource_should_pass",
+			content: `apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: test-role
+rules: []`,
+			expectError: false,
+		},
+		{
+			name: "custom_api_different_domain_missing_hooks_should_fail",
+			content: `apiVersion: mycompany.example.com/v1
+kind: CustomThing
+metadata:
+  name: test-thing
+spec: {}`,
+			expectError: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			contentStr := tc.content
+
+			// Extract apiVersion
+			matches := apiVersionPattern.FindStringSubmatch(contentStr)
+			if len(matches) < 2 {
+				t.Fatalf("no apiVersion found in test case")
+			}
+			apiVersion := matches[1]
+
+			// Check if this is a standard K8s API (no hooks needed)
+			if isStandardK8sAPI(apiVersion) {
+				if tc.expectError {
+					t.Error("expected error for standard K8s resource, but it would be skipped")
+				}
+				return
+			}
+
+			// Check for opt-out annotation
+			if skipValidationPattern.MatchString(contentStr) {
+				if tc.expectError {
+					t.Error("expected error, but skip annotation would bypass validation")
+				}
+				return
+			}
+
+			// Check for helm.sh/hook annotation
+			hasHook := helmHookPattern.MatchString(contentStr)
+
+			if tc.expectError && hasHook {
+				t.Error("expected error (missing hooks), but helm.sh/hook was found")
+			}
+			if !tc.expectError && !hasHook {
+				t.Error("expected pass (hooks present), but helm.sh/hook was not found")
+			}
+		})
+	}
+}
+
+// isStandardK8sAPI checks if an apiVersion is a standard Kubernetes API
+// that doesn't require a CRD.
+func isStandardK8sAPI(apiVersion string) bool {
+	return standardK8sAPIVersions[apiVersion]
+}
+
+// collectManifestFiles returns all manifest YAML files in data/components/*/manifests/.
+func collectManifestFiles(t *testing.T) []string {
+	t.Helper()
+
+	var files []string
+	err := fs.WalkDir(testMetadataFS, "data/components", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		// Only include files in manifests/ directories
+		if !strings.Contains(path, "/manifests/") {
+			return nil
+		}
+		// Only YAML files
+		if !strings.HasSuffix(path, ".yaml") {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk components directory: %v", err)
+	}
+
+	return files
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -916,7 +1224,7 @@ func collectMetadataFiles(t *testing.T) []string {
 	return files
 }
 
-// collectValuesFiles returns all values files in data/components/.
+// collectValuesFiles returns all values files in data/components/ (excluding manifests/).
 func collectValuesFiles(t *testing.T) map[string]bool {
 	t.Helper()
 
@@ -926,6 +1234,10 @@ func collectValuesFiles(t *testing.T) map[string]bool {
 			return err
 		}
 		if d.IsDir() {
+			return nil
+		}
+		// Skip manifest files (they contain Helm templates, not plain YAML)
+		if strings.Contains(path, "/manifests/") {
 			return nil
 		}
 		// Store relative path from data/

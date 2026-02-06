@@ -74,8 +74,11 @@ vim values.yaml
 4. **Install the chart**:
 
 ```bash
-helm install eidos-stack . -f values.yaml
+helm install eidos-stack . --wait --timeout 10m -f values.yaml
 ```
+
+> **Note**: The `--wait --timeout 10m` flags ensure Helm waits for all resources to be ready
+> and that Helm hooks (used for CRD-dependent resources) execute in the correct order.
 
 ## Customization
 
@@ -84,7 +87,7 @@ helm install eidos-stack . -f values.yaml
 To skip installing a specific component, set `<component>.enabled=false`:
 
 ```bash
-helm install eidos-stack . \
+helm install eidos-stack . --wait --timeout 10m \
   --set cert-manager.enabled=false
 ```
 
@@ -93,7 +96,7 @@ helm install eidos-stack . \
 Override specific values using `--set`:
 
 ```bash
-helm install eidos-stack . \
+helm install eidos-stack . --wait --timeout 10m \
   --set gpu-operator.driver.enabled=false \
   --set gpu-operator.toolkit.enabled=true
 ```
@@ -103,7 +106,7 @@ helm install eidos-stack . \
 Create a custom values file and merge it:
 
 ```bash
-helm install eidos-stack . -f values.yaml -f custom-values.yaml
+helm install eidos-stack . --wait --timeout 10m -f values.yaml -f custom-values.yaml
 ```
 
 ## Upgrade
@@ -111,7 +114,7 @@ helm install eidos-stack . -f values.yaml -f custom-values.yaml
 To upgrade an existing installation:
 
 ```bash
-helm upgrade eidos-stack . -f values.yaml
+helm upgrade eidos-stack . --wait --timeout 10m -f values.yaml
 ```
 
 ## Uninstall
