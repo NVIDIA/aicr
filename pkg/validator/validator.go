@@ -16,8 +16,11 @@ package validator
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/NVIDIA/eidos/pkg/errors"
@@ -87,6 +90,20 @@ func EvaluateConstraint(constraint recipe.Constraint, snap *snapshotter.Snapshot
 type Validator struct {
 	// Version is the validator version (typically the CLI version).
 	Version string
+
+	// Namespace is the Kubernetes namespace where validation jobs will run.
+	// Defaults to "eidos-validation" if not specified.
+	Namespace string
+
+	// Image is the container image to use for validation Jobs.
+	// Must include Go toolchain for running tests.
+	// Defaults to "ghcr.io/nvidia/eidos-validator:latest".
+	Image string
+
+	// RunID is a unique identifier for this validation run.
+	// Used to scope all resources (ConfigMaps, Jobs) and enable resumability.
+	// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9")
+	RunID string
 }
 
 // Option is a functional option for configuring Validator instances.
@@ -99,9 +116,58 @@ func WithVersion(version string) Option {
 	}
 }
 
+// WithNamespace returns an Option that sets the namespace for validation jobs.
+func WithNamespace(namespace string) Option {
+	return func(v *Validator) {
+		v.Namespace = namespace
+	}
+}
+
+// WithImage returns an Option that sets the container image for validation Jobs.
+func WithImage(image string) Option {
+	return func(v *Validator) {
+		v.Image = image
+	}
+}
+
+// WithRunID returns an Option that sets the RunID for this validation run.
+// Used when resuming a previous validation run.
+func WithRunID(runID string) Option {
+	return func(v *Validator) {
+		v.RunID = runID
+	}
+}
+
+// generateRunID creates a unique identifier for a validation run.
+// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9")
+func generateRunID() string {
+	// Generate timestamp
+	timestamp := time.Now().Format("20060102-150405")
+
+	// Generate 4 random hex characters
+	randomBytes := make([]byte, 2)
+	if _, err := rand.Read(randomBytes); err != nil {
+		// Fallback to timestamp only if random generation fails
+		return timestamp
+	}
+	randomHex := hex.EncodeToString(randomBytes)
+
+	return fmt.Sprintf("%s-%s", timestamp, randomHex)
+}
+
 // New creates a new Validator with the provided options.
 func New(opts ...Option) *Validator {
-	v := &Validator{}
+	// Default validator image (can be overridden by EIDOS_VALIDATOR_IMAGE env var for CI)
+	defaultImage := "ghcr.io/nvidia/eidos-validator:latest"
+	if envImage := os.Getenv("EIDOS_VALIDATOR_IMAGE"); envImage != "" {
+		defaultImage = envImage
+	}
+
+	v := &Validator{
+		Namespace: "eidos-validation", // Default namespace for validation jobs
+		Image:     defaultImage,       // Default validator image
+		RunID:     generateRunID(),    // Generate unique RunID for this validation run
+	}
 	for _, opt := range opts {
 		opt(v)
 	}

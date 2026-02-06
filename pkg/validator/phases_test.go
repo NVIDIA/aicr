@@ -18,12 +18,23 @@ import (
 	"context"
 	"testing"
 
+	"github.com/NVIDIA/eidos/pkg/k8s/client"
 	"github.com/NVIDIA/eidos/pkg/measurement"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 )
 
 func TestValidatePhase(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -85,6 +96,16 @@ func TestValidatePhase(t *testing.T) {
 }
 
 func TestValidatePreDeployment(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -174,6 +195,16 @@ func TestValidatePreDeployment(t *testing.T) {
 }
 
 func TestValidateDeployment(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -209,7 +240,7 @@ func TestValidateDeployment(t *testing.T) {
 				},
 			},
 			wantStatus: ValidationStatusPass,
-			wantChecks: 2, // 1 constraint + 1 check (both as checks in skeleton)
+			wantChecks: 1, // Checks count (constraints are in separate array)
 		},
 	}
 
@@ -242,6 +273,16 @@ func TestValidateDeployment(t *testing.T) {
 }
 
 func TestValidatePerformance(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -298,6 +339,16 @@ func TestValidatePerformance(t *testing.T) {
 }
 
 func TestValidateConformance(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -353,6 +404,16 @@ func TestValidateConformance(t *testing.T) {
 }
 
 func TestValidateAll_PhaseOrder(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -384,6 +445,16 @@ func TestValidateAll_PhaseOrder(t *testing.T) {
 }
 
 func TestValidateAll_PhaseDependencies(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	// This test would verify phase dependency logic (fail → skip subsequent)
 	// For skeleton implementation, all phases pass, so we can't test skip logic yet
 	// TODO: Add test when we have real validation that can fail
@@ -472,6 +543,16 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 }
 
 func TestValidatePhases(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -545,6 +626,16 @@ func TestValidatePhases(t *testing.T) {
 }
 
 func TestValidatePhases_ContextCanceled(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 

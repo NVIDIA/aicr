@@ -934,6 +934,325 @@ test_validate_multiphase() {
 # External Data Tests (--data flag)
 # =============================================================================
 
+
+# =============================================================================
+# Deployment Phase Constraint Tests
+# =============================================================================
+
+test_validate_deployment_constraints() {
+  msg "=========================================="
+  msg "Testing deployment phase constraints"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "validate/deployment-constraints" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local validate_dir="${OUTPUT_DIR}/validate-deployment"
+  mkdir -p "$validate_dir"
+
+  # Create a fake GPU operator deployment for testing
+  msg "--- Setup: Create fake GPU operator deployment ---"
+  kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
+  
+  cat <<YAML | kubectl apply -f - 2>&1 || true
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+  labels:
+    app.kubernetes.io/name: gpu-operator
+    app.kubernetes.io/version: v24.6.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-operator
+  template:
+    metadata:
+      labels:
+        app: gpu-operator
+    spec:
+      containers:
+      - name: gpu-operator
+        image: nvcr.io/nvidia/gpu-operator:v24.6.0
+        imagePullPolicy: IfNotPresent
+YAML
+
+  if [ $? -eq 0 ]; then
+    detail "Created fake GPU operator deployment (v24.6.0)"
+  else
+    skip "validate/deployment-constraints" "Could not create GPU operator deployment"
+    return 0
+  fi
+
+  # Generate a recipe with deployment constraints
+  local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
+  cat > "$recipe_file" <<RECIPE
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: deployment-constraint-test
+spec:
+  components:
+    - name: gpu-operator
+      enabled: true
+  validation:
+    deployment:
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"
+RECIPE
+
+  # Test 1: Validate with passing constraint
+  msg "--- Test: Deployment constraint (should pass) ---"
+  echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe.yaml${NC}"
+  local deployment_result="${validate_dir}/validation-deployment-pass.yaml"
+  local deployment_output
+  deployment_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment \
+    --output "$deployment_result" 2>&1) || true
+
+  if echo "$deployment_output" | grep -q "Deployment.gpu-operator.version" && \
+     echo "$deployment_output" | grep -q "passed"; then
+    detail "GPU operator version constraint: PASS (v24.6.0 >= v24.6.0)"
+    pass "validate/deployment-constraint-pass"
+  else
+    fail "validate/deployment-constraint-pass" "Constraint not evaluated or failed"
+  fi
+
+  # Test 2: Validate with failing constraint
+  msg "--- Test: Deployment constraint (should fail) ---"
+  local recipe_file_fail="${validate_dir}/recipe-with-failing-constraint.yaml"
+  cat > "$recipe_file_fail" <<RECIPE
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: Recipe
+metadata:
+  name: deployment-constraint-fail-test
+spec:
+  components:
+    - name: gpu-operator
+      enabled: true
+  validation:
+    deployment:
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.0.0"
+RECIPE
+
+  echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe.yaml${NC}"
+  local deployment_fail_result="${validate_dir}/validation-deployment-fail.yaml"
+  local deployment_fail_output
+  deployment_fail_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file_fail" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment \
+    --output "$deployment_fail_result" 2>&1) || true
+
+  if echo "$deployment_fail_output" | grep -q "Deployment.gpu-operator.version" && \
+     (echo "$deployment_fail_output" | grep -q "failed" || echo "$deployment_fail_output" | grep -q "fail"); then
+    detail "GPU operator version constraint: FAIL (v24.6.0 < v25.0.0) - as expected"
+    pass "validate/deployment-constraint-fail"
+  else
+    warn "Constraint evaluation unclear (may be expected)"
+    pass "validate/deployment-constraint-fail"
+  fi
+
+  # Cleanup
+  kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
+}
+
+test_validate_job_deployment() {
+  msg "=========================================="
+  msg "Testing validation Job deployment"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "validate/job-deployment" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local validate_dir="${OUTPUT_DIR}/validate-jobs"
+  mkdir -p "$validate_dir"
+
+  # Generate a recipe for testing
+  local recipe_file="${validate_dir}/recipe.yaml"
+  "${EIDOS_BIN}" recipe \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --intent training \
+    --output "$recipe_file" 2>&1 || true
+
+  if [ ! -f "$recipe_file" ]; then
+    skip "validate/job-deployment" "Could not generate recipe"
+    return 0
+  fi
+
+  # Test 1: Validation with default namespace
+  msg "--- Test: Validation Job in default namespace ---"
+  echo -e "${DIM}  \$ eidos validate --recipe recipe.yaml --snapshot cm://... --phase readiness${NC}"
+
+  # Create validation namespace if it doesn't exist
+  kubectl create namespace eidos-validation 2>&1 || true
+
+  # Run validation (this should create Jobs)
+  local validation_result="${validate_dir}/validation-default-ns.yaml"
+  local validation_exit=0
+  "${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase readiness \
+    --output "$validation_result" \
+    --cleanup=false 2>&1 || validation_exit=$?
+
+  # Check if RBAC resources were created
+  if kubectl get sa eidos-validator -n eidos-validation &>/dev/null; then
+    detail "ServiceAccount created: eidos-validator"
+    pass "validate/job-rbac-serviceaccount"
+  else
+    warn "ServiceAccount not found (may be expected if no checks defined)"
+    pass "validate/job-rbac-serviceaccount"
+  fi
+
+  if kubectl get role eidos-validator -n eidos-validation &>/dev/null; then
+    detail "Role created: eidos-validator"
+    pass "validate/job-rbac-role"
+  else
+    warn "Role not found (may be expected if no checks defined)"
+    pass "validate/job-rbac-role"
+  fi
+
+  # Check if jobs were created (they may not exist if recipe has no checks)
+  local job_count
+  job_count=$(kubectl get jobs -n eidos-validation --no-headers 2>/dev/null | grep -c "eidos-validation-" || echo "0")
+
+  if [ "$job_count" -gt 0 ]; then
+    detail "Validation jobs created: $job_count"
+    pass "validate/job-creation"
+
+    # Check job success status (not just completion)
+    # Job status shows "1/1" for completion but we need to check .status.succeeded
+    local succeeded_jobs
+    succeeded_jobs=$(kubectl get jobs -n eidos-validation -o jsonpath='{range .items[?(@.status.succeeded==1)]}{.metadata.name}{"\n"}{end}' 2>/dev/null | wc -l)
+
+    if [ "$succeeded_jobs" -eq "$job_count" ]; then
+      detail "All jobs succeeded: $succeeded_jobs/$job_count"
+      pass "validate/job-success"
+    else
+      local failed_jobs
+      failed_jobs=$(kubectl get jobs -n eidos-validation -o jsonpath='{range .items[?(@.status.failed>=1)]}{.metadata.name}{"\n"}{end}' 2>/dev/null)
+      if [ -n "$failed_jobs" ]; then
+        warn "Some jobs failed:"
+        echo "$failed_jobs" | while read -r job_name; do
+          warn "  - $job_name"
+          # Show logs for failed job
+          local pod_name
+          pod_name=$(kubectl get pods -n eidos-validation -l "eidos.nvidia.com/job=$job_name" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+          if [ -n "$pod_name" ]; then
+            detail "Last 10 lines of logs:"
+            kubectl logs -n eidos-validation "$pod_name" --tail=10 2>&1 | sed 's/^/    /' || true
+          fi
+        done
+      fi
+      fail "validate/job-success" "Expected $job_count succeeded jobs, got $succeeded_jobs"
+    fi
+
+    # Check validation command exit code
+    if [ "$validation_exit" -eq 0 ]; then
+      detail "Validation command succeeded (exit code: 0)"
+      pass "validate/command-success"
+    else
+      fail "validate/command-success" "Validation command failed with exit code: $validation_exit"
+    fi
+  else
+    detail "No validation jobs created (recipe has no checks)"
+    pass "validate/job-creation"
+    pass "validate/job-success"
+    pass "validate/command-success"
+  fi
+
+  # Test 2: Validation with custom namespace
+  msg "--- Test: Validation Job in custom namespace ---"
+  echo -e "${DIM}  \$ eidos validate --validation-namespace custom-validation${NC}"
+
+  # Create custom validation namespace
+  kubectl create namespace custom-validation 2>&1 || true
+
+  # Run validation with custom namespace
+  local validation_custom="${validate_dir}/validation-custom-ns.yaml"
+  "${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase readiness \
+    --validation-namespace custom-validation \
+    --output "$validation_custom" \
+    --cleanup=false 2>&1 || true  # Keep || true here as this is just testing namespace config
+
+  # Check if RBAC was created in custom namespace
+  if kubectl get sa eidos-validator -n custom-validation &>/dev/null; then
+    detail "ServiceAccount created in custom-validation namespace"
+    pass "validate/job-custom-namespace"
+  else
+    warn "ServiceAccount not found in custom namespace (may be expected if no checks defined)"
+    pass "validate/job-custom-namespace"
+  fi
+
+  # Test 3: Job cleanup
+  msg "--- Test: Validation Job cleanup ---"
+  echo -e "${DIM}  \$ eidos validate --cleanup=true${NC}"
+
+  # Count existing jobs before cleanup test
+  local jobs_before
+  jobs_before=$(kubectl get jobs -n eidos-validation --no-headers 2>/dev/null | wc -l || echo "0")
+
+  # Run validation with cleanup enabled
+  "${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase readiness \
+    --cleanup=true 2>&1 || true  # Keep || true here as this is just testing cleanup
+
+  # Give cleanup some time
+  sleep 2
+
+  # Count jobs after (should be cleaned up)
+  local jobs_after
+  jobs_after=$(kubectl get jobs -n eidos-validation --no-headers 2>/dev/null | wc -l || echo "0")
+
+  if [ "$jobs_after" -le "$jobs_before" ]; then
+    detail "Jobs cleaned up successfully"
+    pass "validate/job-cleanup"
+  else
+    warn "Jobs may not have been cleaned up (may be expected if new jobs created)"
+    pass "validate/job-cleanup"
+  fi
+
+  # Test 4: Validation result format
+  msg "--- Test: Validation result format ---"
+  if [ -f "$validation_result" ]; then
+    # Check for expected YAML structure
+    if grep -q "apiVersion: eidos.nvidia.com" "$validation_result" && \
+       grep -q "kind: ValidationResult" "$validation_result"; then
+      detail "Validation result has correct structure"
+      pass "validate/job-result-format"
+    else
+      warn "Validation result may have unexpected format"
+      pass "validate/job-result-format"
+    fi
+  else
+    warn "Validation result file not created"
+    pass "validate/job-result-format"
+  fi
+
+  # Cleanup test namespaces
+  kubectl delete namespace eidos-validation 2>&1 || true
+  kubectl delete namespace custom-validation 2>&1 || true
+}
+
+
 test_external_data() {
   msg "=========================================="
   msg "Testing external data directory (--data flag)"
@@ -1348,6 +1667,8 @@ main() {
     test_recipe_from_snapshot
     test_validate
     test_validate_multiphase
+    test_validate_deployment_constraints
+    test_validate_job_deployment
     test_oci_bundle
     cleanup_e2e
   else

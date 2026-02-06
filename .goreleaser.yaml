@@ -119,6 +119,24 @@ kos:
     preserve_import_paths: false
     bare: true
 
+dockers:
+  - id: eidos-validator
+    dockerfile: Dockerfile.validator
+    use: buildx
+    image_templates:
+      - "ghcr.io/nvidia/eidos-validator:latest"
+      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}"
+      - "ghcr.io/nvidia/eidos-validator:v{{.Major}}"
+      - "ghcr.io/nvidia/eidos-validator:v{{.Major}}.{{.Minor}}"
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}-validator"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+
 archives:
   - id: eidos
     ids:

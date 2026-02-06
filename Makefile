@@ -122,10 +122,10 @@ license: ## Add/verify license headers in source files
 	@addlicense -f .github/headers/LICENSE $(LICENSE_IGNORES) .
 
 .PHONY: test
-test: ## Runs unit tests with race detector and coverage
+test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
-	go test -count=1 -race -covermode=atomic -coverprofile=coverage.out ./... || exit 1; \
+	go test -short -count=1 -race -covermode=atomic -coverprofile=coverage.out ./... || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
@@ -191,6 +191,16 @@ image: ## Builds and pushes container image (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
 	echo "Building and pushing image to $(IMAGE_REGISTRY)/eidos:$(IMAGE_TAG)"; \
 	KO_DOCKER_REPO=$(IMAGE_REGISTRY) ko build --bare --sbom=none --tags=$(IMAGE_TAG) ./cmd/eidos
+
+.PHONY: image-validator
+image-validator: ## Builds validator image with Go toolchain (IMAGE_REGISTRY, IMAGE_TAG)
+	@set -e; \
+	echo "Building validator image to $(IMAGE_REGISTRY)/eidos-validator:$(IMAGE_TAG)"; \
+	docker build -f Dockerfile.validator -t $(IMAGE_REGISTRY)/eidos-validator:$(IMAGE_TAG) .; \
+	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
+		echo "Pushing validator image to $(IMAGE_REGISTRY)/eidos-validator:$(IMAGE_TAG)"; \
+		docker push $(IMAGE_REGISTRY)/eidos-validator:$(IMAGE_TAG); \
+	fi
 
 .PHONY: release
 release: ## Runs the full release process with goreleaser

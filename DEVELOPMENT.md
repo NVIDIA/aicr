@@ -550,8 +550,9 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | Target | Description |
 |--------|-------------|
 | `make build` | Build binaries for current OS/arch |
-| `make image` | Build and push container image |
-| `make release` | Full release with goreleaser |
+| `make image` | Build and push eidos container image (Ko) |
+| `make image-validator` | Build and push validator image with Go toolchain (Docker) |
+| `make release` | Full release with goreleaser (includes all images) |
 | `make bump-major` | Bump major version (1.2.3 → 2.0.0) |
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |
 | `make bump-patch` | Bump patch version (1.2.3 → 1.2.4) |

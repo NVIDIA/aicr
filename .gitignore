@@ -51,6 +51,7 @@ sbom.json
 # =============================================================================
 # Generated recipe/bundle output
 /recipe.yaml
+/bundle/
 /bundles/
 /bundles.zip
 
