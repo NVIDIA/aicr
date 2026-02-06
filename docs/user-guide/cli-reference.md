@@ -86,6 +86,8 @@ eidos snapshot [flags]
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
 | `--cleanup` | | bool | true | Delete Job and RBAC resources on completion. Use `--cleanup=false` to keep resources for debugging. |
+| `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
+| `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 
 **Output Destinations:**
 - **stdout**: Default when no `-o` flag specified
@@ -145,7 +147,47 @@ eidos snapshot --deploy-agent \
   --timeout 10m \
   --output cm://gpu-operator/eidos-snapshot \
   --cleanup
+
+# Custom template formatting
+eidos snapshot --template examples/templates/snapshot-template.md.tmpl
+
+# Template with file output
+eidos snapshot --template examples/templates/snapshot-template.md.tmpl --output report.md
+
+# Agent deployment with custom template
+eidos snapshot --deploy-agent \
+  --namespace gpu-operator \
+  --template examples/templates/snapshot-template.md.tmpl \
+  --output cluster-report.yaml
 ```
+
+**Custom Templates:**
+
+The `--template` flag enables custom output formatting using Go templates with [Sprig functions](https://masterminds.github.io/sprig/). Templates receive the full Snapshot struct:
+
+```yaml
+# Available template data structure:
+.Kind           # Resource kind ("Snapshot")
+.APIVersion     # API version string
+.Metadata       # Map of key-value pairs (timestamp, version, source-node)
+.Measurements   # Array of Measurement objects
+  .Type         # Measurement type (K8s, GPU, OS, SystemD)
+  .Subtypes     # Array of Subtype objects
+    .Name       # Subtype name (e.g., "server", "smi", "grub")
+    .Data       # Map of readings (key -> Reading with .String method)
+```
+
+Example template extracting key cluster info:
+```go
+cluster:
+  kubernetes: {{ with index .Measurements 0 }}{{ range .Subtypes }}{{ if eq .Name "server" }}
+    version: {{ (index .Data "version").String }}{{ end }}{{ end }}{{ end }}
+  gpu: {{ range .Measurements }}{{ if eq .Type.String "GPU" }}{{ range .Subtypes }}{{ if eq .Name "smi" }}
+    model: {{ (index .Data "gpu.model").String }}
+    count: {{ (index .Data "gpu-count").String }}{{ end }}{{ end }}{{ end }}{{ end }}
+```
+
+See `examples/templates/snapshot-template.md.tmpl` for a complete example template that generates a concise cluster report.
 
 **Agent Deployment Mode:**
 
@@ -1163,6 +1205,49 @@ Debug logs include:
 - External files discovered and registered
 - File source resolution (embedded vs external)
 - Registry merge details (components added/overridden)
+
+## Example Files
+
+The `examples/` directory contains reference files for testing and learning:
+
+### Snapshots (`examples/snapshots/`)
+
+| File | Description |
+|------|-------------|
+| `gb200.yaml` | GB200 NVL72 system snapshot (Ubuntu 24.04, EKS 1.33, NVLink) |
+| `h100.yaml` | H100 GPU cluster snapshot (Ubuntu 22.04, GKE 1.32) |
+| `gb200-h100-comp.md` | Configuration comparison between GB200 and H100 |
+
+**Usage:**
+```shell
+# Generate recipe from example snapshot
+eidos recipe --snapshot examples/snapshots/gb200.yaml --intent training --platform kubeflow
+```
+
+### Recipes (`examples/recipes/`)
+
+| File | Description |
+|------|-------------|
+| `eks-gb200-training.yaml` | GB200 training workload recipe for EKS |
+| `eks-h100-training.yaml` | H100 training workload recipe for EKS |
+
+**Usage:**
+```shell
+# Generate bundle from example recipe
+eidos bundle --recipe examples/recipes/eks-gb200-training.yaml --output ./bundles
+```
+
+### Templates (`examples/templates/`)
+
+| File | Description |
+|------|-------------|
+| `snapshot-template.md.tmpl` | Go template for custom snapshot report formatting |
+
+**Usage:**
+```shell
+# Generate custom cluster report
+eidos snapshot --template examples/templates/snapshot-template.md.tmpl --output report.md
+```
 
 ## See Also
 

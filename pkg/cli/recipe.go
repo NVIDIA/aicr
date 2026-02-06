@@ -87,7 +87,7 @@ Override snapshot-detected criteria:
 			},
 			&cli.StringFlag{
 				Name:  "platform",
-				Usage: fmt.Sprintf("Platform/framework type (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
+				Usage: fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
 			},
 			&cli.IntFlag{
 				Name:  "nodes",
@@ -112,6 +112,11 @@ Override snapshot-detected criteria:
 			kubeconfigFlag,
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// Validate single-value flags are not duplicated
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "output", "format"); err != nil {
+				return err
+			}
+
 			// Initialize external data provider if --data flag is set
 			if err := initDataProvider(cmd); err != nil {
 				return fmt.Errorf("failed to initialize data provider: %w", err)
