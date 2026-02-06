@@ -63,13 +63,6 @@ driver:
   maxParallelUpgrades: 5
   rdma:
     enabled: true
-  resources:
-    limits:
-      cpu: "8"
-      memory: 16Gi
-    requests:
-      cpu: "2"
-      memory: 8Gi
 
 devicePlugin:
   env:
