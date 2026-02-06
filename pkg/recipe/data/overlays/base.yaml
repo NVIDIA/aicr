@@ -46,6 +46,8 @@ spec:
       source: oci://ghcr.io/nvidia
       version: v0.6.0
       valuesFile: components/nvsentinel/values.yaml
+      manifestFiles:
+        - components/nvsentinel/manifests/allow-intra-namespace.yaml
       dependencyRefs:
         - cert-manager
 
