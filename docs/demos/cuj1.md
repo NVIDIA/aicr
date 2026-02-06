@@ -19,6 +19,8 @@ eidos recipe \
 ```shell
 eidos validate \
   --phase readiness \
+  --namespace gpu-operator \
+  --node-selector nodeGroup=customer-gpu
   --output recipe.yaml
 ```
 
