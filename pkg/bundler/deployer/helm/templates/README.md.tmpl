@@ -62,8 +62,11 @@ vim values.yaml
 4. **Install the chart**:
 
 ```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace -f values.yaml
+helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m -f values.yaml
 ```
+
+> **Note**: The `--wait --timeout 10m` flags ensure Helm waits for all resources to be ready
+> and that Helm hooks (used for CRD-dependent resources) execute in the correct order.
 
 ## Customization
 
@@ -72,7 +75,7 @@ helm install {{ .ChartName }} . -n eidos-stack --create-namespace -f values.yaml
 To skip installing a specific component, set `<component>.enabled=false`:
 
 ```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace \
+helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m \
   --set cert-manager.enabled=false
 ```
 
@@ -81,7 +84,7 @@ helm install {{ .ChartName }} . -n eidos-stack --create-namespace \
 Override specific values using `--set`:
 
 ```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace \
+helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m \
   --set gpu-operator.driver.enabled=false \
   --set gpu-operator.toolkit.enabled=true
 ```
@@ -91,7 +94,7 @@ helm install {{ .ChartName }} . -n eidos-stack --create-namespace \
 Create a custom values file and merge it:
 
 ```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace -f values.yaml -f custom-values.yaml
+helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m -f values.yaml -f custom-values.yaml
 ```
 
 ## Upgrade
@@ -99,7 +102,7 @@ helm install {{ .ChartName }} . -n eidos-stack --create-namespace -f values.yaml
 To upgrade an existing installation:
 
 ```bash
-helm upgrade {{ .ChartName }} . -n eidos-stack -f values.yaml
+helm upgrade {{ .ChartName }} . -n eidos-stack --wait --timeout 10m -f values.yaml
 ```
 
 ## Uninstall

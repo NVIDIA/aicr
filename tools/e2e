@@ -1182,8 +1182,165 @@ EOF
     test_fail "validate/invalid-phase" "Expected error for invalid phase"
   fi
 
+  # -------------------------------------------------------------------------
+  # Test 9: Multiple --phase flags (new feature)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 9: Multiple --phase flags ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase readiness --phase deployment 2>&1) || true
+
+  # Should recognize both phases
+  local multi_phase_count=0
+  echo "$output" | grep -q "readiness" && ((multi_phase_count++)) || true
+  echo "$output" | grep -q "deployment" && ((multi_phase_count++)) || true
+
+  if [ $multi_phase_count -ge 2 ]; then
+    test_pass "validate/multiple-phases"
+  else
+    test_fail "validate/multiple-phases" "Expected multiple phases to be processed"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 10: Multiple --phase flags (three phases)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 10: Three --phase flags ---"
+
+  output=$("${EIDOS_BIN}" validate -r "$recipe_file" -s "$snapshot_file" \
+    --phase readiness --phase deployment --phase conformance 2>&1) || true
+
+  # Should show all three phases
+  if echo "$output" | grep -q "readiness" && \
+     echo "$output" | grep -q "deployment" && \
+     echo "$output" | grep -q "conformance"; then
+    test_pass "validate/three-phases"
+  else
+    test_fail "validate/three-phases" "Expected all three phases"
+  fi
+
   msg ""
   msg "Multi-phase validation tests completed"
+}
+
+# ============================================================================
+# DUPLICATE FLAG VALIDATION TESTS
+# ============================================================================
+
+test_duplicate_flag_validation() {
+  msg ""
+  msg "=========================================="
+  msg "Testing Duplicate Flag Validation"
+  msg "=========================================="
+
+  local dup_test_dir="${OUTPUT_DIR}/duplicate-flag-test"
+  mkdir -p "$dup_test_dir"
+
+  # Create a minimal recipe for testing
+  local recipe_file="${dup_test_dir}/test-recipe.yaml"
+  if ! "${EIDOS_BIN}" recipe --service eks --accelerator h100 --intent training \
+    -o "$recipe_file" 2>&1; then
+    msg "Note: Could not create recipe, using placeholder"
+    echo "kind: Recipe" > "$recipe_file"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 1: bundle --recipe duplicate (should error)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 1: bundle --recipe --recipe (should error) ---"
+
+  local output
+  output=$("${EIDOS_BIN}" bundle --recipe "$recipe_file" --recipe "$recipe_file" \
+    -o "$dup_test_dir/out" 2>&1) || true
+
+  if echo "$output" | grep -qi "can only be specified once"; then
+    test_pass "duplicate-flag/bundle-recipe"
+  else
+    test_fail "duplicate-flag/bundle-recipe" "Expected error for duplicate --recipe"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 2: validate --recipe duplicate (should error)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 2: validate --recipe --recipe (should error) ---"
+
+  output=$("${EIDOS_BIN}" validate --recipe "$recipe_file" --recipe "$recipe_file" \
+    --snapshot "$recipe_file" 2>&1) || true
+
+  if echo "$output" | grep -qi "can only be specified once"; then
+    test_pass "duplicate-flag/validate-recipe"
+  else
+    test_fail "duplicate-flag/validate-recipe" "Expected error for duplicate --recipe"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 3: recipe --service duplicate (should error)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 3: recipe --service --service (should error) ---"
+
+  output=$("${EIDOS_BIN}" recipe --service eks --service gke \
+    --accelerator h100 --intent training 2>&1) || true
+
+  if echo "$output" | grep -qi "can only be specified once"; then
+    test_pass "duplicate-flag/recipe-service"
+  else
+    test_fail "duplicate-flag/recipe-service" "Expected error for duplicate --service"
+  fi
+
+  msg ""
+  msg "Duplicate flag validation tests completed"
+}
+
+# ============================================================================
+# VALIDATE COMMAND AGENT FLAGS TEST
+# ============================================================================
+
+test_validate_agent_flags() {
+  msg ""
+  msg "=========================================="
+  msg "Testing Validate Command Agent Flags"
+  msg "=========================================="
+
+  # -------------------------------------------------------------------------
+  # Test 1: Verify agent flags exist in validate command
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 1: Agent flags exist in validate --help ---"
+
+  local help_output
+  help_output=$("${EIDOS_BIN}" validate --help 2>&1)
+
+  local missing_flags=""
+  for flag in "namespace" "node-selector" "toleration" "image" "job-name" "timeout" "cleanup" "privileged"; do
+    if ! echo "$help_output" | grep -q "$flag"; then
+      missing_flags="$missing_flags $flag"
+    fi
+  done
+
+  if [ -z "$missing_flags" ]; then
+    test_pass "validate-agent/flags-exist"
+  else
+    test_fail "validate-agent/flags-exist" "Missing flags:$missing_flags"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 2: Validate command description mentions agent deployment
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 2: Help mentions agent deployment ---"
+
+  if echo "$help_output" | grep -qi "agent\|deploy"; then
+    test_pass "validate-agent/help-mentions-agent"
+  else
+    test_fail "validate-agent/help-mentions-agent" "Help should mention agent deployment"
+  fi
+
+  msg ""
+  msg "Validate agent flags tests completed"
 }
 
 # ============================================================================
@@ -1345,6 +1502,138 @@ EOF
 }
 
 # ============================================================================
+# SNAPSHOT TEMPLATE FLAG TESTS
+# ============================================================================
+
+test_snapshot_template_flags() {
+  msg ""
+  msg "=========================================="
+  msg "Testing Snapshot Template Flag Combinations"
+  msg "=========================================="
+
+  local template_test_dir="${OUTPUT_DIR}/snapshot-template-test"
+  mkdir -p "$template_test_dir"
+
+  # Create a test template
+  local test_template="${template_test_dir}/test.tmpl"
+  cat > "$test_template" << 'EOF'
+# Test Template Output
+kind: {{ .Kind }}
+apiVersion: {{ .APIVersion }}
+measurements_count: {{ len .Measurements }}
+EOF
+
+  # -------------------------------------------------------------------------
+  # Test 1: Verify --template flag exists in help
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 1: Template flag exists in help ---"
+
+  # Note: snapshot command requires either local system access or --deploy-agent
+  # We verify the flag exists by checking help output
+  local help_output
+  help_output=$("${EIDOS_BIN}" snapshot --help 2>&1)
+  if echo "$help_output" | grep -q "template"; then
+    test_pass "snapshot-template/flag-exists"
+  else
+    test_fail "snapshot-template/flag-exists" "Template flag not found in snapshot command help"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 2: Template with explicit yaml format (should succeed validation)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 2: Template with --format yaml ---"
+
+  # This should pass flag validation (may fail at collection)
+  if "${EIDOS_BIN}" snapshot --template "$test_template" --format yaml 2>&1 | grep -qi "error.*format\|invalid.*format"; then
+    test_fail "snapshot-template/yaml-format" "Template with yaml format should be valid"
+  else
+    test_pass "snapshot-template/yaml-format"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 3: Template with json format (should fail validation)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 3: Template with --format json (should fail) ---"
+
+  local json_output
+  json_output=$("${EIDOS_BIN}" snapshot --template "$test_template" --format json 2>&1) || true
+
+  if echo "$json_output" | grep -qi "YAML format\|requires YAML"; then
+    test_pass "snapshot-template/json-format-rejected"
+  else
+    test_fail "snapshot-template/json-format-rejected" "Expected error about YAML format requirement"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 4: Non-existent template file (should fail)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 4: Non-existent Template File ---"
+
+  local missing_output
+  missing_output=$("${EIDOS_BIN}" snapshot --template "/non/existent/template.tmpl" 2>&1) || true
+
+  if echo "$missing_output" | grep -qi "not found\|no such file\|does not exist"; then
+    test_pass "snapshot-template/nonexistent-file"
+  else
+    test_fail "snapshot-template/nonexistent-file" "Expected error for missing template file"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 5: Template path is a directory (should fail)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 5: Template Path is Directory ---"
+
+  local dir_output
+  dir_output=$("${EIDOS_BIN}" snapshot --template "$template_test_dir" 2>&1) || true
+
+  if echo "$dir_output" | grep -qi "directory\|not a file"; then
+    test_pass "snapshot-template/directory-path"
+  else
+    test_fail "snapshot-template/directory-path" "Expected error for directory path"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 6: Verify example template file exists
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 6: Example Template File Exists ---"
+
+  local example_template="${ROOT}/examples/templates/snapshot-template.md.tmpl"
+  if [ -f "$example_template" ]; then
+    test_pass "snapshot-template/example-exists"
+  else
+    test_fail "snapshot-template/example-exists" "Example template not found at ${example_template}"
+  fi
+
+  # -------------------------------------------------------------------------
+  # Test 7: No template (standard formats should work)
+  # -------------------------------------------------------------------------
+  msg ""
+  msg "--- Test 7: No Template with Different Formats ---"
+
+  # Without template, both yaml and json should be valid (will fail at collection)
+  for fmt in yaml json; do
+    local fmt_output
+    fmt_output=$("${EIDOS_BIN}" snapshot --format "$fmt" 2>&1) || true
+
+    # Should not fail due to format validation (only collection)
+    if echo "$fmt_output" | grep -qi "invalid format\|unknown format"; then
+      test_fail "snapshot-template/no-template-${fmt}" "Format $fmt should be valid without template"
+    else
+      test_pass "snapshot-template/no-template-${fmt}"
+    fi
+  done
+
+  msg ""
+  msg "Snapshot template flag tests completed"
+}
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -1378,6 +1667,15 @@ test_external_data_flag
 
 # Step 7: Test multi-phase validation (--phase flag)
 test_validate_phases
+
+# Step 8: Test snapshot template flag combinations
+test_snapshot_template_flags
+
+# Step 9: Test duplicate flag validation
+test_duplicate_flag_validation
+
+# Step 10: Test validate command agent flags
+test_validate_agent_flags
 
 # Print summary
 echo ""
