@@ -470,3 +470,91 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 		},
 	}
 }
+
+func TestValidatePhases(t *testing.T) {
+	snapshot := createTestSnapshot()
+	recipeResult := createTestRecipeWithValidation()
+
+	tests := []struct {
+		name       string
+		phases     []ValidationPhaseName
+		wantStatus ValidationStatus
+		wantPhases int // Number of phases in result
+	}{
+		{
+			name:       "empty phases defaults to readiness",
+			phases:     []ValidationPhaseName{},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 1,
+		},
+		{
+			name:       "single readiness phase",
+			phases:     []ValidationPhaseName{PhaseReadiness},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 1,
+		},
+		{
+			name:       "single deployment phase",
+			phases:     []ValidationPhaseName{PhaseDeployment},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 1,
+		},
+		{
+			name:       "multiple phases - readiness and deployment",
+			phases:     []ValidationPhaseName{PhaseReadiness, PhaseDeployment},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 2,
+		},
+		{
+			name:       "multiple phases - readiness, deployment, performance",
+			phases:     []ValidationPhaseName{PhaseReadiness, PhaseDeployment, PhasePerformance},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 3,
+		},
+		{
+			name:       "all phases via PhaseAll in list",
+			phases:     []ValidationPhaseName{PhaseAll},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 4, // All 4 phases
+		},
+		{
+			name:       "PhaseAll mixed with others uses all",
+			phases:     []ValidationPhaseName{PhaseReadiness, PhaseAll},
+			wantStatus: ValidationStatusPass,
+			wantPhases: 4, // All 4 phases because PhaseAll is present
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"))
+			result, err := v.ValidatePhases(context.Background(), tt.phases, recipeResult, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Status != tt.wantStatus {
+				t.Errorf("Summary.Status = %v, want %v", result.Summary.Status, tt.wantStatus)
+			}
+
+			if len(result.Phases) != tt.wantPhases {
+				t.Errorf("Phases count = %d, want %d", len(result.Phases), tt.wantPhases)
+			}
+		})
+	}
+}
+
+func TestValidatePhases_ContextCanceled(t *testing.T) {
+	snapshot := createTestSnapshot()
+	recipeResult := createTestRecipeWithValidation()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	v := New(WithVersion("test"))
+	_, err := v.ValidatePhases(ctx, []ValidationPhaseName{PhaseReadiness, PhaseDeployment}, recipeResult, snapshot)
+
+	if err == nil {
+		t.Error("expected error for canceled context, got nil")
+	}
+}

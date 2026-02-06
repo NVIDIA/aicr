@@ -31,3 +31,14 @@ func parseOutputFormat(cmd *cli.Command) (serializer.Format, error) {
 	}
 	return outFormat, nil
 }
+
+// validateSingleValueFlags checks that single-value flags are not passed multiple times.
+// Returns an error if any of the specified flags appear more than once.
+func validateSingleValueFlags(cmd *cli.Command, flagNames ...string) error {
+	for _, name := range flagNames {
+		if cmd.Count(name) > 1 {
+			return fmt.Errorf("flag --%s can only be specified once", name)
+		}
+	}
+	return nil
+}
