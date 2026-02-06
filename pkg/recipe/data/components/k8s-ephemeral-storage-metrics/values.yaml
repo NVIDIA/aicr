@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# TODO: add fullnameOverride once upstream chart exposes it in values.yaml
+# (_helpers.tpl has the logic but values.yaml doesn't declare it)
+
 # -- Set metrics you want to enable
 metrics:
   # -- Percentage of ephemeral storage used by a container in a pod
