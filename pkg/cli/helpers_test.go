@@ -105,3 +105,83 @@ func TestParseOutputFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateSingleValueFlags(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		flags   []string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "single flag once is valid",
+			args:    []string{"test", "--recipe", "recipe.yaml"},
+			flags:   []string{"recipe"},
+			wantErr: false,
+		},
+		{
+			name:    "single flag twice should error",
+			args:    []string{"test", "--recipe", "first.yaml", "--recipe", "second.yaml"},
+			flags:   []string{"recipe"},
+			wantErr: true,
+			errMsg:  "flag --recipe can only be specified once",
+		},
+		{
+			name:    "multiple different flags once each is valid",
+			args:    []string{"test", "--recipe", "recipe.yaml", "--output", "out.yaml"},
+			flags:   []string{"recipe", "output"},
+			wantErr: false,
+		},
+		{
+			name:    "flag not in check list can be duplicated",
+			args:    []string{"test", "--other", "first", "--other", "second"},
+			flags:   []string{"recipe"},
+			wantErr: false,
+		},
+		{
+			name:    "flag with alias twice should error",
+			args:    []string{"test", "-r", "first.yaml", "--recipe", "second.yaml"},
+			flags:   []string{"recipe"},
+			wantErr: true,
+			errMsg:  "flag --recipe can only be specified once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotErr error
+			cmd := &cli.Command{
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:    "recipe",
+						Aliases: []string{"r"},
+					},
+					&cli.StringFlag{
+						Name:    "output",
+						Aliases: []string{"o"},
+					},
+					&cli.StringFlag{
+						Name: "other",
+					},
+				},
+				Action: func(_ context.Context, c *cli.Command) error {
+					gotErr = validateSingleValueFlags(c, tt.flags...)
+					return nil
+				},
+			}
+
+			err := cmd.Run(context.Background(), tt.args)
+			if err != nil {
+				t.Fatalf("failed to run command: %v", err)
+			}
+
+			if (gotErr != nil) != tt.wantErr {
+				t.Errorf("validateSingleValueFlags() error = %v, wantErr %v", gotErr, tt.wantErr)
+			}
+			if tt.wantErr && gotErr != nil && gotErr.Error() != tt.errMsg {
+				t.Errorf("validateSingleValueFlags() error message = %q, want %q", gotErr.Error(), tt.errMsg)
+			}
+		})
+	}
+}

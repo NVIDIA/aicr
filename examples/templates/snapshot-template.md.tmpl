@@ -1,0 +1,108 @@
+# Cluster Snapshot Report
+
+{{- /* Extract data from measurements */ -}}
+{{- $k8sServer := dict }}
+{{- $k8sNode := dict }}
+{{- $gpuSmi := dict }}
+{{- $osGrub := dict }}
+{{- $k8sImages := dict }}
+{{- $k8sPolicy := dict }}
+{{- range .Measurements }}
+  {{- if eq .Type.String "K8s" }}
+    {{- range .Subtypes }}
+      {{- if eq .Name "server" }}{{ $k8sServer = .Data }}{{ end }}
+      {{- if eq .Name "node" }}{{ $k8sNode = .Data }}{{ end }}
+      {{- if eq .Name "image" }}{{ $k8sImages = .Data }}{{ end }}
+      {{- if eq .Name "policy" }}{{ $k8sPolicy = .Data }}{{ end }}
+    {{- end }}
+  {{- end }}
+  {{- if eq .Type.String "GPU" }}
+    {{- range .Subtypes }}
+      {{- if eq .Name "smi" }}{{ $gpuSmi = .Data }}{{ end }}
+    {{- end }}
+  {{- end }}
+  {{- if eq .Type.String "OS" }}
+    {{- range .Subtypes }}
+      {{- if eq .Name "grub" }}{{ $osGrub = .Data }}{{ end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
+> Generated: {{ if index .Metadata "timestamp" }}{{ index .Metadata "timestamp" }}{{ end }} | Version: {{ if index .Metadata "version" }}{{ index .Metadata "version" }}{{ end }}
+
+## Cluster Overview
+
+| Property | Value |
+|----------|-------|
+| **Node** | {{ if index $k8sNode "source-node" }}{{ (index $k8sNode "source-node").String }}{{ else }}_unknown_{{ end }} |
+| **Provider** | {{ if index $k8sNode "provider" }}{{ (index $k8sNode "provider").String }}{{ else }}_unknown_{{ end }} |
+| **K8s Version** | {{ if index $k8sServer "version" }}{{ (index $k8sServer "version").String }}{{ else }}_unknown_{{ end }} |
+| **Platform** | {{ if index $k8sServer "platform" }}{{ (index $k8sServer "platform").String }}{{ else }}_unknown_{{ end }} |
+| **OS Image** | {{ if index $k8sNode "os-image" }}{{ (index $k8sNode "os-image").String }}{{ else }}_unknown_{{ end }} |
+| **Kernel** | {{ if index $k8sNode "kernel-version" }}{{ (index $k8sNode "kernel-version").String }}{{ else }}_unknown_{{ end }} |
+| **Container Runtime** | {{ if index $k8sNode "container-runtime-id" }}{{ (index $k8sNode "container-runtime-id").String }}{{ else }}_unknown_{{ end }} |
+
+## GPU Configuration
+
+| Property | Value |
+|----------|-------|
+| **Model** | {{ if index $gpuSmi "gpu.model" }}{{ (index $gpuSmi "gpu.model").String }}{{ else }}_unknown_{{ end }} |
+| **Architecture** | {{ if index $gpuSmi "gpu.product-architecture" }}{{ (index $gpuSmi "gpu.product-architecture").String }}{{ else }}_unknown_{{ end }} |
+| **GPU Count** | {{ if index $gpuSmi "gpu-count" }}{{ (index $gpuSmi "gpu-count").String }}{{ else }}0{{ end }} |
+| **Driver Version** | {{ if index $gpuSmi "driver" }}{{ (index $gpuSmi "driver").String }}{{ else }}_unknown_{{ end }} |
+| **CUDA Version** | {{ if index $gpuSmi "cuda-version" }}{{ (index $gpuSmi "cuda-version").String }}{{ else }}_unknown_{{ end }} |
+| **Persistence Mode** | {{ if index $gpuSmi "gpu.persistence-mode" }}{{ (index $gpuSmi "gpu.persistence-mode").String }}{{ else }}_unknown_{{ end }} |
+| **Addressing Mode** | {{ if index $gpuSmi "gpu.addressing-mode" }}{{ (index $gpuSmi "gpu.addressing-mode").String }}{{ else }}_unknown_{{ end }} |
+
+## Boot Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| **Boot Image** | {{ if index $osGrub "BOOT_IMAGE" }}{{ (index $osGrub "BOOT_IMAGE").String }}{{ else }}_unknown_{{ end }} |
+| **Hugepages** | {{ if index $osGrub "hugepages" }}{{ (index $osGrub "hugepages").String }}{{ else }}0{{ end }} |
+| **Hugepage Size** | {{ if index $osGrub "hugepagesz" }}{{ (index $osGrub "hugepagesz").String }}{{ else }}_unknown_{{ end }} |
+| **NUMA Balancing** | {{ if index $osGrub "numa_balancing" }}{{ (index $osGrub "numa_balancing").String }}{{ else }}_unknown_{{ end }} |
+
+## NVIDIA Components
+
+| Component | Image |
+|-----------|-------|
+| GPU Operator | {{ if index $k8sImages "gpu-operator" }}`{{ (index $k8sImages "gpu-operator").String }}`{{ else }}_not installed_{{ end }} |
+| Driver | {{ if index $k8sImages "driver" }}`{{ (index $k8sImages "driver").String }}`{{ else }}_not installed_{{ end }} |
+| Container Toolkit | {{ if index $k8sImages "container-toolkit" }}`{{ (index $k8sImages "container-toolkit").String }}`{{ else }}_not installed_{{ end }} |
+| Device Plugin | {{ if index $k8sImages "k8s-device-plugin" }}`{{ (index $k8sImages "k8s-device-plugin").String }}`{{ else }}_not installed_{{ end }} |
+| DCGM | {{ if index $k8sImages "dcgm" }}`{{ (index $k8sImages "dcgm").String }}`{{ else }}_not installed_{{ end }} |
+| DCGM Exporter | {{ if index $k8sImages "dcgm-exporter" }}`{{ (index $k8sImages "dcgm-exporter").String }}`{{ else }}_not installed_{{ end }} |
+| Node Feature Discovery | {{ if index $k8sImages "node-feature-discovery" }}`{{ (index $k8sImages "node-feature-discovery").String }}`{{ else }}_not installed_{{ end }} |
+
+## GPU Operator Policy
+
+| Setting | Value |
+|---------|-------|
+| Driver Enabled | {{ if index $k8sPolicy "driver.enabled" }}{{ (index $k8sPolicy "driver.enabled").String }}{{ else }}_unknown_{{ end }} |
+| Driver Version | {{ if index $k8sPolicy "driver.version" }}{{ (index $k8sPolicy "driver.version").String }}{{ else }}_unknown_{{ end }} |
+| RDMA Enabled | {{ if index $k8sPolicy "driver.rdma.enabled" }}{{ (index $k8sPolicy "driver.rdma.enabled").String }}{{ else }}_unknown_{{ end }} |
+| Toolkit Enabled | {{ if index $k8sPolicy "toolkit.enabled" }}{{ (index $k8sPolicy "toolkit.enabled").String }}{{ else }}_unknown_{{ end }} |
+| Device Plugin Enabled | {{ if index $k8sPolicy "devicePlugin.enabled" }}{{ (index $k8sPolicy "devicePlugin.enabled").String }}{{ else }}_unknown_{{ end }} |
+| DCGM Enabled | {{ if index $k8sPolicy "dcgm.enabled" }}{{ (index $k8sPolicy "dcgm.enabled").String }}{{ else }}_unknown_{{ end }} |
+| GDRCopy Enabled | {{ if index $k8sPolicy "gdrcopy.enabled" }}{{ (index $k8sPolicy "gdrcopy.enabled").String }}{{ else }}_unknown_{{ end }} |
+| MIG Strategy | {{ if index $k8sPolicy "mig.strategy" }}{{ (index $k8sPolicy "mig.strategy").String }}{{ else }}_unknown_{{ end }} |
+| CDI Enabled | {{ if index $k8sPolicy "cdi.enabled" }}{{ (index $k8sPolicy "cdi.enabled").String }}{{ else }}_unknown_{{ end }} |
+
+## Key Services
+{{- $services := list "containerd.service" "kubelet.service" "nvidia-persistenced.service" "nvidia-fabricmanager.service" }}
+
+| Service | State |
+|---------|-------|
+{{- range .Measurements }}
+{{- if eq .Type.String "SystemD" }}
+{{- range .Subtypes }}
+{{- if has .Name $services }}
+| {{ .Name | replace ".service" "" }} | {{ if index .Data "ActiveState" }}{{ (index .Data "ActiveState").String }}{{ else }}_unknown_{{ end }} ({{ if index .Data "SubState" }}{{ (index .Data "SubState").String }}{{ else }}_unknown_{{ end }}) |
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+---
+*Generated by [Eidos](https://github.com/NVIDIA/eidos)*
