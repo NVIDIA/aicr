@@ -31,13 +31,6 @@ spec:
 
   # Kind-specific component overrides
   componentRefs:
-    # cert-manager: disable startupapicheck due to nvsentinel network policy issue
-    - name: cert-manager
-      type: Helm
-      overrides:
-        startupapicheck:
-          enabled: false
-
     # gpu-operator: configure for kind with GPU passthrough
     # Assumes host has NVIDIA drivers pre-installed and GPUs passed through to kind
     - name: gpu-operator

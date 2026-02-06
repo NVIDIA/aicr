@@ -50,9 +50,9 @@ cainjector:
       memory: "320Mi"
       cpu: "50m"
 
-# Startup API check job - disabled as workaround for nvsentinel network policy
-# blocking webhook traffic (port 10250). The metrics-access policy only allows
-# ports 2112 and 9216, causing the API check to hang.
-# TODO: Re-enable when nvsentinel provides a way to disable the network policy
+# Startup API check job - verifies cert-manager webhook is reachable after install.
+# Previously disabled due to nvsentinel network policy blocking webhook traffic,
+# now re-enabled since the allow-intra-namespace NetworkPolicy workaround (PR #68)
+# neutralizes the restriction.
 startupapicheck:
-  enabled: false
+  enabled: true
