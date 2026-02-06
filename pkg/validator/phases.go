@@ -44,6 +44,15 @@ const (
 	PhaseAll ValidationPhaseName = "all"
 )
 
+// PhaseOrder defines the canonical execution order for validation phases.
+// Readiness and deployment must run before performance or conformance.
+var PhaseOrder = []ValidationPhaseName{
+	PhaseReadiness,
+	PhaseDeployment,
+	PhasePerformance,
+	PhaseConformance,
+}
+
 // ValidatePhase runs validation for a specific phase.
 // This is the main entry point for phase-based validation.
 func (v *Validator) ValidatePhase(
@@ -455,15 +464,7 @@ func (v *Validator) validateAll(
 	result := NewValidationResult()
 	overallStatus := ValidationStatusPass
 
-	// Phase order: readiness → deployment → performance → conformance
-	phases := []ValidationPhaseName{
-		PhaseReadiness,
-		PhaseDeployment,
-		PhasePerformance,
-		PhaseConformance,
-	}
-
-	for _, phase := range phases {
+	for _, phase := range PhaseOrder {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

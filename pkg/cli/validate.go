@@ -74,28 +74,40 @@ func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 }
 
 // parseValidationPhases parses phase strings into ValidationPhaseName values.
+// It deduplicates phases and returns them in canonical order (readiness → deployment → performance → conformance).
 func parseValidationPhases(phaseStrs []string) ([]validator.ValidationPhaseName, error) {
 	if len(phaseStrs) == 0 {
 		return []validator.ValidationPhaseName{validator.PhaseReadiness}, nil
 	}
 
-	var phases []validator.ValidationPhaseName
+	// Parse and collect requested phases into a set for deduplication
+	requested := make(map[validator.ValidationPhaseName]bool)
 	for _, phaseStr := range phaseStrs {
 		switch phaseStr {
 		case "readiness":
-			phases = append(phases, validator.PhaseReadiness)
+			requested[validator.PhaseReadiness] = true
 		case "deployment":
-			phases = append(phases, validator.PhaseDeployment)
+			requested[validator.PhaseDeployment] = true
 		case "performance":
-			phases = append(phases, validator.PhasePerformance)
+			requested[validator.PhasePerformance] = true
 		case "conformance":
-			phases = append(phases, validator.PhaseConformance)
+			requested[validator.PhaseConformance] = true
 		case "all":
-			phases = append(phases, validator.PhaseAll)
+			// "all" means all phases - return PhaseAll which is handled specially by validator
+			return []validator.ValidationPhaseName{validator.PhaseAll}, nil
 		default:
 			return nil, fmt.Errorf("invalid phase %q: must be one of: readiness, deployment, performance, conformance, all", phaseStr)
 		}
 	}
+
+	// Build result in canonical order using validator.PhaseOrder
+	var phases []validator.ValidationPhaseName
+	for _, phase := range validator.PhaseOrder {
+		if requested[phase] {
+			phases = append(phases, phase)
+		}
+	}
+
 	return phases, nil
 }
 

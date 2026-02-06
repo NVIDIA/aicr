@@ -75,6 +75,41 @@ func TestParseValidationPhases(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name:      "out of order phases reordered to canonical order",
+			phaseStrs: []string{"conformance", "readiness", "performance"},
+			wantPhases: []validator.ValidationPhaseName{
+				validator.PhaseReadiness,
+				validator.PhasePerformance,
+				validator.PhaseConformance,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "duplicate phases deduplicated",
+			phaseStrs: []string{"readiness", "readiness", "deployment", "readiness"},
+			wantPhases: []validator.ValidationPhaseName{
+				validator.PhaseReadiness,
+				validator.PhaseDeployment,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "duplicates with out of order",
+			phaseStrs: []string{"performance", "readiness", "performance", "deployment"},
+			wantPhases: []validator.ValidationPhaseName{
+				validator.PhaseReadiness,
+				validator.PhaseDeployment,
+				validator.PhasePerformance,
+			},
+			wantErr: false,
+		},
+		{
+			name:       "all with other phases returns just all",
+			phaseStrs:  []string{"readiness", "all", "deployment"},
+			wantPhases: []validator.ValidationPhaseName{validator.PhaseAll},
+			wantErr:    false,
+		},
+		{
 			name:       "invalid phase",
 			phaseStrs:  []string{"invalid"},
 			wantPhases: nil,
