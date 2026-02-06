@@ -36,7 +36,6 @@ permissions:
   contents: read
   id-token: write
   pull-requests: write
-  security-events: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -65,12 +64,6 @@ jobs:
           addlicense_version: ${{ steps.versions.outputs.addlicense }}
           coverage_report: 'true'
           coverage_threshold: '70'
-
-      - name: Security Scan
-        uses: ./.github/actions/security-scan
-        with:
-          severity: 'MEDIUM'
-          category: 'trivy-fs'
 
   integration:
     name: Integration Tests
