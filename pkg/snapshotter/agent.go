@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/k8s/agent"
 	k8sclient "github.com/NVIDIA/eidos/pkg/k8s/client"
@@ -80,6 +82,134 @@ type AgentConfig struct {
 	// Privileged enables privileged mode (hostPID, hostNetwork, privileged container).
 	// Required for GPU and SystemD collectors. When false, only K8s and OS collectors work.
 	Privileged bool
+
+	// TemplatePath is the path to a Go template file for custom output formatting.
+	// When set, the snapshot output will be processed through this template.
+	TemplatePath string
+}
+
+// DeployAndGetSnapshot deploys an agent to capture a snapshot and returns the Snapshot struct.
+// This is used by commands that need to capture a snapshot but also process the data
+// (e.g., validate command that needs to run validation on the captured snapshot).
+func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, error) {
+	if config == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "agent config is required")
+	}
+
+	slog.Debug("starting agent deployment for snapshot capture")
+
+	// Get Kubernetes client
+	var clientset k8sclient.Interface
+	var err error
+
+	if config.Kubeconfig != "" {
+		clientset, _, err = k8sclient.GetKubeClientWithConfig(config.Kubeconfig)
+	} else {
+		clientset, _, err = k8sclient.GetKubeClient()
+	}
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create Kubernetes client", err)
+	}
+
+	// Agent Job always writes to a ConfigMap internally.
+	agentOutput := fmt.Sprintf("%s%s/eidos-snapshot", serializer.ConfigMapURIScheme, config.Namespace)
+
+	// Build agent configuration
+	agentConfig := agent.Config{
+		Namespace:          config.Namespace,
+		ServiceAccountName: config.ServiceAccountName,
+		JobName:            config.JobName,
+		Image:              config.Image,
+		ImagePullSecrets:   config.ImagePullSecrets,
+		NodeSelector:       config.NodeSelector,
+		Tolerations:        config.Tolerations,
+		Output:             agentOutput,
+		Debug:              config.Debug,
+		Privileged:         config.Privileged,
+	}
+
+	// Create deployer
+	deployer := agent.NewDeployer(clientset, agentConfig)
+
+	// Ensure cleanup on error or success
+	//nolint:contextcheck // intentional: need fresh context for cleanup when parent is canceled
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		cleanupOpts := agent.CleanupOptions{Enabled: config.Cleanup}
+		if cleanupErr := deployer.Cleanup(cleanupCtx, cleanupOpts); cleanupErr != nil {
+			slog.Warn("cleanup failed - resources may remain in cluster",
+				slog.String("error", cleanupErr.Error()),
+				slog.String("namespace", config.Namespace),
+			)
+		}
+	}()
+
+	slog.Info("deploying agent", slog.String("namespace", agentConfig.Namespace))
+
+	// Deploy RBAC and Job
+	if deployErr := deployer.Deploy(ctx); deployErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to deploy agent", deployErr)
+	}
+
+	slog.Info("agent deployed successfully")
+
+	// Wait for Job completion
+	timeout := config.Timeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+
+	slog.Info("waiting for Job completion",
+		slog.String("job", agentConfig.JobName),
+		slog.Duration("timeout", timeout))
+
+	// Wait for Pod to be ready before streaming logs
+	podReadyTimeout := 60 * time.Second
+	logCtx, cancelLogs := context.WithCancel(ctx)
+	defer cancelLogs()
+
+	if podErr := deployer.WaitForPodReady(ctx, podReadyTimeout); podErr != nil {
+		slog.Warn("could not wait for pod ready, skipping log streaming", slog.String("error", podErr.Error()))
+	} else {
+		// Start streaming logs in background
+		go func() {
+			if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
+				// Only log if not canceled (expected when job completes)
+				if logCtx.Err() == nil {
+					slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
+				}
+			}
+		}()
+	}
+
+	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
+		// On failure, try to get pod logs to show what went wrong
+		if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
+			fmt.Fprintln(logWriter(), "--- agent logs ---")
+			fmt.Fprintln(logWriter(), logs)
+			fmt.Fprintln(logWriter(), "--- end logs ---")
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "job failed", waitErr)
+	}
+
+	slog.Info("job completed successfully")
+
+	// Retrieve snapshot from ConfigMap
+	slog.Debug("retrieving snapshot from ConfigMap")
+	snapshotData, err := deployer.GetSnapshot(ctx)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
+	}
+
+	// Parse snapshot YAML into Snapshot struct
+	var snap Snapshot
+	if err := yaml.Unmarshal(snapshotData, &snap); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse snapshot data", err)
+	}
+
+	return &snap, nil
 }
 
 // ParseNodeSelectors parses node selector strings in format "key=value".
@@ -169,10 +299,15 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create Kubernetes client", err)
 	}
 
-	// Default output to ConfigMap if not specified
-	output := n.AgentConfig.Output
-	if output == "" {
-		output = fmt.Sprintf("%s%s/eidos-snapshot", serializer.ConfigMapURIScheme, n.AgentConfig.Namespace)
+	// The user's final output destination (file, stdout, or ConfigMap)
+	finalOutput := n.AgentConfig.Output
+
+	// Agent Job always writes to a ConfigMap internally.
+	// If user specified a ConfigMap URI, use that; otherwise use a default ConfigMap.
+	agentOutput := fmt.Sprintf("%s%s/eidos-snapshot", serializer.ConfigMapURIScheme, n.AgentConfig.Namespace)
+	if strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme) {
+		// User explicitly wants ConfigMap output, use their URI
+		agentOutput = finalOutput
 	}
 
 	// Build agent configuration
@@ -184,7 +319,7 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		ImagePullSecrets:   n.AgentConfig.ImagePullSecrets,
 		NodeSelector:       n.AgentConfig.NodeSelector,
 		Tolerations:        n.AgentConfig.Tolerations,
-		Output:             output,
+		Output:             agentOutput,
 		Debug:              n.AgentConfig.Debug,
 		Privileged:         n.AgentConfig.Privileged,
 	}
@@ -275,20 +410,52 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
 	}
 
-	// Write snapshot to additional destinations if needed
+	// If template is specified, process the snapshot through the template
+	if n.AgentConfig.TemplatePath != "" {
+		return n.processWithTemplate(ctx, snapshotData, finalOutput)
+	}
+
+	// Write snapshot to final destination
 	switch {
-	case output == serializer.StdoutURI:
+	case finalOutput == "" || finalOutput == "-" || finalOutput == serializer.StdoutURI:
 		// Write to stdout
 		fmt.Println(string(snapshotData))
-	case strings.HasPrefix(output, serializer.ConfigMapURIScheme):
+	case strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme):
 		// Already in ConfigMap (written by Job)
-		slog.Info("snapshot saved to ConfigMap", slog.String("uri", output))
+		slog.Info("snapshot saved to ConfigMap", slog.String("uri", finalOutput))
 	default:
-		// Write to file (in addition to ConfigMap)
-		if err := serializer.WriteToFile(output, snapshotData); err != nil {
+		// Write to file
+		if err := serializer.WriteToFile(finalOutput, snapshotData); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to file", err)
 		}
-		slog.Info("snapshot saved to file", slog.String("path", output))
+		slog.Info("snapshot saved to file", slog.String("path", finalOutput))
+	}
+
+	return nil
+}
+
+// processWithTemplate processes snapshot data through a Go template.
+func (n *NodeSnapshotter) processWithTemplate(ctx context.Context, snapshotData []byte, output string) error {
+	// Unmarshal YAML to Snapshot struct
+	var snap Snapshot
+	if err := yaml.Unmarshal(snapshotData, &snap); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to unmarshal snapshot for template processing", err)
+	}
+
+	// Create template writer
+	tw, err := serializer.NewTemplateFileWriter(n.AgentConfig.TemplatePath, output)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create template writer", err)
+	}
+	defer tw.Close()
+
+	// Execute template
+	if err := tw.Serialize(ctx, &snap); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
+	}
+
+	if output != "" && output != "-" && output != serializer.StdoutURI {
+		slog.Info("snapshot saved to file with template", slog.String("path", output))
 	}
 
 	return nil

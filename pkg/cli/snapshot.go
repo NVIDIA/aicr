@@ -22,9 +22,45 @@ import (
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/eidos/pkg/collector"
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/serializer"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 )
+
+// snapshotTemplateOptions holds parsed template options for the snapshot command.
+type snapshotTemplateOptions struct {
+	templatePath string
+	outputPath   string
+	format       serializer.Format
+}
+
+// parseSnapshotTemplateOptions parses and validates template-related flags.
+func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format) (*snapshotTemplateOptions, error) {
+	templatePath := cmd.String("template")
+	outputPath := cmd.String("output")
+
+	if templatePath != "" {
+		// Validate format is YAML when using template
+		if cmd.IsSet("format") && outFormat != serializer.FormatYAML {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--template requires YAML format; --format must be \"yaml\" or omitted")
+		}
+
+		// Validate template file exists
+		if validateErr := serializer.ValidateTemplateFile(templatePath); validateErr != nil {
+			return nil, validateErr
+		}
+
+		// Force YAML format for template processing
+		outFormat = serializer.FormatYAML
+	}
+
+	return &snapshotTemplateOptions{
+		templatePath: templatePath,
+		outputPath:   outputPath,
+		format:       outFormat,
+	}, nil
+}
 
 func snapshotCmd() *cli.Command {
 	return &cli.Command{
@@ -72,6 +108,18 @@ Combined node selector and custom tolerations:
     --node-selector nodeGroup=customer-gpu \
     --toleration dedicated=user-workload:NoSchedule \
     --output cm://gpu-operator/eidos-snapshot
+
+Custom output formatting with Go templates:
+  eidos snapshot --template my-template.tmpl --output report.md
+
+  eidos snapshot --deploy-agent \
+    --node-selector nodeGroup=customer-gpu \
+    --template my-template.tmpl \
+    --output report.md
+
+The template receives the full Snapshot struct with Header (Kind, APIVersion, Metadata)
+and Measurements array. Sprig template functions are available for rich formatting.
+See examples/templates/snapshot-template.md.tmpl for a sample template.
 `,
 		Flags: []cli.Flag{
 			// Agent deployment flags
@@ -128,13 +176,28 @@ Combined node selector and custom tolerations:
 				Value: true,
 				Usage: "Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces.",
 			},
+			&cli.StringFlag{
+				Name:  "template",
+				Usage: "Path to Go template file for custom output formatting (requires YAML format)",
+			},
 			outputFlag,
 			formatFlag,
 			kubeconfigFlag,
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// Validate single-value flags are not duplicated
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "output", "format"); err != nil {
+				return err
+			}
+
 			// Parse output format
 			outFormat, err := parseOutputFormat(cmd)
+			if err != nil {
+				return err
+			}
+
+			// Parse and validate template options
+			tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat)
 			if err != nil {
 				return err
 			}
@@ -145,9 +208,19 @@ Combined node selector and custom tolerations:
 			)
 
 			// Create output serializer
-			ser, err := serializer.NewFileWriterOrStdout(outFormat, cmd.String("output"))
-			if err != nil {
-				return fmt.Errorf("failed to create output writer: %w", err)
+			var ser serializer.Serializer
+			if tmplOpts.templatePath != "" {
+				// Use template writer
+				ser, err = serializer.NewTemplateFileWriter(tmplOpts.templatePath, tmplOpts.outputPath)
+				if err != nil {
+					return fmt.Errorf("failed to create template writer: %w", err)
+				}
+			} else {
+				// Use standard format writer
+				ser, err = serializer.NewFileWriterOrStdout(tmplOpts.format, tmplOpts.outputPath)
+				if err != nil {
+					return fmt.Errorf("failed to create output writer: %w", err)
+				}
 			}
 
 			// Build snapshotter configuration
@@ -184,9 +257,10 @@ Combined node selector and custom tolerations:
 					Tolerations:        tolerations,
 					Timeout:            cmd.Duration("timeout"),
 					Cleanup:            cmd.Bool("cleanup"),
-					Output:             cmd.String("output"),
+					Output:             tmplOpts.outputPath,
 					Debug:              cmd.Bool("debug"),
 					Privileged:         cmd.Bool("privileged"),
+					TemplatePath:       tmplOpts.templatePath,
 				}
 			}
 

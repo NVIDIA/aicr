@@ -69,6 +69,123 @@ func (v *Validator) ValidatePhase(
 	}
 }
 
+// ValidatePhases runs validation for multiple specified phases.
+// If no phases are specified, defaults to readiness phase.
+// If phases includes "all", runs all phases.
+func (v *Validator) ValidatePhases(
+	ctx context.Context,
+	phases []ValidationPhaseName,
+	recipeResult *recipe.RecipeResult,
+	snap *snapshotter.Snapshot,
+) (*ValidationResult, error) {
+	// Handle empty or single phase cases
+	if len(phases) == 0 {
+		return v.ValidatePhase(ctx, PhaseReadiness, recipeResult, snap)
+	}
+	if len(phases) == 1 {
+		return v.ValidatePhase(ctx, phases[0], recipeResult, snap)
+	}
+
+	// Check if "all" is in the list - if so, just run all
+	for _, p := range phases {
+		if p == PhaseAll {
+			return v.validateAll(ctx, recipeResult, snap)
+		}
+	}
+
+	start := time.Now()
+	slog.Info("running specified validation phases", "phases", phases)
+
+	result := NewValidationResult()
+	overallStatus := ValidationStatusPass
+
+	for _, phase := range phases {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
+		// Skip subsequent phases if a previous phase failed
+		if overallStatus == ValidationStatusFail {
+			result.Phases[string(phase)] = &PhaseResult{
+				Status: ValidationStatusSkipped,
+				Reason: "skipped due to previous phase failure",
+			}
+			slog.Info("skipping phase due to previous failure", "phase", phase)
+			continue
+		}
+
+		// Run the phase
+		phaseResultDoc, err := v.ValidatePhase(ctx, phase, recipeResult, snap)
+		if err != nil {
+			return nil, err
+		}
+
+		// Merge phase result into overall result
+		if phaseResultDoc.Phases[string(phase)] != nil {
+			result.Phases[string(phase)] = phaseResultDoc.Phases[string(phase)]
+
+			// Update overall status
+			if phaseResultDoc.Phases[string(phase)].Status == ValidationStatusFail {
+				overallStatus = ValidationStatusFail
+			}
+		}
+	}
+
+	// Calculate overall summary
+	totalPassed := 0
+	totalFailed := 0
+	totalSkipped := 0
+	totalChecks := 0
+
+	for _, phaseResult := range result.Phases {
+		for _, cv := range phaseResult.Constraints {
+			totalChecks++
+			switch cv.Status {
+			case ConstraintStatusPassed:
+				totalPassed++
+			case ConstraintStatusFailed:
+				totalFailed++
+			case ConstraintStatusSkipped:
+				totalSkipped++
+			}
+		}
+		totalChecks += len(phaseResult.Checks)
+		for _, check := range phaseResult.Checks {
+			switch check.Status {
+			case ValidationStatusPass:
+				totalPassed++
+			case ValidationStatusFail:
+				totalFailed++
+			case ValidationStatusSkipped:
+				totalSkipped++
+			case ValidationStatusWarning:
+				// Warnings don't affect pass/fail count
+			case ValidationStatusPartial:
+				// Partial status is not expected at check level
+			}
+		}
+	}
+
+	result.Summary.Status = overallStatus
+	result.Summary.Passed = totalPassed
+	result.Summary.Failed = totalFailed
+	result.Summary.Skipped = totalSkipped
+	result.Summary.Total = totalChecks
+	result.Summary.Duration = time.Since(start)
+
+	slog.Info("specified phases validation completed",
+		"status", overallStatus,
+		"phases", len(result.Phases),
+		"passed", totalPassed,
+		"failed", totalFailed,
+		"skipped", totalSkipped,
+		"duration", result.Summary.Duration)
+
+	return result, nil
+}
+
 // validateReadiness validates readiness phase.
 // Skeleton implementation - just passes all checks.
 func (v *Validator) validateReadiness(

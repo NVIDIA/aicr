@@ -236,6 +236,11 @@ Package with explicit tag (overrides CLI version):
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			// Validate single-value flags are not duplicated
+			if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo"); err != nil {
+				return err
+			}
+
 			// Initialize external data provider if --data flag is set
 			if err := initDataProvider(cmd); err != nil {
 				return fmt.Errorf("failed to initialize data provider: %w", err)
