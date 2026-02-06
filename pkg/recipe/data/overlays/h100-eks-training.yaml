@@ -37,16 +37,13 @@ spec:
     # H100-specific GPU Operator overrides (inherits valuesFile from eks-training)
     - name: gpu-operator
       type: Helm
-      version: v25.3.3
       manifestFiles:
         - components/gpu-operator/manifests/kernel-module-params.yaml
       overrides:
         driver:
-          version: 580.82.07
           kernelModuleConfig:
             name: "kernel-module-params"
         cdi:
           enabled: true
-          default: false
         gdrcopy:
           enabled: true

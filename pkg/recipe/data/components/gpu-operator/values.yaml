@@ -69,7 +69,7 @@ devicePlugin:
     - name: DP_DISABLE_HEALTHCHECKS
       value: "109"
     - name: DEVICE_LIST_STRATEGY
-      value: volume-mounts
+      value: cdi-cri,cdi-annotations,volume-mounts
 
 migManager:
   enabled: true
