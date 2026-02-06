@@ -18,6 +18,21 @@
 # Override release name prefix to avoid eidos-stack- prefix in resource names
 fullnameOverride: skyhook-operator
 
+# Raise LimitRange defaults to prevent OOMKill of other namespace pods.
+# The skyhook chart creates a namespace-wide LimitRange that applies to ALL
+# containers without explicit resource limits. The upstream default (512Mi)
+# is too low for GPU driver kernel module compilation.
+# TODO: disable LimitRange entirely once the skyhook chart adds a nil guard
+# in cleanup-webhook-job.yaml (currently references limitRange.default.cpu
+# without a conditional check, so setting limitRange to null causes a render error).
+limitRange:
+  default:
+    cpu: "8"
+    memory: 16Gi
+  defaultRequest:
+    cpu: "1"
+    memory: 2Gi
+
 controllerManager:
   manager:
     resources:
