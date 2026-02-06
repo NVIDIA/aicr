@@ -107,6 +107,16 @@ eidos validate \
   --snapshot cm://gpu-operator/eidos-snapshot | yq .
 ```
 
+Validate Recipe sans Snapshot
+
+```shell
+eidos validate \
+  --phase readiness \
+  --namespace gpu-operator \
+  --node-selector nodeGroup=customer-gpu
+  --output recipe.yaml
+```
+
 ## Bundle
 
 Bundle from Recipe:
