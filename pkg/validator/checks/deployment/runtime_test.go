@@ -61,6 +61,15 @@ func TestDeploymentConstraints(t *testing.T) {
 		t.Fatalf("Failed to read snapshot from %s: %v", snapshotPath, err)
 	}
 
+	// Debug: log what we found
+	t.Logf("Recipe loaded: Validation=%v", recipeResult.Validation != nil)
+	if recipeResult.Validation != nil {
+		t.Logf("Recipe Validation.Deployment=%v", recipeResult.Validation.Deployment != nil)
+		if recipeResult.Validation.Deployment != nil {
+			t.Logf("Recipe Validation.Deployment.Constraints count=%d", len(recipeResult.Validation.Deployment.Constraints))
+		}
+	}
+
 	// Check if deployment phase has constraints
 	if recipeResult.Validation == nil ||
 		recipeResult.Validation.Deployment == nil ||

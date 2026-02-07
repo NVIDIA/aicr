@@ -48,6 +48,7 @@ eidosd_URL="${eidosd_URL:-http://localhost:8080}"
 OUTPUT_DIR="${OUTPUT_DIR:-$(mktemp -d)}"
 EIDOS_BIN=""
 EIDOS_IMAGE="${EIDOS_IMAGE:-localhost:5001/eidos:local}"
+EIDOS_VALIDATOR_IMAGE="${EIDOS_VALIDATOR_IMAGE:-localhost:5001/eidos-validator:local}"
 SNAPSHOT_NAMESPACE="${SNAPSHOT_NAMESPACE:-gpu-operator}"
 SNAPSHOT_CM="${SNAPSHOT_CM:-eidos-e2e-snapshot}"
 FAKE_GPU_ENABLED="${FAKE_GPU_ENABLED:-false}"
@@ -944,6 +945,9 @@ test_validate_deployment_constraints() {
   msg "Testing deployment phase constraints"
   msg "=========================================="
 
+  # Create validation namespace for constraint tests
+  kubectl create namespace eidos-validation 2>&1 || true
+
   if [ "$FAKE_GPU_ENABLED" != "true" ]; then
     skip "validate/deployment-constraints" "Fake GPU not enabled"
     return 0
@@ -991,19 +995,18 @@ YAML
   # Generate a recipe with deployment constraints
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
+kind: recipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
-kind: Recipe
 metadata:
-  name: deployment-constraint-test
-spec:
-  components:
-    - name: gpu-operator
-      enabled: true
-  validation:
-    deployment:
-      constraints:
-        - name: Deployment.gpu-operator.version
-          value: ">= v24.6.0"
+  version: dev
+componentRefs:
+  - name: gpu-operator
+    enabled: true
+validation:
+  deployment:
+    constraints:
+      - name: Deployment.gpu-operator.version
+        value: ">= v24.6.0"
 RECIPE
 
   # Test 1: Validate with passing constraint
@@ -1038,19 +1041,18 @@ RECIPE
   msg "--- Test: Deployment constraint (should fail) ---"
   local recipe_file_fail="${validate_dir}/recipe-with-failing-constraint.yaml"
   cat > "$recipe_file_fail" <<RECIPE
+kind: recipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
-kind: Recipe
 metadata:
-  name: deployment-constraint-fail-test
-spec:
-  components:
-    - name: gpu-operator
-      enabled: true
-  validation:
-    deployment:
-      constraints:
-        - name: Deployment.gpu-operator.version
-          value: ">= v25.0.0"
+  version: dev
+componentRefs:
+  - name: gpu-operator
+    enabled: true
+validation:
+  deployment:
+    constraints:
+      - name: Deployment.gpu-operator.version
+        value: ">= v25.0.0"
 RECIPE
 
   echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe.yaml${NC}"
