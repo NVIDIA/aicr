@@ -73,6 +73,8 @@ alertmanager:
 # Node Exporter - for node-level metrics
 nodeExporter:
   enabled: true
+prometheus-node-exporter:
+  fullnameOverride: prometheus-node-exporter
 
 # kube-state-metrics - for Kubernetes object metrics
 kube-state-metrics:

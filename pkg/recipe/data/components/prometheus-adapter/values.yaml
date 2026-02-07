@@ -15,6 +15,9 @@
 # Prometheus Adapter Helm values
 # Enables Kubernetes HPA to scale workloads based on custom metrics from Prometheus
 
+# TODO: add fullnameOverride once upstream PR merges:
+# https://github.com/prometheus-community/helm-charts/pull/6584
+
 # Prometheus connection configuration
 prometheus:
   # URL of the Prometheus service deployed by kube-prometheus-stack
