@@ -68,6 +68,7 @@ func TestDeploymentConstraints(t *testing.T) {
 	if recipeResult.Validation == nil ||
 		recipeResult.Validation.Deployment == nil ||
 		len(recipeResult.Validation.Deployment.Constraints) == 0 {
+
 		t.Log("No deployment constraints to evaluate")
 		return
 	}

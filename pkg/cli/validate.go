@@ -308,7 +308,7 @@ Resume a previous validation run from where it left off:
 			&cli.StringFlag{
 				Name:    "image",
 				Usage:   "Container image for validation Jobs (must include Go toolchain)",
-				Sources: cli.EnvVars("EIDOS_IMAGE"),
+				Sources: cli.EnvVars("EIDOS_VALIDATOR_IMAGE"),
 				Value:   "ghcr.io/nvidia/eidos-validator:latest",
 			},
 			&cli.StringSliceFlag{
