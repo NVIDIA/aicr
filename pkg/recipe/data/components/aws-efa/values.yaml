@@ -56,8 +56,7 @@ additionalPodAnnotations: {}
 
 additionalPodLabels: {}
 
-nameOverride: ""
-
-fullnameOverride: ""
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: aws-efa-k8s-device-plugin
 
 imagePullSecrets: []

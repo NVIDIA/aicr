@@ -15,6 +15,9 @@
 # AWS EBS CSI Driver Helm values
 # Base configuration for EKS deployments
 
+# Override release name prefix to avoid eidos-stack- prefix in resource names
+fullnameOverride: aws-ebs-csi-driver
+
 image:
   repository: public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver
   pullPolicy: IfNotPresent
