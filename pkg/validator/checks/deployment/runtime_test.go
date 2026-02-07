@@ -34,13 +34,12 @@ func TestDeploymentConstraints(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// This test runs inside the validator Job, so required ConfigMaps should be mounted
-	// Get configuration from environment variables (set by the Job)
-	recipeConfigMap := os.Getenv("RECIPE_CONFIGMAP")
-	snapshotConfigMap := os.Getenv("SNAPSHOT_CONFIGMAP")
-	namespace := os.Getenv("VALIDATION_NAMESPACE")
+	// This test runs inside the validator Job with mounted volumes
+	// Get file paths from environment variables (set by the Job)
+	recipePath := os.Getenv("EIDOS_RECIPE_PATH")
+	snapshotPath := os.Getenv("EIDOS_SNAPSHOT_PATH")
 
-	if recipeConfigMap == "" || snapshotConfigMap == "" || namespace == "" {
+	if recipePath == "" || snapshotPath == "" {
 		t.Skip("Skipping: not running in validator Job environment")
 	}
 
@@ -50,18 +49,16 @@ func TestDeploymentConstraints(t *testing.T) {
 		t.Fatalf("Failed to get Kubernetes client: %v", err)
 	}
 
-	// Read recipe from ConfigMap using cm:// URI
-	recipeURI := "cm://" + namespace + "/" + recipeConfigMap
-	recipeResult, err := serializer.FromFile[recipe.RecipeResult](recipeURI)
+	// Read recipe from mounted file
+	recipeResult, err := serializer.FromFile[recipe.RecipeResult](recipePath)
 	if err != nil {
-		t.Fatalf("Failed to read recipe from ConfigMap %s: %v", recipeURI, err)
+		t.Fatalf("Failed to read recipe from %s: %v", recipePath, err)
 	}
 
-	// Read snapshot from ConfigMap using cm:// URI
-	snapshotURI := "cm://" + namespace + "/" + snapshotConfigMap
-	snapshot, err := serializer.FromFile[snapshotter.Snapshot](snapshotURI)
+	// Read snapshot from mounted file
+	snapshot, err := serializer.FromFile[snapshotter.Snapshot](snapshotPath)
 	if err != nil {
-		t.Fatalf("Failed to read snapshot from ConfigMap %s: %v", snapshotURI, err)
+		t.Fatalf("Failed to read snapshot from %s: %v", snapshotPath, err)
 	}
 
 	// Check if deployment phase has constraints
