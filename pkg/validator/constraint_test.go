@@ -229,3 +229,61 @@ func TestParsedConstraint_Evaluate(t *testing.T) {
 		})
 	}
 }
+
+func TestParsedConstraint_String(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint ParsedConstraint
+		want       string
+	}{
+		{
+			name:       "exact match returns value only",
+			constraint: ParsedConstraint{Operator: OperatorExact, Value: "ubuntu"},
+			want:       "ubuntu",
+		},
+		{
+			name:       "exact match with version",
+			constraint: ParsedConstraint{Operator: OperatorExact, Value: "24.04"},
+			want:       "24.04",
+		},
+		{
+			name:       "gte operator",
+			constraint: ParsedConstraint{Operator: OperatorGTE, Value: "1.32.4"},
+			want:       ">= 1.32.4",
+		},
+		{
+			name:       "lte operator",
+			constraint: ParsedConstraint{Operator: OperatorLTE, Value: "1.33"},
+			want:       "<= 1.33",
+		},
+		{
+			name:       "gt operator",
+			constraint: ParsedConstraint{Operator: OperatorGT, Value: "1.30"},
+			want:       "> 1.30",
+		},
+		{
+			name:       "lt operator",
+			constraint: ParsedConstraint{Operator: OperatorLT, Value: "2.0"},
+			want:       "< 2.0",
+		},
+		{
+			name:       "eq operator",
+			constraint: ParsedConstraint{Operator: OperatorEQ, Value: "ubuntu"},
+			want:       "== ubuntu",
+		},
+		{
+			name:       "ne operator",
+			constraint: ParsedConstraint{Operator: OperatorNE, Value: "rhel"},
+			want:       "!= rhel",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.constraint.String()
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

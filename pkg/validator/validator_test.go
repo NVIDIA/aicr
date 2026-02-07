@@ -651,3 +651,29 @@ func TestNew_MultipleOptions(t *testing.T) {
 		t.Errorf("Expected runID %s, got %s", runID, v.RunID)
 	}
 }
+
+func TestNew_WithImage(t *testing.T) {
+	customImage := "localhost:5001/eidos-validator:test"
+	v := New(WithImage(customImage))
+
+	if v.Image != customImage {
+		t.Errorf("Expected image %s, got %s", customImage, v.Image)
+	}
+}
+
+func TestNew_WithImage_MultipleOptions(t *testing.T) {
+	version := "v1.0.0"
+	image := "ghcr.io/nvidia/eidos-validator:v1.0.0"
+
+	v := New(
+		WithVersion(version),
+		WithImage(image),
+	)
+
+	if v.Version != version {
+		t.Errorf("Expected version %s, got %s", version, v.Version)
+	}
+	if v.Image != image {
+		t.Errorf("Expected image %s, got %s", image, v.Image)
+	}
+}

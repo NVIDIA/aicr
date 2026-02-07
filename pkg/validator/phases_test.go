@@ -649,3 +649,168 @@ func TestValidatePhases_ContextCanceled(t *testing.T) {
 		t.Error("expected error for canceled context, got nil")
 	}
 }
+
+// TestMapTestStatusToValidationStatus tests the mapping of test status strings to validation status
+func TestMapTestStatusToValidationStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		testStatus string
+		want       ValidationStatus
+	}{
+		{
+			name:       "pass status",
+			testStatus: "pass",
+			want:       ValidationStatusPass,
+		},
+		{
+			name:       "fail status",
+			testStatus: "fail",
+			want:       ValidationStatusFail,
+		},
+		{
+			name:       "skip status",
+			testStatus: "skip",
+			want:       ValidationStatusSkipped,
+		},
+		{
+			name:       "unknown status defaults to warning",
+			testStatus: "unknown",
+			want:       ValidationStatusWarning,
+		},
+		{
+			name:       "empty status defaults to warning",
+			testStatus: "",
+			want:       ValidationStatusWarning,
+		},
+		{
+			name:       "arbitrary status defaults to warning",
+			testStatus: "some-random-status",
+			want:       ValidationStatusWarning,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapTestStatusToValidationStatus(tt.testStatus)
+			if got != tt.want {
+				t.Errorf("mapTestStatusToValidationStatus(%q) = %v, want %v", tt.testStatus, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDetermineStartPhase tests the logic for determining which phase to start from
+func TestDetermineStartPhase(t *testing.T) {
+	tests := []struct {
+		name           string
+		existingResult *ValidationResult
+		want           ValidationPhaseName
+	}{
+		{
+			name: "no phases run - start from readiness",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{},
+			},
+			want: PhaseReadiness,
+		},
+		{
+			name: "readiness failed - resume from readiness",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusFail,
+					},
+				},
+			},
+			want: PhaseReadiness,
+		},
+		{
+			name: "readiness passed, deployment not started - resume from deployment",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhaseDeployment,
+		},
+		{
+			name: "readiness and deployment passed, performance not started - resume from performance",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhasePerformance,
+		},
+		{
+			name: "readiness passed, deployment failed - resume from deployment",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusFail,
+					},
+				},
+			},
+			want: PhaseDeployment,
+		},
+		{
+			name: "all phases passed - start from readiness",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusPass,
+					},
+					string(PhasePerformance): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseConformance): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhaseReadiness,
+		},
+		{
+			name: "readiness and deployment passed, performance failed, conformance passed - resume from performance",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusPass,
+					},
+					string(PhasePerformance): {
+						Status: ValidationStatusFail,
+					},
+					string(PhaseConformance): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhasePerformance,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := determineStartPhase(tt.existingResult)
+			if got != tt.want {
+				t.Errorf("determineStartPhase() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

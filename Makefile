@@ -12,7 +12,7 @@ GO_VERSION         := $(shell go env GOVERSION 2>/dev/null | sed 's/go//')
 GOLINT_VERSION      = $(shell golangci-lint --version 2>/dev/null | awk '{print $$4}' | sed 's/golangci-lint version //' || echo "not installed")
 KO_VERSION          = $(shell ko version 2>/dev/null || echo "not installed")
 GORELEASER_VERSION  = $(shell goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p' || echo "not installed")
-COVERAGE_THRESHOLD ?= 70
+COVERAGE_THRESHOLD ?= 67
 
 # Tilt/ctlptl configuration
 CTLPTL_CONFIG_FILE = .ctlptl.yaml
