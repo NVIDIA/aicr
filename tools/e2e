@@ -894,7 +894,7 @@ EOF
 # ============================================================================
 # CUJ1: Critical User Journey - Training Workload
 # ============================================================================
-# Tests the complete workflow from docs/demos/cuj1.md:
+# Tests the complete workflow from examples/demos/cuj1.md:
 #   recipe (with platform) → validate → bundle → helm validation
 # ============================================================================
 

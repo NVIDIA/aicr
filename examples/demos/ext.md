@@ -54,6 +54,6 @@ eidos --debug recipe \
 
 ## Links
 
-* [Installation Guide](https://github.com/NVIDIA/eidos/blob/main/docs/user-guide/installation.md)
-* [CLI Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user-guide/cli-reference.md)
+* [Installation Guide](https://github.com/NVIDIA/eidos/blob/main/docs/user/installation.md)
+* [CLI Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user/cli-reference.md)
 * [Data Reference](https://github.com/NVIDIA/eidos/blob/main/pkg/recipe/data/README.md)

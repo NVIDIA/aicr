@@ -55,7 +55,7 @@ curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
   https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s --
 ```
 
-See [Installation Guide](docs/user-guide/installation.md) for manual installation, building from source, and container images.
+See [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
 ### Quick Start
 
@@ -79,43 +79,45 @@ eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training --p
 eidos bundle --recipe recipe.yaml -o ./bundles
 ```
 
-The generated `bundles/` directory contains a Helm umbrella chart ready to deploy or commit to your GitOps repository. See [CLI Reference](docs/user-guide/cli-reference.md) for more options.
+The generated `bundles/` directory contains a Helm umbrella chart ready to deploy or commit to your GitOps repository. See [CLI Reference](docs/user/cli-reference.md) for more options.
 
 ### Get Started by Use Case
 
-These use cases reflect common ways teams interact with Eidos.
+Choose the documentation path that matches how you'll use Eidos.
 
 <details>
-<summary><strong>Platform and Infrastructure Operators</strong></summary>
+<summary><strong>User</strong> – Platform and Infrastructure Operators</summary>
 
-You are responsible for deploying and operating GPU-accelerated Kubernetes clusters. 
-- **[Installation Guide](docs/user-guide/installation.md)** – Install the eidos CLI (automated script, manual, or build from source)
-- **[CLI Reference](docs/user-guide/cli-reference.md)** – Complete command reference with examples
-- **[API Reference](docs/user-guide/api-reference.md)** – Complete API reference with examples
-- **[Agent Deployment](docs/user-guide/agent-deployment.md)** – Deploy the Kubernetes agent to get automated configuration snapshots
+You deploy and operate GPU-accelerated Kubernetes clusters using validated configurations.
+
+- **[Installation Guide](docs/user/installation.md)** – Install the eidos CLI (automated script, manual, or build from source)
+- **[CLI Reference](docs/user/cli-reference.md)** – Complete command reference with examples
+- **[API Reference](docs/user/api-reference.md)** – REST API quick start
+- **[Agent Deployment](docs/user/agent-deployment.md)** – Deploy the Kubernetes agent for automated snapshots
 </details>
 
 <details>
-<summary><strong>Developers and Contributors</strong></summary>
+<summary><strong>Contributor</strong> – Developers and Maintainers</summary>
 
-You are contributing code, extending functionality, or working on Eidos internals. 
+You contribute code, extend functionality, or work on Eidos internals.
 
 - **[Contributing Guide](CONTRIBUTING.md)** – Development setup, testing, and PR process
 - **[Development Guide](DEVELOPMENT.md)** – Local development, Make targets, and tooling
-- **[Architecture Overview](docs/architecture/README.md)** – System design and components
-- **[Bundler Development](docs/architecture/component.md)** – How to create new bundlers
-- **[Data Architecture](docs/architecture/data.md)** – Recipe data model and query matching
+- **[Architecture Overview](docs/contributor/README.md)** – System design and components
+- **[Bundler Development](docs/contributor/component.md)** – How to create new bundlers
+- **[Data Architecture](docs/contributor/data.md)** – Recipe data model and query matching
 </details>
 
 <details>
-<summary><strong>Integrators and Automation Engineers</strong></summary>
+<summary><strong>Integrator</strong> – Automation and Platform Engineers</summary>
 
-You are integrating Eidos into CI/CD pipelines, GitOps workflows, or a larger product or service. 
+You integrate Eidos into CI/CD pipelines, GitOps workflows, or larger platforms.
 
-- **[API Reference](docs/integration/api-reference.md)** – REST API endpoints and usage examples
-- **[Data Flow](docs/integration/data-flow.md)** – Understanding snapshots, recipes, and bundles
-- **[Automation Guide](docs/integration/automation.md)** – CI/CD integration patterns
-- **[Kubernetes Deployment](docs/integration/kubernetes-deployment.md)** – Self-hosted API server setup
+- **[API Reference](docs/user/api-reference.md)** – REST API endpoints and usage examples
+- **[Data Flow](docs/integrator/data-flow.md)** – Understanding snapshots, recipes, and bundles
+- **[Automation Guide](docs/integrator/automation.md)** – CI/CD integration patterns
+- **[Kubernetes Deployment](docs/integrator/kubernetes-deployment.md)** – Self-hosted API server setup
+- **[Recipe Development](docs/integrator/recipe-development.md)** – Adding and modifying recipe metadata
 </details>
 
 ## Project Structure
@@ -133,7 +135,7 @@ You are integrating Eidos into CI/CD pipelines, GitOps workflows, or a larger pr
 
 - **[Documentation](/docs)** – Documentation, guides, and examples.
 - **[Roadmap](ROADMAP.md)** – Feature priorities and development timeline
-- **[Overview](docs/OVERVIEW.md)** - Detailed system overview and glossary
+- **[Overview](docs/README.md)** - Detailed system overview and glossary
 - **[Security](SECURITY.md)** - Security-related resources 
 - **[Releases](https://github.com/NVIDIA/eidos/releases)** - Binaries, SBOMs, and other artifacts
 - **[Issues](https://github.com/NVIDIA/eidos/issues)** - Bugs, feature requests, and questions

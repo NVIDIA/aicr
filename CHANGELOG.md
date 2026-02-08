@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2026-02-08
+
+### Bug Fixes
+
+- Remove redundant driver resource limits  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Make configmap for kernel module config a template; clean up unu…  by [@valcharry](https://github.com/valcharry)
+- Re-enable cert-manager startupapicheck  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Disable skyhook LimitRange by bumping to v0.12.0  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Set fullnameOverride to remove eidos-stack- prefix  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Open webhook container ports in NetworkPolicy workaround  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Tasks
+
+- Clean up changelog by [@mchmarny](https://github.com/mchmarny)
+- Update installation instructions by [@mchmarny](https://github.com/mchmarny)
+- Add validation to e2d demo by [@mchmarny](https://github.com/mchmarny)
+- Add b200 snapshot and report by [@mchmarny](https://github.com/mchmarny)
+- Update b200 snapshot by [@mchmarny](https://github.com/mchmarny)
+- Disable scans until GHAS is enabled again by [@mchmarny](https://github.com/mchmarny)
+- Disable upload until ghas is enabled by [@mchmarny](https://github.com/mchmarny)
+- Remove duplicate code scan by [@mchmarny](https://github.com/mchmarny)
+- Add license to b200 example by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.4.0] - 2026-02-06
 
 ### Features

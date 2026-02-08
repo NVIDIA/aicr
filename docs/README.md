@@ -102,42 +102,42 @@ Eidos prioritizes trust in the software supply chain.
 
 ## Documentation
 
-### User Guide
+Documentation is organized by persona to help you find what you need quickly.
+
+### User Documentation
+
+For platform operators deploying and operating GPU-accelerated Kubernetes clusters.
 
 | Document | Description |
 |----------|-------------|
-| [Installation](user-guide/installation.md) | Installing the `eidos` CLI |
-| [CLI Reference](user-guide/cli-reference.md) | Complete CLI command reference with examples |
-| [API Reference](user-guide/api-reference.md) | Quick start for the REST API |
-| [Agent Deployment](user-guide/agent-deployment.md) | Running the snapshot agent as a Kubernetes Job |
+| [Installation](user/installation.md) | Installing the `eidos` CLI |
+| [CLI Reference](user/cli-reference.md) | Complete CLI command reference with examples |
+| [API Reference](user/api-reference.md) | Quick start for the REST API |
+| [Agent Deployment](user/agent-deployment.md) | Running the snapshot agent as a Kubernetes Job |
 
-### Architecture
+### Contributor Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Architecture Overview](architecture/README.md) | System design, patterns, and deployment topologies |
-| [CLI Architecture](architecture/cli.md) | Detailed CLI implementation and workflow diagrams |
-| [API Server Architecture](architecture/api-server.md) | HTTP server design, middleware, and endpoints |
-| [Data Architecture](architecture/data.md) | Recipe metadata system, criteria matching, and inheritance |
-| [Bundler Development](architecture/component.md) | Guide for creating new bundlers |
-
-### Integration
+For developers contributing code, extending functionality, or working on Eidos internals.
 
 | Document | Description |
 |----------|-------------|
-| [API Reference](integration/api-reference.md) | Complete REST API specification with examples |
-| [Automation](integration/automation.md) | CI/CD integration patterns |
-| [Data Flow](integration/data-flow.md) | Understanding recipe data architecture |
-| [Kubernetes Deployment](integration/kubernetes-deployment.md) | Self-hosted API server deployment |
-| [Recipe Development](integration/recipe-development.md) | Adding and modifying recipe metadata |
+| [Architecture Overview](contributor/README.md) | System design, patterns, and deployment topologies |
+| [CLI Architecture](contributor/cli.md) | Detailed CLI implementation and workflow diagrams |
+| [API Server Architecture](contributor/api-server.md) | HTTP server design, middleware, and endpoints |
+| [Data Architecture](contributor/data.md) | Recipe metadata system, criteria matching, and inheritance |
+| [Bundler Development](contributor/component.md) | Guide for creating new bundlers |
 
-### Demos
+### Integrator Documentation
+
+For engineers integrating Eidos into CI/CD pipelines, GitOps workflows, or larger platforms.
 
 | Document | Description |
 |----------|-------------|
-| [End-to-End Demo](demos/e2e.md) | Complete workflow demonstration (snapshot → recipe → bundle) |
-| [Data Architecture Demo](demos/data.md) | Recipe metadata system walkthrough |
-| [Supply Chain Security Demo](demos/s3c.md) | Verifying SLSA attestations and SBOMs |
+| [API Reference](user/api-reference.md) | Complete REST API specification with examples |
+| [Automation](integrator/automation.md) | CI/CD integration patterns |
+| [Data Flow](integrator/data-flow.md) | Understanding recipe data architecture |
+| [Kubernetes Deployment](integrator/kubernetes-deployment.md) | Self-hosted API server deployment |
+| [Recipe Development](integrator/recipe-development.md) | Adding and modifying recipe metadata |
 
 ## Quick Start
 
@@ -150,7 +150,7 @@ curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
   https://raw.githubusercontent.com/NVIDIA/eidos/main/install | bash -s --
 ```
 
-See [Installation Guide](docs/user-guide/installation.md) for manual installation, building from source, and container images.
+See [Installation Guide](user/installation.md) for manual installation, building from source, and container images.
 
 ### Generate Recipe
 

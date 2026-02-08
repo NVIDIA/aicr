@@ -23,7 +23,7 @@ Deploy the Eidos API Server in your Kubernetes cluster for self-hosted recipe ge
 - Kubernetes Job captures cluster configuration
 - Writes snapshot to ConfigMap via Kubernetes API
 - Requires RBAC: ServiceAccount with ConfigMap create/update permissions
-- See [Agent Deployment](../user-guide/agent-deployment.md)
+- See [Agent Deployment](../user/agent-deployment.md)
 
 **Typical workflow:**
 
@@ -814,7 +814,7 @@ spec:
 
 ## See Also
 
-- [API Reference](api-reference.md) - API endpoint documentation
+- [API Reference](../user/api-reference.md) - API endpoint documentation
 - [Automation](automation.md) - CI/CD integration
 - [Data Flow](data-flow.md) - Understanding data architecture
-- [Architecture: API Server](../architecture/api-server.md) - Internal architecture
+- [API Server Architecture](../contributor/api-server.md) - Internal architecture

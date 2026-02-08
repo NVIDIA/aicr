@@ -460,7 +460,7 @@ See [CLI Architecture](cli.md#deployer-framework-gitops-integration) for detaile
 
 - [Architecture Overview](README.md) - Complete bundler framework architecture
 - [CLI Architecture](cli.md) - Deployer framework and GitOps integration
-- [CLI Reference](../user-guide/cli-reference.md) - Bundle generation commands
-- [API Reference](../integration/api-reference.md) - Programmatic access (recipe generation only)
+- [CLI Reference](../user/cli-reference.md) - Bundle generation commands
+- [API Reference](../user/api-reference.md) - Programmatic access (recipe generation only)
 - [Component Registry](../../pkg/recipe/data/registry.yaml) - Declarative component configuration
 - [Recipe Data README](../../pkg/recipe/data/README.md) - Recipe and component data overview

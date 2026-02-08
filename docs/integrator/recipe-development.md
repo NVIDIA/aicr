@@ -5,6 +5,7 @@ This guide covers how to create, modify, and validate recipe metadata.
 ## Table of Contents
 
 - [Overview](#overview)
+- [External Data Sources](#external-data-sources)
 - [Multi-Level Inheritance](#multi-level-inheritance)
 - [Component Value Configuration](#component-value-configuration)
 - [Value Merge Precedence](#value-merge-precedence)
@@ -25,9 +26,283 @@ Recipe metadata files define component configurations for GPU-accelerated Kubern
 - **Leaf recipes** (e.g., `gb200-eks-ubuntu-training.yaml`) provide hardware-specific overrides
 - **Inline overrides** allow per-recipe customization without creating new files
 
-Recipe files are located in `pkg/recipe/data/` and are embedded into the CLI binary and API server at compile time.
+Recipe files are located in `pkg/recipe/data/` and are embedded into the CLI binary and API server at compile time. Integrators can extend or override embedded data using the `--data` flag without modifying the open source repository (see [External Data Sources](#external-data-sources)).
 
-For details on how the recipe generation process works (query matching, overlay merging), see the [Data Architecture](../architecture/data.md) document.
+For details on how the recipe generation process works (query matching, overlay merging), see the [Data Architecture](../contributor/data.md) document.
+
+## External Data Sources
+
+Eidos embeds all recipe metadata, component values, and registry configurations at compile time. However, integrators can **extend or override** this embedded data using the `--data` flag without modifying the open source codebase.
+
+This enables:
+- **Custom recipes** for proprietary hardware or configurations
+- **Private component values** with organization-specific settings
+- **Extended registries** with internal Helm charts or Kustomize sources
+- **Rapid iteration** during development without rebuilding binaries
+
+### Using External Data with Recipe Generation
+
+The `--data` flag specifies a directory containing recipe data that supplements or overrides embedded files:
+
+```bash
+eidos recipe \
+  --service eks \
+  --accelerator gb200 \
+  --os ubuntu \
+  --intent training \
+  --data ./examples/data \
+  --output recipe.yaml
+```
+
+When `--data` is specified:
+1. Files in the external directory take precedence over embedded files
+2. New files (not present in embedded data) are added to the available pool
+3. Recipe matching and inheritance work identically to embedded-only mode
+
+### Using External Data with Bundle Generation
+
+External data can also be used during bundle generation:
+
+```bash
+eidos bundle \
+  --recipe recipe.yaml \
+  --data ./examples/data \
+  --deployer argocd \
+  --output ./bundle \
+  --system-node-selector nodeGroup=system-pool \
+  --accelerated-node-selector nodeGroup=customer-gpu \
+  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+```
+
+This allows:
+- Custom component values files referenced by your recipes
+- Extended registry entries with private Helm repositories
+- Organization-specific bundler configurations
+
+### Debugging External Data Loading
+
+Use the `--debug` flag to see which files are loaded from external vs embedded sources:
+
+```bash
+eidos --debug recipe \
+  --service eks \
+  --accelerator gb200 \
+  --data ./examples/data
+```
+
+**Example output:**
+
+```
+DEBUG loading data sources
+DEBUG   embedded: overlays/base.yaml
+DEBUG   embedded: overlays/eks.yaml
+DEBUG   embedded: overlays/eks-training.yaml
+DEBUG   external: overlays/gb200-eks-custom.yaml      <- from ./examples/data
+DEBUG   embedded: registry.yaml
+DEBUG   external: registry.yaml                        <- override from ./examples/data
+DEBUG   embedded: components/gpu-operator/values.yaml
+DEBUG   external: components/gpu-operator/custom-values.yaml  <- from ./examples/data
+DEBUG recipe resolution complete
+DEBUG   matched overlays: [base, eks, eks-training, gb200-eks-custom]
+```
+
+Files marked `external` are loaded from the `--data` directory. Files marked `embedded` are from the compiled binary.
+
+### External Data Directory Structure
+
+The external data directory must mirror the embedded data structure:
+
+```
+./examples/data/
+├── registry.yaml              # Extends/overrides component registry
+├── overlays/
+│   ├── custom-recipe.yaml     # New recipe overlay
+│   └── eks-training.yaml      # Override existing overlay
+└── components/
+    ├── gpu-operator/
+    │   └── custom-values.yaml # Custom component values
+    └── my-operator/
+        └── values.yaml        # Values for new component
+```
+
+**Key paths:**
+
+| Path | Purpose |
+|------|---------|
+| `registry.yaml` | Component registry (merged with embedded) |
+| `overlays/*.yaml` | Recipe overlay files |
+| `components/<name>/` | Component-specific values files |
+
+### Example: Adding a Custom Component
+
+**1. Extend the registry** (`./my-data/registry.yaml`):
+
+```yaml
+# This merges with the embedded registry
+- name: my-internal-operator
+  displayName: Internal Operator
+  valueOverrideKeys: [myoperator]
+  helm:
+    defaultRepository: https://charts.internal.example.com
+    defaultChart: internal/my-operator
+  nodeScheduling:
+    accelerated:
+      nodeSelectorPaths: [operator.nodeSelector]
+      tolerationPaths: [operator.tolerations]
+```
+
+**2. Create component values** (`./my-data/components/my-internal-operator/values.yaml`):
+
+```yaml
+operator:
+  replicas: 2
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+```
+
+**3. Create a recipe** (`./my-data/overlays/custom-training.yaml`):
+
+```yaml
+kind: recipeMetadata
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  name: custom-training
+
+spec:
+  base: eks-training
+
+  criteria:
+    service: eks
+    accelerator: gb200
+    os: ubuntu
+    intent: training
+
+  componentRefs:
+    - name: my-internal-operator
+      valuesFile: components/my-internal-operator/values.yaml
+```
+
+**4. Generate recipe and bundle**:
+
+```bash
+# Generate recipe with custom data
+eidos recipe \
+  --service eks \
+  --accelerator gb200 \
+  --os ubuntu \
+  --intent training \
+  --data ./my-data \
+  --output recipe.yaml
+
+# Generate bundle with custom data
+eidos bundle \
+  --recipe recipe.yaml \
+  --data ./my-data \
+  --deployer argocd \
+  --output ./bundles
+```
+
+### Override Precedence
+
+When the same file exists in both embedded and external data:
+
+```
+Embedded data (lowest precedence)
+    ↓
+External data (--data flag) (highest precedence)
+```
+
+**Behavior:**
+- **Overlays**: External overlays with the same `metadata.name` replace embedded ones
+- **Registry**: External registry entries are merged; same-named components are replaced
+- **Component values**: External values files referenced by recipes take precedence
+
+### Integration Workflow
+
+For organizations extending Eidos without forking:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    OSS Eidos Binary                         │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Embedded Data (compiled)               │   │
+│  │  - Standard recipes (EKS, GKE, AKS, etc.)           │   │
+│  │  - Public component registry                        │   │
+│  │  - Default component values                         │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                              +
+┌─────────────────────────────────────────────────────────────┐
+│                 External Data (--data)                      │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              Your Organization's Data               │   │
+│  │  - Custom recipes for internal platforms            │   │
+│  │  - Private Helm chart registry entries              │   │
+│  │  - Organization-specific component values           │   │
+│  │  - Proprietary hardware configurations              │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────┐
+│                     Merged Result                           │
+│  - All standard recipes + your custom recipes               │
+│  - Public components + your private components              │
+│  - Default values overridden by your customizations         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### CI/CD Integration
+
+For automated pipelines, store external data in your repository:
+
+```yaml
+# .github/workflows/deploy.yaml
+- name: Generate GPU Configuration
+  run: |
+    eidos recipe \
+      --service eks \
+      --accelerator gb200 \
+      --intent training \
+      --data ./deploy/eidos-data \
+      --output recipe.yaml
+
+    eidos bundle \
+      --recipe recipe.yaml \
+      --data ./deploy/eidos-data \
+      --deployer argocd \
+      --output oci://ghcr.io/${{ github.repository }}/eidos-bundle
+```
+
+### Validating External Data
+
+Before using external data in production, validate the files:
+
+```bash
+# Verify external data structure
+eidos --debug recipe \
+  --service eks \
+  --accelerator gb200 \
+  --data ./my-data \
+  --dry-run
+
+# Test recipe generation
+eidos recipe \
+  --service eks \
+  --accelerator gb200 \
+  --data ./my-data \
+  --output /dev/stdout
+
+# Test bundle generation
+eidos bundle \
+  --recipe recipe.yaml \
+  --data ./my-data \
+  --output ./test-bundles \
+  --dry-run
+```
 
 ## Multi-Level Inheritance
 
@@ -999,7 +1274,7 @@ make qualify
 
 ## See Also
 
-- [Data Architecture](../architecture/data.md) - Recipe generation process, overlay system, query matching algorithm
-- [Bundler Development Guide](../architecture/component.md) - Creating new bundlers
-- [CLI Reference](../user-guide/cli-reference.md) - CLI commands for recipe and bundle generation
-- [API Reference](api-reference.md) - Programmatic recipe access
+- [Data Architecture](../contributor/data.md) - Recipe generation process, overlay system, query matching algorithm
+- [Bundler Development Guide](../contributor/component.md) - Creating new bundlers
+- [CLI Reference](../user/cli-reference.md) - CLI commands for recipe and bundle generation
+- [API Reference](../user/api-reference.md) - Programmatic recipe access

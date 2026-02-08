@@ -1288,9 +1288,9 @@ func initDataProvider(cmd *cli.Command) error {
 
 ## See Also
 
-- [Recipe Development Guide](../integration/recipe-development.md) - Adding and modifying recipe data
+- [Recipe Development Guide](../integrator/recipe-development.md) - Adding and modifying recipe data
 - [CLI Architecture](cli.md) - How the CLI uses recipe data
-- [CLI Reference](../user-guide/cli-reference.md) - Complete CLI flag reference
+- [CLI Reference](../user/cli-reference.md) - Complete CLI flag reference
 - [API Server Architecture](api-server.md) - How the API serves recipes
 - [OpenAPI Specification](../../api/eidos/v1/server.yaml) - Recipe API contract
 - [Recipe Package Documentation](../../pkg/recipe/) - Go implementation details

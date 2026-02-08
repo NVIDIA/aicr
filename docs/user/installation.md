@@ -176,6 +176,6 @@ sudo rm /usr/local/bin/eidos
 
 ## Getting Help
 
-- **Documentation**: [User Guide](../user-guide/)
+- **Documentation**: [User Documentation](README.md)
 - **Issues**: [GitHub Issues](https://github.com/NVIDIA/eidos/issues)
-- **API Server**: See [Integration Guide](../integration/api-reference.md)
+- **API Server**: See [Kubernetes Deployment](../integrator/kubernetes-deployment.md)

@@ -895,6 +895,7 @@ spec:
 
 - [CLI Reference](cli-reference.md) - eidos CLI commands
 - [Installation Guide](installation.md) - Install CLI locally
-- [API Reference](../integration/api-reference.md) - API server deployment
+- [API Reference](api-reference.md) - REST API usage
+- [Kubernetes Deployment](../integrator/kubernetes-deployment.md) - API server deployment
 - [RBAC Manifest](../../deployments/eidos-agent/1-deps.yaml) - Full RBAC configuration
 - [Job Manifest](../../deployments/eidos-agent/2-job.yaml) - Full Job configuration

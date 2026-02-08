@@ -880,7 +880,7 @@ X-RateLimit-Reset: 1735650000
 
 ## See Also
 
-- [Architecture: Data](../architecture/data.md) - Recipe data architecture
-- [API Reference](api-reference.md) - API endpoint details
+- [Data Architecture](../contributor/data.md) - Recipe data architecture
+- [API Reference](../user/api-reference.md) - API endpoint details
 - [Automation](automation.md) - CI/CD integration patterns
 - [CONTRIBUTING.md](../../CONTRIBUTING.md) - Developer guide

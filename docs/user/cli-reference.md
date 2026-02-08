@@ -1253,6 +1253,6 @@ eidos snapshot --template examples/templates/snapshot-template.md.tmpl --output 
 
 - [Installation Guide](installation.md) - Install eidos
 - [Agent Deployment](agent-deployment.md) - Kubernetes agent setup
-- [API Reference](../integration/api-reference.md) - Programmatic access
-- [Architecture Docs](../architecture/README.md) - Internal architecture
-- [Data Architecture](../architecture/data.md) - Recipe data system details
+- [API Reference](api-reference.md) - Programmatic access
+- [Architecture Docs](../contributor/README.md) - Internal architecture
+- [Data Architecture](../contributor/data.md) - Recipe data system details

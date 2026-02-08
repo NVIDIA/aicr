@@ -205,7 +205,7 @@ flowchart LR
 **RBAC Requirements:**
 - ConfigMap read/write permissions in target namespace
 - ServiceAccount with appropriate Role/RoleBinding
-- See [agent-deployment.md](../../user-guide/agent-deployment.md) for details
+- See [Agent Deployment](../user/agent-deployment.md) for details
 
 ## Component Details
 

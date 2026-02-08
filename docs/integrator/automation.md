@@ -884,8 +884,8 @@ yq eval '.componentRefs[] | select(.name=="gpu-operator") | .version' recipe.yam
 
 ## See Also
 
-- [API Reference](api-reference.md) - API endpoint documentation
+- [API Reference](../user/api-reference.md) - API endpoint documentation
 - [Data Flow](data-flow.md) - Understanding data architecture
 - [Kubernetes Deployment](kubernetes-deployment.md) - Self-hosted API server
-- [CLI Reference](../user-guide/cli-reference.md) - CLI commands
-- [Agent Deployment](../user-guide/agent-deployment.md) - Kubernetes agent
+- [CLI Reference](../user/cli-reference.md) - CLI commands
+- [Agent Deployment](../user/agent-deployment.md) - Kubernetes agent

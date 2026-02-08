@@ -89,6 +89,6 @@ Constraints in the validation example demonstrate:
 
 ## See Also
 
-- [CLI Reference](../../docs/user-guide/cli-reference.md) - Complete CLI command documentation
-- [Recipe Development Guide](../../docs/integration/recipe-development.md) - Creating and modifying recipes
-- [Validation Documentation](../../docs/user-guide/cli-reference.md#eidos-validate) - Multi-phase validation details
+- [CLI Reference](../../docs/user/cli-reference.md) - Complete CLI command documentation
+- [Recipe Development Guide](../../docs/integrator/recipe-development.md) - Creating and modifying recipes
+- [Validation Documentation](../../docs/user/cli-reference.md#eidos-validate) - Multi-phase validation details

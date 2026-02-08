@@ -207,6 +207,6 @@ oras pull --oci-layout "image-oci@$(cat .digest)" -o ./eidos-unpacked
 
 ## Links
 
-* [Installation Guide](https://github.com/NVIDIA/eidos/blob/main/docs/user-guide/installation.md)
-* [CLI Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user-guide/cli-reference.md)
-* [API Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user-guide/api-reference.md)
+* [Installation Guide](https://github.com/NVIDIA/eidos/blob/main/docs/user/installation.md)
+* [CLI Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user/cli-reference.md)
+* [API Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user/api-reference.md)

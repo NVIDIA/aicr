@@ -174,7 +174,7 @@ curl http://localhost:8080/health
 
 ## Demo Cloud Run Deployment
 
-> **Note**: This is a **demonstration deployment** for testing and development purposes only. It is not a production service. Users should self-host the `eidosd` API server in their own infrastructure for production use. See [API Server Documentation](docs/architecture/api-server.md) for deployment guidance.
+> **Note**: This is a **demonstration deployment** for testing and development purposes only. It is not a production service. Users should self-host the `eidosd` API server in their own infrastructure for production use. See [API Server Documentation](docs/contributor/api-server.md) for deployment guidance.
 
 The `eidosd` API server demo is automatically deployed to Google Cloud Run on successful release:
 

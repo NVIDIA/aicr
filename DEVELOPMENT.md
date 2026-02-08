@@ -170,8 +170,9 @@ eidos/
 │   ├── snapshotter/    # Snapshot orchestration
 │   └── validator/      # Constraint evaluation
 ├── docs/
-│   ├── architecture/   # System design docs
-│   └── user-guide/     # User documentation
+│   ├── contributor/    # System design docs (architecture)
+│   ├── integrator/     # CI/CD and API integration docs
+│   └── user/           # User documentation (CLI)
 ├── tools/              # Development scripts
 └── tilt/               # Local dev environment
 ```
@@ -261,7 +262,7 @@ eidos/
 
 Business logic lives in `pkg/*` packages. The `pkg/cli` and `pkg/api` packages handle user interaction only, delegating to functional packages so both CLI and API can share the same logic.
 
-For detailed architecture documentation, see [docs/architecture/README.md](docs/architecture/README.md).
+For detailed architecture documentation, see [docs/contributor/README.md](docs/contributor/README.md).
 
 ## Development Workflow
 
@@ -652,10 +653,10 @@ make dev-reset
 ## Additional Resources
 
 ### Project Documentation
-- [Architecture Overview](docs/architecture/README.md) - System design and components
-- [CLI Architecture](docs/architecture/cli.md) - CLI command structure
-- [Data Architecture](docs/architecture/data.md) - Recipe data model
-- [Bundler Development](docs/architecture/component.md) - Creating new bundlers
+- [Architecture Overview](docs/contributor/README.md) - System design and components
+- [CLI Architecture](docs/contributor/cli.md) - CLI command structure
+- [Data Architecture](docs/contributor/data.md) - Recipe data model
+- [Bundler Development](docs/contributor/component.md) - Creating new bundlers
 
 ### External Resources
 - [Go Documentation](https://golang.org/doc/)

@@ -87,6 +87,25 @@ unzip bundles.zip -d ./bundles
 
 ## Endpoints
 
+### GET /
+
+Service information and available routes.
+
+```shell
+curl "http://localhost:8080/"
+```
+
+**Response:**
+```json
+{
+  "service": "eidosd",
+  "version": "v0.7.6",
+  "routes": ["/v1/recipe", "/v1/bundle"]
+}
+```
+
+---
+
 ### GET /v1/recipe
 
 Generate an optimized configuration recipe based on environment parameters.
@@ -317,7 +336,7 @@ curl -X POST "http://localhost:8080/v1/bundle" \
   -o bundles.zip
 
 # Generate multiple specific bundles
-curl -X POST "https://http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-operator" \
+curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-operator" \
   -H "Content-Type: application/json" \
   -d '{
     "apiVersion": "eidos.nvidia.com/v1alpha1",
@@ -365,7 +384,7 @@ bundles.zip
 Service health check (liveness probe).
 
 ```shell
-curl "https://http://localhost:8080/health"
+curl "http://localhost:8080/health"
 ```
 
 **Response:**
@@ -383,7 +402,7 @@ curl "https://http://localhost:8080/health"
 Service readiness check (readiness probe).
 
 ```shell
-curl "https://http://localhost:8080/ready"
+curl "http://localhost:8080/ready"
 ```
 
 **Response:**
@@ -401,7 +420,7 @@ curl "https://http://localhost:8080/ready"
 Prometheus metrics endpoint.
 
 ```shell
-curl "https://http://localhost:8080/metrics"
+curl "http://localhost:8080/metrics"
 ```
 
 **Key Metrics:**
@@ -422,7 +441,7 @@ Fetch a recipe and generate bundles in one workflow:
 
 # Step 1: Get recipe for H100 on EKS for training
 echo "Fetching recipe..."
-curl -s "https://http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=training" \
+curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=training" \
   -o recipe.json
 
 # Display recipe summary
@@ -431,14 +450,14 @@ jq -r '.componentRefs[] | "  - \(.name): \(.version)"' recipe.json
 
 # Step 2: Generate bundles from recipe (pipe directly)
 echo "Generating bundles..."
-curl -s -X POST "https://http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+curl -s -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
   -H "Content-Type: application/json" \
   -d @recipe.json \
   -o bundles.zip
 
 # Alternative: one-liner without intermediate file
-# curl -s "https://http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
-#   curl -X POST "https://http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
+# curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
+#   curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
 #     -H "Content-Type: application/json" -d @- -o bundles.zip
 
 # Step 3: Extract and verify
@@ -484,7 +503,7 @@ ls -la
 
 ```shell
 # Check rate limit headers
-curl -I "https://http://localhost:8080/v1/recipe?accelerator=h100"
+curl -I "http://localhost:8080/v1/recipe?accelerator=h100"
 
 # Response headers:
 # X-RateLimit-Limit: 100
@@ -496,9 +515,9 @@ When rate limited (HTTP 429), use the `Retry-After` header:
 
 ```shell
 # Retry with backoff
-response=$(curl -s -w "%{http_code}" "https://http://localhost:8080/v1/recipe?accelerator=h100")
+response=$(curl -s -w "%{http_code}" "http://localhost:8080/v1/recipe?accelerator=h100")
 if [ "${response: -3}" = "429" ]; then
-  retry_after=$(curl -sI "https://http://localhost:8080/v1/recipe" | grep -i "Retry-After" | awk '{print $2}')
+  retry_after=$(curl -sI "http://localhost:8080/v1/recipe" | grep -i "Retry-After" | awk '{print $2}')
   echo "Rate limited. Retrying after ${retry_after}s..."
   sleep "$retry_after"
 fi
@@ -578,7 +597,7 @@ import requests
 import zipfile
 import io
 
-BASE_URL = "https://http://localhost:8080"
+BASE_URL = "http://localhost:8080"
 
 # Get recipe
 params = {
@@ -624,7 +643,7 @@ import (
 )
 
 func main() {
-    baseURL := "https://http://localhost:8080"
+    baseURL := "http://localhost:8080"
 
     // Get recipe
     params := url.Values{}
@@ -648,7 +667,7 @@ func main() {
 ### JavaScript/Node.js
 
 ```javascript
-const BASE_URL = "https://http://localhost:8080";
+const BASE_URL = "http://localhost:8080";
 
 async function main() {
     // Get recipe
@@ -682,6 +701,28 @@ async function main() {
 main();
 ```
 
+### Shell Script (Batch Processing)
+
+```bash
+#!/bin/bash
+# Generate recipes for multiple environments
+
+environments=(
+  "os=ubuntu&accelerator=h100&service=eks"
+  "os=ubuntu&accelerator=gb200&service=gke"
+  "os=rhel&accelerator=a100&service=aks"
+)
+
+for env in "${environments[@]}"; do
+  echo "Fetching recipe for: $env"
+
+  curl -s "http://localhost:8080/v1/recipe?${env}" \
+    | jq -r '.componentRefs[] | "\(.name): \(.version)"'
+
+  echo ""
+done
+```
+
 ## OpenAPI Specification
 
 The full OpenAPI 3.1 specification is available at:
@@ -711,13 +752,13 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 **"Invalid accelerator type" error:**
 ```shell
 # Use valid values: h100, gb200, a100, l40, any
-curl "https://http://localhost:8080/v1/recipe?accelerator=h100"
+curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 
 **"Recipe is required" error:**
 ```shell
 # Ensure recipe is in request body
-curl -X POST "https://http://localhost:8080/v1/bundle" \
+curl -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" \
   -d '{"recipe": {...}}'  # recipe must not be null
 ```
@@ -725,7 +766,7 @@ curl -X POST "https://http://localhost:8080/v1/bundle" \
 **Empty zip file:**
 ```shell
 # Check recipe has componentRefs
-curl -s "https://http://localhost:8080/v1/recipe?accelerator=h100" | jq '.componentRefs'
+curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.componentRefs'
 ```
 
 **Connection refused (local):**
@@ -739,4 +780,6 @@ make server
 - [CLI Reference](cli-reference.md) - Command-line interface
 - [Agent Deployment](agent-deployment.md) - Kubernetes agent for snapshot capture
 - [Installation Guide](installation.md) - Setup instructions
-- [Integration API Reference](../integration/api-reference.md) - Detailed API specification
+- [Data Flow](../integrator/data-flow.md) - Understanding recipe data architecture
+- [Automation Guide](../integrator/automation.md) - CI/CD integration patterns
+- [Kubernetes Deployment](../integrator/kubernetes-deployment.md) - Self-hosted API server deployment
