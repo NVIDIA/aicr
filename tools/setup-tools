@@ -332,16 +332,16 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     if command_exists helm; then
         log_success "Helm already installed: $(helm version --short)"
     else
-            log_info "Installing Helm..."
-            if prompt_continue; then
-                HELM_SCRIPT_URL="https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
-                HELM_TMP=$(mktemp)
-                curl -fsSL "$HELM_SCRIPT_URL" -o "$HELM_TMP"
-                verify_sha256 "$HELM_TMP" "${HELM_INSTALL_SHA256:-SKIP}"
-                bash "$HELM_TMP"
-                rm -f "$HELM_TMP"
-                log_success "Helm installed"
-            fi
+        log_info "Installing Helm..."
+        if prompt_continue; then
+            HELM_SCRIPT_URL="https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"
+            HELM_TMP=$(mktemp)
+            curl -fsSL "$HELM_SCRIPT_URL" -o "$HELM_TMP"
+            verify_sha256 "$HELM_TMP" "${HELM_INSTALL_SHA256:-SKIP}"
+            bash "$HELM_TMP"
+            rm -f "$HELM_TMP"
+            log_success "Helm installed"
+        fi
     fi
 
     # kubectl
@@ -371,40 +371,40 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     if command_exists yamllint; then
         log_success "yamllint already installed: $(yamllint --version)"
     else
-            log_info "Installing yamllint..."
-            if prompt_continue; then
-                if [[ "${OS}" == "darwin" ]]; then
-                    brew install yamllint
-                elif [[ "${OS}" == "linux" ]]; then
-                    PIP_REQUIRE_HASHES="${PIP_REQUIRE_HASHES:-false}"
-                    if [[ -n "${YAMLLINT_SHA256:-}" ]]; then
-                        echo "yamllint==${YAMLLINT_VERSION} --hash=sha256:${YAMLLINT_SHA256}" | pip3 install --user --require-hashes -r /dev/stdin
-                    else
-                        log_warning "YAMLLINT_SHA256 not set; skipping install for safety"
-                    fi
+        log_info "Installing yamllint..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                brew install yamllint
+            elif [[ "${OS}" == "linux" ]]; then
+                PIP_REQUIRE_HASHES="${PIP_REQUIRE_HASHES:-false}"
+                if [[ -n "${YAMLLINT_SHA256:-}" ]]; then
+                    echo "yamllint==${YAMLLINT_VERSION} --hash=sha256:${YAMLLINT_SHA256}" | pip3 install --user --require-hashes -r /dev/stdin
+                else
+                    log_warning "YAMLLINT_SHA256 not set; skipping install for safety"
                 fi
-                log_success "yamllint installed"
             fi
+            log_success "yamllint installed"
+        fi
     fi
 
     # grype (vulnerability scanner)
     if command_exists grype; then
         log_success "grype already installed: $(grype version 2>/dev/null | head -1)"
     else
-            log_info "Installing grype ${GRYPE_VERSION}..."
-            if prompt_continue; then
-                if [[ "${OS}" == "darwin" ]]; then
-                    brew install grype
-                elif [[ "${OS}" == "linux" ]]; then
-                    GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
-                    GRYPE_TMP=$(mktemp)
-                    curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP"
-                    verify_sha256 "$GRYPE_TMP" "${GRYPE_INSTALL_SHA256:-SKIP}"
-                    sh "$GRYPE_TMP" -s -- -b /usr/local/bin "${GRYPE_VERSION}"
-                    rm -f "$GRYPE_TMP"
-                fi
-                log_success "grype installed"
+        log_info "Installing grype ${GRYPE_VERSION}..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                brew install grype
+            elif [[ "${OS}" == "linux" ]]; then
+                GRYPE_SCRIPT_URL="https://raw.githubusercontent.com/anchore/grype/main/install.sh"
+                GRYPE_TMP=$(mktemp)
+                curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP"
+                verify_sha256 "$GRYPE_TMP" "${GRYPE_INSTALL_SHA256:-SKIP}"
+                sh "$GRYPE_TMP" -- -b /usr/local/bin "${GRYPE_VERSION}"
+                rm -f "$GRYPE_TMP"
             fi
+            log_success "grype installed"
+        fi
     fi
 
     # Tilt
@@ -521,7 +521,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 GORELEASER_TMP=$(mktemp)
                 curl -fsSL "$GORELEASER_SCRIPT_URL" -o "$GORELEASER_TMP"
                 verify_sha256 "$GORELEASER_TMP" "${GORELEASER_INSTALL_SHA256:-SKIP}"
-                bash "$GORELEASER_TMP" -s -- --version
+                bash "$GORELEASER_TMP" -- --version
                 rm -f "$GORELEASER_TMP"
             fi
             log_success "goreleaser installed"
@@ -578,7 +578,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
             GOLANGCI_TMP=$(mktemp)
             curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
             verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256:-SKIP}"
-            sh "$GOLANGCI_TMP" -s -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+            sh "$GOLANGCI_TMP" -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
             rm -f "$GOLANGCI_TMP"
             log_success "golangci-lint installed"
         fi
