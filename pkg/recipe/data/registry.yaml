@@ -271,6 +271,22 @@ components:
         tolerationPaths:
           - tolerations
 
+  - name: kai-scheduler
+    displayName: kai-scheduler
+    valueOverrideKeys:
+      - kaischeduler
+    helm:
+      defaultRepository: oci://ghcr.io/nvidia/kai-scheduler
+      defaultChart: kai-scheduler
+      defaultVersion: v0.12.10
+      defaultNamespace: kai-scheduler
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - global.nodeSelector
+        tolerationPaths:
+          - global.tolerations
+
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
     valueOverrideKeys:

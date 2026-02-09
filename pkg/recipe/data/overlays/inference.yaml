@@ -15,34 +15,22 @@
 kind: recipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: h100-inference
+  name: inference
 
 spec:
-  base: inference
+  # Inherits from base (implicit when spec.base is empty)
+  # This recipe adds inference-serving components for AI workloads.
+  # Satisfies CNCF AI Conformance requirements:
+  #   - Gang scheduling (kai-scheduler)
 
   criteria:
-    accelerator: h100
-    os: ubuntu
     intent: inference
 
-  # Specific constraints for H100 inference workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
-  constraints:
-    - name: K8s.server.version
-      value: ">= 1.31"
-    - name: OS.release.ID
-      value: ubuntu
-    - name: OS.release.VERSION_ID
-      value: ">= 24.04"
-    - name: OS.sysctl./proc/sys/kernel/osrelease
-      value: ">= 6.8"
-
   componentRefs:
-
-    - name: network-operator
+    - name: kai-scheduler
       type: Helm
-      source: https://helm.ngc.nvidia.com/nvidia
-      version: v25.4.0
-      valuesFile: components/network-operator/values.yaml
+      source: oci://ghcr.io/nvidia/kai-scheduler
+      version: v0.12.10
+      valuesFile: components/kai-scheduler/values.yaml
       dependencyRefs:
-        - cert-manager
+        - gpu-operator
