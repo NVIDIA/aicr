@@ -287,6 +287,33 @@ components:
         tolerationPaths:
           - global.tolerations
 
+  - name: dynamo-crds
+    displayName: dynamo-crds
+    valueOverrideKeys:
+      - dynamocrds
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      defaultChart: dynamo-crds
+      defaultVersion: "0.8.1"
+      defaultNamespace: dynamo-system
+
+  - name: dynamo-platform
+    displayName: dynamo-platform
+    valueOverrideKeys:
+      - dynamoplatform
+      - dynamo
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      defaultChart: dynamo-platform
+      defaultVersion: "0.8.1"
+      defaultNamespace: dynamo-system
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - dynamo-operator.controllerManager.nodeSelector
+        tolerationPaths:
+          - dynamo-operator.controllerManager.tolerations
+
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
     valueOverrideKeys:
