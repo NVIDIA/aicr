@@ -139,9 +139,13 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		input.RecipeResult.DeploymentOrder,
 	)
 
-	// Generate application data for each component
+	// Generate application data for each component (validate names early)
 	appDataList := make([]ApplicationData, 0, len(components))
 	for i, comp := range components {
+		if !isSafePathComponent(comp.Name) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", comp.Name))
+		}
 		appData := ApplicationData{
 			Name:       comp.Name,
 			Namespace:  getNamespace(comp),
@@ -356,4 +360,19 @@ func getNamespace(comp recipe.ComponentRef) string {
 // normalizeVersion ensures version has 'v' prefix removed if present.
 func normalizeVersion(version string) string {
 	return strings.TrimPrefix(version, "v")
+}
+
+// isSafePathComponent returns true if name is a single path component without
+// any separators or parent directory references.
+func isSafePathComponent(name string) bool {
+	if name == "" {
+		return false
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	if strings.Contains(name, "..") {
+		return false
+	}
+	return true
 }

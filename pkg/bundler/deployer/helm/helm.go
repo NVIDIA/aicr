@@ -33,35 +33,33 @@ import (
 	"github.com/NVIDIA/eidos/pkg/recipe"
 )
 
-//go:embed templates/Chart.yaml.tmpl
-var chartTemplate string
-
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
+
+//go:embed templates/component-README.md.tmpl
+var componentReadmeTemplate string
+
+//go:embed templates/deploy.sh.tmpl
+var deployScriptTemplate string
 
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
-// ChartMetadata represents the metadata for an umbrella Helm chart.
-type ChartMetadata struct {
-	APIVersion   string       `yaml:"apiVersion"`
-	Name         string       `yaml:"name"`
-	Description  string       `yaml:"description"`
-	Type         string       `yaml:"type"`
-	Version      string       `yaml:"version"`
-	AppVersion   string       `yaml:"appVersion"`
-	Dependencies []Dependency `yaml:"dependencies"`
+// defaultNamespace is the default namespace for component deployment.
+const defaultNamespace = "nvidia-system"
+
+// ComponentData contains data for rendering per-component templates.
+type ComponentData struct {
+	Name         string
+	Namespace    string
+	Repository   string
+	ChartName    string
+	Version      string
+	HasManifests bool
+	HasChart     bool
 }
 
-// Dependency represents a Helm chart dependency.
-type Dependency struct {
-	Name       string `yaml:"name"`
-	Version    string `yaml:"version"`
-	Repository string `yaml:"repository"`
-	Condition  string `yaml:"condition,omitempty"`
-}
-
-// GeneratorInput contains all data needed to generate an umbrella chart.
+// GeneratorInput contains all data needed to generate a per-component Helm bundle.
 type GeneratorInput struct {
 	// RecipeResult contains the recipe metadata and component references.
 	RecipeResult *recipe.RecipeResult
@@ -70,18 +68,18 @@ type GeneratorInput struct {
 	// These are collected from individual bundlers.
 	ComponentValues map[string]map[string]any
 
-	// Version is the chart version (from CLI/bundler version).
+	// Version is the bundler version (from CLI/bundler version).
 	Version string
 
 	// IncludeChecksums indicates whether to generate a checksums.txt file.
 	IncludeChecksums bool
 
-	// ManifestContents maps manifest file paths to their contents.
-	// These are copied to the chart's templates/ directory.
-	ManifestContents map[string][]byte
+	// ComponentManifests maps component name → manifest path → content.
+	// Each component's manifests are placed in its own manifests/ subdirectory.
+	ComponentManifests map[string]map[string][]byte
 }
 
-// GeneratorOutput contains the result of umbrella chart generation.
+// GeneratorOutput contains the result of Helm bundle generation.
 type GeneratorOutput struct {
 	// Files contains the paths of generated files.
 	Files []string
@@ -89,22 +87,22 @@ type GeneratorOutput struct {
 	// TotalSize is the total size of all generated files.
 	TotalSize int64
 
-	// Duration is the time taken to generate the chart.
+	// Duration is the time taken to generate the bundle.
 	Duration time.Duration
 
 	// DeploymentSteps contains ordered deployment instructions for the user.
 	DeploymentSteps []string
 }
 
-// Generator creates Helm umbrella charts from recipe results.
+// Generator creates per-component Helm bundles from recipe results.
 type Generator struct{}
 
-// NewGenerator creates a new umbrella chart generator.
+// NewGenerator creates a new Helm bundle generator.
 func NewGenerator() *Generator {
 	return &Generator{}
 }
 
-// Generate creates an umbrella chart from the given input.
+// Generate creates a per-component Helm bundle from the given input.
 func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputDir string) (*GeneratorOutput, error) {
 	start := time.Now()
 
@@ -122,26 +120,23 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 			"failed to create output directory", err)
 	}
 
-	// Generate Chart.yaml
-	chartPath, chartSize, err := g.generateChartYAML(ctx, input, outputDir)
+	// Build sorted component data list (validates component names)
+	components, err := g.buildComponentDataList(input)
+	if err != nil {
+		return nil, err
+	}
+
+	// Generate per-component directories
+	files, size, err := g.generateComponentDirectories(ctx, input, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate Chart.yaml", err)
+			"failed to generate component directories", err)
 	}
-	output.Files = append(output.Files, chartPath)
-	output.TotalSize += chartSize
+	output.Files = append(output.Files, files...)
+	output.TotalSize += size
 
-	// Generate values.yaml
-	valuesPath, valuesSize, err := g.generateValuesYAML(ctx, input, outputDir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate values.yaml", err)
-	}
-	output.Files = append(output.Files, valuesPath)
-	output.TotalSize += valuesSize
-
-	// Generate README.md
-	readmePath, readmeSize, err := g.generateREADME(ctx, input, outputDir)
+	// Generate root README.md
+	readmePath, readmeSize, err := g.generateRootREADME(ctx, input, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate README.md", err)
@@ -149,14 +144,14 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
-	// Generate templates directory with manifest files
-	templateFiles, templateSize, err := g.generateTemplates(ctx, input, outputDir)
+	// Generate deploy.sh
+	deployPath, deploySize, err := g.generateDeployScript(ctx, input, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate templates", err)
+			"failed to generate deploy.sh", err)
 	}
-	output.Files = append(output.Files, templateFiles...)
-	output.TotalSize += templateSize
+	output.Files = append(output.Files, deployPath)
+	output.TotalSize += deploySize
 
 	// Generate checksums.txt if requested
 	if input.IncludeChecksums {
@@ -177,11 +172,11 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	// Populate deployment steps for CLI output
 	output.DeploymentSteps = []string{
 		fmt.Sprintf("cd %s", outputDir),
-		"helm dependency update",
-		"helm install eidos-stack . -n eidos-stack --create-namespace --wait --timeout 10m",
+		"chmod +x deploy.sh",
+		"./deploy.sh",
 	}
 
-	slog.Debug("umbrella chart generated",
+	slog.Debug("helm bundle generated",
 		"files", len(output.Files),
 		"total_size", output.TotalSize,
 		"duration", output.Duration,
@@ -190,210 +185,139 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	return output, nil
 }
 
-// generateChartYAML creates the Chart.yaml file with dependencies.
-func (g *Generator) generateChartYAML(ctx context.Context, input *GeneratorInput, outputDir string) (string, int64, error) {
-	if err := ctx.Err(); err != nil {
-		return "", 0, err
-	}
-
-	// Build dependencies from component refs in deployment order
-	deps := make([]Dependency, 0, len(input.RecipeResult.ComponentRefs))
-
-	// Create a map for quick lookup
+// buildComponentDataList builds a sorted list of ComponentData from the recipe.
+// It validates that all component names are safe for use as directory names.
+func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentData, error) {
 	componentMap := make(map[string]recipe.ComponentRef)
 	for _, ref := range input.RecipeResult.ComponentRefs {
 		componentMap[ref.Name] = ref
 	}
 
-	// Add dependencies in deployment order
-	for _, name := range input.RecipeResult.DeploymentOrder {
-		ref, ok := componentMap[name]
-		if !ok {
-			continue
-		}
-		// Skip manifest-only components (no Helm chart source)
-		// These components only contribute manifestFiles and shouldn't be in Chart.yaml dependencies
-		if ref.Source == "" {
-			continue
-		}
-		dep := Dependency{
-			Name:       resolveChartName(ref.Name),
-			Version:    ref.Version,
-			Repository: ref.Source,
-		}
-		// Add condition for optional enabling/disabling
-		// Use component name (not chart name) for condition to match values.yaml structure
-		dep.Condition = fmt.Sprintf("%s.enabled", ref.Name)
-		deps = append(deps, dep)
-	}
+	// Sort by deployment order
+	sorted := sortComponentRefsByDeploymentOrder(
+		input.RecipeResult.ComponentRefs,
+		input.RecipeResult.DeploymentOrder,
+	)
 
-	// Add any components not in deployment order (shouldn't happen, but be safe)
-	for _, ref := range input.RecipeResult.ComponentRefs {
-		// Skip manifest-only components (no Helm chart source)
-		if ref.Source == "" {
-			continue
+	components := make([]ComponentData, 0, len(sorted))
+	for _, ref := range sorted {
+		if !isSafePathComponent(ref.Name) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
-		chartName := resolveChartName(ref.Name)
-		found := false
-		for _, d := range deps {
-			if d.Name == chartName {
-				found = true
-				break
+
+		hasManifests := false
+		if input.ComponentManifests != nil {
+			if m, ok := input.ComponentManifests[ref.Name]; ok && len(m) > 0 {
+				hasManifests = true
 			}
 		}
-		if !found {
-			deps = append(deps, Dependency{
-				Name:       chartName,
-				Version:    ref.Version,
-				Repository: ref.Source,
-				Condition:  fmt.Sprintf("%s.enabled", ref.Name),
-			})
-		}
+
+		components = append(components, ComponentData{
+			Name:         ref.Name,
+			Namespace:    getNamespace(ref),
+			Repository:   ref.Source,
+			ChartName:    resolveChartName(ref.Name),
+			Version:      normalizeVersion(ref.Version),
+			HasManifests: hasManifests,
+			HasChart:     ref.Source != "",
+		})
 	}
 
-	// Build chart metadata
-	chartName := "eidos-stack"
-	if input.RecipeResult.Criteria != nil {
-		// Create a more descriptive name based on criteria
-		parts := []string{"eidos"}
-		if input.RecipeResult.Criteria.Service != "" && input.RecipeResult.Criteria.Service != criteriaAny {
-			parts = append(parts, string(input.RecipeResult.Criteria.Service))
-		}
-		if input.RecipeResult.Criteria.Accelerator != "" && input.RecipeResult.Criteria.Accelerator != criteriaAny {
-			parts = append(parts, string(input.RecipeResult.Criteria.Accelerator))
-		}
-		if len(parts) > 1 {
-			chartName = strings.Join(parts, "-")
-		}
-	}
-
-	data := struct {
-		ChartName    string
-		Description  string
-		Version      string
-		AppVersion   string
-		Dependencies []Dependency
-	}{
-		ChartName:    chartName,
-		Description:  "NVIDIA Cloud Native Stack - GPU-accelerated Kubernetes deployment",
-		Version:      normalizeVersion(input.Version),
-		AppVersion:   input.RecipeResult.Metadata.Version,
-		Dependencies: deps,
-	}
-
-	// Render template
-	tmpl, err := template.New("Chart.yaml").Parse(chartTemplate)
-	if err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse Chart.yaml template", err)
-	}
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to render Chart.yaml", err)
-	}
-
-	// Write file
-	chartPath := filepath.Join(outputDir, "Chart.yaml")
-	content := buf.String()
-
-	if err := os.WriteFile(chartPath, []byte(content), 0600); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write Chart.yaml", err)
-	}
-
-	return chartPath, int64(len(content)), nil
+	return components, nil
 }
 
-// generateValuesYAML creates the values.yaml file with all component values.
-func (g *Generator) generateValuesYAML(ctx context.Context, input *GeneratorInput, outputDir string) (string, int64, error) {
+// generateComponentDirectories creates per-component directories with values.yaml, README.md, and optional manifests.
+func (g *Generator) generateComponentDirectories(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) ([]string, int64, error) {
+	files := make([]string, 0, len(components)*3)
+	var totalSize int64
+
+	for _, comp := range components {
+		select {
+		case <-ctx.Done():
+			return nil, 0, errors.Wrap(errors.ErrCodeInternal, "context cancelled", ctx.Err())
+		default:
+		}
+
+		componentDir := filepath.Join(outputDir, comp.Name)
+		if err := os.MkdirAll(componentDir, 0755); err != nil {
+			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to create directory for %s", comp.Name), err)
+		}
+
+		// Write values.yaml
+		valuesPath := filepath.Join(componentDir, "values.yaml")
+		values := input.ComponentValues[comp.Name]
+		if values == nil {
+			values = make(map[string]any)
+		}
+		valuesSize, err := g.writeValuesFile(values, valuesPath)
+		if err != nil {
+			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to write values.yaml for %s", comp.Name), err)
+		}
+		files = append(files, valuesPath)
+		totalSize += valuesSize
+
+		// Write component README.md
+		readmePath := filepath.Join(componentDir, "README.md")
+		readmeSize, err := g.generateFromTemplate(componentReadmeTemplate, comp, readmePath)
+		if err != nil {
+			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to write README.md for %s", comp.Name), err)
+		}
+		files = append(files, readmePath)
+		totalSize += readmeSize
+
+		// Write manifests if present
+		if input.ComponentManifests != nil {
+			if manifests, ok := input.ComponentManifests[comp.Name]; ok && len(manifests) > 0 {
+				manifestDir := filepath.Join(componentDir, "manifests")
+				if err := os.MkdirAll(manifestDir, 0755); err != nil {
+					return nil, 0, errors.Wrap(errors.ErrCodeInternal,
+						fmt.Sprintf("failed to create manifests directory for %s", comp.Name), err)
+				}
+
+				// Sort manifest paths for deterministic output
+				manifestPaths := make([]string, 0, len(manifests))
+				for p := range manifests {
+					manifestPaths = append(manifestPaths, p)
+				}
+				sort.Strings(manifestPaths)
+
+				for _, manifestPath := range manifestPaths {
+					content := manifests[manifestPath]
+					filename := filepath.Base(manifestPath)
+					if !isSafePathComponent(filename) {
+						return nil, 0, errors.New(errors.ErrCodeInvalidRequest,
+							fmt.Sprintf("invalid manifest filename %q in component %s", filename, comp.Name))
+					}
+					outputPath := filepath.Join(manifestDir, filename)
+
+					if err := os.WriteFile(outputPath, content, 0600); err != nil {
+						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write manifest", err,
+							map[string]any{"component": comp.Name, "filename": filename})
+					}
+
+					files = append(files, outputPath)
+					totalSize += int64(len(content))
+
+					slog.Debug("wrote manifest", "component", comp.Name, "filename", filename)
+				}
+			}
+		}
+	}
+
+	return files, totalSize, nil
+}
+
+// generateRootREADME creates the root README.md with deployment instructions.
+func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
 
-	// Build combined values map
-	// Structure: component-name -> values
-	values := make(map[string]any)
-
-	// Add components in deployment order for consistent output
-	for _, name := range input.RecipeResult.DeploymentOrder {
-		if componentValues, ok := input.ComponentValues[name]; ok {
-			// Add enabled flag (default true)
-			componentWithEnabled := make(map[string]any)
-			componentWithEnabled["enabled"] = true
-			for k, v := range componentValues {
-				componentWithEnabled[k] = v
-			}
-			values[name] = componentWithEnabled
-		}
-	}
-
-	// Add any components not in deployment order
-	for name, componentValues := range input.ComponentValues {
-		if _, exists := values[name]; !exists {
-			componentWithEnabled := make(map[string]any)
-			componentWithEnabled["enabled"] = true
-			for k, v := range componentValues {
-				componentWithEnabled[k] = v
-			}
-			values[name] = componentWithEnabled
-		}
-	}
-
-	// Generate YAML with header comment
-	header := fmt.Sprintf(`# Cloud Native Stack - Helm Umbrella Chart Values
-# Recipe Version: %s
-# Bundler Version: %s
-#
-# This file contains configuration for all sub-charts.
-# Each top-level key corresponds to a dependency in Chart.yaml.
-# Set <component>.enabled=false to skip installing a component.
-`, input.RecipeResult.Metadata.Version, input.Version)
-
-	yamlBytes, err := yaml.Marshal(values)
-	if err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
-	}
-
-	content := header + string(yamlBytes)
-
-	// Write file
-	valuesPath := filepath.Join(outputDir, "values.yaml")
-	if err := os.WriteFile(valuesPath, []byte(content), 0600); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values.yaml", err)
-	}
-
-	return valuesPath, int64(len(content)), nil
-}
-
-// generateREADME creates the README.md file with deployment instructions.
-func (g *Generator) generateREADME(ctx context.Context, input *GeneratorInput, outputDir string) (string, int64, error) {
-	if err := ctx.Err(); err != nil {
-		return "", 0, err
-	}
-
-	// Build component list for README
-	type ComponentInfo struct {
-		Name       string
-		Version    string
-		Repository string
-	}
-
-	componentMap := make(map[string]recipe.ComponentRef)
-	for _, ref := range input.RecipeResult.ComponentRefs {
-		componentMap[ref.Name] = ref
-	}
-
-	components := make([]ComponentInfo, 0, len(input.RecipeResult.DeploymentOrder))
-	for _, name := range input.RecipeResult.DeploymentOrder {
-		if ref, ok := componentMap[name]; ok {
-			components = append(components, ComponentInfo{
-				Name:       ref.Name,
-				Version:    ref.Version,
-				Repository: ref.Source,
-			})
-		}
-	}
-
-	// Build criteria string for README
+	// Build criteria lines
 	criteriaLines := []string{}
 	if input.RecipeResult.Criteria != nil {
 		c := input.RecipeResult.Criteria
@@ -411,45 +335,105 @@ func (g *Generator) generateREADME(ctx context.Context, input *GeneratorInput, o
 		}
 	}
 
-	// Build constraints for README
-	constraints := input.RecipeResult.Constraints
-
-	data := struct {
-		RecipeVersion  string
-		BundlerVersion string
-		Components     []ComponentInfo
-		Criteria       []string
-		Constraints    []recipe.Constraint
-		ChartName      string
-	}{
-		RecipeVersion:  input.RecipeResult.Metadata.Version,
-		BundlerVersion: input.Version,
-		Components:     components,
-		Criteria:       criteriaLines,
-		Constraints:    constraints,
-		ChartName:      "eidos-stack",
+	// Build reversed component list for uninstall
+	reversed := make([]ComponentData, len(components))
+	for i, comp := range components {
+		reversed[len(components)-1-i] = comp
 	}
 
-	// Render template
-	tmpl, err := template.New("README.md").Parse(readmeTemplate)
+	data := struct {
+		RecipeVersion      string
+		BundlerVersion     string
+		Components         []ComponentData
+		ComponentsReversed []ComponentData
+		Criteria           []string
+		Constraints        []recipe.Constraint
+	}{
+		RecipeVersion:      input.RecipeResult.Metadata.Version,
+		BundlerVersion:     input.Version,
+		Components:         components,
+		ComponentsReversed: reversed,
+		Criteria:           criteriaLines,
+		Constraints:        input.RecipeResult.Constraints,
+	}
+
+	readmePath := filepath.Join(outputDir, "README.md")
+	readmeSize, err := g.generateFromTemplate(readmeTemplate, data, readmePath)
 	if err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse README.md template", err)
+		return "", 0, err
+	}
+
+	return readmePath, readmeSize, nil
+}
+
+// generateDeployScript creates the deploy.sh automation script.
+func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) (string, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
+
+	data := struct {
+		BundlerVersion string
+		Components     []ComponentData
+	}{
+		BundlerVersion: input.Version,
+		Components:     components,
+	}
+
+	deployPath := filepath.Join(outputDir, "deploy.sh")
+	deploySize, err := g.generateFromTemplate(deployScriptTemplate, data, deployPath)
+	if err != nil {
+		return "", 0, err
+	}
+
+	// Make executable
+	if err := os.Chmod(deployPath, 0755); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to set deploy.sh permissions", err)
+	}
+
+	return deployPath, deploySize, nil
+}
+
+// generateFromTemplate renders a template to a file.
+func (g *Generator) generateFromTemplate(tmplContent string, data any, outputPath string) (int64, error) {
+	tmpl, err := template.New("template").Parse(tmplContent)
+	if err != nil {
+		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
 	}
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to render README.md", err)
+		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
 	}
 
-	// Write file
-	readmePath := filepath.Join(outputDir, "README.md")
 	content := buf.String()
-
-	if err := os.WriteFile(readmePath, []byte(content), 0600); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write README.md", err)
+	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
+		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write file", err)
 	}
 
-	return readmePath, int64(len(content)), nil
+	return int64(len(content)), nil
+}
+
+// writeValuesFile writes a values.yaml file with header comment.
+func (g *Generator) writeValuesFile(values map[string]any, outputPath string) (int64, error) {
+	var buf strings.Builder
+	buf.WriteString("# Generated by Cloud Native Stack\n")
+	buf.WriteString("---\n")
+
+	if len(values) > 0 {
+		yamlBytes, err := yaml.Marshal(values)
+		if err != nil {
+			return 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
+		}
+		buf.Write(yamlBytes)
+	}
+
+	content := buf.String()
+	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
+		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values file", err)
+	}
+
+	return int64(len(content)), nil
 }
 
 // normalizeVersion ensures version string is valid for Helm (semver without 'v' prefix for chart version)
@@ -514,41 +498,64 @@ func SortComponentsByDeploymentOrder(components []string, deploymentOrder []stri
 	return sorted
 }
 
-// generateTemplates creates manifest files in the templates/ directory.
-// Manifest files are copied as-is. CRD-dependent resources (Custom Resources) must
-// include Helm hook annotations in the source manifest to ensure proper deployment
-// ordering. This is validated by TestManifestHelmHooksRequired in yaml_test.go.
-func (g *Generator) generateTemplates(ctx context.Context, input *GeneratorInput, outputDir string) ([]string, int64, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, 0, err
+// sortComponentRefsByDeploymentOrder sorts component refs by deployment order.
+func sortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []string) []recipe.ComponentRef {
+	if len(order) == 0 {
+		return refs
 	}
 
-	if len(input.ManifestContents) == 0 {
-		return nil, 0, nil
+	orderMap := make(map[string]int, len(order))
+	for i, name := range order {
+		orderMap[name] = i
 	}
 
-	templatesDir := filepath.Join(outputDir, "templates")
-	if err := os.MkdirAll(templatesDir, 0755); err != nil {
-		return nil, 0, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", err)
-	}
+	sorted := make([]recipe.ComponentRef, len(refs))
+	copy(sorted, refs)
 
-	files := make([]string, 0, len(input.ManifestContents))
-	var totalSize int64
+	sort.SliceStable(sorted, func(i, j int) bool {
+		orderI, okI := orderMap[sorted[i].Name]
+		orderJ, okJ := orderMap[sorted[j].Name]
 
-	for path, content := range input.ManifestContents {
-		filename := filepath.Base(path)
-		outputPath := filepath.Join(templatesDir, filename)
-
-		if err := os.WriteFile(outputPath, content, 0600); err != nil {
-			return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write template", err,
-				map[string]any{"filename": filename})
+		if !okI && !okJ {
+			return sorted[i].Name < sorted[j].Name
 		}
+		if !okI {
+			return false
+		}
+		if !okJ {
+			return true
+		}
+		return orderI < orderJ
+	})
 
-		files = append(files, outputPath)
-		totalSize += int64(len(content))
+	return sorted
+}
 
-		slog.Debug("wrote template", "filename", filename)
+// getNamespace returns the namespace for a component.
+func getNamespace(comp recipe.ComponentRef) string {
+	switch comp.Name {
+	case "gpu-operator":
+		return "gpu-operator"
+	case "network-operator":
+		return "nvidia-network-operator"
+	case "cert-manager":
+		return "cert-manager"
+	default:
+		return defaultNamespace
 	}
+}
 
-	return files, totalSize, nil
+// isSafePathComponent returns true if name is a single path component without
+// any separators or parent directory references.
+func isSafePathComponent(name string) bool {
+	if name == "" {
+		return false
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	if strings.Contains(name, "..") {
+		return false
+	}
+	return true
 }

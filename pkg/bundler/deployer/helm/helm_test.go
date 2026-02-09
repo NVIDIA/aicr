@@ -56,45 +56,54 @@ func TestGenerate_Success(t *testing.T) {
 		t.Fatalf("Generate failed: %v", err)
 	}
 
-	// Verify output
-	if len(output.Files) != 3 {
-		t.Errorf("expected 3 files, got %d", len(output.Files))
-	}
-
-	// Check files exist
-	expectedFiles := []string{"Chart.yaml", "values.yaml", "README.md"}
-	for _, f := range expectedFiles {
+	// Verify root files exist
+	rootFiles := []string{"README.md", "deploy.sh"}
+	for _, f := range rootFiles {
 		path := filepath.Join(outputDir, f)
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
-			t.Errorf("expected file %s does not exist", f)
+			t.Errorf("expected root file %s does not exist", f)
 		}
 	}
 
-	// Verify Chart.yaml content
-	chartContent, err := os.ReadFile(filepath.Join(outputDir, "Chart.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read Chart.yaml: %v", err)
-	}
-	if !strings.Contains(string(chartContent), "cert-manager") {
-		t.Error("Chart.yaml missing cert-manager dependency")
-	}
-	if !strings.Contains(string(chartContent), "gpu-operator") {
-		t.Error("Chart.yaml missing gpu-operator dependency")
+	// Verify per-component directories
+	for _, comp := range []string{"cert-manager", "gpu-operator"} {
+		valuesPath := filepath.Join(outputDir, comp, "values.yaml")
+		if _, statErr := os.Stat(valuesPath); os.IsNotExist(statErr) {
+			t.Errorf("expected %s/values.yaml does not exist", comp)
+		}
+		readmePath := filepath.Join(outputDir, comp, "README.md")
+		if _, statErr := os.Stat(readmePath); os.IsNotExist(statErr) {
+			t.Errorf("expected %s/README.md does not exist", comp)
+		}
 	}
 
-	// Verify values.yaml content
-	valuesContent, err := os.ReadFile(filepath.Join(outputDir, "values.yaml"))
+	// Verify cert-manager values contain installCRDs
+	cmValues, err := os.ReadFile(filepath.Join(outputDir, "cert-manager", "values.yaml"))
 	if err != nil {
-		t.Fatalf("failed to read values.yaml: %v", err)
+		t.Fatalf("failed to read cert-manager values: %v", err)
 	}
-	if !strings.Contains(string(valuesContent), "cert-manager") {
-		t.Error("values.yaml missing cert-manager values")
+	if !strings.Contains(string(cmValues), "installCRDs") {
+		t.Error("cert-manager/values.yaml missing installCRDs")
 	}
-	if !strings.Contains(string(valuesContent), "gpu-operator") {
-		t.Error("values.yaml missing gpu-operator values")
+
+	// Verify gpu-operator values contain driver
+	gpuValues, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read gpu-operator values: %v", err)
 	}
-	if !strings.Contains(string(valuesContent), "enabled: true") {
-		t.Error("values.yaml missing enabled flag")
+	if !strings.Contains(string(gpuValues), "driver") {
+		t.Error("gpu-operator/values.yaml missing driver")
+	}
+
+	// No Chart.yaml should exist
+	chartPath := filepath.Join(outputDir, "Chart.yaml")
+	if _, statErr := os.Stat(chartPath); !os.IsNotExist(statErr) {
+		t.Error("Chart.yaml should not exist in per-component bundle")
+	}
+
+	// Verify output has reasonable file count (2 root files + 2 component dirs × 2 files each = 6)
+	if len(output.Files) < 6 {
+		t.Errorf("expected at least 6 files, got %d", len(output.Files))
 	}
 }
 
@@ -159,33 +168,27 @@ func TestGenerate_WithChecksums(t *testing.T) {
 		t.Fatalf("Generate failed: %v", err)
 	}
 
-	// Should have 4 files: Chart.yaml, values.yaml, README.md, checksums.txt
-	if len(output.Files) != 4 {
-		t.Errorf("expected 4 files, got %d", len(output.Files))
-	}
-
 	// Check checksums.txt exists
 	checksumPath := filepath.Join(outputDir, "checksums.txt")
 	if _, statErr := os.Stat(checksumPath); os.IsNotExist(statErr) {
 		t.Error("checksums.txt does not exist")
 	}
 
-	// Verify checksums.txt content
+	// Verify checksums.txt references per-component paths
 	checksumContent, err := os.ReadFile(checksumPath)
 	if err != nil {
 		t.Fatalf("failed to read checksums.txt: %v", err)
 	}
 	content := string(checksumContent)
 
-	// Should contain hashes for the 3 main files
-	if !strings.Contains(content, "Chart.yaml") {
-		t.Error("checksums.txt missing Chart.yaml")
-	}
-	if !strings.Contains(content, "values.yaml") {
-		t.Error("checksums.txt missing values.yaml")
-	}
 	if !strings.Contains(content, "README.md") {
 		t.Error("checksums.txt missing README.md")
+	}
+	if !strings.Contains(content, "deploy.sh") {
+		t.Error("checksums.txt missing deploy.sh")
+	}
+	if !strings.Contains(content, filepath.Join("cert-manager", "values.yaml")) {
+		t.Error("checksums.txt missing cert-manager/values.yaml")
 	}
 
 	// Each line should have 64-char SHA256 hash
@@ -199,6 +202,96 @@ func TestGenerate_WithChecksums(t *testing.T) {
 		if len(parts[0]) != 64 {
 			t.Errorf("expected 64 char hash, got %d: %s", len(parts[0]), parts[0])
 		}
+	}
+
+	// Verify checksums.txt is the last file (appended after generation)
+	lastFile := output.Files[len(output.Files)-1]
+	if !strings.HasSuffix(lastFile, "checksums.txt") {
+		t.Errorf("expected last file to be checksums.txt, got %s", lastFile)
+	}
+}
+
+func TestGenerate_WithManifests(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte("apiVersion: v1\nkind: ConfigMap\n"),
+			},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Verify manifest was placed in component directory
+	manifestPath := filepath.Join(outputDir, "gpu-operator", "manifests", "dcgm-exporter.yaml")
+	if _, statErr := os.Stat(manifestPath); os.IsNotExist(statErr) {
+		t.Error("gpu-operator/manifests/dcgm-exporter.yaml does not exist")
+	}
+
+	// Verify manifest content
+	content, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatalf("failed to read manifest: %v", err)
+	}
+	if !strings.Contains(string(content), "ConfigMap") {
+		t.Error("manifest content incorrect")
+	}
+}
+
+func TestGenerate_DeployScriptExecutable(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	deployPath := filepath.Join(outputDir, "deploy.sh")
+	info, statErr := os.Stat(deployPath)
+	if os.IsNotExist(statErr) {
+		t.Fatal("deploy.sh does not exist")
+	}
+
+	// Check executable permission (0755)
+	mode := info.Mode()
+	if mode&0111 == 0 {
+		t.Errorf("deploy.sh is not executable, mode: %o", mode)
+	}
+
+	// Verify shebang
+	content, err := os.ReadFile(deployPath)
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	if !strings.HasPrefix(string(content), "#!/usr/bin/env bash") {
+		t.Error("deploy.sh missing shebang")
+	}
+	if !strings.Contains(string(content), "set -euo pipefail") {
+		t.Error("deploy.sh missing strict mode")
 	}
 }
 
@@ -267,19 +360,91 @@ func TestResolveChartName(t *testing.T) {
 }
 
 func TestSortComponentsByDeploymentOrder(t *testing.T) {
-	components := []string{"gpu-operator", "cert-manager", "network-operator"}
-	deploymentOrder := []string{"cert-manager", "gpu-operator", "network-operator"}
+	const (
+		certManager     = "cert-manager"
+		gpuOperator     = "gpu-operator"
+		networkOperator = "network-operator"
+	)
+
+	components := []string{gpuOperator, certManager, networkOperator}
+	deploymentOrder := []string{certManager, gpuOperator, networkOperator}
 
 	sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
 
-	if sorted[0] != "cert-manager" {
-		t.Errorf("expected first component to be cert-manager, got %s", sorted[0])
+	if sorted[0] != certManager {
+		t.Errorf("expected first component to be %s, got %s", certManager, sorted[0])
 	}
-	if sorted[1] != "gpu-operator" {
-		t.Errorf("expected second component to be gpu-operator, got %s", sorted[1])
+	if sorted[1] != gpuOperator {
+		t.Errorf("expected second component to be %s, got %s", gpuOperator, sorted[1])
 	}
-	if sorted[2] != "network-operator" {
-		t.Errorf("expected third component to be network-operator, got %s", sorted[2])
+	if sorted[2] != networkOperator {
+		t.Errorf("expected third component to be %s, got %s", networkOperator, sorted[2])
+	}
+}
+
+func TestIsSafePathComponent(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"valid component name", "gpu-operator", true},
+		{"valid with dots", "cert-manager", true},
+		{"empty string", "", false},
+		{"path traversal", "../etc/passwd", false},
+		{"double dot", "..", false},
+		{"forward slash", "gpu/operator", false},
+		{"backslash", "gpu\\operator", false},
+		{"embedded double dot", "foo..bar", false},
+		{"leading dot dot slash", "../foo", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isSafePathComponent(tt.input)
+			if result != tt.expected {
+				t.Errorf("isSafePathComponent(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestBuildComponentDataListRejectsUnsafeNames(t *testing.T) {
+	g := NewGenerator()
+	input := &GeneratorInput{
+		RecipeResult: &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "../etc/passwd", Version: "v1.0.0", Source: "https://evil.com"},
+			},
+		},
+	}
+
+	_, err := g.buildComponentDataList(input)
+	if err == nil {
+		t.Error("expected error for unsafe component name, got nil")
+	}
+}
+
+func TestGetNamespace(t *testing.T) {
+	tests := []struct {
+		name      string
+		component string
+		expected  string
+	}{
+		{"gpu-operator", "gpu-operator", "gpu-operator"},
+		{"network-operator", "network-operator", "nvidia-network-operator"},
+		{"cert-manager", "cert-manager", "cert-manager"},
+		{"unknown", "some-component", defaultNamespace},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ref := recipe.ComponentRef{Name: tt.component}
+			result := getNamespace(ref)
+			if result != tt.expected {
+				t.Errorf("getNamespace(%q) = %q, want %q", tt.component, result, tt.expected)
+			}
+		})
 	}
 }
 

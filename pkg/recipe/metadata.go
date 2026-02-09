@@ -79,7 +79,7 @@ type ComponentRef struct {
 	// DependencyRefs is a list of component names this component depends on.
 	DependencyRefs []string `json:"dependencyRefs,omitempty" yaml:"dependencyRefs,omitempty"`
 
-	// ManifestFiles lists Helm template files to include in the umbrella chart.
+	// ManifestFiles lists manifest files to include in the component bundle.
 	// Paths are relative to the data directory.
 	// Example: ["components/gpu-operator/manifests/dcgm-exporter.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`

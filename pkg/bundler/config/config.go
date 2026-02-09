@@ -28,7 +28,7 @@ type DeployerType string
 
 // Supported deployer types.
 const (
-	// DeployerHelm generates Helm umbrella charts (default).
+	// DeployerHelm generates Helm per-component bundles (default).
 	DeployerHelm DeployerType = "helm"
 	// DeployerArgoCD generates ArgoCD App of Apps manifests.
 	DeployerArgoCD DeployerType = "argocd"

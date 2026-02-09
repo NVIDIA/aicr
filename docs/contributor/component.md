@@ -10,7 +10,7 @@ The bundler system converts RecipeInput objects into deployment artifacts. Artif
 
 - **Declarative Component Registry**: Component configuration is defined in `pkg/recipe/data/registry.yaml`
 - **No separate Go packages**: Adding a new component only requires a registry entry and values files
-- **DefaultBundler**: The `pkg/bundler` package generates Helm umbrella charts from recipes
+- **DefaultBundler**: The `pkg/bundler` package generates Helm per-component bundles from recipes
 - **Recipe-driven**: Components are selected based on recipe's `componentRefs`
 - **Value overrides**: CLI `--set` flag allows runtime customization via `ApplyMapOverrides()`
 - **Node scheduling**: Registry defines paths for injecting node selectors and tolerations
@@ -75,7 +75,7 @@ That's it! The bundler system automatically:
 - Extracts values from the recipe's valuesFile
 - Applies user value overrides from CLI `--set` flags
 - Applies node selectors and tolerations to configured paths
-- Generates the umbrella chart with the component as a dependency
+- Generates the per-component bundle with the component's values and manifests
 
 ### Optional: Custom Manifests
 
@@ -114,7 +114,7 @@ componentRefs:
       - components/gpu-operator/manifests/dcgm-exporter.yaml
 ```
 
-The bundler automatically includes manifest files in the umbrella chart's `templates/` directory.
+The bundler automatically includes manifest files in the component's `manifests/` directory.
 
 ### Registry Configuration Reference
 
@@ -239,35 +239,27 @@ This creates a `recipe.yaml` file with:
 
 **Step 3: Generate the Helm bundle**
 
-Convert the recipe into a Helm umbrella chart:
+Convert the recipe into a Helm per-component bundle:
 
 ```bash
 eidos bundle --recipe recipe.yaml --output bundle
 ```
 
 This generates a `bundle/` directory containing:
-- `Chart.yaml` - Helm chart metadata with component dependencies
-- `values.yaml` - Combined values for all components
-- `templates/` - Additional manifests (ConfigMaps, CRs with Helm hooks)
-- `README.md` - Deployment instructions
+- `deploy.sh` - One-command deployment script
+- `README.md` - Deployment guide with ordered steps
+- `recipe.yaml` - Copy of input recipe
+- `<component>/values.yaml` - Component-specific Helm values
+- `<component>/README.md` - Per-component install/upgrade/uninstall
+- `<component>/manifests/` - Additional manifests (if any)
 
-**Step 4: Download Helm dependencies**
+**Step 4: Deploy the bundle**
 
-Fetch the sub-charts from their repositories:
+Run the deployment script:
 
 ```bash
 cd bundle
-helm dependency update
-```
-
-> **Note:** If the download fails due to file size limits, set `HELM_MAX_FILESIZE=50000000` before running the command. Some charts (e.g., nvsentinel from OCI registry) exceed Helm's default 5MB limit.
-
-**Step 5: Install the Helm chart**
-
-Deploy the stack to the Kind cluster in the namespace `eidos-stack`:
-
-```bash
-helm upgrade --install eidos-stack . -n eidos-stack --create-namespace --wait
+chmod +x deploy.sh && ./deploy.sh
 ```
 
 **Step 6: Verify the deployment**
@@ -349,7 +341,7 @@ The bundle command supports `--system-node-selector`, `--system-node-toleration`
 **How it works:**
 1. Paths are defined in `registry.yaml` under `nodeScheduling`
 2. The bundler automatically applies CLI flag values to those paths
-3. Values are written to the component's section in the umbrella chart's `values.yaml`
+3. Values are written to the component's `values.yaml` in its per-component bundle directory
 
 **Example CLI usage:**
 ```bash
@@ -431,9 +423,9 @@ deploymentOrder:
 When the `--deployer` flag is set, bundlers generate standard artifacts that deployers then transform:
 
 **For Helm** (`--deployer helm`, default):
-- Generates Helm umbrella chart with Chart.yaml and values.yaml
-- Creates combined values with all component configurations
-- Includes dependency references to component charts
+- Generates per-component bundle directories with individual values.yaml
+- Creates component-specific values with installation scripts
+- Includes manifests and deployment instructions per component
 
 **For ArgoCD** (`--deployer argocd`):
 - Bundler generates `values.yaml` and `manifests/`
@@ -446,7 +438,7 @@ When the `--deployer` flag is set, bundlers generate standard artifacts that dep
 The deployer is specified at bundle generation time:
 
 ```bash
-# Default: Helm umbrella chart
+# Default: Helm per-component bundle
 eidos bundle -r recipe.yaml -o ./bundles
 
 # Generate bundles with ArgoCD deployer (use --repo to set Git repository URL)

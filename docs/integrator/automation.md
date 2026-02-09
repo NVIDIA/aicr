@@ -113,9 +113,9 @@ create_bundle:
   stage: bundle
   image: ghcr.io/nvidia/eidos:latest
   script:
-    - eidos bundle --recipe recipe.yaml --bundlers gpu-operator --output ./bundles
+    - eidos bundle --recipe recipe.yaml --output ./bundles
     # Override values at bundle generation time
-    # - eidos bundle -r recipe.yaml -b gpu-operator --set gpuoperator:gds.enabled=true -o ./bundles
+    # - eidos bundle -r recipe.yaml --set gpuoperator:gds.enabled=true -o ./bundles
   artifacts:
     paths:
       - bundles/
@@ -126,10 +126,10 @@ deploy_operators:
   stage: deploy
   image: bitnami/kubectl:latest
   script:
-    - cd bundles/gpu-operator
+    - cd bundles
     - sha256sum -c checksums.txt
-    - chmod +x scripts/install.sh
-    - ./scripts/install.sh
+    - chmod +x deploy.sh
+    - ./deploy.sh
   dependencies:
     - create_bundle
   when: manual
@@ -238,13 +238,11 @@ for cluster_config in "${CLUSTERS[@]}"; do
   # Create bundle
   eidos bundle \
     --recipe "recipe-${CLUSTER}.yaml" \
-    --bundlers gpu-operator \
     --output "./bundles/${CLUSTER}"
-  
+
   # Or with value overrides for environment-specific customization
   # eidos bundle \
   #   --recipe "recipe-${CLUSTER}.yaml" \
-  #   --bundlers gpu-operator \
   #   --set gpuoperator:gds.enabled=true \
   #   --set gpuoperator:mig.strategy=mixed \
   #   --output "./bundles/${CLUSTER}"
@@ -253,8 +251,8 @@ for cluster_config in "${CLUSTERS[@]}"; do
   echo "Deploy to $CLUSTER? [y/N]"
   read -r response
   if [[ "$response" =~ ^[Yy]$ ]]; then
-    cd "bundles/${CLUSTER}/gpu-operator"
-    ./scripts/install.sh
+    cd "bundles/${CLUSTER}"
+    chmod +x deploy.sh && ./deploy.sh
     cd -
   fi
   
@@ -302,7 +300,6 @@ jobs:
         run: |
           eidos bundle \
             --recipe recipe.yaml \
-            --bundlers gpu-operator,network-operator,cert-manager \
             --deployer argocd \
             --repo https://github.com/${{ github.repository }}.git \
             --output ./bundles
@@ -368,7 +365,7 @@ Deploy to multiple environments with environment-specific deployers.
 # multi-env-gitops.sh
 
 ENVIRONMENTS=(
-  "staging:helm"       # Staging uses Helm umbrella chart
+  "staging:helm"       # Staging uses Helm per-component bundle
   "production:argocd"  # Production uses ArgoCD
 )
 
@@ -379,7 +376,6 @@ for env_config in "${ENVIRONMENTS[@]}"; do
   
   eidos bundle \
     --recipe "recipes/${ENV}.yaml" \
-    --bundlers gpu-operator,network-operator \
     --deployer "$DEPLOYER" \
     --output "./bundles/${ENV}"
   

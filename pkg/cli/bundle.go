@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -64,6 +65,27 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		imageRefsPath:  cmd.String("image-refs"),
 	}
 
+	// Resolve recipe path to absolute and validate it exists early.
+	// This prevents confusing "file not found" errors when the working
+	// directory context differs from where the recipe was created.
+	if opts.recipeFilePath != "" &&
+		!strings.HasPrefix(opts.recipeFilePath, "http://") &&
+		!strings.HasPrefix(opts.recipeFilePath, "https://") &&
+		!strings.HasPrefix(opts.recipeFilePath, serializer.ConfigMapURIScheme) {
+
+		absPath, err := filepath.Abs(opts.recipeFilePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve recipe path %q: %w", opts.recipeFilePath, err)
+		}
+		if _, err := os.Stat(absPath); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("recipe file not found: %s (resolved from %q)", absPath, opts.recipeFilePath)
+			}
+			return nil, fmt.Errorf("cannot access recipe file %s: %w", absPath, err)
+		}
+		opts.recipeFilePath = absPath
+	}
+
 	// Parse and validate deployer flag using strongly-typed parser
 	deployerStr := cmd.String("deployer")
 	if deployerStr == "" {
@@ -93,7 +115,13 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		// For OCI output, use current directory for bundle generation
 		opts.outputDir = "./bundle"
 	} else {
-		opts.outputDir = ref.LocalPath
+		// Resolve local output path to absolute to ensure consistent behavior
+		// regardless of how the binary is invoked.
+		absOut, absErr := filepath.Abs(ref.LocalPath)
+		if absErr != nil {
+			return nil, fmt.Errorf("failed to resolve output path %q: %w", ref.LocalPath, absErr)
+		}
+		opts.outputDir = absOut
 	}
 
 	// Parse value overrides from --set flags
@@ -135,10 +163,11 @@ func bundleCmd() *cli.Command {
 Use --deployer argocd to generate ArgoCD Applications.
 
 Helm:
-  - Chart.yaml: Helm chart metadata with component dependencies
-  - values.yaml: Combined values for all components
-  - README.md: Deployment instructions
+  - README.md: Root deployment guide with ordered steps
+  - deploy.sh: Automation script
   - recipe.yaml: Copy of the input recipe for reference
+  - <component>/values.yaml: Helm values per component
+  - <component>/README.md: Component install/upgrade/uninstall
   - checksums.txt: SHA256 checksums of generated files
 
 ArgoCD:
@@ -150,7 +179,7 @@ ArgoCD:
 
 Examples:
 
-Generate Helm umbrella chart (default):
+Generate Helm per-component bundle (default):
   eidos bundle --recipe recipe.yaml --output ./my-bundle
 
 Generate ArgoCD App of Apps:
@@ -251,7 +280,7 @@ Package with explicit tag (overrides CLI version):
 				return err
 			}
 
-			outputType := "Helm umbrella chart"
+			outputType := "Helm per-component bundle"
 			if opts.deployer == config.DeployerArgoCD {
 				outputType = "ArgoCD applications"
 			}

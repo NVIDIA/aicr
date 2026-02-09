@@ -166,7 +166,7 @@ func TestBundleEndpointEmptyComponentRefs(t *testing.T) {
 }
 
 // TestBundleEndpointIgnoresBundlersParam tests that the bundlers query param is silently ignored.
-// In the umbrella chart approach, we generate charts for all components in the recipe,
+// In the per-component bundle approach, we generate bundles for all components in the recipe,
 // not specific bundler types.
 func TestBundleEndpointIgnoresBundlersParam(t *testing.T) {
 	b, err := New()
@@ -274,17 +274,20 @@ func TestBundleEndpointValidRequest(t *testing.T) {
 		t.Fatalf("failed to read zip: %v", err)
 	}
 
-	// Verify expected files in zip (umbrella chart files + recipe)
+	// Verify expected files in zip (per-component bundle files + recipe)
 	expectedFiles := map[string]bool{
-		"Chart.yaml":  false,
-		"values.yaml": false,
 		"README.md":   false,
+		"deploy.sh":   false,
 		"recipe.yaml": false,
 	}
 
+	foundGPUValues := false
 	for _, f := range zipReader.File {
 		if _, ok := expectedFiles[f.Name]; ok {
 			expectedFiles[f.Name] = true
+		}
+		if f.Name == "gpu-operator/values.yaml" {
+			foundGPUValues = true
 		}
 	}
 
@@ -292,6 +295,9 @@ func TestBundleEndpointValidRequest(t *testing.T) {
 		if !found {
 			t.Errorf("expected file %q not found in zip archive", name)
 		}
+	}
+	if !foundGPUValues {
+		t.Error("expected gpu-operator/values.yaml not found in zip archive")
 	}
 
 	// Log files for debugging
@@ -332,7 +338,7 @@ func TestBundleEndpointAllBundlers(t *testing.T) {
 }
 
 // TestBundleRequestQueryParamParsing tests that bundlers query param is ignored.
-// In umbrella chart mode, all components from recipe are included.
+// In per-component bundle mode, all components from recipe are included.
 func TestBundleRequestQueryParamParsing(t *testing.T) {
 	b, err := New()
 	if err != nil {
@@ -391,7 +397,7 @@ func TestBundleRequestQueryParamParsing(t *testing.T) {
 	}
 }
 
-// TestZipResponseContainsExpectedFiles validates zip structure for umbrella chart.
+// TestZipResponseContainsExpectedFiles validates zip structure for per-component bundle.
 func TestZipResponseContainsExpectedFiles(t *testing.T) {
 	b, err := New()
 	if err != nil {
@@ -427,17 +433,20 @@ func TestZipResponseContainsExpectedFiles(t *testing.T) {
 		t.Fatalf("failed to read zip: %v", err)
 	}
 
-	// Check for expected umbrella chart files at root level
+	// Check for expected per-component bundle files
 	expectedFiles := map[string]bool{
-		"Chart.yaml":  false,
-		"values.yaml": false,
 		"README.md":   false,
+		"deploy.sh":   false,
 		"recipe.yaml": false,
 	}
 
+	foundGPUValues := false
 	for _, f := range zipReader.File {
 		if _, ok := expectedFiles[f.Name]; ok {
 			expectedFiles[f.Name] = true
+		}
+		if f.Name == "gpu-operator/values.yaml" {
+			foundGPUValues = true
 		}
 	}
 
@@ -445,6 +454,9 @@ func TestZipResponseContainsExpectedFiles(t *testing.T) {
 		if !found {
 			t.Errorf("expected file %q not found in zip", name)
 		}
+	}
+	if !foundGPUValues {
+		t.Error("expected gpu-operator/values.yaml not found in zip")
 	}
 
 	t.Log("Files in zip:")

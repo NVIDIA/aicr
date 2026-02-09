@@ -1,0 +1,39 @@
+# {{ .Name }}
+
+Chart: {{ .Repository }}/{{ .ChartName }}
+Version: {{ .Version }}
+Namespace: {{ .Namespace }}
+
+## Install
+
+```bash
+helm upgrade --install {{ .Name }} {{ .ChartName }} \
+  --repo {{ .Repository }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} --create-namespace \
+  -f values.yaml \
+  --wait --timeout 10m
+```
+{{ if .HasManifests }}
+After the chart is installed, apply additional manifests:
+
+```bash
+kubectl apply -f manifests/
+```
+{{ end }}
+## Upgrade
+
+```bash
+helm upgrade {{ .Name }} {{ .ChartName }} \
+  --repo {{ .Repository }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} \
+  -f values.yaml \
+  --wait --timeout 10m
+```
+
+## Uninstall
+
+```bash
+helm uninstall {{ .Name }} -n {{ .Namespace }}
+```

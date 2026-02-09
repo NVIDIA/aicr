@@ -79,7 +79,7 @@ eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training --p
 eidos bundle --recipe recipe.yaml -o ./bundles
 ```
 
-The generated `bundles/` directory contains a Helm umbrella chart ready to deploy or commit to your GitOps repository. See [CLI Reference](docs/user/cli-reference.md) for more options.
+The generated `bundles/` directory contains a Helm per-component bundle ready to deploy or commit to your GitOps repository. See [CLI Reference](docs/user/cli-reference.md) for more options.
 
 ### Get Started by Use Case
 

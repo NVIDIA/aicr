@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package helm generates Helm umbrella charts from recipe results.
+// Package helm generates per-component Helm bundles from recipe results.
 //
-// Generates umbrella charts with dependencies for deploying multiple components:
+// Generates a directory per component with individual values and install instructions:
 //
-//   - Chart.yaml with component dependencies
-//   - Combined values.yaml for all components
-//   - README.md with deployment instructions
-//   - checksums.txt for verification (optional)
+//   - <component>/values.yaml: Helm values per component
+//   - <component>/README.md: Component install/upgrade/uninstall
+//   - <component>/manifests/: Optional manifest files
+//   - README.md: Root deployment guide with ordered steps
+//   - deploy.sh: Automation script (0755)
+//   - checksums.txt: SHA256 digests for verification (optional)
 //
 // Usage:
 //

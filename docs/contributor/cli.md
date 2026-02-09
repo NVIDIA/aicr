@@ -117,7 +117,7 @@ Generates deployment artifacts from recipes:
 
 The `--set` flag allows runtime customization of generated bundle values:
 ```shell
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --set gpuoperator:gds.enabled=true \
   --set gpuoperator:driver.version=570.86.16
 ```
@@ -127,12 +127,12 @@ eidos bundle -r recipe.yaml -b gpu-operator \
 The bundle command supports node selector and toleration flags for controlling workload placement:
 ```shell
 # Schedule system components (operators, controllers) on specific nodes
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --system-node-selector nodeGroup=system-pool \
   --system-node-toleration dedicated=system:NoSchedule
 
 # Schedule GPU workloads (drivers, device plugins) on GPU nodes
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --accelerated-node-selector nvidia.com/gpu.present=true \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
 ```
@@ -148,7 +148,7 @@ These flags apply selectors/tolerations to bundler-specific paths (e.g., GPU Ope
 **Execution model**:
 
 - Bundlers run concurrently (parallel execution)
-- If `--bundlers` flag is omitted, all registered bundlers execute
+- All components from the recipe are bundled automatically
 - Errors from any bundler cause immediate cancellation via context propagation
 
 **Testing**: End-to-end workflow validated by `tools/e2e` script
@@ -671,17 +671,17 @@ flowchart TD
 flowchart TD
     A[Bundle Command] --> B[Parse CLI Flags]
     
-    B --> B1["--recipe (required)<br/>--bundlers (optional)<br/>--output (default: .)"]
+    B --> B1["--recipe (required)<br/>--output (default: .)"]
     
     B1 --> C[serializer.FromFile Recipe]
     
     C --> D[bundler.New]
     
-    D --> D1["Build DefaultBundler:<br/>• Empty bundlerTypes = all registered<br/>• Specified types = filtered selection<br/>• Parallel execution"]
+    D --> D1["Build DefaultBundler:<br/>• All recipe components bundled<br/>• Parallel execution"]
     
     D1 --> E[DefaultBundler.Make]
     
-    E --> E1["Select Bundlers:<br/>• If empty: registry.GetAll()<br/>• If specified: registry.Get(types)"]
+    E --> E1["Select Bundlers:<br/>• All recipe components"]
     
     E1 --> E2["Parallel Execution:<br/>• errgroup.WithContext<br/>• One goroutine per bundler<br/>• Concurrent file generation"]
     
@@ -805,44 +805,32 @@ bundler.MustRegister("gpu-operator", NewBundler())
 #### Usage Examples
 
 ```bash
-# Generate all registered bundlers (parallel by default)
+# Generate all recipe components (parallel by default)
 eidos bundle --recipe recipe.yaml --output ./bundles
 
-# Generate specific bundler
-eidos bundle --recipe recipe.yaml --bundlers gpu-operator --output ./bundles
-
-# Multiple bundlers
-eidos bundle \
-  --recipe recipe.yaml \
-  --bundlers gpu-operator \
-  --bundlers network-operator \
-  --output ./bundles
-
 # Use short flags
-eidos bundle -r recipe.yaml -b gpu-operator -o ./bundles
+eidos bundle -r recipe.yaml -o ./bundles
 
 # Override values at generation time
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --set gpuoperator:gds.enabled=true \
   --set gpuoperator:driver.version=570.86.16 \
   -o ./bundles
 
-# Multiple bundlers with overrides
+# Override values for multiple components
 eidos bundle -r recipe.yaml \
-  -b gpu-operator \
-  -b network-operator \
   --set gpuoperator:mig.strategy=mixed \
   --set networkoperator:rdma.enabled=true \
   -o ./bundles
 
 # Schedule system components on system node pool
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --system-node-selector nodeGroup=system-pool \
   --system-node-toleration dedicated=system:NoSchedule \
   -o ./bundles
 
 # Schedule GPU workloads on labeled GPU nodes
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --accelerated-node-selector nvidia.com/gpu.present=true \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   -o ./bundles
@@ -905,10 +893,6 @@ eidos bundle -r recipe.yaml -b gpu-operator \
 # Missing recipe file
 $ eidos bundle --output ./bundles
 Error: required flag "recipe" not set
-
-# Invalid bundler type
-$ eidos bundle -r recipe.yaml -b invalid-type
-Error: invalid bundler type 'invalid-type': unknown bundle type: invalid-type
 
 # Bundler failures (FailFast=false)
 $ eidos bundle -r recipe.yaml
@@ -2722,7 +2706,7 @@ The bundle command integrates with GitOps tools through the **Deployer Framework
 **Supported Deployers**:
 | Type | Description | Output |
 |------|-------------|--------|
-| `helm` | (Default) Helm umbrella chart with dependencies | `Chart.yaml`, `values.yaml` |
+| `helm` | (Default) Helm per-component bundle | `deploy.sh`, `<component>/values.yaml`, `<component>/README.md` |
 | `argocd` | ArgoCD Application manifests | `app-of-apps.yaml`, `<component>/application.yaml` |
 
 **Key Feature: Deployment Order**
@@ -2746,7 +2730,7 @@ flowchart TD
     C -->|helm| D[Helm Deployer]
     C -->|argocd| E[ArgoCD Deployer]
     
-    D --> G[Generate Umbrella Chart]
+    D --> G[Generate Per-Component Bundle]
     E --> H[Generate Applications]
     
     G --> J[Output: Chart.yaml + values.yaml]
@@ -2826,18 +2810,21 @@ bundles/
 
 ### Helm Deployer (Default)
 
-Generates a Helm umbrella chart with component dependencies.
+Generates a Helm per-component bundle with individual component directories.
 
 **Ordering Mechanism**: Dependencies listed in `Chart.yaml` are deployed in order by Helm.
 
 **Output Structure**:
 ```
 bundles/
-├── Chart.yaml       # Umbrella chart with dependencies
-├── values.yaml      # Combined values for all components
-├── README.md        # Deployment instructions
-├── recipe.yaml      # Input recipe reference
-└── checksums.txt    # SHA256 checksums
+├── gpu-operator/
+│   ├── values.yaml      # Component-specific Helm values
+│   ├── scripts/
+│   │   └── install.sh   # Installation script
+│   ├── README.md        # Deployment instructions
+│   └── checksums.txt    # SHA256 checksums
+├── recipe.yaml          # Input recipe reference
+└── deploy.sh            # Top-level deployment script
 ```
 
 ### Deployer Data Flow
@@ -2868,7 +2855,7 @@ sequenceDiagram
 ### Usage Examples
 
 ```bash
-# Default: Helm umbrella chart
+# Default: Helm per-component bundle
 eidos bundle -r recipe.yaml -o ./bundles
 
 # Generate bundle with ArgoCD Applications
@@ -2879,10 +2866,8 @@ eidos bundle -r recipe.yaml --deployer argocd \
   --repo https://github.com/my-org/my-gitops-repo.git \
   -o ./bundles
 
-# Combine with specific bundlers
+# Combine with deployer
 eidos bundle -r recipe.yaml \
-  -b gpu-operator \
-  -b network-operator \
   --deployer argocd \
   -o ./bundles
 ```

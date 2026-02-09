@@ -538,20 +538,7 @@ type ScriptData struct {
 
 ### Bundle Structure
 
-```
-bundle-output/
-├── gpu-operator/
-│   ├── values.yaml           # Helm values with extracted config
-│   ├── manifests/
-│   │   └── clusterpolicy.yaml  # Kubernetes manifest
-│   └── checksums.txt          # SHA256 verification
-│
-└── network-operator/
-    ├── values.yaml
-    └── checksums.txt
-```
-
-Note: Deployment documentation (README.md) is generated at the deployer level (helm, argocd), not by individual component bundlers. See [Deployer-Specific Output](#deployer-specific-output) for README locations.
+The deployer generates the final output structure. See [Deployer-Specific Output](#deployer-specific-output) for details per deployer type.
 
 ## Stage 5: Deployment (GitOps Integration)
 
@@ -619,8 +606,8 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 │  └──────┬─────┘                    └──────┬─────┘       │
 │         │                                 │             │
 │         ▼                                 ▼             │
-│  Chart.yaml with                   sync-wave:           │
-│  dependencies                      - cert-manager:0     │
+│  Per-component dirs                sync-wave:           │
+│  + deploy.sh script                - cert-manager:0     │
 │                                    - gpu-operator:1     │
 │                                    - network-op:2       │
 │                                                         │
@@ -632,11 +619,21 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 **Helm Deployer** (default):
 ```
 bundle-output/
-├── Chart.yaml             # Umbrella chart with dependencies
-├── values.yaml            # Combined values for all components
-├── recipe.yaml            # Recipe used to generate bundle
-├── README.md              # Deployment instructions
-└── checksums.txt          # SHA256 checksums
+├── README.md              # Root deployment guide with ordered steps
+├── deploy.sh              # Automation script (chmod +x)
+├── recipe.yaml            # Copy of the input recipe
+├── checksums.txt          # SHA256 checksums of all files
+├── cert-manager/
+│   ├── values.yaml        # Component Helm values
+│   └── README.md          # Component install/upgrade/uninstall
+├── gpu-operator/
+│   ├── values.yaml        # Component Helm values
+│   ├── README.md          # Component install/upgrade/uninstall
+│   └── manifests/         # Optional manifest files
+│       └── dcgm-exporter.yaml
+└── network-operator/
+    ├── values.yaml
+    └── README.md
 ```
 
 **ArgoCD Deployer**:

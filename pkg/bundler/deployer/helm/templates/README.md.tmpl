@@ -3,7 +3,7 @@
 Recipe Version: {{ .RecipeVersion }}
 Bundler Version: {{ .BundlerVersion }}
 
-This is a Helm umbrella chart that deploys NVIDIA Cloud Native Stack components
+Per-component Helm bundle for deploying NVIDIA Cloud Native Stack components
 for GPU-accelerated Kubernetes workloads.
 
 ## Configuration
@@ -19,10 +19,10 @@ for GPU-accelerated Kubernetes workloads.
 
 The following components are included (deployed in order):
 
-| Component | Version | Repository |
-|-----------|---------|------------|
+| Component | Version | Namespace | Chart |
+|-----------|---------|-----------|-------|
 {{ range .Components -}}
-| {{ .Name }} | {{ .Version }} | {{ .Repository }} |
+| {{ .Name }} | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
 {{ end }}
 
 {{ if .Constraints }}
@@ -39,94 +39,74 @@ The following constraints must be satisfied:
 
 ## Quick Start
 
-1. **Add Helm repositories** (if not already added):
+Run the included deployment script:
 
 ```bash
-helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
-helm repo update
+chmod +x deploy.sh
+./deploy.sh
 ```
 
-2. **Update dependencies**:
+## Manual Installation
+
+Install components individually in order:
+
+{{ range .Components }}
+### {{ .Name }}
 
 ```bash
-helm dependency update
+helm upgrade --install {{ .Name }} {{ .ChartName }} \
+  --repo {{ .Repository }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} --create-namespace \
+  -f {{ .Name }}/values.yaml \
+  --wait --timeout 10m
 ```
-
-3. **Review and customize values** (optional):
-
+{{ if .HasManifests }}
 ```bash
-# Edit values.yaml to customize component configuration
-vim values.yaml
+kubectl apply -f {{ .Name }}/manifests/
 ```
-
-4. **Install the chart**:
-
-```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m -f values.yaml
-```
-
-> **Note**: The `--wait --timeout 10m` flags ensure Helm waits for all resources to be ready
-> and that Helm hooks (used for CRD-dependent resources) execute in the correct order.
+{{ end }}
+{{ end }}
 
 ## Customization
 
-### Disabling Components
-
-To skip installing a specific component, set `<component>.enabled=false`:
-
-```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m \
-  --set cert-manager.enabled=false
-```
-
-### Overriding Values
-
-Override specific values using `--set`:
+Each component has its own `values.yaml` in its directory.
+Edit the file before deploying to customize component configuration:
 
 ```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m \
-  --set gpu-operator.driver.enabled=false \
-  --set gpu-operator.toolkit.enabled=true
-```
-
-### Using a Custom Values File
-
-Create a custom values file and merge it:
-
-```bash
-helm install {{ .ChartName }} . -n eidos-stack --create-namespace --wait --timeout 10m -f values.yaml -f custom-values.yaml
+vim gpu-operator/values.yaml
 ```
 
 ## Upgrade
 
-To upgrade an existing installation:
+To upgrade a specific component:
 
 ```bash
-helm upgrade {{ .ChartName }} . -n eidos-stack --wait --timeout 10m -f values.yaml
+helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml --wait --timeout 10m
 ```
 
 ## Uninstall
 
-To remove the deployment:
+To remove components (reverse order):
 
+{{ range .ComponentsReversed -}}
 ```bash
-helm uninstall {{ .ChartName }} -n eidos-stack
+helm uninstall {{ .Name }} -n {{ .Namespace }}
 ```
+{{ end }}
 
 ## Troubleshooting
 
 ### Check deployment status
 
 ```bash
-helm status {{ .ChartName }} -n eidos-stack
-kubectl get pods -n gpu-operator
+kubectl get pods -A | grep -E 'gpu-operator|network-operator|cert-manager'
 ```
 
 ### View component logs
 
 ```bash
 kubectl logs -n gpu-operator -l app=gpu-operator
-kubectl logs -n nvidia-network-operator -l app=network-operator
 ```
 
 ### Verify GPU access
@@ -139,4 +119,3 @@ kubectl get nodes -o jsonpath='{.items[*].status.allocatable}' | jq '.["nvidia.c
 
 - [GPU Operator Documentation](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)
 - [Network Operator Documentation](https://docs.nvidia.com/networking/display/cokan10/network+operator)
-- [Helm Dependencies](https://helm.sh/docs/helm/helm_dependency/)
