@@ -75,6 +75,71 @@ not valid json
 			wantCheck:  "TestValid",
 			wantErr:    false,
 		},
+		{
+			name: "skipped test",
+			jsonOutput: `{"Action":"run","Test":"TestSkipped"}
+{"Action":"output","Test":"TestSkipped","Output":"=== RUN   TestSkipped\n"}
+{"Action":"skip","Test":"TestSkipped","Elapsed":0.1}`,
+			wantStatus: statusPass,
+			wantCheck:  "TestSkipped",
+			wantErr:    false,
+		},
+		{
+			name: "package-level fail",
+			jsonOutput: `{"Action":"fail"}
+{"Action":"output","Output":"FAIL\n"}`,
+			wantStatus: statusFail,
+			wantCheck:  "",
+			wantErr:    false,
+		},
+		{
+			name: "package-level output only",
+			jsonOutput: `{"Action":"output","Output":"=== Package output\n"}
+{"Action":"pass"}`,
+			wantStatus: statusPass,
+			wantCheck:  "",
+			wantErr:    false,
+		},
+		{
+			name: "test with run action",
+			jsonOutput: `{"Action":"run","Test":"TestRunAction"}
+{"Action":"pass","Test":"TestRunAction","Elapsed":0.5}`,
+			wantStatus: statusPass,
+			wantCheck:  "TestRunAction",
+			wantErr:    false,
+		},
+		{
+			name: "test with duration and output",
+			jsonOutput: `{"Action":"run","Test":"TestDuration"}
+{"Action":"output","Test":"TestDuration","Output":"Running test...\n"}
+{"Action":"output","Test":"TestDuration","Output":"Test completed\n"}
+{"Action":"pass","Test":"TestDuration","Elapsed":2.5}`,
+			wantStatus: statusPass,
+			wantCheck:  "TestDuration",
+			wantErr:    false,
+		},
+		{
+			name: "multiple tests mixed results",
+			jsonOutput: `{"Action":"run","Test":"TestPass1"}
+{"Action":"pass","Test":"TestPass1","Elapsed":0.1}
+{"Action":"run","Test":"TestPass2"}
+{"Action":"pass","Test":"TestPass2","Elapsed":0.2}
+{"Action":"run","Test":"TestFail"}
+{"Action":"fail","Test":"TestFail","Elapsed":0.3}`,
+			wantStatus: statusFail,
+			wantCheck:  "TestFail",
+			wantErr:    false,
+		},
+		{
+			name: "empty lines in output",
+			jsonOutput: `
+{"Action":"pass","Test":"TestEmpty"}
+
+`,
+			wantStatus: statusPass,
+			wantCheck:  "TestEmpty",
+			wantErr:    false,
+		},
 	}
 
 	for _, tt := range tests {

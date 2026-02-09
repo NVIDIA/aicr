@@ -199,6 +199,13 @@ func (d *Deployer) buildTestCommand() string {
 	// 2. Tee output to /tmp for debugging
 	// 3. Exit with test exit code
 
+	// Build test command - only include -run flag if pattern is specified
+	testCmd := fmt.Sprintf("go test -v -json %s", d.config.TestPackage)
+	if d.config.TestPattern != "" {
+		// Quote the pattern to handle special shell characters like ()
+		testCmd = fmt.Sprintf("%s -run '%s'", testCmd, d.config.TestPattern)
+	}
+
 	return fmt.Sprintf(`
 set -e
 echo "Running validation tests..."
@@ -208,12 +215,11 @@ echo "--- BEGIN TEST OUTPUT ---"
 
 # Run tests with JSON output
 # Tee to /tmp/test-output.json for debugging, also send to stdout
-go test -v -json %s -run %s 2>&1 | tee /tmp/test-output.json || TEST_EXIT=$?
+%s 2>&1 | tee /tmp/test-output.json || TEST_EXIT=$?
 
 echo "--- END TEST OUTPUT ---"
 
 # Exit with test exit code
 exit ${TEST_EXIT:-0}
-`, d.config.TestPackage, d.config.TestPattern,
-		d.config.TestPackage, d.config.TestPattern)
+`, d.config.TestPackage, d.config.TestPattern, testCmd)
 }

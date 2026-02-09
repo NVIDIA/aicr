@@ -677,3 +677,75 @@ func TestNew_WithImage_MultipleOptions(t *testing.T) {
 		t.Errorf("Expected image %s, got %s", image, v.Image)
 	}
 }
+
+// TestEvaluateConstraint_EvaluationFailure tests when Evaluate() returns an error.
+func TestEvaluateConstraint_EvaluationFailure(t *testing.T) {
+	// Create a snapshot with non-version-like values that will fail version comparison
+	snapshot := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeOS,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "release",
+						Data: map[string]measurement.Reading{
+							"ID": measurement.Str("not-a-version-string"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Use a version comparison operator on a non-version value
+	// This should cause Evaluate() to fail when trying to parse versions
+	constraint := recipe.Constraint{
+		Name:  "OS.release.ID",
+		Value: ">= 1.0.0", // Version comparison on non-version string
+	}
+
+	result := EvaluateConstraint(constraint, snapshot)
+
+	// Should fail due to version parse error
+	if result.Passed {
+		t.Errorf("Expected constraint to fail, but it passed")
+	}
+	if result.Error == nil {
+		t.Errorf("Expected error from version comparison failure")
+	}
+}
+
+// TestValidator_evaluateConstraint_InvalidExpression tests invalid constraint expressions.
+func TestValidator_evaluateConstraint_InvalidExpression(t *testing.T) {
+	snapshot := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("v1.33.5"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Empty expression should cause parse failure
+	constraint := recipe.Constraint{
+		Name:  "K8s.server.version",
+		Value: "", // Empty expression is invalid
+	}
+
+	result := EvaluateConstraint(constraint, snapshot)
+
+	// Should be skipped due to invalid expression
+	if result.Passed {
+		t.Errorf("Expected constraint to not pass with empty expression")
+	}
+	if result.Error == nil {
+		t.Errorf("Expected error from invalid expression")
+	}
+}

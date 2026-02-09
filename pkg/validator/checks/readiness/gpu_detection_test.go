@@ -312,6 +312,7 @@ func TestGPUHardwareDetection(t *testing.T) {
 		t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
 		return
 	}
+	defer runner.Cancel() // Clean up context when test completes
 
 	runner.RunCheck("gpu-hardware-detection")
 }

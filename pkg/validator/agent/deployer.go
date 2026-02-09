@@ -53,23 +53,37 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 // This is idempotent - safe to call multiple times, reuses existing resources.
 // For multi-phase validation, call this once before running multiple Jobs.
 func (d *Deployer) EnsureRBAC(ctx context.Context) error {
-	slog.Debug("ensuring RBAC resources",
+	slog.Debug("creating RBAC resources",
 		"namespace", d.config.Namespace,
 		"serviceAccount", d.config.ServiceAccountName)
 
 	if err := d.ensureServiceAccount(ctx); err != nil {
+		slog.Error("Failed to create ServiceAccount", "error", err)
 		return eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to create ServiceAccount", err)
 	}
 
 	if err := d.ensureRole(ctx); err != nil {
+		slog.Error("Failed to create Role", "error", err)
 		return eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to create Role", err)
 	}
 
 	if err := d.ensureRoleBinding(ctx); err != nil {
+		slog.Error("Failed to create RoleBinding", "error", err)
 		return eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to create RoleBinding", err)
 	}
 
-	slog.Debug("RBAC resources ensured",
+	// Create ClusterRole for cluster-wide read access (needed for deployment phase)
+	if err := d.ensureClusterRole(ctx); err != nil {
+		slog.Error("Failed to create ClusterRole", "error", err)
+		return eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to create ClusterRole", err)
+	}
+
+	if err := d.ensureClusterRoleBinding(ctx); err != nil {
+		slog.Error("Failed to create ClusterRoleBinding", "error", err)
+		return eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
+	}
+
+	slog.Debug("RBAC resources created",
 		"serviceAccount", d.config.ServiceAccountName)
 
 	return nil
@@ -213,6 +227,20 @@ func (d *Deployer) CleanupRBAC(ctx context.Context) error {
 		deleted = append(deleted, fmt.Sprintf("RoleBinding %q", d.config.ServiceAccountName))
 	}
 
+	// Delete ClusterRole resources
+	clusterRoleName := d.config.ServiceAccountName + "-cluster"
+	if err := d.deleteClusterRole(ctx); err != nil {
+		errs = append(errs, fmt.Sprintf("ClusterRole %q: %v", clusterRoleName, err))
+	} else {
+		deleted = append(deleted, fmt.Sprintf("ClusterRole %q", clusterRoleName))
+	}
+
+	if err := d.deleteClusterRoleBinding(ctx); err != nil {
+		errs = append(errs, fmt.Sprintf("ClusterRoleBinding %q: %v", clusterRoleName, err))
+	} else {
+		deleted = append(deleted, fmt.Sprintf("ClusterRoleBinding %q", clusterRoleName))
+	}
+
 	// Log successful deletions
 	if len(deleted) > 0 {
 		slog.Debug("RBAC cleanup completed",
@@ -233,6 +261,12 @@ func (d *Deployer) CleanupRBAC(ctx context.Context) error {
 // StreamLogs streams logs from the validation Job pod to the provided writer.
 func (d *Deployer) StreamLogs(ctx context.Context) error {
 	return d.streamPodLogs(ctx)
+}
+
+// GetPodLogs retrieves all pod logs as a string.
+// This is useful for capturing logs when a Job fails for debugging.
+func (d *Deployer) GetPodLogs(ctx context.Context) (string, error) {
+	return d.getPodLogsAsString(ctx)
 }
 
 // ignoreAlreadyExists returns nil if the error is "already exists".

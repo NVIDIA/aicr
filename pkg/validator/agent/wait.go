@@ -67,7 +67,9 @@ func (d *Deployer) waitForJobCompletion(ctx context.Context, timeout time.Durati
 					}
 				case batchv1.JobFailed:
 					if condition.Status == corev1.ConditionTrue {
-						return fmt.Errorf("job failed: %s", condition.Message)
+						// Get detailed failure reason from Pod status
+						failureReason := d.getJobFailureReason(ctx, condition.Reason, condition.Message)
+						return fmt.Errorf("job failed: %s", failureReason)
 					}
 				case batchv1.JobSuspended, batchv1.JobFailureTarget, batchv1.JobSuccessCriteriaMet:
 					// These conditions don't affect completion, continue waiting
@@ -75,6 +77,81 @@ func (d *Deployer) waitForJobCompletion(ctx context.Context, timeout time.Durati
 				}
 			}
 		}
+	}
+}
+
+// getJobFailureReason inspects the Pod status to determine detailed failure reason.
+// This helps distinguish between test failures, image pull errors, crashes, etc.
+func (d *Deployer) getJobFailureReason(ctx context.Context, conditionReason, conditionMessage string) string {
+	// Get the pod for this Job
+	pod, err := d.getPodForJob(ctx)
+	if err != nil {
+		// Can't get pod details, return generic Job condition message
+		return fmt.Sprintf("%s: %s", conditionReason, conditionMessage)
+	}
+
+	// Check pod phase
+	switch pod.Status.Phase {
+	case corev1.PodPending:
+		// Pod hasn't started - check for image pull issues
+		for _, containerStatus := range pod.Status.ContainerStatuses {
+			if waiting := containerStatus.State.Waiting; waiting != nil {
+				if strings.Contains(waiting.Reason, "ImagePull") {
+					return fmt.Sprintf("Image pull failed: %s (image: %s)", waiting.Message, containerStatus.Image)
+				}
+				if waiting.Reason == "CrashLoopBackOff" {
+					return fmt.Sprintf("Container in crash loop: %s", waiting.Message)
+				}
+				return fmt.Sprintf("Container waiting: %s - %s", waiting.Reason, waiting.Message)
+			}
+		}
+		return fmt.Sprintf("Pod pending: %s", conditionMessage)
+
+	case corev1.PodFailed:
+		// Pod completed but failed - check container exit codes
+		for _, containerStatus := range pod.Status.ContainerStatuses {
+			if terminated := containerStatus.State.Terminated; terminated != nil {
+				exitCode := terminated.ExitCode
+				switch exitCode {
+				case 1:
+					// Exit code 1 typically means tests failed
+					return fmt.Sprintf("Tests failed (exit code %d): %s", exitCode, terminated.Reason)
+				case 2:
+					// Exit code 2 typically means command/usage error
+					return fmt.Sprintf("Command error (exit code %d): %s", exitCode, terminated.Reason)
+				case 125, 126, 127:
+					// Container/command execution errors
+					return fmt.Sprintf("Execution error (exit code %d): %s", exitCode, terminated.Reason)
+				case 137:
+					// SIGKILL (OOMKilled or killed by system)
+					if terminated.Reason == "OOMKilled" {
+						return "Container killed due to out of memory (OOMKilled)"
+					}
+					return fmt.Sprintf("Container killed (exit code 137): %s", terminated.Reason)
+				case 139:
+					// SIGSEGV (segmentation fault)
+					return "Container crashed with segmentation fault (exit code 139)"
+				default:
+					return fmt.Sprintf("Container exited with code %d: %s", exitCode, terminated.Reason)
+				}
+			}
+		}
+		return fmt.Sprintf("Pod failed: %s", conditionMessage)
+
+	case corev1.PodRunning:
+		// Pod is still running but Job failed - shouldn't normally happen
+		return fmt.Sprintf("Pod still running but Job marked as failed: %s", conditionMessage)
+
+	case corev1.PodSucceeded:
+		// Pod succeeded but we're checking failure reason - shouldn't happen
+		return fmt.Sprintf("Pod succeeded (unexpected in failure check): %s", conditionMessage)
+
+	case corev1.PodUnknown:
+		// Pod state is unknown
+		return fmt.Sprintf("Pod state unknown: %s", conditionMessage)
+
+	default:
+		return fmt.Sprintf("%s: %s (pod phase: %s)", conditionReason, conditionMessage, pod.Status.Phase)
 	}
 }
 
@@ -158,6 +235,35 @@ func (d *Deployer) streamPodLogs(ctx context.Context) error {
 	}
 
 	return scanner.Err()
+}
+
+// getPodLogsAsString retrieves all pod logs as a string.
+// This is useful for capturing logs when a Job fails.
+func (d *Deployer) getPodLogsAsString(ctx context.Context) (string, error) {
+	pod, err := d.getPodForJob(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to find pod: %w", err)
+	}
+
+	req := d.clientset.CoreV1().Pods(d.config.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{})
+	stream, err := req.Stream(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get pod logs: %w", err)
+	}
+	defer stream.Close()
+
+	var logBuffer strings.Builder
+	scanner := bufio.NewScanner(stream)
+	for scanner.Scan() {
+		logBuffer.WriteString(scanner.Text())
+		logBuffer.WriteString("\n")
+	}
+
+	if scanErr := scanner.Err(); scanErr != nil {
+		return "", fmt.Errorf("failed to read pod logs: %w", scanErr)
+	}
+
+	return logBuffer.String(), nil
 }
 
 // getPodForJob finds the pod created by the Job.

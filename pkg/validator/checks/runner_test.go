@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/eidos/pkg/measurement"
+	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -189,7 +190,7 @@ func TestLoadValidationContext_MissingSnapshotFile(t *testing.T) {
 	os.Setenv("EIDOS_SNAPSHOT_PATH", "/nonexistent/snapshot.yaml")
 
 	// Should fail to load context (will also fail on in-cluster config)
-	ctx, err := LoadValidationContext()
+	ctx, cancel, err := LoadValidationContext()
 
 	if err == nil {
 		t.Error("LoadValidationContext should fail with missing snapshot file")
@@ -197,6 +198,10 @@ func TestLoadValidationContext_MissingSnapshotFile(t *testing.T) {
 
 	if ctx != nil {
 		t.Error("LoadValidationContext should return nil context on error")
+	}
+
+	if cancel != nil {
+		t.Error("LoadValidationContext should return nil cancel on error")
 	}
 }
 
@@ -236,7 +241,10 @@ measurements:
 
 	// Attempt to load context
 	// This will still fail on in-cluster config, but we can verify it tries to load the snapshot
-	_, err := LoadValidationContext()
+	ctx, cancel, err := LoadValidationContext()
+	if cancel != nil {
+		defer cancel()
+	}
 
 	// Should fail on in-cluster config (not on snapshot loading)
 	if err == nil {
@@ -246,6 +254,10 @@ measurements:
 	// Error should be about in-cluster config, not snapshot file
 	if err != nil && contains(err.Error(), "no such file") {
 		t.Errorf("Should fail on in-cluster config, not snapshot file, got: %v", err)
+	}
+
+	if ctx != nil {
+		t.Error("LoadValidationContext should return nil context on error")
 	}
 }
 
@@ -263,10 +275,17 @@ func TestLoadValidationContext_DefaultSnapshotPath(t *testing.T) {
 	os.Unsetenv("EIDOS_SNAPSHOT_PATH")
 
 	// Should use default path /data/snapshot/snapshot.yaml
-	_, err := LoadValidationContext()
+	ctx, cancel, err := LoadValidationContext()
+	if cancel != nil {
+		defer cancel()
+	}
 
 	if err == nil {
 		t.Error("LoadValidationContext should fail when not in Kubernetes")
+	}
+
+	if ctx != nil {
+		t.Error("LoadValidationContext should return nil context on error")
 	}
 
 	// Error should be about in-cluster config or default snapshot path
@@ -291,10 +310,17 @@ func TestLoadValidationContext_WithRecipeData(t *testing.T) {
 
 	// Will fail on in-cluster config, but that's expected
 	// This test verifies the recipe data parsing logic
-	_, err := LoadValidationContext()
+	ctx, cancel, err := LoadValidationContext()
+	if cancel != nil {
+		defer cancel()
+	}
 
 	if err == nil {
 		t.Error("LoadValidationContext should fail when not in Kubernetes")
+	}
+
+	if ctx != nil {
+		t.Error("LoadValidationContext should return nil context on error")
 	}
 
 	// The error should be about in-cluster config, not recipe parsing
@@ -317,10 +343,17 @@ func TestLoadValidationContext_InvalidRecipeData(t *testing.T) {
 	os.Setenv("EIDOS_RECIPE_DATA", "invalid json{")
 
 	// Will fail on in-cluster config first, but we're testing recipe parsing
-	_, err := LoadValidationContext()
+	ctx, cancel, err := LoadValidationContext()
+	if cancel != nil {
+		defer cancel()
+	}
 
 	if err == nil {
 		t.Error("LoadValidationContext should fail with invalid recipe JSON")
+	}
+
+	if ctx != nil {
+		t.Error("LoadValidationContext should return nil context on error")
 	}
 }
 
@@ -475,5 +508,199 @@ func TestRunCheck_WithSnapshotData(t *testing.T) {
 		}()
 
 		runner.RunCheck("test-snapshot-check")
+	})
+}
+
+func TestTestRunner_Cancel(t *testing.T) {
+	t.Run("cancel with nil cancel func", func(t *testing.T) {
+		runner := &TestRunner{
+			t:      t,
+			ctx:    nil,
+			cancel: nil,
+		}
+
+		// Should not panic when cancel is nil
+		runner.Cancel()
+	})
+
+	t.Run("cancel with valid cancel func", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		runner := &TestRunner{
+			t:      t,
+			ctx:    &ValidationContext{Context: ctx},
+			cancel: cancel,
+		}
+
+		// Cancel should work without panic
+		runner.Cancel()
+
+		// Verify context is actually canceled
+		select {
+		case <-ctx.Done():
+			// Expected
+		default:
+			t.Error("Context should be cancelled after Cancel()")
+		}
+	})
+}
+
+func TestTestRunner_Context(t *testing.T) {
+	t.Run("returns validation context", func(t *testing.T) {
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		expectedCtx := &ValidationContext{
+			Context:   context.Background(),
+			Clientset: fake.NewSimpleClientset(),
+		}
+
+		runner := &TestRunner{
+			t:   t,
+			ctx: expectedCtx,
+		}
+
+		got := runner.Context()
+		if got != expectedCtx {
+			t.Errorf("Context() = %v, want %v", got, expectedCtx)
+		}
+	})
+
+	t.Run("returns nil when context not set", func(t *testing.T) {
+		runner := &TestRunner{
+			t:   t,
+			ctx: nil,
+		}
+
+		got := runner.Context()
+		if got != nil {
+			t.Errorf("Context() = %v, want nil", got)
+		}
+	})
+}
+
+func TestTestRunner_GetConstraint(t *testing.T) {
+	t.Run("returns constraint when found", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Deployment: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Deployment.gpu-operator.version", Value: ">= v24.6.0"},
+						{Name: "Deployment.other.version", Value: "== v1.0.0"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("deployment", "Deployment.gpu-operator.version")
+		if got == nil {
+			t.Fatal("GetConstraint() returned nil, want constraint")
+		}
+		if got.Name != "Deployment.gpu-operator.version" {
+			t.Errorf("GetConstraint().Name = %v, want %v", got.Name, "Deployment.gpu-operator.version")
+		}
+		if got.Value != ">= v24.6.0" {
+			t.Errorf("GetConstraint().Value = %v, want %v", got.Value, ">= v24.6.0")
+		}
+	})
+
+	t.Run("returns nil when constraint not found", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Deployment: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Deployment.other.version", Value: "== v1.0.0"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("deployment", "Deployment.nonexistent.version")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil", got)
+		}
+	})
+
+	t.Run("returns nil when recipe is nil", func(t *testing.T) {
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    nil,
+			},
+		}
+
+		got := runner.GetConstraint("deployment", "Deployment.test.version")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil", got)
+		}
+	})
+
+	t.Run("returns nil when validation config is nil", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: nil,
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("deployment", "Deployment.test.version")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil", got)
+		}
+	})
+
+	t.Run("returns nil for unknown phase", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Deployment: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Deployment.test.version", Value: "== v1.0.0"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("unknown-phase", "Deployment.test.version")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil for unknown phase", got)
+		}
 	})
 }

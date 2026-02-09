@@ -119,9 +119,9 @@ func TestEnsureRole(t *testing.T) {
 			t.Errorf("expected namespace %q, got %q", deployer.config.Namespace, role.Namespace)
 		}
 
-		// Verify policy rules
-		if len(role.Rules) != 4 {
-			t.Errorf("expected 4 rules, got %d", len(role.Rules))
+		// Verify policy rules (apps rule moved to ClusterRole)
+		if len(role.Rules) != 3 {
+			t.Errorf("expected 3 rules, got %d", len(role.Rules))
 		}
 
 		// Check ConfigMap rule
@@ -149,16 +149,10 @@ func TestEnsureRole(t *testing.T) {
 			t.Errorf("expected get/list verbs, got %v", rule1.Verbs)
 		}
 
-		// Check apps rule
+		// Check batch rule (apps rule moved to ClusterRole for cluster-wide access)
 		rule2 := role.Rules[2]
-		if rule2.APIGroups[0] != "apps" {
-			t.Errorf("expected apps API group, got %v", rule2.APIGroups)
-		}
-
-		// Check batch rule
-		rule3 := role.Rules[3]
-		if rule3.APIGroups[0] != "batch" {
-			t.Errorf("expected batch API group, got %v", rule3.APIGroups)
+		if rule2.APIGroups[0] != "batch" {
+			t.Errorf("expected batch API group, got %v", rule2.APIGroups)
 		}
 	})
 

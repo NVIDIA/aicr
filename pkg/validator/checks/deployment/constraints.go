@@ -32,6 +32,14 @@ func init() {
 		Description: "Validates GPU Operator version by querying deployed resources",
 		Func:        ValidateGPUOperatorVersion,
 	})
+
+	// Register the integration test for this constraint
+	checks.RegisterConstraintTest(&checks.ConstraintTest{
+		TestName:    "TestGPUOperatorVersion",
+		Pattern:     "Deployment.gpu-operator.version",
+		Description: "Validates GPU Operator version from deployed resources",
+		Phase:       "deployment",
+	})
 }
 
 // ValidateGPUOperatorVersion checks the deployed GPU operator version against constraints.
@@ -72,16 +80,20 @@ func getGPUOperatorVersion(ctx context.Context, clientset kubernetes.Interface) 
 	deploymentNames := []string{"gpu-operator", "nvidia-gpu-operator"}
 	namespaces := []string{"gpu-operator", "nvidia-gpu-operator", "kube-system"}
 
+	var lastErr error
 	for _, ns := range namespaces {
 		for _, name := range deploymentNames {
 			version, err := getVersionFromDeployment(ctx, clientset, ns, name)
 			if err == nil && version != "" {
 				return version, nil
 			}
+			if err != nil {
+				lastErr = err
+			}
 		}
 	}
 
-	return "", fmt.Errorf("could not find GPU operator deployment in common namespaces")
+	return "", fmt.Errorf("could not find GPU operator deployment in common namespaces (last error: %w)", lastErr)
 }
 
 // getVersionFromDeployment extracts version from a specific deployment.

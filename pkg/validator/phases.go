@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 	"github.com/NVIDIA/eidos/pkg/validator/agent"
+	"github.com/NVIDIA/eidos/pkg/validator/checks"
 )
 
 // ValidationPhaseName represents the name of a validation phase.
@@ -91,9 +93,8 @@ func (v *Validator) ValidatePhase(
 		}
 		deployer := agent.NewDeployer(clientset, sharedConfig)
 
-		slog.Debug("creating RBAC for validation")
 		if rbacErr := deployer.EnsureRBAC(ctx); rbacErr != nil {
-			slog.Warn("failed to create RBAC resources", "error", rbacErr)
+			slog.Debug("failed to create RBAC resources", "phase", phase, "error", rbacErr)
 		} else {
 			// Cleanup RBAC after phase completes
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
@@ -422,6 +423,12 @@ func (v *Validator) validateDeployment(
 				snapshotCMName := fmt.Sprintf("eidos-snapshot-%s", v.RunID)
 				recipeCMName := fmt.Sprintf("eidos-recipe-%s", v.RunID)
 
+				// Validate that all recipe constraints/checks are registered (logs warnings for missing)
+				v.validateRecipeRegistrations(recipeResult, "deployment")
+
+				// Build test pattern from recipe (constraint names -> test names)
+				testPattern := v.buildTestPattern(recipeResult, "deployment")
+
 				// Deploy ONE Job for ALL deployment checks and constraints in this phase
 				jobConfig := agent.Config{
 					Namespace:          v.Namespace,
@@ -431,7 +438,7 @@ func (v *Validator) validateDeployment(
 					SnapshotConfigMap:  snapshotCMName,
 					RecipeConfigMap:    recipeCMName,
 					TestPackage:        "./pkg/validator/checks/deployment",
-					TestPattern:        "", // Run all tests in package
+					TestPattern:        testPattern,
 					Timeout:            10 * time.Minute,
 				}
 
@@ -543,6 +550,9 @@ func (v *Validator) validatePerformance(
 				// ConfigMap names (created once per validation run by validateAll)
 				snapshotCMName := fmt.Sprintf("eidos-snapshot-%s", v.RunID)
 				recipeCMName := fmt.Sprintf("eidos-recipe-%s", v.RunID)
+
+				// Validate that all recipe constraints/checks are registered (logs warnings for missing)
+				v.validateRecipeRegistrations(recipeResult, "performance")
 
 				// Deploy ONE Job for ALL performance checks and constraints in this phase
 				// Performance tests may need GPU nodes
@@ -662,6 +672,9 @@ func (v *Validator) validateConformance(
 				snapshotCMName := fmt.Sprintf("eidos-snapshot-%s", v.RunID)
 				recipeCMName := fmt.Sprintf("eidos-recipe-%s", v.RunID)
 
+				// Validate that all recipe constraints/checks are registered (logs warnings for missing)
+				v.validateRecipeRegistrations(recipeResult, "conformance")
+
 				// Deploy ONE Job for ALL conformance checks and constraints in this phase
 				jobConfig := agent.Config{
 					Namespace:          v.Namespace,
@@ -725,8 +738,228 @@ func (v *Validator) validateConformance(
 	return result, nil
 }
 
+// buildTestPattern constructs a Go test pattern based on recipe constraints and checks.
+// This enables running only the tests needed for the requested validation.
+// validateRecipeRegistrations checks that all constraints and checks in the recipe
+// are registered. Logs warnings for any that are missing (does not fail validation).
+func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResult, phase string) {
+	var unregisteredConstraints []string
+	var unregisteredChecks []string
+
+	switch phase {
+	case string(PhaseDeployment):
+		if recipeResult.Validation != nil && recipeResult.Validation.Deployment != nil {
+			// Check constraints
+			for _, constraint := range recipeResult.Validation.Deployment.Constraints {
+				_, ok := checks.GetTestNameForConstraint(constraint.Name)
+				if !ok {
+					unregisteredConstraints = append(unregisteredConstraints, constraint.Name)
+				}
+			}
+
+			// Check explicit checks
+			for _, checkName := range recipeResult.Validation.Deployment.Checks {
+				_, ok := checks.GetCheck(checkName)
+				if !ok {
+					unregisteredChecks = append(unregisteredChecks, checkName)
+				}
+			}
+		}
+	case string(PhasePerformance):
+		if recipeResult.Validation != nil && recipeResult.Validation.Performance != nil {
+			for _, constraint := range recipeResult.Validation.Performance.Constraints {
+				_, ok := checks.GetTestNameForConstraint(constraint.Name)
+				if !ok {
+					unregisteredConstraints = append(unregisteredConstraints, constraint.Name)
+				}
+			}
+
+			for _, checkName := range recipeResult.Validation.Performance.Checks {
+				_, ok := checks.GetCheck(checkName)
+				if !ok {
+					unregisteredChecks = append(unregisteredChecks, checkName)
+				}
+			}
+		}
+	case string(PhaseConformance):
+		if recipeResult.Validation != nil && recipeResult.Validation.Conformance != nil {
+			for _, constraint := range recipeResult.Validation.Conformance.Constraints {
+				_, ok := checks.GetTestNameForConstraint(constraint.Name)
+				if !ok {
+					unregisteredConstraints = append(unregisteredConstraints, constraint.Name)
+				}
+			}
+
+			for _, checkName := range recipeResult.Validation.Conformance.Checks {
+				_, ok := checks.GetCheck(checkName)
+				if !ok {
+					unregisteredChecks = append(unregisteredChecks, checkName)
+				}
+			}
+		}
+	}
+
+	// Log warnings if anything is unregistered
+	if len(unregisteredConstraints) > 0 || len(unregisteredChecks) > 0 {
+		var msg strings.Builder
+		msg.WriteString(fmt.Sprintf("recipe contains unregistered validations for phase %s (will be skipped):\n", phase))
+
+		if len(unregisteredConstraints) > 0 {
+			msg.WriteString(fmt.Sprintf("\nUnregistered constraints (%d):\n", len(unregisteredConstraints)))
+			for _, name := range unregisteredConstraints {
+				msg.WriteString(fmt.Sprintf("  - %s\n", name))
+			}
+
+			// Show available constraints for this phase
+			available := checks.ListConstraintTests(phase)
+			if len(available) > 0 {
+				msg.WriteString(fmt.Sprintf("\nAvailable constraints for phase '%s' (%d):\n", phase, len(available)))
+				for _, ct := range available {
+					msg.WriteString(fmt.Sprintf("  - %s: %s\n", ct.Pattern, ct.Description))
+				}
+			}
+		}
+
+		if len(unregisteredChecks) > 0 {
+			msg.WriteString(fmt.Sprintf("\nUnregistered checks (%d):\n", len(unregisteredChecks)))
+			for _, name := range unregisteredChecks {
+				msg.WriteString(fmt.Sprintf("  - %s\n", name))
+			}
+
+			// Show available checks for this phase
+			available := checks.ListChecks(phase)
+			if len(available) > 0 {
+				msg.WriteString(fmt.Sprintf("\nAvailable checks for phase '%s' (%d):\n", phase, len(available)))
+				for _, check := range available {
+					msg.WriteString(fmt.Sprintf("  - %s: %s\n", check.Name, check.Description))
+				}
+			}
+		}
+
+		msg.WriteString("\nTo add missing validations, see: pkg/validator/checks/README.md")
+
+		// Log as warning (not error) - don't fail validation
+		slog.Warn(msg.String())
+	}
+}
+
+func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase string) string {
+	var testNames []string
+	uniqueTests := make(map[string]bool)
+
+	switch phase {
+	case string(PhaseDeployment):
+		if recipeResult.Validation != nil && recipeResult.Validation.Deployment != nil {
+			// Add tests for constraints
+			for _, constraint := range recipeResult.Validation.Deployment.Constraints {
+				testName, ok := checks.GetTestNameForConstraint(constraint.Name)
+				if ok && !uniqueTests[testName] {
+					testNames = append(testNames, testName)
+					uniqueTests[testName] = true
+					slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
+				}
+				// Note: Missing registrations are caught by validateRecipeRegistrations
+			}
+
+			// Add tests for explicit checks
+			for _, checkName := range recipeResult.Validation.Deployment.Checks {
+				testName := checkNameToTestName(checkName)
+				if !uniqueTests[testName] {
+					testNames = append(testNames, testName)
+					uniqueTests[testName] = true
+					slog.Debug("check mapped to test", "check", checkName, "test", testName)
+				}
+			}
+		}
+	case string(PhasePerformance):
+		// TODO: Implement for performance phase
+	case string(PhaseConformance):
+		// TODO: Implement for conformance phase
+	}
+
+	if len(testNames) == 0 {
+		// No pattern - run all tests
+		slog.Debug("no pattern specified, will run all tests in package")
+		return ""
+	}
+
+	// Build regex: ^(TestGPUOperatorVersion|TestOperatorHealth)$
+	pattern := "^(" + strings.Join(testNames, "|") + ")$"
+	slog.Info("built test pattern from recipe", "pattern", pattern, "tests", len(testNames))
+	return pattern
+}
+
+// checkNameToTestName converts a check name to a test function name.
+// Example: "operator-health" -> "TestOperatorHealth"
+func checkNameToTestName(checkName string) string {
+	parts := strings.Split(checkName, "-")
+	for i, part := range parts {
+		if len(part) > 0 {
+			parts[i] = strings.ToUpper(string(part[0])) + part[1:]
+		}
+	}
+	return "Test" + strings.Join(parts, "")
+}
+
 // runPhaseJob deploys and runs a single Job that executes all checks for a phase.
 // Returns aggregated results for all checks in the phase.
+// parseConstraintResult extracts constraint validation results from test output.
+// It looks for lines matching the pattern:
+// CONSTRAINT_RESULT: name=<name> expected=<expected> actual=<actual> passed=<bool>
+// Values can contain spaces, so we parse more carefully using regexp.
+func parseConstraintResult(output []string) *ConstraintValidation {
+	for _, line := range output {
+		if !strings.Contains(line, "CONSTRAINT_RESULT:") {
+			continue
+		}
+
+		// Extract the part after "CONSTRAINT_RESULT:"
+		parts := strings.SplitN(line, "CONSTRAINT_RESULT:", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		fields := strings.TrimSpace(parts[1])
+
+		// Parse key=value pairs more carefully to handle multi-word values
+		// Format: name=X expected=Y actual=Z passed=B
+		// We need to find the start of each key and extract until the next key
+		result := &ConstraintValidation{}
+
+		// Find each field by looking for the key patterns
+		nameIdx := strings.Index(fields, "name=")
+		expectedIdx := strings.Index(fields, " expected=")
+		actualIdx := strings.Index(fields, " actual=")
+		passedIdx := strings.Index(fields, " passed=")
+
+		if nameIdx >= 0 && expectedIdx > nameIdx && actualIdx > expectedIdx && passedIdx > actualIdx {
+			// Extract name (from "name=" to " expected=")
+			result.Name = strings.TrimSpace(fields[nameIdx+5 : expectedIdx])
+
+			// Extract expected (from " expected=" to " actual=")
+			result.Expected = strings.TrimSpace(fields[expectedIdx+10 : actualIdx])
+
+			// Extract actual (from " actual=" to " passed=")
+			result.Actual = strings.TrimSpace(fields[actualIdx+8 : passedIdx])
+
+			// Extract passed (from " passed=" to end)
+			passedValue := strings.TrimSpace(fields[passedIdx+8:])
+			if passedValue == "true" {
+				result.Status = ConstraintStatusPassed
+			} else {
+				result.Status = ConstraintStatusFailed
+			}
+
+			// Only return if we found all required fields
+			if result.Name != "" && result.Expected != "" && result.Actual != "" {
+				return result
+			}
+		}
+	}
+
+	return nil
+}
+
 func (v *Validator) runPhaseJob(
 	ctx context.Context,
 	deployer *agent.Deployer,
@@ -763,15 +996,37 @@ func (v *Validator) runPhaseJob(
 
 	// Wait for Job completion
 	if err := deployer.WaitForCompletion(ctx, config.Timeout); err != nil {
+		// Try to capture Job logs before cleanup
+		logs, logErr := deployer.GetPodLogs(ctx)
+		if logErr != nil {
+			slog.Warn("failed to capture Job logs", "job", config.JobName, "error", logErr)
+		} else if logs != "" {
+			// Output logs to stderr for debugging
+			fmt.Fprintf(os.Stderr, "\n=== Job Logs (%s) ===\n%s\n=== End Job Logs ===\n\n", config.JobName, logs)
+		}
+
 		// Cleanup failed Job
 		if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
 			slog.Warn("failed to cleanup Job after failure", "job", config.JobName, "error", cleanupErr)
 		}
+
+		// Build error reason with log snippet
+		reason := fmt.Sprintf("Job failed or timed out: %v", err)
+		if logs != "" {
+			// Include last 10 lines of logs in reason for context
+			logLines := strings.Split(strings.TrimSpace(logs), "\n")
+			lastLines := logLines
+			if len(logLines) > 10 {
+				lastLines = logLines[len(logLines)-10:]
+			}
+			reason += fmt.Sprintf("\n\nLast %d lines of Job output:\n%s", len(lastLines), strings.Join(lastLines, "\n"))
+		}
+
 		result.Status = ValidationStatusFail
 		result.Checks = append(result.Checks, CheckResult{
 			Name:   phaseName,
 			Status: ValidationStatusFail,
-			Reason: fmt.Sprintf("Job failed or timed out: %v", err),
+			Reason: reason,
 		})
 		return result
 	}
@@ -799,6 +1054,13 @@ func (v *Validator) runPhaseJob(
 			checkResult := CheckResult{
 				Name:   test.Name,
 				Status: mapTestStatusToValidationStatus(test.Status),
+			}
+
+			// Parse constraint results from test output
+			// Look for lines like: CONSTRAINT_RESULT: name=X expected=Y actual=Z passed=true
+			constraintResult := parseConstraintResult(test.Output)
+			if constraintResult != nil {
+				result.Constraints = append(result.Constraints, *constraintResult)
 			}
 
 			// Build reason from test output

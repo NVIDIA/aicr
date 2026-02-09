@@ -1030,6 +1030,395 @@ func CheckPerformance(ctx *checks.ValidationContext) error {
 }
 ```
 
+## Adding Constraint Validators (New Approach)
+
+For constraint validators, Eidos provides an automated code generator that scaffolds all necessary files with proper structure. This ensures consistency and catches registration issues automatically.
+
+### Quick Start with Generator
+
+**1. Generate validator scaffolding:**
+
+```bash
+eidos generate-validator \
+  --constraint Deployment.my-app.version \
+  --phase deployment \
+  --description "Validates my-app version"
+```
+
+This creates three files with TODOs guiding implementation:
+```
+pkg/validator/checks/deployment/
+├── my_app_version.go                    # Helper functions
+├── my_app_version_test.go               # Unit tests
+└── my_app_version_integration_test.go   # Integration test with registration
+```
+
+**2. Implement helper functions:**
+
+Edit `my_app_version.go` and fill in the TODOs:
+
+```go
+// getMyAppVersion queries the cluster to get the actual version
+func getMyAppVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
+    // TODO: Implement version detection
+    // Search common namespaces
+    namespaces := []string{"my-app", "default", "kube-system"}
+    names := []string{"my-app", "myapp"}
+
+    for _, ns := range namespaces {
+        for _, name := range names {
+            deployment, err := clientset.AppsV1().Deployments(ns).Get(
+                ctx, name, metav1.GetOptions{},
+            )
+            if err == nil {
+                // Try version from label
+                if version := deployment.Labels["app.kubernetes.io/version"]; version != "" {
+                    return normalizeVersion(version), nil
+                }
+                // Try version from image tag
+                if len(deployment.Spec.Template.Spec.Containers) > 0 {
+                    return extractVersionFromImage(deployment.Spec.Template.Spec.Containers[0].Image), nil
+                }
+            }
+        }
+    }
+
+    return "", fmt.Errorf("my-app not found")
+}
+
+// evaluateVersionConstraint evaluates version constraint expressions
+func evaluateVersionConstraint(actualValue, constraintValue string) (bool, error) {
+    // TODO: Implement constraint evaluation
+    // Parse constraint (>=, ==, !=, <, >, ~=)
+    // Compare versions using semver
+    // Return pass/fail
+}
+```
+
+**3. Add unit test cases:**
+
+Edit `my_app_version_test.go`:
+
+```go
+func TestGetMyAppVersion(t *testing.T) {
+    tests := []struct {
+        name       string
+        deployment *appsv1.Deployment
+        want       string
+        wantErr    bool
+    }{
+        {
+            name: "version from label",
+            deployment: &appsv1.Deployment{
+                ObjectMeta: metav1.ObjectMeta{
+                    Name:      "my-app",
+                    Namespace: "default",
+                    Labels: map[string]string{
+                        "app.kubernetes.io/version": "v1.2.3",
+                    },
+                },
+            },
+            want:    "v1.2.3",
+            wantErr: false,
+        },
+        // Add more test cases...
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            clientset := fake.NewSimpleClientset(tt.deployment)
+            got, err := getMyAppVersion(context.Background(), clientset)
+
+            if (err != nil) != tt.wantErr {
+                t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+            }
+            if got != tt.want {
+                t.Errorf("got %v, want %v", got, tt.want)
+            }
+        })
+    }
+}
+```
+
+**4. Integration test is auto-generated with registration:**
+
+The generator creates `my_app_version_integration_test.go` with proper registration:
+
+```go
+func init() {
+    checks.RegisterConstraintTest(&checks.ConstraintTest{
+        TestName:    "TestMyAppVersion",
+        Pattern:     "Deployment.my-app.version",
+        Description: "Validates my-app version",
+        Phase:       "deployment",
+    })
+}
+
+func TestMyAppVersion(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test in short mode")
+    }
+
+    runner, err := checks.NewTestRunner(t)
+    if err != nil {
+        t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
+    }
+
+    // Get constraint from recipe
+    constraint := runner.GetConstraint("deployment", "Deployment.my-app.version")
+    if constraint == nil {
+        t.Skip("Constraint not defined in recipe")
+    }
+
+    // Execute validation logic
+    ctx := runner.Context()
+    actualValue, err := getMyAppVersion(ctx.Context, ctx.Clientset)
+    if err != nil {
+        t.Fatalf("Failed to get my-app version: %v", err)
+    }
+
+    passed, err := evaluateVersionConstraint(actualValue, constraint.Value)
+    if err != nil {
+        t.Fatalf("Failed to evaluate constraint: %v", err)
+    }
+
+    if !passed {
+        t.Errorf("Version constraint not satisfied: actual=%s, expected=%s",
+            actualValue, constraint.Value)
+    }
+}
+```
+
+**5. Run tests:**
+
+```bash
+# Unit tests only (fast, no cluster needed)
+make test
+
+# Integration test in Job (requires cluster)
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
+```
+
+**6. Submit PR:**
+
+The CI pipeline automatically validates:
+- Code compiles
+- Unit tests pass
+- Registration is complete (enforced by `pkg/validator/checks/registration_test.go`)
+- Coverage meets threshold
+
+### How It Works
+
+#### Recipe → Test Execution Flow
+
+```yaml
+# Recipe
+validation:
+  deployment:
+    constraints:
+      - name: Deployment.my-app.version
+        value: ">= v1.2.0"
+```
+
+↓
+
+```go
+// Registry lookup (buildTestPattern in phases.go)
+testName, _ := checks.GetTestNameForConstraint("Deployment.my-app.version")
+// Returns: "TestMyAppVersion"
+```
+
+↓
+
+```go
+// Pattern building
+pattern := "^(TestMyAppVersion)$"
+```
+
+↓
+
+```bash
+# Job command
+go test -v -json ./pkg/validator/checks/deployment -run '^(TestMyAppVersion)$'
+```
+
+↓
+
+```go
+// Integration test runs with cluster access
+func TestMyAppVersion(t *testing.T) {
+    // Queries cluster, evaluates constraint
+}
+```
+
+### Architecture Principles
+
+**Key Insight:** Integration tests ARE the validators. They contain the validation logic directly, not wrapper functions.
+
+**File Structure:**
+- `*_version.go` - Helper functions (query cluster, evaluate constraints)
+- `*_version_test.go` - Unit tests with table-driven cases using fake clientset
+- `*_version_integration_test.go` - Integration test that runs in Jobs with real cluster access
+
+**Separation:**
+- **Unit tests**: Fast, use fake clientset, test helper functions
+- **Integration tests**: Run in Jobs, use real cluster, test full constraint validation
+
+**Test Runner Pattern:**
+
+```go
+runner, err := checks.NewTestRunner(t)
+// Provides:
+// - runner.Context() - Kubernetes clientset, context, snapshot, recipe
+// - runner.GetConstraint(phase, name) - Lookup constraint from recipe
+```
+
+### Enforcement Mechanism
+
+Three layers ensure validators are properly implemented:
+
+**1. Automated Registration Tests**
+
+`pkg/validator/checks/registration_test.go` runs in every `make test` and fails if:
+- Registered constraint has no test implementation
+- Integration test exists without registration
+- Registered check has no test implementation
+
+```go
+func TestConstraintRegistrationCompleteness(t *testing.T) {
+    constraintTests := checks.ListConstraintTests("")
+    existingTests := findTestFunctions(t)  // AST parsing
+
+    var missing []string
+    for _, ct := range constraintTests {
+        if !existingTests[ct.TestName] {
+            missing = append(missing, ct.TestName)
+        }
+    }
+
+    if len(missing) > 0 {
+        t.Errorf("Registered constraints missing test implementations")
+    }
+}
+```
+
+**2. Code Generator**
+
+`eidos generate-validator` scaffolds all files correctly:
+- Includes registration automatically in integration test
+- Provides TODOs for implementation
+- Follows naming conventions
+
+**3. Documentation**
+
+- Comprehensive development guide (this section)
+- Generated code has inline examples and TODOs
+- Contributing guide integration
+
+### What Gets Caught
+
+| Mistake | How It's Caught |
+|---------|-----------------|
+| Registered constraint without test | `TestConstraintRegistrationCompleteness` fails |
+| Integration test without registration | `TestIntegrationTestsAreRegistered` fails |
+| Wrong test function name | Pattern matching fails (test not found) |
+| Forgot to implement helpers | Compilation fails (undefined functions) |
+| Missing test cases | Coverage check fails |
+
+### Testing Locally
+
+```bash
+# Unit tests only (skips integration tests)
+go test ./pkg/validator/checks/deployment -short
+
+# Run specific integration test (will skip if not in Kubernetes)
+go test ./pkg/validator/checks/deployment -run TestMyAppVersion -v
+
+# All tests including registration validation
+make test
+```
+
+### Using in Recipe
+
+```yaml
+validation:
+  deployment:
+    constraints:
+      - name: Deployment.my-app.version  # Must match registered Pattern
+        value: ">= v1.2.0"                # Constraint expression
+```
+
+### Common Patterns
+
+#### Multi-Strategy Version Detection
+
+```go
+func getComponentVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
+    deployment := findDeployment(ctx, clientset)
+
+    // Strategy 1: Label
+    if version := deployment.Labels["app.kubernetes.io/version"]; version != "" {
+        return normalizeVersion(version), nil
+    }
+
+    // Strategy 2: Annotation
+    if version := deployment.Annotations["version"]; version != "" {
+        return normalizeVersion(version), nil
+    }
+
+    // Strategy 3: Image tag
+    if len(deployment.Spec.Template.Spec.Containers) > 0 {
+        image := deployment.Spec.Template.Spec.Containers[0].Image
+        return extractVersionFromImage(image), nil
+    }
+
+    return "", fmt.Errorf("version not found")
+}
+```
+
+#### Version Constraint Evaluation
+
+```go
+func evaluateVersionConstraint(actualValue, constraintValue string) (bool, error) {
+    // Parse operator and expected version
+    // Supports: ==, !=, >=, <=, >, <, ~= (compatible)
+    op, expected := parseConstraint(constraintValue)
+
+    // Compare using semver
+    actual, err := semver.Parse(actualValue)
+    if err != nil {
+        return false, fmt.Errorf("invalid actual version: %w", err)
+    }
+
+    expectedVer, err := semver.Parse(expected)
+    if err != nil {
+        return false, fmt.Errorf("invalid expected version: %w", err)
+    }
+
+    switch op {
+    case ">=":
+        return actual.GTE(expectedVer), nil
+    case "==":
+        return actual.Equal(expectedVer), nil
+    // ... other operators
+    }
+}
+```
+
+### Benefits
+
+**1. Impossible to Forget Registration** - Tests fail locally and in CI if registration is missing
+
+**2. Easy to Add New Validators** - One command scaffolds everything correctly
+
+**3. Consistent Architecture** - Generated code follows established patterns
+
+**4. Fast Feedback** - Catches issues locally before PR
+
+**5. Self-Documenting** - Generated code has examples and TODOs
+
+**6. CI Enforced** - Can't merge without complete implementation
+
 ## Troubleshooting
 
 ### Test Wrapper Issues

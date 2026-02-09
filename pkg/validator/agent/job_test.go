@@ -302,7 +302,7 @@ func TestBuildTestCommand(t *testing.T) {
 				"-v",
 				"-json",
 				"./pkg/validator/checks/readiness",
-				"-run TestGpuHardwareDetection",
+				"-run 'TestGpuHardwareDetection'",
 				"tee /tmp/test-output.json",
 				"--- BEGIN TEST OUTPUT ---",
 			},
@@ -313,7 +313,7 @@ func TestBuildTestCommand(t *testing.T) {
 			testPattern: "TestGpuPerformance",
 			wantContain: []string{
 				"./pkg/validator/checks/performance",
-				"-run TestGpuPerformance",
+				"-run 'TestGpuPerformance'",
 			},
 		},
 		{
@@ -322,7 +322,7 @@ func TestBuildTestCommand(t *testing.T) {
 			testPattern: "TestGpu.*",
 			wantContain: []string{
 				"./pkg/validator/checks",
-				"-run TestGpu.*",
+				"-run 'TestGpu.*'",
 			},
 		},
 	}

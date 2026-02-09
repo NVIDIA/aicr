@@ -479,3 +479,201 @@ func TestRegistryConcurrency(t *testing.T) {
 		t.Errorf("Concurrent registration: got %d checks, want %d", len(checks), goroutines)
 	}
 }
+
+func TestRegisterConstraintTest(t *testing.T) {
+	// Save and restore registry
+	originalRegistry := make(map[string]*ConstraintTest)
+	registryMu.Lock()
+	for k, v := range constraintTestRegistry {
+		originalRegistry[k] = v
+	}
+	constraintTestRegistry = make(map[string]*ConstraintTest)
+	registryMu.Unlock()
+
+	defer func() {
+		registryMu.Lock()
+		constraintTestRegistry = originalRegistry
+		registryMu.Unlock()
+	}()
+
+	tests := []struct {
+		name      string
+		test      *ConstraintTest
+		wantPanic bool
+	}{
+		{
+			name: "register valid constraint test",
+			test: &ConstraintTest{
+				TestName:    "TestMyConstraint",
+				Pattern:     "Deployment.my-app.version",
+				Description: "Validates my-app version",
+				Phase:       "deployment",
+			},
+			wantPanic: false,
+		},
+		{
+			name: "register constraint test with nil",
+			test: nil,
+			// Panics because it accesses test.Pattern without nil check
+			// This is consistent with RegisterCheck behavior
+			wantPanic: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if (r != nil) != tt.wantPanic {
+					t.Errorf("RegisterConstraintTest() panic = %v, wantPanic = %v", r, tt.wantPanic)
+				}
+			}()
+
+			RegisterConstraintTest(tt.test)
+
+			if tt.test != nil && !tt.wantPanic {
+				// Verify registration
+				testName, found := GetTestNameForConstraint(tt.test.Pattern)
+				if !found {
+					t.Errorf("constraint test not found after registration")
+				}
+				if testName != tt.test.TestName {
+					t.Errorf("GetTestNameForConstraint() = %v, want %v", testName, tt.test.TestName)
+				}
+			}
+		})
+	}
+}
+
+func TestGetTestNameForConstraint(t *testing.T) {
+	// Save and restore registry
+	originalRegistry := make(map[string]*ConstraintTest)
+	registryMu.Lock()
+	for k, v := range constraintTestRegistry {
+		originalRegistry[k] = v
+	}
+	constraintTestRegistry = make(map[string]*ConstraintTest)
+	registryMu.Unlock()
+
+	defer func() {
+		registryMu.Lock()
+		constraintTestRegistry = originalRegistry
+		registryMu.Unlock()
+	}()
+
+	// Register a test constraint
+	RegisterConstraintTest(&ConstraintTest{
+		TestName:    "TestGPUOperatorVersion",
+		Pattern:     "Deployment.gpu-operator.version",
+		Description: "Validates GPU operator version",
+		Phase:       "deployment",
+	})
+
+	tests := []struct {
+		name           string
+		constraintName string
+		wantTestName   string
+		wantFound      bool
+	}{
+		{
+			name:           "existing constraint",
+			constraintName: "Deployment.gpu-operator.version",
+			wantTestName:   "TestGPUOperatorVersion",
+			wantFound:      true,
+		},
+		{
+			name:           "non-existent constraint",
+			constraintName: "Deployment.unknown.version",
+			wantTestName:   "",
+			wantFound:      false,
+		},
+		{
+			name:           "empty constraint name",
+			constraintName: "",
+			wantTestName:   "",
+			wantFound:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotTestName, gotFound := GetTestNameForConstraint(tt.constraintName)
+			if gotTestName != tt.wantTestName {
+				t.Errorf("GetTestNameForConstraint() testName = %v, want %v", gotTestName, tt.wantTestName)
+			}
+			if gotFound != tt.wantFound {
+				t.Errorf("GetTestNameForConstraint() found = %v, want %v", gotFound, tt.wantFound)
+			}
+		})
+	}
+}
+
+func TestListConstraintTests(t *testing.T) {
+	// Save and restore registry
+	originalRegistry := make(map[string]*ConstraintTest)
+	registryMu.Lock()
+	for k, v := range constraintTestRegistry {
+		originalRegistry[k] = v
+	}
+	constraintTestRegistry = make(map[string]*ConstraintTest)
+	registryMu.Unlock()
+
+	defer func() {
+		registryMu.Lock()
+		constraintTestRegistry = originalRegistry
+		registryMu.Unlock()
+	}()
+
+	// Register test constraints for different phases
+	RegisterConstraintTest(&ConstraintTest{
+		TestName: "TestDeploymentConstraint1",
+		Pattern:  "Deployment.test1.version",
+		Phase:    "deployment",
+	})
+	RegisterConstraintTest(&ConstraintTest{
+		TestName: "TestDeploymentConstraint2",
+		Pattern:  "Deployment.test2.version",
+		Phase:    "deployment",
+	})
+	RegisterConstraintTest(&ConstraintTest{
+		TestName: "TestReadinessConstraint",
+		Pattern:  "Readiness.test.version",
+		Phase:    "readiness",
+	})
+
+	tests := []struct {
+		name      string
+		phase     string
+		wantCount int
+	}{
+		{
+			name:      "all phases",
+			phase:     "",
+			wantCount: 3,
+		},
+		{
+			name:      "deployment phase only",
+			phase:     "deployment",
+			wantCount: 2,
+		},
+		{
+			name:      "readiness phase only",
+			phase:     "readiness",
+			wantCount: 1,
+		},
+		{
+			name:      "non-existent phase",
+			phase:     "conformance",
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ListConstraintTests(tt.phase)
+			if len(got) != tt.wantCount {
+				t.Errorf("ListConstraintTests(%q) returned %d tests, want %d", tt.phase, len(got), tt.wantCount)
+			}
+		})
+	}
+}

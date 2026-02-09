@@ -427,8 +427,8 @@ eidos validate --phase all -o table
 ### Check Development
 
 - **[Checks Architecture](./checks/README.md)** - Overview and design
-- **[How-To Guide](./checks/HOWTO.md)** - Registering checks and constraints
-- **[Troubleshooting](./checks/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[How-To Guide](./checks/README.md#adding-constraint-validators-new-approach)** - Registering checks and constraints
+- **[Troubleshooting](./checks/README.md#troubleshooting)** - Common issues and solutions
 
 ### Phase-Specific Guides
 
@@ -650,7 +650,7 @@ validators := checks.ListConstraintValidators()
 
 ## Troubleshooting
 
-See **[TROUBLESHOOTING.md](./checks/TROUBLESHOOTING.md)** for:
+See **[Troubleshooting Guide](./checks/README.md#troubleshooting)** for:
 - Common errors and solutions
 - RBAC permission issues
 - Job timeout debugging
@@ -661,7 +661,7 @@ See **[TROUBLESHOOTING.md](./checks/TROUBLESHOOTING.md)** for:
 
 To add new validation checks or constraint validators:
 
-1. Read **[HOWTO.md](./checks/HOWTO.md)** for step-by-step instructions
+1. Read **[How-To Guide](./checks/README.md#adding-constraint-validators-new-approach)** for step-by-step instructions
 2. Follow existing patterns in `pkg/validator/checks/`
 3. Write comprehensive tests
 4. Update documentation
@@ -669,6 +669,6 @@ To add new validation checks or constraint validators:
 ## References
 
 - **Constraint Syntax**: [CONSTRAINTS.md](./CONSTRAINTS.md)
-- **Check Development**: [checks/HOWTO.md](./checks/HOWTO.md)
+- **Check Development**: [checks/README.md](./checks/README.md#adding-constraint-validators-new-approach)
 - **Architecture Details**: [checks/README.md](./checks/README.md)
 - **Agent Implementation**: [agent/README.md](./agent/README.md)

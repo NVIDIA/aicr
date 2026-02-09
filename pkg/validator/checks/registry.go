@@ -37,6 +37,10 @@ type ValidationContext struct {
 
 	// RecipeData contains recipe metadata that may be needed for validation
 	RecipeData map[string]interface{}
+
+	// Recipe contains the full recipe with validation constraints
+	// Only available when running inside Jobs (not in unit tests)
+	Recipe *recipe.RecipeResult
 }
 
 // CheckFunc is the function signature for a validation check.
@@ -76,10 +80,27 @@ type ConstraintValidator struct {
 	Func ConstraintValidatorFunc
 }
 
+// ConstraintTest represents a registered integration test for constraint validation.
+// These tests run in Jobs and contain the actual validation logic.
+type ConstraintTest struct {
+	// TestName is the Go test function name (e.g., "TestGPUOperatorVersion")
+	TestName string
+
+	// Pattern is the constraint name this test validates (e.g., "Deployment.gpu-operator.version")
+	Pattern string
+
+	// Description explains what this test validates
+	Description string
+
+	// Phase indicates which validation phase (deployment, performance, conformance)
+	Phase string
+}
+
 var (
-	checkRegistry      = make(map[string]*Check)
-	constraintRegistry = make(map[string]*ConstraintValidator)
-	registryMu         sync.RWMutex
+	checkRegistry          = make(map[string]*Check)
+	constraintRegistry     = make(map[string]*ConstraintValidator)
+	constraintTestRegistry = make(map[string]*ConstraintTest)
+	registryMu             sync.RWMutex
 )
 
 // RegisterCheck adds a check to the registry.
@@ -153,4 +174,44 @@ func ListConstraintValidators() []*ConstraintValidator {
 		validators = append(validators, validator)
 	}
 	return validators
+}
+
+// RegisterConstraintTest adds a constraint test to the registry.
+// This maps constraint names to test function names for pattern building.
+func RegisterConstraintTest(test *ConstraintTest) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if _, exists := constraintTestRegistry[test.Pattern]; exists {
+		panic(fmt.Sprintf("constraint test for pattern %q is already registered", test.Pattern))
+	}
+
+	constraintTestRegistry[test.Pattern] = test
+}
+
+// GetTestNameForConstraint looks up which test function validates a constraint.
+// Returns the test name and true if found, empty string and false otherwise.
+func GetTestNameForConstraint(constraintName string) (string, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	test, ok := constraintTestRegistry[constraintName]
+	if !ok {
+		return "", false
+	}
+	return test.TestName, true
+}
+
+// ListConstraintTests returns all registered constraint tests.
+func ListConstraintTests(phase string) []*ConstraintTest {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	var tests []*ConstraintTest
+	for _, test := range constraintTestRegistry {
+		if phase == "" || test.Phase == phase {
+			tests = append(tests, test)
+		}
+	}
+	return tests
 }
