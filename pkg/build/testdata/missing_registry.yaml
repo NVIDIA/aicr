@@ -1,0 +1,8 @@
+apiVersion: eidos.nvidia.com/v1beta1
+kind: EidosRuntime
+spec:
+  bundle: eks-training
+  version: "1.0.0"
+  registry:
+    host: ""
+    repository: ""

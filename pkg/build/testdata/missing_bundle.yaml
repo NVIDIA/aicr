@@ -1,0 +1,7 @@
+apiVersion: eidos.nvidia.com/v1beta1
+kind: EidosRuntime
+spec:
+  version: "1.0.0"
+  registry:
+    host: "https://registry.example.com"
+    repository: "eidos-runtime"

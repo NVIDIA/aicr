@@ -5,7 +5,7 @@ REPO_NAME          := eidos
 VERSION            ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
 IMAGE_REGISTRY     ?= ghcr.io/nvidia
 IMAGE_TAG          ?= latest
-YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundles/*" ! -path "./.flox/*")
+YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundles/*" ! -path "./.flox/*" ! -path "*/testdata/*")
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 GO_VERSION         := $(shell go env GOVERSION 2>/dev/null | sed 's/go//')

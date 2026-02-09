@@ -218,7 +218,7 @@ func TestComponentRegistry_PathSyntax(t *testing.T) {
 
 	// Validate path syntax (should be dot-notation)
 	for _, comp := range registry.Components {
-		allPaths := []string{}
+		var allPaths []string //nolint:prealloc // test code, readability over performance
 		allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
 		allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
 		allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)
