@@ -19,6 +19,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/eidos/pkg/measurement"
@@ -535,5 +536,216 @@ func TestEvaluateConstraint(t *testing.T) {
 				t.Errorf("Error = %v, wantError = %v", result.Error, tt.wantError)
 			}
 		})
+	}
+}
+
+func TestGenerateRunID(t *testing.T) {
+	// Test that RunID generation produces a valid format
+	runID := generateRunID()
+
+	// Expected format: YYYYMMDD-HHMMSS-XXXX (e.g., "20260206-140523-a3f9")
+	parts := strings.Split(runID, "-")
+	if len(parts) != 3 {
+		t.Errorf("RunID format incorrect, expected 3 parts, got %d: %s", len(parts), runID)
+	}
+
+	// Check timestamp part (YYYYMMDD)
+	if len(parts[0]) != 8 {
+		t.Errorf("Date part should be 8 characters (YYYYMMDD), got %d: %s", len(parts[0]), parts[0])
+	}
+
+	// Check time part (HHMMSS)
+	if len(parts[1]) != 6 {
+		t.Errorf("Time part should be 6 characters (HHMMSS), got %d: %s", len(parts[1]), parts[1])
+	}
+
+	// Check random part (4 hex characters)
+	if len(parts[2]) != 4 {
+		t.Errorf("Random part should be 4 characters, got %d: %s", len(parts[2]), parts[2])
+	}
+}
+
+func TestGenerateRunID_Uniqueness(t *testing.T) {
+	// Generate multiple RunIDs and verify they're unique
+	runIDs := make(map[string]bool)
+	for i := 0; i < 100; i++ {
+		runID := generateRunID()
+		if runIDs[runID] {
+			t.Errorf("Generated duplicate RunID: %s", runID)
+		}
+		runIDs[runID] = true
+	}
+}
+
+func TestNew_GeneratesRunID(t *testing.T) {
+	// Verify that New() automatically generates a RunID
+	v := New()
+
+	if v.RunID == "" {
+		t.Error("New() should generate a RunID, but got empty string")
+	}
+
+	// Verify format
+	parts := strings.Split(v.RunID, "-")
+	if len(parts) != 3 {
+		t.Errorf("Generated RunID has incorrect format: %s", v.RunID)
+	}
+}
+
+func TestNew_WithRunID(t *testing.T) {
+	// Verify that WithRunID option sets the RunID
+	customRunID := "20260101-120000-test"
+	v := New(WithRunID(customRunID))
+
+	if v.RunID != customRunID {
+		t.Errorf("WithRunID() should set RunID to %s, got %s", customRunID, v.RunID)
+	}
+}
+
+func TestNew_UniqueRunIDs(t *testing.T) {
+	// Verify that multiple New() calls generate unique RunIDs
+	v1 := New()
+	v2 := New()
+
+	if v1.RunID == v2.RunID {
+		t.Errorf("New() should generate unique RunIDs, but both are: %s", v1.RunID)
+	}
+}
+
+func TestNew_DefaultNamespace(t *testing.T) {
+	v := New()
+
+	expectedNamespace := "eidos-validation"
+	if v.Namespace != expectedNamespace {
+		t.Errorf("Expected default namespace %s, got %s", expectedNamespace, v.Namespace)
+	}
+}
+
+func TestNew_WithNamespace(t *testing.T) {
+	customNamespace := "custom-validation"
+	v := New(WithNamespace(customNamespace))
+
+	if v.Namespace != customNamespace {
+		t.Errorf("Expected namespace %s, got %s", customNamespace, v.Namespace)
+	}
+}
+
+func TestNew_MultipleOptions(t *testing.T) {
+	version := "v1.0.0"
+	namespace := "custom-ns"
+	runID := "20260101-120000-test"
+
+	v := New(
+		WithVersion(version),
+		WithNamespace(namespace),
+		WithRunID(runID),
+	)
+
+	if v.Version != version {
+		t.Errorf("Expected version %s, got %s", version, v.Version)
+	}
+	if v.Namespace != namespace {
+		t.Errorf("Expected namespace %s, got %s", namespace, v.Namespace)
+	}
+	if v.RunID != runID {
+		t.Errorf("Expected runID %s, got %s", runID, v.RunID)
+	}
+}
+
+func TestNew_WithImage(t *testing.T) {
+	customImage := "localhost:5001/eidos-validator:test"
+	v := New(WithImage(customImage))
+
+	if v.Image != customImage {
+		t.Errorf("Expected image %s, got %s", customImage, v.Image)
+	}
+}
+
+func TestNew_WithImage_MultipleOptions(t *testing.T) {
+	version := "v1.0.0"
+	image := "ghcr.io/nvidia/eidos-validator:v1.0.0"
+
+	v := New(
+		WithVersion(version),
+		WithImage(image),
+	)
+
+	if v.Version != version {
+		t.Errorf("Expected version %s, got %s", version, v.Version)
+	}
+	if v.Image != image {
+		t.Errorf("Expected image %s, got %s", image, v.Image)
+	}
+}
+
+// TestEvaluateConstraint_EvaluationFailure tests when Evaluate() returns an error.
+func TestEvaluateConstraint_EvaluationFailure(t *testing.T) {
+	// Create a snapshot with non-version-like values that will fail version comparison
+	snapshot := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeOS,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "release",
+						Data: map[string]measurement.Reading{
+							"ID": measurement.Str("not-a-version-string"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Use a version comparison operator on a non-version value
+	// This should cause Evaluate() to fail when trying to parse versions
+	constraint := recipe.Constraint{
+		Name:  "OS.release.ID",
+		Value: ">= 1.0.0", // Version comparison on non-version string
+	}
+
+	result := EvaluateConstraint(constraint, snapshot)
+
+	// Should fail due to version parse error
+	if result.Passed {
+		t.Errorf("Expected constraint to fail, but it passed")
+	}
+	if result.Error == nil {
+		t.Errorf("Expected error from version comparison failure")
+	}
+}
+
+// TestValidator_evaluateConstraint_InvalidExpression tests invalid constraint expressions.
+func TestValidator_evaluateConstraint_InvalidExpression(t *testing.T) {
+	snapshot := &snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{
+			{
+				Type: measurement.TypeK8s,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "server",
+						Data: map[string]measurement.Reading{
+							"version": measurement.Str("v1.33.5"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Empty expression should cause parse failure
+	constraint := recipe.Constraint{
+		Name:  "K8s.server.version",
+		Value: "", // Empty expression is invalid
+	}
+
+	result := EvaluateConstraint(constraint, snapshot)
+
+	// Should be skipped due to invalid expression
+	if result.Passed {
+		t.Errorf("Expected constraint to not pass with empty expression")
+	}
+	if result.Error == nil {
+		t.Errorf("Expected error from invalid expression")
 	}
 }

@@ -161,6 +161,13 @@ jobs:
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
+      - name: Attest eidos-validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ghcr.io/nvidia/eidos-validator
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
   # =============================================================================
   # Deploy Job (runs after attestation succeeds)
   # =============================================================================

@@ -13,6 +13,7 @@ This guide covers project setup, architecture, development workflows, and toolin
 - [KWOK Simulated Cluster Testing](#kwok-simulated-cluster-testing)
 - [Make Targets Reference](#make-targets-reference)
 - [Debugging](#debugging)
+- [Validator Development](#validator-development)
 
 ## Quick Start
 
@@ -316,6 +317,13 @@ make e2e
 # With local Kubernetes cluster (requires make dev-env first)
 make e2e-tilt
 
+# Run E2E tests exactly like CI (automated setup + teardown)
+./scripts/run-e2e-local.sh
+
+# Run with options
+./scripts/run-e2e-local.sh --skip-cleanup       # Keep cluster after tests
+./scripts/run-e2e-local.sh --collect-artifacts  # Collect artifacts even on success
+
 # KWOK simulated cluster tests (no GPU hardware required)
 make kwok-test-all                    # All recipes
 make kwok-e2e RECIPE=eks-training     # Single recipe
@@ -453,12 +461,26 @@ make dev-reset        # Full reset (tear down and recreate)
 ### Running E2E Tests with Tilt
 
 ```bash
+# Option 1: Automated (exactly like CI)
+./scripts/run-e2e-local.sh
+
+# Option 2: Manual setup (for development/debugging)
 # Start the dev environment
 make dev-env
 
 # In another terminal, run E2E tests against the Tilt cluster
 make e2e-tilt
 ```
+
+The automated script (`run-e2e-local.sh`) replicates the exact CI workflow:
+- Creates Kind cluster with local registry
+- Starts Tilt in CI mode
+- Builds and pushes both images (`eidos:local`, `eidos-validator:local`)
+- Injects fake nvidia-smi into worker nodes
+- Sets up port forwarding to eidosd
+- Runs E2E tests with proper environment variables
+- Collects debug artifacts on failure
+- Cleans up cluster and resources
 
 ### Testing the API Server Locally (without Kubernetes)
 
@@ -551,8 +573,9 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | Target | Description |
 |--------|-------------|
 | `make build` | Build binaries for current OS/arch |
-| `make image` | Build and push container image |
-| `make release` | Full release with goreleaser |
+| `make image` | Build and push eidos container image (Ko) |
+| `make image-validator` | Build and push validator image with Go toolchain (Docker) |
+| `make release` | Full release with goreleaser (includes all images) |
 | `make bump-major` | Bump major version (1.2.3 → 2.0.0) |
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |
 | `make bump-patch` | Bump patch version (1.2.3 → 1.2.4) |
@@ -648,6 +671,20 @@ tilt logs -f tilt/Tiltfile
 # Reset everything
 make dev-reset
 ```
+
+## Validator Development
+
+For detailed information on adding validation checks and constraint validators, see:
+
+**[pkg/validator/checks/README.md](../pkg/validator/checks/README.md)**
+
+This comprehensive guide covers:
+- Architecture overview (Job-based validation, test registration framework)
+- Quick start with code generator: `eidos generate-validator`
+- How-to guides for adding checks and constraint validators
+- Testing patterns (unit tests vs integration tests)
+- Enforcement mechanisms (automated registration validation)
+- Troubleshooting common issues
 
 ## Additional Resources
 

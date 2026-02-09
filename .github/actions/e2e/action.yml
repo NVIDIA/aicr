@@ -72,6 +72,15 @@ runs:
         # Verify image is available
         curl -sf http://localhost:5001/v2/eidos/tags/list
 
+    - name: Build and push validator image to local registry
+      shell: bash
+      run: |
+        # Build validator image with Go toolchain for running validation tests
+        docker build -f Dockerfile.validator -t localhost:5001/eidos-validator:local .
+        docker push localhost:5001/eidos-validator:local
+        # Verify image is available
+        curl -sf http://localhost:5001/v2/eidos-validator/tags/list
+
     - name: Set up fake GPU environment
       shell: bash
       run: |
@@ -99,6 +108,7 @@ runs:
       shell: bash
       env:
         EIDOS_IMAGE: localhost:5001/eidos:local
+        EIDOS_VALIDATOR_IMAGE: localhost:5001/eidos-validator:local
         FAKE_GPU_ENABLED: "true"
       run: ./tests/e2e/run.sh
 

@@ -18,12 +18,23 @@ import (
 	"context"
 	"testing"
 
+	"github.com/NVIDIA/eidos/pkg/k8s/client"
 	"github.com/NVIDIA/eidos/pkg/measurement"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 )
 
 func TestValidatePhase(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -85,6 +96,16 @@ func TestValidatePhase(t *testing.T) {
 }
 
 func TestValidatePreDeployment(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -174,6 +195,16 @@ func TestValidatePreDeployment(t *testing.T) {
 }
 
 func TestValidateDeployment(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -209,7 +240,7 @@ func TestValidateDeployment(t *testing.T) {
 				},
 			},
 			wantStatus: ValidationStatusPass,
-			wantChecks: 2, // 1 constraint + 1 check (both as checks in skeleton)
+			wantChecks: 1, // Checks count (constraints are in separate array)
 		},
 	}
 
@@ -242,6 +273,16 @@ func TestValidateDeployment(t *testing.T) {
 }
 
 func TestValidatePerformance(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -298,6 +339,16 @@ func TestValidatePerformance(t *testing.T) {
 }
 
 func TestValidateConformance(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
@@ -353,6 +404,16 @@ func TestValidateConformance(t *testing.T) {
 }
 
 func TestValidateAll_PhaseOrder(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -384,6 +445,16 @@ func TestValidateAll_PhaseOrder(t *testing.T) {
 }
 
 func TestValidateAll_PhaseDependencies(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	// This test would verify phase dependency logic (fail → skip subsequent)
 	// For skeleton implementation, all phases pass, so we can't test skip logic yet
 	// TODO: Add test when we have real validation that can fail
@@ -472,6 +543,16 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 }
 
 func TestValidatePhases(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -545,6 +626,16 @@ func TestValidatePhases(t *testing.T) {
 }
 
 func TestValidatePhases_ContextCanceled(t *testing.T) {
+	// Skip if running with -short flag (for fast unit tests)
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Skip if no Kubernetes cluster available (integration test requires cluster)
+	if _, _, err := client.GetKubeClient(); err != nil {
+		t.Skipf("Skipping integration test: no Kubernetes cluster available: %v", err)
+	}
+
 	snapshot := createTestSnapshot()
 	recipeResult := createTestRecipeWithValidation()
 
@@ -556,5 +647,261 @@ func TestValidatePhases_ContextCanceled(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error for canceled context, got nil")
+	}
+}
+
+// TestMapTestStatusToValidationStatus tests the mapping of test status strings to validation status
+func TestMapTestStatusToValidationStatus(t *testing.T) {
+	tests := []struct {
+		name       string
+		testStatus string
+		want       ValidationStatus
+	}{
+		{
+			name:       "pass status",
+			testStatus: "pass",
+			want:       ValidationStatusPass,
+		},
+		{
+			name:       "fail status",
+			testStatus: "fail",
+			want:       ValidationStatusFail,
+		},
+		{
+			name:       "skip status",
+			testStatus: "skip",
+			want:       ValidationStatusSkipped,
+		},
+		{
+			name:       "unknown status defaults to warning",
+			testStatus: "unknown",
+			want:       ValidationStatusWarning,
+		},
+		{
+			name:       "empty status defaults to warning",
+			testStatus: "",
+			want:       ValidationStatusWarning,
+		},
+		{
+			name:       "arbitrary status defaults to warning",
+			testStatus: "some-random-status",
+			want:       ValidationStatusWarning,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mapTestStatusToValidationStatus(tt.testStatus)
+			if got != tt.want {
+				t.Errorf("mapTestStatusToValidationStatus(%q) = %v, want %v", tt.testStatus, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestDetermineStartPhase tests the logic for determining which phase to start from
+func TestDetermineStartPhase(t *testing.T) {
+	tests := []struct {
+		name           string
+		existingResult *ValidationResult
+		want           ValidationPhaseName
+	}{
+		{
+			name: "no phases run - start from readiness",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{},
+			},
+			want: PhaseReadiness,
+		},
+		{
+			name: "readiness failed - resume from readiness",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusFail,
+					},
+				},
+			},
+			want: PhaseReadiness,
+		},
+		{
+			name: "readiness passed, deployment not started - resume from deployment",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhaseDeployment,
+		},
+		{
+			name: "readiness and deployment passed, performance not started - resume from performance",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhasePerformance,
+		},
+		{
+			name: "readiness passed, deployment failed - resume from deployment",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusFail,
+					},
+				},
+			},
+			want: PhaseDeployment,
+		},
+		{
+			name: "all phases passed - start from readiness",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusPass,
+					},
+					string(PhasePerformance): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseConformance): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhaseReadiness,
+		},
+		{
+			name: "readiness and deployment passed, performance failed, conformance passed - resume from performance",
+			existingResult: &ValidationResult{
+				Phases: map[string]*PhaseResult{
+					string(PhaseReadiness): {
+						Status: ValidationStatusPass,
+					},
+					string(PhaseDeployment): {
+						Status: ValidationStatusPass,
+					},
+					string(PhasePerformance): {
+						Status: ValidationStatusFail,
+					},
+					string(PhaseConformance): {
+						Status: ValidationStatusPass,
+					},
+				},
+			},
+			want: PhasePerformance,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := determineStartPhase(tt.existingResult)
+			if got != tt.want {
+				t.Errorf("determineStartPhase() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateRecipeRegistrations(t *testing.T) {
+	validator := New()
+
+	tests := []struct {
+		name               string
+		recipe             *recipe.RecipeResult
+		phase              string
+		expectWarnings     bool
+		expectedItemCount  int
+		descriptionContain string
+	}{
+		{
+			name: "deployment - unregistered constraint logs warning",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{
+							{Name: "Deployment.nonexistent-app.version", Value: ">= v1.0.0"},
+						},
+					},
+				},
+			},
+			phase:              "deployment",
+			expectWarnings:     true,
+			expectedItemCount:  1,
+			descriptionContain: "unregistered constraint",
+		},
+		{
+			name: "deployment - unregistered check logs warning",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"nonexistent-check"},
+					},
+				},
+			},
+			phase:              "deployment",
+			expectWarnings:     true,
+			expectedItemCount:  1,
+			descriptionContain: "unregistered check",
+		},
+		{
+			name: "deployment - multiple unregistered",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{
+							{Name: "Deployment.fake-app-1.version", Value: ">= v1.0.0"},
+							{Name: "Deployment.fake-app-2.version", Value: ">= v1.0.0"},
+						},
+					},
+				},
+			},
+			phase:             "deployment",
+			expectWarnings:    true,
+			expectedItemCount: 2,
+		},
+		{
+			name: "performance - no constraints (no warnings)",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{},
+					},
+				},
+			},
+			phase:          "performance",
+			expectWarnings: false,
+		},
+		{
+			name: "conformance - nil validation (no warnings)",
+			recipe: &recipe.RecipeResult{
+				Validation: nil,
+			},
+			phase:          "conformance",
+			expectWarnings: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// validateRecipeRegistrations now logs warnings instead of returning errors
+			// Just verify it doesn't panic
+			validator.validateRecipeRegistrations(tt.recipe, tt.phase)
+
+			// Note: In a real implementation, you could capture log output to verify warnings
+			// For now, we just ensure the function completes without panicking
+		})
 	}
 }

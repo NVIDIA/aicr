@@ -56,6 +56,32 @@ Before contributing:
 - Ensure all tests pass and code meets quality standards
 - Write tests for new functionality
 
+#### Adding Validation Constraints
+
+Eidos uses a validator framework to check cluster state against requirements. To add new validation constraints:
+
+**Quick Start:**
+```bash
+# Generate all necessary files
+eidos generate-validator \
+  --constraint Deployment.my-app.version \
+  --phase deployment \
+  --description "Validates my-app version"
+```
+
+This creates three files with TODOs guiding implementation:
+- Helper functions with validation logic
+- Unit tests with table-driven test cases
+- Integration test with automatic registration
+
+**Next Steps:**
+1. Implement the TODOs in generated files
+2. Add comprehensive test cases
+3. Run `make test` - registration validation ensures completeness
+4. Submit PR - CI enforces all requirements
+
+**See [pkg/validator/checks/README.md](pkg/validator/checks/README.md) for complete guide with examples, architecture overview, and troubleshooting.**
+
 ## Design Principles
 
 These principles guide all design decisions in Eidos. When faced with trade-offs, these principles take precedence.

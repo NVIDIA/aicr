@@ -34,6 +34,8 @@ make e2e-tilt
 | `snapshot/*` | Snapshot with deploy-agent (requires fake GPU setup) |
 | `recipe/from-snapshot` | Recipe from ConfigMap snapshot (cm://...) |
 | `validate/*` | Recipe validation against snapshot |
+| `validate/deployment-constraints` | Deployment phase constraint validation (GPU operator version) |
+| `validate/job-*` | Validation Job deployment, RBAC, namespace config, cleanup |
 | `bundle/oci-push` | Bundle as OCI image to local registry |
 
 ## Fake GPU Testing

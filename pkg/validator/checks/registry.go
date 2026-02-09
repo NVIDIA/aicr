@@ -1,0 +1,217 @@
+// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package checks
+
+import (
+	"context"
+	"fmt"
+	"sync"
+
+	"github.com/NVIDIA/eidos/pkg/recipe"
+	"github.com/NVIDIA/eidos/pkg/snapshotter"
+	"k8s.io/client-go/kubernetes"
+)
+
+// ValidationContext provides runtime context for checks and constraints.
+type ValidationContext struct {
+	// Context for cancellation and timeouts
+	Context context.Context
+
+	// Snapshot contains captured cluster state (hardware, OS, etc.)
+	Snapshot *snapshotter.Snapshot
+
+	// Clientset provides Kubernetes API access for live cluster queries
+	Clientset kubernetes.Interface
+
+	// RecipeData contains recipe metadata that may be needed for validation
+	RecipeData map[string]interface{}
+
+	// Recipe contains the full recipe with validation constraints
+	// Only available when running inside Jobs (not in unit tests)
+	Recipe *recipe.RecipeResult
+}
+
+// CheckFunc is the function signature for a validation check.
+// It validates a specific aspect of the cluster and reports results via t.
+type CheckFunc func(ctx *ValidationContext) error
+
+// ConstraintValidatorFunc is the function signature for constraint validation.
+// It evaluates whether a constraint is satisfied against the cluster state.
+// Returns the actual value found, whether it passed, and any error.
+type ConstraintValidatorFunc func(ctx *ValidationContext, constraint recipe.Constraint) (actual string, passed bool, err error)
+
+// Check represents a registered validation check.
+type Check struct {
+	// Name is the unique identifier for this check (e.g., "gpu-hardware-detection")
+	Name string
+
+	// Description explains what this check validates
+	Description string
+
+	// Phase indicates which validation phase this check belongs to
+	Phase string // "readiness", "deployment", "performance", "conformance"
+
+	// Func is the check implementation
+	Func CheckFunc
+}
+
+// ConstraintValidator represents a registered constraint validator.
+type ConstraintValidator struct {
+	// Pattern is the constraint name pattern this validator handles
+	// Examples: "GPU.*", "Deployment.gpu-operator.*", "k8s.version"
+	Pattern string
+
+	// Description explains what constraints this validator handles
+	Description string
+
+	// Func is the validator implementation
+	Func ConstraintValidatorFunc
+}
+
+// ConstraintTest represents a registered integration test for constraint validation.
+// These tests run in Jobs and contain the actual validation logic.
+type ConstraintTest struct {
+	// TestName is the Go test function name (e.g., "TestGPUOperatorVersion")
+	TestName string
+
+	// Pattern is the constraint name this test validates (e.g., "Deployment.gpu-operator.version")
+	Pattern string
+
+	// Description explains what this test validates
+	Description string
+
+	// Phase indicates which validation phase (deployment, performance, conformance)
+	Phase string
+}
+
+var (
+	checkRegistry          = make(map[string]*Check)
+	constraintRegistry     = make(map[string]*ConstraintValidator)
+	constraintTestRegistry = make(map[string]*ConstraintTest)
+	registryMu             sync.RWMutex
+)
+
+// RegisterCheck adds a check to the registry.
+// This should be called from init() functions in check packages.
+func RegisterCheck(check *Check) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if _, exists := checkRegistry[check.Name]; exists {
+		panic(fmt.Sprintf("check %q is already registered", check.Name))
+	}
+
+	checkRegistry[check.Name] = check
+}
+
+// RegisterConstraintValidator adds a constraint validator to the registry.
+// This should be called from init() functions in constraint validator packages.
+func RegisterConstraintValidator(validator *ConstraintValidator) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if _, exists := constraintRegistry[validator.Pattern]; exists {
+		panic(fmt.Sprintf("constraint validator for pattern %q is already registered", validator.Pattern))
+	}
+
+	constraintRegistry[validator.Pattern] = validator
+}
+
+// GetCheck retrieves a registered check by name.
+func GetCheck(name string) (*Check, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	check, ok := checkRegistry[name]
+	return check, ok
+}
+
+// GetConstraintValidator retrieves a constraint validator by pattern.
+// For now, uses exact match. Can be enhanced to support pattern matching.
+func GetConstraintValidator(constraintName string) (*ConstraintValidator, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	// TODO: Implement pattern matching (e.g., "GPU.*" matches "GPU.smi.count")
+	// For now, use exact match or prefix match
+	validator, ok := constraintRegistry[constraintName]
+	return validator, ok
+}
+
+// ListChecks returns all registered checks, optionally filtered by phase.
+func ListChecks(phase string) []*Check {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	var checks []*Check
+	for _, check := range checkRegistry {
+		if phase == "" || check.Phase == phase {
+			checks = append(checks, check)
+		}
+	}
+	return checks
+}
+
+// ListConstraintValidators returns all registered constraint validators.
+func ListConstraintValidators() []*ConstraintValidator {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	validators := make([]*ConstraintValidator, 0, len(constraintRegistry))
+	for _, validator := range constraintRegistry {
+		validators = append(validators, validator)
+	}
+	return validators
+}
+
+// RegisterConstraintTest adds a constraint test to the registry.
+// This maps constraint names to test function names for pattern building.
+func RegisterConstraintTest(test *ConstraintTest) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	if _, exists := constraintTestRegistry[test.Pattern]; exists {
+		panic(fmt.Sprintf("constraint test for pattern %q is already registered", test.Pattern))
+	}
+
+	constraintTestRegistry[test.Pattern] = test
+}
+
+// GetTestNameForConstraint looks up which test function validates a constraint.
+// Returns the test name and true if found, empty string and false otherwise.
+func GetTestNameForConstraint(constraintName string) (string, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	test, ok := constraintTestRegistry[constraintName]
+	if !ok {
+		return "", false
+	}
+	return test.TestName, true
+}
+
+// ListConstraintTests returns all registered constraint tests.
+func ListConstraintTests(phase string) []*ConstraintTest {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	var tests []*ConstraintTest
+	for _, test := range constraintTestRegistry {
+		if phase == "" || test.Phase == phase {
+			tests = append(tests, test)
+		}
+	}
+	return tests
+}

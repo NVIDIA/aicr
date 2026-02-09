@@ -147,18 +147,30 @@ func runValidation(
 	recipeSource, snapshotSource, output string,
 	outFormat serializer.Format,
 	failOnError bool,
+	validationNamespace string,
+	resumeRunID string,
+	validatorImage string,
 ) error {
 
 	slog.Info("running validation",
 		"recipe", recipeSource,
 		"snapshot", snapshotSource,
 		"phases", phases,
-		"constraints", len(rec.Constraints))
+		"constraints", len(rec.Constraints),
+		"validation_namespace", validationNamespace,
+		"validator_image", validatorImage,
+		"resume", resumeRunID)
 
-	// Create validator
-	v := validator.New(
+	// Create validator with optional RunID for resume
+	opts := []validator.Option{
 		validator.WithVersion(version),
-	)
+		validator.WithNamespace(validationNamespace),
+		validator.WithImage(validatorImage),
+	}
+	if resumeRunID != "" {
+		opts = append(opts, validator.WithRunID(resumeRunID))
+	}
+	v := validator.New(opts...)
 
 	// Validate with phase support
 	result, err := v.ValidatePhases(ctx, phases, rec, snap)
@@ -240,8 +252,15 @@ Run multiple validation phases:
 Run all validation phases:
   eidos validate -r recipe.yaml -s snapshot.yaml --phase all
 
+Run validation jobs in custom namespace:
+  eidos validate -r recipe.yaml -s snapshot.yaml \
+    --validation-namespace my-validation-ns
+
 Run validation without failing on constraint errors (informational mode):
   eidos validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
+
+Resume a previous validation run from where it left off:
+  eidos validate -r recipe.yaml -s snapshot.yaml --resume 20260206-140523-a3f9
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
@@ -256,6 +275,10 @@ Run validation without failing on constraint errors (informational mode):
 				Usage: `Path/URI to snapshot file containing actual system measurements.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
 	If not provided, an agent will be deployed to capture a fresh snapshot.`,
+			},
+			&cli.StringFlag{
+				Name:  "resume",
+				Usage: "Resume a previous validation run by RunID (format: YYYYMMDD-HHMMSS-XXXX). Skips phases that previously passed.",
 			},
 			&cli.StringSliceFlag{
 				Name: "phase",
@@ -272,15 +295,21 @@ Run validation without failing on constraint errors (informational mode):
 			// Agent deployment flags (used when --snapshot is not provided)
 			&cli.StringFlag{
 				Name:    "namespace",
-				Usage:   "Kubernetes namespace for agent deployment (enables agent mode when set without --snapshot)",
+				Usage:   "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
 				Sources: cli.EnvVars("EIDOS_NAMESPACE"),
 				Value:   "gpu-operator",
 			},
 			&cli.StringFlag{
+				Name:    "validation-namespace",
+				Usage:   "Kubernetes namespace where validation jobs will run",
+				Sources: cli.EnvVars("EIDOS_VALIDATION_NAMESPACE"),
+				Value:   "eidos-validation",
+			},
+			&cli.StringFlag{
 				Name:    "image",
-				Usage:   "Container image for agent Job",
-				Sources: cli.EnvVars("EIDOS_IMAGE"),
-				Value:   "ghcr.io/nvidia/eidos:latest",
+				Usage:   "Container image for validation Jobs (must include Go toolchain)",
+				Sources: cli.EnvVars("EIDOS_VALIDATOR_IMAGE"),
+				Value:   "ghcr.io/nvidia/eidos-validator:latest",
 			},
 			&cli.StringSliceFlag{
 				Name:  "image-pull-secret",
@@ -326,13 +355,14 @@ Run validation without failing on constraint errors (informational mode):
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			// Note: --phase allows multiple values so it's not included here
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "image", "job-name", "service-account-name", "timeout"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "resume"); err != nil {
 				return err
 			}
 
 			recipeFilePath := cmd.String("recipe")
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
+			validationNamespace := cmd.String("validation-namespace")
 
 			// Recipe is always required
 			if recipeFilePath == "" {
@@ -389,7 +419,7 @@ Run validation without failing on constraint errors (informational mode):
 				}
 			}
 
-			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError)
+			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"))
 		},
 	}
 }

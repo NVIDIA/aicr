@@ -209,6 +209,80 @@ func TestParsedConstraint_Evaluate(t *testing.T) {
 			actual:     "ubuntu",
 			want:       false,
 		},
+
+		// Version comparison with IsVersionComparison flag
+		{
+			name:       "eq with version comparison - equal versions",
+			constraint: ParsedConstraint{Operator: OperatorEQ, Value: "1.2.3", IsVersionComparison: true},
+			actual:     "v1.2.3",
+			want:       true,
+		},
+		{
+			name:       "eq with version comparison - different versions",
+			constraint: ParsedConstraint{Operator: OperatorEQ, Value: "1.2.3", IsVersionComparison: true},
+			actual:     "v1.2.4",
+			want:       false,
+		},
+		{
+			name:       "ne with version comparison - different versions",
+			constraint: ParsedConstraint{Operator: OperatorNE, Value: "1.2.3", IsVersionComparison: true},
+			actual:     "v1.2.4",
+			want:       true,
+		},
+		{
+			name:       "ne with version comparison - equal versions",
+			constraint: ParsedConstraint{Operator: OperatorNE, Value: "1.2.3", IsVersionComparison: true},
+			actual:     "v1.2.3",
+			want:       false,
+		},
+		{
+			name:       "eq with non-parseable version falls back to string comparison",
+			constraint: ParsedConstraint{Operator: OperatorEQ, Value: "not-a-version", IsVersionComparison: true},
+			actual:     "not-a-version",
+			want:       true,
+		},
+		{
+			name:       "ne with non-parseable version falls back to string comparison",
+			constraint: ParsedConstraint{Operator: OperatorNE, Value: "not-a-version", IsVersionComparison: true},
+			actual:     "different",
+			want:       true,
+		},
+
+		// Error cases - invalid version parsing for comparison operators
+		{
+			name:        "gte with invalid expected version",
+			constraint:  ParsedConstraint{Operator: OperatorGTE, Value: "not-a-version"},
+			actual:      "1.0.0",
+			expectError: true,
+		},
+		{
+			name:        "gte with invalid actual version",
+			constraint:  ParsedConstraint{Operator: OperatorGTE, Value: "1.0.0"},
+			actual:      "not-a-version",
+			expectError: true,
+		},
+		{
+			name:        "lt with invalid expected version",
+			constraint:  ParsedConstraint{Operator: OperatorLT, Value: "invalid"},
+			actual:      "1.0.0",
+			expectError: true,
+		},
+
+		// Whitespace in actual value
+		{
+			name:       "actual value with leading/trailing whitespace",
+			constraint: ParsedConstraint{Operator: OperatorExact, Value: "ubuntu"},
+			actual:     "  ubuntu  ",
+			want:       true,
+		},
+
+		// Unknown operator error case
+		{
+			name:        "unknown operator",
+			constraint:  ParsedConstraint{Operator: Operator("unknown"), Value: "test"},
+			actual:      "test",
+			expectError: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -225,6 +299,91 @@ func TestParsedConstraint_Evaluate(t *testing.T) {
 			}
 			if result != tt.want {
 				t.Errorf("Evaluate(%q) = %v, want %v", tt.actual, result, tt.want)
+			}
+		})
+	}
+}
+
+func TestLooksLikeVersion(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "simple version", input: "1.2.3", want: true},
+		{name: "version with v prefix", input: "v1.2.3", want: true},
+		{name: "two part version", input: "1.0", want: true},
+		{name: "no dots", input: "123", want: false},
+		{name: "no digits", input: "abc.def", want: false},
+		{name: "empty string", input: "", want: false},
+		{name: "just v prefix", input: "v", want: false},
+		{name: "string with dots but no digits", input: "a.b.c", want: false},
+		{name: "string with digits and dots", input: "ubuntu22.04", want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := looksLikeVersion(tt.input)
+			if got != tt.want {
+				t.Errorf("looksLikeVersion(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParsedConstraint_String(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint ParsedConstraint
+		want       string
+	}{
+		{
+			name:       "exact match returns value only",
+			constraint: ParsedConstraint{Operator: OperatorExact, Value: "ubuntu"},
+			want:       "ubuntu",
+		},
+		{
+			name:       "exact match with version",
+			constraint: ParsedConstraint{Operator: OperatorExact, Value: "24.04"},
+			want:       "24.04",
+		},
+		{
+			name:       "gte operator",
+			constraint: ParsedConstraint{Operator: OperatorGTE, Value: "1.32.4"},
+			want:       ">= 1.32.4",
+		},
+		{
+			name:       "lte operator",
+			constraint: ParsedConstraint{Operator: OperatorLTE, Value: "1.33"},
+			want:       "<= 1.33",
+		},
+		{
+			name:       "gt operator",
+			constraint: ParsedConstraint{Operator: OperatorGT, Value: "1.30"},
+			want:       "> 1.30",
+		},
+		{
+			name:       "lt operator",
+			constraint: ParsedConstraint{Operator: OperatorLT, Value: "2.0"},
+			want:       "< 2.0",
+		},
+		{
+			name:       "eq operator",
+			constraint: ParsedConstraint{Operator: OperatorEQ, Value: "ubuntu"},
+			want:       "== ubuntu",
+		},
+		{
+			name:       "ne operator",
+			constraint: ParsedConstraint{Operator: OperatorNE, Value: "rhel"},
+			want:       "!= rhel",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.constraint.String()
+			if got != tt.want {
+				t.Errorf("String() = %q, want %q", got, tt.want)
 			}
 		})
 	}
