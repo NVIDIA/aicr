@@ -135,7 +135,13 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "$PR_URL/files?per_page=300")
 
-          echo "$FILES_JSON" | jq -c '[.[] | select(.filename | endswith(".go")) | select(.filename | test("^vendor/") | not) | select(.filename | test("_test\\.go$") | not) | .filename]' > .github/outputs/all_modified_files.json
+          echo "$FILES_JSON" | jq -c '
+            [.[] |
+              select(.filename | endswith(".go")) |
+              select(.filename | test("^vendor/") | not) |
+              select(.filename | test("_test\\.go$") | not) |
+              .filename
+            ]' > .github/outputs/all_modified_files.json
 
           if [[ "$(cat .github/outputs/all_modified_files.json)" == "[]" ]]; then
             echo "any_changed=false" >> "$GITHUB_OUTPUT"

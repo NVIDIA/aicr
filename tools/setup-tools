@@ -400,7 +400,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 GRYPE_TMP=$(mktemp)
                 curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP"
                 verify_sha256 "$GRYPE_TMP" "${GRYPE_INSTALL_SHA256:-SKIP}"
-                sh "$GRYPE_TMP" -- -b /usr/local/bin "${GRYPE_VERSION}"
+                sh "$GRYPE_TMP" -b /usr/local/bin "${GRYPE_VERSION}"
                 rm -f "$GRYPE_TMP"
             fi
             log_success "grype installed"
@@ -521,7 +521,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 GORELEASER_TMP=$(mktemp)
                 curl -fsSL "$GORELEASER_SCRIPT_URL" -o "$GORELEASER_TMP"
                 verify_sha256 "$GORELEASER_TMP" "${GORELEASER_INSTALL_SHA256:-SKIP}"
-                bash "$GORELEASER_TMP" -- --version
+                bash "$GORELEASER_TMP" --version
                 rm -f "$GORELEASER_TMP"
             fi
             log_success "goreleaser installed"
@@ -578,7 +578,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
             GOLANGCI_TMP=$(mktemp)
             curl -fsSL "$GOLANGCI_SCRIPT_URL" -o "$GOLANGCI_TMP"
             verify_sha256 "$GOLANGCI_TMP" "${GOLANGCI_LINT_INSTALL_SHA256:-SKIP}"
-            sh "$GOLANGCI_TMP" -- -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
+            sh "$GOLANGCI_TMP" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VERSION}"
             rm -f "$GOLANGCI_TMP"
             log_success "golangci-lint installed"
         fi
