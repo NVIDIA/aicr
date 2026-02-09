@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # This workflow posts coverage comments on PRs after the main workflow completes.
-# Using workflow_run gives us write permissions even for fork PRs.
+# Uses workflow_run with guarded checkout to avoid executing untrusted code.
 # See: https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/
 
 name: Post PR Comment
@@ -26,7 +26,6 @@ on:
 
 permissions:
   actions: read        # Required to download artifacts from other workflow runs
-  contents: read       # Required to checkout repository for go.mod and changed-files
   pull-requests: write
 
 jobs:
@@ -34,7 +33,10 @@ jobs:
     name: Post Coverage Comment
     runs-on: ubuntu-latest
     # Run for PRs regardless of conclusion - coverage might exist even if other steps failed
-    if: github.event.workflow_run.event == 'pull_request'
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.fork == false
+    permissions:
+      actions: read
+      pull-requests: write
     steps:
       - name: Checkout for go.mod version
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -58,7 +60,7 @@ jobs:
         with:
           name: coverage-pr
           path: /tmp/pr-coverage
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Download Coverage Metadata
@@ -68,14 +70,14 @@ jobs:
         with:
           name: coverage-comment-data
           path: /tmp/coverage-comment-data
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
 
       - name: Download Baseline Coverage
         id: download-baseline
         if: steps.download-pr.outcome == 'success'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           mkdir -p /tmp/baseline-coverage
@@ -111,25 +113,35 @@ jobs:
             echo "mode: set" > /tmp/baseline-coverage/coverage.out
           fi
 
-      - name: Checkout for changed-files action
-        if: steps.download-pr.outcome == 'success'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-
       - name: Get Changed Files
         id: changed-files
         if: steps.download-pr.outcome == 'success'
-        uses: tj-actions/changed-files@aa08304bd477b800d468db44fe10f6c61f7f7b11  # v46.0.5
-        with:
-          write_output_files: true
-          json: true
-          files: "**.go"
-          files_ignore: |
-            vendor/**
-            **_test.go
-          output_dir: .github/outputs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github/outputs
+
+          PR_URL="${{ github.event.workflow_run.pull_requests[0].url }}"
+          if [[ -z "$PR_URL" || "$PR_URL" == "null" ]]; then
+            echo "No PR URL found in workflow_run payload. Skipping changed files." >&2
+            echo "any_changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          FILES_JSON=$(curl -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$PR_URL/files?per_page=300")
+
+          echo "$FILES_JSON" | jq -c '[.[] | select(.filename | endswith(".go")) | select(.filename | test("^vendor/") | not) | select(.filename | test("_test\\.go$") | not) | .filename]' > .github/outputs/all_modified_files.json
+
+          if [[ "$(cat .github/outputs/all_modified_files.json)" == "[]" ]]; then
+            echo "any_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "any_changed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Generate Coverage Delta Report
         id: delta

@@ -77,7 +77,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ```yaml
 - uses: ./.github/actions/load-versions
   id: versions
-- uses: actions/setup-go@v5
+- uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
   with:
     go-version: ${{ steps.versions.outputs.go }}
 ```
@@ -282,7 +282,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/load-versions
         id: versions
       - uses: ./.github/actions/go-ci
@@ -299,7 +299,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/load-versions
         id: versions
       - uses: ./.github/actions/go-ci

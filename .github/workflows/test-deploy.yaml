@@ -24,14 +24,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  packages: read
 
 jobs:
   deploy:
     name: Test Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
     env:
       IDENTITY_PROVIDER: 'projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
       SERVICE_ACCOUNT: 'github-actions'

@@ -32,10 +32,7 @@ on:
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
-  actions: read
   contents: read
-  id-token: write
-  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -47,6 +44,8 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
 
       - name: Checkout Code
@@ -69,6 +68,8 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
 
       - name: Checkout Code
@@ -87,6 +88,8 @@ jobs:
     name: E2E Tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
 
       - name: Checkout Code
