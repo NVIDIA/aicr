@@ -1,6 +1,6 @@
 # Proposal: NCCL Fabric Validation for Eidos Performance Phase
 
-**Author:** Ryan Wipfel
+**Author:** Robert Wipfel
 **Date:** 2026-02-09
 **Status:** Draft
 **Roadmap Item:** P0 — NCCL fabric validation (Validator Enhancements)
