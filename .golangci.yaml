@@ -144,6 +144,11 @@ linters:
           - gosec
           - noctx
         path: _test\.go
+      # SA5011 false positive: staticcheck doesn't know t.Fatal stops execution
+      - linters:
+          - staticcheck
+        text: "SA5011"
+        path: _test\.go
       # Relaxed rules for main entry points
       - linters:
           - funlen

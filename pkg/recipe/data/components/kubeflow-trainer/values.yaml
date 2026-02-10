@@ -19,8 +19,8 @@
 # Override release name prefix
 fullnameOverride: kubeflow-trainer
 
-# Controller Manager configuration
-controllerManager:
+# manager configuration
+manager:
   # Resource requests and limits for the controller
   resources:
     requests:
@@ -39,6 +39,31 @@ controllerManager:
     # Verbosity level (0=info, 1=debug, 2=trace)
     verbosity: 0
 
+  # Service account configuration
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+
+  # Prometheus metrics
+  metrics:
+    enabled: true
+    # ServiceMonitor for Prometheus Operator
+    serviceMonitor:
+      enabled: true
+
+  # Security context for pods
+  podSecurityContext:
+    runAsNonRoot: true
+
+  # Container security context
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+
 # Install CRDs (TrainJob, etc.)
 crds:
   install: true
@@ -55,28 +80,3 @@ webhook:
   enabled: true
   # Port for the webhook server
   port: 9443
-
-# Service account configuration
-serviceAccount:
-  create: true
-  name: ""
-  annotations: {}
-
-# Prometheus metrics
-metrics:
-  enabled: true
-  # ServiceMonitor for Prometheus Operator
-  serviceMonitor:
-    enabled: false
-
-# Security context for pods
-podSecurityContext:
-  runAsNonRoot: true
-
-# Container security context
-securityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-      - ALL
-  readOnlyRootFilesystem: true
