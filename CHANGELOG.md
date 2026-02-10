@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-02-10
+
+### Bug Fixes
+
+- Helm-compatible manifest rendering and KWOK CI unification  by [@mchmarny](https://github.com/mchmarny)
+- Resolve staticcheck SA5011 and prealloc lint errors  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Fix deploy.sh failing when run from within the bundle directory.  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Use upstream default namespaces for components  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Features
+
+- Implement Job-based validation framework with test wrapper infrastructure  by [@xdu31](https://github.com/xdu31)
+- Add kai-scheduler component for gang scheduling  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other
+
+- Harden workflows for OpenSSF scorecard 
+
+Signed-off-by: Davanum Srinivas <dsrinivas@nvidia.com> by [@dims](https://github.com/dims)
+
+### Tasks
+
+- Update claude git instructions by [@mchmarny](https://github.com/mchmarny)
+- Update kubeflow paths  by [@coffeepac](https://github.com/coffeepac)
+
 ## [0.4.1] - 2026-02-08
 
 ### Bug Fixes
