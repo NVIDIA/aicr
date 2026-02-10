@@ -17,7 +17,6 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-  --disable-openapi-validation \
   --wait --timeout 10m
 {{ end -}}
 {{ if .HasManifests -}}

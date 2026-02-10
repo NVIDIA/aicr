@@ -41,7 +41,7 @@ toolkit:
 
 dcgmExporter:
   serviceMonitor:
-    enabled: true
+    enabled: false
     interval: 60s
   config:
     name: "dcgm-exporter"
