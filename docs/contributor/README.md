@@ -1124,6 +1124,20 @@ flowchart TD
 
 **Permissions**: `attestations: write`, `contents: write`, `id-token: write`, `packages: write`
 
+### KWOK Scheduling Validation (kwok-recipes.yaml)
+
+**Trigger**: Push to `main` or pull request (when recipe/bundler/KWOK files change), plus `workflow_dispatch`
+
+**Pipeline**: Uses `kwok/scripts/run-all-recipes.sh` — the same script used by `make kwok-test-all` — for maximum local reproducibility.
+
+**How it works**:
+- Single shared Kind cluster with KWOK provider
+- Recipes tested sequentially with cleanup between each
+- For each recipe: generate bundle → deploy via Helm → verify pod scheduling on KWOK nodes
+- Optional `recipe` input for single-recipe testing via `workflow_dispatch`
+
+**Key design**: CI calls the exact same `run-all-recipes.sh` entry point as local development, ensuring local test results match CI results.
+
 ### Composite Actions Architecture
 
 **Three-Layer Design**:
@@ -1143,6 +1157,7 @@ flowchart TD
 3. **Workflows** (Orchestrate actions):
    - `on-push.yaml`: CI validation
    - `on-tag.yaml`: Release, attestation, deployment
+   - `kwok-recipes.yaml`: KWOK scheduling validation (all recipes)
 
 **Benefits**:
 - **Reusability**: Actions shared across workflows
