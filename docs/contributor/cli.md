@@ -2733,7 +2733,7 @@ flowchart TD
     D --> G[Generate Per-Component Bundle]
     E --> H[Generate Applications]
     
-    G --> J[Output: Chart.yaml + values.yaml]
+    G --> J[Output: deploy.sh + per-component values.yaml]
     H --> K[Output: sync-wave annotations]
     
     J --> M[Bundle Output]
