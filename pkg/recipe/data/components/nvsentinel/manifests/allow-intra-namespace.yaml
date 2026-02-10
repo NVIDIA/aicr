@@ -29,8 +29,8 @@
 #
 # Upstream fix: https://github.com/NVIDIA/NVSentinel/pull/789
 # Remove this file once nvsentinel includes the networkPolicy.enabled flag.
-{{- $nvs := index .Values "nvsentinel" }}
-{{- if $nvs }}
+{{- $nv := index .Values "nvsentinel" }}
+{{- if and $nv $nv.networkPolicyWorkaround (ne (toString (index $nv.networkPolicyWorkaround "enabled")) "false") }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

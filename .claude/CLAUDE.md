@@ -83,7 +83,7 @@ make tools-check  # Verify versions match .versions.yaml
 | `pkg/cli` | User interaction, input validation, output formatting | No |
 | `pkg/api` | REST API handlers | No |
 | `pkg/recipe` | Recipe resolution, overlay system, component registry | Yes |
-| `pkg/bundler` | Umbrella chart generation from recipes | Yes |
+| `pkg/bundler` | Per-component Helm bundle generation from recipes | Yes |
 | `pkg/component` | Bundler utilities and test helpers | Yes |
 | `pkg/collector` | System state collection | Yes |
 | `pkg/validator` | Constraint evaluation | Yes |
@@ -296,13 +296,13 @@ eidos recipe --snapshot snapshot.yaml --intent training --output recipe.yaml
 eidos recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow
 
 # Create deployment bundle
-eidos bundle --recipe recipe.yaml --bundlers gpu-operator --output ./bundles
+eidos bundle --recipe recipe.yaml --output ./bundles
 
 # Validate recipe against snapshot
 eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Bundle with value overrides
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --set gpuoperator:driver.version=570.86.16 \
   --deployer argocd \
   -o ./bundles

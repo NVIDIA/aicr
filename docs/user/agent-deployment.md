@@ -563,12 +563,10 @@ eidos recipe \
 # Step 3: Create deployment bundle
 eidos bundle \
   --recipe recipe.yaml \
-  --bundlers gpu-operator \
   --output ./bundles
 
 # Step 4: Deploy to cluster
-cd bundles/gpu-operator
-./scripts/install.sh
+cd bundles && chmod +x deploy.sh && ./deploy.sh
 
 # Step 5: Verify deployment
 kubectl get pods -n gpu-operator
@@ -596,12 +594,10 @@ eidos recipe \
 # Step 4: Create bundle
 eidos bundle \
   --recipe recipe.yaml \
-  --bundlers gpu-operator \
   --output ./bundles
 
 # Step 5: Deploy and verify
-cd bundles/gpu-operator
-./scripts/install.sh
+cd bundles && chmod +x deploy.sh && ./deploy.sh
 kubectl get pods -n gpu-operator
 ```
 
@@ -629,7 +625,7 @@ kubectl get pods -n gpu-operator
     
 - name: Generate bundle
   run: |
-    eidos bundle -r recipe.yaml -b gpu-operator -o ./bundles
+    eidos bundle -r recipe.yaml -o ./bundles
     
 - name: Upload artifacts
   uses: actions/upload-artifact@v3
@@ -663,7 +659,7 @@ kubectl get pods -n gpu-operator
     
 - name: Generate bundle
   run: |
-    eidos bundle -r recipe.yaml -b gpu-operator -o ./bundles
+    eidos bundle -r recipe.yaml -o ./bundles
     
 - name: Upload artifacts
   uses: actions/upload-artifact@v3

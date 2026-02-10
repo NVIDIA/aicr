@@ -35,7 +35,7 @@ type Bundler interface {
 }
 
 // ValuesExtractor defines the interface for extracting component values.
-// This is used by the umbrella chart generator to collect values from each bundler
+// This is used by the Helm bundle generator to collect values from each bundler
 // without requiring file I/O. Bundlers should implement this interface.
 type ValuesExtractor interface {
 	// ExtractValues returns the processed values map for this component.

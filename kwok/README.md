@@ -156,7 +156,7 @@ Copy the `kwok/profiles/eks/` directory structure for your provider and update t
 
 ## CI Integration
 
-The workflow `.github/workflows/kwok-recipes.yaml` auto-discovers and tests all recipes with `spec.criteria.service` defined. Tests run in parallel (max 4) with isolated clusters.
+The workflow `.github/workflows/kwok-recipes.yaml` calls `run-all-recipes.sh` — the same script used by `make kwok-test-all`. CI uses a single shared Kind cluster and tests recipes sequentially with cleanup between each, ensuring local and CI code paths are identical.
 
 Manual trigger:
 ```bash

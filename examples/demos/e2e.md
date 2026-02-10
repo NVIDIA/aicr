@@ -165,7 +165,7 @@ shasum -a 256 -c checksums.txt
 Prep the deployment: 
 
 ```shell
-helm dependency update
+chmod +x deploy.sh && ./deploy.sh
 tree .
 ```
 

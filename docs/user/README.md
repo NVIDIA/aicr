@@ -32,7 +32,7 @@ eidos recipe --service eks --accelerator h100 --intent training -o recipe.yaml
 eidos bundle --recipe recipe.yaml -o ./bundles
 
 # Deploy to your cluster
-cd bundles && helm dependency update && helm install eidos-stack . -n eidos-stack --create-namespace
+cd bundles && chmod +x deploy.sh && ./deploy.sh
 ```
 
 ## Related Documentation

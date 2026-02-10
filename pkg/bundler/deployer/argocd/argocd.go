@@ -43,9 +43,6 @@ var appOfAppsTemplate string
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
 
-// defaultNamespace is the default namespace for component deployment.
-const defaultNamespace = "nvidia-system"
-
 // ApplicationData contains data for rendering an ArgoCD Application.
 type ApplicationData struct {
 	Name       string
@@ -139,14 +136,23 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		input.RecipeResult.DeploymentOrder,
 	)
 
-	// Generate application data for each component
+	// Generate application data for each component (validate names early)
 	appDataList := make([]ApplicationData, 0, len(components))
 	for i, comp := range components {
+		if !isSafePathComponent(comp.Name) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", comp.Name))
+		}
+		chartName := comp.Chart
+		if chartName == "" {
+			chartName = comp.Name
+		}
+
 		appData := ApplicationData{
 			Name:       comp.Name,
-			Namespace:  getNamespace(comp),
+			Namespace:  comp.Namespace,
 			Repository: comp.Source,
-			Chart:      comp.Name,
+			Chart:      chartName,
 			Version:    normalizeVersion(comp.Version),
 			SyncWave:   i, // Use index as sync wave
 		}
@@ -161,15 +167,17 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		default:
 		}
 
-		componentDir := filepath.Join(outputDir, appData.Name)
-		if err := os.MkdirAll(componentDir, 0755); err != nil {
+		componentDir, err := safeJoin(outputDir, appData.Name)
+		if err != nil {
+			return nil, err
+		}
+		if mkdirErr := os.MkdirAll(componentDir, 0755); mkdirErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to create directory for %s", appData.Name), err)
+				fmt.Sprintf("failed to create directory for %s", appData.Name), mkdirErr)
 		}
 
 		// Generate application.yaml
-		appPath := filepath.Join(componentDir, "application.yaml")
-		appSize, err := g.generateFromTemplate(applicationTemplate, appData, appPath)
+		appPath, appSize, err := g.generateFromTemplate(applicationTemplate, appData, componentDir, "application.yaml")
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to generate application.yaml for %s", appData.Name), err)
@@ -178,12 +186,11 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		output.TotalSize += appSize
 
 		// Generate values.yaml
-		valuesPath := filepath.Join(componentDir, "values.yaml")
 		values := input.ComponentValues[appData.Name]
 		if values == nil {
 			values = make(map[string]any)
 		}
-		valuesSize, err := g.writeValuesFile(values, valuesPath)
+		valuesPath, valuesSize, err := g.writeValuesFile(values, componentDir, "values.yaml")
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to generate values.yaml for %s", appData.Name), err)
@@ -202,8 +209,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		TargetRevision: "main",
 		Path:           ".",
 	}
-	appOfAppsPath := filepath.Join(outputDir, "app-of-apps.yaml")
-	appOfAppsSize, err := g.generateFromTemplate(appOfAppsTemplate, appOfAppsData, appOfAppsPath)
+	appOfAppsPath, appOfAppsSize, err := g.generateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate app-of-apps.yaml", err)
 	}
@@ -216,8 +222,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		BundlerVersion: input.Version,
 		Components:     appDataList,
 	}
-	readmePath := filepath.Join(outputDir, "README.md")
-	readmeSize, err := g.generateFromTemplate(readmeTemplate, readmeData, readmePath)
+	readmePath, readmeSize, err := g.generateFromTemplate(readmeTemplate, readmeData, outputDir, "README.md")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate README.md", err)
 	}
@@ -261,28 +266,40 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	return output, nil
 }
 
-// generateFromTemplate renders a template to a file.
-func (g *Generator) generateFromTemplate(tmplContent string, data any, outputPath string) (int64, error) {
+// generateFromTemplate renders a template and writes it to baseDir/filename.
+// It uses safeJoin to verify the output path stays within baseDir.
+func (g *Generator) generateFromTemplate(tmplContent string, data any, baseDir, filename string) (string, int64, error) {
+	outputPath, err := safeJoin(baseDir, filename)
+	if err != nil {
+		return "", 0, err
+	}
+
 	tmpl, err := template.New("template").Parse(tmplContent)
 	if err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
 	}
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
 	}
 
 	content := buf.String()
 	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write file", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write file", err)
 	}
 
-	return int64(len(content)), nil
+	return outputPath, int64(len(content)), nil
 }
 
-// writeValuesFile writes a values.yaml file with header comment.
-func (g *Generator) writeValuesFile(values map[string]any, outputPath string) (int64, error) {
+// writeValuesFile writes a values.yaml file with header comment to baseDir/filename.
+// It uses safeJoin to verify the output path stays within baseDir.
+func (g *Generator) writeValuesFile(values map[string]any, baseDir, filename string) (string, int64, error) {
+	outputPath, err := safeJoin(baseDir, filename)
+	if err != nil {
+		return "", 0, err
+	}
+
 	var buf strings.Builder
 	buf.WriteString("# Generated by Cloud Native Stack\n")
 	buf.WriteString("---\n")
@@ -290,17 +307,17 @@ func (g *Generator) writeValuesFile(values map[string]any, outputPath string) (i
 	if len(values) > 0 {
 		yamlBytes, err := yaml.Marshal(values)
 		if err != nil {
-			return 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
+			return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
 		}
 		buf.Write(yamlBytes)
 	}
 
 	content := buf.String()
 	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values file", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values file", err)
 	}
 
-	return int64(len(content)), nil
+	return outputPath, int64(len(content)), nil
 }
 
 // sortComponentsByDeploymentOrder sorts components based on deployment order.
@@ -338,22 +355,42 @@ func sortComponentsByDeploymentOrder(refs []recipe.ComponentRef, order []string)
 	return sorted
 }
 
-// getNamespace returns the namespace for a component.
-func getNamespace(comp recipe.ComponentRef) string {
-	// Use component name as namespace, or default
-	switch comp.Name {
-	case "gpu-operator":
-		return "gpu-operator"
-	case "network-operator":
-		return "nvidia-network-operator"
-	case "cert-manager":
-		return "cert-manager"
-	default:
-		return defaultNamespace
-	}
-}
-
 // normalizeVersion ensures version has 'v' prefix removed if present.
 func normalizeVersion(version string) string {
 	return strings.TrimPrefix(version, "v")
+}
+
+// isSafePathComponent returns true if name is a single path component without
+// any separators or parent directory references.
+func isSafePathComponent(name string) bool {
+	if name == "" {
+		return false
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return false
+	}
+	if strings.Contains(name, "..") {
+		return false
+	}
+	return true
+}
+
+// safeJoin joins baseDir and name, then verifies the result is contained
+// within baseDir. This prevents path traversal when name comes from
+// untrusted input (e.g., component names from recipe data).
+func safeJoin(baseDir, name string) (string, error) {
+	if filepath.IsAbs(name) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("path component %q is absolute and escapes base directory", name))
+	}
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to resolve base directory", err)
+	}
+	joined := filepath.Clean(filepath.Join(absBase, name))
+	if joined != absBase && !strings.HasPrefix(joined, absBase+string(filepath.Separator)) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("path component %q escapes base directory", name))
+	}
+	return joined, nil
 }

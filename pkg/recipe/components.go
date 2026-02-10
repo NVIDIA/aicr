@@ -67,6 +67,9 @@ type HelmConfig struct {
 
 	// DefaultVersion is the default chart version if not specified in recipe.
 	DefaultVersion string `yaml:"defaultVersion,omitempty"`
+
+	// DefaultNamespace is the Kubernetes namespace for deploying this component.
+	DefaultNamespace string `yaml:"defaultNamespace,omitempty"`
 }
 
 // KustomizeConfig contains default Kustomize settings for a component.

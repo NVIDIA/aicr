@@ -170,6 +170,30 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
     image_digest: sha256:abc123...
 ```
 
+### KWOK Testing Actions
+
+#### `kwok-test/`
+**Purpose**: Test recipes using KWOK simulated nodes in a shared Kind cluster
+**When to use**: KWOK recipe validation in CI or manual workflow dispatch
+**Inputs**:
+- `recipe` (optional): Recipe name to test (empty = all testable recipes)
+- `go_version` (required): Go version to install
+- `kind_version` (optional): Kind version (default: "0.31.0")
+- `helm_version` (optional): Helm version (default: "v4.1.0")
+- `kwok_version` (optional): KWOK version (default: "v0.7.0")
+- `kubectl_version` (optional): kubectl version (default: "v1.35.0")
+
+**Key Design**: Calls `run-all-recipes.sh` — the same script used by `make kwok-test-all` locally. This ensures CI and local testing use identical code paths with a single shared cluster.
+
+**Example**:
+```yaml
+- uses: ./.github/actions/kwok-test
+  with:
+    go_version: ${{ steps.versions.outputs.go }}
+    kind_version: ${{ steps.versions.outputs.kind }}
+    helm_version: ${{ steps.versions.outputs.helm }}
+```
+
 ### Deployment Actions
 
 #### `cloud-run-deploy/`
@@ -229,6 +253,13 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **Purpose**: Isolated testing of the deploy action
 **Inputs**:
 - `image_tag`: Image tag to deploy (e.g., "v0.1.5")
+
+### `kwok-recipes.yaml`
+**Trigger**: Push/PR to main (when `pkg/recipe/data/**` or `kwok/**` change), manual dispatch
+**Purpose**: KWOK simulated cluster validation of recipe scheduling
+**Jobs**:
+1. **Test**: Calls `kwok-test` action which runs `run-all-recipes.sh` (same as `make kwok-test-all`)
+2. **Summary**: Reports pass/fail
 
 ## Architecture Principles
 

@@ -150,34 +150,36 @@ func TestMake_Success(t *testing.T) {
 		t.Fatal("Make() returned nil output")
 	}
 
-	// Verify files were created
-	expectedFiles := []string{"Chart.yaml", "values.yaml", "README.md", "recipe.yaml"}
-	for _, filename := range expectedFiles {
+	// Verify root files were created
+	rootFiles := []string{"README.md", "deploy.sh", "recipe.yaml"}
+	for _, filename := range rootFiles {
 		path := filepath.Join(tmpDir, filename)
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 			t.Errorf("expected file %s was not created", filename)
 		}
 	}
 
-	// Verify Chart.yaml has dependencies
-	chartContent, err := os.ReadFile(filepath.Join(tmpDir, "Chart.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read Chart.yaml: %v", err)
-	}
-	chartStr := string(chartContent)
-	if !strings.Contains(chartStr, "dependencies:") {
-		t.Error("Chart.yaml should contain dependencies section")
-	}
-	if !strings.Contains(chartStr, "gpu-operator") {
-		t.Error("Chart.yaml should reference gpu-operator")
-	}
-	if !strings.Contains(chartStr, "network-operator") {
-		t.Error("Chart.yaml should reference network-operator")
+	// Verify per-component directories
+	for _, comp := range []string{"gpu-operator", "network-operator"} {
+		valuesPath := filepath.Join(tmpDir, comp, "values.yaml")
+		if _, statErr := os.Stat(valuesPath); os.IsNotExist(statErr) {
+			t.Errorf("expected %s/values.yaml was not created", comp)
+		}
+		readmePath := filepath.Join(tmpDir, comp, "README.md")
+		if _, statErr := os.Stat(readmePath); os.IsNotExist(statErr) {
+			t.Errorf("expected %s/README.md was not created", comp)
+		}
 	}
 
-	// Verify output summary
-	if output.TotalFiles < 4 {
-		t.Errorf("expected at least 4 files, got %d", output.TotalFiles)
+	// No Chart.yaml should exist
+	chartPath := filepath.Join(tmpDir, "Chart.yaml")
+	if _, statErr := os.Stat(chartPath); !os.IsNotExist(statErr) {
+		t.Error("Chart.yaml should not exist in per-component bundle")
+	}
+
+	// Verify output summary (3 root + 2 components × 2 files = 7, +1 recipe.yaml = 8)
+	if output.TotalFiles < 7 {
+		t.Errorf("expected at least 7 files, got %d", output.TotalFiles)
 	}
 }
 
@@ -219,10 +221,10 @@ func TestMake_WithValueOverrides(t *testing.T) {
 		t.Fatal("Make() returned nil output")
 	}
 
-	// Verify values.yaml was created
-	valuesPath := filepath.Join(tmpDir, "values.yaml")
+	// Verify gpu-operator/values.yaml was created
+	valuesPath := filepath.Join(tmpDir, "gpu-operator", "values.yaml")
 	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		t.Fatal("values.yaml was not created")
+		t.Fatal("gpu-operator/values.yaml was not created")
 	}
 }
 
@@ -401,7 +403,7 @@ func TestRemoveHyphens(t *testing.T) {
 // Note: Tests for convertMapValue, setMapValueByPath, and applyMapOverrides
 // are in pkg/component/overrides_test.go since those functions now live there.
 
-func TestCollectManifestContents(t *testing.T) {
+func TestCollectComponentManifests(t *testing.T) {
 	bundler, err := New()
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -417,7 +419,7 @@ func TestCollectManifestContents(t *testing.T) {
 			},
 		}
 
-		contents, err := bundler.collectManifestContents(context.Background(), recipeResult)
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -431,7 +433,7 @@ func TestCollectManifestContents(t *testing.T) {
 			ComponentRefs: []recipe.ComponentRef{},
 		}
 
-		contents, err := bundler.collectManifestContents(context.Background(), recipeResult)
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -450,7 +452,7 @@ func TestCollectManifestContents(t *testing.T) {
 			},
 		}
 
-		_, err := bundler.collectManifestContents(context.Background(), recipeResult)
+		_, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err == nil {
 			t.Fatal("expected error for invalid manifest path")
 		}
@@ -459,7 +461,7 @@ func TestCollectManifestContents(t *testing.T) {
 		}
 	})
 
-	t.Run("deduplicates shared manifests", func(t *testing.T) {
+	t.Run("empty manifests for multiple components", func(t *testing.T) {
 		recipeResult := &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{
 				{
@@ -473,11 +475,10 @@ func TestCollectManifestContents(t *testing.T) {
 			},
 		}
 
-		contents, err := bundler.collectManifestContents(context.Background(), recipeResult)
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Both components have empty manifest files, so no contents
 		if len(contents) != 0 {
 			t.Errorf("expected 0 contents, got %d", len(contents))
 		}

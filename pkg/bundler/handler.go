@@ -49,11 +49,12 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 //   - accelerated-node-selector: Node selectors for GPU nodes in format "key=value" (can be repeated)
 //   - accelerated-node-toleration: Tolerations for GPU nodes in format "key=value:effect" (can be repeated)
 //
-// The response is a zip archive containing the umbrella Helm chart:
-//   - Chart.yaml: Helm chart metadata with dependencies
-//   - values.yaml: Combined values for all components
-//   - README.md: Deployment instructions
+// The response is a zip archive containing the Helm per-component bundle:
+//   - README.md: Root deployment guide
+//   - deploy.sh: Automation script
 //   - recipe.yaml: Copy of the input recipe
+//   - <component>/values.yaml: Helm values per component
+//   - <component>/README.md: Component install/upgrade/uninstall
 //   - checksums.txt: SHA256 checksums of generated files
 //
 // Example:
@@ -144,7 +145,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate umbrella chart
+	// Generate bundle
 	output, err := bundler.Make(ctx, &recipeResult, tempDir)
 	if err != nil {
 		server.WriteErrorFromErr(w, r, err, "Failed to generate bundle", nil)

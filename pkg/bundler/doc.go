@@ -15,14 +15,14 @@
 /*
 Package bundler provides orchestration for generating deployment bundles from recipes.
 
-The bundler package generates deployment-ready artifacts (Helm umbrella charts or
+The bundler package generates deployment-ready artifacts (Helm per-component bundles or
 ArgoCD applications) from recipe configurations. Component configuration is loaded
 from the declarative component registry (pkg/recipe/data/registry.yaml).
 
 # Architecture
 
-  - DefaultBundler: Generates Helm umbrella charts or ArgoCD applications
-  - Component Registry: Declarative configuration in pkg/recipe/data/components.yaml
+  - DefaultBundler: Generates Helm per-component bundles or ArgoCD applications
+  - Component Registry: Declarative configuration in pkg/recipe/data/registry.yaml
   - Deployers: Helm (default) and ArgoCD output formats
   - result.Output: Aggregated generation results
 
@@ -54,11 +54,12 @@ Components are defined in pkg/recipe/data/registry.yaml:
 # Output Formats
 
 Helm (default):
-  - Chart.yaml: Helm umbrella chart with dependencies
-  - values.yaml: Combined values for all components
-  - README.md: Deployment instructions
+  - README.md: Root deployment guide with ordered steps
+  - deploy.sh: Automation script (0755)
   - recipe.yaml: Copy of the input recipe
-  - templates/: Custom manifest templates (if any)
+  - <component>/values.yaml: Helm values per component
+  - <component>/README.md: Component install/upgrade/uninstall
+  - <component>/manifests/: Optional manifest files
 
 ArgoCD:
   - app-of-apps.yaml: Parent ArgoCD Application
