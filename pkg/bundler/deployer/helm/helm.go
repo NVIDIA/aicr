@@ -665,6 +665,10 @@ func isSafePathComponent(name string) bool {
 // within baseDir. This prevents path traversal when name comes from
 // untrusted input (e.g., component names from recipe data).
 func safeJoin(baseDir, name string) (string, error) {
+	if filepath.IsAbs(name) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("path component %q is absolute and escapes base directory", name))
+	}
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to resolve base directory", err)

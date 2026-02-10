@@ -433,8 +433,8 @@ func TestSafeJoin(t *testing.T) {
 		{"valid with dots", baseDir, "cert-manager", false},
 		{"path traversal", baseDir, "../etc/passwd", true},
 		{"double dot", baseDir, "..", true},
-		{"absolute path is joined safely", baseDir, "/etc/passwd", false}, // Go's filepath.Join strips leading /
-		{"empty name", baseDir, "", false},                                // empty joins to baseDir itself
+		{"absolute path rejected", baseDir, "/etc/passwd", true},
+		{"empty name", baseDir, "", false}, // empty joins to baseDir itself
 		{"relative base", ".", "gpu-operator", false},
 	}
 

@@ -131,7 +131,7 @@ componentRefs:
       - cert-manager
 
   - name: skyhook-operator
-    namespace: nvidia-system
+    namespace: skyhook
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook

@@ -33,7 +33,7 @@ componentRefs:
     version: v1.17.2
     valuesFile: components/cert-manager/values.yaml
   - name: skyhook-operator
-    namespace: nvidia-system
+    namespace: skyhook
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook

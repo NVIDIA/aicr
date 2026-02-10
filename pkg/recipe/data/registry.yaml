@@ -120,7 +120,7 @@ components:
     helm:
       defaultRepository: https://nvidia.github.io/skyhook
       defaultChart: skyhook-operator
-      defaultNamespace: nvidia-system
+      defaultNamespace: skyhook
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -135,7 +135,7 @@ components:
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
-      defaultNamespace: nvidia-system
+      defaultNamespace: skyhook
     nodeScheduling:
       accelerated:
         nodeSelectorPaths:

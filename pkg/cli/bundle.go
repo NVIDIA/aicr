@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/eidos/pkg/bundler"
 	"github.com/NVIDIA/eidos/pkg/bundler/config"
 	"github.com/NVIDIA/eidos/pkg/bundler/result"
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/oci"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/serializer"
@@ -75,13 +76,13 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 
 		absPath, err := filepath.Abs(opts.recipeFilePath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to resolve recipe path %q: %w", opts.recipeFilePath, err)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve recipe path", err)
 		}
 		if _, err := os.Stat(absPath); err != nil {
 			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("recipe file not found: %s (resolved from %q)", absPath, opts.recipeFilePath)
+				return nil, errors.New(errors.ErrCodeNotFound, "recipe file not found: "+absPath)
 			}
-			return nil, fmt.Errorf("cannot access recipe file %s: %w", absPath, err)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "cannot access recipe file: "+absPath, err)
 		}
 		opts.recipeFilePath = absPath
 	}
@@ -93,7 +94,7 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	} else {
 		deployer, err := config.ParseDeployerType(deployerStr)
 		if err != nil {
-			return nil, fmt.Errorf("invalid --deployer value: %w", err)
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --deployer value", err)
 		}
 		opts.deployer = deployer
 	}
@@ -102,7 +103,7 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	outputTarget := cmd.String("output")
 	ref, err := oci.ParseOutputTarget(outputTarget)
 	if err != nil {
-		return nil, fmt.Errorf("invalid --output value: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --output value", err)
 	}
 
 	if ref.IsOCI {
@@ -119,7 +120,7 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		// regardless of how the binary is invoked.
 		absOut, absErr := filepath.Abs(ref.LocalPath)
 		if absErr != nil {
-			return nil, fmt.Errorf("failed to resolve output path %q: %w", ref.LocalPath, absErr)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve output path: "+ref.LocalPath, absErr)
 		}
 		opts.outputDir = absOut
 	}
@@ -127,27 +128,27 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	// Parse value overrides from --set flags
 	opts.valueOverrides, err = config.ParseValueOverrides(cmd.StringSlice("set"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid --set flag: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --set flag", err)
 	}
 
 	// Parse node selectors
 	opts.systemNodeSelector, err = snapshotter.ParseNodeSelectors(cmd.StringSlice("system-node-selector"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid --system-node-selector: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --system-node-selector", err)
 	}
 	opts.acceleratedNodeSelector, err = snapshotter.ParseNodeSelectors(cmd.StringSlice("accelerated-node-selector"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid --accelerated-node-selector: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --accelerated-node-selector", err)
 	}
 
 	// Parse tolerations
 	opts.systemNodeTolerations, err = snapshotter.ParseTolerations(cmd.StringSlice("system-node-toleration"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid --system-node-toleration: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --system-node-toleration", err)
 	}
 	opts.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(cmd.StringSlice("accelerated-node-toleration"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid --accelerated-node-toleration: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --accelerated-node-toleration", err)
 	}
 
 	return opts, nil
@@ -272,7 +273,7 @@ Package with explicit tag (overrides CLI version):
 
 			// Initialize external data provider if --data flag is set
 			if err := initDataProvider(cmd); err != nil {
-				return fmt.Errorf("failed to initialize data provider: %w", err)
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 			}
 
 			opts, err := parseBundleCmdOptions(cmd)
@@ -374,7 +375,7 @@ func pushOCIBundle(ctx context.Context, opts *bundleCmdOptions, out *result.Outp
 	if opts.imageRefsPath != "" {
 		if err := os.WriteFile(opts.imageRefsPath, []byte(pushResult.Digest+"\n"), 0600); err != nil {
 			slog.Error("failed to write image refs file", "error", err, "path", opts.imageRefsPath)
-			return fmt.Errorf("failed to write image refs: %w", err)
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write image refs", err)
 		}
 		slog.Info("wrote image reference", "path", opts.imageRefsPath, "ref", pushResult.Digest)
 	}
