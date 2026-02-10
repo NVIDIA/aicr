@@ -43,9 +43,6 @@ var appOfAppsTemplate string
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
 
-// defaultNamespace is the default namespace for component deployment.
-const defaultNamespace = "nvidia-system"
-
 // ApplicationData contains data for rendering an ArgoCD Application.
 type ApplicationData struct {
 	Name       string
@@ -146,11 +143,16 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", comp.Name))
 		}
+		chartName := comp.Chart
+		if chartName == "" {
+			chartName = comp.Name
+		}
+
 		appData := ApplicationData{
 			Name:       comp.Name,
-			Namespace:  getNamespace(comp),
+			Namespace:  comp.Namespace,
 			Repository: comp.Source,
-			Chart:      comp.Name,
+			Chart:      chartName,
 			Version:    normalizeVersion(comp.Version),
 			SyncWave:   i, // Use index as sync wave
 		}
@@ -351,21 +353,6 @@ func sortComponentsByDeploymentOrder(refs []recipe.ComponentRef, order []string)
 	})
 
 	return sorted
-}
-
-// getNamespace returns the namespace for a component.
-func getNamespace(comp recipe.ComponentRef) string {
-	// Use component name as namespace, or default
-	switch comp.Name {
-	case "gpu-operator":
-		return "gpu-operator"
-	case "network-operator":
-		return "nvidia-network-operator"
-	case "cert-manager":
-		return "cert-manager"
-	default:
-		return defaultNamespace
-	}
 }
 
 // normalizeVersion ensures version has 'v' prefix removed if present.

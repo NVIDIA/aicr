@@ -18,6 +18,7 @@ package recipe
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/NVIDIA/eidos/pkg/errors"
 )
@@ -53,6 +54,12 @@ type Constraint struct {
 type ComponentRef struct {
 	// Name is the unique identifier for this component.
 	Name string `json:"name" yaml:"name"`
+
+	// Namespace is the Kubernetes namespace for deploying this component.
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+
+	// Chart is the Helm chart name (e.g., "gpu-operator").
+	Chart string `json:"chart,omitempty" yaml:"chart,omitempty"`
 
 	// Type is the deployment type (Helm, Kustomize).
 	Type ComponentType `json:"type" yaml:"type"`
@@ -174,6 +181,16 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 		}
 		if ref.Version == "" && config.Helm.DefaultVersion != "" {
 			ref.Version = config.Helm.DefaultVersion
+		}
+		if ref.Namespace == "" && config.Helm.DefaultNamespace != "" {
+			ref.Namespace = config.Helm.DefaultNamespace
+		}
+		if ref.Chart == "" && config.Helm.DefaultChart != "" {
+			chart := config.Helm.DefaultChart
+			if idx := strings.LastIndex(chart, "/"); idx >= 0 {
+				chart = chart[idx+1:]
+			}
+			ref.Chart = chart
 		}
 	case ComponentTypeKustomize:
 		// Apply Kustomize defaults
@@ -350,6 +367,16 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 // for non-empty fields. Empty/zero fields in overlay inherit from base.
 func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	result := base // Start with base values
+
+	// Namespace: overlay takes precedence if set
+	if overlay.Namespace != "" {
+		result.Namespace = overlay.Namespace
+	}
+
+	// Chart: overlay takes precedence if set
+	if overlay.Chart != "" {
+		result.Chart = overlay.Chart
+	}
 
 	// Type: overlay takes precedence if set
 	if overlay.Type != "" {

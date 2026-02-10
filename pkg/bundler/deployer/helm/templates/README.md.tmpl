@@ -54,12 +54,20 @@ Install components individually in order:
 ### {{ .Name }}
 
 ```bash
+{{ if .IsOCI -}}
+helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} --create-namespace \
+  -f {{ .Name }}/values.yaml \
+  --wait --timeout 10m
+{{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
   --wait --timeout 10m
+{{ end -}}
 ```
 {{ if .HasManifests }}
 ```bash

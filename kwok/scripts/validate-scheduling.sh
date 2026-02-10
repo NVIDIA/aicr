@@ -64,7 +64,7 @@ cleanup() {
     else
         # Uninstall all Helm releases from component namespaces
         local releases
-        releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | "\(.name) \(.namespace)"' || true)
+        releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | select(.namespace != "kube-system") | "\(.name) \(.namespace)"' || true)
         if [[ -n "$releases" ]]; then
             while IFS=' ' read -r name ns; do
                 if [[ -n "$name" ]]; then
@@ -75,8 +75,12 @@ cleanup() {
         fi
         # Clean up stale APIServices before namespace deletion to prevent hangs
         cleanup_stale_apiservices
-        # Delete component namespaces created by deploy.sh
-        for ns in gpu-operator nvidia-network-operator cert-manager nvidia-system kube-prometheus-stack; do
+        # Delete all non-system namespaces (dynamically covers any recipe)
+        local system_ns="default|kube-node-lease|kube-public|kube-system|kwok-system|local-path-storage"
+        local test_namespaces
+        test_namespaces=$(kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
+        for ns in $test_namespaces; do
+            log_info "Deleting namespace $ns..."
             kubectl delete ns "$ns" --ignore-not-found --wait=true --timeout=120s 2>/dev/null || true
         done
     fi
@@ -219,7 +223,7 @@ cleanup_old_tests() {
 
     # Find and uninstall old Helm releases from component namespaces
     local releases
-    releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | "\(.namespace) \(.name)"' || true)
+    releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | select(.namespace != "kube-system") | "\(.namespace) \(.name)"' || true)
     if [[ -n "$releases" ]]; then
         log_info "Uninstalling old releases..."
         echo "$releases" | while read -r ns release; do
@@ -234,13 +238,13 @@ cleanup_old_tests() {
     # These can cause namespace deletion to hang with "stale GroupVersion discovery" errors
     cleanup_stale_apiservices
 
-    # Delete component namespaces created by per-component deployment
-    local component_namespaces="gpu-operator nvidia-network-operator cert-manager nvidia-system kube-prometheus-stack"
-    for ns in $component_namespaces; do
-        if kubectl get ns "$ns" &>/dev/null; then
-            log_info "Removing namespace $ns..."
-            kubectl delete ns "$ns" --ignore-not-found --wait=true --timeout=120s 2>/dev/null || true
-        fi
+    # Delete all non-system namespaces (dynamically covers any recipe)
+    local system_ns="default|kube-node-lease|kube-public|kube-system|kwok-system|local-path-storage"
+    local test_namespaces
+    test_namespaces=$(kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
+    for ns in $test_namespaces; do
+        log_info "Removing namespace $ns..."
+        kubectl delete ns "$ns" --ignore-not-found --wait=true --timeout=120s 2>/dev/null || true
     done
 
     # Also clean up legacy eidos-kwok-test namespaces
@@ -369,10 +373,10 @@ verify_pods() {
     local exclude_ns="kube-system|kube-node-lease|kube-public|local-path-storage|kwok-system"
 
     local total_pods pending_pods failed_pods running_pods unscheduled_pods
-    total_pods=$(kubectl get pods ${ns_filter} --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
-    pending_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Pending --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
-    failed_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Failed --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
-    running_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
+    total_pods=$(kubectl get pods ${ns_filter} --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
+    pending_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Pending --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
+    failed_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Failed --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
+    running_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Running --no-headers 2>/dev/null | { grep -vE "^(${exclude_ns})\s" || true; } | wc -l | tr -d ' ')
 
     # Count truly unscheduled pods (Pending with no node assigned)
     # Pods in ContainerCreating are Pending but scheduled - they have a node

@@ -7,12 +7,20 @@ Namespace: {{ .Namespace }}
 ## Install
 
 ```bash
+{{ if .IsOCI -}}
+helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} --create-namespace \
+  -f values.yaml \
+  --wait --timeout 10m
+{{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f values.yaml \
   --wait --timeout 10m
+{{ end -}}
 ```
 {{ if .HasManifests }}
 After the chart is installed, apply additional manifests:
@@ -24,12 +32,20 @@ kubectl apply -f manifests/
 ## Upgrade
 
 ```bash
+{{ if .IsOCI -}}
+helm upgrade {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} \
+  -f values.yaml \
+  --wait --timeout 10m
+{{ else -}}
 helm upgrade {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} \
   -f values.yaml \
   --wait --timeout 10m
+{{ end -}}
 ```
 
 ## Uninstall

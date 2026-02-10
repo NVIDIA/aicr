@@ -216,6 +216,8 @@ func TestGenerate_WithManifests(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
+	manifestContent := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  namespace: {{ .Namespace }}\n  labels:\n    helm.sh/chart: {{ .ChartName }}-{{ .Version }}\n"
+
 	input := &GeneratorInput{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
@@ -225,7 +227,7 @@ func TestGenerate_WithManifests(t *testing.T) {
 		Version: "v1.0.0",
 		ComponentManifests: map[string]map[string][]byte{
 			"gpu-operator": {
-				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte("apiVersion: v1\nkind: ConfigMap\n"),
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(manifestContent),
 			},
 		},
 	}
@@ -241,14 +243,99 @@ func TestGenerate_WithManifests(t *testing.T) {
 		t.Error("gpu-operator/manifests/dcgm-exporter.yaml does not exist")
 	}
 
-	// Verify manifest content
+	// Verify manifest content was rendered with ComponentData
 	content, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatalf("failed to read manifest: %v", err)
 	}
-	if !strings.Contains(string(content), "ConfigMap") {
-		t.Error("manifest content incorrect")
+	rendered := string(content)
+	if !strings.Contains(rendered, "ConfigMap") {
+		t.Error("manifest missing ConfigMap kind")
 	}
+	if !strings.Contains(rendered, "namespace: gpu-operator") {
+		t.Errorf("manifest namespace not rendered, got: %s", rendered)
+	}
+	if !strings.Contains(rendered, "gpu-operator-25.3.3") {
+		t.Errorf("manifest chart label not rendered, got: %s", rendered)
+	}
+}
+
+func TestHasYAMLObjects(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		expected bool
+	}{
+		{"empty", "", false},
+		{"whitespace only", "  \n  \n", false},
+		{"comments only", "# comment\n# another\n", false},
+		{"separator only", "---\n", false},
+		{"comments and separators", "# Copyright\n# License\n---\n# more comments\n", false},
+		{"valid YAML", "apiVersion: v1\nkind: ConfigMap\n", true},
+		{"comments then YAML", "# header\napiVersion: v1\n", true},
+		{"separator then YAML", "---\napiVersion: v1\n", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := hasYAMLObjects([]byte(tt.content))
+			if result != tt.expected {
+				t.Errorf("hasYAMLObjects(%q) = %v, want %v", tt.content, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGenerate_EmptyManifestsSkipped(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	// Template that renders to empty when enabled=false
+	emptyTemplate := "# Comment\n{{- $cust := index .Values \"gpu-operator\" }}\n{{- if ne (toString (index $cust \"enabled\")) \"false\" }}\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n{{- end }}\n"
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {"enabled": "false"},
+		},
+		Version: "v1.0.0",
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/test.yaml": []byte(emptyTemplate),
+			},
+		},
+	}
+
+	output, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Manifest should not exist (rendered to empty)
+	manifestPath := filepath.Join(outputDir, "gpu-operator", "manifests", "test.yaml")
+	if _, statErr := os.Stat(manifestPath); !os.IsNotExist(statErr) {
+		t.Error("expected empty manifest to be skipped, but file exists")
+	}
+
+	// Manifests dir should not exist (removed when empty)
+	manifestDir := filepath.Join(outputDir, "gpu-operator", "manifests")
+	if _, statErr := os.Stat(manifestDir); !os.IsNotExist(statErr) {
+		t.Error("expected empty manifests directory to be removed")
+	}
+
+	// deploy.sh should NOT contain kubectl apply for gpu-operator manifests
+	deployPath := filepath.Join(outputDir, "deploy.sh")
+	deployContent, err := os.ReadFile(deployPath)
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	if strings.Contains(string(deployContent), "Applying manifests for gpu-operator") {
+		t.Error("deploy.sh should not contain manifest apply for disabled component")
+	}
+
+	_ = output
 }
 
 func TestGenerate_DeployScriptExecutable(t *testing.T) {
@@ -311,49 +398,6 @@ func TestNormalizeVersion(t *testing.T) {
 			result := normalizeVersion(tt.input)
 			if result != tt.expected {
 				t.Errorf("normalizeVersion(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestResolveChartName(t *testing.T) {
-	tests := []struct {
-		name          string
-		componentName string
-		expected      string
-	}{
-		{
-			name:          "kube-prometheus-stack resolves to kube-prometheus-stack",
-			componentName: "kube-prometheus-stack",
-			expected:      "kube-prometheus-stack",
-		},
-		{
-			name:          "gpu-operator resolves to gpu-operator",
-			componentName: "gpu-operator",
-			expected:      "gpu-operator",
-		},
-		{
-			name:          "cert-manager resolves to cert-manager",
-			componentName: "cert-manager",
-			expected:      "cert-manager",
-		},
-		{
-			name:          "skyhook-operator resolves to skyhook-operator",
-			componentName: "skyhook-operator",
-			expected:      "skyhook-operator",
-		},
-		{
-			name:          "unknown component falls back to component name",
-			componentName: "unknown-component",
-			expected:      "unknown-component",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := resolveChartName(tt.componentName)
-			if result != tt.expected {
-				t.Errorf("resolveChartName(%q) = %q, want %q", tt.componentName, result, tt.expected)
 			}
 		})
 	}
@@ -457,26 +501,50 @@ func TestBuildComponentDataListRejectsUnsafeNames(t *testing.T) {
 	}
 }
 
-func TestGetNamespace(t *testing.T) {
-	tests := []struct {
-		name      string
-		component string
-		expected  string
-	}{
-		{"gpu-operator", "gpu-operator", "gpu-operator"},
-		{"network-operator", "network-operator", "nvidia-network-operator"},
-		{"cert-manager", "cert-manager", "cert-manager"},
-		{"unknown", "some-component", defaultNamespace},
+func TestBuildComponentDataList_NamespaceAndChart(t *testing.T) {
+	const (
+		gpuOp   = "gpu-operator"
+		certMgr = "cert-manager"
+		unknown = "unknown"
+	)
+
+	g := NewGenerator()
+	input := &GeneratorInput{
+		RecipeResult: &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: gpuOp, Namespace: gpuOp, Chart: gpuOp, Version: "v1.0.0", Source: "https://example.com"},
+				{Name: certMgr, Namespace: certMgr, Chart: certMgr, Version: "v1.0.0", Source: "https://example.com"},
+				{Name: unknown, Version: "v1.0.0", Source: "https://example.com"},
+			},
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ref := recipe.ComponentRef{Name: tt.component}
-			result := getNamespace(ref)
-			if result != tt.expected {
-				t.Errorf("getNamespace(%q) = %q, want %q", tt.component, result, tt.expected)
+	components, err := g.buildComponentDataList(input)
+	if err != nil {
+		t.Fatalf("buildComponentDataList failed: %v", err)
+	}
+
+	for _, comp := range components {
+		switch comp.Name {
+		case gpuOp:
+			if comp.Namespace != gpuOp {
+				t.Errorf("gpu-operator namespace = %q, want %q", comp.Namespace, gpuOp)
 			}
-		})
+			if comp.ChartName != gpuOp {
+				t.Errorf("gpu-operator chart = %q, want %q", comp.ChartName, gpuOp)
+			}
+		case certMgr:
+			if comp.Namespace != certMgr {
+				t.Errorf("cert-manager namespace = %q, want %q", comp.Namespace, certMgr)
+			}
+		case unknown:
+			if comp.Namespace != "" {
+				t.Errorf("unknown namespace = %q, want empty", comp.Namespace)
+			}
+			if comp.ChartName != unknown {
+				t.Errorf("unknown chart = %q, want %q (fallback to name)", comp.ChartName, unknown)
+			}
+		}
 	}
 }
 
@@ -501,14 +569,18 @@ func createTestRecipeResult() *recipe.RecipeResult {
 		},
 		ComponentRefs: []recipe.ComponentRef{
 			{
-				Name:    "cert-manager",
-				Version: "v1.17.2",
-				Source:  "https://charts.jetstack.io",
+				Name:      "cert-manager",
+				Namespace: "cert-manager",
+				Chart:     "cert-manager",
+				Version:   "v1.17.2",
+				Source:    "https://charts.jetstack.io",
 			},
 			{
-				Name:    "gpu-operator",
-				Version: "v25.3.3",
-				Source:  "https://helm.ngc.nvidia.com/nvidia",
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.3.3",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
 			},
 		},
 		DeploymentOrder: []string{"cert-manager", "gpu-operator"},

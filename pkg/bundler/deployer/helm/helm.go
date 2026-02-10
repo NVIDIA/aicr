@@ -45,9 +45,6 @@ var deployScriptTemplate string
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
-// defaultNamespace is the default namespace for component deployment.
-const defaultNamespace = "nvidia-system"
-
 // ComponentData contains data for rendering per-component templates.
 type ComponentData struct {
 	Name         string
@@ -57,6 +54,7 @@ type ComponentData struct {
 	Version      string
 	HasManifests bool
 	HasChart     bool
+	IsOCI        bool
 }
 
 // GeneratorInput contains all data needed to generate a per-component Helm bundle.
@@ -213,14 +211,26 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 			}
 		}
 
+		chartName := ref.Chart
+		if chartName == "" {
+			chartName = ref.Name
+		}
+
+		isOCI := strings.HasPrefix(ref.Source, "oci://")
+		version := normalizeVersion(ref.Version)
+		if isOCI {
+			version = ref.Version
+		}
+
 		components = append(components, ComponentData{
 			Name:         ref.Name,
-			Namespace:    getNamespace(ref),
+			Namespace:    ref.Namespace,
 			Repository:   ref.Source,
-			ChartName:    resolveChartName(ref.Name),
-			Version:      normalizeVersion(ref.Version),
+			ChartName:    chartName,
+			Version:      version,
 			HasManifests: hasManifests,
 			HasChart:     ref.Source != "",
+			IsOCI:        isOCI,
 		})
 	}
 
@@ -232,7 +242,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 	files := make([]string, 0, len(components)*3)
 	var totalSize int64
 
-	for _, comp := range components {
+	for i, comp := range components {
 		select {
 		case <-ctx.Done():
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal, "context cancelled", ctx.Err())
@@ -289,6 +299,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 				}
 				sort.Strings(manifestPaths)
 
+				manifestsWritten := 0
 				for _, manifestPath := range manifestPaths {
 					content := manifests[manifestPath]
 					filename := filepath.Base(manifestPath)
@@ -298,15 +309,33 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 							fmt.Sprintf("invalid manifest filename %q in component %s", filename, comp.Name))
 					}
 
-					if err := os.WriteFile(outputPath, content, 0600); err != nil {
+					rendered, renderErr := renderManifest(content, comp, input.ComponentValues[comp.Name])
+					if renderErr != nil {
+						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to render manifest template", renderErr,
+							map[string]any{"component": comp.Name, "filename": filename})
+					}
+
+					if !hasYAMLObjects(rendered) {
+						slog.Debug("skipping empty manifest", "component", comp.Name, "filename", filename)
+						continue
+					}
+
+					if err := os.WriteFile(outputPath, rendered, 0600); err != nil {
 						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write manifest", err,
 							map[string]any{"component": comp.Name, "filename": filename})
 					}
 
 					files = append(files, outputPath)
-					totalSize += int64(len(content))
+					totalSize += int64(len(rendered))
+					manifestsWritten++
 
 					slog.Debug("wrote manifest", "component", comp.Name, "filename", filename)
+				}
+
+				// If no manifests had content, remove the empty directory and update flag
+				if manifestsWritten == 0 {
+					os.RemoveAll(manifestDir)
+					components[i].HasManifests = false
 				}
 			}
 		}
@@ -450,6 +479,101 @@ func (g *Generator) writeValuesFile(values map[string]any, baseDir, filename str
 	return outputPath, int64(len(content)), nil
 }
 
+// manifestData provides Helm-compatible template data for rendering manifests.
+type manifestData struct {
+	ComponentData
+	Values  map[string]any
+	Release releaseData
+	Chart   chartData
+}
+
+type releaseData struct {
+	Namespace string
+	Service   string
+}
+
+type chartData struct {
+	Name    string
+	Version string
+}
+
+// helmFuncMap returns Helm-compatible template functions for manifest rendering.
+func helmFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"toYaml": func(v any) string {
+			out, err := yaml.Marshal(v)
+			if err != nil {
+				return ""
+			}
+			return strings.TrimSuffix(string(out), "\n")
+		},
+		"nindent": func(indent int, s string) string {
+			pad := strings.Repeat(" ", indent)
+			lines := strings.Split(s, "\n")
+			for i, line := range lines {
+				if line != "" {
+					lines[i] = pad + line
+				}
+			}
+			return "\n" + strings.Join(lines, "\n")
+		},
+		"toString": func(v any) string {
+			return fmt.Sprintf("%v", v)
+		},
+		"default": func(def, val any) any {
+			if val == nil {
+				return def
+			}
+			if s, ok := val.(string); ok && s == "" {
+				return def
+			}
+			return val
+		},
+	}
+}
+
+// renderManifest renders manifest content as a Go template with Helm-compatible
+// data and functions. Manifests can use .Values, .Release, .Chart, and functions
+// like toYaml, nindent, toString, and default.
+func renderManifest(content []byte, data ComponentData, values map[string]any) ([]byte, error) {
+	tmpl, err := template.New("manifest").Funcs(helmFuncMap()).Parse(string(content))
+	if err != nil {
+		return nil, err
+	}
+
+	md := manifestData{
+		ComponentData: data,
+		Values:        map[string]any{data.Name: values},
+		Release: releaseData{
+			Namespace: data.Namespace,
+			Service:   "Helm",
+		},
+		Chart: chartData{
+			Name:    data.ChartName,
+			Version: data.Version,
+		},
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, md); err != nil {
+		return nil, err
+	}
+	return []byte(buf.String()), nil
+}
+
+// hasYAMLObjects returns true if content contains at least one YAML object
+// (a non-comment, non-blank, non-separator line).
+func hasYAMLObjects(content []byte) bool {
+	for _, line := range strings.Split(string(content), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 // normalizeVersion ensures version string is valid for Helm (semver without 'v' prefix for chart version)
 func normalizeVersion(v string) string {
 	// Remove 'v' prefix if present for chart version
@@ -459,29 +583,6 @@ func normalizeVersion(v string) string {
 		return "0.1.0"
 	}
 	return v
-}
-
-// resolveChartName returns the Helm chart name for a component.
-// It looks up the component in the registry and extracts the chart name from DefaultChart.
-// The chart name is the part after the last "/" in DefaultChart (e.g., "prometheus-community/kube-prometheus-stack" -> "kube-prometheus-stack").
-// Falls back to the component name if not found in registry or no DefaultChart is set.
-func resolveChartName(componentName string) string {
-	registry, err := recipe.GetComponentRegistry()
-	if err != nil {
-		return componentName
-	}
-
-	config := registry.Get(componentName)
-	if config == nil || config.Helm.DefaultChart == "" {
-		return componentName
-	}
-
-	// Extract chart name from DefaultChart (part after last "/")
-	defaultChart := config.Helm.DefaultChart
-	if idx := strings.LastIndex(defaultChart, "/"); idx >= 0 {
-		return defaultChart[idx+1:]
-	}
-	return defaultChart
 }
 
 // SortComponentsByDeploymentOrder sorts component names according to deployment order.
@@ -543,20 +644,6 @@ func sortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []stri
 	})
 
 	return sorted
-}
-
-// getNamespace returns the namespace for a component.
-func getNamespace(comp recipe.ComponentRef) string {
-	switch comp.Name {
-	case "gpu-operator":
-		return "gpu-operator"
-	case "network-operator":
-		return "nvidia-network-operator"
-	case "cert-manager":
-		return "cert-manager"
-	default:
-		return defaultNamespace
-	}
 }
 
 // isSafePathComponent returns true if name is a single path component without

@@ -789,6 +789,154 @@ func TestComponentRefApplyRegistryDefaults(t *testing.T) {
 	})
 }
 
+// TestComponentRefMergeNamespaceAndChart verifies that Namespace and Chart fields
+// are correctly merged when merging ComponentRefs (overlay into base).
+func TestComponentRefMergeNamespaceAndChart(t *testing.T) {
+	const gpuOp = "gpu-operator"
+
+	t.Run("namespace and chart inherited from base", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			ComponentRefs: []ComponentRef{
+				{
+					Name:      gpuOp,
+					Namespace: gpuOp,
+					Chart:     gpuOp,
+					Type:      ComponentTypeHelm,
+					Version:   "v1.0.0",
+				},
+			},
+		}
+
+		overlay := RecipeMetadataSpec{
+			ComponentRefs: []ComponentRef{
+				{
+					Name:    gpuOp,
+					Version: "v2.0.0",
+				},
+			},
+		}
+
+		base.Merge(&overlay)
+
+		comp := base.ComponentRefs[0]
+		if comp.Namespace != gpuOp {
+			t.Errorf("Namespace = %q, want %q (should be inherited from base)", comp.Namespace, gpuOp)
+		}
+		if comp.Chart != gpuOp {
+			t.Errorf("Chart = %q, want %q (should be inherited from base)", comp.Chart, gpuOp)
+		}
+		if comp.Version != "v2.0.0" {
+			t.Errorf("Version = %q, want %q (should be from overlay)", comp.Version, "v2.0.0")
+		}
+	})
+
+	t.Run("namespace and chart overridden by overlay", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			ComponentRefs: []ComponentRef{
+				{
+					Name:      gpuOp,
+					Namespace: gpuOp,
+					Chart:     gpuOp,
+					Type:      ComponentTypeHelm,
+					Version:   "v1.0.0",
+				},
+			},
+		}
+
+		overlay := RecipeMetadataSpec{
+			ComponentRefs: []ComponentRef{
+				{
+					Name:      gpuOp,
+					Namespace: "custom-ns",
+					Chart:     "custom-chart",
+				},
+			},
+		}
+
+		base.Merge(&overlay)
+
+		comp := base.ComponentRefs[0]
+		if comp.Namespace != "custom-ns" {
+			t.Errorf("Namespace = %q, want %q (should be from overlay)", comp.Namespace, "custom-ns")
+		}
+		if comp.Chart != "custom-chart" {
+			t.Errorf("Chart = %q, want %q (should be from overlay)", comp.Chart, "custom-chart")
+		}
+	})
+}
+
+// TestComponentRefApplyRegistryDefaults_NamespaceAndChart verifies that
+// ApplyRegistryDefaults populates Namespace and Chart from HelmConfig.
+func TestComponentRefApplyRegistryDefaults_NamespaceAndChart(t *testing.T) {
+	const gpuOp = "gpu-operator"
+
+	t.Run("namespace and chart applied from registry", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name:        gpuOp,
+			DisplayName: gpuOp,
+			Helm: HelmConfig{
+				DefaultRepository: "https://helm.ngc.nvidia.com/nvidia",
+				DefaultChart:      "nvidia/gpu-operator",
+				DefaultNamespace:  gpuOp,
+			},
+		}
+
+		ref := &ComponentRef{Name: gpuOp}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.Namespace != gpuOp {
+			t.Errorf("Namespace = %q, want %q", ref.Namespace, gpuOp)
+		}
+		if ref.Chart != gpuOp {
+			t.Errorf("Chart = %q, want %q", ref.Chart, gpuOp)
+		}
+	})
+
+	t.Run("existing namespace and chart not overwritten", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name:        gpuOp,
+			DisplayName: gpuOp,
+			Helm: HelmConfig{
+				DefaultRepository: "https://helm.ngc.nvidia.com/nvidia",
+				DefaultChart:      "nvidia/gpu-operator",
+				DefaultNamespace:  gpuOp,
+			},
+		}
+
+		ref := &ComponentRef{
+			Name:      gpuOp,
+			Namespace: "custom-ns",
+			Chart:     "custom-chart",
+		}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.Namespace != "custom-ns" {
+			t.Errorf("Namespace = %q, want %q (should not be overwritten)", ref.Namespace, "custom-ns")
+		}
+		if ref.Chart != "custom-chart" {
+			t.Errorf("Chart = %q, want %q (should not be overwritten)", ref.Chart, "custom-chart")
+		}
+	})
+
+	t.Run("chart extracted from slash-separated DefaultChart", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name:        "kube-prometheus-stack",
+			DisplayName: "kube-prometheus-stack",
+			Helm: HelmConfig{
+				DefaultChart:     "prometheus-community/kube-prometheus-stack",
+				DefaultNamespace: "nvidia-system",
+			},
+		}
+
+		ref := &ComponentRef{Name: "kube-prometheus-stack"}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.Chart != "kube-prometheus-stack" {
+			t.Errorf("Chart = %q, want %q (should extract after /)", ref.Chart, "kube-prometheus-stack")
+		}
+	})
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {
