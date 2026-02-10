@@ -604,9 +604,9 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 		{"gpu-operator", "gpu-operator"},
 		{"network-operator", "nvidia-network-operator"},
 		{"cert-manager", "cert-manager"},
-		{"nvsentinel", "nvidia-system"},
+		{"nvsentinel", "nvsentinel"},
 		{"skyhook-operator", "skyhook"},
-		{"kube-prometheus-stack", "nvidia-system"},
+		{"kube-prometheus-stack", "monitoring"},
 	}
 
 	for _, tt := range tests {

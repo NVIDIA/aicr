@@ -9,6 +9,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Run helm commands from a temp directory to prevent local chart directories
+# (e.g., bundle/skyhook-operator/) from shadowing remote chart references.
+HELM_WORKDIR="$(mktemp -d)"
+trap 'rm -rf "${HELM_WORKDIR}"' EXIT
+cd "${HELM_WORKDIR}"
+
 WAIT_ARGS="--wait --timeout 10m"
 if [[ "${1:-}" == "--no-wait" ]]; then
   WAIT_ARGS=""
