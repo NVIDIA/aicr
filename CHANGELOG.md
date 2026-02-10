@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-02-10
+
+### Bug Fixes
+
+- Split validator docker build into per-arch images with manifest list by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.5.0] - 2026-02-10
 
 ### Bug Fixes
