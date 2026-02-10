@@ -343,10 +343,11 @@ deploy_bundle() {
         return 1
     fi
 
-    # Run the generated deploy script
+    # Run the generated deploy script without --wait since KWOK clusters
+    # only validate scheduling, not pod readiness
     chmod +x "${bundle_dir}/deploy.sh"
-    log_info "Running deploy.sh..."
-    if ! "${bundle_dir}/deploy.sh" 2>&1; then
+    log_info "Running deploy.sh --no-wait..."
+    if ! "${bundle_dir}/deploy.sh" --no-wait 2>&1; then
         log_error "Deploy script failed"
         return 1
     fi
