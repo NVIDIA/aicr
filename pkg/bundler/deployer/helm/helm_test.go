@@ -57,7 +57,7 @@ func TestGenerate_Success(t *testing.T) {
 	}
 
 	// Verify root files exist
-	rootFiles := []string{"README.md", "deploy.sh"}
+	rootFiles := []string{"README.md", "deploy.sh", "undeploy.sh"}
 	for _, f := range rootFiles {
 		path := filepath.Join(outputDir, f)
 		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
@@ -101,9 +101,9 @@ func TestGenerate_Success(t *testing.T) {
 		t.Error("Chart.yaml should not exist in per-component bundle")
 	}
 
-	// Verify output has reasonable file count (2 root files + 2 component dirs × 2 files each = 6)
-	if len(output.Files) < 6 {
-		t.Errorf("expected at least 6 files, got %d", len(output.Files))
+	// Verify output has reasonable file count (3 root files + 2 component dirs × 2 files each = 7)
+	if len(output.Files) < 7 {
+		t.Errorf("expected at least 7 files, got %d", len(output.Files))
 	}
 }
 
@@ -186,6 +186,9 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 	if !strings.Contains(content, "deploy.sh") {
 		t.Error("checksums.txt missing deploy.sh")
+	}
+	if !strings.Contains(content, "undeploy.sh") {
+		t.Error("checksums.txt missing undeploy.sh")
 	}
 	if !strings.Contains(content, filepath.Join("cert-manager", "values.yaml")) {
 		t.Error("checksums.txt missing cert-manager/values.yaml")
@@ -379,6 +382,65 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "set -euo pipefail") {
 		t.Error("deploy.sh missing strict mode")
+	}
+}
+
+func TestGenerate_UndeployScriptExecutable(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	undeployPath := filepath.Join(outputDir, "undeploy.sh")
+	info, statErr := os.Stat(undeployPath)
+	if os.IsNotExist(statErr) {
+		t.Fatal("undeploy.sh does not exist")
+	}
+
+	// Check executable permission (0755)
+	mode := info.Mode()
+	if mode&0111 == 0 {
+		t.Errorf("undeploy.sh is not executable, mode: %o", mode)
+	}
+
+	// Verify content
+	content, err := os.ReadFile(undeployPath)
+	if err != nil {
+		t.Fatalf("failed to read undeploy.sh: %v", err)
+	}
+	script := string(content)
+
+	if !strings.HasPrefix(script, "#!/usr/bin/env bash") {
+		t.Error("undeploy.sh missing shebang")
+	}
+	if !strings.Contains(script, "set -euo pipefail") {
+		t.Error("undeploy.sh missing strict mode")
+	}
+	if !strings.Contains(script, "helm uninstall") {
+		t.Error("undeploy.sh missing helm uninstall command")
+	}
+
+	// Verify reverse order: gpu-operator should appear before cert-manager
+	gpuIdx := strings.Index(script, "Uninstalling gpu-operator")
+	certIdx := strings.Index(script, "Uninstalling cert-manager")
+	if gpuIdx < 0 || certIdx < 0 {
+		t.Fatal("undeploy.sh missing component uninstall lines")
+	}
+	if gpuIdx > certIdx {
+		t.Error("undeploy.sh components not in reverse order: gpu-operator should come before cert-manager")
 	}
 }
 

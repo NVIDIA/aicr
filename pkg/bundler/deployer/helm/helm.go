@@ -42,6 +42,9 @@ var componentReadmeTemplate string
 //go:embed templates/deploy.sh.tmpl
 var deployScriptTemplate string
 
+//go:embed templates/undeploy.sh.tmpl
+var undeployScriptTemplate string
+
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
@@ -150,6 +153,15 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	}
 	output.Files = append(output.Files, deployPath)
 	output.TotalSize += deploySize
+
+	// Generate undeploy.sh
+	undeployPath, undeploySize, err := g.generateUndeployScript(ctx, input, components, outputDir)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to generate undeploy.sh", err)
+	}
+	output.Files = append(output.Files, undeployPath)
+	output.TotalSize += undeploySize
 
 	// Generate checksums.txt if requested
 	if input.IncludeChecksums {
@@ -423,6 +435,39 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 	}
 
 	return deployPath, deploySize, nil
+}
+
+// generateUndeployScript creates the undeploy.sh automation script.
+func (g *Generator) generateUndeployScript(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) (string, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return "", 0, err
+	}
+
+	// Build reversed component list for uninstall order
+	reversed := make([]ComponentData, len(components))
+	for i, comp := range components {
+		reversed[len(components)-1-i] = comp
+	}
+
+	data := struct {
+		BundlerVersion     string
+		ComponentsReversed []ComponentData
+	}{
+		BundlerVersion:     input.Version,
+		ComponentsReversed: reversed,
+	}
+
+	undeployPath, undeploySize, err := g.generateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
+	if err != nil {
+		return "", 0, err
+	}
+
+	// Make executable
+	if err := os.Chmod(undeployPath, 0755); err != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to set undeploy.sh permissions", err)
+	}
+
+	return undeployPath, undeploySize, nil
 }
 
 // generateFromTemplate renders a template and writes it to baseDir/filename.
