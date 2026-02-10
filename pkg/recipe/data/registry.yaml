@@ -284,6 +284,8 @@ components:
     nodeScheduling:
       system:
         nodeSelectorPaths:
-          - controllerManager.nodeSelector
+          - manager.nodeSelector
+          - jobset.controller.nodeSelector
         tolerationPaths:
-          - controllerManager.tolerations
+          - manager.tolerations
+          - jobset.controller.tolerations
