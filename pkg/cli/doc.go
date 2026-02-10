@@ -81,12 +81,12 @@
 // bundle - Create deployment bundles (Step 4):
 //
 //	eidos bundle --recipe recipe.yaml --output ./bundles
-//	eidos bundle -r recipe.yaml --bundlers gpu-operator,network-operator -o ./bundles
+//	eidos bundle -r recipe.yaml --deployer argocd -o ./bundles
 //	eidos bundle -r recipe.yaml --set gpuoperator:driver.version=580.86.16
 //
-// Generates deployment artifacts (Helm values, manifests, scripts) from recipes.
-// Supports multiple bundlers: gpu-operator, network-operator, cert-manager,
-// nvsentinel, skyhook.
+// Generates deployment artifacts from recipes. By default creates a Helm
+// per-component bundle with individual values.yaml per component. Use
+// --deployer argocd for ArgoCD Application manifests.
 //
 // # Global Flags
 //

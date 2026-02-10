@@ -591,6 +591,68 @@ func TestComponentRegistry_Validate_MutuallyExclusiveHelmKustomize(t *testing.T)
 	})
 }
 
+func TestHelmConfig_DefaultNamespace(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	tests := []struct {
+		name              string
+		expectedNamespace string
+	}{
+		{"gpu-operator", "gpu-operator"},
+		{"network-operator", "nvidia-network-operator"},
+		{"cert-manager", "cert-manager"},
+		{"nvsentinel", "nvidia-system"},
+		{"skyhook-operator", "skyhook"},
+		{"kube-prometheus-stack", "nvidia-system"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := registry.Get(tt.name)
+			if comp == nil {
+				t.Fatalf("component %s not found in registry", tt.name)
+			}
+			if comp.Helm.DefaultNamespace != tt.expectedNamespace {
+				t.Errorf("DefaultNamespace = %q, want %q", comp.Helm.DefaultNamespace, tt.expectedNamespace)
+			}
+		})
+	}
+}
+
+func TestHelmConfig_DefaultNamespaceParsing(t *testing.T) {
+	yamlData := `
+apiVersion: eidos.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: test-component
+    displayName: Test Component
+    valueOverrideKeys:
+      - testcomp
+    helm:
+      defaultRepository: https://charts.example.com
+      defaultChart: example/test-component
+      defaultNamespace: custom-namespace
+`
+
+	var registry ComponentRegistry
+	err := yaml.Unmarshal([]byte(yamlData), &registry)
+	if err != nil {
+		t.Fatalf("failed to unmarshal YAML: %v", err)
+	}
+
+	if len(registry.Components) != 1 {
+		t.Fatalf("expected 1 component, got %d", len(registry.Components))
+	}
+
+	comp := registry.Components[0]
+	if comp.Helm.DefaultNamespace != "custom-namespace" {
+		t.Errorf("Helm.DefaultNamespace = %q, want %q", comp.Helm.DefaultNamespace, "custom-namespace")
+	}
+}
+
 func TestKustomizeConfig_Parsing(t *testing.T) {
 	// Test that KustomizeConfig can be parsed correctly from YAML
 	const (

@@ -67,7 +67,7 @@ metrics:
   enabled: true
   # ServiceMonitor for Prometheus Operator
   serviceMonitor:
-    enabled: true
+    enabled: false
 
 # Security context for pods
 podSecurityContext:

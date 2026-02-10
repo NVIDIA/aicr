@@ -532,7 +532,8 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
 KWOK (Kubernetes WithOut Kubelet) tests recipe configurations and bundle scheduling without GPU hardware.
 
 ```bash
-make kwok-test-all                      # Test all recipes
+make kwok-test-all                      # Test all recipes (serial, shared cluster)
+make kwok-test-all-parallel             # Test all recipes (parallel, dedicated clusters)
 make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 ```
 
@@ -540,7 +541,8 @@ Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates
 
 | Command | Description |
 |---------|-------------|
-| `make kwok-test-all` | Test all recipes in shared cluster |
+| `make kwok-test-all` | Test all recipes in shared cluster (serial) |
+| `make kwok-test-all-parallel` | Test all recipes in parallel clusters |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
 | `make kwok-status` | Show cluster and node status |
@@ -565,7 +567,8 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make e2e-tilt` | E2E tests with Tilt cluster |
 | `make scan` | Vulnerability scan with grype |
 | `make bench` | Run benchmarks |
-| `make kwok-test-all` | Test all recipes with KWOK simulated clusters |
+| `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
+| `make kwok-test-all-parallel` | Test all recipes with KWOK (parallel, dedicated clusters) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 
 ### Build & Release

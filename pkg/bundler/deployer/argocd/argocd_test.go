@@ -42,16 +42,20 @@ func TestGenerate_Success(t *testing.T) {
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
 		{
-			Name:    "cert-manager",
-			Version: "v1.17.2",
-			Type:    "helm",
-			Source:  "https://charts.jetstack.io",
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      "helm",
+			Source:    "https://charts.jetstack.io",
 		},
 		{
-			Name:    "gpu-operator",
-			Version: "v25.3.3",
-			Type:    "helm",
-			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
@@ -220,10 +224,12 @@ func TestGenerate_WithRepoURL(t *testing.T) {
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
 		{
-			Name:    "gpu-operator",
-			Version: "v25.3.3",
-			Type:    "helm",
-			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 
@@ -258,16 +264,20 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
 		{
-			Name:    "cert-manager",
-			Version: "v1.17.2",
-			Type:    "helm",
-			Source:  "https://charts.jetstack.io",
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      "helm",
+			Source:    "https://charts.jetstack.io",
 		},
 		{
-			Name:    "gpu-operator",
-			Version: "v25.3.3",
-			Type:    "helm",
-			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
@@ -326,10 +336,12 @@ func TestGenerate_ContextCancellation(t *testing.T) {
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
 		{
-			Name:    "gpu-operator",
-			Version: "v25.3.3",
-			Type:    "helm",
-			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 
@@ -408,25 +420,75 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 	}
 }
 
-func TestGetNamespace(t *testing.T) {
+func TestSafeJoin(t *testing.T) {
+	baseDir := t.TempDir()
+
 	tests := []struct {
-		component string
-		expected  string
+		name    string
+		dir     string
+		input   string
+		wantErr bool
 	}{
-		{"gpu-operator", "gpu-operator"},
-		{"network-operator", "nvidia-network-operator"},
-		{"cert-manager", "cert-manager"},
-		{"unknown-component", defaultNamespace},
+		{"valid component", baseDir, "gpu-operator", false},
+		{"valid with dots", baseDir, "cert-manager", false},
+		{"path traversal", baseDir, "../etc/passwd", true},
+		{"double dot", baseDir, "..", true},
+		{"absolute path rejected", baseDir, "/etc/passwd", true},
+		{"empty name", baseDir, "", false}, // empty joins to baseDir itself
+		{"relative base", ".", "gpu-operator", false},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.component, func(t *testing.T) {
-			comp := recipe.ComponentRef{Name: tt.component}
-			ns := getNamespace(comp)
-			if ns != tt.expected {
-				t.Errorf("getNamespace(%s) = %s, want %s", tt.component, ns, tt.expected)
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := safeJoin(tt.dir, tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("safeJoin(%q, %q) error = %v, wantErr %v", tt.dir, tt.input, err, tt.wantErr)
+				return
+			}
+			if err == nil && result == "" {
+				t.Errorf("safeJoin(%q, %q) returned empty path", tt.dir, tt.input)
 			}
 		})
+	}
+}
+
+func TestApplicationData_NamespaceFromComponentRef(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	input := &GeneratorInput{
+		RecipeResult: recipeResult,
+		Version:      "v0.9.0",
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify namespace is used in application.yaml
+	appPath := filepath.Join(outputDir, "gpu-operator", "application.yaml")
+	content, readErr := os.ReadFile(appPath)
+	if readErr != nil {
+		t.Fatalf("Failed to read application.yaml: %v", readErr)
+	}
+	if !strings.Contains(string(content), "gpu-operator") {
+		t.Error("application.yaml should reference gpu-operator namespace")
 	}
 }
 
@@ -461,16 +523,20 @@ func TestGenerate_Reproducible(t *testing.T) {
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
 		{
-			Name:    "cert-manager",
-			Version: "v1.17.2",
-			Type:    "helm",
-			Source:  "https://charts.jetstack.io",
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      "helm",
+			Source:    "https://charts.jetstack.io",
 		},
 		{
-			Name:    "gpu-operator",
-			Version: "v25.3.3",
-			Type:    "helm",
-			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
@@ -558,10 +624,12 @@ func TestGenerate_NoTimestampInOutput(t *testing.T) {
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
 		{
-			Name:    "gpu-operator",
-			Version: "v25.3.3",
-			Type:    "helm",
-			Source:  "https://helm.ngc.nvidia.com/nvidia",
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"gpu-operator"}

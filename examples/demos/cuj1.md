@@ -35,15 +35,15 @@ eidos bundle \
   --recipe recipe.yaml \
   --system-node-selector nodeGroup=system-pool \
   --accelerated-node-selector nodeGroup=gpu-worker \
-  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
+  --output bundle
 ```
 
 ## Install Bundle into the Cluster
 
 ```shell
-cd ./bundle
-helm dependency update
-helm install eidos-stack . -f values.yaml
+chmod +x deploy.sh
+./deploy.sh
 ```
 
 ## Validate Cluster 

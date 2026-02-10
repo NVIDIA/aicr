@@ -291,16 +291,16 @@ eidos recipe --snapshot snapshot.yaml --intent training --platform kubeflow
 eidos recipe --service eks --accelerator h100 --intent training --os ubuntu
 
 # Create deployment bundle
-eidos bundle --recipe recipe.yaml --bundlers gpu-operator --output ./bundles
+eidos bundle --recipe recipe.yaml --output ./bundles
 
 # Override bundle values at generation time
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --set gpuoperator:gds.enabled=true \
   --set gpuoperator:driver.version=570.86.16 \
   -o ./bundles
 
 # Node scheduling with selectors and tolerations
-eidos bundle -r recipe.yaml -b gpu-operator \
+eidos bundle -r recipe.yaml \
   --system-node-selector nodeGroup=system-pool \
   --system-node-toleration dedicated=system:NoSchedule \
   --accelerated-node-selector nvidia.com/gpu.present=true \
@@ -308,7 +308,7 @@ eidos bundle -r recipe.yaml -b gpu-operator \
   -o ./bundles
 
 # GitOps deployment with ArgoCD (sync-wave ordering)
-eidos bundle -r recipe.yaml -b gpu-operator,network-operator \
+eidos bundle -r recipe.yaml \
   --deployer argocd \
   --repo https://github.com/my-org/my-gitops-repo.git \
   -o ./bundles
@@ -773,14 +773,11 @@ eidos recipe \
 # 3. Create deployment bundle
 eidos bundle \
   --recipe recipe.yaml \
-  --bundlers gpu-operator \
   --output ./bundles
 
 # 4. Deploy to cluster
-cd bundles/gpu-operator
-sha256sum -c checksums.txt  # Verify integrity
-chmod +x scripts/install.sh
-./scripts/install.sh
+cd bundles
+chmod +x deploy.sh && ./deploy.sh
 ```
 
 ### ConfigMap-based Workflow (for Kubernetes Jobs)
@@ -797,7 +794,6 @@ eidos recipe -s cm://gpu-operator/eidos-snapshot \
 
 # 3. Create bundle from ConfigMap recipe
 eidos bundle -r cm://gpu-operator/eidos-recipe \
-  -b gpu-operator \
   -o ./bundles
 
 # 4. Verify ConfigMap data

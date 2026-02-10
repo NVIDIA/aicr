@@ -33,13 +33,14 @@ import (
 	"github.com/NVIDIA/eidos/pkg/recipe"
 )
 
-// DefaultBundler generates Helm umbrella charts from recipes.
+// DefaultBundler generates Helm per-component bundles from recipes.
 //
-// The umbrella chart approach produces a single Helm chart with dependencies
-// that can be deployed using standard Helm commands:
+// The per-component approach produces a directory per component, each with its
+// own values.yaml, README, and optional manifests. A root deploy.sh orchestrates
+// installation in order:
 //
-//	helm dependency update
-//	helm install eidos-stack . -f values.yaml
+//	chmod +x deploy.sh
+//	./deploy.sh
 //
 // Thread-safety: DefaultBundler is safe for concurrent use.
 type DefaultBundler struct {
@@ -100,14 +101,16 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 }
 
 // Make generates a deployment bundle from the given recipe.
-// By default, generates a Helm umbrella chart. If deployer is set to "argocd",
+// By default, generates a Helm per-component bundle. If deployer is set to "argocd",
 // generates ArgoCD Application manifests.
 //
-// For umbrella chart output:
-//   - Chart.yaml: Helm chart metadata with dependencies
-//   - values.yaml: Combined values for all components
-//   - README.md: Deployment instructions
+// For Helm per-component output:
+//   - README.md: Root deployment guide with ordered steps
+//   - deploy.sh: Automation script (0755)
 //   - recipe.yaml: Copy of the input recipe
+//   - <component>/values.yaml: Helm values per component
+//   - <component>/README.md: Component install/upgrade/uninstall
+//   - <component>/manifests/: Optional manifest files
 //   - checksums.txt: SHA256 checksums of generated files
 //
 // For ArgoCD output:
@@ -162,37 +165,37 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	if deployer == config.DeployerArgoCD {
 		return b.makeArgoCD(ctx, recipeResult, componentValues, dir, start)
 	}
-	return b.makeUmbrellaChart(ctx, recipeResult, componentValues, dir, start)
+	return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
 }
 
-// makeUmbrellaChart generates a Helm umbrella chart.
-func (b *DefaultBundler) makeUmbrellaChart(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	slog.Debug("generating umbrella chart",
+// makeHelmBundle generates a Helm per-component bundle.
+func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
+	slog.Debug("generating helm bundle",
 		"component_count", len(recipeResult.ComponentRefs),
 		"output_dir", dir,
 	)
 
-	// Collect manifest contents from components
-	manifestContents, err := b.collectManifestContents(ctx, recipeResult)
+	// Collect manifest contents from components (keyed by component name)
+	componentManifests, err := b.collectComponentManifests(ctx, recipeResult)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to collect manifest contents", err)
+			"failed to collect component manifests", err)
 	}
 
-	// Generate umbrella chart
+	// Generate per-component bundle
 	generator := helm.NewGenerator()
 	generatorInput := &helm.GeneratorInput{
-		RecipeResult:     recipeResult,
-		ComponentValues:  componentValues,
-		Version:          b.Config.Version(),
-		IncludeChecksums: b.Config.IncludeChecksums(),
-		ManifestContents: manifestContents,
+		RecipeResult:       recipeResult,
+		ComponentValues:    componentValues,
+		Version:            b.Config.Version(),
+		IncludeChecksums:   b.Config.IncludeChecksums(),
+		ComponentManifests: componentManifests,
 	}
 
 	output, err := generator.Generate(ctx, generatorInput, dir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate umbrella chart", err)
+			"failed to generate helm bundle", err)
 	}
 
 	// Write recipe file
@@ -202,7 +205,7 @@ func (b *DefaultBundler) makeUmbrellaChart(ctx context.Context, recipeResult *re
 			"failed to write recipe file", err)
 	}
 
-	// Build result output - includes umbrella chart files + recipe.yaml
+	// Build result output
 	resultOutput := &result.Output{
 		Results:       make([]*result.Result, 0),
 		Errors:        make([]result.BundleError, 0),
@@ -212,23 +215,23 @@ func (b *DefaultBundler) makeUmbrellaChart(ctx context.Context, recipeResult *re
 		OutputDir:     dir,
 	}
 
-	// Add a single result for the umbrella chart
-	umbrellaResult := &result.Result{
-		Type:     "umbrella-chart",
+	// Add a single result for the helm bundle
+	helmResult := &result.Result{
+		Type:     "helm-bundle",
 		Success:  true,
 		Files:    output.Files,
 		Size:     output.TotalSize,
 		Duration: output.Duration,
 	}
-	resultOutput.Results = append(resultOutput.Results, umbrellaResult)
+	resultOutput.Results = append(resultOutput.Results, helmResult)
 
 	// Populate deployment info from generator output
 	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "Helm umbrella chart",
+		Type:  "Helm per-component bundle",
 		Steps: output.DeploymentSteps,
 	}
 
-	slog.Debug("umbrella chart generation complete",
+	slog.Debug("helm bundle generation complete",
 		"files", len(output.Files),
 		"size_bytes", output.TotalSize,
 		"duration", output.Duration,
@@ -453,30 +456,32 @@ func removeHyphens(s string) string {
 	return strings.ReplaceAll(s, "-", "")
 }
 
-// collectManifestContents gathers manifest file contents from all components.
-func (b *DefaultBundler) collectManifestContents(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string][]byte, error) {
-	contents := make(map[string][]byte)
+// collectComponentManifests gathers manifest file contents from all components,
+// keyed by component name then manifest path.
+func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+	result := make(map[string]map[string][]byte)
 
 	for _, ref := range recipeResult.ComponentRefs {
-		// Check context cancellation at the outer loop
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled while collecting manifest contents", ctx.Err())
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled while collecting component manifests", ctx.Err())
 		default:
 		}
 
-		for _, manifestPath := range ref.ManifestFiles {
-			if _, exists := contents[manifestPath]; exists {
-				continue // Already loaded (could be shared across components)
-			}
+		if len(ref.ManifestFiles) == 0 {
+			continue
+		}
 
+		componentManifests := make(map[string][]byte, len(ref.ManifestFiles))
+		for _, manifestPath := range ref.ManifestFiles {
 			content, err := recipe.GetManifestContent(manifestPath)
 			if err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load manifest %s for component %s", manifestPath, ref.Name), err)
 			}
-			contents[manifestPath] = content
+			componentManifests[manifestPath] = content
 		}
+		result[ref.Name] = componentManifests
 	}
 
-	return contents, nil
+	return result, nil
 }

@@ -89,30 +89,21 @@ ensure_cluster() {
 cleanup_between_tests() {
     log_info "Cleaning up for next test..."
 
-    # Uninstall Helm release FIRST - this runs pre-delete hooks that need KWOK nodes
-    helm uninstall eidos-test -n eidos-kwok-test --wait 2>/dev/null || true
-
-    # Clean up stale APIServices that can cause namespace deletion to hang
-    # prometheus-adapter creates these and they become stale when the adapter is deleted
-    for api in v1beta1.custom.metrics.k8s.io v1beta1.external.metrics.k8s.io; do
-        if kubectl get apiservice "$api" &>/dev/null; then
-            local available
-            available=$(kubectl get apiservice "$api" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
-            if [[ "$available" != "True" ]]; then
-                log_info "Removing stale APIService: $api"
-                kubectl delete apiservice "$api" --ignore-not-found 2>/dev/null || true
-            fi
-        fi
-    done
-
-    # Delete KWOK nodes AFTER Helm uninstall (hooks may need them)
+    # Delete KWOK nodes (validate-scheduling.sh EXIT trap handles Helm/ns cleanup,
+    # but nodes are managed by run-all-recipes.sh)
     kubectl delete nodes -l type=kwok --ignore-not-found --force --grace-period=0 2>/dev/null || true
-
-    # Delete test namespace
-    kubectl delete ns eidos-kwok-test --ignore-not-found --wait=false 2>/dev/null || true
 
     # Clean up orphaned CRDs from cert-manager (cluster-scoped, not cleaned by ns delete)
     kubectl delete crd -l app.kubernetes.io/instance=eidos-test --ignore-not-found 2>/dev/null || true
+
+    # Wait for any still-terminating namespaces before next recipe
+    local system_ns="default|kube-node-lease|kube-public|kube-system|kwok-system|local-path-storage"
+    local terminating
+    terminating=$(kubectl get ns -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}' 2>/dev/null | grep -vE "^(${system_ns})$" || true)
+    for ns in $terminating; do
+        log_info "Waiting for namespace $ns to terminate..."
+        kubectl wait --for=delete "ns/$ns" --timeout=120s 2>/dev/null || true
+    done
 }
 
 run_recipe_test() {

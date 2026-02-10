@@ -44,7 +44,7 @@ spec:
     - name: nvsentinel
       type: Helm
       source: oci://ghcr.io/nvidia
-      version: v0.6.0
+      version: v0.8.0
       valuesFile: components/nvsentinel/values.yaml
       manifestFiles:
         - components/nvsentinel/manifests/allow-intra-namespace.yaml

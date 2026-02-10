@@ -60,7 +60,7 @@ This directory contains architecture documentation for the Eidos (Eidos) tooling
 - **Deployer Framework**: GitOps integration for deployment artifacts
   - Deployment methods: `helm` (default), `argocd`
   - Deployment ordering: Respects `deploymentOrder` from recipe for correct component installation sequence
-  - Helm: Generates Helm umbrella chart with dependencies
+  - Helm: Generates Helm per-component bundle with individual values.yaml and deploy script
   - ArgoCD: Uses `sync-wave` annotations for ordered deployment
 
 ## Overview
@@ -113,7 +113,7 @@ Generates deployment-ready bundles (Helm values, Kubernetes manifests, installat
 - **Parallel execution** of multiple bundlers by default
 - **Available bundlers**: GPU Operator, Network Operator, Skyhook, Cert-Manager, NVSentinel, DRA Driver
 - **Deployment methods** (`--deployer` flag):
-  - `helm` (default): Helm umbrella chart with dependencies
+  - `helm` (default): Helm per-component bundle with individual values.yaml and deploy script
   - `argocd`: ArgoCD Application manifests with sync-wave ordering (use `--repo` to set Git repository URL)
 - **Deployment ordering**: Components deployed in sequence defined by recipe's `deploymentOrder` field
 - **Value Overrides**: Use `--set bundler:path.to.field=value` to customize generated bundles (CLI only)
@@ -814,7 +814,7 @@ type ComponentConfig struct {
 
 **Implementation**: Declarative configuration in `pkg/recipe/data/registry.yaml`
 **Code Size**: Zero Go code required
-**Output**: Helm umbrella chart with GPU Operator as dependency
+**Output**: Helm per-component bundle with GPU Operator configuration
 
 **Registry Configuration** (`pkg/recipe/data/registry.yaml`):
 ```yaml
@@ -842,16 +842,19 @@ type ComponentConfig struct {
         - daemonsets.tolerations
 ```
 
-**Bundle Contents** (Helm umbrella chart):
+**Bundle Contents** (Helm per-component bundle):
 ```
 bundle/
-├── Chart.yaml               # Umbrella chart with dependencies
-├── values.yaml              # Combined values for all components
-├── README.md                # Deployment instructions
-├── recipe.yaml              # Copy of input recipe
-├── templates/               # Custom manifests (if any)
-│   └── dcgm-exporter.yaml   # DCGM metrics ConfigMap
-└── checksums.txt            # SHA256 checksums
+├── gpu-operator/
+│   ├── values.yaml          # Component-specific Helm values
+│   ├── manifests/           # Custom manifests (if any)
+│   │   └── dcgm-exporter.yaml   # DCGM metrics ConfigMap
+│   ├── scripts/
+│   │   ├── install.sh       # Installation script
+│   │   └── uninstall.sh     # Cleanup script
+│   ├── README.md            # Deployment instructions
+│   └── checksums.txt        # SHA256 checksums
+└── recipe.yaml              # Copy of input recipe
 ```
 
 ### Example: Adding a New Component
@@ -922,7 +925,7 @@ func main() {
         panic(err)
     }
 
-    // Generate umbrella chart
+    // Generate per-component bundle
     output, err := b.Make(ctx, recipeResult, "./output")
     if err != nil {
         panic(err)
@@ -936,8 +939,8 @@ func main() {
 **Declarative Configuration**:
 Components are configured in `pkg/recipe/data/registry.yaml`. The bundler automatically loads component configuration from the registry based on the recipe's `componentRefs`.
 
-**Umbrella Chart Generation**:
-The bundler generates a Helm umbrella chart with all components as dependencies, using the combined values from each component's configuration.
+**Per-Component Bundle Generation**:
+The bundler generates a per-component Helm bundle with individual values and manifests for each component, based on the recipe's `componentRefs`.
 
 
 ### Metrics and Observability
@@ -1121,6 +1124,20 @@ flowchart TD
 
 **Permissions**: `attestations: write`, `contents: write`, `id-token: write`, `packages: write`
 
+### KWOK Scheduling Validation (kwok-recipes.yaml)
+
+**Trigger**: Push to `main` or pull request (when recipe/bundler/KWOK files change), plus `workflow_dispatch`
+
+**Pipeline**: Uses `kwok/scripts/run-all-recipes.sh` — the same script used by `make kwok-test-all` — for maximum local reproducibility.
+
+**How it works**:
+- Single shared Kind cluster with KWOK provider
+- Recipes tested sequentially with cleanup between each
+- For each recipe: generate bundle → deploy via Helm → verify pod scheduling on KWOK nodes
+- Optional `recipe` input for single-recipe testing via `workflow_dispatch`
+
+**Key design**: CI calls the exact same `run-all-recipes.sh` entry point as local development, ensuring local test results match CI results.
+
 ### Composite Actions Architecture
 
 **Three-Layer Design**:
@@ -1140,6 +1157,7 @@ flowchart TD
 3. **Workflows** (Orchestrate actions):
    - `on-push.yaml`: CI validation
    - `on-tag.yaml`: Release, attestation, deployment
+   - `kwok-recipes.yaml`: KWOK scheduling validation (all recipes)
 
 **Benefits**:
 - **Reusability**: Actions shared across workflows

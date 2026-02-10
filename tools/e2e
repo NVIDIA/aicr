@@ -202,11 +202,11 @@ check_file_contains() {
 # BUNDLE VERIFICATION HELPERS
 # ============================================================================
 
-# Verify umbrella chart structure
-verify_umbrella_chart() {
+# Verify per-component bundle structure
+verify_helm_bundle() {
   local bundle_dir=$1
   local test_name=$2
-  local required_files=("Chart.yaml" "values.yaml" "README.md" "recipe.yaml")
+  local required_files=("README.md" "deploy.sh" "recipe.yaml")
 
   for file in "${required_files[@]}"; do
     if [ ! -f "${bundle_dir}/${file}" ]; then
@@ -215,55 +215,46 @@ verify_umbrella_chart() {
     fi
   done
 
-  if ! grep -q "dependencies:" "${bundle_dir}/Chart.yaml"; then
-    test_fail "$test_name" "Chart.yaml missing dependencies"
-    return 1
-  fi
+  # Verify at least one component subdirectory exists with values.yaml
+  local found_component=false
+  local subdir
+  for subdir in "${bundle_dir}"/*/; do
+    if [ -d "$subdir" ] && [ -f "${subdir}values.yaml" ]; then
+      found_component=true
+      break
+    fi
+  done
 
-  if [ ! -s "${bundle_dir}/values.yaml" ]; then
-    test_fail "$test_name" "values.yaml is empty"
+  if [ "$found_component" != "true" ]; then
+    test_fail "$test_name" "No component directories with values.yaml found"
     return 1
   fi
 
   test_pass "$test_name"
 }
 
-# Verify Helm chart validity (lint, deps, template)
-verify_helm_chart() {
+# Verify deploy script is present and executable
+verify_deploy_script() {
   local bundle_dir=$1
   local test_name=$2
 
-  [ "$HELM_AVAILABLE" != "true" ] && return 0
-
-  # Fix "dev" version for helm
-  local chart_file="${bundle_dir}/Chart.yaml"
-  if grep -q "version: dev" "$chart_file" 2>/dev/null; then
-    sed -i.bak 's/version: dev/version: 0.0.0-dev/' "$chart_file"
-    rm -f "${chart_file}.bak"
+  if [ ! -f "${bundle_dir}/deploy.sh" ]; then
+    test_fail "${test_name}/deploy-script" "deploy.sh missing"
+    return 1
   fi
 
-  # Helm lint
-  local lint_output
-  if ! lint_output=$(helm lint "$bundle_dir" 2>&1); then
-    if echo "$lint_output" | grep -q "chart directory is missing these dependencies"; then
-      # Expected - dependencies aren't downloaded
-      if echo "$lint_output" | grep -q "Error:"; then
-        test_fail "${test_name}/helm-lint" "$(echo "$lint_output" | grep "Error:")"
-        return 1
-      fi
-    else
-      test_fail "${test_name}/helm-lint" "$lint_output"
-      return 1
-    fi
+  if [ ! -x "${bundle_dir}/deploy.sh" ]; then
+    test_fail "${test_name}/deploy-script" "deploy.sh not executable"
+    return 1
   fi
-  test_pass "${test_name}/helm-lint"
 
-  # Helm dependency update (optional - may fail without network)
-  if timeout 60 helm dependency update "$bundle_dir" >/dev/null 2>&1; then
-    test_pass "${test_name}/helm-dep-update"
-    # Skip helm template - it can be very slow with large umbrella charts
-    # and may fail due to missing namespace/values requirements
+  # Verify shebang
+  if ! head -1 "${bundle_dir}/deploy.sh" | grep -q "#!/usr/bin/env bash"; then
+    test_fail "${test_name}/deploy-script" "deploy.sh missing shebang"
+    return 1
   fi
+
+  test_pass "${test_name}/deploy-script"
 }
 
 # Verify ArgoCD App of Apps structure
@@ -416,19 +407,19 @@ test_all_recipe_data_files() {
       continue
     fi
     
-    # Test: Verify umbrella chart structure
-    if ! verify_umbrella_chart "$bundle_dir" "cli-workflow/${basename}/umbrella-chart"; then
+    # Test: Verify per-component bundle structure
+    if ! verify_helm_bundle "$bundle_dir" "cli-workflow/${basename}/helm-bundle"; then
       continue
     fi
 
-    # Test: Verify Helm chart validity
-    verify_helm_chart "$bundle_dir" "cli-workflow/${basename}"
+    # Test: Verify deploy script
+    verify_deploy_script "$bundle_dir" "cli-workflow/${basename}"
 
-    # Count dependencies in Chart.yaml (indicates number of components)
-    local dep_count
-    dep_count=$(grep -c "^  - name:" "${bundle_dir}/Chart.yaml" 2>/dev/null || echo "0")
+    # Count component directories
+    local comp_count
+    comp_count=$(find "${bundle_dir}" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
 
-    test_pass "cli-workflow/${basename} (${dep_count} dependencies)"
+    test_pass "cli-workflow/${basename} (${comp_count} components)"
   done
   
   msg ""
@@ -513,20 +504,32 @@ run_bundle_test() {
   fi
   test_pass "bundle/${name}/generation"
 
-  # Verify umbrella chart structure
-  verify_umbrella_chart "$dir" "bundle/${name}/structure" || return 1
+  # Verify per-component bundle structure
+  verify_helm_bundle "$dir" "bundle/${name}/structure" || return 1
 
-  # Check patterns in values.yaml (pipe-separated list)
+  # Check patterns in component values.yaml files (pipe-separated list)
   if [ -n "$patterns" ]; then
     IFS='|' read -ra pattern_array <<< "$patterns"
     for pattern in "${pattern_array[@]}"; do
       local pattern_name=$(echo "$pattern" | tr '.' '-' | tr '/' '-')
-      check_file_contains "bundle/${name}/${pattern_name}" "${dir}/values.yaml" "$pattern" || true
+      # Search across all component values files
+      local found_pattern=false
+      for vfile in "${dir}"/*/values.yaml; do
+        if [ -f "$vfile" ] && grep -q "$pattern" "$vfile" 2>/dev/null; then
+          found_pattern=true
+          break
+        fi
+      done
+      if [ "$found_pattern" = "true" ]; then
+        test_pass "bundle/${name}/${pattern_name}"
+      else
+        test_fail "bundle/${name}/${pattern_name}" "Pattern '$pattern' not found in any component values.yaml"
+      fi
     done
   fi
 
-  # Helm validation
-  verify_helm_chart "$dir" "bundle/${name}"
+  # Deploy script validation
+  verify_deploy_script "$dir" "bundle/${name}"
 }
 
 run_bundle_tests() {
@@ -644,7 +647,7 @@ spec:
   local bundle_dir="${dir}/bundle"
   mkdir -p "$bundle_dir"
   run_cmd_ok "criteria/bundle" "${EIDOS_BIN}" bundle -r "$yaml_recipe" -o "$bundle_dir"
-  verify_umbrella_chart "$bundle_dir" "criteria/bundle-structure"
+  verify_helm_bundle "$bundle_dir" "criteria/bundle-structure"
 
   # Test 9: Partial criteria (only accelerator)
   echo 'kind: recipeCriteria
@@ -843,7 +846,7 @@ EOF
     local bundle_dir="${dir}/bundle"
     mkdir -p "$bundle_dir"
     run_cmd_ok "data/bundle" "${EIDOS_BIN}" bundle -r "$RECIPE_FILE" -o "$bundle_dir" --data "$valid"
-    verify_umbrella_chart "$bundle_dir" "data/bundle-structure"
+    verify_helm_bundle "$bundle_dir" "data/bundle-structure"
   fi
 }
 
@@ -959,14 +962,23 @@ EOF
     --accelerated-node-selector nodeGroup=gpu-worker \
     --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
 
-  verify_umbrella_chart "$bundle" "cuj1/bundle-structure"
-  check_file_contains "cuj1/bundle-sys-selector" "${bundle}/values.yaml" "system-pool"
-  check_file_contains "cuj1/bundle-accel-selector" "${bundle}/values.yaml" "gpu-worker"
-  check_file_contains "cuj1/bundle-toleration" "${bundle}/values.yaml" "nvidia.com/gpu"
+  verify_helm_bundle "$bundle" "cuj1/bundle-structure"
 
-  # Step 4: Helm validation (simulates install prep)
-  msg "--- Step 4: Helm chart validation ---"
-  verify_helm_chart "$bundle" "cuj1"
+  # Check node scheduling values in component values files
+  local found_sys=false found_accel=false found_tol=false
+  for vfile in "${bundle}"/*/values.yaml; do
+    [ -f "$vfile" ] || continue
+    grep -q "system-pool" "$vfile" 2>/dev/null && found_sys=true
+    grep -q "gpu-worker" "$vfile" 2>/dev/null && found_accel=true
+    grep -q "nvidia.com/gpu" "$vfile" 2>/dev/null && found_tol=true
+  done
+  [ "$found_sys" = "true" ] && test_pass "cuj1/bundle-sys-selector" || test_fail "cuj1/bundle-sys-selector" "system-pool not found"
+  [ "$found_accel" = "true" ] && test_pass "cuj1/bundle-accel-selector" || test_fail "cuj1/bundle-accel-selector" "gpu-worker not found"
+  [ "$found_tol" = "true" ] && test_pass "cuj1/bundle-toleration" || test_fail "cuj1/bundle-toleration" "nvidia.com/gpu not found"
+
+  # Step 4: Deploy script validation (simulates install prep)
+  msg "--- Step 4: Deploy script validation ---"
+  verify_deploy_script "$bundle" "cuj1"
 
   # Step 5: Multi-phase validate (CUJ1 final validation)
   msg "--- Step 5: Multi-phase validation ---"

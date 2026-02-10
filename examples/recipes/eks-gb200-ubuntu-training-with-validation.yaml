@@ -83,12 +83,16 @@ validation:
 
 componentRefs:
   - name: cert-manager
+    namespace: cert-manager
+    chart: cert-manager
     type: Helm
     source: https://charts.jetstack.io
     version: v1.17.2
     valuesFile: components/cert-manager/values.yaml
 
   - name: gpu-operator
+    namespace: gpu-operator
+    chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
     version: v25.3.3
@@ -107,6 +111,8 @@ componentRefs:
       - cert-manager
 
   - name: nvidia-dra-driver-gpu
+    namespace: nvidia-system
+    chart: nvidia-dra-driver-gpu
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
     version: 25.8.1
@@ -115,6 +121,8 @@ componentRefs:
       - gpu-operator
 
   - name: nvsentinel
+    namespace: nvidia-system
+    chart: nvsentinel
     type: Helm
     source: oci://ghcr.io/nvidia
     version: v0.6.0
@@ -123,6 +131,8 @@ componentRefs:
       - cert-manager
 
   - name: skyhook-operator
+    namespace: skyhook
+    chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: 0.11.1

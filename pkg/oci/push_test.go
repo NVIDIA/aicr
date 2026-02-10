@@ -410,7 +410,7 @@ func TestPackage_CreatesOCILayout(t *testing.T) {
 }
 
 // TestOCIPackagingIntegration is an integration test that uses the REAL DefaultBundler
-// to generate umbrella chart output and the REAL OCI packaging code to create an artifact.
+// to generate per-component bundle output and the REAL OCI packaging code to create an artifact.
 // This verifies the entire pipeline from recipe → bundler → OCI artifact.
 func TestOCIPackagingIntegration(t *testing.T) {
 	ctx := context.Background()
@@ -434,7 +434,7 @@ func TestOCIPackagingIntegration(t *testing.T) {
 		},
 	}
 
-	// Use the DefaultBundler to generate umbrella chart
+	// Use the DefaultBundler to generate per-component bundle
 	cfg := config.NewConfig(
 		config.WithIncludeChecksums(true),
 	)
@@ -452,7 +452,7 @@ func TestOCIPackagingIntegration(t *testing.T) {
 		t.Fatalf("Bundler.Make() had errors: %v", output.Errors)
 	}
 
-	// Verify bundler created files (umbrella chart is in the output dir directly)
+	// Verify bundler created files (per-component bundle is in the output dir directly)
 	if _, statErr := os.Stat(bundleOutputDir); os.IsNotExist(statErr) {
 		t.Fatalf("Bundler did not create output directory")
 	}
@@ -498,10 +498,10 @@ func TestOCIPackagingIntegration(t *testing.T) {
 		fileNames = append(fileNames, name)
 	}
 
-	// Verify expected umbrella chart files are present
+	// Verify expected per-component bundle files are present
 	expectedFiles := []string{
-		"Chart.yaml",
-		"values.yaml",
+		"README.md",
+		"deploy.sh",
 		"checksums.txt",
 	}
 
