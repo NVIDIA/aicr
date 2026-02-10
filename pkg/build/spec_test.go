@@ -35,7 +35,7 @@ func TestLoadSpec(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "valid spec with bundle",
+			name:    "valid spec",
 			file:    "testdata/valid_spec.yaml",
 			wantErr: false,
 		},
@@ -113,8 +113,8 @@ func TestLoadSpec_Fields(t *testing.T) {
 		t.Fatalf("LoadSpec() unexpected error: %v", err)
 	}
 
-	if spec.Spec.Bundle != "eks-training" {
-		t.Errorf("Bundle = %q, want %q", spec.Spec.Bundle, "eks-training")
+	if spec.Spec.Recipe != "/data/recipes/eks-training.yaml" {
+		t.Errorf("Recipe = %q, want %q", spec.Spec.Recipe, "/data/recipes/eks-training.yaml")
 	}
 	if spec.Spec.Version != "1.0.0" {
 		t.Errorf("Version = %q, want %q", spec.Spec.Version, "1.0.0")
@@ -165,18 +165,6 @@ func TestBuildSpec_Validate(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid with bundle",
-			spec: func() BuildSpec {
-				s := validBase()
-				s.Spec = BuildSpecConfig{
-					Bundle:   "eks-training",
-					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
-				}
-				return s
-			}(),
-			wantErr: false,
-		},
-		{
 			name: "valid with recipe",
 			spec: func() BuildSpec {
 				s := validBase()
@@ -194,7 +182,7 @@ func TestBuildSpec_Validate(t *testing.T) {
 				APIVersion: "wrong/v1",
 				Kind:       ExpectedKind,
 				Spec: BuildSpecConfig{
-					Bundle:   "eks-training",
+					Recipe:   "/data/recipes/eks-training.yaml",
 					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
 				},
 			},
@@ -206,7 +194,7 @@ func TestBuildSpec_Validate(t *testing.T) {
 				APIVersion: ExpectedAPIVersion,
 				Kind:       "WrongKind",
 				Spec: BuildSpecConfig{
-					Bundle:   "eks-training",
+					Recipe:   "/data/recipes/eks-training.yaml",
 					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
 				},
 			},
@@ -217,7 +205,7 @@ func TestBuildSpec_Validate(t *testing.T) {
 			spec: func() BuildSpec {
 				s := validBase()
 				s.Spec = BuildSpecConfig{
-					Bundle:   "eks-training",
+					Recipe:   "/data/recipes/eks-training.yaml",
 					Registry: RegistryConfig{Repository: "test"},
 				}
 				return s
@@ -229,32 +217,8 @@ func TestBuildSpec_Validate(t *testing.T) {
 			spec: func() BuildSpec {
 				s := validBase()
 				s.Spec = BuildSpecConfig{
-					Bundle:   "eks-training",
-					Registry: RegistryConfig{Host: "registry.example.com"},
-				}
-				return s
-			}(),
-			wantErr: true,
-		},
-		{
-			name: "missing both bundle and recipe",
-			spec: func() BuildSpec {
-				s := validBase()
-				s.Spec = BuildSpecConfig{
-					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
-				}
-				return s
-			}(),
-			wantErr: true,
-		},
-		{
-			name: "both bundle and recipe set",
-			spec: func() BuildSpec {
-				s := validBase()
-				s.Spec = BuildSpecConfig{
-					Bundle:   "eks-training",
 					Recipe:   "/data/recipes/eks-training.yaml",
-					Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+					Registry: RegistryConfig{Host: "registry.example.com"},
 				}
 				return s
 			}(),
@@ -278,7 +242,7 @@ func TestBuildSpec_WriteBack(t *testing.T) {
 		APIVersion: ExpectedAPIVersion,
 		Kind:       ExpectedKind,
 		Spec: BuildSpecConfig{
-			Bundle:   "eks-training",
+			Recipe:   "/data/recipes/eks-training.yaml",
 			Version:  "1.0.0",
 			Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
 		},
@@ -310,8 +274,8 @@ func TestBuildSpec_WriteBack(t *testing.T) {
 		t.Fatalf("failed to unmarshal written file: %v", err)
 	}
 
-	if readBack.Spec.Bundle != "eks-training" {
-		t.Errorf("Bundle = %q, want %q", readBack.Spec.Bundle, "eks-training")
+	if readBack.Spec.Recipe != "/data/recipes/eks-training.yaml" {
+		t.Errorf("Recipe = %q, want %q", readBack.Spec.Recipe, "/data/recipes/eks-training.yaml")
 	}
 
 	charts, ok := readBack.Status.Images["charts"]
@@ -345,92 +309,6 @@ func TestBuildSpec_WriteBack_CancelledContext(t *testing.T) {
 	}
 	if sErr.Code != errors.ErrCodeTimeout {
 		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeTimeout)
-	}
-}
-
-func TestBuildSpec_GetClusterSpec(t *testing.T) {
-	tests := []struct {
-		name   string
-		values map[string]interface{}
-		want   bool // whether clusterSpec should be found
-	}{
-		{
-			name:   "nil values",
-			values: nil,
-			want:   false,
-		},
-		{
-			name:   "empty values",
-			values: map[string]interface{}{},
-			want:   false,
-		},
-		{
-			name: "no clusterSpec key",
-			values: map[string]interface{}{
-				"other": "value",
-			},
-			want: false,
-		},
-		{
-			name: "clusterSpec is not a map",
-			values: map[string]interface{}{
-				"clusterSpec": "string-value",
-			},
-			want: false,
-		},
-		{
-			name: "valid clusterSpec",
-			values: map[string]interface{}{
-				"clusterSpec": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"csp": map[string]interface{}{
-							"provider": "aws",
-						},
-					},
-				},
-			},
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			spec := &BuildSpec{
-				Spec: BuildSpecConfig{Values: tt.values},
-			}
-			cs := spec.GetClusterSpec()
-			if tt.want && cs == nil {
-				t.Error("GetClusterSpec() = nil, want non-nil")
-			}
-			if !tt.want && cs != nil {
-				t.Errorf("GetClusterSpec() = %v, want nil", cs)
-			}
-		})
-	}
-}
-
-func TestBuildSpec_GetClusterSpec_FromFile(t *testing.T) {
-	spec, err := LoadSpec(context.Background(), "testdata/valid_spec.yaml")
-	if err != nil {
-		t.Fatalf("LoadSpec() unexpected error: %v", err)
-	}
-
-	cs := spec.GetClusterSpec()
-	if cs == nil {
-		t.Fatal("GetClusterSpec() = nil, want non-nil")
-	}
-
-	// Verify nested clusterSpec structure is accessible
-	specMap, ok := cs["spec"].(map[string]interface{})
-	if !ok {
-		t.Fatal("clusterSpec.spec is not a map")
-	}
-	csp, ok := specMap["csp"].(map[string]interface{})
-	if !ok {
-		t.Fatal("clusterSpec.spec.csp is not a map")
-	}
-	provider, ok := csp["provider"].(string)
-	if !ok || provider != "aws" {
-		t.Errorf("clusterSpec.spec.csp.provider = %v, want %q", csp["provider"], "aws")
 	}
 }
 

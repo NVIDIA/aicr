@@ -1,21 +1,9 @@
 apiVersion: eidos.nvidia.com/v1beta1
 kind: EidosRuntime
 spec:
-  bundle: eks-training
+  recipe: "/data/recipes/eks-training.yaml"
   version: "1.0.0"
   registry:
     host: "https://registry.example.com"
     repository: "eidos-runtime"
     insecureTLS: false
-  values:
-    clusterSpec:
-      spec:
-        csp:
-          provider: aws
-          aws:
-            region: us-east-1
-        environment: production
-        featureFlags:
-          enableGpuHealthMonitor: true
-        networking:
-          cni: vpc-cni

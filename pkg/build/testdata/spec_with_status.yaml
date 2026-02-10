@@ -1,7 +1,7 @@
 apiVersion: eidos.nvidia.com/v1beta1
 kind: EidosRuntime
 spec:
-  bundle: eks-training
+  recipe: "/data/recipes/eks-training.yaml"
   version: "1.0.0"
   registry:
     host: "https://registry.example.com"

@@ -7,8 +7,3 @@ spec:
     host: "http://localhost:5000"
     repository: "test-runtime"
     insecureTLS: true
-  values:
-    clusterSpec:
-      spec:
-        csp:
-          provider: aws

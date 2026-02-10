@@ -42,12 +42,10 @@ type BuildSpec struct {
 
 // BuildSpecConfig holds the input configuration for a build operation.
 type BuildSpecConfig struct {
-	Bundle   string                 `yaml:"bundle"`
-	Recipe   string                 `yaml:"recipe,omitempty"`
-	Version  string                 `yaml:"version,omitempty"`
-	Target   string                 `yaml:"target,omitempty"`
-	Registry RegistryConfig         `yaml:"registry"`
-	Values   map[string]interface{} `yaml:"values,omitempty"`
+	Recipe   string         `yaml:"recipe,omitempty"`
+	Version  string         `yaml:"version,omitempty"`
+	Target   string         `yaml:"target,omitempty"`
+	Registry RegistryConfig `yaml:"registry"`
 }
 
 // RegistryConfig holds OCI registry connection details.
@@ -116,14 +114,6 @@ func (s *BuildSpec) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest, "spec.registry.repository is required")
 	}
 
-	if s.Spec.Bundle == "" && s.Spec.Recipe == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "spec.bundle or spec.recipe is required")
-	}
-
-	if s.Spec.Bundle != "" && s.Spec.Recipe != "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "spec.bundle and spec.recipe are mutually exclusive")
-	}
-
 	return nil
 }
 
@@ -144,26 +134,6 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 	}
 
 	return nil
-}
-
-// GetClusterSpec extracts the clusterSpec from spec.values.
-// Returns nil if values or clusterSpec is not present.
-func (s *BuildSpec) GetClusterSpec() map[string]interface{} {
-	if s.Spec.Values == nil {
-		return nil
-	}
-
-	cs, ok := s.Spec.Values["clusterSpec"]
-	if !ok {
-		return nil
-	}
-
-	csMap, ok := cs.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-
-	return csMap
 }
 
 // SetImageStatus sets the status for a named image (e.g., "charts", "apps", "app-of-apps").
