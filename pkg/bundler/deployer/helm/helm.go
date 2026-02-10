@@ -239,19 +239,21 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		default:
 		}
 
-		componentDir := filepath.Join(outputDir, comp.Name)
-		if err := os.MkdirAll(componentDir, 0755); err != nil {
+		componentDir, err := safeJoin(outputDir, comp.Name)
+		if err != nil {
+			return nil, 0, err
+		}
+		if mkdirErr := os.MkdirAll(componentDir, 0755); mkdirErr != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to create directory for %s", comp.Name), err)
+				fmt.Sprintf("failed to create directory for %s", comp.Name), mkdirErr)
 		}
 
 		// Write values.yaml
-		valuesPath := filepath.Join(componentDir, "values.yaml")
 		values := input.ComponentValues[comp.Name]
 		if values == nil {
 			values = make(map[string]any)
 		}
-		valuesSize, err := g.writeValuesFile(values, valuesPath)
+		valuesPath, valuesSize, err := g.writeValuesFile(values, componentDir, "values.yaml")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write values.yaml for %s", comp.Name), err)
@@ -260,8 +262,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		totalSize += valuesSize
 
 		// Write component README.md
-		readmePath := filepath.Join(componentDir, "README.md")
-		readmeSize, err := g.generateFromTemplate(componentReadmeTemplate, comp, readmePath)
+		readmePath, readmeSize, err := g.generateFromTemplate(componentReadmeTemplate, comp, componentDir, "README.md")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write README.md for %s", comp.Name), err)
@@ -272,7 +273,10 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		// Write manifests if present
 		if input.ComponentManifests != nil {
 			if manifests, ok := input.ComponentManifests[comp.Name]; ok && len(manifests) > 0 {
-				manifestDir := filepath.Join(componentDir, "manifests")
+				manifestDir, manifestDirErr := safeJoin(componentDir, "manifests")
+				if manifestDirErr != nil {
+					return nil, 0, manifestDirErr
+				}
 				if err := os.MkdirAll(manifestDir, 0755); err != nil {
 					return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 						fmt.Sprintf("failed to create manifests directory for %s", comp.Name), err)
@@ -288,11 +292,11 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 				for _, manifestPath := range manifestPaths {
 					content := manifests[manifestPath]
 					filename := filepath.Base(manifestPath)
-					if !isSafePathComponent(filename) {
+					outputPath, pathErr := safeJoin(manifestDir, filename)
+					if pathErr != nil {
 						return nil, 0, errors.New(errors.ErrCodeInvalidRequest,
 							fmt.Sprintf("invalid manifest filename %q in component %s", filename, comp.Name))
 					}
-					outputPath := filepath.Join(manifestDir, filename)
 
 					if err := os.WriteFile(outputPath, content, 0600); err != nil {
 						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write manifest", err,
@@ -357,8 +361,7 @@ func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInpu
 		Constraints:        input.RecipeResult.Constraints,
 	}
 
-	readmePath := filepath.Join(outputDir, "README.md")
-	readmeSize, err := g.generateFromTemplate(readmeTemplate, data, readmePath)
+	readmePath, readmeSize, err := g.generateFromTemplate(readmeTemplate, data, outputDir, "README.md")
 	if err != nil {
 		return "", 0, err
 	}
@@ -380,8 +383,7 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 		Components:     components,
 	}
 
-	deployPath := filepath.Join(outputDir, "deploy.sh")
-	deploySize, err := g.generateFromTemplate(deployScriptTemplate, data, deployPath)
+	deployPath, deploySize, err := g.generateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
 	if err != nil {
 		return "", 0, err
 	}
@@ -394,28 +396,40 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 	return deployPath, deploySize, nil
 }
 
-// generateFromTemplate renders a template to a file.
-func (g *Generator) generateFromTemplate(tmplContent string, data any, outputPath string) (int64, error) {
+// generateFromTemplate renders a template and writes it to baseDir/filename.
+// It uses safeJoin to verify the output path stays within baseDir.
+func (g *Generator) generateFromTemplate(tmplContent string, data any, baseDir, filename string) (string, int64, error) {
+	outputPath, err := safeJoin(baseDir, filename)
+	if err != nil {
+		return "", 0, err
+	}
+
 	tmpl, err := template.New("template").Parse(tmplContent)
 	if err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
 	}
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
 	}
 
 	content := buf.String()
 	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write file", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write file", err)
 	}
 
-	return int64(len(content)), nil
+	return outputPath, int64(len(content)), nil
 }
 
-// writeValuesFile writes a values.yaml file with header comment.
-func (g *Generator) writeValuesFile(values map[string]any, outputPath string) (int64, error) {
+// writeValuesFile writes a values.yaml file with header comment to baseDir/filename.
+// It uses safeJoin to verify the output path stays within baseDir.
+func (g *Generator) writeValuesFile(values map[string]any, baseDir, filename string) (string, int64, error) {
+	outputPath, err := safeJoin(baseDir, filename)
+	if err != nil {
+		return "", 0, err
+	}
+
 	var buf strings.Builder
 	buf.WriteString("# Generated by Cloud Native Stack\n")
 	buf.WriteString("---\n")
@@ -423,17 +437,17 @@ func (g *Generator) writeValuesFile(values map[string]any, outputPath string) (i
 	if len(values) > 0 {
 		yamlBytes, err := yaml.Marshal(values)
 		if err != nil {
-			return 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
+			return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
 		}
 		buf.Write(yamlBytes)
 	}
 
 	content := buf.String()
 	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values file", err)
+		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values file", err)
 	}
 
-	return int64(len(content)), nil
+	return outputPath, int64(len(content)), nil
 }
 
 // normalizeVersion ensures version string is valid for Helm (semver without 'v' prefix for chart version)
@@ -558,4 +572,20 @@ func isSafePathComponent(name string) bool {
 		return false
 	}
 	return true
+}
+
+// safeJoin joins baseDir and name, then verifies the result is contained
+// within baseDir. This prevents path traversal when name comes from
+// untrusted input (e.g., component names from recipe data).
+func safeJoin(baseDir, name string) (string, error) {
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to resolve base directory", err)
+	}
+	joined := filepath.Clean(filepath.Join(absBase, name))
+	if joined != absBase && !strings.HasPrefix(joined, absBase+string(filepath.Separator)) {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("path component %q escapes base directory", name))
+	}
+	return joined, nil
 }

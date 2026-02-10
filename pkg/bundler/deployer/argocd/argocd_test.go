@@ -408,6 +408,38 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 	}
 }
 
+func TestSafeJoin(t *testing.T) {
+	baseDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		dir     string
+		input   string
+		wantErr bool
+	}{
+		{"valid component", baseDir, "gpu-operator", false},
+		{"valid with dots", baseDir, "cert-manager", false},
+		{"path traversal", baseDir, "../etc/passwd", true},
+		{"double dot", baseDir, "..", true},
+		{"absolute path is joined safely", baseDir, "/etc/passwd", false}, // Go's filepath.Join strips leading /
+		{"empty name", baseDir, "", false},                                // empty joins to baseDir itself
+		{"relative base", ".", "gpu-operator", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := safeJoin(tt.dir, tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("safeJoin(%q, %q) error = %v, wantErr %v", tt.dir, tt.input, err, tt.wantErr)
+				return
+			}
+			if err == nil && result == "" {
+				t.Errorf("safeJoin(%q, %q) returned empty path", tt.dir, tt.input)
+			}
+		})
+	}
+}
+
 func TestGetNamespace(t *testing.T) {
 	tests := []struct {
 		component string

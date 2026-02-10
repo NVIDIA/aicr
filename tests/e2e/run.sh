@@ -330,13 +330,21 @@ test_cli_bundle() {
   if "${EIDOS_BIN}" bundle \
     --recipe "$recipe_file" \
     --output "$basic_bundle" 2>&1; then
-    if [ -f "${basic_bundle}/Chart.yaml" ] && [ -f "${basic_bundle}/values.yaml" ]; then
+    if [ -f "${basic_bundle}/deploy.sh" ] && [ -f "${basic_bundle}/README.md" ]; then
       local file_count
       file_count=$(find "$basic_bundle" -type f | wc -l | tr -d ' ')
       detail "Generated ${file_count} files in bundle"
-      pass "cli/bundle/basic"
+      # Verify at least one component directory has values.yaml
+      local comp_count
+      comp_count=$(find "$basic_bundle" -mindepth 2 -name "values.yaml" | wc -l | tr -d ' ')
+      if [ "$comp_count" -gt 0 ]; then
+        detail "Found ${comp_count} component directories"
+        pass "cli/bundle/basic"
+      else
+        fail "cli/bundle/basic" "No component directories with values.yaml"
+      fi
     else
-      fail "cli/bundle/basic" "Missing Chart.yaml or values.yaml"
+      fail "cli/bundle/basic" "Missing deploy.sh or README.md"
     fi
   else
     fail "cli/bundle/basic" "Command failed"
@@ -352,10 +360,18 @@ test_cli_bundle() {
     --system-node-selector nodeGroup=system-pool \
     --accelerated-node-selector nodeGroup=customer-gpu \
     --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule 2>&1; then
-    if grep -q "system-pool" "${sched_bundle}/values.yaml" 2>/dev/null; then
+    # Search across all component values files for the node selector
+    local found_selector=false
+    for vfile in "${sched_bundle}"/*/values.yaml; do
+      if [ -f "$vfile" ] && grep -q "system-pool" "$vfile" 2>/dev/null; then
+        found_selector=true
+        break
+      fi
+    done
+    if [ "$found_selector" = true ]; then
       pass "cli/bundle/scheduling"
     else
-      fail "cli/bundle/scheduling" "Node selector not found in values"
+      fail "cli/bundle/scheduling" "Node selector not found in component values"
     fi
   else
     fail "cli/bundle/scheduling" "Command failed"
@@ -392,22 +408,14 @@ test_cli_bundle() {
     skip "cli/bundle/integrity" "No checksums.txt"
   fi
 
-  # Test 5: Helm lint (if helm available)
-  msg "--- Test: Helm lint ---"
-  if command -v helm &> /dev/null; then
-    # Fix dev version if needed
-    if grep -q "version: dev" "${basic_bundle}/Chart.yaml" 2>/dev/null; then
-      sed -i.bak 's/version: dev/version: 0.0.0-dev/' "${basic_bundle}/Chart.yaml"
-    fi
-    if helm lint "$basic_bundle" > /dev/null 2>&1; then
-      pass "cli/bundle/helm-lint"
-    else
-      # May fail due to missing deps, which is OK
-      warn "Helm lint had warnings (may be missing deps)"
-      pass "cli/bundle/helm-lint"
-    fi
+  # Test 5: deploy.sh is executable
+  msg "--- Test: deploy.sh executable ---"
+  if [ -x "${basic_bundle}/deploy.sh" ]; then
+    pass "cli/bundle/deploy-script"
+  elif [ -f "${basic_bundle}/deploy.sh" ]; then
+    fail "cli/bundle/deploy-script" "deploy.sh exists but is not executable"
   else
-    skip "cli/bundle/helm-lint" "helm not installed"
+    fail "cli/bundle/deploy-script" "deploy.sh not found"
   fi
 }
 
@@ -453,10 +461,10 @@ test_api_bundle() {
       local extract_dir="${bundle_dir}/extracted"
       mkdir -p "$extract_dir"
       unzip -q "$bundle_zip" -d "$extract_dir"
-      if [ -f "${extract_dir}/Chart.yaml" ]; then
+      if [ -f "${extract_dir}/deploy.sh" ]; then
         pass "api/bundle/contents"
       else
-        fail "api/bundle/contents" "Chart.yaml not in bundle"
+        fail "api/bundle/contents" "deploy.sh not in bundle"
       fi
     else
       fail "api/bundle/POST" "Invalid zip file"
@@ -1344,11 +1352,11 @@ test_external_data() {
     --recipe "$recipe_file" \
     --data "$data_dir" \
     --output "$bundle_dir" 2>&1; then
-    if [ -f "${bundle_dir}/Chart.yaml" ]; then
+    if [ -f "${bundle_dir}/deploy.sh" ]; then
       detail "Bundle generated with external data"
       pass "cli/external-data/bundle"
     else
-      fail "cli/external-data/bundle" "Chart.yaml not found"
+      fail "cli/external-data/bundle" "deploy.sh not found"
     fi
   else
     fail "cli/external-data/bundle" "Command failed"

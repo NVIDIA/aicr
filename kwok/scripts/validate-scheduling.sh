@@ -59,16 +59,26 @@ cleanup() {
     fi
 
     if [[ "$KEEP_NAMESPACE" == "true" ]]; then
-        log_info "Preserving namespace $NAMESPACE for inspection"
-        log_info "Clean up with: helm uninstall $RELEASE_NAME -n $NAMESPACE && kubectl delete ns $NAMESPACE"
+        log_info "Preserving releases for inspection"
+        log_info "Clean up with: helm list -A (then uninstall each release)"
     else
-        # Uninstall Helm release first (cleans up CRDs properly)
-        # Add timeout to prevent hanging when cluster is gone
-        timeout 60s helm uninstall "$RELEASE_NAME" -n "$NAMESPACE" --wait 2>/dev/null || true
+        # Uninstall all Helm releases from component namespaces
+        local releases
+        releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | "\(.name) \(.namespace)"' || true)
+        if [[ -n "$releases" ]]; then
+            while IFS=' ' read -r name ns; do
+                if [[ -n "$name" ]]; then
+                    log_info "Uninstalling release $name from $ns..."
+                    timeout 60s helm uninstall "$name" -n "$ns" --wait 2>/dev/null || true
+                fi
+            done <<< "$releases"
+        fi
         # Clean up stale APIServices before namespace deletion to prevent hangs
         cleanup_stale_apiservices
-        # Wait for namespace deletion to complete to avoid conflicts with subsequent tests
-        kubectl delete ns "$NAMESPACE" --ignore-not-found --wait=true --timeout=120s 2>/dev/null || true
+        # Delete component namespaces created by deploy.sh
+        for ns in gpu-operator nvidia-network-operator cert-manager nvidia-system kube-prometheus-stack; do
+            kubectl delete ns "$ns" --ignore-not-found --wait=true --timeout=120s 2>/dev/null || true
+        done
     fi
 
     exit $exit_code
@@ -207,11 +217,11 @@ cleanup_old_tests() {
         fi
     fi
 
-    # Find and uninstall old Helm releases first (this should clean up their CRDs)
+    # Find and uninstall old Helm releases from component namespaces
     local releases
-    releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | select(.namespace | startswith("eidos-kwok-test")) | "\(.namespace) \(.name)"' || true)
+    releases=$(helm list -A -o json 2>/dev/null | jq -r '.[] | "\(.namespace) \(.name)"' || true)
     if [[ -n "$releases" ]]; then
-        log_info "Uninstalling old test releases..."
+        log_info "Uninstalling old releases..."
         echo "$releases" | while read -r ns release; do
             if [[ -n "$release" ]]; then
                 log_info "  Uninstalling $release from $ns..."
@@ -224,21 +234,21 @@ cleanup_old_tests() {
     # These can cause namespace deletion to hang with "stale GroupVersion discovery" errors
     cleanup_stale_apiservices
 
-    # Delete old test namespaces and wait for them to fully terminate
+    # Delete component namespaces created by per-component deployment
+    local component_namespaces="gpu-operator nvidia-network-operator cert-manager nvidia-system kube-prometheus-stack"
+    for ns in $component_namespaces; do
+        if kubectl get ns "$ns" &>/dev/null; then
+            log_info "Removing namespace $ns..."
+            kubectl delete ns "$ns" --ignore-not-found --wait=true --timeout=120s 2>/dev/null || true
+        fi
+    done
+
+    # Also clean up legacy eidos-kwok-test namespaces
     local old_namespaces
     old_namespaces=$(kubectl get ns -o name 2>/dev/null | grep "namespace/eidos-kwok-test" || true)
     if [[ -n "$old_namespaces" ]]; then
         log_info "Removing old test namespaces..."
         echo "$old_namespaces" | xargs kubectl delete --wait=true --timeout=120s 2>/dev/null || true
-
-        # Wait for the specific namespace we'll use to fully disappear
-        wait_for_namespace_gone "$NAMESPACE" 120
-    fi
-
-    # Final check: ensure our namespace is gone before proceeding
-    if kubectl get ns "$NAMESPACE" &>/dev/null; then
-        log_info "Waiting for namespace $NAMESPACE to fully terminate..."
-        wait_for_namespace_gone "$NAMESPACE" 180
     fi
 
     log_info "Cleanup complete"
@@ -322,28 +332,22 @@ generate_bundle() {
     log_info "Bundle generated at ${WORK_DIR}/bundle"
 }
 
-# Deploy bundle to cluster
+# Deploy bundle to cluster using the generated deploy.sh
 deploy_bundle() {
-    log_info "Deploying bundle to namespace: $NAMESPACE"
+    log_info "Deploying per-component bundle..."
 
-    # Create namespace
-    kubectl create ns "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+    local bundle_dir="${WORK_DIR}/bundle"
 
-    # Fetch chart dependencies
-    log_info "Fetching Helm chart dependencies..."
-    if ! helm dependency update "${WORK_DIR}/bundle" 2>&1; then
-        log_error "Helm dependency update failed"
+    if [[ ! -f "${bundle_dir}/deploy.sh" ]]; then
+        log_error "deploy.sh not found in bundle"
         return 1
     fi
 
-    # Deploy bundle using Helm (upgrade --install is idempotent)
-    # Skip --wait since we only care about scheduling, not readiness probes
-    # KWOK stage-fast will transition pods to Running
-    log_info "Installing Helm chart with release name: $RELEASE_NAME..."
-    if ! helm upgrade --install "$RELEASE_NAME" "${WORK_DIR}/bundle" \
-        --namespace "$NAMESPACE" \
-        --timeout 300s 2>&1; then
-        log_error "Helm install failed"
+    # Run the generated deploy script
+    chmod +x "${bundle_dir}/deploy.sh"
+    log_info "Running deploy.sh..."
+    if ! "${bundle_dir}/deploy.sh" 2>&1; then
+        log_error "Deploy script failed"
         return 1
     fi
 
@@ -358,28 +362,33 @@ deploy_bundle() {
 verify_pods() {
     log_info "Verifying pod scheduling..."
 
-    # Get pod status
+    # Get pod status across all component namespaces (per-component deployment)
+    # Exclude system namespaces that aren't part of our bundle
+    local ns_filter="--all-namespaces"
+    local exclude_ns="kube-system|kube-node-lease|kube-public|local-path-storage|kwok-system"
+
     local total_pods pending_pods failed_pods running_pods unscheduled_pods
-    total_pods=$(kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    pending_pods=$(kubectl get pods -n "$NAMESPACE" --field-selector=status.phase=Pending --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    failed_pods=$(kubectl get pods -n "$NAMESPACE" --field-selector=status.phase=Failed --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    running_pods=$(kubectl get pods -n "$NAMESPACE" --field-selector=status.phase=Running --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    total_pods=$(kubectl get pods ${ns_filter} --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
+    pending_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Pending --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
+    failed_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Failed --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
+    running_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Running --no-headers 2>/dev/null | grep -vE "^(${exclude_ns})\s" | wc -l | tr -d ' ')
 
     # Count truly unscheduled pods (Pending with no node assigned)
     # Pods in ContainerCreating are Pending but scheduled - they have a node
     # Exclude cleanup/webhook Jobs - these are Helm hooks that may not have proper tolerations
     # Use awk to count lines, avoiding issues with empty output or newlines
-    unscheduled_pods=$(kubectl get pods -n "$NAMESPACE" --field-selector=status.phase=Pending \
+    unscheduled_pods=$(kubectl get pods ${ns_filter} --field-selector=status.phase=Pending \
         -o json 2>/dev/null | \
-        jq -r '.items[] | select(.spec.nodeName == null or .spec.nodeName == "") | select(.metadata.ownerReferences == null or (.metadata.ownerReferences | map(.kind) | contains(["Job"]) | not)) | .metadata.name' | \
+        jq -r '.items[] | select(.metadata.namespace as $ns | "'${exclude_ns}'" | split("|") | map(. == $ns) | any | not) | select(.spec.nodeName == null or .spec.nodeName == "") | select(.metadata.ownerReferences == null or (.metadata.ownerReferences | map(.kind) | contains(["Job"]) | not)) | .metadata.name' | \
         awk 'NF {count++} END {print count+0}')
 
     log_info "Pod status: $total_pods total, $running_pods running, $pending_pods pending ($unscheduled_pods unscheduled), $failed_pods failed"
 
     # Show pod distribution across nodes
     log_info "Pod distribution:"
-    kubectl get pods -n "$NAMESPACE" -o wide --no-headers 2>/dev/null | \
-        awk '{print $7}' | sort | uniq -c | \
+    kubectl get pods --all-namespaces -o wide --no-headers 2>/dev/null | \
+        grep -vE "^(${exclude_ns})\s" | \
+        awk '{print $8}' | sort | uniq -c | \
         while read -r count node; do
             echo "  $node: $count pods"
         done
@@ -389,16 +398,16 @@ verify_pods() {
     if [[ "$unscheduled_pods" -gt 0 ]]; then
         log_error "Scheduling validation FAILED: $unscheduled_pods pods could not be scheduled"
         log_error "Unscheduled pods:"
-        kubectl get pods -n "$NAMESPACE" --field-selector=status.phase=Pending -o wide | \
-            awk 'NR==1 || $7=="<none>"'
+        kubectl get pods --all-namespaces --field-selector=status.phase=Pending -o wide | \
+            awk 'NR==1 || $8=="<none>"'
         log_error "Events for unscheduled pods:"
-        kubectl get events -n "$NAMESPACE" --field-selector reason=FailedScheduling
+        kubectl get events --all-namespaces --field-selector reason=FailedScheduling
         return 1
     fi
 
     if [[ "$failed_pods" -gt 0 ]]; then
         log_error "Scheduling validation FAILED: $failed_pods pods Failed"
-        kubectl get pods -n "$NAMESPACE" --field-selector=status.phase=Failed -o wide
+        kubectl get pods --all-namespaces --field-selector=status.phase=Failed -o wide
         return 1
     fi
 
