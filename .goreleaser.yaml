@@ -119,55 +119,30 @@ kos:
     preserve_import_paths: false
     bare: true
 
-dockers:
-  - id: eidos-validator-amd64
+dockers_v2:
+  - id: eidos-validator
     dockerfile: Dockerfile.validator
-    use: buildx
-    image_templates:
-      - "ghcr.io/nvidia/eidos-validator:latest-amd64"
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-amd64"
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}-validator"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-
-  - id: eidos-validator-arm64
-    dockerfile: Dockerfile.validator
-    use: buildx
-    image_templates:
-      - "ghcr.io/nvidia/eidos-validator:latest-arm64"
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-arm64"
-    build_flag_templates:
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}-validator"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-
-docker_manifests:
-  - name_template: "ghcr.io/nvidia/eidos-validator:latest"
-    image_templates:
-      - "ghcr.io/nvidia/eidos-validator:latest-amd64"
-      - "ghcr.io/nvidia/eidos-validator:latest-arm64"
-
-  - name_template: "ghcr.io/nvidia/eidos-validator:{{.Tag}}"
-    image_templates:
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-amd64"
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-arm64"
-
-  - name_template: "ghcr.io/nvidia/eidos-validator:v{{.Major}}"
-    image_templates:
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-amd64"
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-arm64"
-
-  - name_template: "ghcr.io/nvidia/eidos-validator:v{{.Major}}.{{.Minor}}"
-    image_templates:
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-amd64"
-      - "ghcr.io/nvidia/eidos-validator:{{.Tag}}-arm64"
+    images:
+      - ghcr.io/nvidia/eidos-validator
+    tags:
+      - latest
+      - "{{.Tag}}"
+      - "v{{.Major}}"
+      - "v{{.Major}}.{{.Minor}}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.created: "{{.Date}}"
+      org.opencontainers.image.title: "{{.ProjectName}}-validator"
+      org.opencontainers.image.revision: "{{.FullCommit}}"
+      org.opencontainers.image.version: "{{.Version}}"
+      org.opencontainers.image.source: "{{.GitURL}}"
+    extra_files:
+      - go.mod
+      - go.sum
+      - pkg
+      - cmd
 
 archives:
   - id: eidos
