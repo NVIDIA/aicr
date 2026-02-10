@@ -19,9 +19,12 @@ metadata:
 
 spec:
   # Inherits from base (implicit when spec.base is empty)
-  # This recipe adds inference-serving components for AI workloads.
+  # This recipe adds inference components for AI workloads.
   # Satisfies CNCF AI Conformance requirements:
   #   - Gang scheduling (kai-scheduler)
+  #   - Advanced Ingress for AI/ML Inference (kgateway with inference extension)
+  #   - AI inference serving (dynamo-platform)
+  #   - AI service metrics (dynamo metrics + kube-prometheus-stack)
 
   criteria:
     intent: inference
@@ -34,3 +37,34 @@ spec:
       valuesFile: components/kai-scheduler/values.yaml
       dependencyRefs:
         - gpu-operator
+
+    - name: kgateway-crds
+      type: Helm
+      source: oci://cr.kgateway.dev/kgateway-dev/charts
+      version: v2.0.0
+      valuesFile: components/kgateway-crds/values.yaml
+
+    - name: kgateway
+      type: Helm
+      source: oci://cr.kgateway.dev/kgateway-dev/charts
+      version: v2.0.0
+      valuesFile: components/kgateway/values.yaml
+      dependencyRefs:
+        - kgateway-crds
+        - cert-manager
+
+    - name: dynamo-crds
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      version: "0.8.1"
+      valuesFile: components/dynamo-crds/values.yaml
+
+    - name: dynamo-platform
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      version: "0.8.1"
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - dynamo-crds
+        - cert-manager
+        - kube-prometheus-stack

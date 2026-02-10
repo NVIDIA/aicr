@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-02-10
+
+### Bug Fixes
+
+- Add actions:read permission for codeql-action SARIF upload by [@mchmarny](https://github.com/mchmarny)
+- Migrate validator docker build to dockers_v2 with extra_files by [@mchmarny](https://github.com/mchmarny)
+
+### Features
+
+- Add dynamo-platform and dynamo-crds for AI inference serving   by [@yuanchen8911](https://github.com/yuanchen8911)
+
 ## [0.5.1] - 2026-02-10
 
 ### Bug Fixes
