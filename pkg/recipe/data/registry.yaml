@@ -83,7 +83,7 @@ components:
       defaultRepository: https://aws.github.io/eks-charts
       defaultChart: aws-efa-k8s-device-plugin
       defaultVersion: v0.5.3
-      defaultNamespace: nvidia-system
+      defaultNamespace: kube-system
     nodeScheduling:
       accelerated:
         nodeSelectorPaths:
@@ -151,7 +151,7 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/nvsentinel
       defaultVersion: v0.8.0
-      defaultNamespace: nvidia-system
+      defaultNamespace: nvsentinel
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -174,7 +174,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/nvidia-dra-driver-gpu
-      defaultNamespace: nvidia-system
+      defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -196,7 +196,7 @@ components:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
       defaultVersion: 81.2.2
-      defaultNamespace: nvidia-system
+      defaultNamespace: monitoring
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -226,7 +226,7 @@ components:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
       defaultVersion: 4.14.0
-      defaultNamespace: nvidia-system
+      defaultNamespace: monitoring
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -243,7 +243,7 @@ components:
       defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
       defaultVersion: 2.55.0
-      defaultNamespace: nvidia-system
+      defaultNamespace: kube-system
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -263,7 +263,7 @@ components:
     helm:
       defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
-      defaultNamespace: nvidia-system
+      defaultNamespace: monitoring
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -280,7 +280,7 @@ components:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
       defaultVersion: 2.1.0
-      defaultNamespace: nvidia-system
+      defaultNamespace: kubeflow
     nodeScheduling:
       system:
         nodeSelectorPaths:
