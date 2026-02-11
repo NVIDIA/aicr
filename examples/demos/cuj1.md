@@ -1,4 +1,4 @@
-# Eidos - CUJ1
+# Eidos - Critical User Journey (CUJ) 1
 
 > Assuming user is already authenticated to an EKS cluster with 2+ H100 node
 
@@ -95,4 +95,4 @@ kubectl logs -f -n kubeflow -l trainer.kubeflow.org/job-name=pytorch-mnist
 
 Job success + Fabric bandwidth within range
 
-> Synthetic workload, perf checks in CUJ2
+> Synthetic workload, perf checks beyond the basic fabric validation is out of scope here.

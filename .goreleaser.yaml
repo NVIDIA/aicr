@@ -62,9 +62,6 @@ builds:
       - amd64
       - arm64
 
-universal_binaries:
-  - name_template: "eidos"
-    replace: true
 
 gomod:
   proxy: false
