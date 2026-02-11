@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.12] - 2026-02-11
+
+### Bug Fixes
+
+- Use buildx imagetools for multi-arch manifest creation by [@mchmarny](https://github.com/mchmarny)
+
+### Tasks
+
+- Readme by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.5.11] - 2026-02-11
 
 ### Bug Fixes
