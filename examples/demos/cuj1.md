@@ -81,6 +81,12 @@ spec:
         nvidia.com/gpu: 1
       limits:
         nvidia.com/gpu: 1
+  podTemplateOverrides:
+    - targetJobs:
+        - name: node
+      spec:
+        tolerations:
+          - operator: Exists
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org
