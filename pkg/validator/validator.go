@@ -144,8 +144,8 @@ func generateRunID() string {
 	// Generate timestamp
 	timestamp := time.Now().Format("20060102-150405")
 
-	// Generate 4 random hex characters
-	randomBytes := make([]byte, 2)
+	// Generate 8 random hex characters
+	randomBytes := make([]byte, 4)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// Fallback to timestamp only if random generation fails
 		return timestamp

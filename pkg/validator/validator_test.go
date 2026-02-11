@@ -559,9 +559,9 @@ func TestGenerateRunID(t *testing.T) {
 		t.Errorf("Time part should be 6 characters (HHMMSS), got %d: %s", len(parts[1]), parts[1])
 	}
 
-	// Check random part (4 hex characters)
-	if len(parts[2]) != 4 {
-		t.Errorf("Random part should be 4 characters, got %d: %s", len(parts[2]), parts[2])
+	// Check random part (8 hex characters)
+	if len(parts[2]) != 8 {
+		t.Errorf("Random part should be 8 characters, got %d: %s", len(parts[2]), parts[2])
 	}
 }
 

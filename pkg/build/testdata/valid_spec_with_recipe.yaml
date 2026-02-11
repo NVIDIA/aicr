@@ -1,0 +1,9 @@
+apiVersion: eidos.nvidia.com/v1beta1
+kind: EidosRuntime
+spec:
+  recipe: "/data/recipes/eks-training.yaml"
+  version: "1.0.0"
+  registry:
+    host: "http://localhost:5000"
+    repository: "test-runtime"
+    insecureTLS: true

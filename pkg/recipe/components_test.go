@@ -218,7 +218,11 @@ func TestComponentRegistry_PathSyntax(t *testing.T) {
 
 	// Validate path syntax (should be dot-notation)
 	for _, comp := range registry.Components {
-		allPaths := []string{}
+		allPaths := make([]string, 0,
+			len(comp.GetSystemNodeSelectorPaths())+
+				len(comp.GetSystemTolerationPaths())+
+				len(comp.GetAcceleratedNodeSelectorPaths())+
+				len(comp.GetAcceleratedTolerationPaths()))
 		allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
 		allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
 		allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)

@@ -63,11 +63,12 @@ make tools-check  # Verify versions match .versions.yaml
 
 1. **Read before writing** — Never modify code you haven't read
 2. **Tests must pass** — `make test` with race detector; never skip tests
-3. **Use project patterns** — Learn existing code before inventing new approaches
-4. **3-strike rule** — After 3 failed fix attempts, stop and reassess
-5. **Structured errors** — Use `pkg/errors` with error codes (never `fmt.Errorf`)
-6. **Context timeouts** — All I/O operations need context with timeout
-7. **Check context in loops** — Always check `ctx.Done()` in long-running operations
+3. **Run `make qualify` often** — Run at every stopping point (after completing a phase, before commits, before moving on). Fix ALL lint/test failures before proceeding. Do not treat pre-existing failures as acceptable.
+4. **Use project patterns** — Learn existing code before inventing new approaches
+5. **3-strike rule** — After 3 failed fix attempts, stop and reassess
+6. **Structured errors** — Use `pkg/errors` with error codes (never `fmt.Errorf`)
+7. **Context timeouts** — All I/O operations need context with timeout
+8. **Check context in loops** — Always check `ctx.Done()` in long-running operations
 
 ## Git Configuration
 
