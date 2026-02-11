@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.vscode
+docs
+kwok
+tests
+tools
+*.md
+!go.mod
+!go.sum
+LICENSE
+CODEOWNERS
+.goreleaser.yaml
+Makefile

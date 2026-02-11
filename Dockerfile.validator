@@ -16,10 +16,9 @@
 # Built natively per-arch via CI (no cross-compilation or QEMU needed).
 FROM golang:1.25-bookworm
 
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+LABEL org.opencontainers.image.title="eidos-validator" \
+      org.opencontainers.image.description="NVIDIA Eidos validation test runner" \
+      org.opencontainers.image.vendor="NVIDIA Corporation"
 
 WORKDIR /workspace
 
