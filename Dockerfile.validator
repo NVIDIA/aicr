@@ -12,31 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Validator image includes Go toolchain for running validation tests in-cluster
+# Validator image includes Go toolchain for running validation tests in-cluster.
+# Built natively per-arch via CI (no cross-compilation or QEMU needed).
 FROM golang:1.25-bookworm
 
-# Install basic dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+LABEL org.opencontainers.image.title="eidos-validator" \
+      org.opencontainers.image.description="NVIDIA Eidos validation test runner" \
+      org.opencontainers.image.vendor="NVIDIA Corporation"
 
-# Set working directory
 WORKDIR /workspace
 
-# Copy go mod files first for better caching
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy source code
+# Note: Exclude unnecessary files for validation (e.g., docs, examples) via .dockerignore.
 COPY . .
 
-# Pre-compile test binaries to speed up Job execution
-# This is optional but improves startup time
-RUN go test -c -o /tmp/readiness.test ./pkg/validator/checks/readiness && \
-    go test -c -o /tmp/deployment.test ./pkg/validator/checks/deployment && \
-    go test -c -o /tmp/performance.test ./pkg/validator/checks/performance && \
-    go test -c -o /tmp/conformance.test ./pkg/validator/checks/conformance || true
+# Pre-compile test binaries for faster Job startup
+RUN go test -c -o /usr/local/bin/readiness.test ./pkg/validator/checks/readiness && \
+    go test -c -o /usr/local/bin/deployment.test ./pkg/validator/checks/deployment && \
+    go test -c -o /usr/local/bin/performance.test ./pkg/validator/checks/performance && \
+    go test -c -o /usr/local/bin/conformance.test ./pkg/validator/checks/conformance || true
 
-# Default command runs bash for debugging
 CMD ["/bin/bash"]

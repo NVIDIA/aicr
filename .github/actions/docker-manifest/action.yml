@@ -1,0 +1,50 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Create Docker Multi-Arch Manifest'
+description: 'Combines per-arch images into multi-arch manifests with standard version tags'
+
+inputs:
+  image:
+    description: 'Full image name without tag (e.g. ghcr.io/nvidia/eidos-validator)'
+    required: true
+  tag:
+    description: 'Release tag (e.g. v0.5.11)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
+
+    - name: Create and push manifests
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        TAG: ${{ inputs.tag }}
+      run: |
+        set -euo pipefail
+
+        # Extract major and minor versions (e.g., v0.5.11 -> v0, v0.5)
+        MAJOR="v$(echo "$TAG" | sed 's/^v//' | cut -d. -f1)"
+        MAJOR_MINOR="v$(echo "$TAG" | sed 's/^v//' | cut -d. -f1-2)"
+
+        for MANIFEST_TAG in "$TAG" "$MAJOR" "$MAJOR_MINOR" "latest"; do
+          docker buildx imagetools create \
+            -t "$IMAGE:$MANIFEST_TAG" \
+            "$IMAGE:$TAG-amd64" \
+            "$IMAGE:$TAG-arm64"
+          echo "Pushed manifest: $IMAGE:$MANIFEST_TAG"
+        done

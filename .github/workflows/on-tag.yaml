@@ -26,6 +26,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  VALIDATOR_IMAGE: ghcr.io/nvidia/eidos-validator
+
 jobs:
 
   # =============================================================================
@@ -99,13 +102,13 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
 
   # =============================================================================
-  # Build Job (runs after all tests pass)
+  # Build Job: GoReleaser (binaries, ko images, draft GitHub release)
   # =============================================================================
 
   build:
-    name: Build and Release
+    name: Build and Release (Draft)
     runs-on: ubuntu-latest
-    needs: [unit, integration, e2e]  # Wait for all tests to pass
+    needs: [unit, integration, e2e]
     timeout-minutes: 30
     outputs:
       release_outcome: ${{ steps.release.outputs.release_outcome }}
@@ -135,17 +138,113 @@ jobs:
         uses: ./.github/actions/go-build-release
 
   # =============================================================================
-  # Attestation Job (runs after build succeeds)
+  # Docker Jobs: Native per-arch validator builds (parallel with GoReleaser)
+  # =============================================================================
+
+  docker-amd64:
+    name: Docker Validator (amd64)
+    runs-on: ubuntu-latest
+    needs: [unit, integration, e2e]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build and push
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4  # v6.15.0
+        with:
+          context: .
+          file: Dockerfile.validator
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-amd64
+          labels: |
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.title=eidos-validator
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  docker-arm64:
+    name: Docker Validator (arm64)
+    runs-on: ubuntu-24.04-arm
+    needs: [unit, integration, e2e]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build and push
+        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4  # v6.15.0
+        with:
+          context: .
+          file: Dockerfile.validator
+          platforms: linux/arm64
+          push: true
+          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-arm64
+          labels: |
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.title=eidos-validator
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  # =============================================================================
+  # Docker Manifest: Combine per-arch images into multi-arch manifests
+  # =============================================================================
+
+  docker-manifest:
+    name: Docker Manifest
+    runs-on: ubuntu-latest
+    needs: [docker-amd64, docker-arm64]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Create multi-arch manifest
+        uses: ./.github/actions/docker-manifest
+        with:
+          image: ${{ env.VALIDATOR_IMAGE }}
+          tag: ${{ github.ref_name }}
+
+  # =============================================================================
+  # Attestation Job (runs after all images are pushed)
   # =============================================================================
 
   attest:
     name: Attest Images
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, docker-manifest]
     if: needs.build.outputs.release_outcome == 'success'
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: write
       id-token: write
       attestations: write
     steps:
@@ -178,13 +277,34 @@ jobs:
           crane_version: ${{ steps.versions.outputs.crane }}
 
   # =============================================================================
-  # Deploy Job (runs after attestation succeeds)
+  # Publish: Flip draft release to public after attestation succeeds
+  # =============================================================================
+
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: [attest]
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false
+
+  # =============================================================================
+  # Deploy Job (runs after release is published)
   # =============================================================================
 
   deploy:
     name: Deploy API Server
     runs-on: ubuntu-latest
-    needs: [attest]
+    needs: [publish]
     timeout-minutes: 10
     permissions:
       contents: read

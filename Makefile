@@ -205,7 +205,7 @@ image-validator: ## Builds validator image with Go toolchain (IMAGE_REGISTRY, IM
 .PHONY: release
 release: ## Runs the full release process with goreleaser
 	@set -e; \
-	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 30m0s
+	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
 .PHONY: bump-major
 bump-major: ## Bumps major version (1.2.3 → 2.0.0)
