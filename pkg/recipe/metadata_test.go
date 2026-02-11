@@ -346,15 +346,16 @@ func containsString(s, substr string) bool {
 func TestOverlayAddsNewComponent(t *testing.T) {
 	ctx := context.Background()
 
-	// Build recipe for H100 inference workload
-	// h100-ubuntu-inference.yaml adds network-operator which is NOT in base.yaml
-	// Note: The overlay file requires accelerator=h100, os=ubuntu, intent=inference
-	// so we must specify all criteria to match it (asymmetric matching).
+	// Build recipe for H100 EKS inference workload with dynamo platform
+	// h100-eks-ubuntu-inference-dynamo.yaml adds kai-scheduler, dynamo-crds, dynamo-platform
+	// which are NOT in base.yaml
 	builder := NewBuilder()
 	criteria := NewCriteria()
+	criteria.Service = CriteriaServiceEKS
 	criteria.Accelerator = CriteriaAcceleratorH100
 	criteria.OS = CriteriaOSUbuntu
 	criteria.Intent = CriteriaIntentInference
+	criteria.Platform = CriteriaPlatformDynamo
 
 	result, err := builder.BuildFromCriteria(ctx, criteria)
 	if err != nil {
@@ -374,20 +375,20 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 	}
 
 	// Verify overlay-added component exists
-	networkOp := result.GetComponentRef("network-operator")
-	if networkOp == nil {
-		t.Fatalf("network-operator not found (should be added by h100-inference overlay)")
+	dynamoPlatform := result.GetComponentRef("dynamo-platform")
+	if dynamoPlatform == nil {
+		t.Fatalf("dynamo-platform not found (should be added by h100-eks-ubuntu-inference-dynamo overlay)")
 	}
 
-	// Verify network-operator properties
-	if networkOp.Version == "" {
-		t.Error("network-operator has empty version")
+	// Verify dynamo-platform properties
+	if dynamoPlatform.Version == "" {
+		t.Error("dynamo-platform has empty version")
 	}
-	if networkOp.Type != "Helm" {
-		t.Errorf("network-operator type = %q, want Helm", networkOp.Type)
+	if dynamoPlatform.Type != "Helm" {
+		t.Errorf("dynamo-platform type = %q, want Helm", dynamoPlatform.Type)
 	}
-	if len(networkOp.DependencyRefs) == 0 {
-		t.Error("network-operator has no dependencies (should depend on cert-manager)")
+	if len(dynamoPlatform.DependencyRefs) == 0 {
+		t.Error("dynamo-platform has no dependencies (should depend on dynamo-crds, cert-manager, kube-prometheus-stack)")
 	}
 
 	// Build recipe for EKS H100 training workload with kubeflow platform
@@ -418,7 +419,7 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 	t.Logf("Successfully verified overlay can add new components")
 	t.Logf("   Base components: %d", len(baseComponents))
 	t.Logf("   Total components: %d", len(result.ComponentRefs))
-	t.Logf("   network-operator version: %s", networkOp.Version)
+	t.Logf("   dynamo-platform version: %s", dynamoPlatform.Version)
 	t.Logf("   kubeflow-trainer version: %s", kubeflowTrainer.Version)
 }
 
@@ -428,13 +429,14 @@ func TestOverlayMergeDoesNotLoseBaseComponents(t *testing.T) {
 	ctx := context.Background()
 	builder := NewBuilder()
 
-	// Build H100 inference recipe (matches overlay that adds network-operator)
-	// Note: The h100-ubuntu-inference.yaml overlay requires all three criteria
-	// (accelerator=h100, os=ubuntu, intent=inference) to match due to asymmetric matching.
+	// Build H100 EKS inference recipe with dynamo platform
+	// Matches overlay chain that adds kgateway, dynamo-platform, kai-scheduler, etc.
 	criteria := NewCriteria()
+	criteria.Service = CriteriaServiceEKS
 	criteria.Accelerator = CriteriaAcceleratorH100
 	criteria.OS = CriteriaOSUbuntu
 	criteria.Intent = CriteriaIntentInference
+	criteria.Platform = CriteriaPlatformDynamo
 
 	result, err := builder.BuildFromCriteria(ctx, criteria)
 	if err != nil {
@@ -449,10 +451,10 @@ func TestOverlayMergeDoesNotLoseBaseComponents(t *testing.T) {
 		}
 	}
 
-	// Verify network-operator was added
-	networkOp := result.GetComponentRef("network-operator")
-	if networkOp == nil {
-		t.Error("network-operator not found (should be added by overlay)")
+	// Verify dynamo-platform was added by overlay
+	dynamoPlatform := result.GetComponentRef("dynamo-platform")
+	if dynamoPlatform == nil {
+		t.Error("dynamo-platform not found (should be added by overlay)")
 	}
 
 	// Result should have at least 5 components (4 base + 1 added)
@@ -462,8 +464,8 @@ func TestOverlayMergeDoesNotLoseBaseComponents(t *testing.T) {
 
 	t.Logf("Base components preserved when overlay adds new components")
 	t.Logf("   Total components: %d (4 base + additions)", len(result.ComponentRefs))
-	if networkOp != nil {
-		t.Logf("   network-operator added: version %s", networkOp.Version)
+	if dynamoPlatform != nil {
+		t.Logf("   dynamo-platform added: version %s", dynamoPlatform.Version)
 	}
 }
 
