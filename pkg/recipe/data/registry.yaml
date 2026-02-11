@@ -73,6 +73,12 @@ components:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
       defaultNamespace: nvidia-network-operator
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - operator.nodeSelector
+        tolerationPaths:
+          - operator.tolerations
 
   - name: aws-efa
     displayName: aws-efa

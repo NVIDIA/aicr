@@ -18,6 +18,8 @@
 # Override release name prefix to avoid eidos-stack- prefix in resource names
 operator:
   fullnameOverride: network-operator
+  tolerations:
+    - operator: Exists
 
 deployCR: true
 

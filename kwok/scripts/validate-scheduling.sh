@@ -331,7 +331,9 @@ generate_bundle() {
         --set "networkoperator:operator.tolerations[2].key=eidos.nvidia.com/kwok-test" \
         --set "networkoperator:operator.tolerations[2].operator=Equal" \
         --set "networkoperator:operator.tolerations[2].value=true" \
-        --set "networkoperator:operator.tolerations[2].effect=NoSchedule"
+        --set "networkoperator:operator.tolerations[2].effect=NoSchedule" \
+        --set "dynamoplatform:etcd.persistence.enabled=false" \
+        --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false"
 
     log_info "Bundle generated at ${WORK_DIR}/bundle"
 }

@@ -51,9 +51,10 @@ spec:
         prometheus:
           prometheusSpec:
             storageSpec:
+              emptyDir: null
               volumeClaimTemplate:
                 spec:
-                  storageClassName: ""  # Use default storage class
+                  storageClassName: gp2
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:

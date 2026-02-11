@@ -1,0 +1,124 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: recipeMetadata
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  name: h100-eks-ubuntu-inference
+
+spec:
+  # Combined training + inference recipe on EKS with H100 and Ubuntu.
+  # Inherits all base and EKS training components, plus inference components.
+  base: h100-eks-ubuntu-training
+
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: inference
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "24.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 6.8"
+
+  componentRefs:
+    # --- Inference components (from inference overlay) ---
+
+    - name: kai-scheduler
+      type: Helm
+      source: oci://ghcr.io/nvidia/kai-scheduler
+      version: v0.12.10
+      valuesFile: components/kai-scheduler/values.yaml
+      dependencyRefs:
+        - gpu-operator
+
+    - name: kgateway-crds
+      type: Helm
+      source: oci://cr.kgateway.dev/kgateway-dev/charts
+      version: v2.0.0
+      valuesFile: components/kgateway-crds/values.yaml
+
+    - name: kgateway
+      type: Helm
+      source: oci://cr.kgateway.dev/kgateway-dev/charts
+      version: v2.0.0
+      valuesFile: components/kgateway/values.yaml
+      dependencyRefs:
+        - kgateway-crds
+        - cert-manager
+
+    - name: dynamo-crds
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      version: "0.8.1"
+      valuesFile: components/dynamo-crds/values.yaml
+
+    - name: dynamo-platform
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      version: "0.8.1"
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - dynamo-crds
+        - cert-manager
+        - kube-prometheus-stack
+      overrides:
+        etcd:
+          persistence:
+            storageClass: gp2
+
+    # --- Additional components ---
+
+    # network-operator is temporarily excluded due to an upstream chart bug:
+    # kubeVersion constraint rejects EKS version strings with pre-release
+    # suffixes (e.g. v1.34.3-eks-ac2d5a0). Upstream fix approved:
+    # https://github.com/Mellanox/network-operator/pull/2167
+    # Re-enable once a release includes the fix.
+    #
+    # - name: network-operator
+    #   type: Helm
+    #   source: https://helm.ngc.nvidia.com/nvidia
+    #   version: v25.4.0
+    #   valuesFile: components/network-operator/values.yaml
+    #   dependencyRefs:
+    #     - cert-manager
+
+    - name: kubeflow-trainer
+      type: Helm
+      source: oci://ghcr.io/kubeflow/charts
+      version: "2.1.0"
+      valuesFile: components/kubeflow-trainer/values.yaml
+      dependencyRefs:
+        - cert-manager
+
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia
+      version: "25.8.1"
+      valuesFile: components/nvidia-dra-driver-gpu/values.yaml
+      dependencyRefs:
+        - gpu-operator
+      overrides:
+        # EKS has no control-plane nodes — remove the default affinity
+        controller:
+          affinity:
+            nodeAffinity: null
+          tolerations:
+            - operator: Exists
