@@ -83,48 +83,50 @@ pkg/validator/checks/
 ├── README.md                    # This file - Complete documentation
 ├── registry.go                  # Registration infrastructure
 ├── runner.go                    # Test runner for Job execution
+├── generator.go                 # Code generator for new checks/constraints
 ├── readiness/                   # Readiness phase checks
 │   ├── gpu_detection.go         # Example: GPU hardware check
 │   └── gpu_detection_test.go    # Unit tests + test wrapper
 ├── deployment/                  # Deployment phase checks + constraints
-│   ├── operator_health.go       # Example: Operator pod health
-│   ├── operator_health_test.go  # Unit tests + test wrapper
-│   └── constraints.go           # Deployment constraint validators
+│   ├── operator_health_check.go           # Check registration and implementation
+│   ├── operator_health_check_test.go      # Integration test (runs in Jobs)
+│   ├── operator_health_check_unit_test.go # Unit test (runs locally)
+│   ├── gpu_operator_version_constraint.go           # Constraint validator
+│   ├── gpu_operator_version_constraint_test.go      # Integration test
+│   └── gpu_operator_version_constraint_unit_test.go # Unit test
 ├── performance/                 # Performance phase checks + constraints
 └── conformance/                 # Conformance phase checks + constraints
 ```
+
+### File Naming Convention
+
+| Type | Files Generated |
+|------|-----------------|
+| **Check** | `<name>_check.go`, `<name>_check_test.go`, `<name>_check_unit_test.go` |
+| **Constraint** | `<name>_constraint.go`, `<name>_constraint_test.go`, `<name>_constraint_unit_test.go` |
 
 ## Getting Started
 
 ### Quick Start (5 minutes)
 
-**1. Create check file:**
+Use the generator to create a new check or constraint with all required files:
+
+**1. Generate a check:**
 ```bash
-touch pkg/validator/checks/deployment/my_check.go
-touch pkg/validator/checks/deployment/my_check_test.go
+eidos generate-validator --check my-check --phase deployment --description "Verify my component is healthy"
 ```
 
-**2. Implement and register check:**
+This creates:
+- `my_check_check.go` - Registration and validator function
+- `my_check_check_test.go` - Integration test (runs in Kubernetes Jobs)
+- `my_check_check_unit_test.go` - Unit test (runs locally)
+- `my_check_recipe.yaml` - Sample recipe for testing
+- `my_check_README.md` - Instructions
+
+**2. Implement the validator function:**
 ```go
-// pkg/validator/checks/deployment/my_check.go
-package deployment
-
-import (
-    "fmt"
-    "github.com/NVIDIA/eidos/pkg/validator/checks"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-)
-
-func init() {
-    checks.RegisterCheck(&checks.Check{
-        Name:        "my-check",
-        Description: "Verify my component is healthy",
-        Phase:       "deployment",
-        Func:        CheckMyComponent,
-    })
-}
-
-func CheckMyComponent(ctx *checks.ValidationContext) error {
+// pkg/validator/checks/deployment/my_check_check.go
+func validateMyCheck(ctx *checks.ValidationContext) error {
     pods, err := ctx.Clientset.CoreV1().Pods("my-namespace").List(
         ctx.Context,
         metav1.ListOptions{LabelSelector: "app=my-component"},
@@ -146,27 +148,46 @@ func CheckMyComponent(ctx *checks.ValidationContext) error {
 }
 ```
 
-**3. Add test wrapper:**
+**3. Add unit tests:**
 ```go
-// pkg/validator/checks/deployment/my_check_test.go
-package deployment
-
-import (
-    "testing"
-    "github.com/NVIDIA/eidos/pkg/validator/checks"
-)
-
-func TestMyCheck(t *testing.T) {
-    runner, err := checks.NewTestRunner(t)
-    if err != nil {
-        t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
-        return
+// pkg/validator/checks/deployment/my_check_check_unit_test.go
+func TestValidateMyCheck(t *testing.T) {
+    tests := []struct {
+        name    string
+        setup   func() *checks.ValidationContext
+        wantErr bool
+    }{
+        {
+            name: "pods running",
+            setup: func() *checks.ValidationContext {
+                return &checks.ValidationContext{
+                    Context:   context.Background(),
+                    Clientset: fake.NewSimpleClientset(&runningPod),
+                }
+            },
+            wantErr: false,
+        },
+        {
+            name: "no pods found",
+            setup: func() *checks.ValidationContext {
+                return &checks.ValidationContext{
+                    Context:   context.Background(),
+                    Clientset: fake.NewSimpleClientset(),
+                }
+            },
+            wantErr: true,
+        },
     }
-    runner.RunCheck("my-check")
+    // ... test execution
 }
 ```
 
-**4. Use in recipe:**
+**4. Run unit tests:**
+```bash
+go test -short -v ./pkg/validator/checks/deployment/... -run TestValidateMyCheck
+```
+
+**5. Use in recipe:**
 ```yaml
 validation:
   deployment:
@@ -174,13 +195,12 @@ validation:
       - my-check
 ```
 
-**5. Test locally:**
-```bash
-go test ./pkg/validator/checks/deployment/ -run TestMyCheck -v
-# Should skip gracefully (not in Kubernetes)
-```
-
 Done! Your check will run inside validation Jobs.
+
+**Generate a constraint validator:**
+```bash
+eidos generate-validator --constraint Deployment.my-app.version --phase deployment
+```
 
 ### Key Principles
 
@@ -211,30 +231,26 @@ validation:
 
 ### Registering a Check
 
-Checks use Go's `init()` pattern for self-registration:
+Checks use Go's `init()` pattern for self-registration. Use `TestName` to specify which test function runs in Jobs:
 
 ```go
-// pkg/validator/checks/readiness/gpu_detection.go
-package readiness
+// pkg/validator/checks/deployment/my_check_check.go
+package deployment
 
 import "github.com/NVIDIA/eidos/pkg/validator/checks"
 
 func init() {
     checks.RegisterCheck(&checks.Check{
-        Name:        "gpu-hardware-detection",
-        Description: "Verify GPU hardware is detected",
-        Phase:       "readiness",
-        Func:        CheckGPUHardwareDetection,
+        Name:        "my-check",
+        Description: "Verify my component is healthy",
+        Phase:       "deployment",
+        TestName:    "TestCheckMyCheck",  // Test function name for Job execution
     })
 }
 
-func CheckGPUHardwareDetection(ctx *checks.ValidationContext) error {
-    // Access snapshot data
-    for _, m := range ctx.Snapshot.Measurements {
-        if m.Type == measurement.TypeGPU {
-            // Validate GPU detection
-        }
-    }
+// validateMyCheck is the validator function (private for encapsulation)
+func validateMyCheck(ctx *checks.ValidationContext) error {
+    // Validation logic here
     return nil
 }
 ```
@@ -244,33 +260,42 @@ func CheckGPUHardwareDetection(ctx *checks.ValidationContext) error {
 Constraint validators evaluate constraints that need cluster access:
 
 ```go
-// pkg/validator/checks/deployment/constraints.go
+// pkg/validator/checks/deployment/my_constraint_constraint.go
 package deployment
 
-import "github.com/NVIDIA/eidos/pkg/validator/checks"
+import (
+    "github.com/NVIDIA/eidos/pkg/recipe"
+    "github.com/NVIDIA/eidos/pkg/validator/checks"
+)
 
 func init() {
     checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-        Pattern:     "Deployment.*",
-        Description: "Validates deployment constraints",
-        Func:        ValidateDeploymentConstraint,
+        Pattern:     "Deployment.my-app.version",
+        Description: "Validates my-app deployment version",
+        TestName:    "TestMyAppVersion",  // Test function name for Job execution
+        Phase:       "deployment",
     })
 }
 
-func ValidateDeploymentConstraint(
+// validateMyAppVersion is the validator function (private for encapsulation)
+func validateMyAppVersion(
     ctx *checks.ValidationContext,
     constraint recipe.Constraint,
 ) (actual string, passed bool, err error) {
     // Query live cluster
-    deployment, err := ctx.Clientset.AppsV1().Deployments("gpu-operator").Get(...)
+    deployment, err := ctx.Clientset.AppsV1().Deployments("my-namespace").Get(
+        ctx.Context, "my-app", metav1.GetOptions{})
+    if err != nil {
+        return "", false, err
+    }
 
-    // Extract actual value (e.g., version)
-    actual = deployment.Spec.Template.Spec.Containers[0].Image
+    // Extract actual value (e.g., version from image tag)
+    actual = extractVersion(deployment.Spec.Template.Spec.Containers[0].Image)
 
     // Evaluate constraint expression
-    passed = evaluateConstraintExpression(constraint.Value, actual)
+    passed, err = evaluateVersionConstraint(actual, constraint.Value)
 
-    return actual, passed, nil
+    return actual, passed, err
 }
 ```
 
@@ -307,27 +332,28 @@ For `go test` to discover and run your check, you need a `Test*` function that:
 
 ### Adding a Test Wrapper
 
-**Step 1: Add Test Wrapper to Your Check's Test File**
+**Note:** When using the generator (`eidos generate-validator`), test wrappers are automatically created. The following is for manual creation.
 
-In the same `*_test.go` file as your unit tests, add a test wrapper function:
+**Step 1: Add Test Wrapper to Your Check's Integration Test File**
+
+The integration test file (`*_check_test.go`) contains the test wrapper that runs in Kubernetes Jobs:
 
 ```go
-// pkg/validator/checks/deployment/operator_health_test.go
+// pkg/validator/checks/deployment/operator_health_check_test.go
 
-// TestOperatorHealth is the test wrapper for the operator-health check.
-// This function is executed by go test inside Kubernetes validation Jobs.
-// It loads the validation context from the Job environment and runs the registered check.
-//
-// This is distinct from TestCheckOperatorHealth which is a unit test with mocked context.
-//
-// When run outside Kubernetes (e.g., during local development), this test is skipped.
+// TestOperatorHealth is the integration test for operator-health.
+// This runs inside validator Jobs and invokes the validator.
 func TestOperatorHealth(t *testing.T) {
+    if testing.Short() {
+        t.Skip("Skipping integration test in short mode")
+    }
+
     runner, err := checks.NewTestRunner(t)
     if err != nil {
         // Skip if not running in Kubernetes (expected during local test runs)
-        t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
-        return
+        t.Skipf("Not in Job environment: %v", err)
     }
+    defer runner.Cancel()
 
     runner.RunCheck("operator-health")
 }

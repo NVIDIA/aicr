@@ -95,8 +95,8 @@ func (v *Validator) ValidatePhase(
 
 		if rbacErr := deployer.EnsureRBAC(ctx); rbacErr != nil {
 			slog.Debug("failed to create RBAC resources", "phase", phase, "error", rbacErr)
-		} else {
-			// Cleanup RBAC after phase completes
+		} else if v.Cleanup {
+			// Cleanup RBAC after phase completes (only if cleanup enabled)
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -111,7 +111,7 @@ func (v *Validator) ValidatePhase(
 		if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
 			slog.Warn("failed to create data ConfigMaps", "error", cmErr)
 		} else {
-			// Cleanup ConfigMaps after phase completes
+			// Always cleanup data ConfigMaps (recipe/snapshot) - these are internal
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -427,7 +427,7 @@ func (v *Validator) validateDeployment(
 				v.validateRecipeRegistrations(recipeResult, "deployment")
 
 				// Build test pattern from recipe (constraint names -> test names)
-				testPattern := v.buildTestPattern(recipeResult, "deployment")
+				patternResult := v.buildTestPattern(recipeResult, "deployment")
 
 				// Deploy ONE Job for ALL deployment checks and constraints in this phase
 				jobConfig := agent.Config{
@@ -438,7 +438,8 @@ func (v *Validator) validateDeployment(
 					SnapshotConfigMap:  snapshotCMName,
 					RecipeConfigMap:    recipeCMName,
 					TestPackage:        "./pkg/validator/checks/deployment",
-					TestPattern:        testPattern,
+					TestPattern:        patternResult.Pattern,
+					ExpectedTests:      patternResult.ExpectedTests,
 					Timeout:            10 * time.Minute,
 				}
 
@@ -843,7 +844,13 @@ func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResul
 	}
 }
 
-func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase string) string {
+// buildTestPatternResult contains the test pattern and expected count.
+type buildTestPatternResult struct {
+	Pattern       string
+	ExpectedTests int
+}
+
+func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase string) buildTestPatternResult {
 	var testNames []string
 	uniqueTests := make(map[string]bool)
 
@@ -863,7 +870,11 @@ func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase st
 
 			// Add tests for explicit checks
 			for _, checkName := range recipeResult.Validation.Deployment.Checks {
-				testName := checkNameToTestName(checkName)
+				testName, ok := checks.GetTestNameForCheck(checkName)
+				if !ok {
+					// Fallback to generated name if not registered
+					testName = checkNameToTestName(checkName)
+				}
 				if !uniqueTests[testName] {
 					testNames = append(testNames, testName)
 					uniqueTests[testName] = true
@@ -880,13 +891,13 @@ func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase st
 	if len(testNames) == 0 {
 		// No pattern - run all tests
 		slog.Debug("no pattern specified, will run all tests in package")
-		return ""
+		return buildTestPatternResult{Pattern: "", ExpectedTests: 0}
 	}
 
 	// Build regex: ^(TestGPUOperatorVersion|TestOperatorHealth)$
 	pattern := "^(" + strings.Join(testNames, "|") + ")$"
 	slog.Info("built test pattern from recipe", "pattern", pattern, "tests", len(testNames))
-	return pattern
+	return buildTestPatternResult{Pattern: pattern, ExpectedTests: len(testNames)}
 }
 
 // checkNameToTestName converts a check name to a test function name.
@@ -1005,9 +1016,13 @@ func (v *Validator) runPhaseJob(
 			fmt.Fprintf(os.Stderr, "\n=== Job Logs (%s) ===\n%s\n=== End Job Logs ===\n\n", config.JobName, logs)
 		}
 
-		// Cleanup failed Job
-		if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
-			slog.Warn("failed to cleanup Job after failure", "job", config.JobName, "error", cleanupErr)
+		// Cleanup failed Job (only if cleanup enabled)
+		if v.Cleanup {
+			if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
+				slog.Warn("failed to cleanup Job after failure", "job", config.JobName, "error", cleanupErr)
+			}
+		} else {
+			slog.Info("cleanup disabled, keeping failed Job for debugging", "job", config.JobName)
 		}
 
 		// Build error reason with log snippet
@@ -1034,15 +1049,38 @@ func (v *Validator) runPhaseJob(
 	// Get aggregated results from Job
 	jobResult, err := deployer.GetResult(ctx)
 	if err != nil {
-		// Cleanup Job
-		if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
-			slog.Warn("failed to cleanup Job", "job", config.JobName, "error", cleanupErr)
+		// Cleanup Job (only if cleanup enabled)
+		if v.Cleanup {
+			if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
+				slog.Warn("failed to cleanup Job", "job", config.JobName, "error", cleanupErr)
+			}
+		} else {
+			slog.Info("cleanup disabled, keeping Job for debugging", "job", config.JobName)
 		}
 		result.Status = ValidationStatusFail
 		result.Checks = append(result.Checks, CheckResult{
 			Name:   phaseName,
 			Status: ValidationStatusFail,
 			Reason: fmt.Sprintf("failed to retrieve result: %v", err),
+		})
+		return result
+	}
+
+	// Validate expected tests match actual tests run
+	actualTests := len(jobResult.Tests)
+	if config.ExpectedTests > 0 && actualTests != config.ExpectedTests {
+		slog.Error("test count mismatch",
+			"expected", config.ExpectedTests,
+			"actual", actualTests,
+			"pattern", config.TestPattern)
+		result.Status = ValidationStatusFail
+		result.Checks = append(result.Checks, CheckResult{
+			Name:   phaseName,
+			Status: ValidationStatusFail,
+			Reason: fmt.Sprintf("expected %d tests to run but %d tests ran (pattern: %s). "+
+				"This usually means the test functions are not in the validator image. "+
+				"Rebuild the image and clear Kind cache: docker exec <cluster>-control-plane crictl rmi <image>",
+				config.ExpectedTests, actualTests, config.TestPattern),
 		})
 		return result
 	}
@@ -1079,8 +1117,8 @@ func (v *Validator) runPhaseJob(
 
 			result.Checks = append(result.Checks, checkResult)
 		}
-	} else {
-		// Fallback: no individual tests parsed, return phase-level result
+	} else if config.ExpectedTests == 0 {
+		// Fallback: no individual tests parsed and no expected tests, return phase-level result
 		result.Checks = append(result.Checks, CheckResult{
 			Name:   phaseName,
 			Status: ValidationStatus(jobResult.Status),
@@ -1094,9 +1132,13 @@ func (v *Validator) runPhaseJob(
 		"tests", len(jobResult.Tests),
 		"duration", jobResult.Duration)
 
-	// Cleanup Job after successful completion
-	if err := deployer.CleanupJob(ctx); err != nil {
-		slog.Warn("failed to cleanup Job", "job", config.JobName, "error", err)
+	// Cleanup Job after successful completion (only if cleanup enabled)
+	if v.Cleanup {
+		if err := deployer.CleanupJob(ctx); err != nil {
+			slog.Warn("failed to cleanup Job", "job", config.JobName, "error", err)
+		}
+	} else {
+		slog.Info("cleanup disabled, keeping Job for debugging", "job", config.JobName)
 	}
 
 	// Set overall phase status based on check results
@@ -1126,6 +1168,7 @@ func (v *Validator) validateAll(
 
 	result := NewValidationResult()
 	result.Init(header.KindValidationResult, APIVersion, v.Version)
+	result.RunID = v.RunID
 	overallStatus := ValidationStatusPass
 
 	// Create Kubernetes client for agent deployment
@@ -1170,8 +1213,8 @@ func (v *Validator) validateAll(
 		slog.Debug("creating shared RBAC for all validation phases")
 		if rbacErr := deployer.EnsureRBAC(ctx); rbacErr != nil {
 			slog.Warn("failed to create validation RBAC, check execution will be skipped", "error", rbacErr)
-		} else {
-			// Cleanup RBAC at the end (deferred to ensure cleanup even on error)
+		} else if v.Cleanup {
+			// Cleanup RBAC at the end (deferred to ensure cleanup even on error, only if cleanup enabled)
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1187,7 +1230,7 @@ func (v *Validator) validateAll(
 		if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
 			slog.Warn("failed to create data ConfigMaps, check execution will be skipped", "error", cmErr)
 		} else {
-			// Cleanup ConfigMaps at the end (deferred to ensure cleanup even on error)
+			// Always cleanup data ConfigMaps (recipe/snapshot) - these are internal
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1200,8 +1243,8 @@ func (v *Validator) validateAll(
 		slog.Debug("creating ValidationResult ConfigMap for tracking progress")
 		if resultErr := v.createValidationResultConfigMap(ctx, clientset); resultErr != nil {
 			slog.Warn("failed to create validation result ConfigMap", "error", resultErr)
-		} else {
-			// Cleanup ValidationResult ConfigMap at the end
+		} else if v.Cleanup {
+			// Cleanup ValidationResult ConfigMap at the end (only if cleanup enabled)
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
 				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1480,6 +1523,7 @@ func (v *Validator) createValidationResultConfigMap(ctx context.Context, clients
 	// Initialize empty ValidationResult structure
 	result := NewValidationResult()
 	result.Init(header.KindValidationResult, APIVersion, v.Version)
+	result.RunID = v.RunID
 
 	// Serialize to YAML
 	resultYAML, err := yaml.Marshal(result)

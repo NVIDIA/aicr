@@ -905,3 +905,131 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckNameToTestName(t *testing.T) {
+	tests := []struct {
+		name      string
+		checkName string
+		want      string
+	}{
+		{
+			name:      "simple hyphenated name",
+			checkName: "operator-health",
+			want:      "TestOperatorHealth",
+		},
+		{
+			name:      "multiple hyphens",
+			checkName: "gpu-device-plugin-check",
+			want:      "TestGpuDevicePluginCheck",
+		},
+		{
+			name:      "single word",
+			checkName: "health",
+			want:      "TestHealth",
+		},
+		{
+			name:      "already capitalized parts",
+			checkName: "GPU-health",
+			want:      "TestGPUHealth",
+		},
+		{
+			name:      "empty string",
+			checkName: "",
+			want:      "Test",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkNameToTestName(tt.checkName)
+			if got != tt.want {
+				t.Errorf("checkNameToTestName(%q) = %q, want %q", tt.checkName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildTestPattern(t *testing.T) {
+	v := New()
+
+	tests := []struct {
+		name              string
+		recipe            *recipe.RecipeResult
+		phase             string
+		wantPattern       string
+		wantExpectedTests int
+	}{
+		{
+			name: "empty recipe returns empty pattern",
+			recipe: &recipe.RecipeResult{
+				Validation: nil,
+			},
+			phase:             "deployment",
+			wantPattern:       "",
+			wantExpectedTests: 0,
+		},
+		{
+			name: "nil validation deployment returns empty pattern",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: nil,
+				},
+			},
+			phase:             "deployment",
+			wantPattern:       "",
+			wantExpectedTests: 0,
+		},
+		{
+			name: "empty deployment checks returns empty pattern",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks:      []string{},
+						Constraints: []recipe.Constraint{},
+					},
+				},
+			},
+			phase:             "deployment",
+			wantPattern:       "",
+			wantExpectedTests: 0,
+		},
+		{
+			name: "performance phase not implemented returns empty",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Checks: []string{"perf-check"},
+					},
+				},
+			},
+			phase:             "performance",
+			wantPattern:       "",
+			wantExpectedTests: 0,
+		},
+		{
+			name: "conformance phase not implemented returns empty",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Conformance: &recipe.ValidationPhase{
+						Checks: []string{"conformance-check"},
+					},
+				},
+			},
+			phase:             "conformance",
+			wantPattern:       "",
+			wantExpectedTests: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := v.buildTestPattern(tt.recipe, tt.phase)
+			if result.Pattern != tt.wantPattern {
+				t.Errorf("buildTestPattern() pattern = %q, want %q", result.Pattern, tt.wantPattern)
+			}
+			if result.ExpectedTests != tt.wantExpectedTests {
+				t.Errorf("buildTestPattern() expectedTests = %d, want %d", result.ExpectedTests, tt.wantExpectedTests)
+			}
+		})
+	}
+}

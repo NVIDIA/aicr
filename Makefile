@@ -193,7 +193,7 @@ image: ## Builds and pushes container image (IMAGE_REGISTRY, IMAGE_TAG)
 	KO_DOCKER_REPO=$(IMAGE_REGISTRY) ko build --bare --sbom=none --tags=$(IMAGE_TAG) ./cmd/eidos
 
 .PHONY: image-validator
-image-validator: ## Builds validator image with Go toolchain (IMAGE_REGISTRY, IMAGE_TAG)
+image-validator: build ## Builds validator image with Go toolchain (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
 	echo "Building validator image to $(IMAGE_REGISTRY)/eidos-validator:$(IMAGE_TAG)"; \
 	docker build -f Dockerfile.validator -t $(IMAGE_REGISTRY)/eidos-validator:$(IMAGE_TAG) .; \

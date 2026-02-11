@@ -17,6 +17,7 @@ package checks
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/NVIDIA/eidos/pkg/recipe"
@@ -65,6 +66,10 @@ type Check struct {
 
 	// Func is the check implementation
 	Func CheckFunc
+
+	// TestName is the Go test function name (e.g., "TestCheckOperatorHealth")
+	// If empty, derived from Name automatically
+	TestName string
 }
 
 // ConstraintValidator represents a registered constraint validator.
@@ -78,6 +83,13 @@ type ConstraintValidator struct {
 
 	// Func is the validator implementation
 	Func ConstraintValidatorFunc
+
+	// TestName is the Go test function name (e.g., "TestGPUOperatorVersion")
+	// If empty, derived from Pattern automatically
+	TestName string
+
+	// Phase indicates which validation phase (deployment, performance, conformance)
+	Phase string
 }
 
 // ConstraintTest represents a registered integration test for constraint validation.
@@ -105,6 +117,7 @@ var (
 
 // RegisterCheck adds a check to the registry.
 // This should be called from init() functions in check packages.
+// If TestName is empty, it's derived from the Name automatically.
 func RegisterCheck(check *Check) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -113,17 +126,41 @@ func RegisterCheck(check *Check) {
 		panic(fmt.Sprintf("check %q is already registered", check.Name))
 	}
 
+	// Auto-derive TestName if not provided
+	if check.TestName == "" {
+		check.TestName = "TestCheck" + patternToFuncName(check.Name)
+	}
+
 	checkRegistry[check.Name] = check
+}
+
+// GetTestNameForCheck looks up which test function validates a check.
+// Returns the test name and true if found, empty string and false otherwise.
+func GetTestNameForCheck(checkName string) (string, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	check, ok := checkRegistry[checkName]
+	if !ok {
+		return "", false
+	}
+	return check.TestName, true
 }
 
 // RegisterConstraintValidator adds a constraint validator to the registry.
 // This should be called from init() functions in constraint validator packages.
+// If TestName is empty, it's derived from the Pattern automatically.
 func RegisterConstraintValidator(validator *ConstraintValidator) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
 	if _, exists := constraintRegistry[validator.Pattern]; exists {
 		panic(fmt.Sprintf("constraint validator for pattern %q is already registered", validator.Pattern))
+	}
+
+	// Auto-derive TestName if not provided
+	if validator.TestName == "" {
+		validator.TestName = "Test" + patternToFuncName(validator.Pattern)
 	}
 
 	constraintRegistry[validator.Pattern] = validator
@@ -195,6 +232,12 @@ func GetTestNameForConstraint(constraintName string) (string, bool) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
+	// First check constraint registry (preferred, single registration)
+	if validator, ok := constraintRegistry[constraintName]; ok && validator.TestName != "" {
+		return validator.TestName, true
+	}
+
+	// Fallback to legacy test registry for backwards compatibility
 	test, ok := constraintTestRegistry[constraintName]
 	if !ok {
 		return "", false
@@ -202,12 +245,48 @@ func GetTestNameForConstraint(constraintName string) (string, bool) {
 	return test.TestName, true
 }
 
+// patternToFuncName converts a constraint pattern to a function name.
+// "Deployment.gpu-operator.version" -> "DeploymentGpuOperatorVersion"
+func patternToFuncName(pattern string) string {
+	var result []rune
+	capitalizeNext := true
+
+	for _, r := range pattern {
+		if r == '.' || r == '-' || r == '_' {
+			capitalizeNext = true
+			continue
+		}
+		if capitalizeNext {
+			result = append(result, []rune(strings.ToUpper(string(r)))...)
+			capitalizeNext = false
+		} else {
+			result = append(result, r)
+		}
+	}
+	return string(result)
+}
+
 // ListConstraintTests returns all registered constraint tests.
+// Includes both legacy ConstraintTest registrations and new ConstraintValidator registrations with Phase.
 func ListConstraintTests(phase string) []*ConstraintTest {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
 	var tests []*ConstraintTest
+
+	// Include tests from constraint validators (new single-registration pattern)
+	for _, validator := range constraintRegistry {
+		if validator.Phase != "" && (phase == "" || validator.Phase == phase) {
+			tests = append(tests, &ConstraintTest{
+				TestName:    validator.TestName,
+				Pattern:     validator.Pattern,
+				Description: validator.Description,
+				Phase:       validator.Phase,
+			})
+		}
+	}
+
+	// Include legacy test registry for backwards compatibility
 	for _, test := range constraintTestRegistry {
 		if phase == "" || test.Phase == phase {
 			tests = append(tests, test)
