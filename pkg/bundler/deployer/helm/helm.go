@@ -54,7 +54,8 @@ type ComponentData struct {
 	Namespace    string
 	Repository   string
 	ChartName    string
-	Version      string
+	Version      string // Original version string (preserves 'v' prefix) for helm install --version
+	ChartVersion string // Normalized version (no 'v' prefix) for chart metadata labels
 	HasManifests bool
 	HasChart     bool
 	IsOCI        bool
@@ -229,10 +230,9 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 		}
 
 		isOCI := strings.HasPrefix(ref.Source, "oci://")
-		version := normalizeVersion(ref.Version)
-		if isOCI {
-			version = ref.Version
-		}
+		// Preserve version string as-is for deploy.sh --version flag.
+		// Helm handles 'v' prefixes correctly via fuzzy matching.
+		version := ref.Version
 
 		components = append(components, ComponentData{
 			Name:         ref.Name,
@@ -240,6 +240,7 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 			Repository:   ref.Source,
 			ChartName:    chartName,
 			Version:      version,
+			ChartVersion: normalizeVersion(ref.Version),
 			HasManifests: hasManifests,
 			HasChart:     ref.Source != "",
 			IsOCI:        isOCI,
@@ -595,7 +596,7 @@ func renderManifest(content []byte, data ComponentData, values map[string]any) (
 		},
 		Chart: chartData{
 			Name:    data.ChartName,
-			Version: data.Version,
+			Version: data.ChartVersion,
 		},
 	}
 

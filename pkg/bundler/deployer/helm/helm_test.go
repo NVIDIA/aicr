@@ -219,7 +219,7 @@ func TestGenerate_WithManifests(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	manifestContent := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  namespace: {{ .Namespace }}\n  labels:\n    helm.sh/chart: {{ .ChartName }}-{{ .Version }}\n"
+	manifestContent := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  namespace: {{ .Release.Namespace }}\n  labels:\n    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}\n"
 
 	input := &GeneratorInput{
 		RecipeResult: createTestRecipeResult(),
@@ -258,7 +258,7 @@ func TestGenerate_WithManifests(t *testing.T) {
 	if !strings.Contains(rendered, "namespace: gpu-operator") {
 		t.Errorf("manifest namespace not rendered, got: %s", rendered)
 	}
-	if !strings.Contains(rendered, "gpu-operator-25.3.3") {
+	if !strings.Contains(rendered, "gpu-operator-25.3.3") { // normalizeVersion strips 'v' prefix for chart labels
 		t.Errorf("manifest chart label not rendered, got: %s", rendered)
 	}
 }
