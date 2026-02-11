@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.15] - 2026-02-11
+
+### Bug Fixes
+
+- Use universal binary name for macOS in install script by [@mchmarny](https://github.com/mchmarny)
+- Use per-arch darwin binaries instead of universal binary by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.5.14] - 2026-02-11
 
 ### Bug Fixes

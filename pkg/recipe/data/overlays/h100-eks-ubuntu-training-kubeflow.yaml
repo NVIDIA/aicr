@@ -46,3 +46,5 @@ spec:
     - name: kubeflow-trainer
       type: Helm
       valuesFile: components/kubeflow-trainer/values.yaml
+      manifestFiles:
+        - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml

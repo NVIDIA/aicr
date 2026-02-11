@@ -100,14 +100,6 @@ spec:
     #   dependencyRefs:
     #     - cert-manager
 
-    - name: kubeflow-trainer
-      type: Helm
-      source: oci://ghcr.io/kubeflow/charts
-      version: "2.1.0"
-      valuesFile: components/kubeflow-trainer/values.yaml
-      dependencyRefs:
-        - cert-manager
-
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia

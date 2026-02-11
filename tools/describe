@@ -1,0 +1,178 @@
+#!/bin/bash
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+# Dir setup
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${DIR}/common"
+ROOT=$(dirname "${DIR}")
+
+# Check required tools
+has_tools yq
+
+OVERLAY_DIR="${ROOT}/pkg/recipe/data/overlays"
+
+usage() {
+  cat << EOF
+Usage: $(basename "$0") [OPTIONS] [OVERLAY]
+
+Describe overlay composition chains and component provenance.
+
+Without arguments, lists all available overlay names.
+With an overlay name, shows the full inheritance chain and which
+layer adds (A) or edits (E) each component.
+
+Options:
+  -h, --help    Show this help message
+
+Examples:
+  $(basename "$0")                                    # List all overlays
+  $(basename "$0") eks-training                       # Show chain for eks-training
+  $(basename "$0") h100-eks-ubuntu-training-kubeflow  # Deep chain
+EOF
+  exit 0
+}
+
+# Parse flags
+OVERLAY_NAME=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -h|--help)
+      usage
+      ;;
+    -*)
+      err "Unknown option: $1"
+      ;;
+    *)
+      OVERLAY_NAME="$1"
+      shift
+      ;;
+  esac
+done
+
+# Build parallel arrays: overlay_names[i] <-> overlay_files[i]
+overlay_names=()
+overlay_files=()
+for f in "${OVERLAY_DIR}"/*.yaml; do
+  name=$(yq '.metadata.name' "$f")
+  overlay_names+=("$name")
+  overlay_files+=("$f")
+done
+
+# Lookup file by overlay name
+lookup_file() {
+  local target=$1
+  for (( i=0; i<${#overlay_names[@]}; i++ )); do
+    if [[ "${overlay_names[$i]}" == "$target" ]]; then
+      echo "${overlay_files[$i]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Check if name exists in overlay list
+name_exists() {
+  local target=$1
+  for n in "${overlay_names[@]}"; do
+    if [[ "$n" == "$target" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# No-arg mode: list all overlay names
+if [[ -z "$OVERLAY_NAME" ]]; then
+  echo "Available overlays:"
+  printf '%s\n' "${overlay_names[@]}" | sort | while read -r name; do
+    echo "  $name"
+  done
+  exit 0
+fi
+
+# Validate overlay exists
+if ! name_exists "$OVERLAY_NAME"; then
+  err "Overlay '$OVERLAY_NAME' not found. Run without arguments to list available overlays."
+fi
+
+# Resolve inheritance chain (target -> ... -> base)
+chain=()
+current="$OVERLAY_NAME"
+while true; do
+  chain+=("$current")
+  file=$(lookup_file "$current")
+  parent=$(yq '.spec.base // ""' "$file")
+  if [[ -z "$parent" || "$parent" == "null" ]]; then
+    # Implicit parent is base (unless we're already at base)
+    if [[ "$current" != "base" ]]; then
+      chain+=("base")
+    fi
+    break
+  fi
+  # Check for circular reference
+  for c in "${chain[@]}"; do
+    if [[ "$c" == "$parent" ]]; then
+      err "Circular inheritance detected: $current -> $parent"
+    fi
+  done
+  current="$parent"
+done
+
+# Reverse chain to go root-first
+reversed=()
+for (( i=${#chain[@]}-1; i>=0; i-- )); do
+  reversed+=("${chain[$i]}")
+done
+
+# Print header
+echo ""
+echo "Overlay: $OVERLAY_NAME"
+printf "Chain:   "
+for (( i=0; i<${#reversed[@]}; i++ )); do
+  if (( i > 0 )); then
+    printf " -> "
+  fi
+  printf "%s" "${reversed[$i]}"
+done
+echo ""
+
+# Walk chain and track components
+seen_components=""
+for layer in "${reversed[@]}"; do
+  file=$(lookup_file "$layer")
+
+  # Read component names from this layer
+  components=$(yq '.spec.componentRefs[].name' "$file" 2>/dev/null || true)
+
+  # Skip layers with no components
+  if [[ -z "$components" ]]; then
+    continue
+  fi
+
+  echo ""
+  echo "  ${layer}"
+  while IFS= read -r comp; do
+    # Check if component already seen (delimited search)
+    if echo "${seen_components}" | grep -qx "$comp" 2>/dev/null; then
+      printf "    E  %s\n" "$comp"
+    else
+      printf "    A  %s\n" "$comp"
+      seen_components="${seen_components}${seen_components:+$'\n'}${comp}"
+    fi
+  done <<< "$components"
+done
+echo ""

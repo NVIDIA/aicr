@@ -133,29 +133,35 @@ extract_version() {
   echo "$version"
 }
 
-# Extract asset API URL from release JSON by asset name
+# Extract asset download URL from release JSON by asset name.
+# Works with both pretty-printed (authenticated) and compact (public) JSON.
 extract_asset_url() {
   local json="$1"
   local asset_name="$2"
-  local url
+  local url=""
 
-  # For private repos with token, use the API URL (id-based)
-  # For public repos, use browser_download_url
+  # Find the line number of the matching asset name
+  local name_line
+  name_line=$(echo "$json" | grep -n "\"name\".*\"${asset_name}\"" | head -1 | cut -d: -f1)
+
+  [[ -z "$name_line" ]] && err "Asset '$asset_name' not found in release"
+
+  # For private repos with token, use the API URL (id-based).
+  # The asset "id" field appears a few lines before "name" in the JSON.
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    # Extract the asset ID and construct API URL
     local asset_id
-    asset_id=$(echo "$json" | grep -B5 "\"name\": \"$asset_name\"" | grep '"id":' | head -1 | sed -E 's/.*"id":[[:space:]]*([0-9]+).*/\1/')
+    asset_id=$(echo "$json" | sed -n "$((name_line-10)),$((name_line))p" | grep -oE '"id"[[:space:]]*:[[:space:]]*[0-9]+' | tail -1 | grep -oE '[0-9]+')
     if [[ -n "$asset_id" ]]; then
       url="https://api.github.com/repos/${REPO}/releases/assets/${asset_id}"
     fi
   fi
 
-  # Fallback to browser_download_url (works for public repos)
+  # Fallback to browser_download_url (appears after "name" in the JSON)
   if [[ -z "$url" ]]; then
-    url=$(echo "$json" | grep -A1 "\"name\": \"$asset_name\"" | grep '"browser_download_url"' | sed -E 's/.*"browser_download_url":[[:space:]]*"([^"]+)".*/\1/')
+    url=$(echo "$json" | sed -n "${name_line},$((name_line+15))p" | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   fi
 
-  [[ -z "$url" ]] && err "Asset '$asset_name' not found in release"
+  [[ -z "$url" ]] && err "Failed to extract download URL for '$asset_name'"
 
   echo "$url"
 }
