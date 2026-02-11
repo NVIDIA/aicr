@@ -105,6 +105,8 @@ spec:
       source: oci://ghcr.io/kubeflow/charts
       version: "2.1.0"
       valuesFile: components/kubeflow-trainer/values.yaml
+      manifestFiles:
+        - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
       dependencyRefs:
         - cert-manager
 
