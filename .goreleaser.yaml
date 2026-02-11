@@ -64,7 +64,7 @@ builds:
 
 universal_binaries:
   - name_template: "eidos"
-    replace: false  # keep platform-specific binaries too
+    replace: true
 
 gomod:
   proxy: false
