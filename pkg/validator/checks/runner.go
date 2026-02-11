@@ -146,6 +146,42 @@ func (r *TestRunner) Context() *ValidationContext {
 	return r.ctx
 }
 
+// HasCheck checks if a check is enabled in the recipe for a given phase.
+// Returns true if the check is listed in the recipe's checks for that phase.
+func (r *TestRunner) HasCheck(phase, checkName string) bool {
+	if r.ctx.Recipe == nil || r.ctx.Recipe.Validation == nil {
+		return false
+	}
+
+	var checkList []string
+	switch phase {
+	case "readiness", "preDeployment":
+		if r.ctx.Recipe.Validation.PreDeployment != nil {
+			checkList = r.ctx.Recipe.Validation.PreDeployment.Checks
+		}
+	case "deployment":
+		if r.ctx.Recipe.Validation.Deployment != nil {
+			checkList = r.ctx.Recipe.Validation.Deployment.Checks
+		}
+	case "performance":
+		if r.ctx.Recipe.Validation.Performance != nil {
+			checkList = r.ctx.Recipe.Validation.Performance.Checks
+		}
+	case "conformance":
+		if r.ctx.Recipe.Validation.Conformance != nil {
+			checkList = r.ctx.Recipe.Validation.Conformance.Checks
+		}
+	}
+
+	for _, name := range checkList {
+		if name == checkName {
+			return true
+		}
+	}
+
+	return false
+}
+
 // LoadValidationContext loads the validation context from the Job environment.
 // This function is called inside Kubernetes Jobs to reconstruct the context needed for validation.
 //

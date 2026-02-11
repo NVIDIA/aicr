@@ -26,6 +26,7 @@ func init() {
 		Description: "Verify GPU hardware is detected and accessible via nvidia-smi",
 		Phase:       "readiness",
 		Func:        CheckGPUHardwareDetection,
+		TestName:    "TestGPUHardwareDetection",
 	})
 }
 

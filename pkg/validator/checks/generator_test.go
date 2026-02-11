@@ -144,52 +144,58 @@ func TestGenerateConstraintValidator(t *testing.T) {
 	}
 
 	// Verify files were created
-	// "Deployment.test-app.version" -> "DeploymentTestAppVersion" -> "deployment_test_app_version"
+	// Generator creates: _constraint.go (source), _constraint_test.go (test), _recipe.yaml, _README.md
 	expectedFiles := []string{
-		"deployment_test_app_version.go",
-		"deployment_test_app_version_test.go",
-		"deployment_test_app_version_integration_test.go",
+		"deployment_test_app_version_constraint.go",
+		"deployment_test_app_version_constraint_test.go",
+		"deployment_test_app_version_recipe.yaml",
+		"deployment_test_app_version_README.md",
 	}
 
 	for _, filename := range expectedFiles {
 		path := filepath.Join(outputDir, filename)
-		if _, err := os.Stat(path); os.IsNotExist(err) {
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
 			t.Errorf("expected file %s was not created", filename)
-			continue
-		}
-
-		// Read and verify content has expected markers
-		content, err := os.ReadFile(path)
-		if err != nil {
-			t.Errorf("failed to read %s: %v", filename, err)
-			continue
-		}
-
-		contentStr := string(content)
-
-		// Verify common elements
-		if !strings.Contains(contentStr, "package deployment") {
-			t.Errorf("%s missing package declaration", filename)
-		}
-
-		if !strings.Contains(contentStr, "DeploymentTestAppVersion") {
-			t.Errorf("%s missing function name DeploymentTestAppVersion", filename)
 		}
 	}
 
-	// Verify helper file has TODO comments
-	helperContent, _ := os.ReadFile(filepath.Join(outputDir, "deployment_test_app_version.go"))
-	if !strings.Contains(string(helperContent), "TODO") {
-		t.Error("helper file missing TODO comments")
+	// Verify constraint source file has expected content
+	constraintContent, err := os.ReadFile(filepath.Join(outputDir, "deployment_test_app_version_constraint.go"))
+	if err != nil {
+		t.Fatalf("failed to read constraint file: %v", err)
+	}
+	contentStr := string(constraintContent)
+
+	// Verify package and registration
+	if !strings.Contains(contentStr, "package deployment") {
+		t.Error("constraint file missing package declaration")
+	}
+	if !strings.Contains(contentStr, "RegisterConstraintValidator") {
+		t.Error("constraint file missing RegisterConstraintValidator")
+	}
+	if !strings.Contains(contentStr, "Deployment.test-app.version") {
+		t.Error("constraint file missing constraint pattern")
+	}
+	if !strings.Contains(contentStr, "TODO") {
+		t.Error("constraint file missing TODO comments")
 	}
 
-	// Verify integration test has registration
-	integrationContent, _ := os.ReadFile(filepath.Join(outputDir, "deployment_test_app_version_integration_test.go"))
-	if !strings.Contains(string(integrationContent), "RegisterConstraintTest") {
-		t.Error("integration test missing RegisterConstraintTest")
+	// Verify recipe file
+	recipeContent, err := os.ReadFile(filepath.Join(outputDir, "deployment_test_app_version_recipe.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read recipe file: %v", err)
 	}
-	if !strings.Contains(string(integrationContent), "Deployment.test-app.version") {
-		t.Error("integration test missing constraint pattern")
+	if !strings.Contains(string(recipeContent), "Deployment.test-app.version") {
+		t.Error("recipe file missing constraint name")
+	}
+
+	// Verify README file
+	readmeContent, err := os.ReadFile(filepath.Join(outputDir, "deployment_test_app_version_README.md"))
+	if err != nil {
+		t.Fatalf("failed to read README file: %v", err)
+	}
+	if !strings.Contains(string(readmeContent), "Deployment.test-app.version") {
+		t.Error("README file missing constraint name")
 	}
 }
 
@@ -240,119 +246,110 @@ func TestGenerateConstraintValidator_EmptyConstraint(t *testing.T) {
 	}
 }
 
-func TestGenerateConstraintValidator_EmptyPhase(t *testing.T) {
+func TestGenerateCheck(t *testing.T) {
+	// Create a temporary directory for test output
 	tmpDir, err := os.MkdirTemp("", "generator-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	cfg := GeneratorConfig{
-		ConstraintName: "Deployment.test.version",
-		Phase:          "",
-		Description:    "Test",
-		OutputDir:      tmpDir,
-	}
-
-	err = GenerateConstraintValidator(cfg)
-	if err == nil {
-		t.Error("expected error for empty phase, got nil")
-	}
-}
-
-func TestGenerateConstraintValidator_EmptyOutputDir(t *testing.T) {
-	cfg := GeneratorConfig{
-		ConstraintName: "Deployment.test.version",
-		Phase:          "deployment",
-		Description:    "Test",
-		OutputDir:      "",
-	}
-
-	err := GenerateConstraintValidator(cfg)
-	if err == nil {
-		t.Error("expected error for empty output dir, got nil")
-	}
-}
-
-func TestGenerateConstraintValidator_DefaultDescription(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "generator-test-*")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
+	// Create subdirectory named "deployment" so package name is correct
 	outputDir := filepath.Join(tmpDir, "deployment")
 	if mkdirErr := os.MkdirAll(outputDir, 0755); mkdirErr != nil {
 		t.Fatalf("failed to create output dir: %v", mkdirErr)
 	}
 
 	cfg := GeneratorConfig{
-		ConstraintName: "Deployment.test-app.version",
-		Phase:          "deployment",
-		Description:    "", // empty description triggers default
-		OutputDir:      outputDir,
+		CheckName:   "test-check",
+		Phase:       "deployment",
+		Description: "Test check for testing",
+		OutputDir:   outputDir,
 	}
 
-	err = GenerateConstraintValidator(cfg)
+	err = GenerateCheck(cfg)
 	if err != nil {
-		t.Fatalf("GenerateConstraintValidator() error = %v", err)
+		t.Fatalf("GenerateCheck() error = %v", err)
 	}
 
-	// Verify integration test file contains default description
-	integrationContent, readErr := os.ReadFile(filepath.Join(outputDir, "deployment_test_app_version_integration_test.go"))
-	if readErr != nil {
-		t.Fatalf("failed to read integration test file: %v", readErr)
+	// Verify files were created
+	expectedFiles := []string{
+		"test_check_check.go",
+		"test_check_check_test.go",
+		"test_check_recipe.yaml",
+		"test_check_README.md",
 	}
 
-	if !strings.Contains(string(integrationContent), "Validates Deployment.test-app.version constraint") {
-		t.Error("integration test missing default description")
+	for _, filename := range expectedFiles {
+		path := filepath.Join(outputDir, filename)
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			t.Errorf("expected file %s was not created", filename)
+		}
+	}
+
+	// Verify source file has expected content
+	sourceContent, err := os.ReadFile(filepath.Join(outputDir, "test_check_check.go"))
+	if err != nil {
+		t.Fatalf("failed to read source file: %v", err)
+	}
+	contentStr := string(sourceContent)
+
+	if !strings.Contains(contentStr, "package deployment") {
+		t.Error("source file missing package declaration")
+	}
+	if !strings.Contains(contentStr, "RegisterCheck") {
+		t.Error("source file missing RegisterCheck")
+	}
+	if !strings.Contains(contentStr, "test-check") {
+		t.Error("source file missing check name")
+	}
+
+	// Verify test file has expected content
+	testContent, err := os.ReadFile(filepath.Join(outputDir, "test_check_check_test.go"))
+	if err != nil {
+		t.Fatalf("failed to read test file: %v", err)
+	}
+	if !strings.Contains(string(testContent), "TestCheckTestCheck") {
+		t.Error("test file missing test function")
 	}
 }
 
-func TestGenerateConstraintValidator_InvalidOutputDir(t *testing.T) {
+func TestGenerateCheck_EmptyName(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "generator-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
 	cfg := GeneratorConfig{
-		ConstraintName: "Deployment.test.version",
-		Phase:          "deployment",
-		Description:    "Test",
-		OutputDir:      "/nonexistent/path/that/does/not/exist",
+		CheckName:   "",
+		Phase:       "deployment",
+		Description: "Test",
+		OutputDir:   tmpDir,
 	}
 
-	err := GenerateConstraintValidator(cfg)
+	err = GenerateCheck(cfg)
 	if err == nil {
-		t.Error("expected error for invalid output directory, got nil")
-	}
-}
-
-func TestGenerateHelperFile_CreateError(t *testing.T) {
-	// Use a path that cannot be created (directory does not exist)
-	err := generateHelperFile("/nonexistent/dir/file.go", "TestFunc", GeneratorConfig{
-		OutputDir:      "/nonexistent/dir",
-		ConstraintName: "Test.constraint",
-		Description:    "Test",
-	})
-	if err == nil {
-		t.Error("expected error when output path does not exist, got nil")
+		t.Error("expected error for empty check name, got nil")
 	}
 }
 
-func TestGenerateUnitTestFile_CreateError(t *testing.T) {
-	err := generateUnitTestFile("/nonexistent/dir/file_test.go", "TestFunc", GeneratorConfig{
-		OutputDir:      "/nonexistent/dir",
-		ConstraintName: "Test.constraint",
-	})
-	if err == nil {
-		t.Error("expected error when output path does not exist, got nil")
+func TestGenerateCheck_EmptyPhase(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "generator-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
 	}
-}
+	defer os.RemoveAll(tmpDir)
 
-func TestGenerateIntegrationTestFile_CreateError(t *testing.T) {
-	err := generateIntegrationTestFile("/nonexistent/dir/file_integration_test.go", "TestFunc", "TestTestFunc", GeneratorConfig{
-		OutputDir:      "/nonexistent/dir",
-		ConstraintName: "Test.constraint",
-		Phase:          "deployment",
-		Description:    "Test",
-	})
+	cfg := GeneratorConfig{
+		CheckName:   "test-check",
+		Phase:       "",
+		Description: "Test",
+		OutputDir:   tmpDir,
+	}
+
+	err = GenerateCheck(cfg)
 	if err == nil {
-		t.Error("expected error when output path does not exist, got nil")
+		t.Error("expected error for empty phase, got nil")
 	}
 }

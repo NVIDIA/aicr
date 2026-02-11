@@ -32,13 +32,7 @@ func init() {
 		Pattern:     "Deployment.gpu-operator.version",
 		Description: "Validates GPU Operator version by querying deployed resources",
 		Func:        ValidateGPUOperatorVersion,
-	})
-
-	// Register the integration test for this constraint
-	checks.RegisterConstraintTest(&checks.ConstraintTest{
 		TestName:    "TestGPUOperatorVersion",
-		Pattern:     "Deployment.gpu-operator.version",
-		Description: "Validates GPU Operator version from deployed resources",
 		Phase:       "deployment",
 	})
 }

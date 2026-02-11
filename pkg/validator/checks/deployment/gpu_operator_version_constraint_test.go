@@ -21,8 +21,7 @@ import (
 )
 
 // TestGPUOperatorVersion validates the GPU operator version constraint.
-// This integration test runs inside validator Jobs and contains the actual validation logic.
-// It is excluded from local test runs via the -short flag.
+// This integration test runs inside validator Jobs and invokes the validator.
 func TestGPUOperatorVersion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
@@ -33,7 +32,7 @@ func TestGPUOperatorVersion(t *testing.T) {
 	if err != nil {
 		t.Skipf("Not in Job environment: %v", err)
 	}
-	defer runner.Cancel() // Clean up context when test completes
+	defer runner.Cancel()
 
 	// Get constraint from recipe
 	constraint := runner.GetConstraint("deployment", "Deployment.gpu-operator.version")
@@ -43,29 +42,19 @@ func TestGPUOperatorVersion(t *testing.T) {
 
 	t.Logf("Validating constraint: %s = %s", constraint.Name, constraint.Value)
 
-	// Get GPU operator version from cluster
+	// Run the validator
 	ctx := runner.Context()
-	version, err := getGPUOperatorVersion(ctx.Context, ctx.Clientset)
+	actual, passed, err := ValidateGPUOperatorVersion(ctx, *constraint)
 	if err != nil {
-		t.Fatalf("Failed to get GPU operator version: %v", err)
+		t.Fatalf("Validation failed: %v", err)
 	}
 
-	t.Logf("Detected GPU operator version: %s", version)
-
-	// Evaluate constraint
-	passed, err := evaluateVersionConstraint(version, constraint.Value)
-	if err != nil {
-		t.Fatalf("Failed to evaluate version constraint: %v", err)
-	}
-
-	// Output structured constraint result for parsing
-	// Format: CONSTRAINT_RESULT: name=<name> expected=<expected> actual=<actual> passed=<bool>
-	t.Logf("CONSTRAINT_RESULT: name=%s expected=%s actual=%s passed=%t",
-		constraint.Name, constraint.Value, version, passed)
+	t.Logf("CONSTRAINT_RESULT: name=%s expected=%s actual=%s passed=%v",
+		constraint.Name, constraint.Value, actual, passed)
 
 	if !passed {
-		t.Errorf("GPU operator version %s does not satisfy constraint %s", version, constraint.Value)
+		t.Errorf("Constraint not satisfied: expected %s, got %s", constraint.Value, actual)
 	} else {
-		t.Logf("✓ GPU operator version %s satisfies constraint %s", version, constraint.Value)
+		t.Logf("✓ Constraint satisfied: %s = %s", constraint.Name, actual)
 	}
 }

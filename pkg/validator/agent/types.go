@@ -58,6 +58,10 @@ type Config struct {
 	// Example: "TestGpuHardwareDetection"
 	TestPattern string
 
+	// ExpectedTests is the number of tests expected to run.
+	// If set and actual tests differ, validation fails.
+	ExpectedTests int
+
 	// Timeout for the Job to complete
 	Timeout time.Duration
 

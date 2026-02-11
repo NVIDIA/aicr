@@ -104,6 +104,10 @@ type Validator struct {
 	// Used to scope all resources (ConfigMaps, Jobs) and enable resumability.
 	// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9")
 	RunID string
+
+	// Cleanup controls whether to delete Jobs, ConfigMaps, and RBAC resources after validation.
+	// Defaults to true. Set to false to keep resources for debugging.
+	Cleanup bool
 }
 
 // Option is a functional option for configuring Validator instances.
@@ -138,6 +142,14 @@ func WithRunID(runID string) Option {
 	}
 }
 
+// WithCleanup returns an Option that controls cleanup of validation resources.
+// When false, Jobs, ConfigMaps, and RBAC resources are kept for debugging.
+func WithCleanup(cleanup bool) Option {
+	return func(v *Validator) {
+		v.Cleanup = cleanup
+	}
+}
+
 // generateRunID creates a unique identifier for a validation run.
 // Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9b2c1e7d04a68")
 func generateRunID() string {
@@ -167,6 +179,7 @@ func New(opts ...Option) *Validator {
 		Namespace: "eidos-validation", // Default namespace for validation jobs
 		Image:     defaultImage,       // Default validator image
 		RunID:     generateRunID(),    // Generate unique RunID for this validation run
+		Cleanup:   true,               // Default to cleanup resources after validation
 	}
 	for _, opt := range opts {
 		opt(v)

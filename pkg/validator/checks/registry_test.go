@@ -138,6 +138,76 @@ func TestRegisterCheckDuplicate(t *testing.T) {
 	RegisterCheck(check)
 }
 
+func TestGetTestNameForCheck(t *testing.T) {
+	// Save and restore registry
+	originalRegistry := make(map[string]*Check)
+	registryMu.Lock()
+	for k, v := range checkRegistry {
+		originalRegistry[k] = v
+	}
+	checkRegistry = make(map[string]*Check)
+	registryMu.Unlock()
+
+	defer func() {
+		registryMu.Lock()
+		checkRegistry = originalRegistry
+		registryMu.Unlock()
+	}()
+
+	// Register a check with explicit TestName
+	RegisterCheck(&Check{
+		Name:        "test-check",
+		Description: "Test check",
+		Phase:       "deployment",
+		TestName:    "TestMyCheck",
+	})
+
+	// Register a check without TestName (should auto-derive)
+	RegisterCheck(&Check{
+		Name:        "auto-test",
+		Description: "Auto test",
+		Phase:       "deployment",
+	})
+
+	tests := []struct {
+		name         string
+		checkName    string
+		wantTestName string
+		wantFound    bool
+	}{
+		{
+			name:         "explicit test name",
+			checkName:    "test-check",
+			wantTestName: "TestMyCheck",
+			wantFound:    true,
+		},
+		{
+			name:         "auto-derived test name",
+			checkName:    "auto-test",
+			wantTestName: "TestCheckAutoTest",
+			wantFound:    true,
+		},
+		{
+			name:         "non-existent check",
+			checkName:    "unknown-check",
+			wantTestName: "",
+			wantFound:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotTestName, gotFound := GetTestNameForCheck(tt.checkName)
+			if gotTestName != tt.wantTestName {
+				t.Errorf("GetTestNameForCheck() testName = %v, want %v", gotTestName, tt.wantTestName)
+			}
+			if gotFound != tt.wantFound {
+				t.Errorf("GetTestNameForCheck() found = %v, want %v", gotFound, tt.wantFound)
+			}
+		})
+	}
+}
+
 func TestGetCheck(t *testing.T) {
 	// Save and restore registry
 	originalRegistry := make(map[string]*Check)
@@ -546,26 +616,32 @@ func TestRegisterConstraintTest(t *testing.T) {
 }
 
 func TestGetTestNameForConstraint(t *testing.T) {
-	// Save and restore registry
-	originalRegistry := make(map[string]*ConstraintTest)
+	// Save and restore both registries
+	originalTestRegistry := make(map[string]*ConstraintTest)
+	originalValidatorRegistry := make(map[string]*ConstraintValidator)
 	registryMu.Lock()
 	for k, v := range constraintTestRegistry {
-		originalRegistry[k] = v
+		originalTestRegistry[k] = v
+	}
+	for k, v := range constraintRegistry {
+		originalValidatorRegistry[k] = v
 	}
 	constraintTestRegistry = make(map[string]*ConstraintTest)
+	constraintRegistry = make(map[string]*ConstraintValidator)
 	registryMu.Unlock()
 
 	defer func() {
 		registryMu.Lock()
-		constraintTestRegistry = originalRegistry
+		constraintTestRegistry = originalTestRegistry
+		constraintRegistry = originalValidatorRegistry
 		registryMu.Unlock()
 	}()
 
-	// Register a test constraint
-	RegisterConstraintTest(&ConstraintTest{
-		TestName:    "TestGPUOperatorVersion",
+	// Register a test constraint via ConstraintValidator (preferred single-registration)
+	RegisterConstraintValidator(&ConstraintValidator{
 		Pattern:     "Deployment.gpu-operator.version",
 		Description: "Validates GPU operator version",
+		TestName:    "TestGPUOperatorVersion",
 		Phase:       "deployment",
 	})
 
@@ -609,35 +685,41 @@ func TestGetTestNameForConstraint(t *testing.T) {
 }
 
 func TestListConstraintTests(t *testing.T) {
-	// Save and restore registry
-	originalRegistry := make(map[string]*ConstraintTest)
+	// Save and restore both registries
+	originalTestRegistry := make(map[string]*ConstraintTest)
+	originalValidatorRegistry := make(map[string]*ConstraintValidator)
 	registryMu.Lock()
 	for k, v := range constraintTestRegistry {
-		originalRegistry[k] = v
+		originalTestRegistry[k] = v
+	}
+	for k, v := range constraintRegistry {
+		originalValidatorRegistry[k] = v
 	}
 	constraintTestRegistry = make(map[string]*ConstraintTest)
+	constraintRegistry = make(map[string]*ConstraintValidator)
 	registryMu.Unlock()
 
 	defer func() {
 		registryMu.Lock()
-		constraintTestRegistry = originalRegistry
+		constraintTestRegistry = originalTestRegistry
+		constraintRegistry = originalValidatorRegistry
 		registryMu.Unlock()
 	}()
 
-	// Register test constraints for different phases
-	RegisterConstraintTest(&ConstraintTest{
-		TestName: "TestDeploymentConstraint1",
+	// Register test constraints using preferred single-registration pattern
+	RegisterConstraintValidator(&ConstraintValidator{
 		Pattern:  "Deployment.test1.version",
+		TestName: "TestDeploymentConstraint1",
 		Phase:    "deployment",
 	})
-	RegisterConstraintTest(&ConstraintTest{
-		TestName: "TestDeploymentConstraint2",
+	RegisterConstraintValidator(&ConstraintValidator{
 		Pattern:  "Deployment.test2.version",
+		TestName: "TestDeploymentConstraint2",
 		Phase:    "deployment",
 	})
-	RegisterConstraintTest(&ConstraintTest{
-		TestName: "TestReadinessConstraint",
+	RegisterConstraintValidator(&ConstraintValidator{
 		Pattern:  "Readiness.test.version",
+		TestName: "TestReadinessConstraint",
 		Phase:    "readiness",
 	})
 

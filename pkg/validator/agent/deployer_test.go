@@ -688,6 +688,28 @@ func TestIgnoreNotFound(t *testing.T) {
 	}
 }
 
+func TestDeployer_GetResult_NoJob(t *testing.T) {
+	deployer, _ := createDeployer()
+	ctx := context.Background()
+
+	// GetResult should fail when there's no Job/pod
+	_, err := deployer.GetResult(ctx)
+	if err == nil {
+		t.Error("GetResult() expected error when no Job exists, got nil")
+	}
+}
+
+func TestDeployer_GetPodLogs_NoJob(t *testing.T) {
+	deployer, _ := createDeployer()
+	ctx := context.Background()
+
+	// GetPodLogs should fail when there's no Job/pod
+	_, err := deployer.GetPodLogs(ctx)
+	if err == nil {
+		t.Error("GetPodLogs() expected error when no Job exists, got nil")
+	}
+}
+
 // Fake error types for testing
 type fakeNotFoundError struct{}
 

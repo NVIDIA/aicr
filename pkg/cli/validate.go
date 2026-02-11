@@ -154,6 +154,7 @@ func runValidation(
 	validationNamespace string,
 	resumeRunID string,
 	validatorImage string,
+	cleanup bool,
 ) error {
 
 	slog.Info("running validation",
@@ -163,13 +164,15 @@ func runValidation(
 		"constraints", len(rec.Constraints),
 		"validation_namespace", validationNamespace,
 		"validator_image", validatorImage,
-		"resume", resumeRunID)
+		"resume", resumeRunID,
+		"cleanup", cleanup)
 
 	// Create validator with optional RunID for resume
 	opts := []validator.Option{
 		validator.WithVersion(version),
 		validator.WithNamespace(validationNamespace),
 		validator.WithImage(validatorImage),
+		validator.WithCleanup(cleanup),
 	}
 	if resumeRunID != "" {
 		opts = append(opts, validator.WithRunID(resumeRunID))
@@ -209,6 +212,16 @@ func runValidation(
 		"failed", result.Summary.Failed,
 		"skipped", result.Summary.Skipped,
 		"duration", result.Summary.Duration)
+
+	// If cleanup is disabled, provide helpful debugging info
+	if !cleanup {
+		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
+			"namespace", validationNamespace,
+			"runID", v.RunID)
+		slog.Info("to inspect Job logs: kubectl logs -l eidos.nvidia.com/job -n " + validationNamespace)
+		slog.Info("to list Jobs: kubectl get jobs -n " + validationNamespace)
+		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=eidos -n " + validationNamespace)
+	}
 
 	// Check if we should fail on validation errors
 	if failOnError && result.Summary.Status == validator.ValidationStatusFail {
@@ -432,7 +445,7 @@ Resume a previous validation run from where it left off:
 				}
 			}
 
-			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"))
+			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"))
 		},
 	}
 }

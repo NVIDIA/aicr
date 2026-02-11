@@ -20,32 +20,36 @@ import (
 	"os"
 	"path/filepath"
 
-	cli "github.com/urfave/cli/v3"
-
-	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/validator/checks"
+	cli "github.com/urfave/cli/v3"
 )
 
 func generateValidatorCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "generate-validator",
-		Usage:    "Generate scaffolding for a new constraint validator",
+		Usage:    "Generate scaffolding for a new check or constraint validator",
 		Category: "Development",
-		Description: `Generate all files needed for a new constraint validator:
-- Helper functions file for validation logic
-- Unit test file with table-driven tests
-- Integration test file with registration
+		Description: `Generate files for a new validation check or constraint:
 
-This ensures new validators follow the correct architecture and have complete test coverage.`,
+Check (no expected value, yes/no validation):
+  eidos generate-validator --check operator-health --phase deployment
+
+Constraint (has expected value from recipe):
+  eidos generate-validator --constraint Deployment.gpu-operator.version --phase deployment
+
+This ensures new validators follow the correct architecture.`,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "constraint",
-				Usage:    "Constraint name (e.g., Deployment.my-app.version)",
-				Required: true,
+				Name:  "check",
+				Usage: "Check name (e.g., operator-health) - for yes/no validations",
+			},
+			&cli.StringFlag{
+				Name:  "constraint",
+				Usage: "Constraint name (e.g., Deployment.my-app.version) - for value comparisons",
 			},
 			&cli.StringFlag{
 				Name:     "phase",
-				Usage:    "Validation phase: deployment, performance, or conformance",
+				Usage:    "Validation phase: readiness, deployment, performance, or conformance",
 				Required: true,
 			},
 			&cli.StringFlag{
@@ -58,40 +62,57 @@ This ensures new validators follow the correct architecture and have complete te
 			},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
+			checkName := cmd.String("check")
 			constraintName := cmd.String("constraint")
 			phase := cmd.String("phase")
 			description := cmd.String("description")
 			outputDir := cmd.String("output")
 
+			// Must specify either check or constraint
+			if checkName == "" && constraintName == "" {
+				return fmt.Errorf("must specify either --check or --constraint")
+			}
+			if checkName != "" && constraintName != "" {
+				return fmt.Errorf("cannot specify both --check and --constraint")
+			}
+
 			// Validate phase
-			if phase != "deployment" && phase != "performance" && phase != "conformance" {
-				return errors.New(errors.ErrCodeInvalidRequest, "--phase must be one of: deployment, performance, conformance")
+			validPhases := map[string]bool{"readiness": true, "deployment": true, "performance": true, "conformance": true}
+			if !validPhases[phase] {
+				return fmt.Errorf("--phase must be one of: readiness, deployment, performance, conformance")
 			}
 
 			// Default output directory
 			if outputDir == "" {
 				cwd, err := os.Getwd()
 				if err != nil {
-					return errors.Wrap(errors.ErrCodeInternal, "failed to get current directory", err)
+					return fmt.Errorf("failed to get current directory: %w", err)
 				}
 				outputDir = filepath.Join(cwd, "pkg", "validator", "checks", phase)
 			}
 
 			// Check if output directory exists
 			if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-				return errors.New(errors.ErrCodeNotFound, fmt.Sprintf("output directory does not exist: %s", outputDir))
+				return fmt.Errorf("output directory does not exist: %s", outputDir)
 			}
 
 			// Generate validator files
 			cfg := checks.GeneratorConfig{
+				CheckName:      checkName,
 				ConstraintName: constraintName,
 				Phase:          phase,
 				Description:    description,
 				OutputDir:      outputDir,
 			}
 
-			if err := checks.GenerateConstraintValidator(cfg); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to generate validator", err)
+			if checkName != "" {
+				if err := checks.GenerateCheck(cfg); err != nil {
+					return fmt.Errorf("failed to generate check: %w", err)
+				}
+			} else {
+				if err := checks.GenerateConstraintValidator(cfg); err != nil {
+					return fmt.Errorf("failed to generate constraint validator: %w", err)
+				}
 			}
 
 			return nil

@@ -270,25 +270,6 @@ func createGPUOperatorPod(name, namespace string, phase corev1.PodPhase) corev1.
 	}
 }
 
-// TestOperatorHealth is the test wrapper for the operator-health check.
-// This function is executed by go test inside Kubernetes validation Jobs.
-// It loads the validation context from the Job environment and runs the registered check.
-//
-// This is distinct from TestCheckOperatorHealth which is a unit test with mocked context.
-//
-// When run outside Kubernetes (e.g., during local development), this test is skipped.
-func TestOperatorHealth(t *testing.T) {
-	runner, err := checks.NewTestRunner(t)
-	if err != nil {
-		// Skip if not running in Kubernetes (expected during local test runs)
-		t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
-		return
-	}
-	defer runner.Cancel() // Clean up context when test completes
-
-	runner.RunCheck("operator-health")
-}
-
 // Helper function to check if a string contains a substring
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&

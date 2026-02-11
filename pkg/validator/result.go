@@ -58,6 +58,11 @@ const (
 type ValidationResult struct {
 	header.Header `json:",inline" yaml:",inline"`
 
+	// RunID is a unique identifier for this validation run.
+	// Used for resume functionality and correlating resources.
+	// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9")
+	RunID string `json:"runID,omitempty" yaml:"runID,omitempty"`
+
 	// RecipeSource is the path/URI of the recipe that was validated.
 	RecipeSource string `json:"recipeSource" yaml:"recipeSource"`
 

@@ -68,9 +68,11 @@ func TestCheckRegistrationCompleteness(t *testing.T) {
 	// Verify each registered check has a test
 	var missing []string
 	for _, check := range allChecks {
-		// Convert check name to expected test name
-		// "operator-health" -> "TestOperatorHealth"
-		expectedTestName := checkNameToTestName(check.Name)
+		// Use registered TestName if available, otherwise derive it
+		expectedTestName := check.TestName
+		if expectedTestName == "" {
+			expectedTestName = checkNameToTestName(check.Name)
+		}
 
 		if !existingTests[expectedTestName] {
 			missing = append(missing, expectedTestName+" (check: "+check.Name+")")
@@ -100,7 +102,11 @@ func TestIntegrationTestsAreRegistered(t *testing.T) {
 
 	allChecks := checks.ListChecks("")
 	for _, check := range allChecks {
-		registeredTests[checkNameToTestName(check.Name)] = true
+		testName := check.TestName
+		if testName == "" {
+			testName = checkNameToTestName(check.Name)
+		}
+		registeredTests[testName] = true
 	}
 
 	// Verify each integration test is registered
