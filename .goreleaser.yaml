@@ -64,7 +64,7 @@ builds:
 
 universal_binaries:
   - name_template: "eidos"
-    replace: false  # keep platform-specific binaries too
+    replace: true
 
 gomod:
   proxy: false
@@ -89,6 +89,7 @@ release:
     owner: NVIDIA
     name: eidos
   prerelease: auto
+  draft: true
 
 kos:
   - id: eidos
@@ -118,31 +119,6 @@ kos:
       - "{{.Tag}}"
     preserve_import_paths: false
     bare: true
-
-dockers_v2:
-  - id: eidos-validator
-    dockerfile: Dockerfile.validator
-    images:
-      - ghcr.io/nvidia/eidos-validator
-    tags:
-      - latest
-      - "{{.Tag}}"
-      - "v{{.Major}}"
-      - "v{{.Major}}.{{.Minor}}"
-    platforms:
-      - linux/amd64
-      - linux/arm64
-    labels:
-      org.opencontainers.image.created: "{{.Date}}"
-      org.opencontainers.image.title: "{{.ProjectName}}-validator"
-      org.opencontainers.image.revision: "{{.FullCommit}}"
-      org.opencontainers.image.version: "{{.Version}}"
-      org.opencontainers.image.source: "{{.GitURL}}"
-    extra_files:
-      - go.mod
-      - go.sum
-      - pkg
-      - cmd
 
 archives:
   - id: eidos

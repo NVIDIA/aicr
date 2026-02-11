@@ -4,7 +4,7 @@
 [![On Tag Release](https://github.com/NVIDIA/eidos/actions/workflows/on-tag.yaml/badge.svg)](https://github.com/NVIDIA/eidos/actions/workflows/on-tag.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Eidos (Eidos) provides validated configuration guidance for deploying GPU-accelerated Kubernetes infrastructure. It captures known-good combinations of software, configuration, and system requirements and makes them consumable as documentation and generated deployment artifacts.
+Eidos provides tooling for deploying optimized and validated GPU-accelerated AI runtime in Kubernetes. It captures known-good combinations of drivers, operators, kernels, and system configurations to create a reproducible artifacts for common Kubernetes deployment frameworks like Helm and ArgoCD.
 
 ## Why We Built This
 
