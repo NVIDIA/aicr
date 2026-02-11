@@ -1,0 +1,12 @@
+# Assert that the snapshot Job completed successfully.
+# Chainsaw will retry this assertion until the timeout (120s) is reached.
+#
+# Replaces the manual kubectl wait in run.sh line 677:
+#   kubectl wait --for=condition=complete job/eidos-e2e-snapshot --timeout=120s
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: eidos-e2e-snapshot
+  namespace: gpu-operator
+status:
+  succeeded: 1

@@ -1,0 +1,30 @@
+# Assert that gpu-operator values.yaml has scheduling options injected.
+#
+# When `eidos bundle` is run with:
+#   --system-node-selector nodeGroup=system-pool
+#   --accelerated-node-selector nodeGroup=customer-gpu
+#   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+#
+# The bundler injects selectors and tolerations at the component's
+# registered Helm value paths.
+#
+# NOTE: chainsaw assert --resource requires apiVersion/kind to parse the YAML.
+# Helm values files don't have these natively, so we prepend them in the test
+# script before asserting. These two lines are not part of the actual values.
+apiVersion: helm/v1
+kind: Values
+
+# System node selector: where the operator pod runs
+operator:
+  nodeSelector:
+    nodeGroup: system-pool
+
+# Accelerated node selector: where GPU daemonsets run
+daemonsets:
+    nodeSelector:
+        nodeGroup: customer-gpu
+    tolerations:
+        - effect: NoSchedule
+          key: nvidia.com/gpu
+          operator: Equal
+          value: present

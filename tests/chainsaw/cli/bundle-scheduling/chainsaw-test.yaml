@@ -1,0 +1,76 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-scheduling
+spec:
+  # No cluster needed -- purely CLI output validation
+  # Run with: EIDOS_BIN=$(pwd)/dist/e2e/eidos chainsaw test --no-cluster --test-dir tests/chainsaw/cli/bundle-scheduling
+  timeouts:
+    exec: 30s
+  steps:
+    # Step 1: Generate recipe
+    - name: generate-recipe
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} recipe \
+                --service eks \
+                --accelerator h100 \
+                --os ubuntu \
+                --intent training \
+                --output /tmp/recipe.yaml
+
+    # Step 2: Assert recipe structure (has native apiVersion/kind)
+    - name: assert-recipe
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/recipe.yaml \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 5s
+
+    # Step 3: Generate bundle with scheduling options
+    - name: generate-bundle
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} bundle \
+                --recipe /tmp/recipe.yaml \
+                --output /tmp/bundle \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=customer-gpu \
+                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+
+    # Step 4: Assert gpu-operator values.yaml has scheduling injected
+    #
+    # chainsaw assert requires apiVersion/kind, so we prepend a header
+    # to the plain Helm values file. The assertion YAML validates that
+    # selectors and tolerations land at the correct Helm value paths.
+    - name: assert-gpu-operator-scheduling
+      try:
+        - script:
+            content: |
+              printf 'apiVersion: helm/v1\nkind: Values\n' > /tmp/gpu-operator-values.yaml
+              sed '/^#/d; /^---$/d' /tmp/bundle/gpu-operator/values.yaml >> /tmp/gpu-operator-values.yaml
+              chainsaw assert \
+                --resource /tmp/gpu-operator-values.yaml \
+                --file ./assert-gpu-operator-values.yaml \
+                --no-color --timeout 5s

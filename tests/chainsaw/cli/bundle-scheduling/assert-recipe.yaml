@@ -1,0 +1,12 @@
+# Assert the generated recipe has the expected structure.
+#
+# Validates that eidos recipe --service eks --accelerator h100 produces
+# a valid recipe with the correct criteria and components.
+kind: recipeResult
+apiVersion: eidos.nvidia.com/v1alpha1
+criteria:
+  service: eks
+  accelerator: h100
+  os: ubuntu
+  intent: training
+(length(componentRefs) > `0`): true
