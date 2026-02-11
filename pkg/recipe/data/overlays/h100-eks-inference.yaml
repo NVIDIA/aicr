@@ -31,3 +31,15 @@ spec:
   constraints:
     - name: K8s.server.version
       value: ">= 1.32.4"
+
+  componentRefs:
+    - name: skyhook-customizations
+      type: Helm
+      manifestFiles:
+        - components/skyhook-customizations/manifests/tuning.yaml
+      overrides:
+        service: aws
+        accelerator: h100
+        intent: inference
+      dependencyRefs:
+        - skyhook-operator

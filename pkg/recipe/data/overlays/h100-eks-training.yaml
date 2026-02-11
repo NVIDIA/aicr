@@ -42,3 +42,14 @@ spec:
           enabled: true
         gdrcopy:
           enabled: true
+
+    - name: skyhook-customizations
+      type: Helm
+      manifestFiles:
+        - components/skyhook-customizations/manifests/tuning.yaml
+      overrides:
+        service: aws
+        accelerator: h100
+        intent: multiNodeTraining
+      dependencyRefs:
+        - skyhook-operator
