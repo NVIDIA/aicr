@@ -21,6 +21,12 @@ global:
   tolerations:
     - operator: Exists
 
+# Disable post-delete hook job — it does not inherit global.tolerations
+# and will hang Pending on clusters with tainted nodes.
+# Helm uninstall already removes the deployments this hook would delete.
+postCleanup:
+  enabled: false
+
 # CDI support for GPU device assignment
 admission:
   cdi: true

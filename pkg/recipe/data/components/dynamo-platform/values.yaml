@@ -45,6 +45,8 @@ grove:
 etcd:
   enabled: true
   fullnameOverride: dynamo-etcd
+  tolerations:
+    - operator: Exists
   image:
     repository: bitnamilegacy/etcd
     tag: 3.5.18-debian-12-r5
@@ -63,6 +65,11 @@ etcd:
 nats:
   enabled: true
   fullnameOverride: dynamo-nats
+  podTemplate:
+    merge:
+      spec:
+        tolerations:
+          - operator: Exists
   config:
     cluster:
       enabled: false
