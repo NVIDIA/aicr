@@ -43,6 +43,7 @@ type validateAgentConfig struct {
 	cleanup            bool
 	debug              bool
 	privileged         bool
+	requireGPU         bool
 }
 
 // parseValidateAgentConfig parses agent deployment flags from the command.
@@ -70,6 +71,7 @@ func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 		cleanup:            cmd.Bool("cleanup"),
 		debug:              cmd.Bool("debug"),
 		privileged:         cmd.Bool("privileged"),
+		requireGPU:         cmd.Bool("require-gpu"),
 	}, nil
 }
 
@@ -127,6 +129,7 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 		Cleanup:            cfg.cleanup,
 		Debug:              cfg.debug,
 		Privileged:         cfg.privileged,
+		RequireGPU:         cfg.requireGPU,
 	}
 
 	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
@@ -347,6 +350,11 @@ Resume a previous validation run from where it left off:
 				Name:  "privileged",
 				Value: true,
 				Usage: "Run agent in privileged mode (required for GPU/SystemD collectors)",
+			},
+			&cli.BoolFlag{
+				Name:    "require-gpu",
+				Sources: cli.EnvVars("EIDOS_REQUIRE_GPU"),
+				Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
 			},
 			outputFlag,
 			formatFlag,
