@@ -453,8 +453,5 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 
 // containsIgnoreCase checks if s contains substr (case-insensitive).
 func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(s) > 0 && len(substr) > 0 &&
-			(s[0]|0x20 == substr[0]|0x20) && containsIgnoreCase(s[1:], substr[1:]) ||
-		len(s) > 0 && containsIgnoreCase(s[1:], substr))
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
 }

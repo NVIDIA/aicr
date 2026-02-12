@@ -36,10 +36,8 @@ type Option func(*DefaultFactory)
 
 // WithSystemDServices configures the systemd services to monitor.
 func WithSystemDServices(services []string) Option {
-	{
-		return func(f *DefaultFactory) {
-			f.SystemDServices = services
-		}
+	return func(f *DefaultFactory) {
+		f.SystemDServices = services
 	}
 }
 
