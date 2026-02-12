@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook H100 EKS Ubuntu Training Customization
+# Skyhook H100 EKS Ubuntu Customization
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
 #
 # This customization configures H100 GPU nodes on Ubuntu with:
