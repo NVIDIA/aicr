@@ -106,21 +106,27 @@ jobs:
       - name: Print GPUs (nvkind)
         run: nvkind cluster print-gpus --name="${KIND_CLUSTER_NAME}"
 
-      - name: Install NVIDIA k8s-device-plugin
+      - name: Install GPU Operator
         run: |
-          helm repo add nvdp https://nvidia.github.io/k8s-device-plugin
+          helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
           helm repo update
           helm upgrade -i \
             --kube-context="kind-${KIND_CLUSTER_NAME}" \
-            --namespace nvidia \
+            --namespace gpu-operator \
             --create-namespace \
-            nvidia-device-plugin nvdp/nvidia-device-plugin
+            --set driver.enabled=false \
+            --set toolkit.enabled=false \
+            --set nfd.enabled=true \
+            --wait --timeout=300s \
+            gpu-operator nvidia/gpu-operator
 
-      - name: Wait for device plugin to be ready
+      - name: Wait for GPU operands to be ready
         run: |
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n nvidia \
-            rollout status daemonset/nvidia-device-plugin --timeout=120s
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n nvidia get pods
+          echo "Waiting for device plugin to be ready..."
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+            rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s || true
+          echo "GPU Operator pods:"
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods
 
       - name: Run nvidia-smi in a pod
         run: |
@@ -155,8 +161,9 @@ jobs:
           mkdir -p /tmp/debug-artifacts
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n nvidia get pods -o wide > /tmp/debug-artifacts/device-plugin-pods.txt || true
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n nvidia logs -l app.kubernetes.io/name=nvidia-device-plugin --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
           kubectl --context="kind-${KIND_CLUSTER_NAME}" describe pod/gpu-smoke-test > /tmp/debug-artifacts/gpu-pod-describe.txt || true
 
       - name: Export kind logs
