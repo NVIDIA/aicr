@@ -15,9 +15,9 @@
 name: GPU Smoke Test
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - "pull-request/[0-9]+"
     paths:
       - '.github/workflows/gpu-smoke-test.yaml'
   workflow_dispatch: {}  # Allow manual runs
