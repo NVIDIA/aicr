@@ -561,15 +561,13 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 		queue = queue[1:]
 		result = append(result, node)
 
-		var ready []string
 		for _, dependent := range dependents[node] {
 			inDegree[dependent]--
 			if inDegree[dependent] == 0 {
-				ready = append(ready, dependent)
+				queue = append(queue, dependent)
 			}
 		}
-		sort.Strings(ready)
-		queue = append(queue, ready...)
+		sort.Strings(queue)
 	}
 
 	// Check if all nodes were processed (no cycles)
