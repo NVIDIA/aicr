@@ -20,6 +20,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const testTolKeyDedicated = "dedicated"
+
 // TestStruct is a test struct with various field types.
 type TestStruct struct {
 	// Simple fields
@@ -573,7 +575,7 @@ func TestApplyTolerationsOverrides(t *testing.T) {
 			values: make(map[string]any),
 			tolerations: []corev1.Toleration{
 				{
-					Key:      "dedicated",
+					Key:      testTolKeyDedicated,
 					Value:    "system-workload",
 					Operator: corev1.TolerationOpEqual,
 					Effect:   corev1.TaintEffectNoSchedule,
@@ -592,7 +594,7 @@ func TestApplyTolerationsOverrides(t *testing.T) {
 				if !ok {
 					t.Fatal("toleration entry wrong type")
 				}
-				if tol["key"] != "dedicated" {
+				if tol["key"] != testTolKeyDedicated {
 					t.Errorf("key = %v, want dedicated", tol["key"])
 				}
 				if tol["value"] != "system-workload" {
@@ -663,7 +665,7 @@ func TestTolerationsToPodSpec(t *testing.T) {
 			name: "converts full toleration",
 			tolerations: []corev1.Toleration{
 				{
-					Key:      "dedicated",
+					Key:      testTolKeyDedicated,
 					Operator: corev1.TolerationOpEqual,
 					Value:    "gpu",
 					Effect:   corev1.TaintEffectNoSchedule,
@@ -674,7 +676,7 @@ func TestTolerationsToPodSpec(t *testing.T) {
 					t.Fatalf("expected 1 result, got %d", len(result))
 				}
 				tol := result[0]
-				if tol["key"] != "dedicated" {
+				if tol["key"] != testTolKeyDedicated {
 					t.Errorf("key = %v, want dedicated", tol["key"])
 				}
 				if tol["operator"] != "Equal" {
@@ -1067,6 +1069,393 @@ func TestSetFieldValue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPathToFieldName(t *testing.T) {
+	tests := []struct {
+		segment string
+		want    string
+	}{
+		// Known acronyms
+		{"gds", "GDS"},
+		{"gpu", "GPU"},
+		{"mig", "MIG"},
+		{"dcgm", "DCGM"},
+		{"cpu", "CPU"},
+		{"api", "API"},
+		{"cdi", "CDI"},
+		{"gdr", "GDR"},
+		{"rdma", "RDMA"},
+		{"sriov", "SRIOV"},
+		{"vfio", "VFIO"},
+		{"vgpu", "VGPU"},
+		{"ofed", "OFED"},
+		{"crds", "CRDs"},
+		{"rbac", "RBAC"},
+		{"tls", "TLS"},
+		{"nfd", "NFD"},
+		{"gfd", "GFD"},
+		// Case-insensitive acronym lookup
+		{"GPU", "GPU"},
+		{"Gds", "GDS"},
+		// Underscore-separated with acronym
+		{"mig_strategy", "MIGStrategy"},
+		{"gpu_version", "GPUVersion"},
+		// Underscore-separated without acronym
+		{"node_selector", "NodeSelector"},
+		// Dash-separated with acronym
+		{"gpu-operator", "GPUOperator"},
+		{"rdma-driver", "RDMADriver"},
+		// Dash-separated without acronym
+		{"network-operator", "NetworkOperator"},
+		// Simple title case
+		{"enabled", "Enabled"},
+		{"version", "Version"},
+		{"driver", "Driver"},
+		{"strategy", "Strategy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.segment, func(t *testing.T) {
+			got := pathToFieldName(tt.segment)
+			if got != tt.want {
+				t.Errorf("pathToFieldName(%q) = %q, want %q", tt.segment, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMatchesPattern(t *testing.T) {
+	tests := []struct {
+		name      string
+		fieldName string
+		segment   string
+		want      bool
+	}{
+		// Containment
+		{"field contains segment", "DriverVersion", "driver", true},
+		{"field contains segment mixed case", "GPUOperatorVersion", "operator", true},
+		// Enable prefix
+		{"enable prefix match", "EnableGDS", "gds", true},
+		{"enable prefix no match", "EnableGDS", "mig", false},
+		// Starts with
+		{"field starts with segment", "DriverVersion", "driverversion", true},
+		// Dash-separated
+		{"dash-separated match", "GPUOperator", "gpu-operator", true},
+		{"dash-separated no match", "GPUOperator", "network-operator", false},
+		// Negative cases
+		{"no match at all", "EnableGDS", "version", false},
+		{"empty segment", "DriverVersion", "", true}, // empty string is contained in anything
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchesPattern(tt.fieldName, tt.segment)
+			if got != tt.want {
+				t.Errorf("matchesPattern(%q, %q) = %v, want %v", tt.fieldName, tt.segment, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveFlatFieldName(t *testing.T) {
+	tests := []struct {
+		prefix string
+		suffix string
+		want   string
+	}{
+		// Special mappings
+		{"operator", "version", "GPUOperatorVersion"},
+		{"toolkit", "version", "NvidiaContainerToolkitVersion"},
+		{"driver", "repository", "DriverRegistry"},
+		{"driver", "registry", "DriverRegistry"},
+		{"ofed", "version", "OFEDVersion"},
+		{"ofed", "deploy", "DeployOFED"},
+		{"nic", "type", "NicType"},
+		{"containerRuntime", "socket", "ContainerRuntimeSocket"},
+		{"hostDevice", "enabled", "EnableHostDevice"},
+		{"operator", "registry", "OperatorRegistry"},
+		{"kubeRbacProxy", "version", "KubeRbacProxyVersion"},
+		{"agent", "image", "SkyhookAgentImage"},
+		// Tolerations
+		{"tolerations", "key", "TolerationKey"},
+		{"tolerations", "value", "TolerationValue"},
+		// Sandbox / secure boot
+		{"sandboxWorkloads", "enabled", "EnableSecureBoot"},
+		// Open kernel module
+		{"driver", "useOpenKernelModules", "UseOpenKernelModule"},
+		{"driver", "useOpenKernelModule", "UseOpenKernelModule"},
+		// Generic enabled suffix
+		{"gds", "enabled", "EnableGDS"},
+		{"mig", "enabled", "EnableMIG"},
+		// Default concatenation
+		{"driver", "version", "DriverVersion"},
+		{"mig", "strategy", "MIGStrategy"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.prefix+"."+tt.suffix, func(t *testing.T) {
+			got := deriveFlatFieldName(tt.prefix, tt.suffix)
+			if got != tt.want {
+				t.Errorf("deriveFlatFieldName(%q, %q) = %q, want %q", tt.prefix, tt.suffix, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeriveMultiSegmentFieldName(t *testing.T) {
+	tests := []struct {
+		name  string
+		parts []string
+		want  string
+	}{
+		{
+			"cpu limit",
+			[]string{"manager", "resources", "cpu", "limit"},
+			"ManagerCPULimit",
+		},
+		{
+			"memory limit",
+			[]string{"manager", "resources", "memory", "limit"},
+			"ManagerMemoryLimit",
+		},
+		{
+			"cpu request",
+			[]string{"manager", "resources", "cpu", "request"},
+			"ManagerCPURequest",
+		},
+		{
+			"memory request",
+			[]string{"manager", "resources", "memory", "request"},
+			"ManagerMemoryRequest",
+		},
+		{
+			"wrong prefix",
+			[]string{"worker", "resources", "cpu", "limit"},
+			"",
+		},
+		{
+			"wrong second segment",
+			[]string{"manager", "config", "cpu", "limit"},
+			"",
+		},
+		{
+			"wrong length - 3 parts",
+			[]string{"manager", "resources", "cpu"},
+			"",
+		},
+		{
+			"wrong length - 5 parts",
+			[]string{"manager", "resources", "cpu", "limit", "extra"},
+			"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := deriveMultiSegmentFieldName(tt.parts)
+			if got != tt.want {
+				t.Errorf("deriveMultiSegmentFieldName(%v) = %q, want %q", tt.parts, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetNodeSelectorAtPath(t *testing.T) {
+	tests := []struct {
+		name         string
+		path         string
+		nodeSelector map[string]string
+		verify       func(t *testing.T, values map[string]any)
+	}{
+		{
+			name: "single-segment path",
+			path: "nodeSelector",
+			nodeSelector: map[string]string{
+				"role": "gpu",
+			},
+			verify: func(t *testing.T, values map[string]any) {
+				ns, ok := values["nodeSelector"].(map[string]any)
+				if !ok {
+					t.Fatal("nodeSelector not found")
+				}
+				if ns["role"] != "gpu" {
+					t.Errorf("nodeSelector.role = %v, want gpu", ns["role"])
+				}
+			},
+		},
+		{
+			name: "multi-segment path creates intermediate maps",
+			path: "webhook.nodeSelector",
+			nodeSelector: map[string]string{
+				"zone": "us-east",
+			},
+			verify: func(t *testing.T, values map[string]any) {
+				wh, ok := values["webhook"].(map[string]any)
+				if !ok {
+					t.Fatal("webhook not found")
+				}
+				ns, ok := wh["nodeSelector"].(map[string]any)
+				if !ok {
+					t.Fatal("webhook.nodeSelector not found")
+				}
+				if ns["zone"] != "us-east" {
+					t.Errorf("webhook.nodeSelector.zone = %v, want us-east", ns["zone"])
+				}
+			},
+		},
+		{
+			name: "deep nesting",
+			path: "a.b.c.nodeSelector",
+			nodeSelector: map[string]string{
+				"key": "val",
+			},
+			verify: func(t *testing.T, values map[string]any) {
+				a, ok := values["a"].(map[string]any)
+				if !ok {
+					t.Fatal("a not found")
+				}
+				b, ok := a["b"].(map[string]any)
+				if !ok {
+					t.Fatal("a.b not found")
+				}
+				c, ok := b["c"].(map[string]any)
+				if !ok {
+					t.Fatal("a.b.c not found")
+				}
+				ns, ok := c["nodeSelector"].(map[string]any)
+				if !ok {
+					t.Fatal("a.b.c.nodeSelector not found")
+				}
+				if ns["key"] != "val" {
+					t.Errorf("got %v, want val", ns["key"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := make(map[string]any)
+			setNodeSelectorAtPath(values, tt.nodeSelector, tt.path)
+			tt.verify(t, values)
+		})
+	}
+
+	t.Run("intermediate path is non-map value", func(t *testing.T) {
+		values := map[string]any{
+			"webhook": "not-a-map", // string instead of map
+		}
+		setNodeSelectorAtPath(values, map[string]string{"key": "val"}, "webhook.nodeSelector")
+		wh, ok := values["webhook"].(map[string]any)
+		if !ok {
+			t.Fatal("webhook should have been replaced with a map")
+		}
+		ns, ok := wh["nodeSelector"].(map[string]any)
+		if !ok {
+			t.Fatal("webhook.nodeSelector not found")
+		}
+		if ns["key"] != "val" {
+			t.Errorf("got %v, want val", ns["key"])
+		}
+	})
+}
+
+func TestSetTolerationsAtPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		path        string
+		tolerations []map[string]any
+		verify      func(t *testing.T, values map[string]any)
+	}{
+		{
+			name: "single-segment path",
+			path: "tolerations",
+			tolerations: []map[string]any{
+				{"key": testTolKeyDedicated, "operator": "Equal", "value": "gpu", "effect": "NoSchedule"},
+			},
+			verify: func(t *testing.T, values map[string]any) {
+				tols, ok := values["tolerations"].([]any)
+				if !ok {
+					t.Fatal("tolerations not found or wrong type")
+				}
+				if len(tols) != 1 {
+					t.Fatalf("expected 1 toleration, got %d", len(tols))
+				}
+				tol, ok := tols[0].(map[string]any)
+				if !ok {
+					t.Fatal("toleration entry wrong type")
+				}
+				if tol["key"] != testTolKeyDedicated {
+					t.Errorf("key = %v, want dedicated", tol["key"])
+				}
+			},
+		},
+		{
+			name: "multi-segment path creates intermediate maps",
+			path: "webhook.tolerations",
+			tolerations: []map[string]any{
+				{"operator": "Exists"},
+			},
+			verify: func(t *testing.T, values map[string]any) {
+				wh, ok := values["webhook"].(map[string]any)
+				if !ok {
+					t.Fatal("webhook not found")
+				}
+				tols, ok := wh["tolerations"].([]any)
+				if !ok {
+					t.Fatal("webhook.tolerations not found")
+				}
+				if len(tols) != 1 {
+					t.Fatalf("expected 1 toleration, got %d", len(tols))
+				}
+			},
+		},
+		{
+			name: "multiple tolerations",
+			path: "tolerations",
+			tolerations: []map[string]any{
+				{"key": "key1", "operator": "Equal", "value": "val1"},
+				{"key": "key2", "operator": "Exists"},
+			},
+			verify: func(t *testing.T, values map[string]any) {
+				tols, ok := values["tolerations"].([]any)
+				if !ok {
+					t.Fatal("tolerations not found or wrong type")
+				}
+				if len(tols) != 2 {
+					t.Fatalf("expected 2 tolerations, got %d", len(tols))
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := make(map[string]any)
+			setTolerationsAtPath(values, tt.tolerations, tt.path)
+			tt.verify(t, values)
+		})
+	}
+
+	t.Run("intermediate path is non-map value", func(t *testing.T) {
+		values := map[string]any{
+			"webhook": "not-a-map",
+		}
+		tols := []map[string]any{{"operator": "Exists"}}
+		setTolerationsAtPath(values, tols, "webhook.tolerations")
+		wh, ok := values["webhook"].(map[string]any)
+		if !ok {
+			t.Fatal("webhook should have been replaced with a map")
+		}
+		result, ok := wh["tolerations"].([]any)
+		if !ok {
+			t.Fatal("webhook.tolerations not found")
+		}
+		if len(result) != 1 {
+			t.Fatalf("expected 1 toleration, got %d", len(result))
+		}
+	})
 }
 
 func TestNodeSelectorToMatchExpressions(t *testing.T) {

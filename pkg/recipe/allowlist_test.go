@@ -235,6 +235,71 @@ func TestAllowLists_IsEmpty(t *testing.T) {
 	}
 }
 
+func TestAllowLists_StringMethods(t *testing.T) {
+	al := &AllowLists{
+		Accelerators: []CriteriaAcceleratorType{CriteriaAcceleratorH100, CriteriaAcceleratorL40},
+		Services:     []CriteriaServiceType{CriteriaServiceEKS, CriteriaServiceGKE},
+		Intents:      []CriteriaIntentType{CriteriaIntentTraining},
+		OSTypes:      []CriteriaOSType{CriteriaOSUbuntu},
+	}
+
+	t.Run("AcceleratorStrings", func(t *testing.T) {
+		got := al.AcceleratorStrings()
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
+		}
+	})
+
+	t.Run("AcceleratorStrings nil", func(t *testing.T) {
+		var nilAL *AllowLists
+		if got := nilAL.AcceleratorStrings(); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("ServiceStrings", func(t *testing.T) {
+		got := al.ServiceStrings()
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
+		}
+	})
+
+	t.Run("ServiceStrings nil", func(t *testing.T) {
+		var nilAL *AllowLists
+		if got := nilAL.ServiceStrings(); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("IntentStrings", func(t *testing.T) {
+		got := al.IntentStrings()
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1", len(got))
+		}
+	})
+
+	t.Run("IntentStrings nil", func(t *testing.T) {
+		var nilAL *AllowLists
+		if got := nilAL.IntentStrings(); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+
+	t.Run("OSTypeStrings", func(t *testing.T) {
+		got := al.OSTypeStrings()
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1", len(got))
+		}
+	})
+
+	t.Run("OSTypeStrings nil", func(t *testing.T) {
+		var nilAL *AllowLists
+		if got := nilAL.OSTypeStrings(); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+}
+
 func TestParseAllowListsFromEnv(t *testing.T) {
 	tests := []struct {
 		name    string

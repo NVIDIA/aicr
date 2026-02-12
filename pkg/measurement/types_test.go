@@ -1166,3 +1166,75 @@ func TestScalar_MarshalYAML(t *testing.T) {
 		})
 	}
 }
+
+func TestSubtype_UnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantData map[string]any
+		wantErr  bool
+	}{
+		{
+			name:     "string values",
+			input:    `{"subtype":"server","data":{"version":"v1.32.0"}}`,
+			wantName: "server",
+			wantData: map[string]any{"version": "v1.32.0"},
+		},
+		{
+			name:     "numeric values",
+			input:    `{"subtype":"gpu","data":{"count":4}}`,
+			wantName: "gpu",
+			wantData: map[string]any{"count": float64(4)},
+		},
+		{
+			name:     "boolean values",
+			input:    `{"subtype":"feature","data":{"enabled":true}}`,
+			wantName: "feature",
+			wantData: map[string]any{"enabled": true},
+		},
+		{
+			name:     "with context",
+			input:    `{"subtype":"node","data":{"hostname":"node-1"},"context":{"zone":"us-east"}}`,
+			wantName: "node",
+			wantData: map[string]any{"hostname": "node-1"},
+		},
+		{
+			name:    "invalid json",
+			input:   `{invalid`,
+			wantErr: true,
+		},
+		{
+			name:     "empty data",
+			input:    `{"subtype":"empty","data":{}}`,
+			wantName: "empty",
+			wantData: map[string]any{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var st Subtype
+			err := json.Unmarshal([]byte(tt.input), &st)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if st.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", st.Name, tt.wantName)
+			}
+			for k, wantV := range tt.wantData {
+				gotReading, ok := st.Data[k]
+				if !ok {
+					t.Errorf("missing key %q in data", k)
+					continue
+				}
+				if gotReading.Any() != wantV {
+					t.Errorf("Data[%q] = %v, want %v", k, gotReading.Any(), wantV)
+				}
+			}
+		})
+	}
+}

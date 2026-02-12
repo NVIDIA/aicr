@@ -323,6 +323,31 @@ func TestResult_LargeFileSize(t *testing.T) {
 	}
 }
 
+// TestResult_SetOCIMetadata tests setting OCI metadata.
+func TestResult_SetOCIMetadata(t *testing.T) {
+	result := New(types.BundleType("gpu-operator"))
+
+	result.SetOCIMetadata("sha256:abc123", "ghcr.io/nvidia/bundle:v1.0.0", true)
+
+	if result.OCIDigest != "sha256:abc123" {
+		t.Errorf("OCIDigest = %q, want sha256:abc123", result.OCIDigest)
+	}
+	if result.OCIReference != "ghcr.io/nvidia/bundle:v1.0.0" {
+		t.Errorf("OCIReference = %q, want ghcr.io/nvidia/bundle:v1.0.0", result.OCIReference)
+	}
+	if !result.Pushed {
+		t.Error("Pushed = false, want true")
+	}
+
+	// Test with pushed=false
+	result2 := New(types.BundleType("network-operator"))
+	result2.SetOCIMetadata("sha256:def456", "localhost:5000/test:latest", false)
+
+	if result2.Pushed {
+		t.Error("Pushed = true, want false")
+	}
+}
+
 // TestResult_EmptyState tests result in empty state
 func TestResult_EmptyState(t *testing.T) {
 	result := New(types.BundleType("gpu-operator"))

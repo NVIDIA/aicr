@@ -82,4 +82,34 @@ func TestParseConfig(t *testing.T) {
 			t.Errorf("expected default port 8080 for invalid env, got %d", cfg.Port)
 		}
 	})
+
+	t.Run("custom shutdown timeout from environment", func(t *testing.T) {
+		t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "60")
+
+		cfg := parseConfig()
+
+		if cfg.ShutdownTimeout != 60*time.Second {
+			t.Errorf("expected shutdown timeout 60s, got %v", cfg.ShutdownTimeout)
+		}
+	})
+
+	t.Run("invalid shutdown timeout uses default", func(t *testing.T) {
+		t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "invalid")
+
+		cfg := parseConfig()
+
+		if cfg.ShutdownTimeout != 30*time.Second {
+			t.Errorf("expected default shutdown timeout 30s for invalid env, got %v", cfg.ShutdownTimeout)
+		}
+	})
+
+	t.Run("zero shutdown timeout uses default", func(t *testing.T) {
+		t.Setenv("SHUTDOWN_TIMEOUT_SECONDS", "0")
+
+		cfg := parseConfig()
+
+		if cfg.ShutdownTimeout != 30*time.Second {
+			t.Errorf("expected default shutdown timeout 30s for zero, got %v", cfg.ShutdownTimeout)
+		}
+	})
 }

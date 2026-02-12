@@ -815,6 +815,103 @@ func TestDetermineStartPhase(t *testing.T) {
 	}
 }
 
+func TestCheckNameToTestName(t *testing.T) {
+	tests := []struct {
+		name      string
+		checkName string
+		want      string
+	}{
+		{"hyphenated name", "operator-health", "TestOperatorHealth"},
+		{"single word", "health", "TestHealth"},
+		{"multiple hyphens", "gpu-hardware-detection", "TestGpuHardwareDetection"},
+		{"already capitalized", "GPU", "TestGPU"},
+		{"empty string", "", "Test"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkNameToTestName(tt.checkName)
+			if got != tt.want {
+				t.Errorf("checkNameToTestName(%q) = %q, want %q", tt.checkName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildTestPattern(t *testing.T) {
+	tests := []struct {
+		name   string
+		recipe *recipe.RecipeResult
+		phase  string
+		want   string
+	}{
+		{
+			name: "nil validation returns empty",
+			recipe: &recipe.RecipeResult{
+				Validation: nil,
+			},
+			phase: "deployment",
+			want:  "",
+		},
+		{
+			name: "empty deployment returns empty",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{},
+				},
+			},
+			phase: "deployment",
+			want:  "",
+		},
+		{
+			name: "deployment with checks builds pattern",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"operator-health", "expected-resources"},
+					},
+				},
+			},
+			phase: "deployment",
+			want:  "^(TestOperatorHealth|TestExpectedResources)$",
+		},
+		{
+			name: "performance phase returns empty (TODO stub)",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Checks: []string{"nccl-bandwidth-test"},
+					},
+				},
+			},
+			phase: "performance",
+			want:  "",
+		},
+		{
+			name: "conformance phase returns empty (TODO stub)",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Conformance: &recipe.ValidationPhase{
+						Checks: []string{"ai-workload-validation"},
+					},
+				},
+			},
+			phase: "conformance",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New()
+			got := v.buildTestPattern(tt.recipe, tt.phase)
+			if got != tt.want {
+				t.Errorf("buildTestPattern() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateRecipeRegistrations(t *testing.T) {
 	validator := New()
 

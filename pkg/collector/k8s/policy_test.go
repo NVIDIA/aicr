@@ -176,6 +176,135 @@ func TestPolicyCollector_ParsesClusterPolicySpec(t *testing.T) {
 	assert.Equal(t, "550.54.15", driver["version"])
 }
 
+func TestFlattenSpec(t *testing.T) {
+	tests := []struct {
+		name     string
+		data     map[string]any
+		prefix   string
+		expected map[string]string
+	}{
+		{
+			name: "simple string",
+			data: map[string]any{
+				"version": "550.54.15",
+			},
+			expected: map[string]string{
+				"version": "550.54.15",
+			},
+		},
+		{
+			name: "nested map",
+			data: map[string]any{
+				"driver": map[string]any{
+					"version": "580.82.07",
+					"enabled": true,
+				},
+			},
+			expected: map[string]string{
+				"driver.version": "580.82.07",
+				"driver.enabled": "true",
+			},
+		},
+		{
+			name: "bool value",
+			data: map[string]any{
+				"enabled": true,
+			},
+			expected: map[string]string{
+				"enabled": "true",
+			},
+		},
+		{
+			name: "float64 value",
+			data: map[string]any{
+				"ratio": float64(3.14),
+			},
+			expected: map[string]string{
+				"ratio": "3.14",
+			},
+		},
+		{
+			name: "int value",
+			data: map[string]any{
+				"count": 42,
+			},
+			expected: map[string]string{
+				"count": "42",
+			},
+		},
+		{
+			name: "array value",
+			data: map[string]any{
+				"items": []any{"a", "b", "c"},
+			},
+			expected: map[string]string{
+				"items": `["a","b","c"]`,
+			},
+		},
+		{
+			name: "empty array ignored",
+			data: map[string]any{
+				"items": []any{},
+			},
+			expected: map[string]string{},
+		},
+		{
+			name:   "with prefix",
+			prefix: "spec",
+			data: map[string]any{
+				"version": "1.0",
+			},
+			expected: map[string]string{
+				"spec.version": "1.0",
+			},
+		},
+		{
+			name: "deep nesting",
+			data: map[string]any{
+				"a": map[string]any{
+					"b": map[string]any{
+						"c": "deep",
+					},
+				},
+			},
+			expected: map[string]string{
+				"a.b.c": "deep",
+			},
+		},
+		{
+			name: "default type",
+			data: map[string]any{
+				"unknown": int64(99),
+			},
+			expected: map[string]string{
+				"unknown": "99",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := make(map[string]measurement.Reading)
+			flattenSpec(tt.data, tt.prefix, result)
+
+			if len(result) != len(tt.expected) {
+				t.Fatalf("got %d readings, want %d", len(result), len(tt.expected))
+			}
+
+			for key, wantVal := range tt.expected {
+				got, exists := result[key]
+				if !exists {
+					t.Errorf("missing key %q", key)
+					continue
+				}
+				if got.Any() != wantVal {
+					t.Errorf("key %q = %v, want %q", key, got.Any(), wantVal)
+				}
+			}
+		})
+	}
+}
+
 func TestPolicyCollector_SpecSerialization(t *testing.T) {
 	// Test that spec can be properly serialized to JSON
 	policy := createMockClusterPolicy("test-policy", "")

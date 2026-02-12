@@ -177,6 +177,56 @@ func TestCLIHandler_IncludesAttributes(t *testing.T) {
 	}
 }
 
+func TestGetLogPrefix(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		t.Setenv(LogPrefixEnvVar, "")
+		if got := getLogPrefix(); got != "cli" {
+			t.Errorf("getLogPrefix() = %q, want cli", got)
+		}
+	})
+
+	t.Run("custom", func(t *testing.T) {
+		t.Setenv(LogPrefixEnvVar, "test-prefix")
+		if got := getLogPrefix(); got != "test-prefix" {
+			t.Errorf("getLogPrefix() = %q, want test-prefix", got)
+		}
+	})
+}
+
+func TestCLIHandler_WithAttrs(t *testing.T) {
+	var buf bytes.Buffer
+	handler := NewCLIHandler(&buf, slog.LevelInfo)
+
+	// WithAttrs should return the same handler (no-op implementation)
+	result := handler.WithAttrs([]slog.Attr{slog.String("key", "value")})
+	if result != handler {
+		t.Error("WithAttrs should return the same handler")
+	}
+
+	// nil attrs
+	result = handler.WithAttrs(nil)
+	if result != handler {
+		t.Error("WithAttrs(nil) should return the same handler")
+	}
+}
+
+func TestCLIHandler_WithGroup(t *testing.T) {
+	var buf bytes.Buffer
+	handler := NewCLIHandler(&buf, slog.LevelInfo)
+
+	// WithGroup should return the same handler (no-op implementation)
+	result := handler.WithGroup("test-group")
+	if result != handler {
+		t.Error("WithGroup should return the same handler")
+	}
+
+	// empty group
+	result = handler.WithGroup("")
+	if result != handler {
+		t.Error("WithGroup(\"\") should return the same handler")
+	}
+}
+
 func TestSetDefaultCLILogger(t *testing.T) {
 	// Save original default logger
 	originalLogger := slog.Default()

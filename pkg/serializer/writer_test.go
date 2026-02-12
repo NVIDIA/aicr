@@ -160,6 +160,26 @@ func TestNewWriter_DefaultsToStdout(t *testing.T) {
 	}
 }
 
+func TestNewStdoutWriter(t *testing.T) {
+	tests := []struct {
+		name   string
+		format Format
+	}{
+		{"json format", FormatJSON},
+		{"yaml format", FormatYAML},
+		{"unknown format defaults to JSON", Format("unknown")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := NewStdoutWriter(tt.format)
+			if w == nil {
+				t.Fatal("NewStdoutWriter() returned nil")
+			}
+		})
+	}
+}
+
 func TestWriter_Close(t *testing.T) {
 	// Test closing stdout writer (should be safe)
 	writer := NewStdoutWriter(FormatJSON)

@@ -492,6 +492,32 @@ func TestApplicationData_NamespaceFromComponentRef(t *testing.T) {
 	}
 }
 
+func TestIsSafePathComponent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{"valid name", "gpu-operator", true},
+		{"valid with dots", "cert-manager.io", true},
+		{"empty string", "", false},
+		{"forward slash", "path/traversal", false},
+		{"backslash", "path\\traversal", false},
+		{"double dot", "..", false},
+		{"contains double dot", "foo..bar", false},
+		{"single dot", ".", true},
+		{"dashes and numbers", "test-123", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isSafePathComponent(tt.input); got != tt.want {
+				t.Errorf("isSafePathComponent(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeVersion(t *testing.T) {
 	tests := []struct {
 		input    string

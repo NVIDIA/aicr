@@ -66,6 +66,73 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestNewWithConfig(t *testing.T) {
+	t.Run("nil config uses default", func(t *testing.T) {
+		bundler, err := NewWithConfig(nil)
+		if err != nil {
+			t.Fatalf("NewWithConfig(nil) error = %v", err)
+		}
+		if bundler.Config == nil {
+			t.Fatal("Config should not be nil")
+		}
+	})
+
+	t.Run("valid config", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithVersion("v2.0.0"))
+		bundler, err := NewWithConfig(cfg)
+		if err != nil {
+			t.Fatalf("NewWithConfig() error = %v", err)
+		}
+		if bundler.Config.Version() != "v2.0.0" {
+			t.Errorf("expected version v2.0.0, got %s", bundler.Config.Version())
+		}
+	})
+
+	t.Run("equivalent to New(WithConfig())", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithVersion("v3.0.0"))
+		b1, err := NewWithConfig(cfg)
+		if err != nil {
+			t.Fatalf("NewWithConfig() error = %v", err)
+		}
+		b2, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New(WithConfig()) error = %v", err)
+		}
+		if b1.Config.Version() != b2.Config.Version() {
+			t.Errorf("versions differ: NewWithConfig=%s, New(WithConfig)=%s",
+				b1.Config.Version(), b2.Config.Version())
+		}
+	})
+}
+
+func TestWithAllowLists(t *testing.T) {
+	t.Run("nil allowlists", func(t *testing.T) {
+		bundler, err := New(WithAllowLists(nil))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if bundler.AllowLists != nil {
+			t.Error("AllowLists should be nil")
+		}
+	})
+
+	t.Run("valid allowlists", func(t *testing.T) {
+		al := &recipe.AllowLists{
+			Services: []recipe.CriteriaServiceType{"eks", "gke"},
+		}
+		bundler, err := New(WithAllowLists(al))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if bundler.AllowLists == nil {
+			t.Fatal("AllowLists should not be nil")
+		}
+		if len(bundler.AllowLists.Services) != 2 {
+			t.Errorf("expected 2 services, got %d", len(bundler.AllowLists.Services))
+		}
+	})
+}
+
 func TestMake_NilInput(t *testing.T) {
 	bundler, err := New()
 	if err != nil {

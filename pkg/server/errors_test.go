@@ -181,6 +181,45 @@ func TestWriteErrorFromErr_StructuredErrorMapsStatusAndDetails(t *testing.T) {
 	}
 }
 
+func TestWriteErrorFromErr_NilError(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	WriteErrorFromErr(w, req, nil, "fallback msg", nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if resp.Message != "fallback msg" {
+		t.Fatalf("expected message %q, got %q", "fallback msg", resp.Message)
+	}
+}
+
+func TestWriteErrorFromErr_StructuredErrorEmptyMessage(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	err := eidoserrors.New(eidoserrors.ErrCodeNotFound, "")
+	WriteErrorFromErr(w, req, err, "fallback", nil)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+
+	var resp ErrorResponse
+	if uerr := json.Unmarshal(w.Body.Bytes(), &resp); uerr != nil {
+		t.Fatalf("failed to unmarshal: %v", uerr)
+	}
+	if resp.Message != "fallback" {
+		t.Fatalf("expected fallback message, got %q", resp.Message)
+	}
+}
+
 func TestWriteErrorFromErr_NonStructuredFallsBackToInternal(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
