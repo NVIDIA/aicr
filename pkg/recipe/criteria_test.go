@@ -1306,6 +1306,101 @@ func TestParseCriteriaFromBody_NilBody(t *testing.T) {
 	}
 }
 
+func TestCriteria_String(t *testing.T) {
+	tests := []struct {
+		name     string
+		criteria Criteria
+		want     string
+	}{
+		{
+			name:     "all defaults (any)",
+			criteria: Criteria{Service: CriteriaServiceAny, Accelerator: CriteriaAcceleratorAny, Intent: CriteriaIntentAny, OS: CriteriaOSAny, Platform: CriteriaPlatformAny},
+			want:     "criteria(any)",
+		},
+		{
+			name:     "single field set",
+			criteria: Criteria{Service: "eks", Accelerator: CriteriaAcceleratorAny, Intent: CriteriaIntentAny, OS: CriteriaOSAny, Platform: CriteriaPlatformAny},
+			want:     "criteria(service=eks)",
+		},
+		{
+			name:     "multiple fields set",
+			criteria: Criteria{Service: "eks", Accelerator: "h100", Intent: "training", OS: CriteriaOSAny, Platform: CriteriaPlatformAny},
+			want:     "criteria(service=eks, accelerator=h100, intent=training)",
+		},
+		{
+			name:     "all fields set",
+			criteria: Criteria{Service: "gke", Accelerator: "l40", Intent: "inference", OS: "ubuntu", Platform: "kubeflow", Nodes: 8},
+			want:     "criteria(service=gke, accelerator=l40, intent=inference, os=ubuntu, platform=kubeflow, nodes=8)",
+		},
+		{
+			name:     "only nodes set",
+			criteria: Criteria{Service: CriteriaServiceAny, Accelerator: CriteriaAcceleratorAny, Intent: CriteriaIntentAny, OS: CriteriaOSAny, Platform: CriteriaPlatformAny, Nodes: 4},
+			want:     "criteria(nodes=4)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.criteria.String()
+			if got != tt.want {
+				t.Errorf("Criteria.String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWithCriteriaOS(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantOS  CriteriaOSType
+		wantErr bool
+	}{
+		{"valid ubuntu", "ubuntu", "ubuntu", false},
+		{"valid any", "any", CriteriaOSAny, false},
+		{"invalid os", "windows", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			criteria, err := BuildCriteria(WithCriteriaOS(tt.input))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WithCriteriaOS(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && criteria.OS != tt.wantOS {
+				t.Errorf("OS = %v, want %v", criteria.OS, tt.wantOS)
+			}
+		})
+	}
+}
+
+func TestWithCriteriaNodes(t *testing.T) {
+	tests := []struct {
+		name      string
+		nodes     int
+		wantNodes int
+		wantErr   bool
+	}{
+		{"zero nodes", 0, 0, false},
+		{"positive nodes", 8, 8, false},
+		{"negative nodes", -1, 0, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			criteria, err := BuildCriteria(WithCriteriaNodes(tt.nodes))
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && criteria.Nodes != tt.wantNodes {
+				t.Errorf("Nodes = %d, want %d", criteria.Nodes, tt.wantNodes)
+			}
+		})
+	}
+}
+
 // writeTestFile is a helper to create test files.
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)

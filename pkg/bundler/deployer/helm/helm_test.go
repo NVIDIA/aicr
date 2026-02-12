@@ -472,20 +472,69 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 		networkOperator = "network-operator"
 	)
 
-	components := []string{gpuOperator, certManager, networkOperator}
-	deploymentOrder := []string{certManager, gpuOperator, networkOperator}
+	t.Run("all in order map", func(t *testing.T) {
+		components := []string{gpuOperator, certManager, networkOperator}
+		deploymentOrder := []string{certManager, gpuOperator, networkOperator}
 
-	sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
 
-	if sorted[0] != certManager {
-		t.Errorf("expected first component to be %s, got %s", certManager, sorted[0])
-	}
-	if sorted[1] != gpuOperator {
-		t.Errorf("expected second component to be %s, got %s", gpuOperator, sorted[1])
-	}
-	if sorted[2] != networkOperator {
-		t.Errorf("expected third component to be %s, got %s", networkOperator, sorted[2])
-	}
+		if sorted[0] != certManager {
+			t.Errorf("expected first %s, got %s", certManager, sorted[0])
+		}
+		if sorted[1] != gpuOperator {
+			t.Errorf("expected second %s, got %s", gpuOperator, sorted[1])
+		}
+		if sorted[2] != networkOperator {
+			t.Errorf("expected third %s, got %s", networkOperator, sorted[2])
+		}
+	})
+
+	t.Run("only one in order map", func(t *testing.T) {
+		// "alpha" is not in the order map, gpuOperator is.
+		// gpuOperator should come first (okI branch).
+		components := []string{"alpha", gpuOperator}
+		deploymentOrder := []string{gpuOperator}
+
+		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		if sorted[0] != gpuOperator {
+			t.Errorf("expected ordered component first, got %s", sorted[0])
+		}
+	})
+
+	t.Run("only j in order map", func(t *testing.T) {
+		// "zebra" is not in the order map, certManager is.
+		// certManager should sort after "zebra" would normally, but since
+		// certManager is in the map and zebra is not, certManager gets priority=false (okJ branch).
+		components := []string{certManager, "zebra"}
+		deploymentOrder := []string{certManager}
+
+		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		if sorted[0] != certManager {
+			t.Errorf("expected ordered component first, got %s", sorted[0])
+		}
+	})
+
+	t.Run("neither in order map", func(t *testing.T) {
+		// Both unknown — should fall back to alphabetical.
+		components := []string{"zebra", "alpha"}
+		deploymentOrder := []string{gpuOperator}
+
+		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		if sorted[0] != "alpha" {
+			t.Errorf("expected alphabetical first, got %s", sorted[0])
+		}
+		if sorted[1] != "zebra" {
+			t.Errorf("expected alphabetical second, got %s", sorted[1])
+		}
+	})
+
+	t.Run("empty deployment order", func(t *testing.T) {
+		components := []string{"b", "a"}
+		sorted := SortComponentsByDeploymentOrder(components, nil)
+		if sorted[0] != "a" {
+			t.Errorf("expected alphabetical with empty order, got %s", sorted[0])
+		}
+	})
 }
 
 func TestIsSafePathComponent(t *testing.T) {
@@ -798,4 +847,75 @@ func TestGenerate_NoTimestampInOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to walk directory: %v", err)
 	}
+}
+
+func TestHelmFuncMap(t *testing.T) {
+	funcs := helmFuncMap()
+
+	t.Run("toYaml", func(t *testing.T) {
+		fn := funcs["toYaml"].(func(any) string)
+
+		// map input
+		got := fn(map[string]string{"key": "value"})
+		if !strings.Contains(got, "key: value") {
+			t.Errorf("toYaml(map) = %q, want to contain 'key: value'", got)
+		}
+
+		// string input
+		got = fn("hello")
+		if got != "hello" {
+			t.Errorf("toYaml(string) = %q, want 'hello'", got)
+		}
+
+		// nil input
+		got = fn(nil)
+		if got != "null" {
+			t.Errorf("toYaml(nil) = %q, want 'null'", got)
+		}
+	})
+
+	t.Run("nindent", func(t *testing.T) {
+		fn := funcs["nindent"].(func(int, string) string)
+		got := fn(4, "line1\nline2")
+		if !strings.Contains(got, "    line1") {
+			t.Errorf("nindent should indent line1: got %q", got)
+		}
+		if !strings.Contains(got, "    line2") {
+			t.Errorf("nindent should indent line2: got %q", got)
+		}
+		if got[0] != '\n' {
+			t.Error("nindent should start with newline")
+		}
+	})
+
+	t.Run("toString", func(t *testing.T) {
+		fn := funcs["toString"].(func(any) string)
+		if got := fn(42); got != "42" {
+			t.Errorf("toString(42) = %q, want '42'", got)
+		}
+		if got := fn(nil); got != "<nil>" {
+			t.Errorf("toString(nil) = %q, want '<nil>'", got)
+		}
+	})
+
+	t.Run("default", func(t *testing.T) {
+		fn := funcs["default"].(func(any, any) any)
+
+		// nil value returns default
+		if got := fn("fallback", nil); got != "fallback" {
+			t.Errorf("default(fallback, nil) = %v, want 'fallback'", got)
+		}
+		// empty string returns default
+		if got := fn("fallback", ""); got != "fallback" {
+			t.Errorf("default(fallback, empty) = %v, want 'fallback'", got)
+		}
+		// non-empty returns value
+		if got := fn("fallback", "actual"); got != "actual" {
+			t.Errorf("default(fallback, actual) = %v, want 'actual'", got)
+		}
+		// non-string non-nil returns value
+		if got := fn("fallback", 42); got != 42 {
+			t.Errorf("default(fallback, 42) = %v, want 42", got)
+		}
+	})
 }

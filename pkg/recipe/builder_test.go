@@ -239,6 +239,43 @@ func TestBuilder_BuildFromCriteriaWithEvaluator(t *testing.T) {
 	}
 }
 
+// TestWithAllowLists tests the WithAllowLists builder option.
+func TestWithAllowLists(t *testing.T) {
+	t.Run("nil allowlists", func(t *testing.T) {
+		b := NewBuilder(WithAllowLists(nil))
+		if b.AllowLists != nil {
+			t.Error("expected nil AllowLists")
+		}
+	})
+
+	t.Run("valid allowlists", func(t *testing.T) {
+		al := &AllowLists{
+			Services: []CriteriaServiceType{CriteriaServiceEKS},
+		}
+		b := NewBuilder(WithAllowLists(al))
+		if b.AllowLists == nil {
+			t.Fatal("expected non-nil AllowLists")
+		}
+		if len(b.AllowLists.Services) != 1 {
+			t.Errorf("Services length = %d, want 1", len(b.AllowLists.Services))
+		}
+	})
+}
+
+// TestGetEmbeddedFS tests that the embedded filesystem is accessible.
+func TestGetEmbeddedFS(t *testing.T) {
+	fs := GetEmbeddedFS()
+
+	// Should be able to read the registry file
+	data, err := fs.ReadFile("data/registry.yaml")
+	if err != nil {
+		t.Fatalf("failed to read registry.yaml from embedded FS: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("registry.yaml is empty")
+	}
+}
+
 // TestConstraintWarning tests the ConstraintWarning struct.
 func TestConstraintWarning(t *testing.T) {
 	warning := ConstraintWarning{

@@ -113,6 +113,28 @@ func TestParseLogLevel(t *testing.T) {
 	}
 }
 
+func TestNewLogLogger(t *testing.T) {
+	tests := []struct {
+		name    string
+		module  string
+		version string
+		level   string
+	}{
+		{"debug level", "test", "v1.0.0", "debug"},
+		{"info level", "test", "v1.0.0", "info"},
+		{"error level", "test", "v1.0.0", "error"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logger := NewLogLogger(tt.module, tt.version, tt.level)
+			if logger == nil {
+				t.Fatal("NewLogLogger returned nil")
+			}
+		})
+	}
+}
+
 func TestNewStructuredLogger(t *testing.T) {
 	tests := []struct {
 		name    string
