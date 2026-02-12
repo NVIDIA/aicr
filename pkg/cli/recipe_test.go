@@ -383,7 +383,7 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			criteria := extractCriteriaFromSnapshot(tt.snapshot)
+			criteria := recipe.ExtractCriteriaFromSnapshot(tt.snapshot)
 
 			if tt.validate != nil {
 				tt.validate(t, criteria)
@@ -578,33 +578,6 @@ func TestCommandLister(_ *testing.T) {
 		},
 	}
 	commandLister(context.Background(), rootCmd)
-}
-
-func TestContainsIgnoreCase(t *testing.T) {
-	tests := []struct {
-		s      string
-		substr string
-		want   bool
-	}{
-		{"NVIDIA H100", "h100", true},
-		{"h100", "H100", true},
-		{"GB200", "gb200", true},
-		{"NVIDIA A100-SXM4-80GB", "a100", true},
-		{"L40S", "l40", true},
-		{"H100", "gb200", false},
-		{"", "h100", false},
-		{"h100", "", true}, // empty substr matches anything
-		{"", "", true},     // empty matches empty
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.s+"_"+tt.substr, func(t *testing.T) {
-			got := containsIgnoreCase(tt.s, tt.substr)
-			if got != tt.want {
-				t.Errorf("containsIgnoreCase(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
-			}
-		})
-	}
 }
 
 func hasName(flag cli.Flag, name string) bool {

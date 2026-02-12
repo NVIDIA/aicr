@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/eidos/pkg/errors"
+	"github.com/NVIDIA/eidos/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,7 +116,7 @@ func (d *Deployer) deleteConfigMap(ctx context.Context) error {
 	}
 
 	err = d.clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // StreamLogs streams logs from the Job's Pod to the provided writer.

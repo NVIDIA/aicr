@@ -85,58 +85,9 @@ type Builder struct {
 // It loads the metadata store, applies matching overlays, and returns
 // a RecipeResult with merged components and computed deployment order.
 func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeResult, error) {
-	if c == nil {
-		return nil, eidoserrors.New(eidoserrors.ErrCodeInvalidRequest, "criteria cannot be nil")
-	}
-
-	// Enforce timeout budget for building, leaving buffer for handler response
-	// This prevents handler deadline from being reached before we can respond
-	buildCtx, cancel := context.WithTimeout(ctx, defaults.RecipeBuildTimeout)
-	defer cancel()
-
-	// Check context before expensive operations
-	select {
-	case <-buildCtx.Done():
-		return nil, eidoserrors.WrapWithContext(
-			eidoserrors.ErrCodeTimeout,
-			"recipe build context cancelled during initialization",
-			buildCtx.Err(),
-			map[string]any{
-				"stage": "initialization",
-			},
-		)
-	default:
-	}
-
-	// Track overall build duration
-	start := time.Now()
-	defer func() {
-		recipeBuiltDuration.Observe(time.Since(start).Seconds())
-	}()
-
-	store, err := loadMetadataStore(buildCtx)
-	if err != nil {
-		return nil, eidoserrors.WrapWithContext(
-			eidoserrors.ErrCodeInternal,
-			"failed to load metadata store",
-			err,
-			map[string]any{
-				"stage": "metadata_load",
-			},
-		)
-	}
-
-	result, err := store.BuildRecipeResult(ctx, c)
-	if err != nil {
-		return nil, err
-	}
-
-	// Set recipe version from builder configuration
-	if b.Version != "" {
-		result.Metadata.Version = b.Version
-	}
-
-	return result, nil
+	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
+		return store.BuildRecipeResult(buildCtx, c)
+	})
 }
 
 // BuildFromCriteriaWithEvaluator creates a RecipeResult payload for the provided criteria,
@@ -150,29 +101,30 @@ func (b *Builder) BuildFromCriteria(ctx context.Context, c *Criteria) (*RecipeRe
 // The evaluator function is typically created by wrapping validator.EvaluateConstraint
 // with the snapshot data.
 func (b *Builder) BuildFromCriteriaWithEvaluator(ctx context.Context, c *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
+	return b.buildWithStore(ctx, c, func(store *MetadataStore, buildCtx context.Context) (*RecipeResult, error) {
+		return store.BuildRecipeResultWithEvaluator(buildCtx, c, evaluator)
+	})
+}
+
+func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(*MetadataStore, context.Context) (*RecipeResult, error)) (*RecipeResult, error) {
 	if c == nil {
 		return nil, eidoserrors.New(eidoserrors.ErrCodeInvalidRequest, "criteria cannot be nil")
 	}
 
-	// Enforce timeout budget: 25s for building, leaving 5s buffer for handler response
-	buildCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	buildCtx, cancel := context.WithTimeout(ctx, defaults.RecipeBuildTimeout)
 	defer cancel()
 
-	// Check context before expensive operations
-	select {
-	case <-buildCtx.Done():
+	if err := buildCtx.Err(); err != nil {
 		return nil, eidoserrors.WrapWithContext(
 			eidoserrors.ErrCodeTimeout,
 			"recipe build context cancelled during initialization",
-			buildCtx.Err(),
+			err,
 			map[string]any{
 				"stage": "initialization",
 			},
 		)
-	default:
 	}
 
-	// Track overall build duration
 	start := time.Now()
 	defer func() {
 		recipeBuiltDuration.Observe(time.Since(start).Seconds())
@@ -190,12 +142,11 @@ func (b *Builder) BuildFromCriteriaWithEvaluator(ctx context.Context, c *Criteri
 		)
 	}
 
-	result, err := store.BuildRecipeResultWithEvaluator(ctx, c, evaluator)
+	result, err := buildFn(store, buildCtx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Set recipe version from builder configuration
 	if b.Version != "" {
 		result.Metadata.Version = b.Version
 	}

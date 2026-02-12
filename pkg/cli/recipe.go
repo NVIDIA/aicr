@@ -22,7 +22,6 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/eidos/pkg/measurement"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/serializer"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
@@ -149,7 +148,7 @@ Override snapshot-detected criteria:
 				}
 
 				// Extract criteria from snapshot
-				criteria := extractCriteriaFromSnapshot(snap)
+				criteria := recipe.ExtractCriteriaFromSnapshot(snap)
 
 				// Apply CLI overrides
 				if applyErr := applyCriteriaOverrides(cmd, criteria); applyErr != nil {
@@ -271,106 +270,6 @@ func buildCriteriaFromCmd(cmd *cli.Command) (*recipe.Criteria, error) {
 	return recipe.BuildCriteria(opts...)
 }
 
-// extractCriteriaFromSnapshot extracts criteria from a snapshot.
-// This maps snapshot measurements to criteria fields.
-func extractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *recipe.Criteria {
-	criteria := recipe.NewCriteria()
-
-	if snap == nil {
-		return criteria
-	}
-
-	// Extract from K8s measurements
-	for _, m := range snap.Measurements {
-		if m == nil {
-			continue
-		}
-
-		switch m.Type {
-		case measurement.TypeK8s:
-			// Look for service type in server subtype
-			for _, st := range m.Subtypes {
-				if st.Name == "server" {
-					// Try direct "service" field first
-					if svcType, ok := st.Data["service"]; ok {
-						if parsed, err := recipe.ParseCriteriaServiceType(svcType.String()); err == nil {
-							criteria.Service = parsed
-						}
-					}
-
-					// Extract service from K8s version string (e.g., "v1.33.5-eks-3025e55")
-					if version, ok := st.Data["version"]; ok {
-						versionStr := version.String()
-						switch {
-						case strings.Contains(versionStr, "-eks-"):
-							criteria.Service = recipe.CriteriaServiceEKS
-						case strings.Contains(versionStr, "-gke"):
-							criteria.Service = recipe.CriteriaServiceGKE
-						case strings.Contains(versionStr, "-aks"):
-							criteria.Service = recipe.CriteriaServiceAKS
-						}
-					}
-				}
-			}
-
-		case measurement.TypeGPU:
-			// Look for GPU/accelerator type in smi or device subtype
-			for _, st := range m.Subtypes {
-				if st.Name == "smi" || st.Name == "device" {
-					// Try "gpu.model" field (from nvidia-smi)
-					if model, ok := st.Data["gpu.model"]; ok {
-						modelStr := model.String()
-						// Map model names to accelerator types
-						switch {
-						case containsIgnoreCase(modelStr, "gb200"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorGB200
-						case containsIgnoreCase(modelStr, "h100"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorH100
-						case containsIgnoreCase(modelStr, "a100"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorA100
-						case containsIgnoreCase(modelStr, "l40"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorL40
-						}
-					}
-
-					// Also try plain "model" field
-					if model, ok := st.Data["model"]; ok {
-						modelStr := model.String()
-						switch {
-						case containsIgnoreCase(modelStr, "gb200"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorGB200
-						case containsIgnoreCase(modelStr, "h100"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorH100
-						case containsIgnoreCase(modelStr, "a100"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorA100
-						case containsIgnoreCase(modelStr, "l40"):
-							criteria.Accelerator = recipe.CriteriaAcceleratorL40
-						}
-					}
-				}
-			}
-
-		case measurement.TypeOS:
-			// Look for OS type in release subtype
-			for _, st := range m.Subtypes {
-				if st.Name == "release" {
-					if osID, ok := st.Data["ID"]; ok {
-						if parsed, err := recipe.ParseCriteriaOSType(osID.String()); err == nil {
-							criteria.OS = parsed
-						}
-					}
-				}
-			}
-
-		case measurement.TypeSystemD:
-			// SystemD measurements not used for criteria extraction
-			continue
-		}
-	}
-
-	return criteria
-}
-
 // applyCriteriaOverrides applies CLI flag overrides to criteria.
 // Logs a warning when a flag overrides a value detected from the snapshot.
 func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
@@ -449,12 +348,4 @@ func applyCriteriaOverrides(cmd *cli.Command, criteria *recipe.Criteria) error {
 		criteria.Nodes = n
 	}
 	return nil
-}
-
-// containsIgnoreCase checks if s contains substr (case-insensitive).
-func containsIgnoreCase(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(s) > 0 && len(substr) > 0 &&
-			(s[0]|0x20 == substr[0]|0x20) && containsIgnoreCase(s[1:], substr[1:]) ||
-		len(s) > 0 && containsIgnoreCase(s[1:], substr))
 }
