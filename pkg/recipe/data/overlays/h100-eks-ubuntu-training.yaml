@@ -46,6 +46,6 @@ spec:
     - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/h100-eks-ubuntu-training.yaml
+        - components/skyhook-customizations/manifests/h100-eks-ubuntu.yaml
       dependencyRefs:
         - skyhook-operator

@@ -41,12 +41,10 @@ spec:
       value: ">= 6.8"
 
   componentRefs:
-    # Ubuntu node customizations via skyhook-customizations component.
-    # Reuses the training manifest — it contains H100+EKS+Ubuntu node
-    # customizations that apply to both training and inference workloads.
+    # Ubuntu node customizations via skyhook-customizations component
     - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/h100-eks-ubuntu-training.yaml
+        - components/skyhook-customizations/manifests/h100-eks-ubuntu.yaml
       dependencyRefs:
         - skyhook-operator
