@@ -53,7 +53,10 @@ spec:
                 platform=$(awk '/^  criteria:/{c=1;next} c && /^  [a-z]/{exit} c && /platform:/{gsub(/.*platform: /,""); print}' "$recipe_file")
 
                 # Skip intermediate overlays and wildcards
-                [ -z "$accelerator" ] || [ -z "$os_val" ] || [ -z "$intent" ] && { skip_count=$((skip_count+1)); continue; }
+                if [ -z "$accelerator" ] || [ -z "$os_val" ] || [ -z "$intent" ]; then
+                  skip_count=$((skip_count+1))
+                  continue
+                fi
                 echo "$accelerator $os_val $intent" | grep -q "any" && { skip_count=$((skip_count+1)); continue; }
 
                 leaf_count=$((leaf_count+1))
