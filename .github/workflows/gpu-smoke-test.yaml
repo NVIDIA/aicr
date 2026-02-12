@@ -92,13 +92,14 @@ jobs:
 
       - name: Configure NVIDIA Container Toolkit for kind
         run: |
-          sudo nvidia-ctk runtime configure --runtime=docker --set-as-default
+          sudo nvidia-ctk runtime configure --runtime=docker --set-as-default --cdi.enabled
           sudo nvidia-ctk config --set accept-nvidia-visible-devices-as-volume-mounts=true --in-place
+          sudo nvidia-ctk config --set accept-nvidia-visible-devices-envvar-when-unprivileged=false --in-place
           sudo systemctl restart docker
 
       - name: Create GPU-enabled kind cluster
         run: |
-          nvkind cluster create --name="${KIND_CLUSTER_NAME}"
+          nvkind cluster create --name="${KIND_CLUSTER_NAME}" || echo "::warning::nvkind cluster create returned non-zero (umount errors are expected with CDI mode)"
           kubectl --context="kind-${KIND_CLUSTER_NAME}" cluster-info
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide
 
