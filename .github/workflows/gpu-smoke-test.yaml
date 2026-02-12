@@ -174,7 +174,16 @@ jobs:
             --image=ko.local/eidos:smoke-test \
             --output=snapshot.yaml
           echo "--- Snapshot output ---"
-          head -100 snapshot.yaml
+          cat snapshot.yaml
+
+      - name: Validate snapshot contains T4 GPU
+        run: |
+          if grep -qi "t4" snapshot.yaml; then
+            echo "T4 GPU found in snapshot"
+          else
+            echo "::error::T4 GPU not found in snapshot"
+            exit 1
+          fi
 
       - name: Collect debug artifacts
         if: failure()
