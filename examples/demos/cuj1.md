@@ -70,15 +70,23 @@ metadata:
   namespace: kubeflow
 spec:
   trainer:
-    numNodes: 2
-    image: docker.io/kubeflowkatib/pytorch-mnist:v1beta1-45c5727
+    numNodes: 1
+    image: kubeflow/pytorch-dist-mnist:v1-9e12c68
     command:
       - "python3"
-      - "/opt/pytorch-mnist/mnist.py"
+      - "/opt/mnist/src/mnist.py"
       - "--epochs=1"
     resourcesPerNode:
       requests:
         nvidia.com/gpu: 1
+      limits:
+        nvidia.com/gpu: 1
+  podTemplateOverrides:
+    - targetJobs:
+        - name: node
+      spec:
+        tolerations:
+          - operator: Exists
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org
