@@ -60,17 +60,17 @@ jobs:
       - name: Install kind
         run: |
           KIND_VERSION="${{ steps.versions.outputs.kind }}"
-          curl -fsSL -o /usr/local/bin/kind \
+          sudo curl -fsSL -o /usr/local/bin/kind \
             "https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-amd64"
-          chmod +x /usr/local/bin/kind
+          sudo chmod +x /usr/local/bin/kind
           kind version
 
       - name: Install kubectl
         run: |
           KUBECTL_VERSION="${{ steps.versions.outputs.kubectl }}"
-          curl -fsSL -o /usr/local/bin/kubectl \
+          sudo curl -fsSL -o /usr/local/bin/kubectl \
             "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-          chmod +x /usr/local/bin/kubectl
+          sudo chmod +x /usr/local/bin/kubectl
           kubectl version --client
 
       - name: Install Helm
@@ -78,8 +78,8 @@ jobs:
           HELM_VERSION="${{ steps.versions.outputs.helm }}"
           curl -fsSL https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz \
             | tar -xzC /tmp
-          mv /tmp/linux-amd64/helm /usr/local/bin/helm
-          chmod +x /usr/local/bin/helm
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+          sudo chmod +x /usr/local/bin/helm
           helm version
 
       - name: Install nvkind
