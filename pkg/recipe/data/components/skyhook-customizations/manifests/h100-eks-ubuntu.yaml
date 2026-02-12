@@ -35,7 +35,7 @@ metadata:
     app.kubernetes.io/created-by: eidos
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-  name: h100-eks-ubuntu-training
+  name: h100-eks-ubuntu
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
