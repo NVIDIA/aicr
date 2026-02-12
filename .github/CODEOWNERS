@@ -19,7 +19,7 @@
 * @nvidia/eidos-write
 
 # Data
-pkg/recipe/data/** @nvidia/eidos-maintainer
+recipes/** @nvidia/eidos-maintainer
 
 # CI/CD and automation
 /Makefile @nvidia/eidos-maintainer

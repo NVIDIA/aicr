@@ -8,7 +8,7 @@ The bundler system converts RecipeInput objects into deployment artifacts. Artif
 
 **Architecture:**
 
-- **Declarative Component Registry**: Component configuration is defined in `pkg/recipe/data/registry.yaml`
+- **Declarative Component Registry**: Component configuration is defined in `recipes/registry.yaml`
 - **No separate Go packages**: Adding a new component only requires a registry entry and values files
 - **DefaultBundler**: The `pkg/bundler` package generates Helm per-component bundles from recipes
 - **Recipe-driven**: Components are selected based on recipe's `componentRefs`
@@ -22,7 +22,7 @@ The bundler system converts RecipeInput objects into deployment artifacts. Artif
 
 Adding a new component requires **no Go code**. Simply add an entry to the component registry:
 
-**Step 1: Add to `pkg/recipe/data/registry.yaml`**
+**Step 1: Add to `recipes/registry.yaml`**
 
 ```yaml
 components:
@@ -46,7 +46,7 @@ components:
 
 **Step 2: Add component values file**
 
-Create `pkg/recipe/data/components/my-operator/values.yaml`:
+Create `recipes/components/my-operator/values.yaml`:
 
 ```yaml
 # My Operator Helm values
@@ -59,7 +59,7 @@ operator:
 
 **Step 3: Reference in recipe**
 
-Add the component to a recipe overlay in `pkg/recipe/data/overlays/`:
+Add the component to a recipe overlay in `recipes/overlays/`:
 
 ```yaml
 componentRefs:
@@ -79,11 +79,11 @@ That's it! The bundler system automatically:
 
 ### Optional: Custom Manifests
 
-For components that need additional Kubernetes manifests (beyond the Helm chart), add them to `pkg/recipe/data/components/<name>/manifests/`:
+For components that need additional Kubernetes manifests (beyond the Helm chart), add them to `recipes/components/<name>/manifests/`:
 
 **Step 1: Create manifest file**
 
-Create `pkg/recipe/data/components/gpu-operator/manifests/dcgm-exporter.yaml`:
+Create `recipes/components/gpu-operator/manifests/dcgm-exporter.yaml`:
 
 ```yaml
 # DCGM Exporter ConfigMap
@@ -118,7 +118,7 @@ The bundler automatically includes manifest files in the component's `manifests/
 
 ### Registry Configuration Reference
 
-The component registry (`pkg/recipe/data/registry.yaml`) supports these fields:
+The component registry (`recipes/registry.yaml`) supports these fields:
 
 **Helm Component Configuration:**
 
@@ -172,7 +172,7 @@ The component registry (`pkg/recipe/data/registry.yaml`) supports these fields:
 - Use consistent naming: component name should match the Helm chart name (e.g., `gpu-operator`)
 - Define `valueOverrideKeys` for user-friendly `--set` prefixes (e.g., `gpuoperator` allows `--set gpuoperator:key=value`)
 - Configure `nodeScheduling` paths only for components that need workload placement
-- Create values files under `pkg/recipe/data/components/<name>/` for reusable configurations
+- Create values files under `recipes/components/<name>/` for reusable configurations
 
 ### Values Files
 
@@ -221,7 +221,7 @@ Build the CLI with embedded recipe data and install it:
 make build && cp dist/eidos_darwin_all/eidos /usr/local/bin/
 ```
 
-This compiles the Go code and embeds all files from `pkg/recipe/data/` into the binary. The binary is copied to `/usr/local/bin/` for global access.
+This compiles the Go code and embeds all files from `recipes/` into the binary. The binary is copied to `/usr/local/bin/` for global access.
 
 **Step 2: Generate the recipe**
 
@@ -296,7 +296,7 @@ kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance=eido
 
 ### Documentation
 
-- Update `pkg/recipe/data/README.md` when adding new components
+- Update `recipes/README.md` when adding new components
 - Document component-specific settings in values file comments
 - Add examples to `examples/` directory for common use cases
 
@@ -304,7 +304,7 @@ kubectl delete clusterrole,clusterrolebinding -l app.kubernetes.io/instance=eido
 
 ### Component Registry Structure
 
-Components are configured in `pkg/recipe/data/registry.yaml`. Here's an example entry:
+Components are configured in `recipes/registry.yaml`. Here's an example entry:
 
 ```yaml
 - name: gpu-operator
@@ -454,5 +454,5 @@ See [CLI Architecture](cli.md#deployer-framework-gitops-integration) for detaile
 - [CLI Architecture](cli.md) - Deployer framework and GitOps integration
 - [CLI Reference](../user/cli-reference.md) - Bundle generation commands
 - [API Reference](../user/api-reference.md) - Programmatic access (recipe generation only)
-- [Component Registry](../../pkg/recipe/data/registry.yaml) - Declarative component configuration
-- [Recipe Data README](../../pkg/recipe/data/README.md) - Recipe and component data overview
+- [Component Registry](../../recipes/registry.yaml) - Declarative component configuration
+- [Recipe Data README](../../recipes/README.md) - Recipe and component data overview

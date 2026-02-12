@@ -547,7 +547,7 @@ The `--data` flag enables extending embedded recipe data with external files:
 
 ```mermaid
 flowchart TD
-    A[Embedded Data<br/>pkg/recipe/data/] --> C[Layered Data Provider]
+    A[Embedded Data<br/>recipes/] --> C[Layered Data Provider]
     B[External Directory<br/>--data ./my-data/] --> C
     C --> D[Recipe Generation]
 
@@ -2612,7 +2612,7 @@ Adding a new component requires **no Go code**. Components are configured declar
 
 #### Step-by-Step Guide
 
-1. **Add to Component Registry** (`pkg/recipe/data/registry.yaml`):
+1. **Add to Component Registry** (`recipes/registry.yaml`):
    ```yaml
    components:
      - name: my-operator
@@ -2631,7 +2631,7 @@ Adding a new component requires **no Go code**. Components are configured declar
              - operator.tolerations
    ```
 
-2. **Create Values File** (`pkg/recipe/data/components/my-operator/values.yaml`):
+2. **Create Values File** (`recipes/components/my-operator/values.yaml`):
    ```yaml
    # My Operator Helm values
    operator:
@@ -2641,7 +2641,7 @@ Adding a new component requires **no Go code**. Components are configured declar
        tag: v1.0.0
    ```
 
-3. **Add to Recipe Overlay** (`pkg/recipe/data/overlays/<overlay>.yaml`):
+3. **Add to Recipe Overlay** (`recipes/overlays/<overlay>.yaml`):
    ```yaml
    componentRefs:
      - name: my-operator

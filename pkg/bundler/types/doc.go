@@ -25,7 +25,7 @@
 //
 // # Component Names
 //
-// Component names are defined declaratively in pkg/recipe/data/registry.yaml.
+// Component names are defined declaratively in recipes/registry.yaml.
 // BundleType values are created from these names at runtime:
 //
 //	bundlerType := types.BundleType("gpu-operator")
@@ -50,7 +50,7 @@
 //
 // # Adding New Components
 //
-// To add a new component, add an entry to pkg/recipe/data/registry.yaml.
+// To add a new component, add an entry to recipes/registry.yaml.
 // No Go code changes are required.
 //
 // # Zero Value

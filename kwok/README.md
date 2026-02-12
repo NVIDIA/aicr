@@ -28,7 +28,7 @@ flowchart LR
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| Recipe Overlays | `pkg/recipe/data/overlays/*.yaml` | Define cluster criteria (service, accelerator) |
+| Recipe Overlays | `recipes/overlays/*.yaml` | Define cluster criteria (service, accelerator) |
 | Node Profiles | `kwok/profiles/{provider}/*.yaml` | Define hardware specs per instance type |
 | Scripts | `kwok/scripts/` | Create nodes, validate scheduling |
 | CI Workflow | `.github/workflows/kwok-recipes.yaml` | Auto-discover and test recipes |
@@ -110,7 +110,7 @@ PARALLEL=2 make kwok-test-all-parallel
 
 A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` defined.
 
-Create `pkg/recipe/data/overlays/your-recipe.yaml`:
+Create `recipes/overlays/your-recipe.yaml`:
 
 ```yaml
 kind: recipeMetadata
@@ -184,7 +184,7 @@ kubectl logs -n kube-system deployment/kwok-controller
 
 Verify it has `spec.criteria.service` defined (not `any` or `null`):
 ```bash
-yq eval '.spec.criteria.service' pkg/recipe/data/overlays/your-recipe.yaml
+yq eval '.spec.criteria.service' recipes/overlays/your-recipe.yaml
 ```
 
 ## Limitations

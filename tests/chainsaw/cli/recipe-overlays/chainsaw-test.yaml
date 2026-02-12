@@ -37,7 +37,7 @@ spec:
               WORK="/tmp/chainsaw-recipe-overlays"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
 
-              OVERLAY_DIR="${REPO_ROOT}/pkg/recipe/data/overlays"
+              OVERLAY_DIR="${REPO_ROOT}/recipes/overlays"
               leaf_count=0
               skip_count=0
 

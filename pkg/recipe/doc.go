@@ -210,7 +210,7 @@
 // 3. Merge overlay configurations into result
 // 4. Return RecipeResult with component references
 //
-// Base structure (data/overlays/base.yaml):
+// Base structure (recipes/overlays/base.yaml):
 //
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	kind: Base
@@ -222,7 +222,7 @@
 //	    version: v25.3.3
 //	    repository: https://helm.ngc.nvidia.com/nvidia
 //
-// Overlay structure (data/overlays/*.yaml):
+// Overlay structure (recipes/overlays/*.yaml):
 //
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	kind: Overlay
@@ -266,8 +266,8 @@
 // # Data Source
 //
 // Recipe metadata is embedded at build time from:
-//   - recipe/data/overlays/base.yaml (base component versions)
-//   - recipe/data/overlays/*.yaml (criteria-specific overlays)
+//   - recipes/overlays/base.yaml (base component versions)
+//   - recipes/overlays/*.yaml (criteria-specific overlays)
 //
 // The metadata store is loaded once and cached (singleton pattern with sync.Once).
 //
@@ -304,7 +304,7 @@
 //   - Configured via kustomize section in registry.yaml
 //   - Support Git/OCI sources with path and tag
 //
-// The component registry (pkg/recipe/data/registry.yaml) determines component
+// The component registry (recipes/registry.yaml) determines component
 // defaults. Components must have either helm OR kustomize configuration.
 //
 // # Subpackages

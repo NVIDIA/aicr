@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package types
+package recipes
 
-// BundleType represents the type of a bundler.
-// Component names are defined in recipes/registry.yaml.
-type BundleType string
+import (
+	"embed"
+)
 
-// String returns the string representation of the bundle type.
-func (bt BundleType) String() string {
-	return string(bt)
-}
+//go:embed overlays/*.yaml registry.yaml components/*/*.yaml components/*/manifests/*.yaml
+var FS embed.FS

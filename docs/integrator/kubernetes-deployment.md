@@ -7,7 +7,7 @@ Deploy the Eidos API Server in your Kubernetes cluster for self-hosted recipe ge
 **API Server deployment** enables self-hosted recipe generation:
 
 - Isolated deployment: Recipe data stays within your infrastructure
-- Custom recipes: Modify embedded recipe data (see `pkg/recipe/data/`)
+- Custom recipes: Modify embedded recipe data (see `recipes/`)
 - High availability: Deploy multiple replicas with load balancing
 - Observability: Prometheus `/metrics` endpoint and structured logging
 
@@ -400,7 +400,7 @@ CLI tests use [Kyverno Chainsaw](https://github.com/kyverno/chainsaw) for declar
 
 ### ConfigMap for Custom Recipe Data (Advanced)
 
-> **Note:** This example shows the concept of mounting custom recipe data. The actual recipe format uses a base-plus-overlay architecture. See `pkg/recipe/data/` for the current schema (`overlays/*.yaml` including `base.yaml`).
+> **Note:** This example shows the concept of mounting custom recipe data. The actual recipe format uses a base-plus-overlay architecture. See `recipes/` for the current schema (`overlays/*.yaml` including `base.yaml`).
 
 ```yaml
 # configmap.yaml - Example showing custom recipe data mounting
@@ -414,7 +414,7 @@ data:
     # Your custom base recipe
     apiVersion: eidos.nvidia.com/v1alpha1
     kind: RecipeMetadata
-    # ... (see pkg/recipe/data/overlays/base.yaml for schema)
+    # ... (see recipes/overlays/base.yaml for schema)
 ```
 
 Mount in deployment:

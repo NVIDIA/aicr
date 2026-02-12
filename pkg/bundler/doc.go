@@ -17,12 +17,12 @@ Package bundler provides orchestration for generating deployment bundles from re
 
 The bundler package generates deployment-ready artifacts (Helm per-component bundles or
 ArgoCD applications) from recipe configurations. Component configuration is loaded
-from the declarative component registry (pkg/recipe/data/registry.yaml).
+from the declarative component registry (recipes/registry.yaml).
 
 # Architecture
 
   - DefaultBundler: Generates Helm per-component bundles or ArgoCD applications
-  - Component Registry: Declarative configuration in pkg/recipe/data/registry.yaml
+  - Component Registry: Declarative configuration in recipes/registry.yaml
   - Deployers: Helm (default) and ArgoCD output formats
   - result.Output: Aggregated generation results
 
@@ -42,7 +42,7 @@ With options:
 
 # Supported Components
 
-Components are defined in pkg/recipe/data/registry.yaml:
+Components are defined in recipes/registry.yaml:
 
   - gpu-operator: NVIDIA GPU Operator
   - network-operator: NVIDIA Network Operator
@@ -77,7 +77,7 @@ ArgoCD:
 
 # Adding New Components
 
-To add a new component, add an entry to pkg/recipe/data/registry.yaml.
+To add a new component, add an entry to recipes/registry.yaml.
 No Go code is required.
 
 Helm Component Example:
