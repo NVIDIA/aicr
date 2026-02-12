@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/eidos/pkg/bundler/deployer/shared"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 )
 
@@ -440,13 +441,13 @@ func TestSafeJoin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := safeJoin(tt.dir, tt.input)
+			result, err := shared.SafeJoin(tt.dir, tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("safeJoin(%q, %q) error = %v, wantErr %v", tt.dir, tt.input, err, tt.wantErr)
+				t.Errorf("shared.SafeJoin(%q, %q) error = %v, wantErr %v", tt.dir, tt.input, err, tt.wantErr)
 				return
 			}
 			if err == nil && result == "" {
-				t.Errorf("safeJoin(%q, %q) returned empty path", tt.dir, tt.input)
+				t.Errorf("shared.SafeJoin(%q, %q) returned empty path", tt.dir, tt.input)
 			}
 		})
 	}
@@ -511,8 +512,8 @@ func TestIsSafePathComponent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isSafePathComponent(tt.input); got != tt.want {
-				t.Errorf("isSafePathComponent(%q) = %v, want %v", tt.input, got, tt.want)
+			if got := shared.IsSafePathComponent(tt.input); got != tt.want {
+				t.Errorf("shared.IsSafePathComponent(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}
