@@ -75,3 +75,6 @@ nats:
       enabled: false
     jetstream:
       enabled: true
+      fileStore:
+        pvc:
+          storageClassName: ""
