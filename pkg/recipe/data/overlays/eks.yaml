@@ -63,3 +63,15 @@ spec:
       type: Helm
       version: v0.5.3
       valuesFile: components/aws-efa/values.yaml
+
+    # EKS has no control-plane nodes — remove the default nodeAffinity
+    # that targets node-role.kubernetes.io/control-plane
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        gpuResourcesEnabledOverride: true
+        controller:
+          affinity:
+            nodeAffinity: null
+          tolerations:
+            - operator: Exists

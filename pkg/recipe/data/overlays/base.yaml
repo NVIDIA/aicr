@@ -70,3 +70,11 @@ spec:
       valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
       dependencyRefs:
         - kube-prometheus-stack
+
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia
+      version: "25.8.1"
+      valuesFile: components/nvidia-dra-driver-gpu/values.yaml
+      dependencyRefs:
+        - gpu-operator
