@@ -28,6 +28,10 @@ NVIDIA Eidos generates validated GPU-accelerated Kubernetes configurations.
 ## Commands
 
 ```bash
+# IMPORTANT: goreleaser (used by make build, make qualify, e2e) fails if
+# GITLAB_TOKEN is set alongside GITHUB_TOKEN. Always unset it first:
+unset GITLAB_TOKEN
+
 # Development workflow
 make qualify      # Full check: test + lint + e2e + scan (run before PR)
 make test         # Unit tests with -race

@@ -22,7 +22,6 @@ import (
 	"time"
 
 	eidoserrors "github.com/NVIDIA/eidos/pkg/errors"
-	"k8s.io/apimachinery/pkg/api/errors"
 )
 
 // Deploy deploys the validation agent with all required resources (RBAC + Job).
@@ -267,20 +266,4 @@ func (d *Deployer) StreamLogs(ctx context.Context) error {
 // This is useful for capturing logs when a Job fails for debugging.
 func (d *Deployer) GetPodLogs(ctx context.Context) (string, error) {
 	return d.getPodLogsAsString(ctx)
-}
-
-// ignoreAlreadyExists returns nil if the error is "already exists".
-func ignoreAlreadyExists(err error) error {
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
-}
-
-// ignoreNotFound returns nil if the error is "not found".
-func ignoreNotFound(err error) error {
-	if errors.IsNotFound(err) {
-		return nil
-	}
-	return err
 }

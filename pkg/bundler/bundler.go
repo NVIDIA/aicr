@@ -462,10 +462,8 @@ func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeRe
 	result := make(map[string]map[string][]byte)
 
 	for _, ref := range recipeResult.ComponentRefs {
-		select {
-		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled while collecting component manifests", ctx.Err())
-		default:
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled while collecting component manifests", err)
 		}
 
 		if len(ref.ManifestFiles) == 0 {

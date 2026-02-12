@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/NVIDIA/eidos/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -35,13 +36,13 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
-	return ignoreAlreadyExists(err)
+	return k8s.IgnoreAlreadyExists(err)
 }
 
 // deleteServiceAccount deletes the ServiceAccount.
 func (d *Deployer) deleteServiceAccount(ctx context.Context) error {
 	err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // ensureRole creates the Role if it doesn't exist.
@@ -73,13 +74,13 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
-	return ignoreAlreadyExists(err)
+	return k8s.IgnoreAlreadyExists(err)
 }
 
 // deleteRole deletes the Role.
 func (d *Deployer) deleteRole(ctx context.Context) error {
 	err := d.clientset.RbacV1().Roles(d.config.Namespace).Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // ensureClusterRole creates a ClusterRole for cluster-wide read access.
@@ -127,7 +128,7 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 	clusterRoleName := d.config.ServiceAccountName + "-cluster"
 	err := d.clientset.RbacV1().ClusterRoles().Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // ensureClusterRoleBinding creates a ClusterRoleBinding.
@@ -180,7 +181,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
 	clusterRoleBindingName := d.config.ServiceAccountName + "-cluster"
 	err := d.clientset.RbacV1().ClusterRoleBindings().Delete(ctx, clusterRoleBindingName, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // ensureRoleBinding creates the RoleBinding if it doesn't exist.
@@ -205,13 +206,13 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
-	return ignoreAlreadyExists(err)
+	return k8s.IgnoreAlreadyExists(err)
 }
 
 // deleteRoleBinding deletes the RoleBinding.
 func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
 	err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // ensureInputConfigMaps verifies that required input ConfigMaps exist.
@@ -239,5 +240,5 @@ func (d *Deployer) ensureInputConfigMaps(ctx context.Context) error {
 func (d *Deployer) deleteResultConfigMap(ctx context.Context) error {
 	resultConfigMapName := fmt.Sprintf("%s-result", d.config.JobName)
 	err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).Delete(ctx, resultConfigMapName, metav1.DeleteOptions{})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }

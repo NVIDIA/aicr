@@ -29,6 +29,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/eidos/pkg/bundler/checksum"
+	"github.com/NVIDIA/eidos/pkg/bundler/deployer/shared"
 	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 )
@@ -212,7 +213,7 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 
 	components := make([]ComponentData, 0, len(sorted))
 	for _, ref := range sorted {
-		if !isSafePathComponent(ref.Name) {
+		if !shared.IsSafePathComponent(ref.Name) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
@@ -262,7 +263,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		default:
 		}
 
-		componentDir, err := safeJoin(outputDir, comp.Name)
+		componentDir, err := shared.SafeJoin(outputDir, comp.Name)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -276,7 +277,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		if values == nil {
 			values = make(map[string]any)
 		}
-		valuesPath, valuesSize, err := g.writeValuesFile(values, componentDir, "values.yaml")
+		valuesPath, valuesSize, err := shared.WriteValuesFile(values, componentDir, "values.yaml")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write values.yaml for %s", comp.Name), err)
@@ -285,7 +286,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		totalSize += valuesSize
 
 		// Write component README.md
-		readmePath, readmeSize, err := g.generateFromTemplate(componentReadmeTemplate, comp, componentDir, "README.md")
+		readmePath, readmeSize, err := shared.GenerateFromTemplate(componentReadmeTemplate, comp, componentDir, "README.md")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write README.md for %s", comp.Name), err)
@@ -296,7 +297,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		// Write manifests if present
 		if input.ComponentManifests != nil {
 			if manifests, ok := input.ComponentManifests[comp.Name]; ok && len(manifests) > 0 {
-				manifestDir, manifestDirErr := safeJoin(componentDir, "manifests")
+				manifestDir, manifestDirErr := shared.SafeJoin(componentDir, "manifests")
 				if manifestDirErr != nil {
 					return nil, 0, manifestDirErr
 				}
@@ -316,7 +317,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 				for _, manifestPath := range manifestPaths {
 					content := manifests[manifestPath]
 					filename := filepath.Base(manifestPath)
-					outputPath, pathErr := safeJoin(manifestDir, filename)
+					outputPath, pathErr := shared.SafeJoin(manifestDir, filename)
 					if pathErr != nil {
 						return nil, 0, errors.New(errors.ErrCodeInvalidRequest,
 							fmt.Sprintf("invalid manifest filename %q in component %s", filename, comp.Name))
@@ -347,7 +348,9 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 
 				// If no manifests had content, remove the empty directory and update flag
 				if manifestsWritten == 0 {
-					os.RemoveAll(manifestDir)
+					if rmErr := os.RemoveAll(manifestDir); rmErr != nil {
+						slog.Warn("failed to remove empty manifest directory", "dir", manifestDir, "error", rmErr)
+					}
 					components[i].HasManifests = false
 				}
 			}
@@ -403,7 +406,7 @@ func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInpu
 		Constraints:        input.RecipeResult.Constraints,
 	}
 
-	readmePath, readmeSize, err := g.generateFromTemplate(readmeTemplate, data, outputDir, "README.md")
+	readmePath, readmeSize, err := shared.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
 	if err != nil {
 		return "", 0, err
 	}
@@ -425,7 +428,7 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 		Components:     components,
 	}
 
-	deployPath, deploySize, err := g.generateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
+	deployPath, deploySize, err := shared.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
 	if err != nil {
 		return "", 0, err
 	}
@@ -458,7 +461,7 @@ func (g *Generator) generateUndeployScript(ctx context.Context, input *Generator
 		ComponentsReversed: reversed,
 	}
 
-	undeployPath, undeploySize, err := g.generateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
+	undeployPath, undeploySize, err := shared.GenerateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
 	if err != nil {
 		return "", 0, err
 	}
@@ -469,60 +472,6 @@ func (g *Generator) generateUndeployScript(ctx context.Context, input *Generator
 	}
 
 	return undeployPath, undeploySize, nil
-}
-
-// generateFromTemplate renders a template and writes it to baseDir/filename.
-// It uses safeJoin to verify the output path stays within baseDir.
-func (g *Generator) generateFromTemplate(tmplContent string, data any, baseDir, filename string) (string, int64, error) {
-	outputPath, err := safeJoin(baseDir, filename)
-	if err != nil {
-		return "", 0, err
-	}
-
-	tmpl, err := template.New("template").Parse(tmplContent)
-	if err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
-	}
-
-	var buf strings.Builder
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to execute template", err)
-	}
-
-	content := buf.String()
-	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write file", err)
-	}
-
-	return outputPath, int64(len(content)), nil
-}
-
-// writeValuesFile writes a values.yaml file with header comment to baseDir/filename.
-// It uses safeJoin to verify the output path stays within baseDir.
-func (g *Generator) writeValuesFile(values map[string]any, baseDir, filename string) (string, int64, error) {
-	outputPath, err := safeJoin(baseDir, filename)
-	if err != nil {
-		return "", 0, err
-	}
-
-	var buf strings.Builder
-	buf.WriteString("# Generated by Cloud Native Stack\n")
-	buf.WriteString("---\n")
-
-	if len(values) > 0 {
-		yamlBytes, err := yaml.Marshal(values)
-		if err != nil {
-			return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to marshal values", err)
-		}
-		buf.Write(yamlBytes)
-	}
-
-	content := buf.String()
-	if err := os.WriteFile(outputPath, []byte(content), 0600); err != nil {
-		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to write values file", err)
-	}
-
-	return outputPath, int64(len(content)), nil
 }
 
 // manifestData provides Helm-compatible template data for rendering manifests.
@@ -690,39 +639,4 @@ func sortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []stri
 	})
 
 	return sorted
-}
-
-// isSafePathComponent returns true if name is a single path component without
-// any separators or parent directory references.
-func isSafePathComponent(name string) bool {
-	if name == "" {
-		return false
-	}
-	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
-		return false
-	}
-	if strings.Contains(name, "..") {
-		return false
-	}
-	return true
-}
-
-// safeJoin joins baseDir and name, then verifies the result is contained
-// within baseDir. This prevents path traversal when name comes from
-// untrusted input (e.g., component names from recipe data).
-func safeJoin(baseDir, name string) (string, error) {
-	if filepath.IsAbs(name) {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("path component %q is absolute and escapes base directory", name))
-	}
-	absBase, err := filepath.Abs(baseDir)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to resolve base directory", err)
-	}
-	joined := filepath.Clean(filepath.Join(absBase, name))
-	if joined != absBase && !strings.HasPrefix(joined, absBase+string(filepath.Separator)) {
-		return "", errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("path component %q escapes base directory", name))
-	}
-	return joined, nil
 }
