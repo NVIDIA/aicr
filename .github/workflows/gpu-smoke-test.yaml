@@ -92,7 +92,7 @@ jobs:
 
       - name: Configure NVIDIA Container Toolkit for kind
         run: |
-          sudo nvidia-ctk runtime configure --runtime=docker --set-as-default --cdi.enabled
+          sudo nvidia-ctk runtime configure --runtime=docker --set-as-default
           sudo nvidia-ctk config --set accept-nvidia-visible-devices-as-volume-mounts=true --in-place
           sudo systemctl restart docker
 
