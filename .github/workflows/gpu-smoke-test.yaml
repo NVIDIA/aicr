@@ -159,6 +159,23 @@ jobs:
       - name: Show nvidia-smi output
         run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
 
+      - name: Build eidos image and load into kind
+        run: |
+          go install github.com/google/ko@v0.18.0
+          KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
+          kind load docker-image ko.local/eidos:smoke-test --name "${KIND_CLUSTER_NAME}"
+
+      - name: Run eidos snapshot with deploy-agent
+        run: |
+          go build -o ./eidos ./cmd/eidos
+          ./eidos snapshot --deploy-agent \
+            --kubeconfig="${HOME}/.kube/config" \
+            --namespace=default \
+            --image=ko.local/eidos:smoke-test \
+            --output=snapshot.yaml
+          echo "--- Snapshot output ---"
+          head -100 snapshot.yaml
+
       - name: Collect debug artifacts
         if: failure()
         run: |
