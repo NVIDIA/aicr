@@ -251,6 +251,7 @@ KUBECTL_VERSION=$(yq '.testing_tools.kubectl' .versions.yaml)
 CTLPTL_VERSION=$(yq '.testing_tools.ctlptl' .versions.yaml)
 TILT_VERSION=$(yq '.testing_tools.tilt' .versions.yaml)
 HELM_VERSION=$(yq '.testing_tools.helm' .versions.yaml)
+CHAINSAW_VERSION=$(yq '.testing_tools.chainsaw' .versions.yaml)
 KO_VERSION=$(yq '.build_tools.ko' .versions.yaml)
 GIT_CLIFF_VERSION=$(yq '.build_tools.git_cliff' .versions.yaml)
 
@@ -263,6 +264,7 @@ echo "  kind:            ${KIND_VERSION}"
 echo "  kubectl:         ${KUBECTL_VERSION}"
 echo "  tilt:            ${TILT_VERSION}"
 echo "  helm:            ${HELM_VERSION}"
+echo "  chainsaw:        ${CHAINSAW_VERSION}"
 echo "  git-cliff:       ${GIT_CLIFF_VERSION}"
 echo ""
 
@@ -341,6 +343,21 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             bash "$HELM_TMP"
             rm -f "$HELM_TMP"
             log_success "Helm installed"
+        fi
+    fi
+
+    # chainsaw (declarative e2e testing)
+    if command_exists chainsaw; then
+        log_success "Chainsaw already installed: $(chainsaw version 2>/dev/null | head -1)"
+    else
+        log_info "Installing Chainsaw ${CHAINSAW_VERSION}..."
+        if prompt_continue; then
+            if command_exists go; then
+                go install github.com/kyverno/chainsaw@"${CHAINSAW_VERSION}"
+            else
+                log_warning "Install chainsaw manually: go install github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
+            fi
+            log_success "Chainsaw installed"
         fi
     fi
 
@@ -614,6 +631,7 @@ TOOLS=(
     "go:go version 2>/dev/null | grep -oE 'go[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
     "docker:docker version --format '{{.Server.Version}}' 2>/dev/null"
     "helm:helm version --short 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
+    "chainsaw:chainsaw version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
     "kubectl:kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+[^\"]*'"
     "yamllint:yamllint --version 2>/dev/null | awk '{print \$2}'"
     "grype:grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\\[' || echo installed"

@@ -47,7 +47,7 @@ This directory contains architecture documentation for the Eidos (Eidos) tooling
   - Recipe generation modes: Query mode (direct parameters) and snapshot mode (analyze captured state)
   - Validation: Check recipe constraints against cluster snapshots
   - ConfigMap integration: Read and write operations using `cm://namespace/name` URI format
-  - Testing: `tools/e2e` script validates complete workflow
+  - Testing: Chainsaw tests in `tests/chainsaw/cli/` validate complete workflow (`make e2e`)
 - **[API Server Architecture](api-server.md)**: HTTP REST API for recipe generation and bundle creation
   - Endpoints: `GET /v1/recipe` (query mode only), `POST /v1/bundle` (bundle generation)
   - Does not support snapshot capture or validation (use CLI or agent)
@@ -1272,16 +1272,15 @@ flowchart TD
 
 **Example Usage**:
 ```bash
-# Full workflow (snapshot → recipe → bundle)
-./tools/e2e -s examples/snapshots/gb200.yaml \
-           -r examples/recipes/gb200-eks-ubuntu-training.yaml \
-           -b examples/bundles/gb200-eks-ubuntu-training
+# Run all CLI integration tests (no cluster needed)
+make e2e
 
-# Just capture snapshot from agent
-./tools/e2e -s snapshot.yaml
+# Run a single chainsaw test (using eidos from PATH)
+EIDOS_BIN=$(command -v eidos) \
+  chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
 
-# Generate recipe and bundle (skip snapshot file)
-./tools/e2e -r recipe.yaml -b ./bundles
+# Run cluster-based E2E tests (requires Kind cluster)
+make e2e-tilt
 ```
 
 ### Integration with CI/CD

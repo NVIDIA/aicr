@@ -930,14 +930,12 @@ kubectl logs -n gpu-operator -l app=nvidia-operator-validator
 Validate the complete workflow:
 
 ```shell
-# Test full workflow: agent → snapshot → recipe → bundle
-./tools/e2e -s snapshot.yaml -r recipe.yaml -b ./bundles
+# Run all CLI integration tests (no cluster needed)
+make e2e
 
-# Test just snapshot capture to ConfigMap
-./tools/e2e -s snapshot.yaml
-
-# Test recipe and bundle generation from ConfigMap
-./tools/e2e -r recipe.yaml -b ./bundles
+# Run a single chainsaw test
+EIDOS_BIN=$(find dist -maxdepth 2 -type f -name eidos | head -n 1)
+chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
 ```
 
 ## Shell Completion

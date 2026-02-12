@@ -41,6 +41,11 @@ runs:
       run: |
         curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+    - name: Install Chainsaw
+      shell: bash
+      run: |
+        go install github.com/kyverno/chainsaw@v0.2.14
+
     - name: Run Integration Tests
       shell: bash
       run: ./tools/e2e

@@ -1,0 +1,183 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-criteria-file
+spec:
+  description: |
+    Validates the --criteria flag for recipe generation.
+    Tests valid YAML/JSON criteria, CLI flag overrides, invalid files,
+    non-existent files, partial criteria, and bundle from criteria.
+    Replaces test_criteria_file_flag() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup-fixtures
+      description: Create criteria fixture files (valid YAML, JSON, invalid variants).
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-criteria-file"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+
+              cat > "${WORK}/criteria.yaml" << 'EOF'
+              kind: recipeCriteria
+              apiVersion: eidos.nvidia.com/v1alpha1
+              metadata:
+                name: test-criteria
+              spec:
+                service: eks
+                accelerator: h100
+                os: ubuntu
+                intent: training
+              EOF
+
+              cat > "${WORK}/criteria.json" << 'EOF'
+              {"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","metadata":{"name":"test"},"spec":{"service":"gke","accelerator":"a100","os":"ubuntu","intent":"inference"}}
+              EOF
+
+              echo 'kind: wrongKind' > "${WORK}/invalid-kind.yaml"
+
+              cat > "${WORK}/invalid-version.yaml" << 'EOF'
+              kind: recipeCriteria
+              apiVersion: wrong.version/v1
+              EOF
+
+              cat > "${WORK}/invalid-enum.yaml" << 'EOF'
+              kind: recipeCriteria
+              apiVersion: eidos.nvidia.com/v1alpha1
+              spec:
+                service: invalid-service
+              EOF
+
+              cat > "${WORK}/partial.yaml" << 'EOF'
+              kind: recipeCriteria
+              apiVersion: eidos.nvidia.com/v1alpha1
+              spec:
+                accelerator: h100
+              EOF
+
+    - name: valid-yaml-criteria
+      description: Recipe generation with valid YAML criteria file succeeds.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/criteria.yaml" -o "${WORK}/yaml-recipe.yaml"
+              test -f "${WORK}/yaml-recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: valid-json-criteria
+      description: Recipe generation with valid JSON criteria file succeeds.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/criteria.json" -o "${WORK}/json-recipe.yaml"
+              test -f "${WORK}/json-recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: cli-flag-override
+      description: CLI --service flag overrides criteria file value.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/criteria.yaml" --service gke \
+                -o "${WORK}/override.yaml"
+              grep -q "gke" "${WORK}/override.yaml"
+            check:
+              ($error == null): true
+
+    - name: invalid-kind
+      description: Criteria file with wrong kind must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/invalid-kind.yaml" -o /dev/null 2>&1
+            check:
+              ($error != null): true
+
+    - name: invalid-apiversion
+      description: Criteria file with wrong apiVersion must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/invalid-version.yaml" -o /dev/null 2>&1
+            check:
+              ($error != null): true
+
+    - name: invalid-enum
+      description: Criteria file with invalid enum value must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/invalid-enum.yaml" -o /dev/null 2>&1
+            check:
+              ($error != null): true
+
+    - name: non-existent-file
+      description: Non-existent criteria file must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} recipe --criteria "/non/existent/file.yaml" -o /dev/null 2>&1
+            check:
+              ($error != null): true
+
+    - name: bundle-from-criteria
+      description: Bundle generation from criteria-derived recipe succeeds.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} bundle -r "${WORK}/yaml-recipe.yaml" -o "${WORK}/bundle"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -f "${WORK}/bundle/README.md"
+              ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
+            check:
+              ($error == null): true
+
+    - name: partial-criteria
+      description: Partial criteria file (only accelerator) succeeds.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-criteria-file"
+              ${EIDOS_BIN} recipe --criteria "${WORK}/partial.yaml" -o "${WORK}/partial-recipe.yaml"
+              test -f "${WORK}/partial-recipe.yaml"
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-criteria-file

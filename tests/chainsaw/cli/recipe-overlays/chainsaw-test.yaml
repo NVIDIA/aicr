@@ -1,0 +1,98 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-recipe-overlays
+spec:
+  description: |
+    Smoke-tests all leaf overlay recipe files end-to-end via CLI.
+    For every overlay that has complete criteria (accelerator, os, intent),
+    generates a recipe and then a bundle, verifying the CLI workflow succeeds.
+    Replaces test_all_recipe_data_files() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 120s
+  steps:
+    - name: leaf-overlay-smoke
+      description: Iterate leaf overlays, generate recipe + bundle for each.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel)}"
+              WORK="/tmp/chainsaw-recipe-overlays"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+
+              OVERLAY_DIR="${REPO_ROOT}/pkg/recipe/data/overlays"
+              leaf_count=0
+              skip_count=0
+
+              for recipe_file in "${OVERLAY_DIR}"/*.yaml; do
+                basename=$(basename "$recipe_file" .yaml)
+                [ "$basename" = "base" ] && continue
+
+                # Extract criteria using awk
+                service=$(awk '/^  criteria:/{c=1;next} c && /^  [a-z]/{exit} c && /service:/{gsub(/.*service: /,""); print}' "$recipe_file")
+                accelerator=$(awk '/^  criteria:/{c=1;next} c && /^  [a-z]/{exit} c && /accelerator:/{gsub(/.*accelerator: /,""); print}' "$recipe_file")
+                os_val=$(awk '/^  criteria:/{c=1;next} c && /^  [a-z]/{exit} c && /os:/{gsub(/.*os: /,""); print}' "$recipe_file")
+                intent=$(awk '/^  criteria:/{c=1;next} c && /^  [a-z]/{exit} c && /intent:/{gsub(/.*intent: /,""); print}' "$recipe_file")
+                platform=$(awk '/^  criteria:/{c=1;next} c && /^  [a-z]/{exit} c && /platform:/{gsub(/.*platform: /,""); print}' "$recipe_file")
+
+                # Skip intermediate overlays and wildcards
+                if [ -z "$accelerator" ] || [ -z "$os_val" ] || [ -z "$intent" ]; then
+                  skip_count=$((skip_count+1))
+                  continue
+                fi
+                echo "$accelerator $os_val $intent" | grep -q "any" && { skip_count=$((skip_count+1)); continue; }
+
+                leaf_count=$((leaf_count+1))
+                test_dir="${WORK}/${basename}"
+                mkdir -p "$test_dir"
+
+                # Build recipe flags (POSIX-compatible, values are simple alphanumeric from awk)
+                flags="--accelerator ${accelerator} --os ${os_val} --intent ${intent}"
+                [ -n "$service" ] && flags="${flags} --service ${service}"
+                [ -n "$platform" ] && flags="${flags} --platform ${platform}"
+
+                echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="
+                ${EIDOS_BIN} recipe ${flags} -o "${test_dir}/recipe.yaml" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
+
+                # Generate bundle
+                echo "=== ${basename}: bundle ==="
+                ${EIDOS_BIN} bundle -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" || \
+                  { echo "FAIL: bundle generation for ${basename}" >&2; exit 1; }
+
+                # Verify bundle structure
+                test -f "${test_dir}/bundle/deploy.sh" || \
+                  { echo "FAIL: deploy.sh missing for ${basename}" >&2; exit 1; }
+                test -f "${test_dir}/bundle/README.md" || \
+                  { echo "FAIL: README.md missing for ${basename}" >&2; exit 1; }
+                ls "${test_dir}"/bundle/*/values.yaml >/dev/null 2>&1 || \
+                  { echo "FAIL: no component values.yaml for ${basename}" >&2; exit 1; }
+
+                echo "PASS: ${basename}"
+              done
+
+              echo ""
+              echo "Tested ${leaf_count} leaf overlays (skipped ${skip_count} intermediate)"
+              [ "$leaf_count" -gt 0 ] || { echo "FAIL: no leaf overlays found" >&2; exit 1; }
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-recipe-overlays

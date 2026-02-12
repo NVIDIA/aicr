@@ -1,0 +1,134 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-validate-phases
+spec:
+  description: |
+    Validates the multi-phase validation CLI (--phase flag).
+    Tests individual phases, --phase all, invalid phase, multiple --phase flags,
+    and result file structure.
+    Replaces test_validate_phases() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup
+      description: Generate recipe and mock snapshot for validation tests.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-validate-phases"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${EIDOS_BIN} recipe --service eks --accelerator h100 --intent training \
+                -o "${WORK}/recipe.yaml"
+              cat > "${WORK}/snapshot.yaml" << 'SNAP'
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - name: server
+                      data:
+                        version: v1.33.0
+                - type: OS
+                  subtypes:
+                    - name: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+              SNAP
+
+    - name: individual-phases
+      description: Verify each individual phase produces output mentioning the phase name.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-validate-phases"
+              for phase in readiness deployment performance conformance; do
+                output=$(${EIDOS_BIN} validate -r "${WORK}/recipe.yaml" \
+                  -s "${WORK}/snapshot.yaml" --phase "$phase" 2>&1) || true
+                if ! echo "$output" | grep -qi "$phase"; then
+                  echo "Phase '$phase' not found in output" >&2
+                  exit 1
+                fi
+              done
+            check:
+              ($error == null): true
+
+    - name: phase-all
+      description: Verify --phase all produces readiness, deployment, and performance phases.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-validate-phases"
+              output=$(${EIDOS_BIN} validate -r "${WORK}/recipe.yaml" \
+                -s "${WORK}/snapshot.yaml" --phase all \
+                -o "${WORK}/all-phases.yaml" 2>&1) || true
+              count=0
+              echo "$output" | grep -q "readiness" && count=$((count+1))
+              echo "$output" | grep -q "deployment" && count=$((count+1))
+              echo "$output" | grep -q "performance" && count=$((count+1))
+              if [ "$count" -lt 3 ]; then
+                echo "Expected 3+ phases, found $count" >&2
+                exit 1
+              fi
+            check:
+              ($error == null): true
+
+    - name: result-structure
+      description: Verify --phase all output file contains phases key.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-validate-phases"
+              grep -q "phases:" "${WORK}/all-phases.yaml"
+            check:
+              ($error == null): true
+
+    - name: invalid-phase
+      description: Verify invalid phase name produces an error.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-validate-phases"
+              ${EIDOS_BIN} validate -r "${WORK}/recipe.yaml" \
+                -s "${WORK}/snapshot.yaml" --phase invalid-phase 2>&1 || true
+            check:
+              (contains($stderr, 'invalid phase') || contains($stdout, 'invalid phase')): true
+
+    - name: multiple-phase-flags
+      description: Verify multiple --phase flags produce all requested phases.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-validate-phases"
+              output=$(${EIDOS_BIN} validate -r "${WORK}/recipe.yaml" \
+                -s "${WORK}/snapshot.yaml" \
+                --phase readiness --phase deployment --phase conformance 2>&1) || true
+              echo "$output" | grep -q "readiness" || { echo "readiness missing" >&2; exit 1; }
+              echo "$output" | grep -q "deployment" || { echo "deployment missing" >&2; exit 1; }
+              echo "$output" | grep -q "conformance" || { echo "conformance missing" >&2; exit 1; }
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-validate-phases

@@ -801,21 +801,18 @@ kubectl get configmap eidos-snapshot -n gpu-operator -o yaml
 kubectl get configmap eidos-recipe -n gpu-operator -o yaml
 ```
 
-### E2E Testing with Agent
+### E2E Testing
 
 ```bash
-# Run full E2E test (snapshot → recipe → bundle)
-./tools/e2e -s examples/snapshots/h100.yaml \
-           -r examples/recipes/h100-eks-ubuntu-training.yaml \
-           -b examples/bundles/h100-eks-ubuntu-training
+# Run CLI integration tests (no cluster needed)
+make e2e
 
-# The script:
-# 1. Deploys agent Job to cluster
-# 2. Waits for snapshot to be written to ConfigMap
-# 3. Optionally saves snapshot to file
-# 4. Optionally generates recipe using cm://gpu-operator/eidos-snapshot
-# 5. Optionally generates bundle from recipe
-# 6. Validates each step completes successfully
+# Run a single chainsaw test
+EIDOS_BIN=$(pwd)/dist/eidos \
+  chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
+
+# Run cluster-based E2E tests (requires Kind cluster)
+make e2e-tilt
 ```
 
 ### Agent Deployment Pattern

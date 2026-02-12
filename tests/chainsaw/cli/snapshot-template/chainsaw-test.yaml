@@ -1,0 +1,112 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-snapshot-template
+spec:
+  description: |
+    Validates the snapshot --template and --format flags.
+    Tests flag existence, format validation, invalid paths, example
+    template existence, and standard formats.
+    Replaces test_snapshot_template_flags() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup
+      description: Create a test template file.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-snapshot-template"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              cat > "${WORK}/test.tmpl" << 'EOF'
+              kind: {{ .Kind }}
+              apiVersion: {{ .APIVersion }}
+              EOF
+
+    - name: template-flag-exists
+      description: Verify snapshot --help mentions template flag.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} snapshot --help 2>&1
+            check:
+              (contains($stdout, 'template')): true
+
+    - name: json-format-rejected-with-template
+      description: JSON format with --template must be rejected (templates require YAML).
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-snapshot-template"
+              ${EIDOS_BIN} snapshot --template "${WORK}/test.tmpl" --format json 2>&1 || true
+            check:
+              (contains($stderr, 'YAML format') || contains($stderr, 'requires YAML') || contains($stdout, 'YAML format') || contains($stdout, 'requires YAML')): true
+
+    - name: nonexistent-template
+      description: Non-existent template path must produce an error.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} snapshot --template "/non/existent.tmpl" 2>&1 || true
+            check:
+              (contains($stderr, 'not found') || contains($stderr, 'no such file') || contains($stderr, 'does not exist') || contains($stdout, 'not found') || contains($stdout, 'no such file') || contains($stdout, 'does not exist')): true
+
+    - name: directory-as-template
+      description: Directory path as --template must produce an error.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-snapshot-template"
+              ${EIDOS_BIN} snapshot --template "${WORK}" 2>&1 || true
+            check:
+              (contains($stderr, 'directory') || contains($stderr, 'not a file') || contains($stdout, 'directory') || contains($stdout, 'not a file')): true
+
+    - name: example-template-exists
+      description: Verify the example snapshot template file exists in the repo.
+      try:
+        - script:
+            content: |
+              REPO_ROOT="${REPO_ROOT:-$(git rev-parse --show-toplevel)}"
+              test -f "${REPO_ROOT}/examples/templates/snapshot-template.md.tmpl"
+            check:
+              ($error == null): true
+
+    - name: standard-formats
+      description: Standard YAML and JSON formats without --template are accepted.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              for fmt in yaml json; do
+                output=$(${EIDOS_BIN} snapshot --format "$fmt" 2>&1) || true
+                if echo "$output" | grep -qi "invalid format\|unknown format"; then
+                  echo "Format '$fmt' should be valid" >&2
+                  exit 1
+                fi
+              done
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-snapshot-template

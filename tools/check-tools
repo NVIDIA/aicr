@@ -113,6 +113,9 @@ get_tool_metadata() {
         helm)
             echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
             ;;
+        chainsaw)
+            echo "chainsaw:::chainsaw version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            ;;
         # Optional tools (no version in .versions.yaml)
         docker)
             echo "docker:::docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'not running':::presence"
