@@ -16,6 +16,9 @@ fi
 
 echo "Undeploying Cloud Native Stack components..."
 
+# System namespaces that must not be deleted
+PROTECTED_NS="kube-system kube-public kube-node-lease default"
+
 # Uninstall components in reverse order
 {{ range .ComponentsReversed -}}
 {{ if .HasManifests -}}
@@ -25,7 +28,7 @@ kubectl delete -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" --ignore-not-found
 {{ if .HasChart -}}
 echo "Uninstalling {{ .Name }} ({{ .Namespace }})..."
 helm uninstall {{ .Name }} -n {{ .Namespace }} --ignore-not-found || true
-if [[ "${KEEP_NS}" == "false" ]] && kubectl get namespace {{ .Namespace }} &>/dev/null; then
+if [[ "${KEEP_NS}" == "false" ]] && ! echo " ${PROTECTED_NS} " | grep -q " {{ .Namespace }} " && kubectl get namespace {{ .Namespace }} &>/dev/null; then
   echo "Deleting namespace {{ .Namespace }}..."
   kubectl delete namespace {{ .Namespace }} --ignore-not-found
 fi
