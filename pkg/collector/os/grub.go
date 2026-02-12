@@ -52,7 +52,7 @@ func (c *Collector) collectGRUB(ctx context.Context) (*measurement.Subtype, erro
 		return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read GRUB params from %s", filePathGrub), err)
 	}
 
-	props := make(map[string]measurement.Reading, 0)
+	props := make(map[string]measurement.Reading)
 
 	for k, v := range params {
 		props[k] = measurement.Str(v)

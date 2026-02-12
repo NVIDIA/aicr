@@ -53,7 +53,7 @@ func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	if len(services) == 0 {
 		services = []string{"containerd.service"}
 	}
-	subs := make([]measurement.Subtype, 0)
+	subs := make([]measurement.Subtype, 0, len(services))
 
 	conn, err := dbus.NewSystemdConnectionContext(ctx)
 	if err != nil {

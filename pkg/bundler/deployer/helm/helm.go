@@ -348,7 +348,9 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 
 				// If no manifests had content, remove the empty directory and update flag
 				if manifestsWritten == 0 {
-					os.RemoveAll(manifestDir)
+					if rmErr := os.RemoveAll(manifestDir); rmErr != nil {
+						slog.Warn("failed to remove empty manifest directory", "dir", manifestDir, "error", rmErr)
+					}
 					components[i].HasManifests = false
 				}
 			}
