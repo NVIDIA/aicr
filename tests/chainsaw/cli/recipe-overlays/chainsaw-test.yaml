@@ -63,14 +63,13 @@ spec:
                 test_dir="${WORK}/${basename}"
                 mkdir -p "$test_dir"
 
-                # Build recipe command (argv array to avoid eval and quoting issues)
-                cmd=("${EIDOS_BIN}" recipe --accelerator "$accelerator" --os "$os_val" --intent "$intent")
-                [ -n "$service" ] && cmd+=("--service" "$service")
-                [ -n "$platform" ] && cmd+=("--platform" "$platform")
-                cmd+=("-o" "${test_dir}/recipe.yaml")
+                # Build recipe flags (POSIX-compatible, values are simple alphanumeric from awk)
+                flags="--accelerator ${accelerator} --os ${os_val} --intent ${intent}"
+                [ -n "$service" ] && flags="${flags} --service ${service}"
+                [ -n "$platform" ] && flags="${flags} --platform ${platform}"
 
                 echo "=== ${basename}: recipe (service=${service:-default} accel=${accelerator} os=${os_val} intent=${intent} platform=${platform:-none}) ==="
-                "${cmd[@]}" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
+                ${EIDOS_BIN} recipe ${flags} -o "${test_dir}/recipe.yaml" || { echo "FAIL: recipe generation for ${basename}" >&2; exit 1; }
 
                 # Generate bundle
                 echo "=== ${basename}: bundle ==="
