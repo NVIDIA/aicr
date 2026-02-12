@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/configuration-chainsaw-v1alpha1.json
-apiVersion: chainsaw.kyverno.io/v1alpha1
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/configuration-chainsaw-v1alpha2.json
+apiVersion: chainsaw.kyverno.io/v1alpha2
 kind: Configuration
 metadata:
   name: eidos-e2e
@@ -21,10 +21,15 @@ spec:
   timeouts:
     apply: 30s
     assert: 120s
+    cleanup: 30s
     delete: 30s
+    error: 10s
     exec: 60s
-  # Run tests in parallel where possible
-  parallel: 4
-  # Generate JUnit reports for CI
-  reportFormat: JUnit
-  reportName: eidos-e2e
+  execution:
+    parallel: 4
+    failFast: true
+  cleanup:
+    skipDelete: false
+  report:
+    format: JUnit
+    name: eidos-e2e

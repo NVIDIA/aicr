@@ -35,10 +35,10 @@ operator:
 
 # Accelerated node selector: where GPU daemonsets run
 daemonsets:
-    nodeSelector:
-        nodeGroup: customer-gpu
-    tolerations:
-        - effect: NoSchedule
-          key: nvidia.com/gpu
-          operator: Equal
-          value: present
+  nodeSelector:
+    nodeGroup: customer-gpu
+  tolerations:
+    - effect: NoSchedule
+      key: nvidia.com/gpu
+      operator: Equal
+      value: present

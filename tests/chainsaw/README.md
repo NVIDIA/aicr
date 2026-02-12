@@ -2,7 +2,7 @@
 
 Example end-to-end tests using [Kyverno Chainsaw](https://github.com/kyverno/chainsaw), showing how Chainsaw's declarative YAML assertions can replace the bash grep/kubectl chains in `tests/e2e/run.sh`.
 
-These two tests are a proof-of-concept. See the existing `tests/e2e/run.sh` for the full test suite.
+These tests are a proof-of-concept. See the existing `tests/e2e/run.sh` for the full test suite.
 
 ## Install Chainsaw
 
@@ -279,7 +279,7 @@ tests/chainsaw/
 
 - **Declarative YAML assertions** — validate document structure, not just string matching
 - **Partial map matching** — specify only the fields you care about
-- **K8s-native** — apply resources, assert state, cleanup with `finally` blocks
+- **K8s-native** — apply resources, assert state, cleanup with `cleanup` blocks
 - **Parallel execution** — independent tests run concurrently
 - **JUnit reporting** — CI-friendly test output
 - **Consistent with skyhook** — same patterns used in [skyhook/k8s-tests/chainsaw](https://github.com/NVIDIA/skyhook/tree/main/k8s-tests/chainsaw)

@@ -19,6 +19,5 @@
 kind: ValidationResult
 apiVersion: eidos.nvidia.com/v1alpha1
 phases:
-  readiness: 
+  readiness:
     status: pass
-  
