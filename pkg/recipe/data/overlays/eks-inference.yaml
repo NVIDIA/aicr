@@ -37,12 +37,16 @@ spec:
       source: oci://cr.kgateway.dev/kgateway-dev/charts
       version: v2.0.0
       valuesFile: components/kgateway-crds/values.yaml
+      manifestFiles:
+        - components/kgateway-crds/manifests/gateway-api-crds.yaml
 
     - name: kgateway
       type: Helm
       source: oci://cr.kgateway.dev/kgateway-dev/charts
       version: v2.0.0
       valuesFile: components/kgateway/values.yaml
+      manifestFiles:
+        - components/kgateway/manifests/inference-gateway.yaml
       dependencyRefs:
         - kgateway-crds
         - cert-manager
