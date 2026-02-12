@@ -97,9 +97,13 @@ jobs:
           sudo nvidia-ctk config --set accept-nvidia-visible-devices-envvar-when-unprivileged=false --in-place
           sudo systemctl restart docker
 
+      - name: Validate Docker GPU access
+        run: docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
+
       - name: Create GPU-enabled kind cluster
         run: |
           nvkind cluster create --name="${KIND_CLUSTER_NAME}" || echo "::warning::nvkind cluster create returned non-zero (umount errors are expected with CDI mode)"
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait --for=condition=Ready nodes --all --timeout=300s
           kubectl --context="kind-${KIND_CLUSTER_NAME}" cluster-info
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide
 
