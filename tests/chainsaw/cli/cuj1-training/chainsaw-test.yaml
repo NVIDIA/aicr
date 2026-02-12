@@ -1,0 +1,172 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cuj1-training-workload
+spec:
+  description: |
+    CUJ1: Critical User Journey - Training Workload.
+    Tests the complete eidos workflow from examples/demos/cuj1.md:
+      Step 1: recipe (with --platform kubeflow)
+      Step 2: validate (readiness phase)
+      Step 3: bundle (with node scheduling)
+      Step 4: deploy script validation
+      Step 5: multi-phase validate
+    No cluster needed. Run with:
+      EIDOS_BIN=$(pwd)/dist/e2e/eidos chainsaw test --no-cluster --test-dir tests/chainsaw/cli/cuj1-training
+  timeouts:
+    exec: 30s
+  steps:
+
+    # ── Step 1: Generate recipe with kubeflow platform ───────────────
+    - name: generate-recipe
+      description: Generate an EKS H100 training recipe with kubeflow platform.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-cuj1-training"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${EIDOS_BIN} recipe \
+                --service eks \
+                --accelerator h100 \
+                --intent training \
+                --os ubuntu \
+                --platform kubeflow \
+                --output "${WORK}/recipe.yaml"
+
+    - name: assert-recipe
+      description: Verify recipe has correct criteria, kubeflow components, and deployment order.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-cuj1-training/recipe.yaml \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 5s
+
+    # ── Step 2: Validate recipe (readiness phase) ────────────────────
+    - name: validate-readiness
+      description: Run readiness validation against a mock snapshot.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-cuj1-training"
+              ${EIDOS_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot ./mock-snapshot.yaml \
+                --phase readiness \
+                --output "${WORK}/validate-readiness-raw.yaml"
+              printf 'apiVersion: eidos.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/validate-readiness.yaml"
+              sed '/^---$/d' "${WORK}/validate-readiness-raw.yaml" >> "${WORK}/validate-readiness.yaml"
+
+    - name: assert-validate-readiness
+      description: Verify readiness validation passes.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-cuj1-training/validate-readiness.yaml \
+                --file ./assert-validate-readiness.yaml \
+                --no-color --timeout 5s
+
+    # ── Step 3: Generate bundle with node scheduling ─────────────────
+    - name: generate-bundle
+      description: Generate a Helm bundle with system and accelerated node scheduling.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-cuj1-training"
+              ${EIDOS_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
+                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+
+    - name: assert-bundle-structure
+      description: Verify bundle contains README, deploy script, recipe, and component values.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-cuj1-training"
+              test -f "${WORK}/bundle/README.md"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -f "${WORK}/bundle/recipe.yaml"
+              ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
+            check:
+              ($error == null): true
+
+    - name: assert-bundle-scheduling
+      description: Verify gpu-operator values.yaml has scheduling, driver, RDMA, and NFD settings.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-cuj1-training"
+              printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/gpu-operator-values.yaml"
+              sed '/^---$/d' "${WORK}/bundle/gpu-operator/values.yaml" >> "${WORK}/gpu-operator-values.yaml"
+              chainsaw assert \
+                --resource "${WORK}/gpu-operator-values.yaml" \
+                --file ./assert-bundle-scheduling.yaml \
+                --no-color --timeout 5s
+
+    # ── Step 4: Deploy script validation ─────────────────────────────
+    - name: assert-deploy-script
+      description: Verify deploy.sh exists, is executable, and has correct shebang.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-cuj1-training"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -x "${WORK}/bundle/deploy.sh"
+              head -1 "${WORK}/bundle/deploy.sh" | grep -q "#!/usr/bin/env bash"
+            check:
+              ($error == null): true
+
+    # ── Step 5: Multi-phase validate ─────────────────────────────────
+    - name: validate-multiphase
+      description: Run all three validation phases (readiness, deployment, conformance).
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-cuj1-training"
+              ${EIDOS_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot ./mock-snapshot.yaml \
+                --phase readiness \
+                --phase deployment \
+                --phase conformance \
+                --output "${WORK}/validate-multiphase-raw.yaml"
+              printf 'apiVersion: eidos.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/validate-multiphase.yaml"
+              sed '/^---$/d' "${WORK}/validate-multiphase-raw.yaml" >> "${WORK}/validate-multiphase.yaml"
+
+    - name: assert-validate-multiphase
+      description: Verify all three validation phases are present with expected statuses.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-cuj1-training/validate-multiphase.yaml \
+                --file ./assert-validate-multiphase.yaml \
+                --no-color --timeout 5s
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-cuj1-training

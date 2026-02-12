@@ -1,0 +1,85 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: snapshot-deploy-agent
+spec:
+  description: |
+    Deploys the eidos snapshot agent as a Job, then asserts on the K8s
+    resources it creates (Job completion, ConfigMap metadata, snapshot content).
+    Requires: Kind cluster with fake nvidia-smi, gpu-operator namespace,
+    eidos image at localhost:5001/eidos:local.
+    Run with: chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 30s
+  steps:
+    - name: cleanup-previous
+      description: Ensure clean state by removing leftover resources from prior runs.
+      try:
+        - script:
+            content: |
+              kubectl delete job eidos-e2e-snapshot -n gpu-operator --ignore-not-found=true
+              kubectl delete cm eidos-e2e-snapshot -n gpu-operator --ignore-not-found=true
+              kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: setup-rbac
+      description: Create ServiceAccount, ClusterRole, and ClusterRoleBinding for the snapshot agent.
+      try:
+        - apply:
+            file: rbac.yaml
+
+    - name: deploy-snapshot-job
+      description: Deploy the snapshot agent Job to the gpu-operator namespace.
+      try:
+        - apply:
+            file: snapshot-job.yaml
+
+    - name: assert-job-completed
+      description: Wait for the snapshot Job to complete (retries until 120s timeout).
+      try:
+        - assert:
+            file: assert-job-complete.yaml
+
+    - name: assert-configmap-metadata
+      description: Verify ConfigMap has correct labels and format key.
+      try:
+        - assert:
+            file: assert-configmap.yaml
+
+    - name: assert-snapshot-content
+      description: Extract snapshot.yaml from ConfigMap and validate document structure.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-snapshot-deploy"
+              mkdir -p "${WORK}"
+              kubectl get cm eidos-e2e-snapshot -n gpu-operator \
+                -o jsonpath='{.data.snapshot\.yaml}' > "${WORK}/snapshot.yaml"
+              chainsaw assert --resource "${WORK}/snapshot.yaml" \
+                --file ./assert-snapshot-content.yaml \
+                --no-color --timeout 5s
+      # cleanup runs after the entire test completes, regardless of step success/failure.
+      cleanup:
+        - script:
+            content: |
+              kubectl delete job eidos-e2e-snapshot -n gpu-operator --ignore-not-found=true
+              kubectl delete cm eidos-e2e-snapshot -n gpu-operator --ignore-not-found=true
+              rm -rf /tmp/chainsaw-snapshot-deploy
+        - delete:
+            file: rbac.yaml

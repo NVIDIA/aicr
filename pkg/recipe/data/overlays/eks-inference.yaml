@@ -15,38 +15,34 @@
 kind: recipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: h100-eks-ubuntu-inference
+  name: eks-inference
 
 spec:
-  # Inherits from h100-eks-inference recipe (H100 + EKS + inference settings)
-  # This overlay adds Ubuntu-specific configurations
-  base: h100-eks-inference
+  # Inherits from eks recipe (EKS-specific settings)
+  base: eks
 
   criteria:
     service: eks
-    accelerator: h100
-    os: ubuntu
     intent: inference
 
-  # H100 + Ubuntu specific constraints for inference workloads
+  # Inference specific constraints for EKS workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
-    - name: OS.release.ID
-      value: ubuntu
-    - name: OS.release.VERSION_ID
-      value: "24.04"
-    - name: OS.sysctl./proc/sys/kernel/osrelease
-      value: ">= 6.8"
+      value: ">= 1.30"
 
   componentRefs:
-    # Ubuntu node customizations via skyhook-customizations component.
-    # Reuses the training manifest — it contains H100+EKS+Ubuntu node
-    # customizations that apply to both training and inference workloads.
-    - name: skyhook-customizations
+    - name: kgateway-crds
       type: Helm
-      manifestFiles:
-        - components/skyhook-customizations/manifests/h100-eks-ubuntu-training.yaml
+      source: oci://cr.kgateway.dev/kgateway-dev/charts
+      version: v2.0.0
+      valuesFile: components/kgateway-crds/values.yaml
+
+    - name: kgateway
+      type: Helm
+      source: oci://cr.kgateway.dev/kgateway-dev/charts
+      version: v2.0.0
+      valuesFile: components/kgateway/values.yaml
       dependencyRefs:
-        - skyhook-operator
+        - kgateway-crds
+        - cert-manager

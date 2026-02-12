@@ -762,6 +762,8 @@ func TestParseCriteriaPlatformType(t *testing.T) {
 	}{
 		{"empty", "", CriteriaPlatformAny, false},
 		{"any", "any", CriteriaPlatformAny, false},
+		{"dynamo", "dynamo", CriteriaPlatformDynamo, false},
+		{"Dynamo uppercase", "Dynamo", CriteriaPlatformDynamo, false},
 		{"kubeflow", "kubeflow", CriteriaPlatformKubeflow, false},
 		{"Kubeflow uppercase", "Kubeflow", CriteriaPlatformKubeflow, false},
 		{"invalid", "invalid", CriteriaPlatformAny, true},
@@ -785,7 +787,7 @@ func TestGetCriteriaPlatformTypes(t *testing.T) {
 	types := GetCriteriaPlatformTypes()
 
 	// Should return sorted list
-	expected := []string{"kubeflow"}
+	expected := []string{"dynamo", "kubeflow"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaPlatformTypes() returned %d types, want %d", len(types), len(expected))
 	}
