@@ -163,7 +163,7 @@ jobs:
         run: |
           go install github.com/google/ko@v0.18.0
           KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
-          kind load docker-image ko.local/eidos:smoke-test --name "${KIND_CLUSTER_NAME}"
+          kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
 
       - name: Run eidos snapshot with deploy-agent
         run: |
@@ -171,7 +171,7 @@ jobs:
           ./eidos snapshot --deploy-agent \
             --kubeconfig="${HOME}/.kube/config" \
             --namespace=default \
-            --image=ko.local/eidos:smoke-test \
+            --image=ko.local:smoke-test \
             --output=snapshot.yaml
           echo "--- Snapshot output ---"
           cat snapshot.yaml
