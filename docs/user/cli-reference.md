@@ -934,8 +934,8 @@ Validate the complete workflow:
 make e2e
 
 # Run a single chainsaw test
-EIDOS_BIN=$(pwd)/dist/eidos_darwin_arm64_v8.0/eidos \
-  chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
+EIDOS_BIN=$(find dist -maxdepth 2 -type f -name eidos | head -n 1)
+chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
 ```
 
 ## Shell Completion
