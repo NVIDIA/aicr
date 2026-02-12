@@ -4,8 +4,10 @@ End-to-end tests using [Kyverno Chainsaw](https://github.com/kyverno/chainsaw). 
 
 ## Install Chainsaw
 
+To install Chainsaw at the version pinned in `.versions.yaml`, run:
+
 ```bash
-go install github.com/kyverno/chainsaw@latest
+make tools-setup
 ```
 
 ## Running Tests
