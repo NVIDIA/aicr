@@ -192,21 +192,39 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 			Add: []corev1.Capability{"SYS_ADMIN", "SYS_CHROOT"},
 		},
 	}
-	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      "run-systemd",
-		MountPath: "/run/systemd",
-		ReadOnly:  true,
-	})
+	container.VolumeMounts = append(container.VolumeMounts,
+		corev1.VolumeMount{
+			Name:      "run-systemd",
+			MountPath: "/run/systemd",
+			ReadOnly:  true,
+		},
+		corev1.VolumeMount{
+			Name:      "host-os-release",
+			MountPath: "/etc/os-release",
+			ReadOnly:  true,
+		},
+	)
 
-	spec.Volumes = append(spec.Volumes, corev1.Volume{
-		Name: "run-systemd",
-		VolumeSource: corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{
-				Path: "/run/systemd",
-				Type: ptr.To(corev1.HostPathDirectory),
+	spec.Volumes = append(spec.Volumes,
+		corev1.Volume{
+			Name: "run-systemd",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/run/systemd",
+					Type: ptr.To(corev1.HostPathDirectory),
+				},
 			},
 		},
-	})
+		corev1.Volume{
+			Name: "host-os-release",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/etc/os-release",
+					Type: ptr.To(corev1.HostPathFile),
+				},
+			},
+		},
+	)
 }
 
 // applyRestrictedSettings configures the pod for PSS-restricted namespaces (K8s collector only).
