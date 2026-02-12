@@ -147,6 +147,36 @@ func TestValidator_Validate(t *testing.T) {
 			wantSkipped: 1,
 		},
 		{
+			name: "value not found in snapshot",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.nonexistent", Value: "test"}, // Valid type but missing key
+			},
+			wantStatus:  ValidationStatusPartial,
+			wantPassed:  0,
+			wantFailed:  0,
+			wantSkipped: 1,
+		},
+		{
+			name: "invalid constraint expression",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ""}, // Empty expression
+			},
+			wantStatus:  ValidationStatusPartial,
+			wantPassed:  0,
+			wantFailed:  0,
+			wantSkipped: 1,
+		},
+		{
+			name: "evaluation failure on version parse",
+			constraints: []recipe.Constraint{
+				{Name: "OS.release.ID", Value: ">= 1.0.0"}, // Version comparison on non-version "ubuntu"
+			},
+			wantStatus:  ValidationStatusFail,
+			wantPassed:  0,
+			wantFailed:  1,
+			wantSkipped: 0,
+		},
+		{
 			name:        "empty constraints",
 			constraints: []recipe.Constraint{},
 			wantStatus:  ValidationStatusPass,
@@ -574,6 +604,14 @@ func TestGenerateRunID_Uniqueness(t *testing.T) {
 			t.Errorf("Generated duplicate RunID: %s", runID)
 		}
 		runIDs[runID] = true
+	}
+}
+
+func TestNew_CustomImageFromEnv(t *testing.T) {
+	t.Setenv("EIDOS_VALIDATOR_IMAGE", "custom-image:latest")
+	v := New()
+	if v.Image != "custom-image:latest" {
+		t.Errorf("Image = %q, want custom-image:latest", v.Image)
 	}
 }
 

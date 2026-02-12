@@ -19,6 +19,8 @@ import (
 	"testing"
 )
 
+const testVersionV2 = "v2.0"
+
 func TestMergeValues(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -457,4 +459,132 @@ func TestGetValuesForComponent_BuilderIntegration(t *testing.T) {
 	if len(ref.Overrides) > 0 {
 		t.Logf("   Recipe has %d inline override keys", len(ref.Overrides))
 	}
+}
+
+func TestGetManifestContent(t *testing.T) {
+	t.Run("existing manifest", func(t *testing.T) {
+		content, err := GetManifestContent("components/gpu-operator/manifests/dcgm-exporter.yaml")
+		if err != nil {
+			t.Fatalf("GetManifestContent() error = %v", err)
+		}
+		if len(content) == 0 {
+			t.Error("expected non-empty content")
+		}
+	})
+
+	t.Run("missing manifest", func(t *testing.T) {
+		_, err := GetManifestContent("components/nonexistent/manifests/missing.yaml")
+		if err == nil {
+			t.Error("expected error for missing manifest")
+		}
+	})
+}
+
+func TestMustGetComponentRegistry(t *testing.T) {
+	reg := MustGetComponentRegistry()
+	if reg == nil {
+		t.Fatal("MustGetComponentRegistry() returned nil")
+	}
+	if len(reg.Components) == 0 {
+		t.Error("expected non-empty component registry")
+	}
+}
+
+func TestRecipe_Accessors(t *testing.T) {
+	t.Run("GetComponentRef always nil", func(t *testing.T) {
+		r := &Recipe{}
+		if got := r.GetComponentRef("anything"); got != nil {
+			t.Errorf("Recipe.GetComponentRef() = %v, want nil", got)
+		}
+	})
+
+	t.Run("GetValuesForComponent returns empty map", func(t *testing.T) {
+		r := &Recipe{}
+		got, err := r.GetValuesForComponent("anything")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got == nil || len(got) != 0 {
+			t.Errorf("expected empty map, got %v", got)
+		}
+	})
+
+	t.Run("GetVersion with nil metadata", func(t *testing.T) {
+		r := &Recipe{}
+		if got := r.GetVersion(); got != "" {
+			t.Errorf("Recipe.GetVersion() = %q, want empty", got)
+		}
+	})
+
+	t.Run("GetVersion with metadata", func(t *testing.T) {
+		r := &Recipe{}
+		r.Metadata = map[string]string{"recipe-version": "v1.0"}
+		if got := r.GetVersion(); got != "v1.0" {
+			t.Errorf("Recipe.GetVersion() = %q, want v1.0", got)
+		}
+	})
+
+	t.Run("GetCriteria always nil", func(t *testing.T) {
+		r := &Recipe{}
+		if got := r.GetCriteria(); got != nil {
+			t.Errorf("Recipe.GetCriteria() = %v, want nil", got)
+		}
+	})
+}
+
+func TestRecipeResult_Accessors(t *testing.T) {
+	t.Run("GetVersion", func(t *testing.T) {
+		rr := &RecipeResult{}
+		rr.Metadata.Version = testVersionV2
+		if got := rr.GetVersion(); got != testVersionV2 {
+			t.Errorf("RecipeResult.GetVersion() = %q, want v2.0", got)
+		}
+	})
+
+	t.Run("GetCriteria", func(t *testing.T) {
+		c := &Criteria{Service: "eks"}
+		rr := &RecipeResult{Criteria: c}
+		if got := rr.GetCriteria(); got != c {
+			t.Errorf("RecipeResult.GetCriteria() != expected criteria")
+		}
+	})
+
+	t.Run("GetComponentRef found", func(t *testing.T) {
+		rr := &RecipeResult{
+			ComponentRefs: []ComponentRef{
+				{Name: "gpu-operator", Version: "v1.0"},
+				{Name: "network-operator", Version: testVersionV2},
+			},
+		}
+		got := rr.GetComponentRef("network-operator")
+		if got == nil {
+			t.Fatal("expected non-nil component ref")
+		}
+		if got.Version != testVersionV2 {
+			t.Errorf("Version = %q, want v2.0", got.Version)
+		}
+	})
+
+	t.Run("GetComponentRef not found", func(t *testing.T) {
+		rr := &RecipeResult{ComponentRefs: []ComponentRef{{Name: "gpu-operator"}}}
+		if got := rr.GetComponentRef("missing"); got != nil {
+			t.Errorf("expected nil, got %v", got)
+		}
+	})
+}
+
+func TestHasComponentRefs(t *testing.T) {
+	t.Run("RecipeResult returns true", func(t *testing.T) {
+		rr := &RecipeResult{}
+		if !HasComponentRefs(rr) {
+			t.Error("expected true for RecipeResult")
+		}
+	})
+
+	t.Run("Recipe returns false", func(t *testing.T) {
+		r := &Recipe{}
+		if HasComponentRefs(r) {
+			t.Error("expected false for Recipe")
+		}
+	})
 }

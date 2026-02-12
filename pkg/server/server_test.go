@@ -101,6 +101,19 @@ func TestReadyEndpoint(t *testing.T) {
 	}
 }
 
+func TestReadyEndpoint_MethodNotAllowed(t *testing.T) {
+	s := New()
+
+	req := httptest.NewRequest(http.MethodPost, "/ready", nil)
+	w := httptest.NewRecorder()
+
+	s.handleReady(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
 func TestRateLimiting(t *testing.T) {
 	routes := map[string]http.HandlerFunc{
 		"/test": func(w http.ResponseWriter, _ *http.Request) {
@@ -330,6 +343,27 @@ func TestCustomRootHandlerNotOverridden(t *testing.T) {
 	}
 }
 
+func TestHealthEndpoint_MethodNotAllowed(t *testing.T) {
+	s := New()
+
+	req := httptest.NewRequest(http.MethodPost, "/health", nil)
+	w := httptest.NewRecorder()
+
+	s.handleHealth(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+func TestWithVersion(t *testing.T) {
+	s := New(WithVersion("v1.2.3"))
+
+	if s.config.Version != "v1.2.3" {
+		t.Errorf("expected version v1.2.3, got %s", s.config.Version)
+	}
+}
+
 func TestWithName(t *testing.T) {
 	customName := "custom-api-server"
 	s := New(WithName(customName))
@@ -389,6 +423,49 @@ func TestDefaultServerName(t *testing.T) {
 	if s.config.Name != "server" {
 		t.Errorf("expected default name 'server', got %s", s.config.Name)
 	}
+}
+
+func TestResponseWriter(t *testing.T) {
+	t.Run("WriteHeader deduplication", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+
+		rw.WriteHeader(http.StatusCreated)
+		if rw.Status() != http.StatusCreated {
+			t.Errorf("status = %d, want %d", rw.Status(), http.StatusCreated)
+		}
+
+		// Second WriteHeader should be ignored
+		rw.WriteHeader(http.StatusBadRequest)
+		if rw.Status() != http.StatusCreated {
+			t.Errorf("status changed to %d after duplicate write", rw.Status())
+		}
+	})
+
+	t.Run("Write auto-writes header", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+
+		n, err := rw.Write([]byte("hello"))
+		if err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		if n != 5 {
+			t.Errorf("Write() = %d, want 5", n)
+		}
+		if rw.Status() != http.StatusOK {
+			t.Errorf("auto status = %d, want %d", rw.Status(), http.StatusOK)
+		}
+	})
+
+	t.Run("default status is OK", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		rw := newResponseWriter(w)
+
+		if rw.Status() != http.StatusOK {
+			t.Errorf("default status = %d, want %d", rw.Status(), http.StatusOK)
+		}
+	})
 }
 
 func contains(s, substr string) bool {

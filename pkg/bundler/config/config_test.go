@@ -212,6 +212,14 @@ func TestNodeSelectorOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("SystemNodeSelector with nil input", func(t *testing.T) {
+		cfg := NewConfig(WithSystemNodeSelector(nil))
+		got := cfg.SystemNodeSelector()
+		if got != nil {
+			t.Errorf("SystemNodeSelector() = %v, want nil for nil input", got)
+		}
+	})
+
 	t.Run("SystemNodeSelector returns nil for nil config", func(t *testing.T) {
 		cfg := NewConfig()
 		got := cfg.SystemNodeSelector()
@@ -253,6 +261,14 @@ func TestNodeSelectorOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("AcceleratedNodeSelector with nil input", func(t *testing.T) {
+		cfg := NewConfig(WithAcceleratedNodeSelector(nil))
+		got := cfg.AcceleratedNodeSelector()
+		if got != nil {
+			t.Errorf("AcceleratedNodeSelector() = %v, want nil for nil input", got)
+		}
+	})
+
 	t.Run("AcceleratedNodeSelector returns nil for nil config", func(t *testing.T) {
 		cfg := NewConfig()
 		got := cfg.AcceleratedNodeSelector()
@@ -281,6 +297,14 @@ func TestNodeTolerationOptions(t *testing.T) {
 		}
 	})
 
+	t.Run("SystemNodeTolerations with nil input", func(t *testing.T) {
+		cfg := NewConfig(WithSystemNodeTolerations(nil))
+		got := cfg.SystemNodeTolerations()
+		if got != nil {
+			t.Errorf("SystemNodeTolerations() = %v, want nil for nil input", got)
+		}
+	})
+
 	t.Run("SystemNodeTolerations returns nil for nil config", func(t *testing.T) {
 		cfg := NewConfig()
 		got := cfg.SystemNodeTolerations()
@@ -304,6 +328,14 @@ func TestNodeTolerationOptions(t *testing.T) {
 		}
 		if got[0].Key != "nvidia.com/gpu" {
 			t.Errorf("AcceleratedNodeTolerations()[0].Key = %s, want nvidia.com/gpu", got[0].Key)
+		}
+	})
+
+	t.Run("AcceleratedNodeTolerations with nil input", func(t *testing.T) {
+		cfg := NewConfig(WithAcceleratedNodeTolerations(nil))
+		got := cfg.AcceleratedNodeTolerations()
+		if got != nil {
+			t.Errorf("AcceleratedNodeTolerations() = %v, want nil for nil input", got)
 		}
 	})
 
