@@ -78,3 +78,9 @@ spec:
         etcd:
           persistence:
             storageClass: gp2
+        nats:
+          config:
+            jetstream:
+              fileStore:
+                pvc:
+                  storageClassName: gp2
