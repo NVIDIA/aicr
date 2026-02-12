@@ -808,7 +808,7 @@ kubectl get configmap eidos-recipe -n gpu-operator -o yaml
 make e2e
 
 # Run a single chainsaw test
-EIDOS_BIN=$(pwd)/dist/eidos_darwin_arm64_v8.0/eidos \
+EIDOS_BIN=$(pwd)/dist/eidos \
   chainsaw test --no-cluster --test-dir tests/chainsaw/cli/recipe-generation
 
 # Run cluster-based E2E tests (requires Kind cluster)
