@@ -532,35 +532,7 @@ func (s *RecipeMetadataSpec) detectCycles() error {
 // Components with no dependencies come first, then components that depend only
 // on already-listed components, etc.
 func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
-	// Build adjacency list and in-degree map
-	deps := make(map[string][]string)
-	inDegree := make(map[string]int)
-
-	for _, c := range s.ComponentRefs {
-		deps[c.Name] = c.DependencyRefs
-		if _, exists := inDegree[c.Name]; !exists {
-			inDegree[c.Name] = 0
-		}
-		for _, dep := range c.DependencyRefs {
-			if _, exists := inDegree[dep]; !exists {
-				inDegree[dep] = 0 // ensure key exists
-			}
-		}
-	}
-
-	// Count incoming edges
-	for _, c := range s.ComponentRefs {
-		for range c.DependencyRefs {
-			// Each dependency adds an edge from dep -> c
-			// So c has inDegree[c]++ for each dependency
-		}
-	}
-
-	// Count dependencies
-	// inDegree[X] = number of components that X depends on
-	// For deployment order, we want components with no dependencies first
-	// So we use reverse: inDegree[X] = number of deps X has
-	inDegree = make(map[string]int)
+	inDegree := make(map[string]int, len(s.ComponentRefs))
 	for _, c := range s.ComponentRefs {
 		inDegree[c.Name] = len(c.DependencyRefs)
 	}
@@ -585,20 +557,17 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 	}
 
 	for len(queue) > 0 {
-		// Take first element
 		node := queue[0]
 		queue = queue[1:]
 		result = append(result, node)
 
-		// For each component that depends on this node
 		for _, dependent := range dependents[node] {
 			inDegree[dependent]--
 			if inDegree[dependent] == 0 {
 				queue = append(queue, dependent)
-				// Re-sort for deterministic output
-				sort.Strings(queue)
 			}
 		}
+		sort.Strings(queue)
 	}
 
 	// Check if all nodes were processed (no cycles)

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/NVIDIA/eidos/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,7 +54,7 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 	err := d.clientset.BatchV1().Jobs(d.config.Namespace).Delete(ctx, d.config.JobName, metav1.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
 	})
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // buildJobSpec constructs the Kubernetes Job specification.

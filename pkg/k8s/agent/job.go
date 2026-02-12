@@ -19,6 +19,7 @@ import (
 	"time"
 
 	eidoserrors "github.com/NVIDIA/eidos/pkg/errors"
+	"github.com/NVIDIA/eidos/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -259,7 +260,7 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 			PropagationPolicy: &propagationPolicy,
 		},
 	)
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // waitForJobDeletion waits for the Job to be fully deleted.
@@ -269,7 +270,7 @@ func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
 		func(ctx context.Context) (bool, error) {
 			_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 				Get(ctx, d.config.JobName, metav1.GetOptions{})
-			if ignoreNotFound(err) == nil {
+			if k8s.IgnoreNotFound(err) == nil {
 				return true, nil // Job deleted successfully
 			}
 			if err != nil {

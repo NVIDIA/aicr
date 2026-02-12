@@ -22,7 +22,6 @@ import (
 	"time"
 
 	eidoserrors "github.com/NVIDIA/eidos/pkg/errors"
-	"k8s.io/apimachinery/pkg/api/errors"
 )
 
 // Deploy deploys the agent with all required resources (RBAC + Job).
@@ -136,22 +135,4 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	}
 
 	return nil
-}
-
-// ignoreAlreadyExists returns nil if the error is "already exists", otherwise returns the error.
-// Used to make resource creation idempotent.
-func ignoreAlreadyExists(err error) error {
-	if errors.IsAlreadyExists(err) {
-		return nil
-	}
-	return err
-}
-
-// ignoreNotFound returns nil if the error is "not found", otherwise returns the error.
-// Used to make resource deletion idempotent.
-func ignoreNotFound(err error) error {
-	if errors.IsNotFound(err) {
-		return nil
-	}
-	return err
 }
