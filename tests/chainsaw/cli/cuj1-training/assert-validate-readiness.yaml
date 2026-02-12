@@ -12,18 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert the ConfigMap exists with correct metadata and structure.
-# Chainsaw retries this assertion until the timeout (120s).
+# Assert the readiness validation result has the expected structure.
 #
-# The snapshot.yaml *content* is validated separately in Step 6 using
-# `chainsaw assert --resource` on the extracted YAML document.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: eidos-e2e-snapshot
-  namespace: gpu-operator
-  labels:
-    app.kubernetes.io/component: Snapshot
-    app.kubernetes.io/name: eidos
-data:
-  format: yaml
+# NOTE: chainsaw assert --resource requires apiVersion/kind. The validate
+# output doesn't include these, so the test prepends them before asserting.
+kind: ValidationResult
+apiVersion: eidos.nvidia.com/v1alpha1
+phases:
+  readiness: 
+    status: pass
+  

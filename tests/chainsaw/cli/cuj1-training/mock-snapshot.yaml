@@ -12,18 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert the ConfigMap exists with correct metadata and structure.
-# Chainsaw retries this assertion until the timeout (120s).
-#
-# The snapshot.yaml *content* is validated separately in Step 6 using
-# `chainsaw assert --resource` on the extracted YAML document.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: eidos-e2e-snapshot
-  namespace: gpu-operator
-  labels:
-    app.kubernetes.io/component: Snapshot
-    app.kubernetes.io/name: eidos
-data:
-  format: yaml
+# Mock snapshot for CUJ1 testing.
+# Provides minimal K8s and OS measurements so eidos validate can run
+# without a real cluster or GPU hardware.
+measurements:
+  - type: K8s
+    subtypes:
+      - name: server
+        data:
+          version: v1.33.0
+  - type: OS
+    subtypes:
+      - name: release
+        data:
+          ID: ubuntu
+          VERSION_ID: "24.04"

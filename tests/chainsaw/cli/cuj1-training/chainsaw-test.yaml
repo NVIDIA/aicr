@@ -1,0 +1,152 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cuj1-training-workload
+spec:
+  # CUJ1: Critical User Journey - Training Workload
+  #
+  # Tests the complete eidos workflow from examples/demos/cuj1.md:
+  #   Step 1: recipe (with --platform kubeflow)
+  #   Step 2: validate (readiness phase)
+  #   Step 3: bundle (with node scheduling)
+  #   Step 4: deploy script validation
+  #   Step 5: multi-phase validate
+  #
+  # No cluster needed. Run with:
+  #   EIDOS_BIN=$(pwd)/dist/e2e/eidos chainsaw test --no-cluster --test-dir tests/chainsaw/cli/cuj1-training
+  timeouts:
+    exec: 30s
+  steps:
+
+    # ── Step 1: Generate recipe with kubeflow platform ───────────────
+    - name: generate-recipe
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} recipe \
+                --service eks \
+                --accelerator h100 \
+                --intent training \
+                --os ubuntu \
+                --platform kubeflow \
+                --output /tmp/cuj1-recipe.yaml
+
+    - name: assert-recipe
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/cuj1-recipe.yaml \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 5s
+
+    # ── Step 2: Validate recipe (readiness phase) ────────────────────
+    - name: validate-readiness
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} validate \
+                --recipe /tmp/cuj1-recipe.yaml \
+                --snapshot ./mock-snapshot.yaml \
+                --phase readiness \
+                --output /tmp/cuj1-validate-readiness-raw.yaml
+              printf 'apiVersion: eidos.nvidia.com/v1alpha1\nkind: ValidationResult\n' > /tmp/cuj1-validate-readiness.yaml
+              sed '/^#/d; /^---$/d' /tmp/cuj1-validate-readiness-raw.yaml >> /tmp/cuj1-validate-readiness.yaml
+
+    - name: assert-validate-readiness
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/cuj1-validate-readiness.yaml \
+                --file ./assert-validate-readiness.yaml \
+                --no-color --timeout 5s
+
+    # ── Step 3: Generate bundle with node scheduling ─────────────────
+    - name: generate-bundle
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} bundle \
+                --recipe /tmp/cuj1-recipe.yaml \
+                --output /tmp/cuj1-bundle \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
+                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+
+    # Verify bundle structure: required files and at least one component
+    - name: assert-bundle-structure
+      try:
+        - script:
+            content: |
+              test -f /tmp/cuj1-bundle/README.md
+              test -f /tmp/cuj1-bundle/deploy.sh
+              test -f /tmp/cuj1-bundle/recipe.yaml
+              ls /tmp/cuj1-bundle/*/values.yaml >/dev/null 2>&1
+            check:
+              ($error == null): true
+
+    - name: assert-bundle-scheduling
+      try:
+        - script:
+            content: |
+              printf 'apiVersion: helm/v1\nkind: Values\n' > /tmp/cuj1-gpu-operator-values.yaml
+              sed '/^#/d; /^---$/d' /tmp/cuj1-bundle/gpu-operator/values.yaml >> /tmp/cuj1-gpu-operator-values.yaml
+              chainsaw assert \
+                --resource /tmp/cuj1-gpu-operator-values.yaml \
+                --file ./assert-bundle-scheduling.yaml \
+                --no-color --timeout 5s
+
+    # ── Step 4: Deploy script validation ─────────────────────────────
+    - name: assert-deploy-script
+      try:
+        - script:
+            content: |
+              test -f /tmp/cuj1-bundle/deploy.sh
+              test -x /tmp/cuj1-bundle/deploy.sh
+              head -1 /tmp/cuj1-bundle/deploy.sh | grep -q "#!/usr/bin/env bash"
+            check:
+              ($error == null): true
+
+    # ── Step 5: Multi-phase validate ─────────────────────────────────
+    - name: validate-multiphase
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} validate \
+                --recipe /tmp/cuj1-recipe.yaml \
+                --snapshot ./mock-snapshot.yaml \
+                --phase readiness \
+                --phase deployment \
+                --phase conformance \
+                --output /tmp/cuj1-validate-multiphase-raw.yaml
+              printf 'apiVersion: eidos.nvidia.com/v1alpha1\nkind: ValidationResult\n' > /tmp/cuj1-validate-multiphase.yaml
+              sed '/^#/d; /^---$/d' /tmp/cuj1-validate-multiphase-raw.yaml >> /tmp/cuj1-validate-multiphase.yaml
+
+    - name: assert-validate-multiphase
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/cuj1-validate-multiphase.yaml \
+                --file ./assert-validate-multiphase.yaml \
+                --no-color --timeout 5s

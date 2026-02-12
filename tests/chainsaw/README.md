@@ -143,6 +143,110 @@ EIDOS_BIN=$(pwd)/dist/e2e/eidos chainsaw test --no-cluster --test-dir tests/chai
 
 ---
 
+### 3. `cli/cuj1-training` — Critical User Journey
+
+Tests the complete eidos workflow from `examples/demos/cuj1.md`: recipe -> validate -> bundle -> deploy script -> multi-phase validate.
+
+**Replaces**: `test_cuj1()` in `tools/e2e` (lines 904–999)
+
+**What it tests**:
+- Recipe with `--platform kubeflow` has correct criteria, key components by name (`assert-recipe.yaml`)
+- Readiness validation produces a valid result (`assert-validate-readiness.yaml`)
+- Bundle structure: README.md, deploy.sh, recipe.yaml, component values exist
+- Bundle scheduling: system/accelerated node selectors at correct Helm paths (`assert-bundle-scheduling.yaml`)
+- Bundle training stack: driver with RDMA, GDRCopy, CDI, DCGM, GFD, MIG Manager, toolkit enabled (`assert-bundle-scheduling.yaml`)
+- Bundle NFD scheduling: master/gc on system nodes, worker on GPU nodes (`assert-bundle-scheduling.yaml`)
+- Deploy script exists, is executable, has correct shebang
+- Multi-phase validation (readiness + deployment + conformance) produces all phases (`assert-validate-multiphase.yaml`)
+
+**How the current bash test does it** (12 assertions across ~95 lines):
+```bash
+check_file_contains "cuj1/recipe-has-kubeflow" "$recipe" "kubeflow"
+grep -q "system-pool" "$vfile" 2>/dev/null && found_sys=true
+echo "$validate_output" | grep -q "readiness" && echo "$validate_output" | grep -q "deployment"
+```
+
+**How Chainsaw does it** — 4 assertion YAML files, each validating document structure:
+
+`assert-recipe.yaml` -- validates kind, criteria, constraints, all components by name, and deployment order:
+```yaml
+kind: recipeResult
+apiVersion: eidos.nvidia.com/v1alpha1
+criteria:
+  service: eks
+  accelerator: h100
+  intent: training
+  os: ubuntu
+  platform: kubeflow
+constraints:
+  - name: K8s.server.version
+    value: '>= 1.32.4'
+  - name: OS.release.ID
+    value: ubuntu
+  - name: OS.release.VERSION_ID
+    value: "24.04"
+  - name: OS.sysctl./proc/sys/kernel/osrelease
+    value: '>= 6.8'
+componentRefs:
+  - name: aws-ebs-csi-driver
+  - name: aws-efa
+  - name: cert-manager
+  - name: gpu-operator
+  - name: k8s-ephemeral-storage-metrics
+  - name: kube-prometheus-stack
+  - name: kubeflow-trainer
+  # ... and more
+```
+
+`assert-bundle-scheduling.yaml` -- validates scheduling, driver, and full training stack:
+```yaml
+operator:
+  nodeSelector:
+    nodeGroup: system-pool
+daemonsets:
+  nodeSelector:
+    nodeGroup: gpu-worker
+  tolerations:
+    - key: nvidia.com/gpu
+      value: present
+      effect: NoSchedule
+driver:
+  enabled: true
+  rdma:
+    enabled: true
+gdrcopy:
+  enabled: true
+cdi:
+  enabled: true
+node-feature-discovery:
+  master:
+    nodeSelector:
+      nodeGroup: system-pool
+  worker:
+    nodeSelector:
+      nodeGroup: gpu-worker
+```
+
+`assert-validate-multiphase.yaml` -- validates all 3 phases present:
+```yaml
+kind: ValidationResult
+apiVersion: eidos.nvidia.com/v1alpha1
+phases:
+  readiness: {}
+  deployment: {}
+  conformance: {}
+```
+
+**Prerequisites**: Built eidos binary. No cluster needed.
+
+**Run**:
+```bash
+go build -o dist/e2e/eidos ./cmd/eidos
+EIDOS_BIN=$(pwd)/dist/e2e/eidos chainsaw test --no-cluster --test-dir tests/chainsaw/cli/cuj1-training
+```
+
+---
+
 ## File Structure
 
 ```
@@ -150,10 +254,17 @@ tests/chainsaw/
 ├── chainsaw-config.yaml                          # Global config (timeouts, parallel, reporting)
 ├── README.md
 ├── cli/
-│   └── bundle-scheduling/
-│       ├── chainsaw-test.yaml                    # Test orchestration
-│       ├── assert-recipe.yaml                    # Recipe structure assertion
-│       └── assert-gpu-operator-values.yaml       # Scheduling injection assertion
+│   ├── bundle-scheduling/
+│   │   ├── chainsaw-test.yaml                    # Test orchestration
+│   │   ├── assert-recipe.yaml                    # Recipe structure assertion
+│   │   └── assert-gpu-operator-values.yaml       # Scheduling injection assertion
+│   └── cuj1-training/
+│       ├── chainsaw-test.yaml                    # Full CUJ1 journey orchestration
+│       ├── mock-snapshot.yaml                    # Test fixture (mock K8s/OS data)
+│       ├── assert-recipe.yaml                    # Recipe with kubeflow platform
+│       ├── assert-validate-readiness.yaml        # Readiness phase result
+│       ├── assert-validate-multiphase.yaml       # Multi-phase result (3 phases)
+│       └── assert-bundle-scheduling.yaml         # Scheduling injection assertion
 └── snapshot/
     └── deploy-agent/
         ├── chainsaw-test.yaml                    # Test orchestration
