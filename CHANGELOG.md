@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.16] - 2026-02-12
+
+### Bug Fixes
+
+- Use POSIX-compatible redirects in KWOK parallel test script  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Features
+
+- Add tools/describe for overlay composition visualization by [@mchmarny](https://github.com/mchmarny)
+- Restructure inference overlay hierarchy  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other
+
+- KubeFlow patches  by [@coffeepac](https://github.com/coffeepac)
+
+### Tasks
+
+- Update CUJs by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.5.15] - 2026-02-11
 
 ### Bug Fixes
