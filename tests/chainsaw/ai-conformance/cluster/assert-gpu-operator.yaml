@@ -1,0 +1,117 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Assert GPU operator and all managed components are healthy.
+# fullnameOverride: gpu-operator (from values.yaml)
+# Chart: nvidia/gpu-operator v25.10.1
+#
+# The GPU operator controller creates a ClusterPolicy CR, which in turn
+# creates DaemonSets for the driver, device-plugin, toolkit, DCGM, GFD,
+# and validator. The ClusterPolicy status.state=ready check is the primary
+# health signal — if it is ready, all sub-components are functional.
+
+# GPU Operator controller
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  conditions:
+    - type: Available
+      status: "True"
+---
+# Node Feature Discovery master
+# fullnameOverride: node-feature-discovery (from gpu-operator values.yaml)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-feature-discovery-master
+  namespace: gpu-operator
+status:
+  conditions:
+    - type: Available
+      status: "True"
+---
+# ClusterPolicy — umbrella health check for all GPU operator sub-components.
+# When status.state is "ready", the driver, device-plugin, toolkit, DCGM
+# exporter, GFD, MIG manager, and validator are all functional.
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: cluster-policy
+status:
+  state: ready
+---
+# NVIDIA operator validator DaemonSet — runs on every GPU node and confirms
+# that driver, toolkit, device-plugin, and DCGM are all working.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-operator-validator
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# NVIDIA driver DaemonSet — compiles and loads the GPU driver on each node.
+# This is the slowest component (driver compilation can take several minutes).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-driver-daemonset
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# NVIDIA device plugin DaemonSet — exposes GPUs as allocatable resources
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# DCGM Exporter DaemonSet — GPU metrics for Prometheus
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# NVIDIA Container Toolkit DaemonSet — configures container runtimes for GPU access
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-container-toolkit-daemonset
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# GPU Feature Discovery DaemonSet — labels nodes with GPU properties
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-feature-discovery
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true

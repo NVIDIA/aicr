@@ -1,0 +1,38 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Assert NVSentinel controller and platform connector are healthy.
+# fullnameOverride: nvsentinel (from values.yaml)
+# Chart: nvidia/nvsentinel v0.8.0
+
+# NVSentinel controller — manages network policies and platform configuration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nvsentinel
+  namespace: nvsentinel
+status:
+  conditions:
+    - type: Available
+      status: "True"
+---
+# NVSentinel platform connector — DaemonSet on GPU nodes for platform telemetry
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvsentinel-platform-connector
+  namespace: nvsentinel
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
