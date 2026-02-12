@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/eidos/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -646,9 +647,9 @@ func TestIgnoreAlreadyExists(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ignoreAlreadyExists(tt.err)
+			err := k8s.IgnoreAlreadyExists(tt.err)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ignoreAlreadyExists() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("k8s.IgnoreAlreadyExists() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -679,9 +680,9 @@ func TestIgnoreNotFound(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ignoreNotFound(tt.err)
+			err := k8s.IgnoreNotFound(tt.err)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ignoreNotFound() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("k8s.IgnoreNotFound() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
