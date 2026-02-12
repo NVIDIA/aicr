@@ -151,7 +151,7 @@ These flags apply selectors/tolerations to bundler-specific paths (e.g., GPU Ope
 - All components from the recipe are bundled automatically
 - Errors from any bundler cause immediate cancellation via context propagation
 
-**Testing**: End-to-end workflow validated by `tools/e2e` script
+**Testing**: End-to-end workflow validated by Chainsaw tests in `tests/chainsaw/cli/`
 
 ## Architecture Diagram
 

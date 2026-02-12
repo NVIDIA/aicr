@@ -1,0 +1,55 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-recipe-generation
+spec:
+  description: |
+    Validates recipe generation via query-mode CLI flags.
+    Replaces generate_recipe() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: generate-recipe
+      description: Generate an EKS GB200 training recipe via query-mode flags.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-recipe-generation"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${EIDOS_BIN} recipe \
+                --service eks \
+                --accelerator gb200 \
+                --os ubuntu \
+                --intent training \
+                --output "${WORK}/recipe.yaml"
+
+    - name: assert-recipe-structure
+      description: Verify recipe has correct kind, apiVersion, criteria, and key components.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-recipe-generation/recipe.yaml \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 5s
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-recipe-generation

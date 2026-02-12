@@ -370,27 +370,17 @@ eidos bundle --recipe cm://gpu-operator/eidos-recipe --output ./bundles
 
 ### E2E Testing
 
-Validate the complete workflow with the e2e script:
+Validate the complete workflow:
 
 ```bash
-# Test full workflow: agent → snapshot → recipe → bundle
-./tools/e2e -s examples/snapshots/gb200.yaml \
-           -r examples/recipes/gb200-eks-ubuntu-training.yaml \
-           -b examples/bundles/gb200-eks-ubuntu-training
+# Run all CLI integration tests (no cluster needed)
+make e2e
 
-# Just test agent deployment and snapshot capture
-./tools/e2e -s snapshot.yaml
-
-# Test recipe and bundle generation from ConfigMap
-./tools/e2e -r recipe.yaml -b ./bundles
+# Run cluster-based E2E tests (requires Kind cluster)
+make e2e-tilt
 ```
 
-The e2e script:
-- Deploys agent Job with RBAC
-- Waits for snapshot to be written to ConfigMap
-- Optionally generates recipe and bundle
-- Validates each step completes successfully
-- Preserves resources on failure for debugging
+CLI tests use [Kyverno Chainsaw](https://github.com/kyverno/chainsaw) for declarative YAML assertions. See `tests/chainsaw/README.md` for details.
 
 ## Configuration Options
 

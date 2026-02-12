@@ -234,7 +234,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **Purpose**: CI validation
 **Jobs** (run in parallel):
 1. **Unit Tests**: Go CI (setup, test, lint) + security scan
-2. **Integration Tests**: CLI integration tests via `tools/e2e`
+2. **Integration Tests**: Chainsaw CLI integration tests via `tools/e2e`
 3. **E2E Tests**: Full end-to-end tests using Kind cluster (via `.github/actions/e2e`)
 
 ### `on-tag.yaml`

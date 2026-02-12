@@ -38,7 +38,7 @@ The API server provides HTTP REST access to **Steps 2 and 4 of the Eidos workflo
 - All four steps: snapshot → recipe → validate → bundle
 - ConfigMap I/O: `cm://namespace/name` URIs
 - Agent deployment: Kubernetes Job with RBAC
-- E2E testing: `tools/e2e` validation script
+- E2E testing: Chainsaw tests in `tests/chainsaw/cli/`
 
 ## Architecture Diagram
 

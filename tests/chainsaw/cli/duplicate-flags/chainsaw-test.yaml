@@ -1,0 +1,75 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-duplicate-flags
+spec:
+  description: |
+    Validates that duplicate single-value flags are rejected.
+    Replaces test_duplicate_flag_validation() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup
+      description: Generate a recipe for use in duplicate flag tests.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-duplicate-flags"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${EIDOS_BIN} recipe --service eks --accelerator h100 --intent training \
+                -o "${WORK}/recipe.yaml"
+
+    - name: duplicate-bundle-recipe
+      description: Duplicate --recipe flag on bundle must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-duplicate-flags"
+              ${EIDOS_BIN} bundle --recipe "${WORK}/recipe.yaml" --recipe "${WORK}/recipe.yaml" \
+                -o "${WORK}/out" 2>&1 || true
+            check:
+              (contains($stderr, 'can only be specified once') || contains($stdout, 'can only be specified once')): true
+
+    - name: duplicate-validate-recipe
+      description: Duplicate --recipe flag on validate must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              WORK="/tmp/chainsaw-duplicate-flags"
+              ${EIDOS_BIN} validate --recipe "${WORK}/recipe.yaml" --recipe "${WORK}/recipe.yaml" \
+                --snapshot "${WORK}/recipe.yaml" 2>&1 || true
+            check:
+              (contains($stderr, 'can only be specified once') || contains($stdout, 'can only be specified once')): true
+
+    - name: duplicate-recipe-service
+      description: Duplicate --service flag on recipe must fail.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} recipe --service eks --service gke --accelerator h100 --intent training 2>&1 || true
+            check:
+              (contains($stderr, 'can only be specified once') || contains($stdout, 'can only be specified once')): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-duplicate-flags

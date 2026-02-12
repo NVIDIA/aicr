@@ -1,0 +1,54 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-validate-agent-flags
+spec:
+  description: |
+    Validates that the validate command exposes all required agent flags.
+    Replaces test_validate_agent_flags() in tools/e2e.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: check-agent-flags
+      description: Verify validate --help contains all required agent flags.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              help_output=$(${EIDOS_BIN} validate --help 2>&1)
+              missing=""
+              for flag in namespace node-selector toleration image job-name timeout cleanup privileged; do
+                echo "$help_output" | grep -q "$flag" || missing="$missing $flag"
+              done
+              if [ -n "$missing" ]; then
+                echo "Missing flags:$missing" >&2
+                exit 1
+              fi
+            check:
+              ($error == null): true
+
+    - name: check-help-mentions-agent
+      description: Verify validate --help mentions agent or deploy functionality.
+      try:
+        - script:
+            content: |
+              EIDOS_BIN="${EIDOS_BIN:?Set EIDOS_BIN to the path of the eidos binary}"
+              ${EIDOS_BIN} validate --help 2>&1
+            check:
+              (contains($stdout, 'agent') || contains($stdout, 'deploy') || contains($stdout, 'Agent') || contains($stdout, 'Deploy')): true
