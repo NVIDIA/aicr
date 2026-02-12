@@ -59,7 +59,7 @@ get_recipes() {
 check_deps() {
     local missing=()
     for cmd in kubectl helm yq kind docker; do
-        if ! command -v "$cmd" &>/dev/null; then
+        if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
         fi
     done
@@ -70,7 +70,7 @@ check_deps() {
     fi
 
     # Check if docker is running
-    if ! docker info &>/dev/null; then
+    if ! docker info >/dev/null 2>&1; then
         log_error "Docker is not running or not accessible"
         log_error "Start Docker Desktop or check permissions"
         exit 1
@@ -115,31 +115,31 @@ nodes:
 EOF
 
     # Create cluster with kind
-    if ! kind create cluster --name "$cluster_name" --config "$kind_config" --wait 60s &>"$log_file"; then
+    if ! kind create cluster --name "$cluster_name" --config "$kind_config" --wait 60s >"$log_file" 2>&1; then
         log_error "[$cluster_name] Failed to create cluster. Check: $log_file"
         return 1
     fi
 
     # Wait for nodes
-    if ! kubectl --context="$context" wait --for=condition=Ready node --all --timeout=60s &>>"$log_file"; then
+    if ! kubectl --context="$context" wait --for=condition=Ready node --all --timeout=60s >>"$log_file" 2>&1; then
         log_error "[$cluster_name] Nodes not ready. Check: $log_file"
         return 1
     fi
 
     # Install KWOK controller
     log_info "[$cluster_name] Installing KWOK controller..."
-    if ! kubectl --context="$context" apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwok.yaml" &>>"$log_file"; then
+    if ! kubectl --context="$context" apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/kwok.yaml" >>"$log_file" 2>&1; then
         log_error "[$cluster_name] Failed to install KWOK. Check: $log_file"
         return 1
     fi
 
-    if ! kubectl --context="$context" apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/stage-fast.yaml" &>>"$log_file"; then
+    if ! kubectl --context="$context" apply -f "https://github.com/kubernetes-sigs/kwok/releases/download/${KWOK_VERSION}/stage-fast.yaml" >>"$log_file" 2>&1; then
         log_error "[$cluster_name] Failed to install KWOK stages. Check: $log_file"
         return 1
     fi
 
     # Wait for KWOK controller with longer timeout for parallel creation
-    if ! kubectl --context="$context" wait --for=condition=Available deployment/kwok-controller -n kube-system --timeout=300s &>>"$log_file"; then
+    if ! kubectl --context="$context" wait --for=condition=Available deployment/kwok-controller -n kube-system --timeout=300s >>"$log_file" 2>&1; then
         log_error "[$cluster_name] KWOK controller not ready. Check: $log_file"
         # Show last 10 lines of log for immediate debugging
         echo "  Last 10 lines of $log_file:" >&2
@@ -154,7 +154,7 @@ EOF
     kubectl --context="$context" taint nodes -l node-role.kubernetes.io/control-plane \
         node-role.kubernetes.io/control-plane:NoSchedule \
         eidos.nvidia.com/kwok-test=true:NoSchedule \
-        --overwrite &>>"$log_file" || true
+        --overwrite >>"$log_file" 2>&1 || true
 
     log_info "[$cluster_name] Cluster ready"
 }
@@ -190,14 +190,14 @@ run_test_on_cluster() {
     export KWOK_RELEASE="eidos-test-${recipe}"
 
     # Create nodes
-    if ! bash "${SCRIPT_DIR}/apply-nodes.sh" "${recipe}" &>"$log_file"; then
+    if ! bash "${SCRIPT_DIR}/apply-nodes.sh" "${recipe}" >"$log_file" 2>&1; then
         log_error "[$cluster_name] Failed to create nodes for ${recipe}"
         echo "FAILED" > "${WORK_DIR}/${cluster_name}-${recipe}.result"
         return 1
     fi
 
     # Run validation
-    if ! bash "${SCRIPT_DIR}/validate-scheduling.sh" "${recipe}" &>>"$log_file"; then
+    if ! bash "${SCRIPT_DIR}/validate-scheduling.sh" "${recipe}" >>"$log_file" 2>&1; then
         log_error "[$cluster_name] Validation failed for ${recipe}"
         echo "FAILED" > "${WORK_DIR}/${cluster_name}-${recipe}.result"
         return 1
