@@ -31,5 +31,5 @@ spec:
   cleanup:
     skipDelete: false
   report:
-    format: JUnit
+    format: JUNIT-TEST
     name: eidos-e2e

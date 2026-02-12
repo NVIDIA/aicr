@@ -21,8 +21,7 @@ criteria:
   accelerator: gb200
   os: ubuntu
   intent: training
-# Verify key components are present (partial match on array)
-componentRefs:
-  - name: gpu-operator
-  - name: skyhook-operator
+# Verify key components are present via JMESPath (arrays require exact match in chainsaw)
 (length(componentRefs) > `0`): true
+(componentRefs[?name == 'gpu-operator'] | length(@) > `0`): true
+(componentRefs[?name == 'skyhook-operator'] | length(@) > `0`): true
