@@ -317,6 +317,29 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 			},
 		},
 		{
+			name: "unknown GPU preserves default accelerator",
+			snapshot: &snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					{
+						Type: measurement.TypeGPU,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "device",
+								Data: map[string]measurement.Reading{
+									"model": measurement.Str("NVIDIA T4"),
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, c *Criteria) {
+				if c.Accelerator != CriteriaAcceleratorAny {
+					t.Errorf("Accelerator = %v, want %v (default preserved)", c.Accelerator, CriteriaAcceleratorAny)
+				}
+			},
+		},
+		{
 			name: "systemd measurement skipped",
 			snapshot: &snapshotter.Snapshot{
 				Measurements: []*measurement.Measurement{

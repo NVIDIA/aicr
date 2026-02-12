@@ -63,11 +63,15 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 			for _, st := range m.Subtypes {
 				if st.Name == "smi" || st.Name == "device" {
 					if model, ok := st.Data["gpu.model"]; ok {
-						criteria.Accelerator = matchAccelerator(model.String())
+						if acc := matchAccelerator(model.String()); acc != "" {
+							criteria.Accelerator = acc
+						}
 					}
-					if criteria.Accelerator == "" || criteria.Accelerator == CriteriaAcceleratorAny {
+					if criteria.Accelerator == CriteriaAcceleratorAny {
 						if model, ok := st.Data["model"]; ok {
-							criteria.Accelerator = matchAccelerator(model.String())
+							if acc := matchAccelerator(model.String()); acc != "" {
+								criteria.Accelerator = acc
+							}
 						}
 					}
 				}
