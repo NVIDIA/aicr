@@ -39,6 +39,7 @@ spec:
       valuesFile: components/kgateway-crds/values.yaml
       manifestFiles:
         - components/kgateway-crds/manifests/gateway-api-crds.yaml
+        - components/kgateway-crds/manifests/inference-extension-crds.yaml
 
     - name: kgateway
       type: Helm
