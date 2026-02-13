@@ -43,6 +43,7 @@ type validateAgentConfig struct {
 	cleanup            bool
 	debug              bool
 	privileged         bool
+	requireGPU         bool
 }
 
 // parseValidateAgentConfig parses agent deployment flags from the command.
@@ -70,6 +71,7 @@ func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 		cleanup:            cmd.Bool("cleanup"),
 		debug:              cmd.Bool("debug"),
 		privileged:         cmd.Bool("privileged"),
+		requireGPU:         cmd.Bool("require-gpu"),
 	}, nil
 }
 
@@ -127,6 +129,7 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 		Cleanup:            cfg.cleanup,
 		Debug:              cfg.debug,
 		Privileged:         cfg.privileged,
+		RequireGPU:         cfg.requireGPU,
 	}
 
 	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
@@ -214,55 +217,8 @@ func runValidation(
 	return nil
 }
 
-func validateCmd() *cli.Command {
-	return &cli.Command{
-		Name:                  "validate",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Validate cluster using specific recipe.",
-		Description: `Validate a system snapshot against the constraints defined in a recipe.
-
-This command compares actual system measurements from a snapshot against the
-expected constraints defined in a recipe file. It reports which constraints
-pass, fail, or cannot be evaluated.
-
-You can either provide an existing snapshot file or deploy an agent to capture
-a fresh snapshot from the cluster.
-
-# Examples
-
-Validate using an existing snapshot file:
-  eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
-
-Load snapshot from ConfigMap:
-  eidos validate --recipe recipe.yaml --snapshot cm://gpu-operator/eidos-snapshot
-
-Deploy agent to capture and validate in one step:
-  eidos validate --recipe recipe.yaml --namespace gpu-operator
-
-Target specific GPU nodes with node selector:
-  eidos validate --recipe recipe.yaml \
-    --namespace gpu-operator \
-    --node-selector nodeGroup=customer-gpu
-
-Run multiple validation phases:
-  eidos validate -r recipe.yaml -s snapshot.yaml \
-    --phase readiness --phase deployment --phase conformance
-
-Run all validation phases:
-  eidos validate -r recipe.yaml -s snapshot.yaml --phase all
-
-Run validation jobs in custom namespace:
-  eidos validate -r recipe.yaml -s snapshot.yaml \
-    --validation-namespace my-validation-ns
-
-Run validation without failing on constraint errors (informational mode):
-  eidos validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
-
-Resume a previous validation run from where it left off:
-  eidos validate -r recipe.yaml -s snapshot.yaml --resume 20260206-140523-a3f9
-`,
-		Flags: []cli.Flag{
+func validateCmdFlags() []cli.Flag {
+	return []cli.Flag{
 			&cli.StringFlag{
 				Name:    "recipe",
 				Aliases: []string{"r"},
@@ -348,10 +304,66 @@ Resume a previous validation run from where it left off:
 				Value: true,
 				Usage: "Run agent in privileged mode (required for GPU/SystemD collectors)",
 			},
+			&cli.BoolFlag{
+				Name:    "require-gpu",
+				Sources: cli.EnvVars("EIDOS_REQUIRE_GPU"),
+				Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
+			},
 			outputFlag,
 			formatFlag,
 			kubeconfigFlag,
-		},
+		}
+}
+
+func validateCmd() *cli.Command {
+	return &cli.Command{
+		Name:                  "validate",
+		Category:              functionalCategoryName,
+		EnableShellCompletion: true,
+		Usage:                 "Validate cluster using specific recipe.",
+		Description: `Validate a system snapshot against the constraints defined in a recipe.
+
+This command compares actual system measurements from a snapshot against the
+expected constraints defined in a recipe file. It reports which constraints
+pass, fail, or cannot be evaluated.
+
+You can either provide an existing snapshot file or deploy an agent to capture
+a fresh snapshot from the cluster.
+
+# Examples
+
+Validate using an existing snapshot file:
+  eidos validate --recipe recipe.yaml --snapshot snapshot.yaml
+
+Load snapshot from ConfigMap:
+  eidos validate --recipe recipe.yaml --snapshot cm://gpu-operator/eidos-snapshot
+
+Deploy agent to capture and validate in one step:
+  eidos validate --recipe recipe.yaml --namespace gpu-operator
+
+Target specific GPU nodes with node selector:
+  eidos validate --recipe recipe.yaml \
+    --namespace gpu-operator \
+    --node-selector nodeGroup=customer-gpu
+
+Run multiple validation phases:
+  eidos validate -r recipe.yaml -s snapshot.yaml \
+    --phase readiness --phase deployment --phase conformance
+
+Run all validation phases:
+  eidos validate -r recipe.yaml -s snapshot.yaml --phase all
+
+Run validation jobs in custom namespace:
+  eidos validate -r recipe.yaml -s snapshot.yaml \
+    --validation-namespace my-validation-ns
+
+Run validation without failing on constraint errors (informational mode):
+  eidos validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
+
+Resume a previous validation run from where it left off:
+  eidos validate -r recipe.yaml -s snapshot.yaml --resume 20260206-140523-a3f9
+`,
+		Flags:  validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			// Note: --phase allows multiple values so it's not included here

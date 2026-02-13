@@ -171,17 +171,21 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 	}
 
 	container := &spec.Containers[0]
+	limits := corev1.ResourceList{
+		corev1.ResourceCPU:              mustParseQuantity("2"),
+		corev1.ResourceMemory:           mustParseQuantity("8Gi"),
+		corev1.ResourceEphemeralStorage: mustParseQuantity("4Gi"),
+	}
+	if d.config.RequireGPU {
+		limits[corev1.ResourceName("nvidia.com/gpu")] = mustParseQuantity("1")
+	}
 	container.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU:              mustParseQuantity("1"),
 			corev1.ResourceMemory:           mustParseQuantity("4Gi"),
 			corev1.ResourceEphemeralStorage: mustParseQuantity("2Gi"),
 		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:              mustParseQuantity("2"),
-			corev1.ResourceMemory:           mustParseQuantity("8Gi"),
-			corev1.ResourceEphemeralStorage: mustParseQuantity("4Gi"),
-		},
+		Limits: limits,
 	}
 	container.SecurityContext = &corev1.SecurityContext{
 		Privileged:               ptr.To(true),
