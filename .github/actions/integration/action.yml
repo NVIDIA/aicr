@@ -28,7 +28,9 @@ runs:
       with:
         go-version: '${{ inputs.go_version }}'
         cache: true
-        cache-dependency-path: 'go.sum'
+        cache-dependency-path: |
+          go.sum
+          vendor/modules.txt
         check-latest: true
 
     - name: Setup build tools
@@ -48,4 +50,6 @@ runs:
 
     - name: Run Integration Tests
       shell: bash
+      env:
+        GOFLAGS: -mod=vendor
       run: ./tools/e2e

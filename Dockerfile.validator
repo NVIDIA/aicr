@@ -22,10 +22,14 @@ LABEL org.opencontainers.image.title="eidos-validator" \
 
 WORKDIR /workspace
 
-COPY go.mod go.sum ./
-RUN go mod download
+ENV GOFLAGS=-mod=vendor
 
-# Note: Exclude unnecessary files for validation (e.g., docs, examples) via .dockerignore.
+COPY go.mod go.sum ./
+COPY vendor ./vendor/
+
+# COPY . . overlays vendor/ with identical content; this is intentional —
+# the separate vendor COPY above creates a cached layer so source-only
+# changes don't re-download deps. See .dockerignore for context trimming.
 COPY . .
 
 # Pre-compile test binaries for faster Job startup

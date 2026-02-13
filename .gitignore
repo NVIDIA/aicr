@@ -11,9 +11,6 @@ Thumbs.db
 go.work
 go.work.sum
 
-# Dependencies
-vendor/
-
 # Test binaries and output
 *.test
 tmp/

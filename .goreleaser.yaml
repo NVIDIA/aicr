@@ -23,7 +23,7 @@ builds:
     dir: cmd/eidos
     env:
       - CGO_ENABLED=0
-      - GO111MODULE=on
+      - GOFLAGS=-mod=vendor
     flags:
       - -trimpath
     ldflags: &build-ldflags |
@@ -46,7 +46,7 @@ builds:
     dir: cmd/eidosd
     env:
       - CGO_ENABLED=0
-      - GO111MODULE=on
+      - GOFLAGS=-mod=vendor
     flags:
       - -trimpath
     ldflags: &build-ldflags |

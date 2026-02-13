@@ -13,3 +13,12 @@ LICENSE
 CODEOWNERS
 .goreleaser.yaml
 Makefile
+
+# Trim non-essential vendor metadata from build context
+vendor/**/.travis.yml
+vendor/**/.gitignore
+vendor/**/.deepsource.toml
+vendor/**/CONTRIBUTING.md
+vendor/**/CODE_OF_CONDUCT.md
+vendor/**/SECURITY.md
+vendor/**/FUNDING.json

@@ -22,6 +22,7 @@ on:
     paths:
       - 'go.mod'
       - 'go.sum'
+      - 'vendor/'
       - '.github/workflows/verify-licenses.yaml'
   workflow_dispatch: {}
 
@@ -50,11 +51,16 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
 
       - name: Install go-licenses
         run: go install github.com/google/go-licenses@${{ steps.versions.outputs.go_licenses }}
 
       - name: Report licenses
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           echo "=== Dependency Licenses ==="
           go-licenses report ./... 2>/dev/null | sort -t',' -k3 | column -t -s','
@@ -63,6 +69,8 @@ jobs:
           go-licenses report ./... 2>/dev/null | cut -d',' -f3 | sort | uniq -c | sort -rn
 
       - name: Check licenses
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           # Allowed licenses (all CNCF-approved)
           go-licenses check ./... \

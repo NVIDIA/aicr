@@ -38,6 +38,7 @@ AUTO_MODE=${AUTO_MODE:-false}
 SKIP_GO=false
 SKIP_DOCKER=false
 SKIP_TOOLS=false
+UPGRADE=false
 
 # Detect OS and architecture
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -136,6 +137,7 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
     --auto              Non-interactive mode (auto-yes to all prompts)
+    --upgrade           Reinstall/upgrade tools to versions in .versions.yaml (default: skip if already installed)
     --skip-go           Skip Go installation check
     --skip-docker       Skip Docker installation check
     --skip-tools        Skip development tools installation
@@ -151,6 +153,9 @@ EXAMPLES:
 
     # Automated CI setup
     $0 --auto
+
+    # Upgrade all tools to .versions.yaml (e.g. make tools-update)
+    $0 --upgrade --auto
 
     # Install only tools (Go already installed)
     $0 --skip-go --skip-docker
@@ -178,6 +183,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-tools)
             SKIP_TOOLS=true
+            shift
+            ;;
+        --upgrade)
+            UPGRADE=true
             shift
             ;;
         --help|-h)
@@ -209,9 +218,13 @@ if [[ ! -f "${VERSIONS_FILE}" ]]; then
     exit 1
 fi
 
-# Install yq if not present (needed to parse .versions.yaml)
-if ! command_exists yq; then
-    log_info "Installing yq (YAML processor)..."
+# Install yq if not present or --upgrade (needed to parse .versions.yaml)
+if ! command_exists yq || [[ "${UPGRADE}" == "true" ]]; then
+    if command_exists yq && [[ "${UPGRADE}" == "true" ]]; then
+        log_info "Upgrading yq (YAML processor)..."
+    else
+        log_info "Installing yq (YAML processor)..."
+    fi
 
     if [[ "${OS}" == "darwin" ]]; then
         if command_exists brew; then
@@ -331,7 +344,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"edfa587f31bde70db161d1e5b783e086a1627d7e2f7c91de5f7cca79bcdf8631"}
     YAMLLINT_SHA256=${YAMLLINT_SHA256:-"9bc99c3e9fe89b4c6ee26e17aa817cf2d14390de6577cb6e2e6ed5f72120c835"}
 
-    if command_exists helm; then
+    if command_exists helm && [[ "${UPGRADE}" != "true" ]]; then
         log_success "Helm already installed: $(helm version --short)"
     else
         log_info "Installing Helm..."
@@ -347,7 +360,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # chainsaw (declarative e2e testing)
-    if command_exists chainsaw; then
+    if command_exists chainsaw && [[ "${UPGRADE}" != "true" ]]; then
         log_success "Chainsaw already installed: $(chainsaw version 2>/dev/null | head -1)"
     else
         log_info "Installing Chainsaw ${CHAINSAW_VERSION}..."
@@ -362,7 +375,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # kubectl
-    if command_exists kubectl; then
+    if command_exists kubectl && [[ "${UPGRADE}" != "true" ]]; then
         log_success "kubectl already installed: $(kubectl version --client --short 2>/dev/null || kubectl version --client)"
     else
         log_info "Installing kubectl ${KUBECTL_VERSION}..."
@@ -385,7 +398,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # yamllint (for YAML linting)
-    if command_exists yamllint; then
+    if command_exists yamllint && [[ "${UPGRADE}" != "true" ]]; then
         log_success "yamllint already installed: $(yamllint --version)"
     else
         log_info "Installing yamllint..."
@@ -405,7 +418,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # grype (vulnerability scanner)
-    if command_exists grype; then
+    if command_exists grype && [[ "${UPGRADE}" != "true" ]]; then
         log_success "grype already installed: $(grype version 2>/dev/null | head -1)"
     else
         log_info "Installing grype ${GRYPE_VERSION}..."
@@ -425,7 +438,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # Tilt
-    if command_exists tilt; then
+    if command_exists tilt && [[ "${UPGRADE}" != "true" ]]; then
         log_success "Tilt already installed: $(tilt version)"
     else
         log_info "Installing Tilt ${TILT_VERSION}..."
@@ -454,7 +467,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # Kind
-    if command_exists kind; then
+    if command_exists kind && [[ "${UPGRADE}" != "true" ]]; then
         log_success "Kind already installed: $(kind version)"
     else
         log_info "Installing Kind ${KIND_VERSION}..."
@@ -475,7 +488,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # ctlptl
-    if command_exists ctlptl; then
+    if command_exists ctlptl && [[ "${UPGRADE}" != "true" ]]; then
         log_success "ctlptl already installed: $(ctlptl version)"
     else
         log_info "Installing ctlptl ${CTLPTL_VERSION}..."
@@ -495,7 +508,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # ko (container image builder)
-    if command_exists ko; then
+    if command_exists ko && [[ "${UPGRADE}" != "true" ]]; then
         log_success "ko already installed: $(ko version)"
     else
         log_info "Installing ko ${KO_VERSION}..."
@@ -526,7 +539,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # goreleaser
-    if command_exists goreleaser; then
+    if command_exists goreleaser && [[ "${UPGRADE}" != "true" ]]; then
         log_success "goreleaser already installed: $(goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p')"
     else
         log_info "Installing goreleaser..."
@@ -546,7 +559,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     fi
 
     # git-cliff (changelog generator)
-    if command_exists git-cliff; then
+    if command_exists git-cliff && [[ "${UPGRADE}" != "true" ]]; then
         log_success "git-cliff already installed: $(git-cliff --version 2>/dev/null | awk '{print $2}')"
     else
         log_info "Installing git-cliff ${GIT_CLIFF_VERSION}..."
@@ -585,7 +598,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     echo "════════════════════════════════════════════════════════"
 
     # golangci-lint
-    if command_exists golangci-lint; then
+    if command_exists golangci-lint && [[ "${UPGRADE}" != "true" ]]; then
         CURRENT_LINT=$(golangci-lint version 2>/dev/null | awk '{print $4}' || echo "unknown")
         log_success "golangci-lint already installed: ${CURRENT_LINT}"
     else
@@ -602,7 +615,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     fi
 
     # addlicense
-    if command_exists addlicense; then
+    if command_exists addlicense && [[ "${UPGRADE}" != "true" ]]; then
         log_success "addlicense already installed"
     else
         log_info "Installing addlicense ${ADDLICENSE_VERSION}..."
