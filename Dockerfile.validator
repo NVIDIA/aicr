@@ -27,7 +27,9 @@ ENV GOFLAGS=-mod=vendor
 COPY go.mod go.sum ./
 COPY vendor ./vendor/
 
-# Note: Exclude unnecessary files for validation (e.g., docs, examples) via .dockerignore.
+# COPY . . overlays vendor/ with identical content; this is intentional —
+# the separate vendor COPY above creates a cached layer so source-only
+# changes don't re-download deps. See .dockerignore for context trimming.
 COPY . .
 
 # Pre-compile test binaries for faster Job startup

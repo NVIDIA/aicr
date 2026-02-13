@@ -55,7 +55,7 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: ${{ inputs.go_version }}
-        cache: false
+        cache: false  # vendor/ provides deps; disable to save disk on constrained runners
 
     - name: Free up disk space
       shell: bash
