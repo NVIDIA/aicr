@@ -26,7 +26,7 @@ recipes/** @nvidia/eidos-maintainer
 /.goreleaser.yaml @nvidia/eidos-maintainer
 
 # Configuration files
-/.versions.yaml @nvidia/eidos-maintainer
+/.settings.yaml @nvidia/eidos-maintainer
 /.golangci.yaml @nvidia/eidos-maintainer
 /.yamllint.yaml @nvidia/eidos-maintainer
 

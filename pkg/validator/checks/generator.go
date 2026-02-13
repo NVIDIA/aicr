@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
+	"github.com/NVIDIA/eidos/pkg/errors"
 )
 
 // GeneratorConfig holds configuration for generating validator code.
@@ -528,13 +530,13 @@ func TestValidate{{.FuncName}}Registration(t *testing.T) {
 //nolint:dupl // Similar structure to GenerateCheck but different templates and logic
 func GenerateConstraintValidator(cfg GeneratorConfig) error {
 	if cfg.ConstraintName == "" {
-		return fmt.Errorf("constraint name is required")
+		return errors.New(errors.ErrCodeInvalidRequest, "constraint name is required")
 	}
 	if cfg.Phase == "" {
-		return fmt.Errorf("phase is required")
+		return errors.New(errors.ErrCodeInvalidRequest, "phase is required")
 	}
 	if cfg.OutputDir == "" {
-		return fmt.Errorf("output directory is required")
+		return errors.New(errors.ErrCodeInvalidRequest, "output directory is required")
 	}
 
 	// Derive names from constraint

@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/eidos/pkg/validator"
@@ -135,7 +136,7 @@ func TestParseValidationPhases(t *testing.T) {
 			}
 
 			if tt.wantErr && tt.errContain != "" {
-				if err == nil || !contains(err.Error(), tt.errContain) {
+				if err == nil || !strings.Contains(err.Error(), tt.errContain) {
 					t.Errorf("parseValidationPhases() error = %v, want error containing %q", err, tt.errContain)
 				}
 				return
@@ -208,20 +209,6 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 			t.Errorf("missing agent flag: %s", flagName)
 		}
 	}
-}
-
-// contains checks if s contains substr
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // hasFlag checks if a cli.Flag has the given name

@@ -15,8 +15,7 @@
 package deployment
 
 import (
-	"fmt"
-
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/validator/checks"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -37,7 +36,7 @@ func init() {
 // Returns nil if validation passes, error if it fails.
 func CheckOperatorHealth(ctx *checks.ValidationContext) error {
 	if ctx.Clientset == nil {
-		return fmt.Errorf("kubernetes client is not available")
+		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
 	// Query live cluster for gpu-operator pods
@@ -48,11 +47,11 @@ func CheckOperatorHealth(ctx *checks.ValidationContext) error {
 		},
 	)
 	if err != nil {
-		return fmt.Errorf("failed to list gpu-operator pods: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to list gpu-operator pods", err)
 	}
 
 	if len(pods.Items) == 0 {
-		return fmt.Errorf("no gpu-operator pods found")
+		return errors.New(errors.ErrCodeNotFound, "no gpu-operator pods found")
 	}
 
 	// Check that at least one pod is running
@@ -64,7 +63,7 @@ func CheckOperatorHealth(ctx *checks.ValidationContext) error {
 	}
 
 	if runningCount == 0 {
-		return fmt.Errorf("no gpu-operator pods are in Running state")
+		return errors.New(errors.ErrCodeInternal, "no gpu-operator pods are in Running state")
 	}
 
 	return nil

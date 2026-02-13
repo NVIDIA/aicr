@@ -26,3 +26,14 @@ status:
   conditions:
     - type: Available
       status: "True"
+---
+# Inference Gateway — model-aware request routing for AI/ML inference
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-gateway
+  namespace: kgateway-system
+status:
+  conditions:
+    - type: Available
+      status: "True"

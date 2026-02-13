@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/NVIDIA/eidos/pkg/bundler/checksum"
@@ -128,7 +126,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	}
 
 	// Sort components by deployment order
-	components := sortComponentsByDeploymentOrder(
+	components := shared.SortComponentRefsByDeploymentOrder(
 		input.RecipeResult.ComponentRefs,
 		input.RecipeResult.DeploymentOrder,
 	)
@@ -150,7 +148,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 			Namespace:  comp.Namespace,
 			Repository: comp.Source,
 			Chart:      chartName,
-			Version:    normalizeVersion(comp.Version),
+			Version:    shared.NormalizeVersion(comp.Version),
 			SyncWave:   i, // Use index as sync wave
 		}
 		appDataList = append(appDataList, appData)
@@ -261,44 +259,4 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	)
 
 	return output, nil
-}
-
-// sortComponentsByDeploymentOrder sorts components based on deployment order.
-func sortComponentsByDeploymentOrder(refs []recipe.ComponentRef, order []string) []recipe.ComponentRef {
-	if len(order) == 0 {
-		return refs
-	}
-
-	// Create order map for O(1) lookup
-	orderMap := make(map[string]int, len(order))
-	for i, name := range order {
-		orderMap[name] = i
-	}
-
-	// Sort components
-	sorted := make([]recipe.ComponentRef, len(refs))
-	copy(sorted, refs)
-
-	sort.SliceStable(sorted, func(i, j int) bool {
-		orderI, okI := orderMap[sorted[i].Name]
-		orderJ, okJ := orderMap[sorted[j].Name]
-
-		if !okI && !okJ {
-			return sorted[i].Name < sorted[j].Name
-		}
-		if !okI {
-			return false
-		}
-		if !okJ {
-			return true
-		}
-		return orderI < orderJ
-	})
-
-	return sorted
-}
-
-// normalizeVersion ensures version has 'v' prefix removed if present.
-func normalizeVersion(version string) string {
-	return strings.TrimPrefix(version, "v")
 }

@@ -2,7 +2,7 @@
 # Flox Environment Manifest
 # =============================================================================
 #
-# AUTO-GENERATED from .versions.yaml - DO NOT EDIT DIRECTLY
+# AUTO-GENERATED from .settings.yaml - DO NOT EDIT DIRECTLY
 #
 # Regenerate with: make flox-manifest
 #
@@ -61,8 +61,8 @@ echo "Eidos Development Environment (Flox)"
 echo "====================================="
 echo ""
 
-# Version information from .versions.yaml
-echo "Configured versions (.versions.yaml):"
+# Version information from .settings.yaml
+echo "Configured versions (.settings.yaml):"
 echo "  Go:             1.25"
 echo "  kubectl:        1.32"
 echo "  kind:           0.31.0"
@@ -124,7 +124,7 @@ if [[ ${#MISSING_TOOLS[@]} -gt 0 ]]; then
     echo ""
 fi
 
-echo "Run 'make tools-check' to verify all versions match .versions.yaml"
+echo "Run 'make tools-check' to verify all versions match .settings.yaml"
 echo ""
 '''
 

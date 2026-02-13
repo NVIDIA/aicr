@@ -23,7 +23,7 @@ NVIDIA Eidos generates validated GPU-accelerated Kubernetes configurations.
  state         config         vs actual     manifests
 ```
 
-**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.6, Ko for images
+**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.9, Ko for images
 
 ## Commands
 
@@ -60,7 +60,7 @@ unset GITLAB_TOKEN && ./tools/e2e
 
 # Tools management
 make tools-setup  # Install all required tools
-make tools-check  # Verify versions match .versions.yaml
+make tools-check  # Verify versions match .settings.yaml
 ```
 
 ## Non-Negotiable Rules
@@ -248,7 +248,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 | `CONTRIBUTING.md` | Contribution guidelines, PR process, DCO |
 | `DEVELOPMENT.md` | Development setup, architecture, Make targets |
 | `RELEASING.md` | Release process for maintainers |
-| `.versions.yaml` | Tool versions (single source of truth) |
+| `.settings.yaml` | Project settings: tool versions, quality thresholds, build/test config (single source of truth) |
 | `recipes/registry.yaml` | Declarative component configuration |
 | `recipes/overlays/*.yaml` | Recipe overlay definitions |
 | `recipes/components/*/values.yaml` | Component Helm values |
@@ -273,7 +273,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 - Observability is mandatory — structured logging, metrics, tracing
 
 **Foundational:**
-- Local development equals CI — `.versions.yaml` is single source of truth
+- Local development equals CI — `.settings.yaml` is single source of truth
 - Correctness must be reproducible — same inputs → same outputs, always
 - Metadata is separate from consumption — recipes define *what*, bundlers determine *how*
 - Recipe specialization requires explicit intent — never silently upgrade to specialized configs

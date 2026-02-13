@@ -19,7 +19,7 @@ on:
     - cron: '0 0,6,12,18 * * *'  # Every 6 hours (4x daily)
   push:
     branches:
-      - "pull-request/[0-9]+"
+      - "pull-request/*"
     paths:
       - '.github/workflows/gpu-smoke-test.yaml'
   workflow_dispatch: {}  # Allow manual runs
@@ -47,6 +47,8 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Load versions
         id: versions
@@ -57,7 +59,9 @@ jobs:
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
-          cache-dependency-path: 'go.sum'
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
 
       - name: Install kind
         run: |
@@ -162,12 +166,16 @@ jobs:
         run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
 
       - name: Build eidos image and load into kind
+        env:
+          GOFLAGS: -mod=vendor
         run: |
-          go install github.com/google/ko@v0.18.0
+          go install github.com/google/ko@${{ steps.versions.outputs.ko }}
           KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
           kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
 
       - name: Run eidos snapshot with deploy-agent
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           go build -o ./eidos ./cmd/eidos
           ./eidos snapshot --deploy-agent \

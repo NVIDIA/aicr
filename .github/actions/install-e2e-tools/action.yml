@@ -33,9 +33,9 @@ runs:
           /usr/local/bin/ko
           /usr/local/bin/helm
           /usr/local/bin/yq
-        # Cache key based on .versions.yaml - invalidates when versions change
+        # Cache key based on .settings.yaml - invalidates when versions change
         # yamllint disable-line rule:line-length
-        key: e2e-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.versions.yaml') }}
+        key: e2e-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.settings.yaml') }}
         restore-keys: |
           e2e-tools-${{ runner.os }}-${{ runner.arch }}-
 

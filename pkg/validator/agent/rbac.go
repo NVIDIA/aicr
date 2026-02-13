@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	eidoserrors "github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -221,7 +222,7 @@ func (d *Deployer) ensureInputConfigMaps(ctx context.Context) error {
 	if d.config.SnapshotConfigMap != "" {
 		_, err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).Get(ctx, d.config.SnapshotConfigMap, metav1.GetOptions{})
 		if err != nil {
-			return fmt.Errorf("snapshot ConfigMap %q not found: %w", d.config.SnapshotConfigMap, err)
+			return eidoserrors.Wrap(eidoserrors.ErrCodeNotFound, fmt.Sprintf("snapshot ConfigMap %q not found", d.config.SnapshotConfigMap), err)
 		}
 	}
 
@@ -229,7 +230,7 @@ func (d *Deployer) ensureInputConfigMaps(ctx context.Context) error {
 	if d.config.RecipeConfigMap != "" {
 		_, err := d.clientset.CoreV1().ConfigMaps(d.config.Namespace).Get(ctx, d.config.RecipeConfigMap, metav1.GetOptions{})
 		if err != nil {
-			return fmt.Errorf("recipe ConfigMap %q not found: %w", d.config.RecipeConfigMap, err)
+			return eidoserrors.Wrap(eidoserrors.ErrCodeNotFound, fmt.Sprintf("recipe ConfigMap %q not found", d.config.RecipeConfigMap), err)
 		}
 	}
 

@@ -301,28 +301,70 @@ func TestBaseBundler_GenerateChecksums_ContextCancelled(t *testing.T) {
 }
 
 func TestBaseBundler_MakeExecutable(t *testing.T) {
-	tmpDir := t.TempDir()
-	b := NewBaseBundler(nil, types.BundleType("gpu-operator"))
-
-	testFile := filepath.Join(tmpDir, "script.sh")
-	if err := os.WriteFile(testFile, []byte("#!/bin/bash\necho test"), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T) string
+		wantErr   bool
+		wantExec  bool
+		wantResEr bool
+	}{
+		{
+			name: "valid file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				f := filepath.Join(t.TempDir(), "script.sh")
+				if err := os.WriteFile(f, []byte("#!/bin/bash\necho test"), 0644); err != nil {
+					t.Fatalf("setup: %v", err)
+				}
+				return f
+			},
+			wantExec: true,
+		},
+		{
+			name: "nonexistent file",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return filepath.Join(t.TempDir(), "does-not-exist.sh")
+			},
+			wantErr:   true,
+			wantResEr: true,
+		},
+		{
+			name: "nonexistent directory",
+			setup: func(t *testing.T) string {
+				t.Helper()
+				return filepath.Join(t.TempDir(), "no-such-dir", "script.sh")
+			},
+			wantErr:   true,
+			wantResEr: true,
+		},
 	}
 
-	err := b.MakeExecutable(testFile)
-	if err != nil {
-		t.Fatalf("MakeExecutable() error = %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewBaseBundler(nil, types.BundleType("gpu-operator"))
+			path := tt.setup(t)
 
-	// Verify file is executable
-	info, err := os.Stat(testFile)
-	if err != nil {
-		t.Fatalf("Failed to stat file: %v", err)
-	}
+			err := b.MakeExecutable(path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("MakeExecutable() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
 
-	mode := info.Mode()
-	if mode&0111 == 0 {
-		t.Error("File is not executable")
+			if tt.wantResEr && len(b.Result.Errors) == 0 {
+				t.Error("expected error in Result.Errors")
+			}
+
+			if tt.wantExec {
+				info, statErr := os.Stat(path)
+				if statErr != nil {
+					t.Fatalf("stat: %v", statErr)
+				}
+				if info.Mode()&0111 == 0 {
+					t.Error("file is not executable")
+				}
+			}
+		})
 	}
 }
 

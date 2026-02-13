@@ -494,6 +494,125 @@ func TestValidateTemplateFile_SkipsURLValidation(t *testing.T) {
 	}
 }
 
+func TestExecuteTemplateToBytes_Errors(t *testing.T) {
+	// Create a temp template file
+	dir := t.TempDir()
+	tmplPath := filepath.Join(dir, "test.tmpl")
+	if err := os.WriteFile(tmplPath, []byte("Hello {{ .Name }}!"), 0o644); err != nil {
+		t.Fatalf("failed to write template file: %v", err)
+	}
+
+	tests := []struct {
+		name         string
+		templatePath string
+		data         any
+		wantContains string
+		wantErr      bool
+	}{
+		{
+			name:         "valid template",
+			templatePath: tmplPath,
+			data:         struct{ Name string }{Name: "World"},
+			wantContains: "Hello World!",
+		},
+		{
+			name:         "template file not found",
+			templatePath: filepath.Join(dir, "nonexistent.tmpl"),
+			data:         nil,
+			wantErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ExecuteTemplateToBytes(context.Background(), tt.templatePath, tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ExecuteTemplateToBytes() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantContains != "" && !strings.Contains(string(got), tt.wantContains) {
+				t.Errorf("ExecuteTemplateToBytes() = %q, want to contain %q", string(got), tt.wantContains)
+			}
+		})
+	}
+}
+
+func TestValidateTemplateFile_Errors(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{
+			name:    "nonexistent file",
+			path:    "/tmp/claude/nonexistent-template-file.tmpl",
+			wantErr: true,
+		},
+		{
+			name:    "directory instead of file",
+			path:    os.TempDir(),
+			wantErr: true,
+		},
+		{
+			name:    "URL skips validation",
+			path:    "https://example.com/template.tmpl",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateTemplateFile(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateTemplateFile(%q) error = %v, wantErr %v", tt.path, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNewTemplateWriter_NilOutput(t *testing.T) {
+	tmpDir := t.TempDir()
+	templatePath := filepath.Join(tmpDir, "test.tmpl")
+	if err := os.WriteFile(templatePath, []byte("{{ .Name }}"), 0o644); err != nil {
+		t.Fatalf("failed to write template file: %v", err)
+	}
+
+	writer := NewTemplateWriter(templatePath, nil)
+	if writer == nil {
+		t.Fatal("expected non-nil writer")
+	}
+	// output should default to os.Stdout
+	if writer.output != os.Stdout {
+		t.Error("expected output to default to os.Stdout when nil is passed")
+	}
+}
+
+func TestNewTemplateFileWriter_InvalidPath(t *testing.T) {
+	_, err := NewTemplateFileWriter("template.tmpl", "/nonexistent-dir/subdir/output.txt")
+	if err == nil {
+		t.Fatal("expected error for invalid output path")
+	}
+	if !hasErrorCode(err, errors.ErrCodeInternal) {
+		t.Errorf("expected ErrCodeInternal, got: %v", err)
+	}
+}
+
+func TestExecuteTemplateToBytes_InvalidSyntax(t *testing.T) {
+	dir := t.TempDir()
+	tmplPath := filepath.Join(dir, "bad.tmpl")
+	if err := os.WriteFile(tmplPath, []byte("{{ .Name"), 0o644); err != nil {
+		t.Fatalf("failed to write template file: %v", err)
+	}
+
+	_, err := ExecuteTemplateToBytes(context.Background(), tmplPath, struct{ Name string }{Name: "test"})
+	if err == nil {
+		t.Fatal("expected error for invalid template syntax")
+	}
+	if !hasErrorCode(err, errors.ErrCodeInvalidRequest) {
+		t.Errorf("expected ErrCodeInvalidRequest, got: %v", err)
+	}
+}
+
 func TestExecuteTemplateToBytes_URL(t *testing.T) {
 	// Create a test HTTP server that serves a template
 	templateContent := `Result: {{ .Value }}`

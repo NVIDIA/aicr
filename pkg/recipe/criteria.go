@@ -241,6 +241,9 @@ func NewCriteria() *Criteria {
 // (e.g., accelerator=any), while a specific query (e.g., accelerator=gb200) can match
 // both generic recipes and recipes with that specific value.
 func (c *Criteria) Matches(other *Criteria) bool {
+	if c == nil {
+		return other == nil
+	}
 	if other == nil {
 		return true
 	}

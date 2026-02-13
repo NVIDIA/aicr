@@ -357,7 +357,7 @@ func TestGenerate_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestSortComponentsByDeploymentOrder(t *testing.T) {
+func TestSortComponentRefsByDeploymentOrder(t *testing.T) {
 	tests := []struct {
 		name     string
 		refs     []recipe.ComponentRef
@@ -406,7 +406,7 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := sortComponentsByDeploymentOrder(tt.refs, tt.order)
+			result := shared.SortComponentRefsByDeploymentOrder(tt.refs, tt.order)
 
 			if len(result) != len(tt.expected) {
 				t.Fatalf("Expected %d components, got %d", len(tt.expected), len(result))
@@ -532,9 +532,9 @@ func TestNormalizeVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := normalizeVersion(tt.input)
+			result := shared.NormalizeVersion(tt.input)
 			if result != tt.expected {
-				t.Errorf("normalizeVersion(%s) = %s, want %s", tt.input, result, tt.expected)
+				t.Errorf("NormalizeVersion(%s) = %s, want %s", tt.input, result, tt.expected)
 			}
 		})
 	}

@@ -58,7 +58,7 @@ ensure_cluster() {
         log_info "Creating cluster: ${CLUSTER_NAME}"
         kind create cluster \
             --name "${CLUSTER_NAME}" \
-            --image "${KIND_NODE_IMAGE:-kindest/node:v1.32.0}" \
+            --image "${KIND_NODE_IMAGE:-$(yq -r '.testing.kind_node_image' "${REPO_ROOT}/.settings.yaml" 2>/dev/null || echo "kindest/node:v1.32.0")}" \
             --config "${KWOK_DIR}/kind-config.yaml" \
             --wait 60s
     fi

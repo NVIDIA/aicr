@@ -336,6 +336,92 @@ func TestComponentRefMergeInheritsFromBase(t *testing.T) {
 		comp.Source, comp.Version, comp.ValuesFile)
 }
 
+func TestMergeComponentRef_AdvancedFields(t *testing.T) {
+	t.Run("overrides merged from overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name:      "gpu-operator",
+			Overrides: map[string]any{"driver.enabled": true},
+		}
+		overlay := ComponentRef{
+			Name:      "gpu-operator",
+			Overrides: map[string]any{"gds.enabled": true},
+		}
+		result := mergeComponentRef(base, overlay)
+		if result.Overrides["driver.enabled"] != true {
+			t.Error("expected base override to be preserved")
+		}
+		if result.Overrides["gds.enabled"] != true {
+			t.Error("expected overlay override to be merged")
+		}
+	})
+
+	t.Run("overrides overlay into nil base", func(t *testing.T) {
+		base := ComponentRef{Name: "test"}
+		overlay := ComponentRef{
+			Name:      "test",
+			Overrides: map[string]any{"key": "val"},
+		}
+		result := mergeComponentRef(base, overlay)
+		if result.Overrides["key"] != "val" {
+			t.Error("expected override to be set on nil base")
+		}
+	})
+
+	t.Run("patches replaced by overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name:    "test",
+			Patches: []string{"base-patch.yaml"},
+		}
+		overlay := ComponentRef{
+			Name:    "test",
+			Patches: []string{"overlay-patch.yaml"},
+		}
+		result := mergeComponentRef(base, overlay)
+		if len(result.Patches) != 1 || result.Patches[0] != "overlay-patch.yaml" {
+			t.Errorf("patches = %v, want [overlay-patch.yaml]", result.Patches)
+		}
+	})
+
+	t.Run("dependencyRefs replaced by overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name:           "test",
+			DependencyRefs: []string{"dep-a"},
+		}
+		overlay := ComponentRef{
+			Name:           "test",
+			DependencyRefs: []string{"dep-b", "dep-c"},
+		}
+		result := mergeComponentRef(base, overlay)
+		if len(result.DependencyRefs) != 2 {
+			t.Errorf("dependencyRefs len = %d, want 2", len(result.DependencyRefs))
+		}
+	})
+
+	t.Run("manifestFiles additive dedup merge", func(t *testing.T) {
+		base := ComponentRef{
+			Name:          "test",
+			ManifestFiles: []string{"a.yaml", "b.yaml"},
+		}
+		overlay := ComponentRef{
+			Name:          "test",
+			ManifestFiles: []string{"b.yaml", "c.yaml"},
+		}
+		result := mergeComponentRef(base, overlay)
+		if len(result.ManifestFiles) != 3 {
+			t.Errorf("manifestFiles = %v, want 3 items (a, b, c)", result.ManifestFiles)
+		}
+	})
+
+	t.Run("tag from overlay", func(t *testing.T) {
+		base := ComponentRef{Name: "test", Tag: "v1.0"}
+		overlay := ComponentRef{Name: "test", Tag: "v2.0"}
+		result := mergeComponentRef(base, overlay)
+		if result.Tag != "v2.0" {
+			t.Errorf("tag = %q, want v2.0", result.Tag)
+		}
+	})
+}
+
 // Helper function
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || containsString(s[1:], substr)))

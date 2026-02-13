@@ -444,6 +444,83 @@ func TestMake_DefaultOutputDir(t *testing.T) {
 	}
 }
 
+func TestMake_ArgoCD(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerArgoCD),
+		config.WithRepoURL("https://github.com/org/repo.git"),
+		config.WithVersion("v1.0.0"),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "eidos.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Version: "v25.3.3",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:    "network-operator",
+				Version: "v25.4.0",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator", "network-operator"},
+	}
+
+	output, err := bundler.Make(ctx, recipeResult, tmpDir)
+	if err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	if output == nil {
+		t.Fatal("Make() returned nil output")
+	}
+
+	// ArgoCD output should have results
+	if len(output.Results) == 0 {
+		t.Error("expected at least 1 result")
+	}
+
+	// Check the result type
+	for _, r := range output.Results {
+		if r.Type != "argocd-applications" {
+			t.Errorf("result type = %q, want %q", r.Type, "argocd-applications")
+		}
+		if !r.Success {
+			t.Error("expected successful result")
+		}
+	}
+
+	// Verify deployment info
+	if output.Deployment == nil {
+		t.Fatal("expected deployment info")
+	}
+	if output.Deployment.Type != "ArgoCD applications" {
+		t.Errorf("deployment type = %q, want %q", output.Deployment.Type, "ArgoCD applications")
+	}
+
+	// Verify output directory has files
+	if output.TotalFiles == 0 {
+		t.Error("expected generated files")
+	}
+}
+
 func TestRemoveHyphens(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -469,6 +546,77 @@ func TestRemoveHyphens(t *testing.T) {
 
 // Note: Tests for convertMapValue, setMapValueByPath, and applyMapOverrides
 // are in pkg/component/overrides_test.go since those functions now live there.
+
+func TestGetValueOverridesForComponent(t *testing.T) {
+	tests := []struct {
+		name          string
+		overrides     map[string]map[string]string
+		componentName string
+		wantOverrides bool
+		wantKey       string
+		wantValue     string
+	}{
+		{
+			name:          "nil config overrides",
+			overrides:     nil,
+			componentName: "gpu-operator",
+			wantOverrides: false,
+		},
+		{
+			name: "exact name match",
+			overrides: map[string]map[string]string{
+				"gpu-operator": {"driver.enabled": "true"},
+			},
+			componentName: "gpu-operator",
+			wantOverrides: true,
+			wantKey:       "driver.enabled",
+			wantValue:     "true",
+		},
+		{
+			name: "no match returns nil",
+			overrides: map[string]map[string]string{
+				"network-operator": {"enabled": "true"},
+			},
+			componentName: "gpu-operator",
+			wantOverrides: false,
+		},
+		{
+			name: "override key match via registry",
+			overrides: map[string]map[string]string{
+				"gpuoperator": {"driver.enabled": "true"},
+			},
+			componentName: "gpu-operator",
+			wantOverrides: true,
+			wantKey:       "driver.enabled",
+			wantValue:     "true",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithValueOverrides(tt.overrides),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			result := b.getValueOverridesForComponent(tt.componentName)
+			if tt.wantOverrides && result == nil {
+				t.Error("expected overrides, got nil")
+			}
+			if !tt.wantOverrides && result != nil {
+				t.Errorf("expected nil overrides, got %v", result)
+			}
+			if tt.wantOverrides && result != nil {
+				if v, ok := result[tt.wantKey]; !ok || v != tt.wantValue {
+					t.Errorf("override[%q] = %q, want %q", tt.wantKey, v, tt.wantValue)
+				}
+			}
+		})
+	}
+}
 
 func TestCollectComponentManifests(t *testing.T) {
 	bundler, err := New()

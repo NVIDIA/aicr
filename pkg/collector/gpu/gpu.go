@@ -576,16 +576,3 @@ type SupportedMemClock struct {
 type Capabilities struct {
 	Egm string `xml:"egm" json:"egm" yaml:"egm"`
 }
-
-type NvidiaSMILog struct {
-	XMLName       xml.Name `xml:"nvidia_smi_log" json:"-" yaml:"-"`
-	DriverVersion string   `xml:"driver_version" json:"driverVersion" yaml:"driverVersion"`
-	CUDAVersion   string   `xml:"cuda_version" json:"cudaVersion" yaml:"cudaVersion"`
-	GPUs          []GPU    `xml:"gpu" json:"gpus" yaml:"gpus"`
-}
-
-type MemoryUsage struct {
-	Total string `xml:"total" json:"total" yaml:"total"`
-	Used  string `xml:"used" json:"used" yaml:"used"`
-	Free  string `xml:"free" json:"free" yaml:"free"`
-}

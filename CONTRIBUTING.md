@@ -56,6 +56,10 @@ Before contributing:
 - Ensure all tests pass and code meets quality standards
 - Write tests for new functionality
 
+#### Go dependencies (vendor)
+
+This project vendors Go dependencies. After changing `go.mod` or `go.sum`, run `make tidy` (which runs `go mod vendor`) and commit `go.mod`, `go.sum`, and the `vendor/` directory. CI will fail if `vendor/` is out of sync.
+
 #### Adding Validation Constraints
 
 Eidos uses a validator framework to check cluster state against requirements. To add new validation constraints:
@@ -90,7 +94,7 @@ These principles guide all design decisions in Eidos. When faced with trade-offs
 
 The same tools, same versions, and same validation run locally and in CI.
 
-**What:** Tool versions are centralized in `.versions.yaml`. Both `make tools-setup` (local) and GitHub Actions use this single source of truth. `make qualify` runs the exact same checks as CI.
+**What:** Tool versions are centralized in `.settings.yaml`. Both `make tools-setup` (local) and GitHub Actions use this single source of truth. `make qualify` runs the exact same checks as CI.
 
 **Why:** "Works on my machine" is not acceptable. If a contributor can run `make qualify` locally and it passes, CI will pass. This eliminates surprise failures and reduces feedback loops.
 

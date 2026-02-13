@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/NVIDIA/eidos/pkg/errors"
-	"github.com/NVIDIA/eidos/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -104,19 +103,6 @@ func (d *Deployer) getSnapshotFromConfigMap(ctx context.Context) ([]byte, error)
 	}
 
 	return []byte(snapshot), nil
-}
-
-// deleteConfigMap deletes the snapshot ConfigMap.
-//
-//nolint:unused // Kept for future debugging purposes
-func (d *Deployer) deleteConfigMap(ctx context.Context) error {
-	namespace, name, err := parseConfigMapName(d.config.Output)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse ConfigMap URI", err)
-	}
-
-	err = d.clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, name, metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
 }
 
 // StreamLogs streams logs from the Job's Pod to the provided writer.

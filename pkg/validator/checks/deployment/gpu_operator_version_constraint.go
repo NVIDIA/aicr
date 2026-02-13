@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/validator"
 	"github.com/NVIDIA/eidos/pkg/validator/checks"
@@ -46,18 +47,18 @@ func init() {
 // Constraint value examples: ">= v24.6.0", "== v25.10.1", "~= v24.6"
 func ValidateGPUOperatorVersion(ctx *checks.ValidationContext, constraint recipe.Constraint) (string, bool, error) {
 	if ctx.Clientset == nil {
-		return "", false, fmt.Errorf("kubernetes client not available")
+		return "", false, errors.New(errors.ErrCodeInvalidRequest, "kubernetes client not available")
 	}
 
 	version, err := getGPUOperatorVersion(ctx.Context, ctx.Clientset)
 	if err != nil {
-		return "", false, fmt.Errorf("failed to detect GPU operator version: %w", err)
+		return "", false, errors.Wrap(errors.ErrCodeInternal, "failed to detect GPU operator version", err)
 	}
 
 	// Evaluate constraint expression against detected version
 	passed, err := evaluateVersionConstraint(version, constraint.Value)
 	if err != nil {
-		return version, false, fmt.Errorf("failed to evaluate version constraint: %w", err)
+		return version, false, errors.Wrap(errors.ErrCodeInternal, "failed to evaluate version constraint", err)
 	}
 
 	return version, passed, nil
@@ -87,7 +88,7 @@ func getGPUOperatorVersion(ctx context.Context, clientset kubernetes.Interface) 
 		}
 	}
 
-	return "", fmt.Errorf("could not find GPU operator deployment in common namespaces (last error: %w)", lastErr)
+	return "", errors.Wrap(errors.ErrCodeNotFound, "could not find GPU operator deployment in common namespaces", lastErr)
 }
 
 // getVersionFromDeployment extracts version from a specific deployment.
@@ -121,7 +122,7 @@ func getVersionFromDeployment(ctx context.Context, clientset kubernetes.Interfac
 		return normalizeVersion(version), nil
 	}
 
-	return "", fmt.Errorf("could not determine version from deployment %s/%s", namespace, name)
+	return "", errors.New(errors.ErrCodeNotFound, fmt.Sprintf("could not determine version from deployment %s/%s", namespace, name))
 }
 
 // extractVersionFromImage parses version from container image.
@@ -164,13 +165,13 @@ func evaluateVersionConstraint(actualVersion, constraintExpr string) (bool, erro
 	// Parse the constraint expression (e.g., ">= v24.6.0", "== v25.10.1")
 	parsed, err := validator.ParseConstraintExpression(constraintExpr)
 	if err != nil {
-		return false, fmt.Errorf("invalid constraint expression: %w", err)
+		return false, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid constraint expression", err)
 	}
 
 	// Evaluate the constraint
 	passed, err := parsed.Evaluate(actualVersion)
 	if err != nil {
-		return false, fmt.Errorf("constraint evaluation failed: %w", err)
+		return false, errors.Wrap(errors.ErrCodeInternal, "constraint evaluation failed", err)
 	}
 
 	return passed, nil

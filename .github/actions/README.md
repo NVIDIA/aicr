@@ -52,7 +52,7 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 **When to use**: E2E test workflows that need development tools (kubectl, kind, tilt, etc.)
 **Key Features**:
 - Uses `tools/setup-tools` for consistency with local development
-- Caches tools based on `.versions.yaml` hash
+- Caches tools based on `.settings.yaml` hash
 - Same tools, same versions as local dev - no "works on my machine" issues
 
 **Example**:
@@ -61,13 +61,13 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 ```
 
 This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which:
-- Reads versions from `.versions.yaml` (single source of truth)
+- Reads versions from `.settings.yaml` (single source of truth)
 - Installs: helm, kubectl, kind, ctlptl, tilt, ko, grype, yamllint, golangci-lint
 - Skips Go (handled by `actions/setup-go`) and Docker (pre-installed on runners)
 - Uses the same installation logic as local development
 
 #### `load-versions/`
-**Purpose**: Load tool versions from `.versions.yaml` as workflow outputs
+**Purpose**: Load tool versions from `.settings.yaml` as workflow outputs
 **When to use**: When you need version values in workflow steps
 **Outputs**:
 - `go`, `goreleaser`, `ko`, `crane`, `golangci_lint`, `yamllint`, `addlicense`
@@ -281,7 +281,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ### Tool Installation Strategy
 - **Development tools**: Use `install-e2e-tools` which delegates to `tools/setup-tools`
   - Same script used locally and in CI - guaranteed consistency
-  - Versions managed in `.versions.yaml` (single source of truth)
+  - Versions managed in `.settings.yaml` (single source of truth)
   - `make tools-check` works identically in both environments
 - **Build tools**: Use `setup-build-tools` for selective installation of ko, syft, crane, goreleaser
 - Version pinning ensures reproducibility across all environments
@@ -372,7 +372,7 @@ The `install-e2e-tools` action ensures that CI uses the exact same tool installa
 │ tools/setup-tools   │◄───►│ tools/setup-tools   │
 │        │            │     │        │            │
 │        ▼            │     │        ▼            │
-│  .versions.yaml     │◄───►│  .versions.yaml     │
+│  .settings.yaml     │◄───►│  .settings.yaml     │
 └─────────────────────┘     └─────────────────────┘
          │                           │
          └───────────────────────────┘
@@ -380,7 +380,7 @@ The `install-e2e-tools` action ensures that CI uses the exact same tool installa
 ```
 
 This eliminates "works on my machine" issues by ensuring:
-- Same tool versions (from `.versions.yaml`)
+- Same tool versions (from `.settings.yaml`)
 - Same installation logic (`tools/setup-tools`)
 - Same verification (`make tools-check`)
 

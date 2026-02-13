@@ -50,10 +50,11 @@ chmod +x deploy.sh
 
 ```shell
 eidos validate \
-  --phase readiness \ 
+  --recipe recipe.yaml \
+  --phase readiness \
   --phase deployment \
   --phase conformance \
-  --output recipe.yaml
+  --output report.yaml
 ```
 
 ## Run Job

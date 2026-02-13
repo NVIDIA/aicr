@@ -466,6 +466,97 @@ func TestNewFileReader(t *testing.T) {
 	})
 }
 
+func TestNewFileReader_ErrorPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		format    Format
+		filePath  string
+		wantErrSS string
+	}{
+		{
+			name:      "empty path",
+			format:    FormatJSON,
+			filePath:  "",
+			wantErrSS: "failed to open file",
+		},
+		{
+			name:      "nested in nonexistent directory",
+			format:    FormatJSON,
+			filePath:  "/no/such/dir/file.json",
+			wantErrSS: "failed to open file",
+		},
+		{
+			name:      "path with null byte",
+			format:    FormatYAML,
+			filePath:  "/tmp/invalid\x00file.yaml",
+			wantErrSS: "failed to open file",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader, err := NewFileReader(tt.format, tt.filePath)
+			if err == nil {
+				reader.Close()
+				t.Fatal("expected error")
+			}
+			if reader != nil {
+				t.Error("expected nil reader on error")
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSS) {
+				t.Errorf("error = %v, want substring %q", err, tt.wantErrSS)
+			}
+		})
+	}
+}
+
+func TestNewFileReader_ReaderState(t *testing.T) {
+	tests := []struct {
+		name   string
+		format Format
+		data   string
+	}{
+		{
+			name:   "json reader has closer",
+			format: FormatJSON,
+			data:   `{"name":"state","value":1}`,
+		},
+		{
+			name:   "yaml reader has closer",
+			format: FormatYAML,
+			data:   "name: state\nvalue: 1\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpfile, err := os.CreateTemp("", "state-test*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(tmpfile.Name())
+			tmpfile.WriteString(tt.data)
+			tmpfile.Close()
+
+			reader, err := NewFileReader(tt.format, tmpfile.Name())
+			if err != nil {
+				t.Fatalf("NewFileReader failed: %v", err)
+			}
+			defer reader.Close()
+
+			if reader.format != tt.format {
+				t.Errorf("format = %v, want %v", reader.format, tt.format)
+			}
+			if reader.closer == nil {
+				t.Error("expected closer to be set for file-backed reader")
+			}
+			if reader.input == nil {
+				t.Error("expected input to be set")
+			}
+		})
+	}
+}
+
 func TestNewFileReaderAuto(t *testing.T) {
 	t.Run("auto-detect json", func(t *testing.T) {
 		// Create temporary file

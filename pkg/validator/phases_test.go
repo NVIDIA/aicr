@@ -897,6 +897,38 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 			expectWarnings: false,
 		},
 		{
+			name: "performance - unregistered constraint logs warning",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{
+							{Name: "Performance.nonexistent-metric.value", Value: ">= 100"},
+						},
+						Checks: []string{"nonexistent-perf-check"},
+					},
+				},
+			},
+			phase:             "performance",
+			expectWarnings:    true,
+			expectedItemCount: 1,
+		},
+		{
+			name: "conformance - unregistered constraint and check logs warning",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Conformance: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{
+							{Name: "Conformance.fake.value", Value: ">= 1.0"},
+						},
+						Checks: []string{"fake-conformance-check"},
+					},
+				},
+			},
+			phase:             "conformance",
+			expectWarnings:    true,
+			expectedItemCount: 1,
+		},
+		{
 			name: "conformance - nil validation (no warnings)",
 			recipe: &recipe.RecipeResult{
 				Validation: nil,

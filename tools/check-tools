@@ -15,8 +15,8 @@
 
 # check-tools: Verifies required tools are installed and shows version comparison
 #
-# This script dynamically reads from .versions.yaml and checks each tool.
-# Adding a new tool to .versions.yaml automatically includes it in the check
+# This script dynamically reads from .settings.yaml and checks each tool.
+# Adding a new tool to .settings.yaml automatically includes it in the check
 # (as long as the tool metadata is defined in TOOL_METADATA below).
 #
 # Usage:
@@ -28,7 +28,7 @@ set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tools/common
 . "${DIR}/common"
-VERSIONS_FILE="${REPO_ROOT}/.versions.yaml"
+VERSIONS_FILE="${REPO_ROOT}/.settings.yaml"
 
 # Check if yq is available
 if ! command -v yq &>/dev/null; then
@@ -37,7 +37,7 @@ if ! command -v yq &>/dev/null; then
     exit 1
 fi
 
-# Check if .versions.yaml exists
+# Check if .settings.yaml exists
 if [[ ! -f "${VERSIONS_FILE}" ]]; then
     log_error "Version file not found: ${VERSIONS_FILE}"
     exit 1
@@ -55,8 +55,8 @@ fi
 #   - presence: Only check if installed (no version comparison)
 #
 # To add a new tool:
-# 1. Add it to .versions.yaml under the appropriate category
-# 2. Add its metadata entry in get_tool_metadata() with the yaml_key matching the key in .versions.yaml
+# 1. Add it to .settings.yaml under the appropriate category
+# 2. Add its metadata entry in get_tool_metadata() with the yaml_key matching the key in .settings.yaml
 
 # Returns tool metadata for a given yaml_key
 # Compatible with bash 3.x (no associative arrays)
@@ -116,7 +116,7 @@ get_tool_metadata() {
         chainsaw)
             echo "chainsaw:::chainsaw version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;
-        # Optional tools (no version in .versions.yaml)
+        # Optional tools (no version in .settings.yaml)
         docker)
             echo "docker:::docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'not running':::presence"
             ;;
@@ -231,7 +231,7 @@ echo ""
 print_row "Tool" "Expected" "Installed" "Status"
 print_row "----" "--------" "---------" "------"
 
-# Get all categories from .versions.yaml
+# Get all categories from .settings.yaml
 categories=$(yq 'keys | .[]' "${VERSIONS_FILE}")
 
 # Iterate through each category
@@ -248,7 +248,7 @@ for category in $categories; do
     done
 done
 
-# Check docker separately (not in .versions.yaml but useful to show)
+# Check docker separately (not in .settings.yaml but useful to show)
 if command -v docker &>/dev/null; then
     installed=$(docker version --format '{{.Server.Version}}' 2>/dev/null | tr -d '\n' || true)
     if [[ -z "$installed" ]]; then

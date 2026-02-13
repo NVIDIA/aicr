@@ -17,6 +17,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/eidos/pkg/serializer"
@@ -160,7 +161,7 @@ func TestSnapshotTemplateFlagCombinations(t *testing.T) {
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error containing %q, got nil", tt.errContains)
-				} else if tt.errContains != "" && !containsString(err.Error(), tt.errContains) {
+				} else if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("expected error containing %q, got %v", tt.errContains, err)
 				}
 			} else {
@@ -195,21 +196,6 @@ type validationError struct {
 
 func (e *validationError) Error() string {
 	return e.msg
-}
-
-// containsString checks if str contains substr (case-insensitive for flexibility).
-func containsString(str, substr string) bool {
-	return len(str) >= len(substr) && (str == substr ||
-		len(str) > 0 && containsSubstring(str, substr))
-}
-
-func containsSubstring(str, substr string) bool {
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // TestOutputDestinationParsing tests parsing of various output destinations.

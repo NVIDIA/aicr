@@ -206,7 +206,7 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 	}
 
 	// Sort by deployment order
-	sorted := sortComponentRefsByDeploymentOrder(
+	sorted := shared.SortComponentRefsByDeploymentOrder(
 		input.RecipeResult.ComponentRefs,
 		input.RecipeResult.DeploymentOrder,
 	)
@@ -241,7 +241,7 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 			Repository:   ref.Source,
 			ChartName:    chartName,
 			Version:      version,
-			ChartVersion: normalizeVersion(ref.Version),
+			ChartVersion: shared.NormalizeVersionWithDefault(ref.Version),
 			HasManifests: hasManifests,
 			HasChart:     ref.Source != "",
 			IsOCI:        isOCI,
@@ -384,24 +384,11 @@ func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInpu
 		}
 	}
 
-	// Build reversed component list for uninstall
-	reversed := make([]ComponentData, len(components))
-	for i, comp := range components {
-		reversed[len(components)-1-i] = comp
-	}
-
-	data := struct {
-		RecipeVersion      string
-		BundlerVersion     string
-		Components         []ComponentData
-		ComponentsReversed []ComponentData
-		Criteria           []string
-		Constraints        []recipe.Constraint
-	}{
+	data := readmeTemplateData{
 		RecipeVersion:      input.RecipeResult.Metadata.Version,
 		BundlerVersion:     input.Version,
 		Components:         components,
-		ComponentsReversed: reversed,
+		ComponentsReversed: reverseComponents(components),
 		Criteria:           criteriaLines,
 		Constraints:        input.RecipeResult.Constraints,
 	}
@@ -420,10 +407,7 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 		return "", 0, err
 	}
 
-	data := struct {
-		BundlerVersion string
-		Components     []ComponentData
-	}{
+	data := deployTemplateData{
 		BundlerVersion: input.Version,
 		Components:     components,
 	}
@@ -447,18 +431,9 @@ func (g *Generator) generateUndeployScript(ctx context.Context, input *Generator
 		return "", 0, err
 	}
 
-	// Build reversed component list for uninstall order
-	reversed := make([]ComponentData, len(components))
-	for i, comp := range components {
-		reversed[len(components)-1-i] = comp
-	}
-
-	data := struct {
-		BundlerVersion     string
-		ComponentsReversed []ComponentData
-	}{
+	data := undeployTemplateData{
 		BundlerVersion:     input.Version,
-		ComponentsReversed: reversed,
+		ComponentsReversed: reverseComponents(components),
 	}
 
 	undeployPath, undeploySize, err := shared.GenerateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
@@ -472,6 +447,37 @@ func (g *Generator) generateUndeployScript(ctx context.Context, input *Generator
 	}
 
 	return undeployPath, undeploySize, nil
+}
+
+// readmeTemplateData is the template data for root README.md generation.
+type readmeTemplateData struct {
+	RecipeVersion      string
+	BundlerVersion     string
+	Components         []ComponentData
+	ComponentsReversed []ComponentData
+	Criteria           []string
+	Constraints        []recipe.Constraint
+}
+
+// deployTemplateData is the template data for deploy.sh generation.
+type deployTemplateData struct {
+	BundlerVersion string
+	Components     []ComponentData
+}
+
+// undeployTemplateData is the template data for undeploy.sh generation.
+type undeployTemplateData struct {
+	BundlerVersion     string
+	ComponentsReversed []ComponentData
+}
+
+// reverseComponents returns a reversed copy of the component list (for uninstall order).
+func reverseComponents(components []ComponentData) []ComponentData {
+	reversed := make([]ComponentData, len(components))
+	for i, comp := range components {
+		reversed[len(components)-1-i] = comp
+	}
+	return reversed
 }
 
 // manifestData provides Helm-compatible template data for rendering manifests.
@@ -567,76 +573,4 @@ func hasYAMLObjects(content []byte) bool {
 		return true
 	}
 	return false
-}
-
-// normalizeVersion ensures version string is valid for Helm (semver without 'v' prefix for chart version)
-func normalizeVersion(v string) string {
-	// Remove 'v' prefix if present for chart version
-	v = strings.TrimPrefix(v, "v")
-	// Default to 0.1.0 if empty
-	if v == "" {
-		return "0.1.0"
-	}
-	return v
-}
-
-// SortComponentsByDeploymentOrder sorts component names according to deployment order.
-func SortComponentsByDeploymentOrder(components []string, deploymentOrder []string) []string {
-	orderMap := make(map[string]int)
-	for i, name := range deploymentOrder {
-		orderMap[name] = i
-	}
-
-	sorted := make([]string, len(components))
-	copy(sorted, components)
-
-	sort.Slice(sorted, func(i, j int) bool {
-		orderI, okI := orderMap[sorted[i]]
-		orderJ, okJ := orderMap[sorted[j]]
-		if okI && okJ {
-			return orderI < orderJ
-		}
-		if okI {
-			return true
-		}
-		if okJ {
-			return false
-		}
-		return sorted[i] < sorted[j]
-	})
-
-	return sorted
-}
-
-// sortComponentRefsByDeploymentOrder sorts component refs by deployment order.
-func sortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []string) []recipe.ComponentRef {
-	if len(order) == 0 {
-		return refs
-	}
-
-	orderMap := make(map[string]int, len(order))
-	for i, name := range order {
-		orderMap[name] = i
-	}
-
-	sorted := make([]recipe.ComponentRef, len(refs))
-	copy(sorted, refs)
-
-	sort.SliceStable(sorted, func(i, j int) bool {
-		orderI, okI := orderMap[sorted[i].Name]
-		orderJ, okJ := orderMap[sorted[j].Name]
-
-		if !okI && !okJ {
-			return sorted[i].Name < sorted[j].Name
-		}
-		if !okI {
-			return false
-		}
-		if !okJ {
-			return true
-		}
-		return orderI < orderJ
-	})
-
-	return sorted
 }

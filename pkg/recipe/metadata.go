@@ -17,6 +17,8 @@ package recipe
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -408,9 +410,7 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 		if result.Overrides == nil {
 			result.Overrides = make(map[string]any)
 		}
-		for k, v := range overlay.Overrides {
-			result.Overrides[k] = v
-		}
+		maps.Copy(result.Overrides, overlay.Overrides)
 	}
 
 	// Patches: overlay replaces if set
@@ -539,7 +539,7 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 
 	// Kahn's algorithm
 	// https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/
-	var queue []string
+	queue := make([]string, 0, len(inDegree))
 	for name, degree := range inDegree {
 		if degree == 0 {
 			queue = append(queue, name)
@@ -548,7 +548,7 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 	// Sort queue for deterministic output
 	sort.Strings(queue)
 
-	var result []string
+	result := make([]string, 0, len(s.ComponentRefs))
 	dependents := make(map[string][]string) // dep -> list of components that depend on it
 	for _, c := range s.ComponentRefs {
 		for _, dep := range c.DependencyRefs {
@@ -564,10 +564,10 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 		for _, dependent := range dependents[node] {
 			inDegree[dependent]--
 			if inDegree[dependent] == 0 {
-				queue = append(queue, dependent)
+				idx := sort.SearchStrings(queue, dependent)
+				queue = slices.Insert(queue, idx, dependent)
 			}
 		}
-		sort.Strings(queue)
 	}
 
 	// Check if all nodes were processed (no cycles)

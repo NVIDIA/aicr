@@ -18,12 +18,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"text/template"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/eidos/pkg/errors"
+	"github.com/NVIDIA/eidos/pkg/recipe"
 )
 
 // IsSafePathComponent returns true if name is a single path component without
@@ -113,4 +115,87 @@ func GenerateFromTemplate(tmplContent string, data any, baseDir, filename string
 	}
 
 	return outputPath, int64(len(content)), nil
+}
+
+// NormalizeVersion removes the 'v' prefix from a version string.
+// It returns the input unchanged if no prefix is present.
+func NormalizeVersion(v string) string {
+	return strings.TrimPrefix(v, "v")
+}
+
+// NormalizeVersionWithDefault removes the 'v' prefix and defaults empty
+// strings to "0.1.0". Use this for Helm chart metadata where a version
+// is always required.
+func NormalizeVersionWithDefault(v string) string {
+	v = strings.TrimPrefix(v, "v")
+	if v == "" {
+		return "0.1.0"
+	}
+	return v
+}
+
+// SortComponentRefsByDeploymentOrder sorts component refs by deployment order.
+// Components in the order list are sorted by their position; components not in
+// the order list are placed after ordered components and sorted alphabetically.
+func SortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []string) []recipe.ComponentRef {
+	if len(order) == 0 {
+		return refs
+	}
+
+	orderMap := make(map[string]int, len(order))
+	for i, name := range order {
+		orderMap[name] = i
+	}
+
+	sorted := make([]recipe.ComponentRef, len(refs))
+	copy(sorted, refs)
+
+	sort.SliceStable(sorted, func(i, j int) bool {
+		orderI, okI := orderMap[sorted[i].Name]
+		orderJ, okJ := orderMap[sorted[j].Name]
+
+		if !okI && !okJ {
+			return sorted[i].Name < sorted[j].Name
+		}
+		if !okI {
+			return false
+		}
+		if !okJ {
+			return true
+		}
+		return orderI < orderJ
+	})
+
+	return sorted
+}
+
+// SortComponentNamesByDeploymentOrder sorts component name strings according
+// to deployment order. Components in the order list are sorted by their
+// position; components not in the order list are placed after ordered
+// components and sorted alphabetically.
+func SortComponentNamesByDeploymentOrder(components []string, deploymentOrder []string) []string {
+	orderMap := make(map[string]int)
+	for i, name := range deploymentOrder {
+		orderMap[name] = i
+	}
+
+	sorted := make([]string, len(components))
+	copy(sorted, components)
+
+	sort.Slice(sorted, func(i, j int) bool {
+		orderI, okI := orderMap[sorted[i]]
+		orderJ, okJ := orderMap[sorted[j]]
+		if okI && okJ {
+			return orderI < orderJ
+		}
+		if okI {
+			return true
+		}
+		if okJ {
+			return false
+		}
+		return sorted[i] < sorted[j]
+	})
+
+	return sorted
 }

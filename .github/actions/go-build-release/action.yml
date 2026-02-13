@@ -20,6 +20,10 @@ inputs:
     description: 'Container registry (e.g. ghcr.io)'
     required: false
     default: 'ghcr.io'
+  ko_version:
+    description: 'ko version (e.g. v0.18.0)'
+    required: false
+    default: 'v0.18.0'
 
 outputs:
   release_outcome:
@@ -33,6 +37,7 @@ runs:
       uses: ./.github/actions/setup-build-tools
       with:
         install_ko: 'true'
+        ko_version: ${{ inputs.ko_version }}
         install_syft: 'true'
         install_goreleaser: 'true'
 
@@ -46,6 +51,7 @@ runs:
       shell: bash
       env:
         GITHUB_TOKEN: ${{ github.token }}
+        GOFLAGS: -mod=vendor
         # Repository paths are fully specified in .goreleaser.yaml kos.repositories
       run: |
         set -euo pipefail

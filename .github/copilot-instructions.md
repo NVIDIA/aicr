@@ -38,7 +38,7 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
 - **Bundlers**: Plugin-based artifact generators (GPU Operator, Network Operator, Cert-Manager, NVSentinel, Skyhook, DRA Driver)
 - **Deployers**: GitOps integration providers (helm, argocd) with deployment ordering
 
-**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.6, Container images via Ko
+**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.9, Container images via Ko
 
 **Package Architecture (Critical Principle):**
 - **User Interaction Packages** (`pkg/cli`, `pkg/api`): Focus solely on capturing user intent, validating input, and formatting output. No business logic.
@@ -332,7 +332,7 @@ eidos bundle -r recipe.yaml \
 - **[API Reference](../docs/user/api-reference.md)** – REST API endpoints
 - **[GitHub Actions README](actions/README.md)** – CI/CD architecture
 - **[API Specification](../api/eidos/v1/server.yaml)** – OpenAPI spec
-- **[.versions.yaml](../.versions.yaml)** – Tool versions (single source of truth)
+- **[.settings.yaml](../.settings.yaml)** – Project settings: tool versions, quality thresholds, build/test config
 
 ---
 
@@ -707,7 +707,7 @@ jobs:
       - uses: ./.github/actions/go-ci
         with:
           go_version: '1.25'
-          golangci_lint_version: 'v2.6.2'
+          golangci_lint_version: 'v2.9.0'
           coverage_report: 'true'
       - uses: ./.github/actions/security-scan
   integration:

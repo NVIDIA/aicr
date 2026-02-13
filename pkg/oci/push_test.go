@@ -241,9 +241,6 @@ func TestPushOptions_Defaults(t *testing.T) {
 	if opts.InsecureTLS != false {
 		t.Error("InsecureTLS should default to false")
 	}
-	if opts.SubDir != "" {
-		t.Error("SubDir should default to empty string")
-	}
 }
 
 func TestPushResult_Fields(t *testing.T) {

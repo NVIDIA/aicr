@@ -15,8 +15,7 @@
 package readiness
 
 import (
-	"fmt"
-
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/measurement"
 	"github.com/NVIDIA/eidos/pkg/validator/checks"
 )
@@ -34,7 +33,7 @@ func init() {
 // CheckGPUHardwareDetection validates that GPU hardware is properly detected.
 func CheckGPUHardwareDetection(ctx *checks.ValidationContext) error {
 	if ctx.Snapshot == nil {
-		return fmt.Errorf("snapshot is nil")
+		return errors.New(errors.ErrCodeInvalidRequest, "snapshot is nil")
 	}
 
 	// Find GPU measurement in snapshot
@@ -47,12 +46,12 @@ func CheckGPUHardwareDetection(ctx *checks.ValidationContext) error {
 	}
 
 	if gpuMeasurement == nil {
-		return fmt.Errorf("no GPU measurement found in snapshot")
+		return errors.New(errors.ErrCodeNotFound, "no GPU measurement found in snapshot")
 	}
 
 	// Validate that GPU measurement has subtypes with data
 	if len(gpuMeasurement.Subtypes) == 0 {
-		return fmt.Errorf("GPU measurement has no subtypes")
+		return errors.New(errors.ErrCodeInvalidRequest, "GPU measurement has no subtypes")
 	}
 
 	// Check that at least one subtype has GPU data
@@ -65,7 +64,7 @@ func CheckGPUHardwareDetection(ctx *checks.ValidationContext) error {
 	}
 
 	if !hasGPUData {
-		return fmt.Errorf("GPU measurement has no data in any subtype")
+		return errors.New(errors.ErrCodeNotFound, "GPU measurement has no data in any subtype")
 	}
 
 	return nil

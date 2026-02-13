@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -197,6 +198,111 @@ func TestMetadataStore_ResolveInheritanceChain(t *testing.T) {
 			t.Fatalf("chain length = %d, want 1", len(chain))
 		}
 	})
+}
+
+func TestMetadataStore_EvaluateOverlayConstraints(t *testing.T) {
+	tests := []struct {
+		name         string
+		constraints  []Constraint
+		evaluator    ConstraintEvaluatorFunc
+		wantPassed   bool
+		wantWarnings int
+	}{
+		{
+			name:        "no constraints passes",
+			constraints: nil,
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{Passed: true}
+			},
+			wantPassed:   true,
+			wantWarnings: 0,
+		},
+		{
+			name: "all constraints pass",
+			constraints: []Constraint{
+				{Name: "k8s", Value: ">= 1.30"},
+				{Name: "os", Value: "ubuntu"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{Passed: true, Actual: "matched"}
+			},
+			wantPassed:   true,
+			wantWarnings: 0,
+		},
+		{
+			name: "one constraint fails",
+			constraints: []Constraint{
+				{Name: "k8s", Value: ">= 1.30"},
+				{Name: "os", Value: "ubuntu"},
+			},
+			evaluator: func(c Constraint) ConstraintEvalResult {
+				if c.Name == "os" {
+					return ConstraintEvalResult{Passed: false, Actual: "rhel"}
+				}
+				return ConstraintEvalResult{Passed: true, Actual: "1.31"}
+			},
+			wantPassed:   false,
+			wantWarnings: 1,
+		},
+		{
+			name: "evaluator returns error",
+			constraints: []Constraint{
+				{Name: "k8s", Value: ">= 1.30"},
+			},
+			evaluator: func(_ Constraint) ConstraintEvalResult {
+				return ConstraintEvalResult{
+					Passed: false,
+					Actual: "unknown",
+					Error:  fmt.Errorf("value not found"),
+				}
+			},
+			wantPassed:   false,
+			wantWarnings: 1,
+		},
+		{
+			name: "mixed pass fail error",
+			constraints: []Constraint{
+				{Name: "k8s", Value: ">= 1.30"},
+				{Name: "os", Value: "ubuntu"},
+				{Name: "gpu", Value: "h100"},
+			},
+			evaluator: func(c Constraint) ConstraintEvalResult {
+				switch c.Name {
+				case "k8s":
+					return ConstraintEvalResult{Passed: true, Actual: "1.31"}
+				case "os":
+					return ConstraintEvalResult{Passed: false, Actual: "rhel"}
+				default:
+					return ConstraintEvalResult{Error: fmt.Errorf("not found")}
+				}
+			},
+			wantPassed:   false,
+			wantWarnings: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			overlay := &RecipeMetadata{}
+			overlay.Metadata.Name = "test-overlay"
+			overlay.Spec.Constraints = tt.constraints
+
+			store := &MetadataStore{}
+			passed, warnings := store.evaluateOverlayConstraints(overlay, tt.evaluator)
+
+			if passed != tt.wantPassed {
+				t.Errorf("passed = %v, want %v", passed, tt.wantPassed)
+			}
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("warnings count = %d, want %d", len(warnings), tt.wantWarnings)
+			}
+			for _, w := range warnings {
+				if w.Overlay != "test-overlay" {
+					t.Errorf("warning Overlay = %q, want %q", w.Overlay, "test-overlay")
+				}
+			}
+		})
+	}
 }
 
 func TestMetadataStore_FindMatchingOverlays(t *testing.T) {

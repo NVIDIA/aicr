@@ -74,7 +74,8 @@ Make Snapshot:
 eidos snapshot \
     --deploy-agent \
     --namespace gpu-operator \
-    --node-selector nodeGroup=customer-gpu
+    --node-selector nodeGroup=customer-gpu \
+    --output cm://gpu-operator/eidos-snapshot
 ```
 
 Check Snapshot in ConfigMap:
@@ -166,13 +167,6 @@ Prep the deployment:
 
 ```shell
 chmod +x deploy.sh && ./deploy.sh
-tree .
-```
-
-Validate Bundle: 
-
-```shell
-helm lint .
 ```
 
 View bundle README: 

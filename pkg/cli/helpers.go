@@ -19,6 +19,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/serializer"
 )
 
@@ -27,7 +28,7 @@ import (
 func parseOutputFormat(cmd *cli.Command) (serializer.Format, error) {
 	outFormat := serializer.Format(cmd.String("format"))
 	if outFormat.IsUnknown() {
-		return "", fmt.Errorf("unknown output format: %q, valid formats are: yaml, json, table", outFormat)
+		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("unknown output format: %q, valid formats are: yaml, json, table", outFormat))
 	}
 	return outFormat, nil
 }
@@ -37,7 +38,7 @@ func parseOutputFormat(cmd *cli.Command) (serializer.Format, error) {
 func validateSingleValueFlags(cmd *cli.Command, flagNames ...string) error {
 	for _, name := range flagNames {
 		if cmd.Count(name) > 1 {
-			return fmt.Errorf("flag --%s can only be specified once", name)
+			return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("flag --%s can only be specified once", name))
 		}
 	}
 	return nil

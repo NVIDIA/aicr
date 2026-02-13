@@ -151,7 +151,7 @@
 //	// API servers: Use structured JSON logger
 //	func main() {
 //	    logging.SetDefaultStructuredLogger("myapp", version)
-//	    defer slog.Debug("application started")
+//	    slog.Info("application started")
 //	    // ...
 //	}
 //

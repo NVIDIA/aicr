@@ -226,49 +226,25 @@ func (s *MetadataStore) FindMatchingOverlays(criteria *Criteria) []*RecipeMetada
 	return matches
 }
 
-// BuildRecipeResult builds a RecipeResult by merging base with matching overlays.
-// Each matching overlay is resolved through its inheritance chain before merging.
-// This enables multi-level inheritance: base → intermediate → overlay.
-func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteria) (*RecipeResult, error) {
-	// Check if ctx has been canceled and exit early if so
-	select {
-	case <-ctx.Done():
-		return nil, eidoserrors.WrapWithContext(
-			eidoserrors.ErrCodeTimeout,
-			"build recipe result context cancelled during initialization",
-			ctx.Err(),
-			map[string]any{
-				"stage": "initialization",
-			},
-		)
-	default:
-	}
-
-	// Find matching overlays (sorted by specificity, least specific first)
-	overlays := s.FindMatchingOverlays(criteria)
-
-	// Track all applied recipes (from inheritance chains)
-	appliedOverlays := make([]string, 0)
-
-	// Start with the base spec
+// initBaseMergedSpec creates a copy of the base spec for overlay merging.
+func (s *MetadataStore) initBaseMergedSpec() (RecipeMetadataSpec, []string) {
 	mergedSpec := RecipeMetadataSpec{
 		Constraints:   make([]Constraint, len(s.Base.Spec.Constraints)),
 		ComponentRefs: make([]ComponentRef, len(s.Base.Spec.ComponentRefs)),
 	}
 	copy(mergedSpec.Constraints, s.Base.Spec.Constraints)
 	copy(mergedSpec.ComponentRefs, s.Base.Spec.ComponentRefs)
-	appliedOverlays = append(appliedOverlays, "base")
+	return mergedSpec, []string{"base"}
+}
 
-	// For each matching overlay, resolve its inheritance chain and merge
-	// We only apply the leaf overlay's chain, not intermediate ones
-	// This avoids double-applying recipes that appear in multiple chains
-	processedChains := make(map[string]bool) // Track which recipes we've already applied
+// mergeOverlayChains resolves inheritance chains and merges overlays into the spec.
+func (s *MetadataStore) mergeOverlayChains(overlays []*RecipeMetadata, mergedSpec *RecipeMetadataSpec, appliedOverlays []string) ([]string, error) {
+	processedChains := make(map[string]bool)
 
 	for _, overlay := range overlays {
-		// Resolve the full inheritance chain for this overlay
 		chain, err := s.resolveInheritanceChain(overlay.Metadata.Name)
 		if err != nil {
-			return nil, eidoserrors.WrapWithContext(
+			return appliedOverlays, eidoserrors.WrapWithContext(
 				eidoserrors.ErrCodeInvalidRequest,
 				"failed to resolve inheritance chain",
 				err,
@@ -278,12 +254,11 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 			)
 		}
 
-		// Apply each recipe in the chain that hasn't been applied yet
 		// Skip base (index 0) since we already started with it
 		for i := 1; i < len(chain); i++ {
 			recipe := chain[i]
 			if processedChains[recipe.Metadata.Name] {
-				continue // Already applied this recipe
+				continue
 			}
 			processedChains[recipe.Metadata.Name] = true
 			mergedSpec.Merge(&recipe.Spec)
@@ -291,28 +266,22 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 		}
 	}
 
-	// Warn if no overlays matched - user is getting base-only configuration
-	if len(appliedOverlays) <= 1 { // Only "base" was applied
-		slog.Warn("no environment-specific overlays matched, using base configuration only",
-			"criteria", criteria.String(),
-			"hint", "recipe may not be optimized for your environment")
-	}
+	return appliedOverlays, nil
+}
 
-	// Validate merged dependencies
+// finalizeRecipeResult validates, sorts, and builds the final RecipeResult.
+func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, appliedOverlays []string) (*RecipeResult, error) {
 	if err := mergedSpec.ValidateDependencies(); err != nil {
 		return nil, eidoserrors.Wrap(eidoserrors.ErrCodeInvalidRequest, "merged recipe validation failed", err)
 	}
 
-	// Compute deployment order
 	deployOrder, err := mergedSpec.TopologicalSort()
 	if err != nil {
 		return nil, eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to compute deployment order", err)
 	}
 
-	// Apply registry defaults to component refs
 	applyRegistryDefaults(mergedSpec.ComponentRefs)
 
-	// Build result
 	result := &RecipeResult{
 		Kind:            "recipeResult",
 		APIVersion:      "eidos.nvidia.com/v1alpha1",
@@ -326,6 +295,38 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 	return result, nil
 }
 
+// BuildRecipeResult builds a RecipeResult by merging base with matching overlays.
+// Each matching overlay is resolved through its inheritance chain before merging.
+// This enables multi-level inheritance: base → intermediate → overlay.
+func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteria) (*RecipeResult, error) {
+	select {
+	case <-ctx.Done():
+		return nil, eidoserrors.WrapWithContext(
+			eidoserrors.ErrCodeTimeout,
+			"build recipe result context cancelled during initialization",
+			ctx.Err(),
+			map[string]any{"stage": "initialization"},
+		)
+	default:
+	}
+
+	overlays := s.FindMatchingOverlays(criteria)
+	mergedSpec, appliedOverlays := s.initBaseMergedSpec()
+
+	appliedOverlays, err := s.mergeOverlayChains(overlays, &mergedSpec, appliedOverlays)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(appliedOverlays) <= 1 {
+		slog.Warn("no environment-specific overlays matched, using base configuration only",
+			"criteria", criteria.String(),
+			"hint", "recipe may not be optimized for your environment")
+	}
+
+	return finalizeRecipeResult(criteria, &mergedSpec, appliedOverlays)
+}
+
 // BuildRecipeResultWithEvaluator builds a RecipeResult by merging base with matching overlays,
 // filtering overlays based on constraint evaluation using the provided evaluator function.
 //
@@ -337,29 +338,24 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 // The evaluator function is called for each constraint in each matching overlay.
 // If evaluator is nil, this method behaves identically to BuildRecipeResult.
 func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, criteria *Criteria, evaluator ConstraintEvaluatorFunc) (*RecipeResult, error) {
-	// If no evaluator provided, use the standard build method
 	if evaluator == nil {
 		return s.BuildRecipeResult(ctx, criteria)
 	}
 
-	// Check if ctx has been canceled
 	select {
 	case <-ctx.Done():
 		return nil, eidoserrors.WrapWithContext(
 			eidoserrors.ErrCodeTimeout,
 			"build recipe result context cancelled during initialization",
 			ctx.Err(),
-			map[string]any{
-				"stage": "initialization",
-			},
+			map[string]any{"stage": "initialization"},
 		)
 	default:
 	}
 
-	// Find matching overlays (sorted by specificity, least specific first)
+	// Find matching overlays and filter by constraint evaluation
 	overlays := s.FindMatchingOverlays(criteria)
 
-	// Evaluate constraints and filter overlays
 	var filteredOverlays []*RecipeMetadata
 	var excludedOverlays []string
 	var constraintWarnings []ConstraintWarning
@@ -383,49 +379,13 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		}
 	}
 
-	// Track all applied recipes (from inheritance chains)
-	appliedOverlays := make([]string, 0)
+	mergedSpec, appliedOverlays := s.initBaseMergedSpec()
 
-	// Start with the base spec
-	mergedSpec := RecipeMetadataSpec{
-		Constraints:   make([]Constraint, len(s.Base.Spec.Constraints)),
-		ComponentRefs: make([]ComponentRef, len(s.Base.Spec.ComponentRefs)),
-	}
-	copy(mergedSpec.Constraints, s.Base.Spec.Constraints)
-	copy(mergedSpec.ComponentRefs, s.Base.Spec.ComponentRefs)
-	appliedOverlays = append(appliedOverlays, "base")
-
-	// For each filtered overlay, resolve its inheritance chain and merge
-	processedChains := make(map[string]bool)
-
-	for _, overlay := range filteredOverlays {
-		// Resolve the full inheritance chain for this overlay
-		chain, err := s.resolveInheritanceChain(overlay.Metadata.Name)
-		if err != nil {
-			return nil, eidoserrors.WrapWithContext(
-				eidoserrors.ErrCodeInvalidRequest,
-				"failed to resolve inheritance chain",
-				err,
-				map[string]any{
-					"overlay": overlay.Metadata.Name,
-				},
-			)
-		}
-
-		// Apply each recipe in the chain that hasn't been applied yet
-		// Skip base (index 0) since we already started with it
-		for i := 1; i < len(chain); i++ {
-			recipe := chain[i]
-			if processedChains[recipe.Metadata.Name] {
-				continue
-			}
-			processedChains[recipe.Metadata.Name] = true
-			mergedSpec.Merge(&recipe.Spec)
-			appliedOverlays = append(appliedOverlays, recipe.Metadata.Name)
-		}
+	appliedOverlays, err := s.mergeOverlayChains(filteredOverlays, &mergedSpec, appliedOverlays)
+	if err != nil {
+		return nil, err
 	}
 
-	// Log information about filtered overlays
 	if len(excludedOverlays) > 0 {
 		slog.Warn("some overlays were excluded due to constraint failures",
 			"excluded", excludedOverlays,
@@ -433,7 +393,6 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 			"criteria", criteria.String())
 	}
 
-	// Warn if no overlays were applied
 	if len(appliedOverlays) <= 1 {
 		if len(excludedOverlays) > 0 {
 			slog.Warn("all matching overlays were excluded due to constraint failures, using base configuration only",
@@ -446,30 +405,10 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 		}
 	}
 
-	// Validate merged dependencies
-	if err := mergedSpec.ValidateDependencies(); err != nil {
-		return nil, eidoserrors.Wrap(eidoserrors.ErrCodeInvalidRequest, "merged recipe validation failed", err)
-	}
-
-	// Compute deployment order
-	deployOrder, err := mergedSpec.TopologicalSort()
+	result, err := finalizeRecipeResult(criteria, &mergedSpec, appliedOverlays)
 	if err != nil {
-		return nil, eidoserrors.Wrap(eidoserrors.ErrCodeInternal, "failed to compute deployment order", err)
+		return nil, err
 	}
-
-	// Apply registry defaults to component refs
-	applyRegistryDefaults(mergedSpec.ComponentRefs)
-
-	// Build result
-	result := &RecipeResult{
-		Kind:            "recipeResult",
-		APIVersion:      "eidos.nvidia.com/v1alpha1",
-		Criteria:        criteria,
-		Constraints:     mergedSpec.Constraints,
-		ComponentRefs:   mergedSpec.ComponentRefs,
-		DeploymentOrder: deployOrder,
-	}
-	result.Metadata.AppliedOverlays = appliedOverlays
 	result.Metadata.ExcludedOverlays = excludedOverlays
 	result.Metadata.ConstraintWarnings = constraintWarnings
 

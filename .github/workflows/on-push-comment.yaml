@@ -29,9 +29,16 @@ permissions:
   pull-requests: write
 
 jobs:
+  # COUPLING: This workflow depends on "On Push Qualification" producing these artifacts:
+  #   - coverage-pr (coverage.out from PR build)
+  #   - coverage-comment-data (JSON: coverage, threshold, pass, color, pr_number)
+  #   - coverage-baseline (coverage.out from last successful main build)
+  # Renaming the workflow or these artifacts will silently break PR comments.
+
   post-coverage-comment:
     name: Post Coverage Comment
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Run for PRs regardless of conclusion - coverage might exist even if other steps failed
     if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.head_repository.fork == false
     permissions:
@@ -43,6 +50,7 @@ jobs:
         with:
           sparse-checkout: go.mod
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Setup Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0

@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/urfave/cli/v3"
@@ -179,8 +180,8 @@ func TestValidateSingleValueFlags(t *testing.T) {
 			if (gotErr != nil) != tt.wantErr {
 				t.Errorf("validateSingleValueFlags() error = %v, wantErr %v", gotErr, tt.wantErr)
 			}
-			if tt.wantErr && gotErr != nil && gotErr.Error() != tt.errMsg {
-				t.Errorf("validateSingleValueFlags() error message = %q, want %q", gotErr.Error(), tt.errMsg)
+			if tt.wantErr && gotErr != nil && !strings.Contains(gotErr.Error(), tt.errMsg) {
+				t.Errorf("validateSingleValueFlags() error message = %q, want containing %q", gotErr.Error(), tt.errMsg)
 			}
 		})
 	}

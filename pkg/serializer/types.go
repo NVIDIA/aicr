@@ -23,7 +23,7 @@
 //
 //	writer := serializer.NewWriter(serializer.FormatJSON, os.Stdout)
 //	defer writer.Close() // Important: close to release file handles
-//	if err := writer.Serialize(data); err != nil {
+//	if err := writer.Serialize(ctx, data); err != nil {
 //		log.Fatal(err)
 //	}
 //

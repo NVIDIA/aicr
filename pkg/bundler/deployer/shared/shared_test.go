@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/eidos/pkg/recipe"
 )
 
 func TestIsSafePathComponent(t *testing.T) {
@@ -192,4 +194,156 @@ func TestGenerateFromTemplate(t *testing.T) {
 			t.Errorf("output path %q not under base dir %q", path, absDir)
 		}
 	})
+}
+
+func TestNormalizeVersion(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"v1.0.0", "1.0.0"},
+		{"1.0.0", "1.0.0"},
+		{"v25.3.3", "25.3.3"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := NormalizeVersion(tt.input)
+			if result != tt.expected {
+				t.Errorf("NormalizeVersion(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestNormalizeVersionWithDefault(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"v1.0.0", "1.0.0"},
+		{"1.0.0", "1.0.0"},
+		{"v0.1.0-alpha", "0.1.0-alpha"},
+		{"", "0.1.0"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := NormalizeVersionWithDefault(tt.input)
+			if result != tt.expected {
+				t.Errorf("NormalizeVersionWithDefault(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSortComponentRefsByDeploymentOrder(t *testing.T) {
+	tests := []struct {
+		name     string
+		refs     []recipe.ComponentRef
+		order    []string
+		expected []string
+	}{
+		{
+			name: "ordered",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+				{Name: "cert-manager"},
+				{Name: "network-operator"},
+			},
+			order:    []string{"cert-manager", "gpu-operator", "network-operator"},
+			expected: []string{"cert-manager", "gpu-operator", "network-operator"},
+		},
+		{
+			name: "empty order preserves input",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+				{Name: "cert-manager"},
+			},
+			order:    []string{},
+			expected: []string{"gpu-operator", "cert-manager"},
+		},
+		{
+			name: "partial order",
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+				{Name: "cert-manager"},
+				{Name: "network-operator"},
+			},
+			order:    []string{"cert-manager"},
+			expected: []string{"cert-manager", "gpu-operator", "network-operator"},
+		},
+		{
+			name: "component not in order goes last",
+			refs: []recipe.ComponentRef{
+				{Name: "unknown"},
+				{Name: "gpu-operator"},
+			},
+			order:    []string{"gpu-operator"},
+			expected: []string{"gpu-operator", "unknown"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SortComponentRefsByDeploymentOrder(tt.refs, tt.order)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d components, got %d", len(tt.expected), len(result))
+			}
+			for i, name := range tt.expected {
+				if result[i].Name != name {
+					t.Errorf("position %d: expected %s, got %s", i, name, result[i].Name)
+				}
+			}
+		})
+	}
+}
+
+func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
+	tests := []struct {
+		name     string
+		comps    []string
+		order    []string
+		expected []string
+	}{
+		{
+			name:     "all in order map",
+			comps:    []string{"gpu-operator", "cert-manager", "network-operator"},
+			order:    []string{"cert-manager", "gpu-operator", "network-operator"},
+			expected: []string{"cert-manager", "gpu-operator", "network-operator"},
+		},
+		{
+			name:     "only one in order map",
+			comps:    []string{"alpha", "gpu-operator"},
+			order:    []string{"gpu-operator"},
+			expected: []string{"gpu-operator", "alpha"},
+		},
+		{
+			name:     "neither in order map",
+			comps:    []string{"zebra", "alpha"},
+			order:    []string{"gpu-operator"},
+			expected: []string{"alpha", "zebra"},
+		},
+		{
+			name:     "empty deployment order",
+			comps:    []string{"b", "a"},
+			order:    nil,
+			expected: []string{"a", "b"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := SortComponentNamesByDeploymentOrder(tt.comps, tt.order)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("expected %d components, got %d", len(tt.expected), len(result))
+			}
+			for i, name := range tt.expected {
+				if result[i] != name {
+					t.Errorf("position %d: expected %s, got %s", i, name, result[i])
+				}
+			}
+		})
+	}
 }

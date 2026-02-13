@@ -176,7 +176,7 @@ func initDataProvider(cmd *cli.Command) error {
 		AllowSymlinks: false,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to initialize external data: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
 	}
 
 	// Set as global data provider

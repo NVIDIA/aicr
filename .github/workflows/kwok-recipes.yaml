@@ -55,6 +55,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Load versions
         id: versions
@@ -69,6 +71,7 @@ jobs:
           helm_version: ${{ steps.versions.outputs.helm }}
           kwok_version: ${{ steps.versions.outputs.kwok }}
           kubectl_version: ${{ steps.versions.outputs.kubectl }}
+          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
   summary:
     name: KWOK Test Summary

@@ -20,6 +20,10 @@ inputs:
     description: 'Install ko (true/false)'
     required: false
     default: 'false'
+  ko_version:
+    description: 'ko version (e.g. v0.18.0)'
+    required: false
+    default: 'v0.18.0'
   install_syft:
     description: 'Install syft (true/false)'
     required: false
@@ -46,10 +50,21 @@ runs:
       run: |
         set -euo pipefail
         # Install ko from binary release (go install puts in GOPATH which isn't in PATH)
-        KO_VERSION="0.18.0"  # From .versions.yaml
-        KO_URL="https://github.com/ko-build/ko/releases/download/v${KO_VERSION}/ko_${KO_VERSION}_Linux_x86_64.tar.gz"
+        # Strip 'v' prefix for URL construction
+        KO_VERSION="${{ inputs.ko_version }}"
+        KO_VERSION="${KO_VERSION#v}"
+        KO_BASE="https://github.com/ko-build/ko/releases/download/v${KO_VERSION}"
+        KO_TAR="ko_${KO_VERSION}_Linux_x86_64.tar.gz"
         KO_TMP="$(mktemp -d)"
-        curl -fsSL "$KO_URL" | tar -xzC "$KO_TMP"
+        curl -fsSL -o "${KO_TMP}/${KO_TAR}" "${KO_BASE}/${KO_TAR}"
+        curl -fsSL -o "${KO_TMP}/checksums.txt" "${KO_BASE}/checksums.txt"
+        EXPECTED=$(grep "${KO_TAR}" "${KO_TMP}/checksums.txt" | head -1 | awk '{print $1}')
+        ACTUAL=$(sha256sum "${KO_TMP}/${KO_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::ko checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${KO_TMP}/${KO_TAR}" -C "${KO_TMP}"
         sudo mv "$KO_TMP/ko" /usr/local/bin/ko
         sudo chmod +x /usr/local/bin/ko
         rm -rf "$KO_TMP"
@@ -68,9 +83,18 @@ runs:
         # Strip 'v' prefix for URL construction
         CRANE_VERSION="${{ inputs.crane_version }}"
         CRANE_VERSION="${CRANE_VERSION#v}"
-        CRANE_URL="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+        CRANE_BASE="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}"
+        CRANE_TAR="go-containerregistry_Linux_x86_64.tar.gz"
         CRANE_TMP="$(mktemp -d)"
-        curl -fsSL "$CRANE_URL" | tar -xzC "$CRANE_TMP"
+        curl -fsSL -o "${CRANE_TMP}/${CRANE_TAR}" "${CRANE_BASE}/${CRANE_TAR}"
+        curl -fsSL -o "${CRANE_TMP}/checksums.txt" "${CRANE_BASE}/checksums.txt"
+        EXPECTED=$(grep "${CRANE_TAR}" "${CRANE_TMP}/checksums.txt" | head -1 | awk '{print $1}')
+        ACTUAL=$(sha256sum "${CRANE_TMP}/${CRANE_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::crane checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${CRANE_TMP}/${CRANE_TAR}" -C "${CRANE_TMP}"
         sudo mv "$CRANE_TMP/crane" /usr/local/bin/crane
         sudo chmod +x /usr/local/bin/crane
         rm -rf "$CRANE_TMP"

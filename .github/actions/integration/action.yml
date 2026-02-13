@@ -19,6 +19,10 @@ inputs:
   go_version:
     description: 'Go version to install (e.g., 1.25)'
     required: true
+  chainsaw_version:
+    description: 'Chainsaw version to install (e.g., v0.2.14)'
+    required: false
+    default: 'v0.2.14'
 
 runs:
   using: 'composite'
@@ -28,7 +32,9 @@ runs:
       with:
         go-version: '${{ inputs.go_version }}'
         cache: true
-        cache-dependency-path: 'go.sum'
+        cache-dependency-path: |
+          go.sum
+          vendor/modules.txt
         check-latest: true
 
     - name: Setup build tools
@@ -44,8 +50,10 @@ runs:
     - name: Install Chainsaw
       shell: bash
       run: |
-        go install github.com/kyverno/chainsaw@v0.2.14
+        go install github.com/kyverno/chainsaw@${{ inputs.chainsaw_version }}
 
     - name: Run Integration Tests
       shell: bash
+      env:
+        GOFLAGS: -mod=vendor
       run: ./tools/e2e

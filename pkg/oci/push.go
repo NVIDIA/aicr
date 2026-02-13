@@ -99,10 +99,6 @@ type PushOptions struct {
 	Repository string
 	// Tag is the image tag (e.g., "v1.0.0", "latest").
 	Tag string
-	// SubDir optionally limits the push to a subdirectory within SourceDir.
-	// Note: This field is reserved for future use. When implemented, it will allow
-	// pushing only a specific subdirectory of the source directory.
-	SubDir string
 	// PlainHTTP uses HTTP instead of HTTPS for the registry connection.
 	PlainHTTP bool
 	// InsecureTLS skips TLS certificate verification.

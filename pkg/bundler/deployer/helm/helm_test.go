@@ -445,7 +445,7 @@ func TestGenerate_UndeployScriptExecutable(t *testing.T) {
 	}
 }
 
-func TestNormalizeVersion(t *testing.T) {
+func TestNormalizeVersionWithDefault(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -458,15 +458,15 @@ func TestNormalizeVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := normalizeVersion(tt.input)
+			result := shared.NormalizeVersionWithDefault(tt.input)
 			if result != tt.expected {
-				t.Errorf("normalizeVersion(%q) = %q, want %q", tt.input, result, tt.expected)
+				t.Errorf("NormalizeVersionWithDefault(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
 	}
 }
 
-func TestSortComponentsByDeploymentOrder(t *testing.T) {
+func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 	const (
 		certManager     = "cert-manager"
 		gpuOperator     = "gpu-operator"
@@ -477,7 +477,7 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 		components := []string{gpuOperator, certManager, networkOperator}
 		deploymentOrder := []string{certManager, gpuOperator, networkOperator}
 
-		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 
 		if sorted[0] != certManager {
 			t.Errorf("expected first %s, got %s", certManager, sorted[0])
@@ -496,7 +496,7 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 		components := []string{"alpha", gpuOperator}
 		deploymentOrder := []string{gpuOperator}
 
-		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 		if sorted[0] != gpuOperator {
 			t.Errorf("expected ordered component first, got %s", sorted[0])
 		}
@@ -509,7 +509,7 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 		components := []string{certManager, "zebra"}
 		deploymentOrder := []string{certManager}
 
-		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 		if sorted[0] != certManager {
 			t.Errorf("expected ordered component first, got %s", sorted[0])
 		}
@@ -520,7 +520,7 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 		components := []string{"zebra", "alpha"}
 		deploymentOrder := []string{gpuOperator}
 
-		sorted := SortComponentsByDeploymentOrder(components, deploymentOrder)
+		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 		if sorted[0] != "alpha" {
 			t.Errorf("expected alphabetical first, got %s", sorted[0])
 		}
@@ -531,7 +531,7 @@ func TestSortComponentsByDeploymentOrder(t *testing.T) {
 
 	t.Run("empty deployment order", func(t *testing.T) {
 		components := []string{"b", "a"}
-		sorted := SortComponentsByDeploymentOrder(components, nil)
+		sorted := shared.SortComponentNamesByDeploymentOrder(components, nil)
 		if sorted[0] != "a" {
 			t.Errorf("expected alphabetical with empty order, got %s", sorted[0])
 		}
@@ -847,6 +847,323 @@ func TestGenerate_NoTimestampInOutput(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("failed to walk directory: %v", err)
+	}
+}
+
+func TestGenerateDeployScript(t *testing.T) {
+	tests := []struct {
+		name       string
+		cancelCtx  bool
+		outputDir  string
+		components []ComponentData
+		wantErr    bool
+	}{
+		{
+			name:      "success",
+			outputDir: "", // filled per-test with t.TempDir()
+			components: []ComponentData{
+				{Name: "cert-manager", Namespace: "cert-manager", Repository: "https://charts.jetstack.io", ChartName: "cert-manager", Version: "v1.17.2", ChartVersion: "1.17.2"},
+				{Name: "gpu-operator", Namespace: "gpu-operator", Repository: "https://helm.ngc.nvidia.com/nvidia", ChartName: "gpu-operator", Version: "v25.3.3", ChartVersion: "25.3.3"},
+			},
+		},
+		{
+			name:      "cancelled context",
+			cancelCtx: true,
+			outputDir: "", // filled per-test
+			components: []ComponentData{
+				{Name: "cert-manager"},
+			},
+			wantErr: true,
+		},
+		{
+			name:      "invalid output directory",
+			outputDir: "/nonexistent/path/that/does/not/exist",
+			components: []ComponentData{
+				{Name: "cert-manager"},
+			},
+			wantErr: true,
+		},
+		{
+			name:       "empty components",
+			outputDir:  "",
+			components: []ComponentData{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewGenerator()
+			ctx := context.Background()
+			if tt.cancelCtx {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			dir := tt.outputDir
+			if dir == "" {
+				dir = t.TempDir()
+			}
+
+			input := &GeneratorInput{
+				Version: "v1.0.0",
+			}
+
+			path, size, err := g.generateDeployScript(ctx, input, tt.components, dir)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+
+			if path == "" {
+				t.Fatal("expected non-empty path")
+			}
+			if size <= 0 {
+				t.Fatal("expected positive file size")
+			}
+
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				t.Fatalf("stat(%s): %v", path, statErr)
+			}
+			if info.Mode()&0111 == 0 {
+				t.Errorf("deploy.sh not executable, mode: %o", info.Mode())
+			}
+		})
+	}
+}
+
+func TestGenerateUndeployScript(t *testing.T) {
+	tests := []struct {
+		name       string
+		cancelCtx  bool
+		outputDir  string
+		components []ComponentData
+		wantErr    bool
+	}{
+		{
+			name:      "success",
+			outputDir: "",
+			components: []ComponentData{
+				{Name: "cert-manager", Namespace: "cert-manager", Repository: "https://charts.jetstack.io", ChartName: "cert-manager", Version: "v1.17.2", ChartVersion: "1.17.2"},
+				{Name: "gpu-operator", Namespace: "gpu-operator", Repository: "https://helm.ngc.nvidia.com/nvidia", ChartName: "gpu-operator", Version: "v25.3.3", ChartVersion: "25.3.3"},
+			},
+		},
+		{
+			name:      "cancelled context",
+			cancelCtx: true,
+			outputDir: "",
+			components: []ComponentData{
+				{Name: "cert-manager"},
+			},
+			wantErr: true,
+		},
+		{
+			name:      "invalid output directory",
+			outputDir: "/nonexistent/path/that/does/not/exist",
+			components: []ComponentData{
+				{Name: "cert-manager"},
+			},
+			wantErr: true,
+		},
+		{
+			name:       "empty components",
+			outputDir:  "",
+			components: []ComponentData{},
+		},
+		{
+			name:      "reverses component order",
+			outputDir: "",
+			components: []ComponentData{
+				{Name: "alpha", Namespace: "alpha", ChartName: "alpha", Version: "v1.0.0", ChartVersion: "1.0.0", HasChart: true},
+				{Name: "beta", Namespace: "beta", ChartName: "beta", Version: "v2.0.0", ChartVersion: "2.0.0", HasChart: true},
+				{Name: "gamma", Namespace: "gamma", ChartName: "gamma", Version: "v3.0.0", ChartVersion: "3.0.0", HasChart: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewGenerator()
+			ctx := context.Background()
+			if tt.cancelCtx {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			dir := tt.outputDir
+			if dir == "" {
+				dir = t.TempDir()
+			}
+
+			input := &GeneratorInput{
+				Version: "v1.0.0",
+			}
+
+			path, size, err := g.generateUndeployScript(ctx, input, tt.components, dir)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+
+			if path == "" {
+				t.Fatal("expected non-empty path")
+			}
+			if size <= 0 {
+				t.Fatal("expected positive file size")
+			}
+
+			info, statErr := os.Stat(path)
+			if statErr != nil {
+				t.Fatalf("stat(%s): %v", path, statErr)
+			}
+			if info.Mode()&0111 == 0 {
+				t.Errorf("undeploy.sh not executable, mode: %o", info.Mode())
+			}
+
+			if tt.name == "reverses component order" {
+				content, readErr := os.ReadFile(path)
+				if readErr != nil {
+					t.Fatalf("read undeploy.sh: %v", readErr)
+				}
+				script := string(content)
+				gammaIdx := strings.Index(script, "gamma")
+				alphaIdx := strings.Index(script, "alpha")
+				if gammaIdx < 0 || alphaIdx < 0 {
+					t.Fatal("expected both gamma and alpha in undeploy.sh")
+				}
+				if gammaIdx > alphaIdx {
+					t.Error("undeploy.sh should have gamma before alpha (reverse order)")
+				}
+			}
+		})
+	}
+}
+
+func TestReverseComponents(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []ComponentData
+		wantLen  int
+		wantName string // expected first element name after reverse
+	}{
+		{
+			name:    "empty",
+			input:   []ComponentData{},
+			wantLen: 0,
+		},
+		{
+			name:     "single",
+			input:    []ComponentData{{Name: "a"}},
+			wantLen:  1,
+			wantName: "a",
+		},
+		{
+			name: "multiple",
+			input: []ComponentData{
+				{Name: "a"},
+				{Name: "b"},
+				{Name: "c"},
+			},
+			wantLen:  3,
+			wantName: "c",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Keep a copy of original order to verify non-mutation
+			original := make([]ComponentData, len(tt.input))
+			copy(original, tt.input)
+
+			result := reverseComponents(tt.input)
+
+			if len(result) != tt.wantLen {
+				t.Fatalf("len = %d, want %d", len(result), tt.wantLen)
+			}
+			if tt.wantLen > 0 && result[0].Name != tt.wantName {
+				t.Errorf("first element = %q, want %q", result[0].Name, tt.wantName)
+			}
+			// Verify original is unchanged
+			for i, comp := range tt.input {
+				if comp.Name != original[i].Name {
+					t.Errorf("original[%d] mutated: got %q, want %q", i, comp.Name, original[i].Name)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderManifest(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		data    ComponentData
+		values  map[string]any
+		wantErr bool
+		wantSub string // substring expected in output
+	}{
+		{
+			name:    "valid template with values",
+			content: "namespace: {{ .Release.Namespace }}",
+			data:    ComponentData{Name: "gpu-operator", Namespace: "gpu-operator"},
+			values:  map[string]any{"enabled": true},
+			wantSub: "namespace: gpu-operator",
+		},
+		{
+			name:    "invalid template syntax",
+			content: "{{ .Invalid {{ }}",
+			data:    ComponentData{Name: "test"},
+			values:  nil,
+			wantErr: true,
+		},
+		{
+			name:    "chart data rendered",
+			content: "chart: {{ .Chart.Name }}-{{ .Chart.Version }}",
+			data:    ComponentData{Name: "gpu-operator", ChartName: "gpu-operator", ChartVersion: "25.3.3"},
+			values:  nil,
+			wantSub: "chart: gpu-operator-25.3.3",
+		},
+		{
+			name:    "nil values map",
+			content: "name: {{ .Name }}",
+			data:    ComponentData{Name: "test-comp"},
+			values:  nil,
+			wantSub: "name: test-comp",
+		},
+		{
+			name:    "toYaml function",
+			content: "config: {{ toYaml .Values.mycomp }}",
+			data:    ComponentData{Name: "mycomp"},
+			values:  map[string]any{"key": "value"},
+			wantSub: "key: value",
+		},
+		{
+			name:    "default function",
+			content: `ns: {{ default "fallback" .Release.Namespace }}`,
+			data:    ComponentData{Name: "test", Namespace: ""},
+			values:  nil,
+			wantSub: "ns: fallback",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := renderManifest([]byte(tt.content), tt.data, tt.values)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && tt.wantSub != "" {
+				if !strings.Contains(string(result), tt.wantSub) {
+					t.Errorf("output %q does not contain %q", string(result), tt.wantSub)
+				}
+			}
+		})
 	}
 }
 

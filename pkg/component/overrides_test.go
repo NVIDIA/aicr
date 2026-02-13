@@ -1580,3 +1580,150 @@ func TestNodeSelectorToMatchExpressions(t *testing.T) {
 		})
 	}
 }
+
+// PointerTestStruct has a pointer-to-struct field for testing nil pointer traversal.
+type PointerTestStruct struct {
+	Config *PointerSubConfig
+}
+
+type PointerSubConfig struct {
+	Value string
+	Count int
+}
+
+// MultiSegmentTestStruct has fields for 4-segment path testing.
+type MultiSegmentTestStruct struct {
+	ManagerCPULimit      string
+	ManagerMemoryLimit   string
+	ManagerCPURequest    string
+	ManagerMemoryRequest string
+}
+
+func TestApplyValueOverrides_PointerToStruct(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		verify    func(t *testing.T, s *PointerTestStruct)
+	}{
+		{
+			name: "sets field through nil pointer to struct",
+			overrides: map[string]string{
+				"config.value": "initialized",
+			},
+			verify: func(t *testing.T, s *PointerTestStruct) {
+				if s.Config == nil {
+					t.Fatal("Config pointer should be initialized")
+				}
+				if s.Config.Value != "initialized" {
+					t.Errorf("Config.Value = %v, want initialized", s.Config.Value)
+				}
+			},
+		},
+		{
+			name: "sets field through non-nil pointer to struct",
+			overrides: map[string]string{
+				"config.count": "42",
+			},
+			verify: func(t *testing.T, s *PointerTestStruct) {
+				if s.Config == nil {
+					t.Fatal("Config pointer should be initialized")
+				}
+				if s.Config.Count != 42 {
+					t.Errorf("Config.Count = %v, want 42", s.Config.Count)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &PointerTestStruct{}
+			err := ApplyValueOverrides(s, tt.overrides)
+			if err != nil {
+				t.Fatalf("ApplyValueOverrides() unexpected error = %v", err)
+			}
+			tt.verify(t, s)
+		})
+	}
+}
+
+func TestApplyValueOverrides_NonStructTraversal(t *testing.T) {
+	type FlatStruct struct {
+		Name string
+	}
+
+	s := &FlatStruct{Name: "test"}
+	err := ApplyValueOverrides(s, map[string]string{
+		"name.sub": "value",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-struct traversal")
+	}
+	if !containsSubstring(err.Error(), "cannot traverse non-struct field") {
+		t.Errorf("expected 'cannot traverse non-struct field' error, got: %v", err)
+	}
+}
+
+func TestApplyValueOverrides_MultiSegmentPaths(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		verify    func(t *testing.T, s *MultiSegmentTestStruct)
+	}{
+		{
+			name: "manager.resources.cpu.limit",
+			overrides: map[string]string{
+				"manager.resources.cpu.limit": "4",
+			},
+			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
+				if s.ManagerCPULimit != "4" {
+					t.Errorf("ManagerCPULimit = %v, want 4", s.ManagerCPULimit)
+				}
+			},
+		},
+		{
+			name: "manager.resources.memory.limit",
+			overrides: map[string]string{
+				"manager.resources.memory.limit": "8Gi",
+			},
+			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
+				if s.ManagerMemoryLimit != "8Gi" {
+					t.Errorf("ManagerMemoryLimit = %v, want 8Gi", s.ManagerMemoryLimit)
+				}
+			},
+		},
+		{
+			name: "manager.resources.cpu.request",
+			overrides: map[string]string{
+				"manager.resources.cpu.request": "2",
+			},
+			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
+				if s.ManagerCPURequest != "2" {
+					t.Errorf("ManagerCPURequest = %v, want 2", s.ManagerCPURequest)
+				}
+			},
+		},
+		{
+			name: "manager.resources.memory.request",
+			overrides: map[string]string{
+				"manager.resources.memory.request": "4Gi",
+			},
+			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
+				if s.ManagerMemoryRequest != "4Gi" {
+					t.Errorf("ManagerMemoryRequest = %v, want 4Gi", s.ManagerMemoryRequest)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &MultiSegmentTestStruct{}
+			err := ApplyValueOverrides(s, tt.overrides)
+			if err != nil {
+				t.Fatalf("ApplyValueOverrides() unexpected error = %v", err)
+			}
+			tt.verify(t, s)
+		})
+	}
+}

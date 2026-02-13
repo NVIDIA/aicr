@@ -20,8 +20,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/NVIDIA/eidos/pkg/validator/checks"
 	cli "github.com/urfave/cli/v3"
+
+	"github.com/NVIDIA/eidos/pkg/errors"
+	"github.com/NVIDIA/eidos/pkg/validator/checks"
 )
 
 func generateValidatorCmd() *cli.Command {
@@ -79,21 +81,21 @@ This ensures new validators follow the correct architecture.`,
 			// Validate phase
 			validPhases := map[string]bool{"readiness": true, "deployment": true, "performance": true, "conformance": true}
 			if !validPhases[phase] {
-				return fmt.Errorf("--phase must be one of: readiness, deployment, performance, conformance")
+				return errors.New(errors.ErrCodeInvalidRequest, "--phase must be one of: readiness, deployment, performance, conformance")
 			}
 
 			// Default output directory
 			if outputDir == "" {
 				cwd, err := os.Getwd()
 				if err != nil {
-					return fmt.Errorf("failed to get current directory: %w", err)
+					return errors.Wrap(errors.ErrCodeInternal, "failed to get current directory", err)
 				}
 				outputDir = filepath.Join(cwd, "pkg", "validator", "checks", phase)
 			}
 
 			// Check if output directory exists
 			if _, err := os.Stat(outputDir); os.IsNotExist(err) {
-				return fmt.Errorf("output directory does not exist: %s", outputDir)
+				return errors.New(errors.ErrCodeNotFound, fmt.Sprintf("output directory does not exist: %s", outputDir))
 			}
 
 			// Generate validator files
@@ -107,11 +109,11 @@ This ensures new validators follow the correct architecture.`,
 
 			if checkName != "" {
 				if err := checks.GenerateCheck(cfg); err != nil {
-					return fmt.Errorf("failed to generate check: %w", err)
+					return errors.Wrap(errors.ErrCodeInternal, "failed to generate check", err)
 				}
 			} else {
 				if err := checks.GenerateConstraintValidator(cfg); err != nil {
-					return fmt.Errorf("failed to generate constraint validator: %w", err)
+					return errors.Wrap(errors.ErrCodeInternal, "failed to generate constraint validator", err)
 				}
 			}
 

@@ -703,4 +703,193 @@ func TestTestRunner_GetConstraint(t *testing.T) {
 			t.Errorf("GetConstraint() = %v, want nil for unknown phase", got)
 		}
 	})
+
+	t.Run("returns constraint for performance phase", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Performance: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Performance.nccl.bandwidth", Value: ">= 100Gbps"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("performance", "Performance.nccl.bandwidth")
+		if got == nil {
+			t.Fatal("GetConstraint() returned nil, want constraint")
+		}
+		if got.Name != "Performance.nccl.bandwidth" {
+			t.Errorf("GetConstraint().Name = %v, want %v", got.Name, "Performance.nccl.bandwidth")
+		}
+		if got.Value != ">= 100Gbps" {
+			t.Errorf("GetConstraint().Value = %v, want %v", got.Value, ">= 100Gbps")
+		}
+	})
+
+	t.Run("returns nil for performance phase when nil", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Performance: nil,
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("performance", "Performance.nccl.bandwidth")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil for nil performance phase", got)
+		}
+	})
+
+	t.Run("returns constraint for conformance phase", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Conformance: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Conformance.k8s.version", Value: ">= 1.30"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("conformance", "Conformance.k8s.version")
+		if got == nil {
+			t.Fatal("GetConstraint() returned nil, want constraint")
+		}
+		if got.Name != "Conformance.k8s.version" {
+			t.Errorf("GetConstraint().Name = %v, want %v", got.Name, "Conformance.k8s.version")
+		}
+		if got.Value != ">= 1.30" {
+			t.Errorf("GetConstraint().Value = %v, want %v", got.Value, ">= 1.30")
+		}
+	})
+
+	t.Run("returns nil for conformance phase when nil", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Conformance: nil,
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("conformance", "Conformance.k8s.version")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil for nil conformance phase", got)
+		}
+	})
+
+	t.Run("returns nil for deployment phase when nil", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Deployment: nil,
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("deployment", "Deployment.gpu-operator.version")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil for nil deployment phase", got)
+		}
+	})
+
+	t.Run("performance phase constraint not found", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Performance: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Performance.nccl.bandwidth", Value: ">= 100Gbps"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("performance", "Performance.nonexistent")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil for nonexistent constraint", got)
+		}
+	})
+
+	t.Run("conformance phase constraint not found", func(t *testing.T) {
+		recipeResult := &recipe.RecipeResult{
+			Validation: &recipe.ValidationConfig{
+				Conformance: &recipe.ValidationPhase{
+					Constraints: []recipe.Constraint{
+						{Name: "Conformance.k8s.version", Value: ">= 1.30"},
+					},
+				},
+			},
+		}
+
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		runner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    recipeResult,
+			},
+		}
+
+		got := runner.GetConstraint("conformance", "Conformance.nonexistent")
+		if got != nil {
+			t.Errorf("GetConstraint() = %v, want nil for nonexistent constraint", got)
+		}
+	})
 }

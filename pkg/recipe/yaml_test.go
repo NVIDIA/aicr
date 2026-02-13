@@ -41,6 +41,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"gopkg.in/yaml.v3"
 	"k8s.io/client-go/kubernetes/scheme"
 )
@@ -377,7 +378,7 @@ func TestAllConstraintsSyntaxValid(t *testing.T) {
 func validateConstraintValue(value string) error {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return fmt.Errorf("empty constraint value")
+		return errors.New(errors.ErrCodeInvalidRequest, "empty constraint value")
 	}
 
 	// Check for operator prefix
@@ -385,7 +386,7 @@ func validateConstraintValue(value string) error {
 		if strings.HasPrefix(value, op) {
 			remainder := strings.TrimSpace(strings.TrimPrefix(value, op))
 			if remainder == "" {
-				return fmt.Errorf("operator %q without value", op)
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("operator %q without value", op))
 			}
 			return nil // Valid operator + value
 		}

@@ -23,7 +23,7 @@ inputs:
   threshold:
     description: 'Minimum coverage percentage required'
     required: false
-    default: '70'
+    default: ''
   badge_gist_id:
     description: 'Gist ID for storing the coverage badge JSON (optional)'
     required: false
@@ -52,6 +52,9 @@ runs:
 
         COVERAGE_FILE="${{ inputs.coverage_file }}"
         THRESHOLD="${{ inputs.threshold }}"
+        if [[ -z "$THRESHOLD" ]]; then
+          THRESHOLD=70
+        fi
 
         if [[ ! -f "$COVERAGE_FILE" ]]; then
           echo "::error::Coverage file not found: $COVERAGE_FILE"

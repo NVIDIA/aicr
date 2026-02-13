@@ -18,7 +18,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -474,14 +476,7 @@ func TestSupportedFormats(t *testing.T) {
 	}
 
 	for _, exp := range expected {
-		found := false
-		for _, f := range formats {
-			if f == exp {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.Contains(formats, exp) {
 			t.Errorf("SupportedFormats() missing %v", exp)
 		}
 	}
@@ -578,6 +573,11 @@ func Test_serializeYAML(t *testing.T) {
 			name:    "nil",
 			data:    nil,
 			wantErr: false,
+		},
+		{
+			name:    "unsupported type",
+			data:    &yamlErrMarshaler{},
+			wantErr: true,
 		},
 	}
 
@@ -722,6 +722,111 @@ func TestWriteToFile(t *testing.T) {
 			t.Errorf("expected 'overwritten', got %q", got)
 		}
 	})
+}
+
+func TestSerializeJSONStandalone(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    any
+		wantErr bool
+	}{
+		{
+			name: "serializes struct",
+			data: struct {
+				Name string `json:"name"`
+				Age  int    `json:"age"`
+			}{Name: "test", Age: 42},
+		},
+		{
+			name: "serializes map",
+			data: map[string]any{"key": "value", "num": 123},
+		},
+		{
+			name:    "handles unsupported type",
+			data:    make(chan int),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := serializeJSON(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("serializeJSON() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(got) == 0 {
+				t.Error("serializeJSON() returned empty bytes")
+			}
+		})
+	}
+}
+
+func TestSerializeYAMLStandalone(t *testing.T) {
+	tests := []struct {
+		name    string
+		data    any
+		wantErr bool
+	}{
+		{
+			name: "serializes struct",
+			data: struct {
+				Name string `yaml:"name"`
+				Age  int    `yaml:"age"`
+			}{Name: "test", Age: 42},
+		},
+		{
+			name: "serializes map",
+			data: map[string]string{"key": "value"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := serializeYAML(tt.data)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("serializeYAML() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && len(got) == 0 {
+				t.Error("serializeYAML() returned empty bytes")
+			}
+		})
+	}
+}
+
+type errWriter struct{}
+
+func (e *errWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
+
+type yamlErrMarshaler struct{}
+
+func (y *yamlErrMarshaler) MarshalYAML() (any, error) {
+	return nil, io.ErrUnexpectedEOF
+}
+
+func TestWriter_SerializeYAML_WriterError(t *testing.T) {
+	w := NewWriter(FormatYAML, &errWriter{})
+	err := w.Serialize(context.Background(), testConfig{Name: "test", Value: 1})
+	if err == nil {
+		t.Fatal("expected error from broken writer")
+	}
+	if !strings.Contains(err.Error(), "failed to serialize to YAML") {
+		t.Errorf("error = %v, want error containing 'failed to serialize to YAML'", err)
+	}
+}
+
+func TestWriter_SerializeJSON_WriterError(t *testing.T) {
+	w := NewWriter(FormatJSON, &errWriter{})
+	err := w.Serialize(context.Background(), testConfig{Name: "test", Value: 1})
+	if err == nil {
+		t.Fatal("expected error from broken writer")
+	}
+	if !strings.Contains(err.Error(), "failed to serialize to JSON") {
+		t.Errorf("error = %v, want error containing 'failed to serialize to JSON'", err)
+	}
 }
 
 func Test_serializeJSON_Formatting(t *testing.T) {

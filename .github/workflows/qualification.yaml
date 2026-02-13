@@ -1,0 +1,125 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Qualification
+
+on:
+  workflow_call:
+    inputs:
+      coverage_report:
+        description: 'Whether to generate coverage report (true/false)'
+        type: string
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+
+  unit:
+    name: Unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Go CI (setup, test, lint)
+        uses: ./.github/actions/go-ci
+        with:
+          go_version: ${{ steps.versions.outputs.go }}
+          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
+          addlicense_version: ${{ steps.versions.outputs.addlicense }}
+          coverage_report: ${{ inputs.coverage_report }}
+          coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
+          lint_timeout: ${{ steps.versions.outputs.lint_timeout }}
+
+  integration:
+    name: Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Integration Tests
+        uses: ./.github/actions/integration
+        with:
+          go_version: ${{ steps.versions.outputs.go }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+
+  chainsaw:
+    name: Conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Conformance Tests
+        uses: ./.github/actions/chainsaw
+        with:
+          go_version: ${{ steps.versions.outputs.go }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run E2E Tests
+        uses: ./.github/actions/e2e
+        with:
+          go_version: ${{ steps.versions.outputs.go }}

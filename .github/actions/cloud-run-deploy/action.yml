@@ -44,6 +44,10 @@ inputs:
   ghcr_token:
     description: 'GitHub token for GHCR authentication (use github.token)'
     required: true
+  crane_version:
+    description: 'crane version (e.g. v0.20.6)'
+    required: false
+    default: 'v0.20.6'
 
 runs:
   using: 'composite'
@@ -93,10 +97,21 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        CRANE_VERSION="0.20.6"
-        CRANE_URL="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+        # Strip 'v' prefix for URL construction
+        CRANE_VERSION="${{ inputs.crane_version }}"
+        CRANE_VERSION="${CRANE_VERSION#v}"
+        CRANE_BASE="https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}"
+        CRANE_TAR="go-containerregistry_Linux_x86_64.tar.gz"
         CRANE_TMP="$(mktemp -d)"
-        curl -fsSL "$CRANE_URL" | tar -xzC "$CRANE_TMP"
+        curl -fsSL -o "${CRANE_TMP}/${CRANE_TAR}" "${CRANE_BASE}/${CRANE_TAR}"
+        curl -fsSL -o "${CRANE_TMP}/checksums.txt" "${CRANE_BASE}/checksums.txt"
+        EXPECTED=$(grep "${CRANE_TAR}" "${CRANE_TMP}/checksums.txt" | head -1 | awk '{print $1}')
+        ACTUAL=$(sha256sum "${CRANE_TMP}/${CRANE_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::crane checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${CRANE_TMP}/${CRANE_TAR}" -C "${CRANE_TMP}"
         sudo mv "$CRANE_TMP/crane" /usr/local/bin/crane
         sudo chmod +x /usr/local/bin/crane
         rm -rf "$CRANE_TMP"

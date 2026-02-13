@@ -46,7 +46,7 @@
 // Serializer: Interface for encoding data to output
 //
 //	type Serializer interface {
-//	    Serialize(v any) error
+//	    Serialize(ctx context.Context, snapshot any) error
 //	}
 //
 // Reader: Handles decoding data from input sources
@@ -61,38 +61,32 @@
 //
 // Write to stdout (YAML):
 //
-//	serializer, err := serializer.NewStdoutSerializer(serializer.FormatYAML)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
+//	w := serializer.NewStdoutWriter(serializer.FormatYAML)
 //
 //	data := map[string]any{"version": "1.0.0", "status": "ok"}
-//	if err := serializer.Serialize(data); err != nil {
+//	if err := w.Serialize(context.Background(), data); err != nil {
 //	    log.Fatal(err)
 //	}
 //
 // Write to file with automatic format detection:
 //
-//	serializer, err := serializer.NewFileSerializer("config.json")
+//	w, err := serializer.NewFileWriterOrStdout(serializer.FormatJSON, "config.json")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
-//	defer serializer.Close()
+//	defer w.Close()
 //
-//	if err := serializer.Serialize(data); err != nil {
+//	if err := w.Serialize(context.Background(), data); err != nil {
 //	    log.Fatal(err)
 //	}
 //
 // Write with explicit format:
 //
-//	serializer, err := serializer.NewFileSerializerWithFormat("output.txt", serializer.FormatTable)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	defer serializer.Close()
+//	w := serializer.NewWriter(serializer.FormatTable, output)
+//	defer w.Close()
 //
 //	snapshot := // ... measurement data
-//	if err := serializer.Serialize(snapshot); err != nil {
+//	if err := w.Serialize(context.Background(), snapshot); err != nil {
 //	    log.Fatal(err)
 //	}
 //
@@ -100,26 +94,27 @@
 //
 // Read from file with automatic format detection:
 //
-//	reader, err := serializer.NewFileReader("snapshot.yaml")
+//	reader, err := serializer.NewFileReaderAuto("snapshot.yaml")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
 //	defer reader.Close()
 //
 //	var snapshot snapshotter.Snapshot
-//	if err := reader.Read(&snapshot); err != nil {
+//	if err := reader.Deserialize(&snapshot); err != nil {
 //	    log.Fatal(err)
 //	}
 //
-// Read from stdin:
+// Read from file with explicit format:
 //
-//	reader, err := serializer.NewStdinReader(serializer.FormatJSON)
+//	reader, err := serializer.NewFileReader(serializer.FormatJSON, "data.json")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
+//	defer reader.Close()
 //
 //	var data map[string]any
-//	if err := reader.Read(&data); err != nil {
+//	if err := reader.Deserialize(&data); err != nil {
 //	    log.Fatal(err)
 //	}
 //
@@ -131,7 +126,7 @@
 //	}
 //
 //	var config Config
-//	if err := reader.Read(&config); err != nil {
+//	if err := reader.Deserialize(&config); err != nil {
 //	    log.Fatal(err)
 //	}
 //
@@ -144,8 +139,8 @@
 //   - Other → JSON (default)
 //
 // Format detection is automatic when using:
-//   - NewFileSerializer(path)
-//   - NewFileReader(path)
+//   - NewFileWriterOrStdout(format, path)
+//   - NewFileReaderAuto(path)
 //
 // # Table Format
 //
@@ -174,13 +169,13 @@
 //
 // Always close serializers and readers that manage files:
 //
-//	serializer, err := serializer.NewFileSerializer("output.json")
+//	w, err := serializer.NewFileWriterOrStdout(serializer.FormatJSON, "output.json")
 //	if err != nil {
 //	    return err
 //	}
-//	defer serializer.Close()  // Required for file resources
+//	defer w.Close()  // Required for file resources
 //
-// Stdout/stdin serializers don't require closing but Close() is safe to call.
+// Stdout writers don't require closing but Close() is safe to call.
 //
 // # Error Handling
 //

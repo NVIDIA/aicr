@@ -23,7 +23,7 @@ Set environment variable `AUTO_MODE=true` to avoid having to approve each tool i
 # 1. Clone and setup
 git clone https://github.com/NVIDIA/eidos.git && cd eidos
 make tools-setup    # Install all required tools
-make tools-check    # Verify versions match .versions.yaml
+make tools-check    # Verify versions match .settings.yaml
 
 # 2. Develop
 make test           # Run tests with race detector
@@ -81,7 +81,7 @@ sudo chmod +x /usr/local/bin/yq
 
 ### Automated Setup (Recommended)
 
-The project uses `.versions.yaml` as a single source of truth for tool versions. This ensures consistency between local development and CI.
+The project uses `.settings.yaml` as a single source of truth for tool versions. This ensures consistency between local development and CI.
 
 ```bash
 # Install all required tools (interactive mode)
@@ -117,12 +117,12 @@ Legend: ✓ = installed, ⚠ = version mismatch, ✗ = missing
 
 ### Version Management
 
-All tool versions are centrally managed in `.versions.yaml`. This file is the single source of truth used by:
+All tool versions are centrally managed in `.settings.yaml`. This file is the single source of truth used by:
 - `make tools-setup` - Local development setup
 - `make tools-check` - Version verification
 - GitHub Actions CI - Ensures CI uses identical versions
 
-When updating tool versions, edit `.versions.yaml` and the changes propagate everywhere automatically.
+When updating tool versions, edit `.settings.yaml` and the changes propagate everywhere automatically.
 
 ### Alternative: Using Flox
 

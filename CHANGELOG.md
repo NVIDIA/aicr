@@ -2,24 +2,59 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.2] - 2026-02-13
+
+### CI/CD
+
+- Add actions:read permission to security-scan job by [@mchmarny](https://github.com/mchmarny)
+- Eliminate hardcoded versions and consolidate CI workflows by [@mchmarny](https://github.com/mchmarny)
+- Harden checkout credentials, add checksum verification, fail-fast off by [@mchmarny](https://github.com/mchmarny)
+- Skip SBOM generation in packaging dry run by [@mchmarny](https://github.com/mchmarny)
+
+### Tasks
+
+- Clean up changelog by [@mchmarny](https://github.com/mchmarny)
+
+## [0.6.1] - 2026-02-13
+
+### Features
+
+- *(skyhook-customizations)* Use overrides and switch to nvidia_tuned  by [@ayuskauskas](https://github.com/ayuskauskas)
+- Vendor Gateway API Inference Extension CRDs (v1.3.0)  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(test)* Add standalone resource existence checker for ai-conformance  by [@dims](https://github.com/dims)
+
+### Bug Fixes
+
+- Protect system namespaces from deletion in undeploy.sh  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Rename skyhook CR to remove training suffix  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Add nats storageClass for EKS dynamo deployment  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Mount host /etc/os-release in privileged snapshot agent  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### CI/CD
+
+- Add GPU smoke test workflow using nvkind  by [@dims](https://github.com/dims)
+- Enable copy-pr-bot by [@dims](https://github.com/dims)
+- Setup vendoring for golang  by [@lockwobr](https://github.com/lockwobr)
+- Deduplicate test jobs into reusable qualification workflow by [@mchmarny](https://github.com/mchmarny)
+
+### Tasks
+
+- Exclude git from sandbox for GPG commit signing by [@mchmarny](https://github.com/mchmarny)
+- Code quality cleanup across codebase  by [@mchmarny](https://github.com/mchmarny)
+- Rename skyhook customization manifest to remove training suffix  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(recipe)* Move embedded data to recipes/ at repo root  by [@lockwobr](https://github.com/lockwobr)
+
 ## [0.5.16] - 2026-02-12
 
 ### Bug Fixes
 
 - Use POSIX-compatible redirects in KWOK parallel test script  by [@yuanchen8911](https://github.com/yuanchen8911)
-
+- KubeFlow patches  by [@coffeepac](https://github.com/coffeepac)
+  
 ### Features
 
 - Add tools/describe for overlay composition visualization by [@mchmarny](https://github.com/mchmarny)
 - Restructure inference overlay hierarchy  by [@yuanchen8911](https://github.com/yuanchen8911)
-
-### Other
-
-- KubeFlow patches  by [@coffeepac](https://github.com/coffeepac)
-
-### Tasks
-
-- Update CUJs by [@mchmarny](https://github.com/mchmarny)
 
 ## [0.5.15] - 2026-02-11
 
@@ -34,10 +69,6 @@ All notable changes to this project will be documented in this file.
 
 - Resolve EKS deployment issues for multiple components  by [@yuanchen8911](https://github.com/yuanchen8911)
 - Preserve version prefix in deploy.sh for helm install  by [@yuanchen8911](https://github.com/yuanchen8911)
-
-### Tasks
-
-- Clean up changelog by [@mchmarny](https://github.com/mchmarny)
 
 ## [0.5.13] - 2026-02-11
 
@@ -272,7 +303,7 @@ All notable changes to this project will be documented in this file.
 ### Features
 
 - Replace Codecov with GitHub-native coverage tracking by @mchmarny
-- Add Flox manifest generator from .versions.yaml by @mchmarny
+- Add Flox manifest generator from .settings.yaml by @mchmarny
 
 ### Refactor
 

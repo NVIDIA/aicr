@@ -465,6 +465,73 @@ func TestZipResponseContainsExpectedFiles(t *testing.T) {
 	}
 }
 
+// TestParseQueryParams tests the query parameter parsing function directly.
+func TestParseQueryParams(t *testing.T) {
+	tests := []struct {
+		name         string
+		url          string
+		wantErr      bool
+		wantDeployer string
+		wantRepoURL  string
+	}{
+		{
+			name:         "empty query defaults to helm",
+			url:          "/v1/bundle",
+			wantDeployer: "helm",
+		},
+		{
+			name:         "deployer=argocd",
+			url:          "/v1/bundle?deployer=argocd",
+			wantDeployer: "argocd",
+		},
+		{
+			name:         "deployer=helm explicit",
+			url:          "/v1/bundle?deployer=helm",
+			wantDeployer: "helm",
+		},
+		{
+			name:    "invalid deployer",
+			url:     "/v1/bundle?deployer=invalid",
+			wantErr: true,
+		},
+		{
+			name:         "repo URL for argocd",
+			url:          "/v1/bundle?deployer=argocd&repo=https://github.com/org/repo.git",
+			wantDeployer: "argocd",
+			wantRepoURL:  "https://github.com/org/repo.git",
+		},
+		{
+			name:         "set param parsed",
+			url:          "/v1/bundle?set=gpuoperator:driver.enabled=true",
+			wantDeployer: "helm",
+		},
+		{
+			name:         "system-node-selector param",
+			url:          "/v1/bundle?system-node-selector=nodeGroup=system",
+			wantDeployer: "helm",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.url, nil)
+			params, err := parseQueryParams(req)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if string(params.deployer) != tt.wantDeployer {
+				t.Errorf("deployer = %q, want %q", params.deployer, tt.wantDeployer)
+			}
+			if tt.wantRepoURL != "" && params.repoURL != tt.wantRepoURL {
+				t.Errorf("repoURL = %q, want %q", params.repoURL, tt.wantRepoURL)
+			}
+		})
+	}
+}
+
 // TestZipCanBeExtracted verifies that the returned zip can be extracted.
 func TestZipCanBeExtracted(t *testing.T) {
 	b, err := New()

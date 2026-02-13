@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/serializer"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
@@ -70,7 +71,7 @@ type TestRunner struct {
 func NewTestRunner(t *testing.T) (*TestRunner, error) {
 	ctx, cancel, err := LoadValidationContext()
 	if err != nil {
-		return nil, fmt.Errorf("failed to load validation context: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validation context", err)
 	}
 
 	return &TestRunner{
@@ -212,13 +213,13 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("failed to create in-cluster config: %w", err)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create in-cluster config", err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("failed to create kubernetes clientset: %w", err)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes clientset", err)
 	}
 
 	// Load snapshot from mounted file using serializer (auto-detects YAML/JSON format)
@@ -230,7 +231,7 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	snapshot, err := serializer.FromFile[snapshotter.Snapshot](snapshotPath)
 	if err != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("failed to load snapshot from %s: %w", snapshotPath, err)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %s", snapshotPath), err)
 	}
 
 	// Load optional recipe data
@@ -238,7 +239,7 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	if recipeJSON := os.Getenv("EIDOS_RECIPE_DATA"); recipeJSON != "" {
 		if err := json.Unmarshal([]byte(recipeJSON), &recipeData); err != nil {
 			cancel()
-			return nil, nil, fmt.Errorf("failed to unmarshal recipe data JSON: %w", err)
+			return nil, nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to unmarshal recipe data JSON", err)
 		}
 	}
 
@@ -253,7 +254,7 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 		recipeResult, err = serializer.FromFile[recipe.RecipeResult](recipePath)
 		if err != nil {
 			cancel()
-			return nil, nil, fmt.Errorf("failed to load recipe from %s: %w", recipePath, err)
+			return nil, nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load recipe from %s", recipePath), err)
 		}
 	}
 

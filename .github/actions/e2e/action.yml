@@ -35,7 +35,7 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: ${{ inputs.go_version }}
-        cache: true
+        cache: false  # vendor/ provides deps; disable to save disk on constrained runners
 
     - name: Free up disk space
       shell: bash
@@ -66,6 +66,8 @@ runs:
 
     - name: Build and push Eidos image to local registry
       shell: bash
+      env:
+        GOFLAGS: -mod=vendor
       run: |
         # Build and push eidos image for snapshot agent
         KO_DOCKER_REPO=localhost:5001/eidos ko build --bare --tags=local ./cmd/eidos
@@ -107,6 +109,7 @@ runs:
       id: e2e-tests
       shell: bash
       env:
+        GOFLAGS: -mod=vendor
         EIDOS_IMAGE: localhost:5001/eidos:local
         EIDOS_VALIDATOR_IMAGE: localhost:5001/eidos-validator:local
         FAKE_GPU_ENABLED: "true"

@@ -27,8 +27,8 @@ REPO_ROOT="${KWOK_DIR}/.."
 OVERLAYS_DIR="${REPO_ROOT}/recipes/overlays"
 
 CLUSTER_PREFIX="${KWOK_CLUSTER_PREFIX:-eidos-kwok-test}"
-KWOK_VERSION="${KWOK_VERSION:-$(yq -r '.testing_tools.kwok' "${REPO_ROOT}/.versions.yaml" 2>/dev/null || echo "v0.7.0")}"
-KIND_NODE_IMAGE="${KIND_NODE_IMAGE:-kindest/node:v1.32.0}"
+KWOK_VERSION="${KWOK_VERSION:-$(yq -r '.testing_tools.kwok' "${REPO_ROOT}/.settings.yaml" 2>/dev/null || echo "v0.7.0")}"
+KIND_NODE_IMAGE="${KIND_NODE_IMAGE:-$(yq -r '.testing.kind_node_image' "${REPO_ROOT}/.settings.yaml" 2>/dev/null || echo "kindest/node:v1.32.0")}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

@@ -14,11 +14,11 @@
 # limitations under the License.
 
 # =============================================================================
-# Generate Flox manifest.toml from .versions.yaml
+# Generate Flox manifest.toml from .settings.yaml
 # =============================================================================
 #
 # This script generates a Flox manifest.toml that installs the same tool
-# versions defined in .versions.yaml, providing an alternative to the
+# versions defined in .settings.yaml, providing an alternative to the
 # make-based setup for developers who prefer Flox/Nix environments.
 #
 # Usage:
@@ -34,7 +34,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-VERSIONS_FILE="${ROOT_DIR}/.versions.yaml"
+VERSIONS_FILE="${ROOT_DIR}/.settings.yaml"
 MANIFEST_FILE="${ROOT_DIR}/.flox/env/manifest.toml"
 
 # Colors
@@ -83,7 +83,7 @@ cat > "$MANIFEST_FILE" << EOF
 # Flox Environment Manifest
 # =============================================================================
 #
-# AUTO-GENERATED from .versions.yaml - DO NOT EDIT DIRECTLY
+# AUTO-GENERATED from .settings.yaml - DO NOT EDIT DIRECTLY
 #
 # Regenerate with: make flox-manifest
 #
@@ -139,8 +139,8 @@ echo "Eidos Development Environment (Flox)"
 echo "====================================="
 echo ""
 
-# Version information from .versions.yaml
-echo "Configured versions (.versions.yaml):"
+# Version information from .settings.yaml
+echo "Configured versions (.settings.yaml):"
 echo "  Go:             ${GO_VERSION}"
 echo "  kubectl:        ${KUBECTL_VERSION}"
 echo "  kind:           ${KIND_VERSION}"
@@ -202,7 +202,7 @@ if [[ \${#MISSING_TOOLS[@]} -gt 0 ]]; then
     echo ""
 fi
 
-echo "Run 'make tools-check' to verify all versions match .versions.yaml"
+echo "Run 'make tools-check' to verify all versions match .settings.yaml"
 echo ""
 '''
 
@@ -216,7 +216,7 @@ EOF
 
 log_info "Manifest generated successfully"
 echo ""
-echo "Expected versions (from .versions.yaml):"
+echo "Expected versions (from .settings.yaml):"
 echo "  Go:             ${GO_VERSION}"
 echo "  kubectl:        ${KUBECTL_VERSION}"
 echo "  kind:           ${KIND_VERSION}"

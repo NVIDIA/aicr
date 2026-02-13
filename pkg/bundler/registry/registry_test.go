@@ -23,6 +23,7 @@ import (
 	"github.com/NVIDIA/eidos/pkg/bundler/config"
 	"github.com/NVIDIA/eidos/pkg/bundler/result"
 	"github.com/NVIDIA/eidos/pkg/bundler/types"
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 )
 
@@ -46,7 +47,7 @@ type mockValidatableBundler struct {
 func (m *mockValidatableBundler) Validate(ctx context.Context, input recipe.RecipeInput) error {
 	m.validated = true
 	if input == nil {
-		return fmt.Errorf("recipe is nil")
+		return errors.New(errors.ErrCodeInvalidRequest, "recipe is nil")
 	}
 	return nil
 }

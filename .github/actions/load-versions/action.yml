@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Load Versions'
-description: 'Loads tool versions from .versions.yaml (single source of truth)'
+description: 'Loads tool versions from .settings.yaml (single source of truth)'
 
 outputs:
   go:
@@ -61,43 +61,73 @@ outputs:
   kwok:
     description: 'KWOK version'
     value: ${{ steps.versions.outputs.kwok }}
+  chainsaw:
+    description: 'Chainsaw version'
+    value: ${{ steps.versions.outputs.chainsaw }}
+  coverage_threshold:
+    description: 'Minimum test coverage percentage'
+    value: ${{ steps.versions.outputs.coverage_threshold }}
+  lint_timeout:
+    description: 'Lint timeout duration'
+    value: ${{ steps.versions.outputs.lint_timeout }}
+  test_timeout:
+    description: 'Test timeout duration'
+    value: ${{ steps.versions.outputs.test_timeout }}
+  image_registry:
+    description: 'Container image registry'
+    value: ${{ steps.versions.outputs.image_registry }}
+  kind_node_image:
+    description: 'Kind node image for testing'
+    value: ${{ steps.versions.outputs.kind_node_image }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Load versions from .versions.yaml
+    - name: Load versions from .settings.yaml
       id: versions
       shell: bash
       run: |
         # Languages
-        echo "go=$(yq eval '.languages.go' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "go=$(yq eval '.languages.go' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Build tools
-        echo "goreleaser=$(yq eval '.build_tools.goreleaser' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "ko=$(yq eval '.build_tools.ko' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "crane=$(yq eval '.build_tools.crane' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "goreleaser=$(yq eval '.build_tools.goreleaser' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "ko=$(yq eval '.build_tools.ko' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "crane=$(yq eval '.build_tools.crane' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Linting
-        echo "golangci_lint=$(yq eval '.linting.golangci_lint' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "yamllint=$(yq eval '.linting.yamllint' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "addlicense=$(yq eval '.linting.addlicense' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "go_licenses=$(yq eval '.linting.go_licenses' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "go_licenses=$(yq eval '.linting.go_licenses' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Security tools
-        echo "grype=$(yq eval '.security_tools.grype' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Testing tools
-        echo "kubectl=$(yq eval '.testing_tools.kubectl' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "kind=$(yq eval '.testing_tools.kind' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "tilt=$(yq eval '.testing_tools.tilt' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "helm=$(yq eval '.testing_tools.helm' .versions.yaml)" >> $GITHUB_OUTPUT
-        echo "kwok=$(yq eval '.testing_tools.kwok' .versions.yaml)" >> $GITHUB_OUTPUT
+        echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "kind=$(yq eval '.testing_tools.kind' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "tilt=$(yq eval '.testing_tools.tilt' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "kwok=$(yq eval '.testing_tools.kwok' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "chainsaw=$(yq eval '.testing_tools.chainsaw' .settings.yaml)" >> $GITHUB_OUTPUT
+
+        # Quality thresholds
+        echo "coverage_threshold=$(yq eval '.quality.coverage_threshold' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "lint_timeout=$(yq eval '.quality.lint_timeout' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "test_timeout=$(yq eval '.quality.test_timeout' .settings.yaml)" >> $GITHUB_OUTPUT
+
+        # Build configuration
+        echo "image_registry=$(yq eval '.build.image_registry' .settings.yaml)" >> $GITHUB_OUTPUT
+
+        # Testing configuration
+        echo "kind_node_image=$(yq eval '.testing.kind_node_image' .settings.yaml)" >> $GITHUB_OUTPUT
 
     - name: Display loaded versions
       shell: bash
       run: |
-        echo "Loaded versions from .versions.yaml:"
+        echo "Loaded versions from .settings.yaml:"
         echo "  go: ${{ steps.versions.outputs.go }}"
         echo "  goreleaser: ${{ steps.versions.outputs.goreleaser }}"
         echo "  ko: ${{ steps.versions.outputs.ko }}"
@@ -113,3 +143,9 @@ runs:
         echo "  tilt: ${{ steps.versions.outputs.tilt }}"
         echo "  helm: ${{ steps.versions.outputs.helm }}"
         echo "  kwok: ${{ steps.versions.outputs.kwok }}"
+        echo "  chainsaw: ${{ steps.versions.outputs.chainsaw }}"
+        echo "  coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}"
+        echo "  lint_timeout: ${{ steps.versions.outputs.lint_timeout }}"
+        echo "  test_timeout: ${{ steps.versions.outputs.test_timeout }}"
+        echo "  image_registry: ${{ steps.versions.outputs.image_registry }}"
+        echo "  kind_node_image: ${{ steps.versions.outputs.kind_node_image }}"

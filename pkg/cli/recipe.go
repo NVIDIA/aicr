@@ -22,6 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/serializer"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
@@ -118,7 +119,7 @@ Override snapshot-detected criteria:
 
 			// Initialize external data provider if --data flag is set
 			if err := initDataProvider(cmd); err != nil {
-				return fmt.Errorf("failed to initialize data provider: %w", err)
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 			}
 
 			// Parse output format
@@ -144,7 +145,7 @@ Override snapshot-detected criteria:
 				slog.Info("loading snapshot from", "uri", snapFilePath)
 				snap, loadErr := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapFilePath, cmd.String("kubeconfig"))
 				if loadErr != nil {
-					return fmt.Errorf("failed to load snapshot from %q: %w", snapFilePath, loadErr)
+					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapFilePath), loadErr)
 				}
 
 				// Extract criteria from snapshot
@@ -186,7 +187,7 @@ Override snapshot-detected criteria:
 				// TODO: Add context support to LoadCriteriaFromFile for HTTP URL timeout/cancellation
 				criteria, loadErr := recipe.LoadCriteriaFromFile(criteriaFilePath) //nolint:contextcheck // serializer.FromFile doesn't support context yet
 				if loadErr != nil {
-					return fmt.Errorf("failed to load criteria from %q: %w", criteriaFilePath, loadErr)
+					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load criteria from %q", criteriaFilePath), loadErr)
 				}
 
 				// Apply CLI overrides (individual flags take precedence over file)
@@ -200,12 +201,12 @@ Override snapshot-detected criteria:
 				// Build criteria from CLI flags
 				criteria, buildErr := buildCriteriaFromCmd(cmd)
 				if buildErr != nil {
-					return fmt.Errorf("error parsing criteria: %w", buildErr)
+					return errors.Wrap(errors.ErrCodeInvalidRequest, "error parsing criteria", buildErr)
 				}
 
 				// Validate that at least some criteria was provided
 				if criteria.Specificity() == 0 {
-					return fmt.Errorf("no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --platform, --nodes, --criteria, or use --snapshot to load from a snapshot file")
+					return errors.New(errors.ErrCodeInvalidRequest, "no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --platform, --nodes, --criteria, or use --snapshot to load from a snapshot file")
 				}
 
 				slog.Info("building recipe from criteria", "criteria", criteria.String())
@@ -213,14 +214,14 @@ Override snapshot-detected criteria:
 			}
 
 			if err != nil {
-				return fmt.Errorf("error building recipe: %w", err)
+				return errors.Wrap(errors.ErrCodeInternal, "error building recipe", err)
 			}
 
 			// Serialize output
 			output := cmd.String("output")
 			ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
 			if err != nil {
-				return fmt.Errorf("failed to create output writer: %w", err)
+				return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
 			}
 			defer func() {
 				if closer, ok := ser.(interface{ Close() error }); ok {
@@ -231,7 +232,7 @@ Override snapshot-detected criteria:
 			}()
 
 			if err := ser.Serialize(ctx, result); err != nil {
-				return fmt.Errorf("failed to serialize recipe: %w", err)
+				return errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
 			}
 
 			slog.Info("recipe generation completed",

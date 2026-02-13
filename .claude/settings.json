@@ -1,14 +1,19 @@
 {
+  "sandbox": {
+    "excludedCommands": [
+      "git"
+    ]
+  },
   "permissions": {
     "allow": [
-      "Bash(cat *)",
       "Bash(file *)",
-      "Bash(find *)",
-      "Bash(grep *)",
-      "Bash(head *)",
+      "Bash(gh *)",
+      "Bash(git *)",
+      "Bash(go *)",
       "Bash(ls *)",
+      "Bash(make *)",
       "Bash(pwd)",
-      "Bash(tail *)",
+      "Bash(unset *)",
       "Bash(wc *)",
       "Bash(which *)",
       "Skill(commit-commands:commit)",

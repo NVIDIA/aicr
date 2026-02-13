@@ -231,6 +231,60 @@ func TestNormalizeVersion(t *testing.T) {
 	}
 }
 
+func TestEvaluateVersionConstraint(t *testing.T) {
+	tests := []struct {
+		name           string
+		actualVersion  string
+		constraintExpr string
+		wantPassed     bool
+		wantErr        bool
+	}{
+		{
+			name:           "exact match passes",
+			actualVersion:  "v24.6.0",
+			constraintExpr: "== v24.6.0",
+			wantPassed:     true,
+		},
+		{
+			name:           "greater than passes",
+			actualVersion:  "v25.0.0",
+			constraintExpr: ">= v24.6.0",
+			wantPassed:     true,
+		},
+		{
+			name:           "less than fails",
+			actualVersion:  "v24.3.0",
+			constraintExpr: ">= v24.6.0",
+			wantPassed:     false,
+		},
+		{
+			name:           "empty constraint expression",
+			actualVersion:  "v24.6.0",
+			constraintExpr: "",
+			wantErr:        true,
+		},
+		{
+			name:           "invalid actual version",
+			actualVersion:  "not-a-version",
+			constraintExpr: ">= v24.6.0",
+			wantErr:        true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			passed, err := evaluateVersionConstraint(tt.actualVersion, tt.constraintExpr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("evaluateVersionConstraint() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && passed != tt.wantPassed {
+				t.Errorf("evaluateVersionConstraint() = %v, want %v", passed, tt.wantPassed)
+			}
+		})
+	}
+}
+
 // Helper function to create a GPU operator deployment for testing
 //
 //nolint:unparam // namespace may vary in other tests

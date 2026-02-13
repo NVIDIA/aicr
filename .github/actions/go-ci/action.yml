@@ -33,7 +33,11 @@ inputs:
   coverage_threshold:
     description: 'Minimum coverage percentage required'
     required: false
-    default: '70'
+    default: ''
+  lint_timeout:
+    description: 'Lint timeout duration'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -44,13 +48,21 @@ runs:
       with:
         go-version: '${{ inputs.go_version }}'
         cache: true
-        cache-dependency-path: 'go.sum'
+        cache-dependency-path: |
+          go.sum
+          vendor/modules.txt
         check-latest: true
 
     # Unit Tests
     - name: Tidy Modules
       shell: bash
       run: make tidy
+
+    - name: Verify vendor is in sync
+      shell: bash
+      run: |
+        go mod vendor
+        git diff --exit-code vendor/ || (echo "vendor/ is out of sync with go.mod/go.sum; run 'make tidy' and commit go.mod, go.sum, and vendor/" && exit 1)
 
     - name: Run Tests with Coverage
       shell: bash
@@ -69,7 +81,9 @@ runs:
       uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20  # v9.2.0
       with:
         version: ${{ inputs.golangci_lint_version }}
-        args: --timeout=5m
+        args: --timeout=${{ inputs.lint_timeout || '5m' }}
+      env:
+        GOFLAGS: -mod=vendor
 
     - name: Lint YAML
       if: hashFiles('.yamllint.yaml') != ''

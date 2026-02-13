@@ -23,6 +23,7 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/serializer"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
@@ -50,12 +51,12 @@ type validateAgentConfig struct {
 func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 	nodeSelector, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid node-selector: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 	}
 
 	tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid toleration: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 	}
 
 	return &validateAgentConfig{
@@ -98,7 +99,7 @@ func parseValidationPhases(phaseStrs []string) ([]validator.ValidationPhaseName,
 			// "all" means all phases - return PhaseAll which is handled specially by validator
 			return []validator.ValidationPhaseName{validator.PhaseAll}, nil
 		default:
-			return nil, fmt.Errorf("invalid phase %q: must be one of: readiness, deployment, performance, conformance, all", phaseStr)
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid phase %q: must be one of: readiness, deployment, performance, conformance, all", phaseStr))
 		}
 	}
 
@@ -134,7 +135,7 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 
 	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to capture snapshot: %w", err)
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to capture snapshot", err)
 	}
 
 	source := fmt.Sprintf("agent:%s/%s", cfg.namespace, cfg.jobName)
@@ -183,7 +184,7 @@ func runValidation(
 	// Validate with phase support
 	result, err := v.ValidatePhases(ctx, phases, rec, snap)
 	if err != nil {
-		return fmt.Errorf("validation failed: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}
 
 	// Set source information
@@ -193,7 +194,7 @@ func runValidation(
 	// Serialize output
 	ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
 	if err != nil {
-		return fmt.Errorf("failed to create output writer: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
 	}
 	defer func() {
 		if closer, ok := ser.(interface{ Close() error }); ok {
@@ -204,7 +205,7 @@ func runValidation(
 	}()
 
 	if err := ser.Serialize(ctx, result); err != nil {
-		return fmt.Errorf("failed to serialize validation result: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation result", err)
 	}
 
 	slog.Info("validation completed",
@@ -226,7 +227,7 @@ func runValidation(
 
 	// Check if we should fail on validation errors
 	if failOnError && result.Summary.Status == validator.ValidationStatusFail {
-		return fmt.Errorf("validation failed: %d constraint(s) did not pass", result.Summary.Failed)
+		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("validation failed: %d constraint(s) did not pass", result.Summary.Failed))
 	}
 
 	return nil
@@ -234,100 +235,100 @@ func runValidation(
 
 func validateCmdFlags() []cli.Flag {
 	return []cli.Flag{
-			&cli.StringFlag{
-				Name:    "recipe",
-				Aliases: []string{"r"},
-				Usage: `Path/URI to recipe file containing constraints to validate.
+		&cli.StringFlag{
+			Name:    "recipe",
+			Aliases: []string{"r"},
+			Usage: `Path/URI to recipe file containing constraints to validate.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).`,
-			},
-			&cli.StringFlag{
-				Name:    "snapshot",
-				Aliases: []string{"s"},
-				Usage: `Path/URI to snapshot file containing actual system measurements.
+		},
+		&cli.StringFlag{
+			Name:    "snapshot",
+			Aliases: []string{"s"},
+			Usage: `Path/URI to snapshot file containing actual system measurements.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
 	If not provided, an agent will be deployed to capture a fresh snapshot.`,
-			},
-			&cli.StringFlag{
-				Name:  "resume",
-				Usage: "Resume a previous validation run by RunID (format: YYYYMMDD-HHMMSS-XXXX). Skips phases that previously passed.",
-			},
-			&cli.StringSliceFlag{
-				Name: "phase",
-				Usage: `Validation phase(s) to run (can be repeated).
+		},
+		&cli.StringFlag{
+			Name:  "resume",
+			Usage: "Resume a previous validation run by RunID (format: YYYYMMDD-HHMMSS-XXXX). Skips phases that previously passed.",
+		},
+		&cli.StringSliceFlag{
+			Name: "phase",
+			Usage: `Validation phase(s) to run (can be repeated).
 	Options: "readiness", "deployment", "performance", "conformance", "all".
 	Default: "readiness" (quick readiness check).
 	Example: --phase readiness --phase deployment`,
-			},
-			&cli.BoolFlag{
-				Name:  "fail-on-error",
-				Value: true,
-				Usage: "Exit with non-zero status if any constraint fails validation",
-			},
-			// Agent deployment flags (used when --snapshot is not provided)
-			&cli.StringFlag{
-				Name:    "namespace",
-				Usage:   "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
-				Sources: cli.EnvVars("EIDOS_NAMESPACE"),
-				Value:   "gpu-operator",
-			},
-			&cli.StringFlag{
-				Name:    "validation-namespace",
-				Usage:   "Kubernetes namespace where validation jobs will run",
-				Sources: cli.EnvVars("EIDOS_VALIDATION_NAMESPACE"),
-				Value:   "eidos-validation",
-			},
-			&cli.StringFlag{
-				Name:    "image",
-				Usage:   "Container image for validation Jobs (must include Go toolchain)",
-				Sources: cli.EnvVars("EIDOS_VALIDATOR_IMAGE"),
-				Value:   "ghcr.io/nvidia/eidos-validator:latest",
-			},
-			&cli.StringSliceFlag{
-				Name:  "image-pull-secret",
-				Usage: "Secret name for pulling images from private registries (can be repeated)",
-			},
-			&cli.StringFlag{
-				Name:  "job-name",
-				Usage: "Override default Job name",
-				Value: "eidos-validate",
-			},
-			&cli.StringFlag{
-				Name:  "service-account-name",
-				Usage: "Override default ServiceAccount name",
-				Value: "eidos",
-			},
-			&cli.StringSliceFlag{
-				Name:  "node-selector",
-				Usage: "Node selector for Job scheduling (format: key=value, can be repeated)",
-			},
-			&cli.StringSliceFlag{
-				Name:  "toleration",
-				Usage: "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
-			},
-			&cli.DurationFlag{
-				Name:  "timeout",
-				Usage: "Timeout for waiting for Job completion",
-				Value: 5 * time.Minute,
-			},
-			&cli.BoolFlag{
-				Name:  "cleanup",
-				Value: true,
-				Usage: "Remove Job and RBAC resources on completion",
-			},
-			&cli.BoolFlag{
-				Name:  "privileged",
-				Value: true,
-				Usage: "Run agent in privileged mode (required for GPU/SystemD collectors)",
-			},
-			&cli.BoolFlag{
-				Name:    "require-gpu",
-				Sources: cli.EnvVars("EIDOS_REQUIRE_GPU"),
-				Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
-			},
-			outputFlag,
-			formatFlag,
-			kubeconfigFlag,
-		}
+		},
+		&cli.BoolFlag{
+			Name:  "fail-on-error",
+			Value: true,
+			Usage: "Exit with non-zero status if any constraint fails validation",
+		},
+		// Agent deployment flags (used when --snapshot is not provided)
+		&cli.StringFlag{
+			Name:    "namespace",
+			Usage:   "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
+			Sources: cli.EnvVars("EIDOS_NAMESPACE"),
+			Value:   "gpu-operator",
+		},
+		&cli.StringFlag{
+			Name:    "validation-namespace",
+			Usage:   "Kubernetes namespace where validation jobs will run",
+			Sources: cli.EnvVars("EIDOS_VALIDATION_NAMESPACE"),
+			Value:   "eidos-validation",
+		},
+		&cli.StringFlag{
+			Name:    "image",
+			Usage:   "Container image for validation Jobs (must include Go toolchain)",
+			Sources: cli.EnvVars("EIDOS_VALIDATOR_IMAGE"),
+			Value:   "ghcr.io/nvidia/eidos-validator:latest",
+		},
+		&cli.StringSliceFlag{
+			Name:  "image-pull-secret",
+			Usage: "Secret name for pulling images from private registries (can be repeated)",
+		},
+		&cli.StringFlag{
+			Name:  "job-name",
+			Usage: "Override default Job name",
+			Value: "eidos-validate",
+		},
+		&cli.StringFlag{
+			Name:  "service-account-name",
+			Usage: "Override default ServiceAccount name",
+			Value: "eidos",
+		},
+		&cli.StringSliceFlag{
+			Name:  "node-selector",
+			Usage: "Node selector for Job scheduling (format: key=value, can be repeated)",
+		},
+		&cli.StringSliceFlag{
+			Name:  "toleration",
+			Usage: "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
+		},
+		&cli.DurationFlag{
+			Name:  "timeout",
+			Usage: "Timeout for waiting for Job completion",
+			Value: 5 * time.Minute,
+		},
+		&cli.BoolFlag{
+			Name:  "cleanup",
+			Value: true,
+			Usage: "Remove Job and RBAC resources on completion",
+		},
+		&cli.BoolFlag{
+			Name:  "privileged",
+			Value: true,
+			Usage: "Run agent in privileged mode (required for GPU/SystemD collectors)",
+		},
+		&cli.BoolFlag{
+			Name:    "require-gpu",
+			Sources: cli.EnvVars("EIDOS_REQUIRE_GPU"),
+			Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
+		},
+		outputFlag,
+		formatFlag,
+		kubeconfigFlag,
+	}
 }
 
 func validateCmd() *cli.Command {
@@ -378,7 +379,7 @@ Run validation without failing on constraint errors (informational mode):
 Resume a previous validation run from where it left off:
   eidos validate -r recipe.yaml -s snapshot.yaml --resume 20260206-140523-a3f9
 `,
-		Flags:  validateCmdFlags(),
+		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			// Note: --phase allows multiple values so it's not included here
@@ -393,7 +394,7 @@ Resume a previous validation run from where it left off:
 
 			// Recipe is always required
 			if recipeFilePath == "" {
-				return fmt.Errorf("--recipe is required")
+				return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required")
 			}
 
 			// Parse output format
@@ -415,7 +416,7 @@ Resume a previous validation run from where it left off:
 			// Load recipe
 			rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](recipeFilePath, kubeconfig)
 			if err != nil {
-				return fmt.Errorf("failed to load recipe from %q: %w", recipeFilePath, err)
+				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load recipe from %q", recipeFilePath), err)
 			}
 
 			// Get snapshot - either from file or by deploying an agent
@@ -427,7 +428,7 @@ Resume a previous validation run from where it left off:
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
 				snap, err = serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapshotFilePath, kubeconfig)
 				if err != nil {
-					return fmt.Errorf("failed to load snapshot from %q: %w", snapshotFilePath, err)
+					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapshotFilePath), err)
 				}
 				snapshotSource = snapshotFilePath
 			} else {

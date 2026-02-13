@@ -115,3 +115,52 @@ metadata:
 status:
   (numberReady > `0`): true
   (desiredNumberScheduled > `0`): true
+---
+# Node Feature Discovery worker DaemonSet — detects hardware features on each node
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-feature-discovery-worker
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# Node Feature Discovery garbage collector — cleans up stale node feature labels
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-feature-discovery-gc
+  namespace: gpu-operator
+status:
+  conditions:
+    - type: Available
+      status: "True"
+---
+# NVIDIA DCGM DaemonSet — Data Center GPU Manager for health and diagnostics
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-dcgm
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# NVIDIA MIG Manager DaemonSet — manages Multi-Instance GPU partitioning
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-mig-manager
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# NVIDIA Device Plugin MPS Control Daemon — Multi-Process Service for GPU sharing
+# desiredNumberScheduled may be 0 when MPS is not enabled
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-mps-control-daemon
+  namespace: gpu-operator

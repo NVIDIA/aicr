@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -38,17 +39,17 @@ func (d *Deployer) waitForJobCompletion(ctx context.Context, timeout time.Durati
 		FieldSelector: fmt.Sprintf("metadata.name=%s", d.config.JobName),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to watch Job: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to watch Job", err)
 	}
 	defer watcher.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for Job completion: %w", ctx.Err())
+			return errors.Wrap(errors.ErrCodeTimeout, "timeout waiting for Job completion", ctx.Err())
 		case event := <-watcher.ResultChan():
 			if event.Type == watch.Deleted {
-				return fmt.Errorf("job was deleted")
+				return errors.New(errors.ErrCodeInternal, "job was deleted")
 			}
 
 			job, ok := event.Object.(*batchv1.Job)
@@ -69,7 +70,7 @@ func (d *Deployer) waitForJobCompletion(ctx context.Context, timeout time.Durati
 					if condition.Status == corev1.ConditionTrue {
 						// Get detailed failure reason from Pod status
 						failureReason := d.getJobFailureReason(ctx, condition.Reason, condition.Message)
-						return fmt.Errorf("job failed: %s", failureReason)
+						return errors.New(errors.ErrCodeInternal, fmt.Sprintf("job failed: %s", failureReason))
 					}
 				case batchv1.JobSuspended, batchv1.JobFailureTarget, batchv1.JobSuccessCriteriaMet:
 					// These conditions don't affect completion, continue waiting
@@ -160,14 +161,14 @@ func (d *Deployer) getResultFromJobLogs(ctx context.Context) (*ValidationResult,
 	// Get the pod for this Job
 	pod, err := d.getPodForJob(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find pod: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeNotFound, "failed to find pod", err)
 	}
 
 	// Get pod logs
 	req := d.clientset.CoreV1().Pods(d.config.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{})
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get pod logs: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get pod logs", err)
 	}
 	defer stream.Close()
 
@@ -198,14 +199,14 @@ func (d *Deployer) getResultFromJobLogs(ctx context.Context) (*ValidationResult,
 	}
 
 	if scanErr := scanner.Err(); scanErr != nil {
-		return nil, fmt.Errorf("failed to read pod logs: %w", scanErr)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read pod logs", scanErr)
 	}
 
 	// Parse go test JSON output
 	jsonOutput := strings.Join(jsonLines, "\n")
 	result, err := parseGoTestJSON(jsonOutput)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse test results: %w", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse test results", err)
 	}
 
 	return result, nil
@@ -216,7 +217,7 @@ func (d *Deployer) streamPodLogs(ctx context.Context) error {
 	// Get the pod for this Job
 	pod, err := d.getPodForJob(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to find pod: %w", err)
+		return errors.Wrap(errors.ErrCodeNotFound, "failed to find pod", err)
 	}
 
 	req := d.clientset.CoreV1().Pods(d.config.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
@@ -225,7 +226,7 @@ func (d *Deployer) streamPodLogs(ctx context.Context) error {
 
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to open log stream: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to open log stream", err)
 	}
 	defer stream.Close()
 
@@ -242,13 +243,13 @@ func (d *Deployer) streamPodLogs(ctx context.Context) error {
 func (d *Deployer) getPodLogsAsString(ctx context.Context) (string, error) {
 	pod, err := d.getPodForJob(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to find pod: %w", err)
+		return "", errors.Wrap(errors.ErrCodeNotFound, "failed to find pod", err)
 	}
 
 	req := d.clientset.CoreV1().Pods(d.config.Namespace).GetLogs(pod.Name, &corev1.PodLogOptions{})
 	stream, err := req.Stream(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get pod logs: %w", err)
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to get pod logs", err)
 	}
 	defer stream.Close()
 
@@ -260,7 +261,7 @@ func (d *Deployer) getPodLogsAsString(ctx context.Context) (string, error) {
 	}
 
 	if scanErr := scanner.Err(); scanErr != nil {
-		return "", fmt.Errorf("failed to read pod logs: %w", scanErr)
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read pod logs", scanErr)
 	}
 
 	return logBuffer.String(), nil
@@ -276,7 +277,7 @@ func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 	}
 
 	if len(pods.Items) == 0 {
-		return nil, fmt.Errorf("no pods found for Job %q", d.config.JobName)
+		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no pods found for Job %q", d.config.JobName))
 	}
 
 	return &pods.Items[0], nil
@@ -382,22 +383,24 @@ func parseGoTestJSON(jsonOutput string) (*ValidationResult, error) {
 	}
 
 	// Convert map to slice
+	result.Tests = make([]TestResult, 0, len(testResults))
 	for _, test := range testResults {
 		result.Tests = append(result.Tests, *test)
 	}
 
-	// Calculate overall duration from all tests
+	// Summarize results
+	summarizeTestResults(result, overallOutput)
+
+	return result, nil
+}
+
+// summarizeTestResults populates Duration, Message, and Details from parsed tests.
+func summarizeTestResults(result *ValidationResult, overallOutput []string) {
 	var totalDuration time.Duration
+	passCount, failCount, skipCount := 0, 0, 0
+
 	for _, test := range result.Tests {
 		totalDuration += test.Duration
-	}
-	result.Duration = totalDuration
-
-	// Set summary message
-	passCount := 0
-	failCount := 0
-	skipCount := 0
-	for _, test := range result.Tests {
 		switch test.Status {
 		case statusPass:
 			passCount++
@@ -407,8 +410,8 @@ func parseGoTestJSON(jsonOutput string) (*ValidationResult, error) {
 			skipCount++
 		}
 	}
+	result.Duration = totalDuration
 
-	// Generate summary message based on test counts
 	switch {
 	case failCount > 0:
 		result.Message = fmt.Sprintf("%d tests: %d passed, %d failed, %d skipped", len(result.Tests), passCount, failCount, skipCount)
@@ -418,10 +421,7 @@ func parseGoTestJSON(jsonOutput string) (*ValidationResult, error) {
 		result.Message = fmt.Sprintf("%d tests passed", passCount)
 	}
 
-	// Store overall output in details
 	if len(overallOutput) > 0 {
 		result.Details["output"] = overallOutput
 	}
-
-	return result, nil
 }

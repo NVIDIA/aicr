@@ -16,7 +16,6 @@ package cli
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -218,13 +217,13 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				// Use template writer
 				ser, err = serializer.NewTemplateFileWriter(tmplOpts.templatePath, tmplOpts.outputPath)
 				if err != nil {
-					return fmt.Errorf("failed to create template writer: %w", err)
+					return errors.Wrap(errors.ErrCodeInternal, "failed to create template writer", err)
 				}
 			} else {
 				// Use standard format writer
 				ser, err = serializer.NewFileWriterOrStdout(tmplOpts.format, tmplOpts.outputPath)
 				if err != nil {
-					return fmt.Errorf("failed to create output writer: %w", err)
+					return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
 				}
 			}
 
@@ -240,13 +239,13 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				// Parse node selectors
 				nodeSelector, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
 				if err != nil {
-					return fmt.Errorf("invalid node-selector: %w", err)
+					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 				}
 
 				// Parse tolerations
 				tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 				if err != nil {
-					return fmt.Errorf("invalid toleration: %w", err)
+					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 				}
 
 				// Configure agent deployment

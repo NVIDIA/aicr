@@ -32,74 +32,33 @@ env:
 jobs:
 
   # =============================================================================
-  # Test Jobs (run in parallel, same as on-push.yaml)
+  # Test Jobs (reusable workflow — same suite as on-push.yaml)
   # =============================================================================
 
-  unit:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  tests:
+    uses: ./.github/workflows/qualification.yaml
     permissions:
+      actions: read
+      contents: read
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
       contents: read
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run Go CI (setup, test, lint)
-        uses: ./.github/actions/go-ci
         with:
-          go_version: ${{ steps.versions.outputs.go }}
-          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
-          addlicense_version: ${{ steps.versions.outputs.addlicense }}
-          coverage_report: 'false'
+          persist-credentials: false
 
       - name: Security Scan
         uses: ./.github/actions/security-scan
         with:
           severity: 'MEDIUM'
           category: 'trivy-fs'
-
-  integration:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run Integration Tests
-        uses: ./.github/actions/integration
-        with:
-          go_version: ${{ steps.versions.outputs.go }}
-
-  e2e:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run E2E Tests
-        uses: ./.github/actions/e2e
-        with:
-          go_version: ${{ steps.versions.outputs.go }}
 
   # =============================================================================
   # Build Job: GoReleaser (binaries, ko images, draft GitHub release)
@@ -108,7 +67,7 @@ jobs:
   build:
     name: Build and Release (Draft)
     runs-on: ubuntu-latest
-    needs: [unit, integration, e2e]
+    needs: [tests, security-scan]
     timeout-minutes: 30
     outputs:
       release_outcome: ${{ steps.release.outputs.release_outcome }}
@@ -122,6 +81,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           fetch-depth: 0  # Full history for changelog generation
+          persist-credentials: false
 
       - name: Load versions
         id: versions
@@ -136,22 +96,36 @@ jobs:
       - name: Build and Release
         id: release
         uses: ./.github/actions/go-build-release
+        with:
+          ko_version: ${{ steps.versions.outputs.ko }}
 
   # =============================================================================
   # Docker Jobs: Native per-arch validator builds (parallel with GoReleaser)
   # =============================================================================
 
-  docker-amd64:
-    name: Docker Validator (amd64)
-    runs-on: ubuntu-latest
-    needs: [unit, integration, e2e]
+  docker-validator:
+    name: Docker Validator (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    needs: [tests, security-scan]
     timeout-minutes: 15
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
@@ -164,42 +138,9 @@ jobs:
         with:
           context: .
           file: Dockerfile.validator
-          platforms: linux/amd64
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-amd64
-          labels: |
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.title=eidos-validator
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ github.ref_name }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-
-  docker-arm64:
-    name: Docker Validator (arm64)
-    runs-on: ubuntu-24.04-arm
-    needs: [unit, integration, e2e]
-    timeout-minutes: 15
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-
-      - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
-
-      - name: Authenticate to registry
-        uses: ./.github/actions/ghcr-login
-
-      - name: Build and push
-        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4  # v6.15.0
-        with:
-          context: .
-          file: Dockerfile.validator
-          platforms: linux/arm64
-          push: true
-          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-arm64
+          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-${{ matrix.arch }}
           labels: |
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
             org.opencontainers.image.title=eidos-validator
@@ -214,7 +155,7 @@ jobs:
   docker-manifest:
     name: Docker Manifest
     runs-on: ubuntu-latest
-    needs: [docker-amd64, docker-arm64]
+    needs: [docker-validator]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -222,6 +163,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -250,6 +193,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Load versions
         id: versions
@@ -322,6 +267,12 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
 
       - name: Deploy Demo API Server
         uses: ./.github/actions/cloud-run-deploy
@@ -335,3 +286,4 @@ jobs:
           target_registry: ${{ env.TARGET_REGISTRY }}
           image_name: 'eidosd'
           ghcr_token: ${{ github.token }}
+          crane_version: ${{ steps.versions.outputs.crane }}

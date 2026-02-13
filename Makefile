@@ -3,7 +3,10 @@
 
 REPO_NAME          := eidos
 VERSION            ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-IMAGE_REGISTRY     ?= ghcr.io/nvidia
+IMAGE_REGISTRY     ?= $(shell yq -r '.build.image_registry' .settings.yaml 2>/dev/null)
+ifeq ($(IMAGE_REGISTRY),)
+IMAGE_REGISTRY     := ghcr.io/nvidia
+endif
 IMAGE_TAG          ?= latest
 YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundles/*" ! -path "./.flox/*" ! -path "*/testdata/*")
 COMMIT             := $(shell git rev-parse HEAD)
@@ -12,7 +15,18 @@ GO_VERSION         := $(shell go env GOVERSION 2>/dev/null | sed 's/go//')
 GOLINT_VERSION      = $(shell golangci-lint --version 2>/dev/null | awk '{print $$4}' | sed 's/golangci-lint version //' || echo "not installed")
 KO_VERSION          = $(shell ko version 2>/dev/null || echo "not installed")
 GORELEASER_VERSION  = $(shell goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p' || echo "not installed")
-COVERAGE_THRESHOLD ?= 66
+COVERAGE_THRESHOLD ?= $(shell yq -r '.quality.coverage_threshold' .settings.yaml 2>/dev/null)
+ifeq ($(COVERAGE_THRESHOLD),)
+COVERAGE_THRESHOLD := 70
+endif
+LINT_TIMEOUT       ?= $(shell yq -r '.quality.lint_timeout' .settings.yaml 2>/dev/null)
+ifeq ($(LINT_TIMEOUT),)
+LINT_TIMEOUT       := 5m
+endif
+TEST_TIMEOUT       ?= $(shell yq -r '.quality.test_timeout' .settings.yaml 2>/dev/null)
+ifeq ($(TEST_TIMEOUT),)
+TEST_TIMEOUT       := 10m
+endif
 
 # Tilt/ctlptl configuration
 CTLPTL_CONFIG_FILE = .ctlptl.yaml
@@ -46,8 +60,13 @@ tools-setup: ## Setup development environment (installs all required tools). Use
 	@echo "Setting up development environment..."
 	@AUTO_MODE=$(AUTO_MODE) bash tools/setup-tools
 
+.PHONY: tools-update
+tools-update: ## Reinstall/upgrade all tools to versions in .settings.yaml (non-interactive)
+	@echo "Updating tools to .settings.yaml..."
+	@AUTO_MODE=true bash tools/setup-tools --upgrade
+
 .PHONY: flox-manifest
-flox-manifest: ## Generate Flox manifest.toml from .versions.yaml (alternative to tools-setup)
+flox-manifest: ## Generate Flox manifest.toml from .settings.yaml (alternative to tools-setup)
 	@bash tools/generate-flox-manifest
 
 # =============================================================================
@@ -58,7 +77,12 @@ flox-manifest: ## Generate Flox manifest.toml from .versions.yaml (alternative t
 tidy: ## Formats code and updates Go module dependencies
 	@set -e; \
 	go fmt ./...; \
-	go mod tidy
+	go mod tidy; \
+	go mod vendor
+
+.PHONY: vendor
+vendor: ## Vendors Go module dependencies (run after changing go.mod/go.sum)
+	@go mod vendor
 
 .PHONY: fmt-check
 fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
@@ -69,12 +93,13 @@ fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
 upgrade: ## Upgrades all dependencies to latest versions
 	@set -e; \
 	go get -u ./...; \
-	go mod tidy
+	go mod tidy; \
+	go mod vendor
 
 .PHONY: generate
 generate: ## Runs go generate for code generation
 	@echo "Running go generate..."
-	@go generate ./...
+	@GOFLAGS="-mod=vendor" go generate ./...
 	@echo "Code generation completed"
 
 .PHONY: lint
@@ -85,9 +110,9 @@ lint: lint-go lint-yaml license ## Lints the entire project (Go, YAML, and licen
 lint-go: ## Lints Go files with golangci-lint and go vet
 	@set -e; \
 	echo "Running go vet..."; \
-	go vet ./...; \
+	GOFLAGS="-mod=vendor" go vet ./...; \
 	echo "Running golangci-lint..."; \
-	golangci-lint -c .golangci.yaml run
+	GOFLAGS="-mod=vendor" golangci-lint -c .golangci.yaml run --timeout=$(LINT_TIMEOUT)
 
 .PHONY: lint-yaml
 lint-yaml: ## Lints YAML files with yamllint
@@ -125,12 +150,12 @@ license: ## Add/verify license headers in source files
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
-	go test -short -count=1 -race -covermode=atomic -coverprofile=coverage.out ./... || exit 1; \
+	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v /tests/chainsaw/) || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
 .PHONY: test-coverage
-test-coverage: test ## Runs tests and enforces coverage threshold (COVERAGE_THRESHOLD=60)
+test-coverage: test ## Runs tests and enforces coverage threshold (COVERAGE_THRESHOLD=70)
 	@coverage=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
 	echo "Coverage: $$coverage% (threshold: $(COVERAGE_THRESHOLD)%)"; \
 	if [ $$(echo "$$coverage < $(COVERAGE_THRESHOLD)" | bc) -eq 1 ]; then \
@@ -142,7 +167,7 @@ test-coverage: test ## Runs tests and enforces coverage threshold (COVERAGE_THRE
 .PHONY: bench
 bench: ## Runs benchmarks
 	@echo "Running benchmarks..."
-	@go test -bench=. -benchmem ./...
+	@GOFLAGS="-mod=vendor" go test -bench=. -benchmem ./...
 
 .PHONY: e2e
 e2e: ## Runs end-to-end integration tests (CLI only)
@@ -163,14 +188,14 @@ scan: ## Scans for vulnerabilities with grype
 	grype dir:. --config .grype.yaml --fail-on high --quiet
 
 .PHONY: qualify
-qualify: test lint e2e scan ## Qualifies the codebase (test, lint, e2e, scan)
+qualify: test-coverage lint e2e scan ## Qualifies the codebase (test-coverage, lint, e2e, scan)
 	@echo "Codebase qualification completed"
 
 .PHONY: server
 server: ## Starts a local development server with debug logging
 	@set -e; \
 	echo "Starting local development server..."; \
-	LOG_LEVEL=debug go run cmd/eidosd/main.go
+	GOFLAGS="-mod=vendor" LOG_LEVEL=debug go run cmd/eidosd/main.go
 
 .PHONY: docs
 docs: ## Serves Go documentation on http://localhost:6060
@@ -348,10 +373,14 @@ cluster-status: ## Shows cluster and registry status
 # KWOK Cluster Simulation
 # =============================================================================
 
-# KWOK version for simulated GPU nodes (from .versions.yaml)
-KWOK_VERSION ?= $(shell yq -r '.testing_tools.kwok' .versions.yaml 2>/dev/null)
+# KWOK version for simulated GPU nodes (from .settings.yaml)
+KWOK_VERSION ?= $(shell yq -r '.testing_tools.kwok' .settings.yaml 2>/dev/null)
 ifeq ($(KWOK_VERSION),)
 KWOK_VERSION := v0.7.0
+endif
+KIND_NODE_IMAGE ?= $(shell yq -r '.testing.kind_node_image' .settings.yaml 2>/dev/null)
+ifeq ($(KIND_NODE_IMAGE),)
+KIND_NODE_IMAGE := kindest/node:v1.32.0
 endif
 CTLPTL_KWOK_CONFIG_FILE := .ctlptl-kwok.yaml
 
@@ -530,6 +559,7 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Tools ===\033[0m"
 	@echo "  make tools-check    Check tools and compare versions"
 	@echo "  make tools-setup    Install all development tools"
+	@echo "  make tools-update   Upgrade all tools to .settings.yaml"
 	@echo "  make flox-manifest  Generate Flox manifest (alternative setup)"
 	@echo ""
 	@echo "\033[1m=== Utilities ===\033[0m"

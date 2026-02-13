@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -38,7 +39,7 @@ func (d *Deployer) ensureJob(ctx context.Context) error {
 	// Create the Job
 	_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).Create(ctx, job, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create Job: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create Job", err)
 	}
 
 	slog.Debug("validation Job created",

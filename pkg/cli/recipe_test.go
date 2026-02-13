@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -421,6 +422,72 @@ func TestApplyCriteriaOverrides(t *testing.T) {
 			},
 		},
 		{
+			name:    "override intent",
+			args:    []string{"cmd", "--intent", "inference"},
+			initial: &recipe.Criteria{Intent: recipe.CriteriaIntentTraining},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Intent != recipe.CriteriaIntentInference {
+					t.Errorf("Intent = %v, want %v", c.Intent, recipe.CriteriaIntentInference)
+				}
+			},
+		},
+		{
+			name:    "override os",
+			args:    []string{"cmd", "--os", "rhel"},
+			initial: &recipe.Criteria{OS: recipe.CriteriaOSUbuntu},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.OS != recipe.CriteriaOSRHEL {
+					t.Errorf("OS = %v, want %v", c.OS, recipe.CriteriaOSRHEL)
+				}
+			},
+		},
+		{
+			name:    "override platform",
+			args:    []string{"cmd", "--platform", "kubeflow"},
+			initial: &recipe.Criteria{Platform: recipe.CriteriaPlatformDynamo},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Platform != recipe.CriteriaPlatformKubeflow {
+					t.Errorf("Platform = %v, want %v", c.Platform, recipe.CriteriaPlatformKubeflow)
+				}
+			},
+		},
+		{
+			name:    "override nodes",
+			args:    []string{"cmd", "--nodes", "16"},
+			initial: &recipe.Criteria{Nodes: 4},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Nodes != 16 {
+					t.Errorf("Nodes = %v, want 16", c.Nodes)
+				}
+			},
+		},
+		{
+			name:    "same service value no change",
+			args:    []string{"cmd", "--service", "eks"},
+			initial: &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Service != recipe.CriteriaServiceEKS {
+					t.Errorf("Service = %v, want %v", c.Service, recipe.CriteriaServiceEKS)
+				}
+			},
+		},
+		{
+			name:    "set on empty criteria",
+			args:    []string{"cmd", "--intent", "training", "--os", "ubuntu", "--nodes", "8"},
+			initial: &recipe.Criteria{},
+			validate: func(t *testing.T, c *recipe.Criteria) {
+				if c.Intent != recipe.CriteriaIntentTraining {
+					t.Errorf("Intent = %v, want %v", c.Intent, recipe.CriteriaIntentTraining)
+				}
+				if c.OS != recipe.CriteriaOSUbuntu {
+					t.Errorf("OS = %v, want %v", c.OS, recipe.CriteriaOSUbuntu)
+				}
+				if c.Nodes != 8 {
+					t.Errorf("Nodes = %v, want 8", c.Nodes)
+				}
+			},
+		},
+		{
 			name:    "no overrides preserves existing",
 			args:    []string{"cmd"},
 			initial: &recipe.Criteria{Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorGB200},
@@ -434,8 +501,32 @@ func TestApplyCriteriaOverrides(t *testing.T) {
 			},
 		},
 		{
-			name:    "invalid override returns error",
+			name:    "invalid service returns error",
 			args:    []string{"cmd", "--service", "invalid"},
+			initial: &recipe.Criteria{},
+			wantErr: true,
+		},
+		{
+			name:    "invalid accelerator returns error",
+			args:    []string{"cmd", "--accelerator", "invalid"},
+			initial: &recipe.Criteria{},
+			wantErr: true,
+		},
+		{
+			name:    "invalid intent returns error",
+			args:    []string{"cmd", "--intent", "invalid"},
+			initial: &recipe.Criteria{},
+			wantErr: true,
+		},
+		{
+			name:    "invalid os returns error",
+			args:    []string{"cmd", "--os", "invalid"},
+			initial: &recipe.Criteria{},
+			wantErr: true,
+		},
+		{
+			name:    "invalid platform returns error",
+			args:    []string{"cmd", "--platform", "invalid"},
 			initial: &recipe.Criteria{},
 			wantErr: true,
 		},
@@ -450,6 +541,7 @@ func TestApplyCriteriaOverrides(t *testing.T) {
 					&cli.StringFlag{Name: "accelerator", Aliases: []string{"gpu"}},
 					&cli.StringFlag{Name: "intent"},
 					&cli.StringFlag{Name: "os"},
+					&cli.StringFlag{Name: "platform"},
 					&cli.IntFlag{Name: "nodes"},
 				},
 				Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -584,13 +676,7 @@ func hasName(flag cli.Flag, name string) bool {
 	if flag == nil {
 		return false
 	}
-	names := flag.Names()
-	for _, n := range names {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(flag.Names(), name)
 }
 
 func TestRecipeCmd_HasDataFlag(t *testing.T) {

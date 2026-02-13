@@ -179,6 +179,95 @@ not valid json
 	}
 }
 
+func TestSummarizeTestResults(t *testing.T) {
+	tests := []struct {
+		name            string
+		tests           []TestResult
+		overallOutput   []string
+		wantMessage     string
+		wantDuration    time.Duration
+		wantOutputInDet bool
+	}{
+		{
+			name: "all passed",
+			tests: []TestResult{
+				{Name: "TestA", Status: statusPass, Duration: 100 * time.Millisecond},
+				{Name: "TestB", Status: statusPass, Duration: 200 * time.Millisecond},
+			},
+			wantMessage:  "2 tests passed",
+			wantDuration: 300 * time.Millisecond,
+		},
+		{
+			name: "some failed",
+			tests: []TestResult{
+				{Name: "TestA", Status: statusPass, Duration: 100 * time.Millisecond},
+				{Name: "TestB", Status: statusFail, Duration: 200 * time.Millisecond},
+			},
+			wantMessage:  "2 tests: 1 passed, 1 failed, 0 skipped",
+			wantDuration: 300 * time.Millisecond,
+		},
+		{
+			name: "some skipped",
+			tests: []TestResult{
+				{Name: "TestA", Status: statusPass, Duration: 50 * time.Millisecond},
+				{Name: "TestB", Status: statusSkip, Duration: 10 * time.Millisecond},
+			},
+			wantMessage:  "2 tests: 1 passed, 1 skipped",
+			wantDuration: 60 * time.Millisecond,
+		},
+		{
+			name: "mixed pass fail skip",
+			tests: []TestResult{
+				{Name: "TestA", Status: statusPass, Duration: 100 * time.Millisecond},
+				{Name: "TestB", Status: statusFail, Duration: 200 * time.Millisecond},
+				{Name: "TestC", Status: statusSkip, Duration: 50 * time.Millisecond},
+			},
+			wantMessage:  "3 tests: 1 passed, 1 failed, 1 skipped",
+			wantDuration: 350 * time.Millisecond,
+		},
+		{
+			name:         "empty test list",
+			tests:        []TestResult{},
+			wantMessage:  "0 tests passed",
+			wantDuration: 0,
+		},
+		{
+			name: "overall output stored in details",
+			tests: []TestResult{
+				{Name: "TestA", Status: statusPass, Duration: 100 * time.Millisecond},
+			},
+			overallOutput:   []string{"line1", "line2"},
+			wantMessage:     "1 tests passed",
+			wantDuration:    100 * time.Millisecond,
+			wantOutputInDet: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &ValidationResult{
+				Details: make(map[string]interface{}),
+				Tests:   tt.tests,
+			}
+			summarizeTestResults(result, tt.overallOutput)
+
+			if result.Message != tt.wantMessage {
+				t.Errorf("Message = %q, want %q", result.Message, tt.wantMessage)
+			}
+			if result.Duration != tt.wantDuration {
+				t.Errorf("Duration = %v, want %v", result.Duration, tt.wantDuration)
+			}
+			_, hasOutput := result.Details["output"]
+			if tt.wantOutputInDet && !hasOutput {
+				t.Error("expected output in Details")
+			}
+			if !tt.wantOutputInDet && hasOutput {
+				t.Error("unexpected output in Details")
+			}
+		})
+	}
+}
+
 func TestGetPodForJob(t *testing.T) {
 	deployer, clientset := createDeployer()
 	ctx := context.Background()

@@ -27,6 +27,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   package:
     name: Package (Dry Run)
@@ -37,6 +41,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Load versions
         id: versions
@@ -56,6 +62,7 @@ jobs:
       - name: GoReleaser Dry Run
         env:
           GORELEASER_CURRENT_TAG: v0.0.0
+          GOFLAGS: -mod=vendor
         run: |
           set -euo pipefail
-          goreleaser release --snapshot --clean --skip=publish
+          goreleaser release --snapshot --clean --skip=publish,sbom

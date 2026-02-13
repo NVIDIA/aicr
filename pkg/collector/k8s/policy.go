@@ -56,6 +56,10 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 
 	// Find all ClusterPolicy resources across all API groups
 	for _, apiResourceList := range apiResourceLists {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
 		if apiResourceList == nil {
 			continue
 		}

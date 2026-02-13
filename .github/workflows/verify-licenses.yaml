@@ -18,10 +18,19 @@ on:
   push:
     branches:
       - main
-      - "pull-request/[0-9]+"
+      - "pull-request/*"
     paths:
       - 'go.mod'
       - 'go.sum'
+      - 'vendor/'
+      - '.github/workflows/verify-licenses.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+      - 'vendor/'
       - '.github/workflows/verify-licenses.yaml'
   workflow_dispatch: {}
 
@@ -40,6 +49,8 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Load versions
         id: versions
@@ -50,11 +61,16 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
 
       - name: Install go-licenses
         run: go install github.com/google/go-licenses@${{ steps.versions.outputs.go_licenses }}
 
       - name: Report licenses
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           echo "=== Dependency Licenses ==="
           go-licenses report ./... 2>/dev/null | sort -t',' -k3 | column -t -s','
@@ -63,6 +79,8 @@ jobs:
           go-licenses report ./... 2>/dev/null | cut -d',' -f3 | sort | uniq -c | sort -rn
 
       - name: Check licenses
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           # Allowed licenses (all CNCF-approved)
           go-licenses check ./... \

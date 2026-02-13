@@ -94,35 +94,46 @@ func ApplyMapOverrides(target map[string]any, overrides map[string]string) error
 	return nil
 }
 
-// setMapValueByPath sets a value in a nested map using dot-notation path.
-// Creates nested maps as needed. Converts string values to bools when appropriate.
-func setMapValueByPath(target map[string]any, path, value string) error {
+// getOrCreateNestedMap traverses a dot-separated path in a nested map,
+// creating intermediate maps as needed, and returns the parent map
+// and the final key. When strict is true, returns an error if an
+// intermediate path segment exists but is not a map. When strict is
+// false, non-map values are silently replaced with new maps.
+func getOrCreateNestedMap(m map[string]any, path string, strict bool) (map[string]any, string, error) {
 	parts := strings.Split(path, ".")
-	current := target
+	current := m
 
-	// Traverse/create the path up to the last segment
-	for i := 0; i < len(parts)-1; i++ {
-		part := parts[i]
+	for _, part := range parts[:len(parts)-1] {
 		if next, ok := current[part]; ok {
-			// If the value exists, it must be a map
 			if nextMap, ok := next.(map[string]any); ok {
 				current = nextMap
+			} else if strict {
+				return nil, "", errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("path segment %q exists but is not a map (type: %T)", part, next))
 			} else {
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("path segment %q exists but is not a map (type: %T)", part, next))
+				newMap := make(map[string]any)
+				current[part] = newMap
+				current = newMap
 			}
 		} else {
-			// Create a new nested map
 			newMap := make(map[string]any)
 			current[part] = newMap
 			current = newMap
 		}
 	}
 
-	// Set the final value
-	lastPart := parts[len(parts)-1]
+	return current, parts[len(parts)-1], nil
+}
 
-	// Try to convert value to appropriate type
-	current[lastPart] = convertMapValue(value)
+// setMapValueByPath sets a value in a nested map using dot-notation path.
+// Creates nested maps as needed. Converts string values to bools when appropriate.
+func setMapValueByPath(target map[string]any, path, value string) error {
+	parent, key, err := getOrCreateNestedMap(target, path, true)
+	if err != nil {
+		return err
+	}
+
+	parent[key] = convertMapValue(value)
 
 	return nil
 }
@@ -556,36 +567,14 @@ func ApplyNodeSelectorOverrides(values map[string]any, nodeSelector map[string]s
 
 // setNodeSelectorAtPath sets the node selector at the specified dot-notation path.
 func setNodeSelectorAtPath(values map[string]any, nodeSelector map[string]string, path string) {
-	parts := strings.Split(path, ".")
-	current := values
-
-	// Navigate to the parent of the target field
-	for i := 0; i < len(parts)-1; i++ {
-		part := parts[i]
-		if next, ok := current[part]; ok {
-			if nextMap, ok := next.(map[string]any); ok {
-				current = nextMap
-			} else {
-				// Path doesn't exist as expected structure, create it
-				newMap := make(map[string]any)
-				current[part] = newMap
-				current = newMap
-			}
-		} else {
-			// Create the intermediate path
-			newMap := make(map[string]any)
-			current[part] = newMap
-			current = newMap
-		}
-	}
+	parent, key, _ := getOrCreateNestedMap(values, path, false)
 
 	// Set the node selector - convert map[string]string to map[string]any
-	lastPart := parts[len(parts)-1]
 	nsMap := make(map[string]any, len(nodeSelector))
 	for k, v := range nodeSelector {
 		nsMap[k] = v
 	}
-	current[lastPart] = nsMap
+	parent[key] = nsMap
 }
 
 // ApplyTolerationsOverrides applies toleration overrides to a values map.
@@ -611,37 +600,14 @@ func ApplyTolerationsOverrides(values map[string]any, tolerations []corev1.Toler
 
 // setTolerationsAtPath sets the tolerations at the specified dot-notation path.
 func setTolerationsAtPath(values map[string]any, tolerations []map[string]any, path string) {
-	parts := strings.Split(path, ".")
-	current := values
+	parent, key, _ := getOrCreateNestedMap(values, path, false)
 
-	// Navigate to the parent of the target field
-	for i := 0; i < len(parts)-1; i++ {
-		part := parts[i]
-		if next, ok := current[part]; ok {
-			if nextMap, ok := next.(map[string]any); ok {
-				current = nextMap
-			} else {
-				// Path doesn't exist as expected structure, create it
-				newMap := make(map[string]any)
-				current[part] = newMap
-				current = newMap
-			}
-		} else {
-			// Create the intermediate path
-			newMap := make(map[string]any)
-			current[part] = newMap
-			current = newMap
-		}
-	}
-
-	// Set the tolerations
-	lastPart := parts[len(parts)-1]
 	// Convert to []any for proper YAML serialization
 	tolInterface := make([]any, len(tolerations))
 	for i, t := range tolerations {
 		tolInterface[i] = t
 	}
-	current[lastPart] = tolInterface
+	parent[key] = tolInterface
 }
 
 // TolerationsToPodSpec converts a slice of corev1.Toleration to a YAML-friendly format.
