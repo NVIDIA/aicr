@@ -672,11 +672,14 @@ func TestNew_MultipleOptions(t *testing.T) {
 	version := "v1.0.0"
 	namespace := "custom-ns"
 	runID := "20260101-120000-test"
+	secrets := []string{"secret-a", "secret-b"}
 
 	v := New(
 		WithVersion(version),
 		WithNamespace(namespace),
 		WithRunID(runID),
+		WithCleanup(false),
+		WithImagePullSecrets(secrets),
 	)
 
 	if v.Version != version {
@@ -687,6 +690,12 @@ func TestNew_MultipleOptions(t *testing.T) {
 	}
 	if v.RunID != runID {
 		t.Errorf("Expected runID %s, got %s", runID, v.RunID)
+	}
+	if v.Cleanup {
+		t.Error("Expected Cleanup to be false")
+	}
+	if len(v.ImagePullSecrets) != 2 || v.ImagePullSecrets[0] != "secret-a" {
+		t.Errorf("Expected ImagePullSecrets [secret-a secret-b], got %v", v.ImagePullSecrets)
 	}
 }
 

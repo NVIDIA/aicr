@@ -312,7 +312,8 @@ func (v *Validator) validateReadiness(
 			jobConfig := agent.Config{
 				Namespace:          v.Namespace,
 				JobName:            fmt.Sprintf("eidos-%s-readiness", v.RunID),
-				Image:              v.Image, // TODO: Use actual image from config
+				Image:              v.Image,
+				ImagePullSecrets:   v.ImagePullSecrets,
 				ServiceAccountName: "eidos-validator",
 				SnapshotConfigMap:  snapshotCMName,
 				RecipeConfigMap:    recipeCMName,
@@ -434,6 +435,7 @@ func (v *Validator) validateDeployment(
 					Namespace:          v.Namespace,
 					JobName:            fmt.Sprintf("eidos-%s-deployment", v.RunID),
 					Image:              v.Image,
+					ImagePullSecrets:   v.ImagePullSecrets,
 					ServiceAccountName: "eidos-validator",
 					SnapshotConfigMap:  snapshotCMName,
 					RecipeConfigMap:    recipeCMName,
@@ -561,6 +563,7 @@ func (v *Validator) validatePerformance(
 					Namespace:          v.Namespace,
 					JobName:            fmt.Sprintf("eidos-%s-performance", v.RunID),
 					Image:              v.Image,
+					ImagePullSecrets:   v.ImagePullSecrets,
 					ServiceAccountName: "eidos-validator",
 					SnapshotConfigMap:  snapshotCMName,
 					RecipeConfigMap:    recipeCMName,
@@ -681,6 +684,7 @@ func (v *Validator) validateConformance(
 					Namespace:          v.Namespace,
 					JobName:            fmt.Sprintf("eidos-%s-conformance", v.RunID),
 					Image:              v.Image,
+					ImagePullSecrets:   v.ImagePullSecrets,
 					ServiceAccountName: "eidos-validator",
 					SnapshotConfigMap:  snapshotCMName,
 					RecipeConfigMap:    recipeCMName,
@@ -1205,7 +1209,8 @@ func (v *Validator) validateAll(
 		sharedConfig := agent.Config{
 			Namespace:          v.Namespace,
 			ServiceAccountName: "eidos-validator",
-			Image:              v.Image, // TODO: Use actual image from config
+			Image:              v.Image,
+			ImagePullSecrets:   v.ImagePullSecrets,
 		}
 		deployer := agent.NewDeployer(clientset, sharedConfig)
 

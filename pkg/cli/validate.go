@@ -155,6 +155,7 @@ func runValidation(
 	resumeRunID string,
 	validatorImage string,
 	cleanup bool,
+	imagePullSecrets []string,
 ) error {
 
 	slog.Info("running validation",
@@ -173,6 +174,7 @@ func runValidation(
 		validator.WithNamespace(validationNamespace),
 		validator.WithImage(validatorImage),
 		validator.WithCleanup(cleanup),
+		validator.WithImagePullSecrets(imagePullSecrets),
 	}
 	if resumeRunID != "" {
 		opts = append(opts, validator.WithRunID(resumeRunID))
@@ -445,7 +447,7 @@ Resume a previous validation run from where it left off:
 				}
 			}
 
-			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"))
+			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"))
 		},
 	}
 }
