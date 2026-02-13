@@ -12,16 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: GPU Smoke Test (nvkind + T4)
+name: GPU Smoke Test (nvkind + H100)
 
 on:
   schedule:
     - cron: '0 0,6,12,18 * * *'  # Every 6 hours (4x daily)
   push:
     branches:
-      - "pull-request/*"
+      - "pull-request/[0-9]+"
     paths:
-      - '.github/workflows/gpu-smoke-test.yaml'
+      - '.github/workflows/gpu-h100-smoke-test.yaml'
       - '.github/actions/gpu-smoke-test/**'
   workflow_dispatch: {}  # Allow manual runs
 
@@ -35,8 +35,8 @@ concurrency:
 jobs:
 
   gpu-smoke-test:
-    name: GPU Smoke Test (nvkind + T4)
-    runs-on: linux-amd64-gpu-t4-latest-1
+    name: GPU Smoke Test (nvkind + H100)
+    runs-on: linux-amd64-gpu-h100-latest-1
     timeout-minutes: 30
     permissions:
       contents: read
@@ -48,13 +48,70 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
 
       - name: GPU Smoke Test
         uses: ./.github/actions/gpu-smoke-test
         with:
-          expected-gpu-model: T4
+          expected-gpu-model: H100
+          exclude-nfd-from-control-plane: 'true'
+
+      # --- H100-only steps: CUJ2 inference workflow ---
+
+      - name: Generate inference recipe
+        run: |
+          ./eidos recipe \
+            --service kind \
+            --accelerator h100 \
+            --os ubuntu \
+            --intent inference \
+            --platform dynamo \
+            --output recipe.yaml
+          echo "--- Recipe ---"
+          cat recipe.yaml
+
+      - name: Validate recipe constraints
+        run: |
+          ./eidos validate \
+            --recipe recipe.yaml \
+            --phase readiness \
+            --namespace gpu-operator \
+            --kubeconfig="${HOME}/.kube/config" \
+            --require-gpu \
+            --image=ko.local:smoke-test
+
+      - name: Generate deployment bundle
+        run: |
+          ./eidos bundle \
+            --recipe recipe.yaml \
+            --accelerated-node-selector nvidia.com/gpu.present=true \
+            --output bundle
+          echo "--- Bundle contents ---"
+          ls -la bundle/
+
+      - name: Install bundle into cluster
+        run: |
+          cd bundle
+          chmod +x deploy.sh
+          # Strip gpu-operator from deploy.sh — it was already installed
+          # by the composite action with kind-specific settings.
+          sed -i '/^echo "Installing gpu-operator/,/\${WAIT_ARGS}$/d' deploy.sh
+          sed -i '/^echo "Applying manifests for gpu-operator/d' deploy.sh
+          sed -i '/gpu-operator\/manifests\//d' deploy.sh
+          echo "--- deploy.sh (gpu-operator stripped) ---"
+          cat deploy.sh
+          ./deploy.sh
+
+      - name: Validate cluster
+        run: |
+          ./eidos validate \
+            --recipe recipe.yaml \
+            --phase readiness \
+            --phase deployment \
+            --phase conformance \
+            --namespace gpu-operator \
+            --kubeconfig="${HOME}/.kube/config" \
+            --require-gpu \
+            --image=ko.local:smoke-test
 
       - name: Collect debug artifacts
         if: failure()
