@@ -1,0 +1,229 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: GPU Smoke Test
+
+on:
+  schedule:
+    - cron: '0 0,6,12,18 * * *'  # Every 6 hours (4x daily)
+  push:
+    branches:
+      - "pull-request/[0-9]+"
+    paths:
+      - '.github/workflows/gpu-smoke-test.yaml'
+  workflow_dispatch: {}  # Allow manual runs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  gpu-smoke-test:
+    name: GPU Smoke Test (nvkind + T4)
+    runs-on: linux-amd64-gpu-t4-latest-1
+    timeout-minutes: 30
+    permissions:
+      contents: read
+
+    env:
+      KIND_CLUSTER_NAME: gpu-smoke-test
+
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: 'go.sum'
+
+      - name: Install kind
+        run: |
+          KIND_VERSION="${{ steps.versions.outputs.kind }}"
+          sudo curl -fsSL -o /usr/local/bin/kind \
+            "https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-amd64"
+          sudo chmod +x /usr/local/bin/kind
+          kind version
+
+      - name: Install kubectl
+        run: |
+          KUBECTL_VERSION="${{ steps.versions.outputs.kubectl }}"
+          sudo curl -fsSL -o /usr/local/bin/kubectl \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          sudo chmod +x /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Install Helm
+        run: |
+          HELM_VERSION="${{ steps.versions.outputs.helm }}"
+          curl -fsSL https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz \
+            | tar -xzC /tmp
+          sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+          sudo chmod +x /usr/local/bin/helm
+          helm version
+
+      - name: Install nvkind
+        run: |
+          go install github.com/NVIDIA/nvkind/cmd/nvkind@latest
+          nvkind --help
+
+      - name: Verify host GPU
+        run: nvidia-smi -L
+
+      - name: Configure NVIDIA Container Toolkit for kind
+        run: |
+          sudo nvidia-ctk runtime configure --runtime=docker --set-as-default --cdi.enabled
+          sudo nvidia-ctk config --set accept-nvidia-visible-devices-as-volume-mounts=true --in-place
+          sudo nvidia-ctk config --set accept-nvidia-visible-devices-envvar-when-unprivileged=false --in-place
+          sudo systemctl restart docker
+
+      - name: Validate Docker GPU access
+        run: docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
+
+      - name: Create GPU-enabled kind cluster
+        run: |
+          nvkind cluster create --name="${KIND_CLUSTER_NAME}" || echo "::warning::nvkind cluster create returned non-zero (umount errors are expected with CDI mode)"
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait --for=condition=Ready nodes --all --timeout=300s
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" cluster-info
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide
+
+      - name: Print GPUs (nvkind)
+        run: nvkind cluster print-gpus --name="${KIND_CLUSTER_NAME}"
+
+      - name: Install GPU Operator
+        run: |
+          helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+          helm repo update
+          helm upgrade -i \
+            --kube-context="kind-${KIND_CLUSTER_NAME}" \
+            --namespace gpu-operator \
+            --create-namespace \
+            --set driver.enabled=false \
+            --set toolkit.enabled=false \
+            --set nfd.enabled=true \
+            --wait --timeout=300s \
+            gpu-operator nvidia/gpu-operator
+
+      - name: Wait for GPU operands to be ready
+        run: |
+          echo "Waiting for device plugin to be ready..."
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+            rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s || true
+          echo "GPU Operator pods:"
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods
+
+      - name: Run nvidia-smi in a pod
+        run: |
+          cat <<'EOF' | kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: gpu-smoke-test
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: nvidia-smi
+              image: ubuntu:22.04
+              command: ["nvidia-smi"]
+              resources:
+                limits:
+                  nvidia.com/gpu: 1
+          EOF
+
+          echo "Waiting for gpu-smoke-test pod to complete..."
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait pod/gpu-smoke-test \
+            --for=condition=Ready --timeout=120s || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait pod/gpu-smoke-test \
+            --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s
+
+      - name: Show nvidia-smi output
+        run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
+
+      - name: Build eidos image and load into kind
+        run: |
+          go install github.com/google/ko@v0.18.0
+          KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
+          kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+
+      - name: Run eidos snapshot with deploy-agent
+        run: |
+          go build -o ./eidos ./cmd/eidos
+          ./eidos snapshot --deploy-agent \
+            --kubeconfig="${HOME}/.kube/config" \
+            --namespace=default \
+            --image=ko.local:smoke-test \
+            --require-gpu \
+            --output=snapshot.yaml
+          echo "--- Snapshot output ---"
+          cat snapshot.yaml
+
+      - name: Validate snapshot detected T4 GPU
+        run: |
+          GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[0].data["gpu.model"]' snapshot.yaml)
+          GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[0].data["gpu-count"]' snapshot.yaml)
+          echo "GPU model: ${GPU_MODEL}"
+          echo "GPU count: ${GPU_COUNT}"
+          if [[ "${GPU_MODEL}" != *"T4"* ]]; then
+            echo "::error::Expected T4 GPU in snapshot, got: ${GPU_MODEL}"
+            exit 1
+          fi
+          if [[ "${GPU_COUNT}" -lt 1 ]]; then
+            echo "::error::Expected gpu-count >= 1, got: ${GPU_COUNT}"
+            exit 1
+          fi
+          echo "Snapshot correctly detected ${GPU_COUNT}x ${GPU_MODEL}"
+
+      - name: Collect debug artifacts
+        if: failure()
+        run: |
+          mkdir -p /tmp/debug-artifacts
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" describe pod/gpu-smoke-test > /tmp/debug-artifacts/gpu-pod-describe.txt || true
+
+      - name: Export kind logs
+        if: failure()
+        run: |
+          mkdir -p /tmp/kind-logs
+          kind export logs /tmp/kind-logs --name "${KIND_CLUSTER_NAME}" || true
+
+      - name: Upload debug artifacts
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: gpu-smoke-test-debug-${{ github.run_id }}
+          path: |
+            /tmp/debug-artifacts/
+            /tmp/kind-logs/
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        run: |
+          kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
+          docker system prune -f || true

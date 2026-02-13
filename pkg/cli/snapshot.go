@@ -176,6 +176,11 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Value: true,
 				Usage: "Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces.",
 			},
+			&cli.BoolFlag{
+				Name:    "require-gpu",
+				Sources: cli.EnvVars("EIDOS_REQUIRE_GPU"),
+				Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
+			},
 			&cli.StringFlag{
 				Name:  "template",
 				Usage: "Path to Go template file for custom output formatting (requires YAML format)",
@@ -260,6 +265,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 					Output:             tmplOpts.outputPath,
 					Debug:              cmd.Bool("debug"),
 					Privileged:         cmd.Bool("privileged"),
+					RequireGPU:         cmd.Bool("require-gpu"),
 					TemplatePath:       tmplOpts.templatePath,
 				}
 			}
