@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -222,6 +223,13 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes clientset", err)
 	}
 
+	// Get the validation namespace
+	namespace, err := getNamespaceFromServiceAccount()
+	if err != nil {
+		cancel()
+		return nil, nil, fmt.Errorf("failed to get namespace from service account: %w", err)
+	}
+
 	// Load snapshot from mounted file using serializer (auto-detects YAML/JSON format)
 	snapshotPath := os.Getenv("EIDOS_SNAPSHOT_PATH")
 	if snapshotPath == "" {
@@ -260,9 +268,20 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 
 	return &ValidationContext{
 		Context:    ctx,
+		Namespace:  namespace,
 		Snapshot:   snapshot,
 		Clientset:  clientset,
+		RESTConfig: config,
 		RecipeData: recipeData,
 		Recipe:     recipeResult,
 	}, cancel, nil
+}
+
+// getNamespaceFromServiceAccount gets the namespace from the service account
+func getNamespaceFromServiceAccount() (string, error) {
+	namespaceBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+	if err != nil {
+		return "", fmt.Errorf("failed to read namespace from service account: %w", err)
+	}
+	return strings.TrimSpace(string(namespaceBytes)), nil
 }

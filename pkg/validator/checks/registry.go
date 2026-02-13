@@ -23,6 +23,7 @@ import (
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 // ValidationContext provides runtime context for checks and constraints.
@@ -33,8 +34,14 @@ type ValidationContext struct {
 	// Snapshot contains captured cluster state (hardware, OS, etc.)
 	Snapshot *snapshotter.Snapshot
 
+	// Namespace is the namespace where the validation is running
+	Namespace string
+
 	// Clientset provides Kubernetes API access for live cluster queries
 	Clientset kubernetes.Interface
+
+	// RESTConfig provides Kubernetes API access for cluster queries (used for e.g. remote command execution)
+	RESTConfig *rest.Config
 
 	// RecipeData contains recipe metadata that may be needed for validation
 	RecipeData map[string]interface{}
