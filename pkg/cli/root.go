@@ -168,7 +168,7 @@ func initDataProvider(cmd *cli.Command) error {
 	slog.Info("initializing external data provider", "directory", dataDir)
 
 	// Create embedded provider
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "data")
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 
 	// Create layered provider
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{

@@ -20,16 +20,14 @@ import (
 	"fmt"
 
 	"github.com/NVIDIA/eidos/pkg/errors"
+	"github.com/NVIDIA/eidos/recipes"
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed data/overlays/*.yaml data/registry.yaml data/components/*/*.yaml data/components/*/manifests/*.yaml
-var dataFS embed.FS
 
 // GetEmbeddedFS returns the embedded data filesystem.
 // This is used by the CLI to create layered data providers.
 func GetEmbeddedFS() embed.FS {
-	return dataFS
+	return recipes.FS
 }
 
 // GetManifestContent retrieves a manifest file from the data provider.

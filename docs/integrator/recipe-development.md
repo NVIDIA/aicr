@@ -26,7 +26,7 @@ Recipe metadata files define component configurations for GPU-accelerated Kubern
 - **Leaf recipes** (e.g., `gb200-eks-ubuntu-training.yaml`) provide hardware-specific overrides
 - **Inline overrides** allow per-recipe customization without creating new files
 
-Recipe files are located in `pkg/recipe/data/` and are embedded into the CLI binary and API server at compile time. Integrators can extend or override embedded data using the `--data` flag without modifying the open source repository (see [External Data Sources](#external-data-sources)).
+Recipe files are located in `recipes/` and are embedded into the CLI binary and API server at compile time. Integrators can extend or override embedded data using the `--data` flag without modifying the open source repository (see [External Data Sources](#external-data-sources)).
 
 For details on how the recipe generation process works (query matching, overlay merging), see the [Data Architecture](../contributor/data.md) document.
 
@@ -752,7 +752,7 @@ Constraint names use dot-notation paths that map to snapshot measurements:
 ### Example: GB200 Training Recipe Constraints
 
 ```yaml
-# pkg/recipe/data/overlays/gb200-eks-ubuntu-training.yaml
+# recipes/overlays/gb200-eks-ubuntu-training.yaml
 spec:
   criteria:
     service: eks
@@ -979,9 +979,9 @@ go test -v ./pkg/recipe/... -run TestConstraintValuesHaveValidOperators
 
 **Steps:**
 
-1. **Create the recipe file** in `pkg/recipe/data/`:
+1. **Create the recipe file** in `recipes/`:
    ```yaml
-   # pkg/recipe/data/overlays/gke-h100-inference.yaml
+   # recipes/overlays/gke-h100-inference.yaml
    apiVersion: eidos.nvidia.com/v1alpha1
    kind: RecipeMetadata
    metadata:
@@ -1001,7 +1001,7 @@ go test -v ./pkg/recipe/... -run TestConstraintValuesHaveValidOperators
 
 2. **Create component values** if using `valuesFile`:
    ```yaml
-   # pkg/recipe/data/components/gpu-operator/gke-h100-inference.yaml
+   # recipes/components/gpu-operator/gke-h100-inference.yaml
    driver:
      version: "570.86.16"
    mig:
@@ -1023,9 +1023,9 @@ go test -v ./pkg/recipe/... -run TestConstraintValuesHaveValidOperators
 
 **Steps:**
 
-1. **Create the values file** in `pkg/recipe/data/components/{component}/`:
+1. **Create the values file** in `recipes/components/{component}/`:
    ```yaml
-   # pkg/recipe/data/components/network-operator/eks-gb200-training.yaml
+   # recipes/components/network-operator/eks-gb200-training.yaml
    rdma:
      enabled: true
    sriov:
@@ -1056,7 +1056,7 @@ go test -v ./pkg/recipe/... -run TestConstraintValuesHaveValidOperators
 
 **Steps:**
 
-1. **Locate the recipe file** in `pkg/recipe/data/`
+1. **Locate the recipe file** in `recipes/`
 
 2. **Update the version**:
    ```yaml
@@ -1150,7 +1150,7 @@ go test -v ./pkg/recipe/... -run TestConstraintValuesHaveValidOperators
 
 ### Automated Test Suite
 
-All recipe metadata and component values are automatically validated by the test suite located in [`pkg/recipe/data_test.go`](../../pkg/recipe/data_test.go).
+All recipe metadata and component values are automatically validated by the test suite located in [`pkg/recipe/yaml_test.go`](../../pkg/recipe/yaml_test.go).
 
 | Test Category | What It Validates |
 |---------------|-------------------|
@@ -1181,7 +1181,7 @@ go test -v ./pkg/recipe/... -run TestAllMetadataFilesConformToSchema
 
 When adding new recipe metadata or component configurations:
 
-1. **Create the new file** in `pkg/recipe/data/`
+1. **Create the new file** in `recipes/`
 
 2. **Verify schema compliance**:
    ```bash
@@ -1206,7 +1206,7 @@ When adding new recipe metadata or component configurations:
 
 6. **Generate and inspect bundle**:
    ```bash
-   eidos bundle -r pkg/recipe/data/overlays/your-recipe.yaml -o ./test-bundles
+   eidos bundle -r recipes/overlays/your-recipe.yaml -o ./test-bundles
    cat test-bundles/gpu-operator/values.yaml | grep -A5 "driver:"
    ```
 
@@ -1258,7 +1258,7 @@ eidos recipe --service eks --accelerator gb200 --format json | \
 
 ```bash
 # Validate YAML syntax
-yamllint pkg/recipe/data/overlays/your-recipe.yaml
+yamllint recipes/overlays/your-recipe.yaml
 
 # Run all recipe tests
 go test -v ./pkg/recipe/... -count=1

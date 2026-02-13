@@ -799,7 +799,7 @@ X-RateLimit-Reset: 1735650000
 ### Embedded Data
 
 **Recipe Data:**
-- Location: `pkg/recipe/data/overlays/*.yaml` (including `base.yaml`)
+- Location: `recipes/overlays/*.yaml` (including `base.yaml`)
 - Embedded at compile time via `//go:embed` directives
 - Loaded once per process, cached in memory
 - TTL: 5 minutes (in-memory cache)

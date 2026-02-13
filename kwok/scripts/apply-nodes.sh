@@ -28,7 +28,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KWOK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_ROOT="$(cd "${KWOK_DIR}/.." && pwd)"
 TEMPLATE="${KWOK_DIR}/templates/nodes/node.yaml.tmpl"
-OVERLAYS_DIR="${REPO_ROOT}/pkg/recipe/data/overlays"
+OVERLAYS_DIR="${REPO_ROOT}/recipes/overlays"
 
 # Fixed defaults
 SYSTEM_NODE_COUNT=2

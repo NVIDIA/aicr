@@ -697,7 +697,7 @@ The Bundler Framework provides an extensible system for generating deployment bu
 
 **1. Declarative Component Registry**
 **Rationale**: No Go code required for new components; configuration in YAML
-**Implementation**: Components defined in `pkg/recipe/data/registry.yaml`; bundler loads configuration automatically
+**Implementation**: Components defined in `recipes/registry.yaml`; bundler loads configuration automatically
 **Benefits**: Zero boilerplate; consistent configuration; easy to add new components
 **Components**: `recipe.ComponentRegistry`, `recipe.ComponentConfig`, `component.BaseBundler`
 
@@ -812,11 +812,11 @@ type ComponentConfig struct {
 
 ### GPU Operator Configuration (Example)
 
-**Implementation**: Declarative configuration in `pkg/recipe/data/registry.yaml`
+**Implementation**: Declarative configuration in `recipes/registry.yaml`
 **Code Size**: Zero Go code required
 **Output**: Helm per-component bundle with GPU Operator configuration
 
-**Registry Configuration** (`pkg/recipe/data/registry.yaml`):
+**Registry Configuration** (`recipes/registry.yaml`):
 ```yaml
 - name: gpu-operator
   displayName: GPU Operator
@@ -861,7 +861,7 @@ bundle/
 
 Adding a new component requires only YAML configuration:
 
-**Step 1: Add to registry** (`pkg/recipe/data/registry.yaml`):
+**Step 1: Add to registry** (`recipes/registry.yaml`):
 ```yaml
 - name: my-operator
   displayName: My Operator
@@ -877,7 +877,7 @@ Adding a new component requires only YAML configuration:
         - operator.nodeSelector
 ```
 
-**Step 2: Create values file** (`pkg/recipe/data/components/my-operator/values.yaml`):
+**Step 2: Create values file** (`recipes/components/my-operator/values.yaml`):
 ```yaml
 operator:
   replicas: 1
@@ -886,7 +886,7 @@ operator:
     tag: v1.0.0
 ```
 
-**Step 3: Reference in recipe overlay** (`pkg/recipe/data/overlays/my-recipe.yaml`):
+**Step 3: Reference in recipe overlay** (`recipes/overlays/my-recipe.yaml`):
 ```yaml
 componentRefs:
   - name: my-operator
@@ -937,7 +937,7 @@ func main() {
 ```
 
 **Declarative Configuration**:
-Components are configured in `pkg/recipe/data/registry.yaml`. The bundler automatically loads component configuration from the registry based on the recipe's `componentRefs`.
+Components are configured in `recipes/registry.yaml`. The bundler automatically loads component configuration from the registry based on the recipe's `componentRefs`.
 
 **Per-Component Bundle Generation**:
 The bundler generates a per-component Helm bundle with individual values and manifests for each component, based on the recipe's `componentRefs`.

@@ -35,7 +35,11 @@ metadata:
     app.kubernetes.io/created-by: eidos
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+<<<<<<<< HEAD:recipes/components/skyhook-customizations/manifests/h100-eks-ubuntu.yaml
+  name: h100-eks-ubuntu
+========
   name: tuning
+>>>>>>>> origin/main:recipes/components/skyhook-customizations/manifests/tuning.yaml
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true

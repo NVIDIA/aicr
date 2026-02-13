@@ -5,7 +5,7 @@
 View embedded data files structure:
 
 ```shell
-tree -L 2 pkg/recipe/data/
+tree -L 2 recipes/
 ```
 
 ## Runtime Data Support
@@ -56,4 +56,4 @@ eidos --debug recipe \
 
 * [Installation Guide](https://github.com/NVIDIA/eidos/blob/main/docs/user/installation.md)
 * [CLI Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user/cli-reference.md)
-* [Data Reference](https://github.com/NVIDIA/eidos/blob/main/pkg/recipe/data/README.md)
+* [Data Reference](https://github.com/NVIDIA/eidos/blob/main/recipes/README.md)

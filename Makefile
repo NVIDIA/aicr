@@ -389,7 +389,7 @@ ifndef RECIPE
 	@echo "Error: RECIPE is required"
 	@echo "Usage: make kwok-nodes RECIPE=gb200-eks-training"
 	@echo "Available recipes (with service criteria):"
-	@for f in pkg/recipe/data/overlays/*.yaml; do \
+	@for f in recipes/overlays/*.yaml; do \
 		name=$$(basename "$$f" .yaml); \
 		service=$$(yq eval '.spec.criteria.service // ""' "$$f" 2>/dev/null); \
 		if [ -n "$$service" ] && [ "$$service" != "null" ] && [ "$$service" != "any" ]; then \

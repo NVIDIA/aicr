@@ -286,7 +286,7 @@ generate_bundle() {
     log_info "Generating bundle for recipe: $recipe"
 
     # Read criteria from the recipe overlay file
-    local recipe_overlay="${REPO_ROOT}/pkg/recipe/data/overlays/${recipe}.yaml"
+    local recipe_overlay="${REPO_ROOT}/recipes/overlays/${recipe}.yaml"
     if [[ ! -f "$recipe_overlay" ]]; then
         log_error "Recipe overlay not found: $recipe_overlay"
         exit 1

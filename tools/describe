@@ -23,7 +23,7 @@ ROOT=$(dirname "${DIR}")
 # Check required tools
 has_tools yq
 
-OVERLAY_DIR="${ROOT}/pkg/recipe/data/overlays"
+OVERLAY_DIR="${ROOT}/recipes/overlays"
 
 usage() {
   cat << EOF

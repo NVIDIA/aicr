@@ -23,7 +23,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KWOK_DIR="${SCRIPT_DIR}/.."
 REPO_ROOT="${KWOK_DIR}/.."
-OVERLAYS_DIR="${REPO_ROOT}/pkg/recipe/data/overlays"
+OVERLAYS_DIR="${REPO_ROOT}/recipes/overlays"
 
 CLUSTER_NAME="${KWOK_CLUSTER:-eidos-kwok-test}"
 CONTEXT="kind-${CLUSTER_NAME}"

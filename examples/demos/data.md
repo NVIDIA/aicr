@@ -23,7 +23,7 @@ Demo:
 View embedded recipe files structure:
 
 ```shell
-tree -L 2 pkg/recipe/data/
+tree -L 2 recipes/
 ```
 
 ### Base
@@ -31,7 +31,7 @@ tree -L 2 pkg/recipe/data/
 Base recipe (foundation for all recipes):
 
 ```shell
-yq . pkg/recipe/data/overlays/base.yaml
+yq . recipes/overlays/base.yaml
 ```
 
 ### Constraints
@@ -54,7 +54,7 @@ Examples:
 GPU Operator 
 
 ```shell
-cat pkg/recipe/data/components/gpu-operator/values.yaml | yq .
+cat recipes/components/gpu-operator/values.yaml | yq .
 ```
 
 ### Multi-Level Inheritance
@@ -62,19 +62,19 @@ cat pkg/recipe/data/components/gpu-operator/values.yaml | yq .
 EKS recipe (example of inheritance from base):
 
 ```shell
-yq . pkg/recipe/data/overlays/eks.yaml
+yq . recipes/overlays/eks.yaml
 ```
 
 EKS training recipe (inherits from eks):
 
 ```shell
-yq . pkg/recipe/data/overlays/eks-training.yaml
+yq . recipes/overlays/eks-training.yaml
 ```
 
 View GB200 EKS training recipe (inherits from eks-training):
 
 ```shell
-yq . pkg/recipe/data/overlays/gb200-eks-training.yaml
+yq . recipes/overlays/gb200-eks-training.yaml
 ```
 
 ### Multi-Level Inheritance (Values)
@@ -82,7 +82,7 @@ yq . pkg/recipe/data/overlays/gb200-eks-training.yaml
 Training-optimized values:
 
 ```shell
-cat pkg/recipe/data/components/gpu-operator/values-eks-training.yaml | yq .
+cat recipes/components/gpu-operator/values-eks-training.yaml | yq .
 ```
 
 Values are merged in order (later = higher priority):
@@ -94,7 +94,7 @@ Base ValuesFile → Overlay ValuesFile → Overlay Overrides → CLI --set flags
 View leaf recipe (inherits from gb200-eks-training):
 
 ```shell
-yq pkg/recipe/data/overlays/gb200-eks-ubuntu-training.yaml
+yq recipes/overlays/gb200-eks-ubuntu-training.yaml
 ```
 
 ## Criteria Matching (runtime == at query time, compiled binary)
@@ -168,7 +168,7 @@ This matches all levels:
 Recipes define their own dependencies:
 
 ```shell
-yq . pkg/recipe/data/overlays/base.yaml
+yq . recipes/overlays/base.yaml
 ```
 
 View computed deployment order is computed at recipe composition time and sorted based on dependencies:
@@ -236,6 +236,6 @@ Integrity of the metadata is paramount!
 - [CLI Reference](https://github.com/NVIDIA/eidos/blob/main/docs/user/cli-reference.md) - Recipe command options
 
 ### Source Code
-- [Recipe Data Files](https://github.com/NVIDIA/eidos/tree/main/pkg/recipe/data) - YAML recipe definitions
+- [Recipe Data Files](https://github.com/NVIDIA/eidos/tree/main/recipes) - YAML recipe definitions
 - [Metadata Store](https://github.com/NVIDIA/eidos/blob/main/pkg/recipe/metadata_store.go) - Inheritance resolution
 - [Criteria Matching](https://github.com/NVIDIA/eidos/blob/main/pkg/recipe/criteria.go) - Matching algorithm
