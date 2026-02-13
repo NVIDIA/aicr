@@ -35,7 +35,7 @@ metadata:
     app.kubernetes.io/created-by: eidos
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-  name: h100-eks-ubuntu
+  name: tuning
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
@@ -55,27 +55,20 @@ spec:
   {{- end }}
   # Static: Baked-in tuning for H100 Ubuntu training
   packages:
-    fix-mac-address-policy:
-      image: ghcr.io/nvidia/skyhook-packages/shellscript
-      version: "1.1.1"
+    nvidia-tuned:
+      image: ghcr.io/nvidia/skyhook-packages/nvidia-tuned
+      version: "0.1.0"
+      interrupt:
+        type: reboot
       env:
-        - name: DROPIN_FOLDER
-          value: /etc/systemd/network/99-default.link.d
-        - name: CONFIG_FILE
-          value: mac-address-policy.conf
+        - name: INTERRUPT
+          value: "true"
       configMap:
-        apply.sh: |-
-          #!/bin/bash
-          # The MacAdressPolicy must be set as none to avoid issue with AWS CNI plugin
-          # writing into /etc to avoid being overwritten by package systemd-udev
-          echo "Fixing MacAdressPolicy in $DROPIN_FOLDER/$CONFIG_FILE..."
-          mkdir -p $DROPIN_FOLDER
-          cat <<EOF > $DROPIN_FOLDER/$CONFIG_FILE
-          [Link]
-          MACAddressPolicy=none
-          EOF
-
-        apply_check.sh: |-
-          #!/bin/bash
-          grep 'MACAddressPolicy=none' $DROPIN_FOLDER/$CONFIG_FILE
+        {{- if $cust.intent }}
+        intent: {{ $cust.intent }}
+        {{- end }}
+        accelerator: {{ $cust.accelerator }}
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
 {{- end }}

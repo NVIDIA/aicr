@@ -40,11 +40,4 @@ spec:
     - name: OS.sysctl./proc/sys/kernel/osrelease
       value: ">= 6.8"
 
-  componentRefs:
-    # Ubuntu node customizations via skyhook-customizations component
-    - name: skyhook-customizations
-      type: Helm
-      manifestFiles:
-        - components/skyhook-customizations/manifests/h100-eks-ubuntu.yaml
-      dependencyRefs:
-        - skyhook-operator
+  componentRefs: []
