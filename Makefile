@@ -46,6 +46,11 @@ tools-setup: ## Setup development environment (installs all required tools). Use
 	@echo "Setting up development environment..."
 	@AUTO_MODE=$(AUTO_MODE) bash tools/setup-tools
 
+.PHONY: tools-update
+tools-update: ## Reinstall/upgrade all tools to versions in .versions.yaml (non-interactive)
+	@echo "Updating tools to .versions.yaml..."
+	@AUTO_MODE=true bash tools/setup-tools --upgrade
+
 .PHONY: flox-manifest
 flox-manifest: ## Generate Flox manifest.toml from .versions.yaml (alternative to tools-setup)
 	@bash tools/generate-flox-manifest
@@ -58,7 +63,12 @@ flox-manifest: ## Generate Flox manifest.toml from .versions.yaml (alternative t
 tidy: ## Formats code and updates Go module dependencies
 	@set -e; \
 	go fmt ./...; \
-	go mod tidy
+	go mod tidy; \
+	go mod vendor
+
+.PHONY: vendor
+vendor: ## Vendors Go module dependencies (run after changing go.mod/go.sum)
+	@go mod vendor
 
 .PHONY: fmt-check
 fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
@@ -69,12 +79,13 @@ fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
 upgrade: ## Upgrades all dependencies to latest versions
 	@set -e; \
 	go get -u ./...; \
-	go mod tidy
+	go mod tidy; \
+	go mod vendor
 
 .PHONY: generate
 generate: ## Runs go generate for code generation
 	@echo "Running go generate..."
-	@go generate ./...
+	@GOFLAGS="-mod=vendor" go generate ./...
 	@echo "Code generation completed"
 
 .PHONY: lint
@@ -85,9 +96,9 @@ lint: lint-go lint-yaml license ## Lints the entire project (Go, YAML, and licen
 lint-go: ## Lints Go files with golangci-lint and go vet
 	@set -e; \
 	echo "Running go vet..."; \
-	go vet ./...; \
+	GOFLAGS="-mod=vendor" go vet ./...; \
 	echo "Running golangci-lint..."; \
-	golangci-lint -c .golangci.yaml run
+	GOFLAGS="-mod=vendor" golangci-lint -c .golangci.yaml run
 
 .PHONY: lint-yaml
 lint-yaml: ## Lints YAML files with yamllint
@@ -125,7 +136,7 @@ license: ## Add/verify license headers in source files
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
-	go test -short -count=1 -race -covermode=atomic -coverprofile=coverage.out ./... || exit 1; \
+	GOFLAGS="-mod=vendor" go test -short -count=1 -race -covermode=atomic -coverprofile=coverage.out ./... || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
@@ -142,7 +153,7 @@ test-coverage: test ## Runs tests and enforces coverage threshold (COVERAGE_THRE
 .PHONY: bench
 bench: ## Runs benchmarks
 	@echo "Running benchmarks..."
-	@go test -bench=. -benchmem ./...
+	@GOFLAGS="-mod=vendor" go test -bench=. -benchmem ./...
 
 .PHONY: e2e
 e2e: ## Runs end-to-end integration tests (CLI only)
@@ -170,7 +181,7 @@ qualify: test lint e2e scan ## Qualifies the codebase (test, lint, e2e, scan)
 server: ## Starts a local development server with debug logging
 	@set -e; \
 	echo "Starting local development server..."; \
-	LOG_LEVEL=debug go run cmd/eidosd/main.go
+	GOFLAGS="-mod=vendor" LOG_LEVEL=debug go run cmd/eidosd/main.go
 
 .PHONY: docs
 docs: ## Serves Go documentation on http://localhost:6060
@@ -530,6 +541,7 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Tools ===\033[0m"
 	@echo "  make tools-check    Check tools and compare versions"
 	@echo "  make tools-setup    Install all development tools"
+	@echo "  make tools-update   Upgrade all tools to .versions.yaml"
 	@echo "  make flox-manifest  Generate Flox manifest (alternative setup)"
 	@echo ""
 	@echo "\033[1m=== Utilities ===\033[0m"

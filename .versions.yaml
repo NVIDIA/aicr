@@ -14,7 +14,7 @@
 
 # Language Versions
 languages:
-  go: '1.25'
+  go: '1.25.7'
 
 # Build Tools
 build_tools:
@@ -25,7 +25,7 @@ build_tools:
 
 # Linting
 linting:
-  golangci_lint: 'v2.6.2'
+  golangci_lint: 'v2.9.0'
   yamllint: '1.35.0'
   addlicense: 'v1.1.1'
   go_licenses: 'v1.6.0'

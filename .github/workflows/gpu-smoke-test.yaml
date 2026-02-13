@@ -57,7 +57,9 @@ jobs:
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
-          cache-dependency-path: 'go.sum'
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
 
       - name: Install kind
         run: |
@@ -162,12 +164,16 @@ jobs:
         run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
 
       - name: Build eidos image and load into kind
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           go install github.com/google/ko@v0.18.0
           KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
           kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
 
       - name: Run eidos snapshot with deploy-agent
+        env:
+          GOFLAGS: -mod=vendor
         run: |
           go build -o ./eidos ./cmd/eidos
           ./eidos snapshot --deploy-agent \

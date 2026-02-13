@@ -56,6 +56,10 @@ Before contributing:
 - Ensure all tests pass and code meets quality standards
 - Write tests for new functionality
 
+#### Go dependencies (vendor)
+
+This project vendors Go dependencies. After changing `go.mod` or `go.sum`, run `make tidy` (which runs `go mod vendor`) and commit `go.mod`, `go.sum`, and the `vendor/` directory. CI will fail if `vendor/` is out of sync.
+
 #### Adding Validation Constraints
 
 Eidos uses a validator framework to check cluster state against requirements. To add new validation constraints:
