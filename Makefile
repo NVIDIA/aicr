@@ -125,7 +125,7 @@ license: ## Add/verify license headers in source files
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
-	go test -short -count=1 -race -covermode=atomic -coverprofile=coverage.out ./... || exit 1; \
+	go test -short -count=1 -race -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v /tests/chainsaw/) || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
