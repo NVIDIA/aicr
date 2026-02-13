@@ -25,7 +25,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kube-prometheus-kube-prome-operator
+  name: kube-prometheus-operator
   namespace: monitoring
 status:
   conditions:
@@ -58,7 +58,7 @@ status:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: prometheus-kube-prometheus-kube-prome-prometheus
+  name: prometheus-kube-prometheus-prometheus
   namespace: monitoring
 status:
   (readyReplicas > `0`): true
@@ -67,7 +67,7 @@ status:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: alertmanager-kube-prometheus-kube-prome-alertmanager
+  name: alertmanager-kube-prometheus-alertmanager
   namespace: monitoring
 status:
   (readyReplicas > `0`): true

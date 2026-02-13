@@ -20,19 +20,65 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nvsentinel
+  name: labeler
   namespace: nvsentinel
 status:
   conditions:
     - type: Available
       status: "True"
 ---
-# NVSentinel platform connector — DaemonSet on GPU nodes for platform telemetry
+# NVSentinel platform connector — DaemonSet on all nodes for platform telemetry
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: nvsentinel-platform-connector
+  name: platform-connectors
   namespace: nvsentinel
 status:
   (numberReady > `0`): true
   (desiredNumberScheduled > `0`): true
+---
+# GPU health monitor (DCGM 4.x) — monitors GPU health via DCGM 4.x on labeled nodes
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-health-monitor-dcgm-4.x
+  namespace: nvsentinel
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# GPU health monitor (DCGM 3.x) — monitors GPU health via DCGM 3.x on labeled nodes
+# desiredNumberScheduled may be 0 depending on node labels
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-health-monitor-dcgm-3.x
+  namespace: nvsentinel
+---
+# Metadata collector — collects GPU metadata on GPU nodes
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: metadata-collector
+  namespace: nvsentinel
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# Syslog health monitor (regular) — monitors system logs for GPU errors on non-kata nodes
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: syslog-health-monitor-regular
+  namespace: nvsentinel
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# Syslog health monitor (kata) — monitors system logs for GPU errors on kata nodes
+# desiredNumberScheduled may be 0 when no kata nodes are present
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: syslog-health-monitor-kata
+  namespace: nvsentinel

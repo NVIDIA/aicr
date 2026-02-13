@@ -77,3 +77,10 @@ metadata:
   name: dynamo-system
 status:
   phase: Active
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kai-resource-reservation
+status:
+  phase: Active
