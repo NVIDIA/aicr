@@ -56,7 +56,7 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
    - Add factory method in `factory.go`
    - Write table-driven tests with mocks
 
-2. **Update recipe data** in `pkg/recipe/data/`:
+2. **Update recipe data** in `recipes/`:
    - Add base measurements in `overlays/base.yaml`
    - Create overlay files in `overlays/` with criteria matching
 
@@ -72,7 +72,7 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
 
 **For Helm Components:**
 
-1. **Add to component registry** (`pkg/recipe/data/registry.yaml`):
+1. **Add to component registry** (`recipes/registry.yaml`):
    ```yaml
    - name: my-operator
      displayName: My Operator
@@ -82,11 +82,11 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
        defaultChart: example/my-operator
    ```
 
-2. **Create values file** (`pkg/recipe/data/components/my-operator/values.yaml`):
+2. **Create values file** (`recipes/components/my-operator/values.yaml`):
    - Define Helm chart values
    - Keep configuration minimal and reusable
 
-3. **Reference in recipe** (`pkg/recipe/data/overlays/*.yaml`):
+3. **Reference in recipe** (`recipes/overlays/*.yaml`):
    ```yaml
    componentRefs:
      - name: my-operator
@@ -97,7 +97,7 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
 
 **For Kustomize Components:**
 
-1. **Add to component registry** (`pkg/recipe/data/registry.yaml`):
+1. **Add to component registry** (`recipes/registry.yaml`):
    ```yaml
    - name: my-kustomize-app
      displayName: My Kustomize App
@@ -108,7 +108,7 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
        defaultTag: v1.0.0
    ```
 
-2. **Reference in recipe** (`pkg/recipe/data/overlays/*.yaml`):
+2. **Reference in recipe** (`recipes/overlays/*.yaml`):
    ```yaml
    componentRefs:
      - name: my-kustomize-app

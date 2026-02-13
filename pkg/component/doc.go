@@ -14,7 +14,7 @@
 
 // Package component provides the generic bundler framework and shared utilities.
 //
-// Component configuration is defined declaratively in pkg/recipe/data/registry.yaml.
+// Component configuration is defined declaratively in recipes/registry.yaml.
 // This package provides reusable utilities for bundle generation. With the declarative
 // registry, no separate Go packages are needed per component - just add an entry to
 // registry.yaml to configure a new component.

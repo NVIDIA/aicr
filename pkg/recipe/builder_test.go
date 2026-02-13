@@ -267,7 +267,7 @@ func TestGetEmbeddedFS(t *testing.T) {
 	fs := GetEmbeddedFS()
 
 	// Should be able to read the registry file
-	data, err := fs.ReadFile("data/registry.yaml")
+	data, err := fs.ReadFile("registry.yaml")
 	if err != nil {
 		t.Fatalf("failed to read registry.yaml from embedded FS: %v", err)
 	}

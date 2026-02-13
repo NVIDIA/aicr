@@ -69,7 +69,7 @@ func (a *AllowLists) AcceleratorStrings() []string {
 	if a == nil {
 		return nil
 	}
-	return acceleratorTypesToStrings(a.Accelerators)
+	return typesToStrings(a.Accelerators)
 }
 
 // ServiceStrings returns the allowed service types as strings.
@@ -77,7 +77,7 @@ func (a *AllowLists) ServiceStrings() []string {
 	if a == nil {
 		return nil
 	}
-	return serviceTypesToStrings(a.Services)
+	return typesToStrings(a.Services)
 }
 
 // IntentStrings returns the allowed intent types as strings.
@@ -85,7 +85,7 @@ func (a *AllowLists) IntentStrings() []string {
 	if a == nil {
 		return nil
 	}
-	return intentTypesToStrings(a.Intents)
+	return typesToStrings(a.Intents)
 }
 
 // OSTypeStrings returns the allowed OS types as strings.
@@ -93,7 +93,7 @@ func (a *AllowLists) OSTypeStrings() []string {
 	if a == nil {
 		return nil
 	}
-	return osTypesToStrings(a.OSTypes)
+	return typesToStrings(a.OSTypes)
 }
 
 // ValidateCriteria checks if the given criteria values are permitted by the allowlists.
@@ -124,7 +124,7 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				nil,
 				map[string]any{
 					"requested": string(c.Accelerator),
-					"allowed":   acceleratorTypesToStrings(a.Accelerators),
+					"allowed":   typesToStrings(a.Accelerators),
 				},
 			)
 		}
@@ -139,7 +139,7 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				nil,
 				map[string]any{
 					"requested": string(c.Service),
-					"allowed":   serviceTypesToStrings(a.Services),
+					"allowed":   typesToStrings(a.Services),
 				},
 			)
 		}
@@ -154,7 +154,7 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				nil,
 				map[string]any{
 					"requested": string(c.Intent),
-					"allowed":   intentTypesToStrings(a.Intents),
+					"allowed":   typesToStrings(a.Intents),
 				},
 			)
 		}
@@ -169,7 +169,7 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				nil,
 				map[string]any{
 					"requested": string(c.OS),
-					"allowed":   osTypesToStrings(a.OSTypes),
+					"allowed":   typesToStrings(a.OSTypes),
 				},
 			)
 		}
@@ -192,7 +192,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse accelerators
 	if v := os.Getenv(EnvAllowedAccelerators); v != "" {
-		accelerators, err := parseAcceleratorList(v)
+		accelerators, err := parseTypeList(v, ParseCriteriaAcceleratorType, CriteriaAcceleratorAny)
 		if err != nil {
 			return nil, eidoserrors.WrapWithContext(
 				eidoserrors.ErrCodeInvalidRequest,
@@ -206,7 +206,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse services
 	if v := os.Getenv(EnvAllowedServices); v != "" {
-		services, err := parseServiceList(v)
+		services, err := parseTypeList(v, ParseCriteriaServiceType, CriteriaServiceAny)
 		if err != nil {
 			return nil, eidoserrors.WrapWithContext(
 				eidoserrors.ErrCodeInvalidRequest,
@@ -220,7 +220,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse intents
 	if v := os.Getenv(EnvAllowedIntents); v != "" {
-		intents, err := parseIntentList(v)
+		intents, err := parseTypeList(v, ParseCriteriaIntentType, CriteriaIntentAny)
 		if err != nil {
 			return nil, eidoserrors.WrapWithContext(
 				eidoserrors.ErrCodeInvalidRequest,
@@ -234,7 +234,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 	// Parse OS types
 	if v := os.Getenv(EnvAllowedOSTypes); v != "" {
-		osTypes, err := parseOSList(v)
+		osTypes, err := parseTypeList(v, ParseCriteriaOSType, CriteriaOSAny)
 		if err != nil {
 			return nil, eidoserrors.WrapWithContext(
 				eidoserrors.ErrCodeInvalidRequest,
@@ -254,110 +254,25 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 	return al, nil
 }
 
-// parseAcceleratorList parses a comma-separated list of accelerator types.
-func parseAcceleratorList(s string) ([]CriteriaAcceleratorType, error) {
-	var result []CriteriaAcceleratorType
+func parseTypeList[T ~string](s string, parse func(string) (T, error), anyVal T) ([]T, error) {
+	var result []T
 	for _, v := range strings.Split(s, ",") {
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue
 		}
-		at, err := ParseCriteriaAcceleratorType(v)
+		parsed, err := parse(v)
 		if err != nil {
 			return nil, err
 		}
-		// Skip "any" in allowlist - it doesn't make sense to allow only "any"
-		if at != CriteriaAcceleratorAny {
-			result = append(result, at)
+		if parsed != anyVal {
+			result = append(result, parsed)
 		}
 	}
 	return result, nil
 }
 
-// parseServiceList parses a comma-separated list of service types.
-func parseServiceList(s string) ([]CriteriaServiceType, error) {
-	var result []CriteriaServiceType
-	for _, v := range strings.Split(s, ",") {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		st, err := ParseCriteriaServiceType(v)
-		if err != nil {
-			return nil, err
-		}
-		if st != CriteriaServiceAny {
-			result = append(result, st)
-		}
-	}
-	return result, nil
-}
-
-// parseIntentList parses a comma-separated list of intent types.
-func parseIntentList(s string) ([]CriteriaIntentType, error) {
-	var result []CriteriaIntentType
-	for _, v := range strings.Split(s, ",") {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		it, err := ParseCriteriaIntentType(v)
-		if err != nil {
-			return nil, err
-		}
-		if it != CriteriaIntentAny {
-			result = append(result, it)
-		}
-	}
-	return result, nil
-}
-
-// parseOSList parses a comma-separated list of OS types.
-func parseOSList(s string) ([]CriteriaOSType, error) {
-	var result []CriteriaOSType
-	for _, v := range strings.Split(s, ",") {
-		v = strings.TrimSpace(v)
-		if v == "" {
-			continue
-		}
-		ot, err := ParseCriteriaOSType(v)
-		if err != nil {
-			return nil, err
-		}
-		if ot != CriteriaOSAny {
-			result = append(result, ot)
-		}
-	}
-	return result, nil
-}
-
-// Helper functions to convert typed slices to string slices for error messages.
-
-func acceleratorTypesToStrings(types []CriteriaAcceleratorType) []string {
-	result := make([]string, len(types))
-	for i, t := range types {
-		result[i] = string(t)
-	}
-	return result
-}
-
-func serviceTypesToStrings(types []CriteriaServiceType) []string {
-	result := make([]string, len(types))
-	for i, t := range types {
-		result[i] = string(t)
-	}
-	return result
-}
-
-func intentTypesToStrings(types []CriteriaIntentType) []string {
-	result := make([]string, len(types))
-	for i, t := range types {
-		result[i] = string(t)
-	}
-	return result
-}
-
-func osTypesToStrings(types []CriteriaOSType) []string {
+func typesToStrings[T ~string](types []T) []string {
 	result := make([]string, len(types))
 	for i, t := range types {
 		result[i] = string(t)

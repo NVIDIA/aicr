@@ -255,7 +255,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - `image_tag`: Image tag to deploy (e.g., "v0.1.5")
 
 ### `kwok-recipes.yaml`
-**Trigger**: Push/PR to main (when `pkg/recipe/data/**` or `kwok/**` change), manual dispatch
+**Trigger**: Push/PR to main (when `recipes/**` or `kwok/**` change), manual dispatch
 **Purpose**: KWOK simulated cluster validation of recipe scheduling
 **Jobs**:
 1. **Test**: Calls `kwok-test` action which runs `run-all-recipes.sh` (same as `make kwok-test-all`)

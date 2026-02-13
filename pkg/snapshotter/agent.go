@@ -83,6 +83,11 @@ type AgentConfig struct {
 	// Required for GPU and SystemD collectors. When false, only K8s and OS collectors work.
 	Privileged bool
 
+	// RequireGPU requests nvidia.com/gpu resource for the agent pod.
+	// Required in CDI environments (e.g., kind with nvkind) where GPU devices
+	// are only injected when explicitly requested.
+	RequireGPU bool
+
 	// TemplatePath is the path to a Go template file for custom output formatting.
 	// When set, the snapshot output will be processed through this template.
 	TemplatePath string
@@ -126,6 +131,7 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		Output:             agentOutput,
 		Debug:              config.Debug,
 		Privileged:         config.Privileged,
+		RequireGPU:         config.RequireGPU,
 	}
 
 	// Create deployer
@@ -322,6 +328,7 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		Output:             agentOutput,
 		Debug:              n.AgentConfig.Debug,
 		Privileged:         n.AgentConfig.Privileged,
+		RequireGPU:         n.AgentConfig.RequireGPU,
 	}
 
 	// Create deployer

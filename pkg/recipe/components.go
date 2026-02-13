@@ -24,7 +24,7 @@ import (
 )
 
 // ComponentRegistry holds the declarative configuration for all components.
-// This is loaded from data/registry.yaml at startup.
+// This is loaded from embedded recipe data (recipes/registry.yaml) at startup.
 type ComponentRegistry struct {
 	APIVersion string            `yaml:"apiVersion"`
 	Kind       string            `yaml:"kind"`

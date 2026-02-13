@@ -34,6 +34,7 @@ type Config struct {
 	Output             string
 	Debug              bool
 	Privileged         bool // If true, run with privileged security context (required for GPU/SystemD collectors)
+	RequireGPU         bool // If true, request nvidia.com/gpu resource (required for CDI environments)
 }
 
 // Deployer manages the deployment and lifecycle of the agent Job.

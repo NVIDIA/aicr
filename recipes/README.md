@@ -14,7 +14,7 @@ This directory contains recipe metadata and component configurations for the NVI
 ## Directory Structure
 
 ```
-pkg/recipe/data/
+recipes/
 ├── registry.yaml                  # Component registry (Helm & Kustomize configs)
 ├── overlays/                      # Recipe overlays (including base)
 │   ├── base.yaml                  # Base recipe (universal defaults, root of inheritance)
@@ -76,7 +76,7 @@ All recipe metadata and component values are automatically validated. Tests run 
 
 ```bash
 # Generate bundle from recipe with overrides
-eidos bundle -r pkg/recipe/data/overlays/your-recipe.yaml -o ./test-bundles
+eidos bundle -r recipes/overlays/your-recipe.yaml -o ./test-bundles
 
 # Verify merged values
 cat test-bundles/gpu-operator/values.yaml | grep -A5 "driver:"

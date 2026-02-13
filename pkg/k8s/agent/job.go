@@ -19,6 +19,7 @@ import (
 	"time"
 
 	eidoserrors "github.com/NVIDIA/eidos/pkg/errors"
+	"github.com/NVIDIA/eidos/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -170,17 +171,21 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 	}
 
 	container := &spec.Containers[0]
+	limits := corev1.ResourceList{
+		corev1.ResourceCPU:              mustParseQuantity("2"),
+		corev1.ResourceMemory:           mustParseQuantity("8Gi"),
+		corev1.ResourceEphemeralStorage: mustParseQuantity("4Gi"),
+	}
+	if d.config.RequireGPU {
+		limits[corev1.ResourceName("nvidia.com/gpu")] = mustParseQuantity("1")
+	}
 	container.Resources = corev1.ResourceRequirements{
 		Requests: corev1.ResourceList{
 			corev1.ResourceCPU:              mustParseQuantity("1"),
 			corev1.ResourceMemory:           mustParseQuantity("4Gi"),
 			corev1.ResourceEphemeralStorage: mustParseQuantity("2Gi"),
 		},
-		Limits: corev1.ResourceList{
-			corev1.ResourceCPU:              mustParseQuantity("2"),
-			corev1.ResourceMemory:           mustParseQuantity("8Gi"),
-			corev1.ResourceEphemeralStorage: mustParseQuantity("4Gi"),
-		},
+		Limits: limits,
 	}
 	container.SecurityContext = &corev1.SecurityContext{
 		Privileged:               ptr.To(true),
@@ -191,21 +196,39 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 			Add: []corev1.Capability{"SYS_ADMIN", "SYS_CHROOT"},
 		},
 	}
-	container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
-		Name:      "run-systemd",
-		MountPath: "/run/systemd",
-		ReadOnly:  true,
-	})
+	container.VolumeMounts = append(container.VolumeMounts,
+		corev1.VolumeMount{
+			Name:      "run-systemd",
+			MountPath: "/run/systemd",
+			ReadOnly:  true,
+		},
+		corev1.VolumeMount{
+			Name:      "host-os-release",
+			MountPath: "/etc/os-release",
+			ReadOnly:  true,
+		},
+	)
 
-	spec.Volumes = append(spec.Volumes, corev1.Volume{
-		Name: "run-systemd",
-		VolumeSource: corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{
-				Path: "/run/systemd",
-				Type: ptr.To(corev1.HostPathDirectory),
+	spec.Volumes = append(spec.Volumes,
+		corev1.Volume{
+			Name: "run-systemd",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/run/systemd",
+					Type: ptr.To(corev1.HostPathDirectory),
+				},
 			},
 		},
-	})
+		corev1.Volume{
+			Name: "host-os-release",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: "/etc/os-release",
+					Type: ptr.To(corev1.HostPathFile),
+				},
+			},
+		},
+	)
 }
 
 // applyRestrictedSettings configures the pod for PSS-restricted namespaces (K8s collector only).
@@ -259,7 +282,7 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 			PropagationPolicy: &propagationPolicy,
 		},
 	)
-	return ignoreNotFound(err)
+	return k8s.IgnoreNotFound(err)
 }
 
 // waitForJobDeletion waits for the Job to be fully deleted.
@@ -269,7 +292,7 @@ func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
 		func(ctx context.Context) (bool, error) {
 			_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 				Get(ctx, d.config.JobName, metav1.GetOptions{})
-			if ignoreNotFound(err) == nil {
+			if k8s.IgnoreNotFound(err) == nil {
 				return true, nil // Job deleted successfully
 			}
 			if err != nil {

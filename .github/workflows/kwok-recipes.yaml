@@ -19,7 +19,7 @@ on:
     branches:
       - main
     paths:
-      - 'pkg/recipe/data/**'
+      - 'recipes/**'
       - 'kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'
@@ -27,7 +27,7 @@ on:
     branches:
       - main
     paths:
-      - 'pkg/recipe/data/**'
+      - 'recipes/**'
       - 'kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'

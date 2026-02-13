@@ -28,6 +28,10 @@ NVIDIA Eidos generates validated GPU-accelerated Kubernetes configurations.
 ## Commands
 
 ```bash
+# IMPORTANT: goreleaser (used by make build, make qualify, e2e) fails if
+# GITLAB_TOKEN is set alongside GITHUB_TOKEN. Always unset it first:
+unset GITLAB_TOKEN
+
 # Development workflow
 make qualify      # Full check: test + lint + e2e + scan (run before PR)
 make test         # Unit tests with -race
@@ -188,16 +192,16 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 
 | Task | Location | Key Points |
 |------|----------|------------|
-| New Helm component | `pkg/recipe/data/registry.yaml` | Add entry with name, displayName, helm settings, nodeScheduling |
-| New Kustomize component | `pkg/recipe/data/registry.yaml` | Add entry with name, displayName, kustomize settings |
-| Component values | `pkg/recipe/data/components/<name>/` | Create values.yaml with Helm chart configuration |
+| New Helm component | `recipes/registry.yaml` | Add entry with name, displayName, helm settings, nodeScheduling |
+| New Kustomize component | `recipes/registry.yaml` | Add entry with name, displayName, kustomize settings |
+| Component values | `recipes/components/<name>/` | Create values.yaml with Helm chart configuration |
 | New collector | `pkg/collector/<type>/` | Implement `Collector` interface, add to factory |
 | New API endpoint | `pkg/api/` | Handler + middleware chain + OpenAPI spec update |
 | Fix test failures | Run `make test` | Check race conditions (`-race`), verify context handling |
 
 **Adding a Helm component (declarative - no Go code needed):**
 ```yaml
-# pkg/recipe/data/registry.yaml
+# recipes/registry.yaml
 - name: my-operator
   displayName: My Operator
   valueOverrideKeys: [myoperator]
@@ -211,7 +215,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 
 **Adding a Kustomize component (declarative - no Go code needed):**
 ```yaml
-# pkg/recipe/data/registry.yaml
+# recipes/registry.yaml
 - name: my-kustomize-app
   displayName: My Kustomize App
   valueOverrideKeys: [mykustomize]
@@ -245,9 +249,9 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 | `DEVELOPMENT.md` | Development setup, architecture, Make targets |
 | `RELEASING.md` | Release process for maintainers |
 | `.versions.yaml` | Tool versions (single source of truth) |
-| `pkg/recipe/data/registry.yaml` | Declarative component configuration |
-| `pkg/recipe/data/overlays/*.yaml` | Recipe overlay definitions |
-| `pkg/recipe/data/components/*/values.yaml` | Component Helm values |
+| `recipes/registry.yaml` | Declarative component configuration |
+| `recipes/overlays/*.yaml` | Recipe overlay definitions |
+| `recipes/components/*/values.yaml` | Component Helm values |
 | `api/eidos/v1/server.yaml` | OpenAPI spec |
 | `.goreleaser.yaml` | Release configuration |
 

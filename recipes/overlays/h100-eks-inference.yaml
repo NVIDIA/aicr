@@ -15,38 +15,31 @@
 kind: recipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
-  name: h100-eks-ubuntu-inference
+  name: h100-eks-inference
 
 spec:
-  # Inherits from h100-eks-inference recipe (H100 + EKS + inference settings)
-  # This overlay adds Ubuntu-specific configurations
-  base: h100-eks-inference
+  # Inherits from eks-inference recipe (EKS + inference settings)
+  base: eks-inference
 
   criteria:
     service: eks
     accelerator: h100
-    os: ubuntu
     intent: inference
 
-  # H100 + Ubuntu specific constraints for inference workloads
+  # Specific constraints for H100 on EKS inference workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
       value: ">= 1.32.4"
-    - name: OS.release.ID
-      value: ubuntu
-    - name: OS.release.VERSION_ID
-      value: "24.04"
-    - name: OS.sysctl./proc/sys/kernel/osrelease
-      value: ">= 6.8"
 
   componentRefs:
-    # Ubuntu node customizations via skyhook-customizations component.
-    # Reuses the training manifest — it contains H100+EKS+Ubuntu node
-    # customizations that apply to both training and inference workloads.
     - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/h100-eks-ubuntu-training.yaml
+        - components/skyhook-customizations/manifests/tuning.yaml
+      overrides:
+        service: aws
+        accelerator: h100
+        intent: inference
       dependencyRefs:
         - skyhook-operator

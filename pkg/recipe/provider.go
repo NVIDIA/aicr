@@ -56,23 +56,28 @@ func NewEmbeddedDataProvider(efs embed.FS, prefix string) *EmbeddedDataProvider 
 
 // ReadFile reads a file from the embedded filesystem.
 func (p *EmbeddedDataProvider) ReadFile(path string) ([]byte, error) {
-	fullPath := p.prefix + "/" + path
+	fullPath := filepath.Join(p.prefix, path)
 	slog.Debug("reading file from embedded provider", "path", path, "fullPath", fullPath)
 	return p.fs.ReadFile(fullPath)
 }
 
 // WalkDir walks the embedded filesystem.
 func (p *EmbeddedDataProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
-	fullRoot := p.prefix
-	if root != "" {
-		fullRoot = p.prefix + "/" + root
+	fullRoot := filepath.Join(p.prefix, root)
+	if fullRoot == "" {
+		fullRoot = "." // embed.FS expects "." for root
 	}
 	slog.Debug("walking embedded filesystem", "root", root, "fullRoot", fullRoot)
 	return fs.WalkDir(p.fs, fullRoot, func(path string, d fs.DirEntry, err error) error {
 		// Strip the prefix before passing to callback
-		relPath := strings.TrimPrefix(path, p.prefix+"/")
-		if relPath == p.prefix {
-			relPath = ""
+		var relPath string
+		if p.prefix == "" {
+			relPath = path
+		} else {
+			relPath = strings.TrimPrefix(path, p.prefix+"/")
+			if relPath == p.prefix {
+				relPath = ""
+			}
 		}
 		return fn(relPath, d, err)
 	})
@@ -460,7 +465,7 @@ func SetDataProvider(provider DataProvider) {
 func GetDataProvider() DataProvider {
 	if globalDataProvider == nil {
 		slog.Debug("initializing default embedded data provider")
-		globalDataProvider = NewEmbeddedDataProvider(dataFS, "data")
+		globalDataProvider = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
 	}
 	return globalDataProvider
 }

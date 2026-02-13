@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// yaml_test.go validates the embedded recipe YAML files in data/.
+// yaml_test.go validates the embedded recipe YAML files in recipes/ (overlays, components).
 //
 // Area of Concern: Static YAML data file validation
 // - Schema conformance - all YAML files parse into RecipeMetadata
@@ -34,7 +34,6 @@
 package recipe
 
 import (
-	"embed"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -46,11 +45,7 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 )
 
-// testMetadataFS embeds all recipe data files for testing.
-// This uses a separate embed directive to include component values files and manifests.
-//
-//go:embed data/overlays/*.yaml data/components/*/*.yaml data/components/*/manifests/*.yaml
-var testMetadataFS embed.FS
+// Tests use GetEmbeddedFS() from adapter (embedded recipes/ at repo root).
 
 // validMeasurementTypes are the valid top-level measurement types for constraints.
 var validMeasurementTypes = map[string]bool{
@@ -63,14 +58,14 @@ var validMeasurementTypes = map[string]bool{
 // validConstraintOperators are the supported constraint operators.
 var validConstraintOperators = []string{">=", "<=", ">", "<", "==", "!="}
 
-// baseYAMLFile is the base recipe filename (relative to data/).
+// baseYAMLFile is the base recipe filename (overlays/base.yaml).
 const baseYAMLFile = "overlays/base.yaml"
 
 // ============================================================================
 // Schema Conformance Tests
 // ============================================================================
 
-// TestAllMetadataFilesParseCorrectly verifies that all YAML files in data/
+// TestAllMetadataFilesParseCorrectly verifies that all YAML files in overlays/
 // parse into valid RecipeMetadata structures.
 func TestAllMetadataFilesParseCorrectly(t *testing.T) {
 	files := collectMetadataFiles(t)
@@ -80,7 +75,7 @@ func TestAllMetadataFilesParseCorrectly(t *testing.T) {
 
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -100,7 +95,7 @@ func TestAllMetadataFilesHaveRequiredFields(t *testing.T) {
 
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -149,7 +144,7 @@ func TestAllOverlayCriteriaUseValidEnums(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -201,7 +196,7 @@ func TestAllOverlayCriteriaUseValidEnums(t *testing.T) {
 // ============================================================================
 
 // TestAllValuesFileReferencesExist verifies that all valuesFile references
-// in componentRefs point to existing files in the data/components/ directory.
+// in componentRefs point to existing files in the recipes/components/ directory.
 func TestAllValuesFileReferencesExist(t *testing.T) {
 	files := collectMetadataFiles(t)
 
@@ -210,7 +205,7 @@ func TestAllValuesFileReferencesExist(t *testing.T) {
 
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -238,7 +233,7 @@ func TestAllValuesFileReferencesExist(t *testing.T) {
 // reference components that are defined in the same file or base.yaml.
 func TestAllDependencyReferencesExist(t *testing.T) {
 	// Load base components first
-	baseContent, err := testMetadataFS.ReadFile("data/" + baseYAMLFile)
+	baseContent, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", baseYAMLFile, err)
 	}
@@ -262,7 +257,7 @@ func TestAllDependencyReferencesExist(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -308,7 +303,7 @@ func TestAllComponentNamesMatchKnownComponents(t *testing.T) {
 
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -343,7 +338,7 @@ func TestAllConstraintsSyntaxValid(t *testing.T) {
 
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -412,7 +407,7 @@ func TestAllBaseReferencesPointToExistingRecipes(t *testing.T) {
 	// Build map of recipe names to files
 	recipeNames := make(map[string]string)
 	for _, path := range files {
-		content, err := testMetadataFS.ReadFile(path)
+		content, err := GetEmbeddedFS().ReadFile(path)
 		if err != nil {
 			t.Fatalf("failed to read %s: %v", path, err)
 		}
@@ -433,7 +428,7 @@ func TestAllBaseReferencesPointToExistingRecipes(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -462,7 +457,7 @@ func TestNoCircularBaseReferences(t *testing.T) {
 	// Build map of recipe name -> base reference
 	baseRefs := make(map[string]string)
 	for _, path := range files {
-		content, err := testMetadataFS.ReadFile(path)
+		content, err := GetEmbeddedFS().ReadFile(path)
 		if err != nil {
 			t.Fatalf("failed to read %s: %v", path, err)
 		}
@@ -505,7 +500,7 @@ func TestInheritanceChainDepthReasonable(t *testing.T) {
 	// Build map of recipe name -> base reference
 	baseRefs := make(map[string]string)
 	for _, path := range files {
-		content, err := testMetadataFS.ReadFile(path)
+		content, err := GetEmbeddedFS().ReadFile(path)
 		if err != nil {
 			t.Fatalf("failed to read %s: %v", path, err)
 		}
@@ -551,7 +546,7 @@ func TestIntermediateRecipesHavePartialCriteria(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -583,7 +578,7 @@ func TestLeafRecipesHaveCompleteCriteria(t *testing.T) {
 	// Build set of recipes that are referenced as base by other recipes
 	referencedAsBases := make(map[string]bool)
 	for _, path := range files {
-		content, err := testMetadataFS.ReadFile(path)
+		content, err := GetEmbeddedFS().ReadFile(path)
 		if err != nil {
 			t.Fatalf("failed to read %s: %v", path, err)
 		}
@@ -606,7 +601,7 @@ func TestLeafRecipesHaveCompleteCriteria(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -661,7 +656,7 @@ func TestNoDuplicateCriteriaAcrossOverlays(t *testing.T) {
 			continue
 		}
 
-		content, err := testMetadataFS.ReadFile(path)
+		content, err := GetEmbeddedFS().ReadFile(path)
 		if err != nil {
 			t.Fatalf("failed to read %s: %v", path, err)
 		}
@@ -692,7 +687,7 @@ func TestNoDuplicateCriteriaAcrossOverlays(t *testing.T) {
 // can be merged with base without errors.
 func TestBaseAndOverlaysMergeWithoutConflict(t *testing.T) {
 	// Load base
-	baseContent, err := testMetadataFS.ReadFile("data/" + baseYAMLFile)
+	baseContent, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", baseYAMLFile, err)
 	}
@@ -711,7 +706,7 @@ func TestBaseAndOverlaysMergeWithoutConflict(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -739,7 +734,7 @@ func TestBaseAndOverlaysMergeWithoutConflict(t *testing.T) {
 // the resulting recipe has no circular dependencies.
 func TestMergedRecipesHaveNoCycles(t *testing.T) {
 	// Load base
-	baseContent, err := testMetadataFS.ReadFile("data/" + baseYAMLFile)
+	baseContent, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", baseYAMLFile, err)
 	}
@@ -758,7 +753,7 @@ func TestMergedRecipesHaveNoCycles(t *testing.T) {
 		}
 
 		t.Run(filename, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -793,7 +788,7 @@ func TestAllValuesFilesParseAsValidYAML(t *testing.T) {
 
 	for path := range valuesFiles {
 		t.Run(path, func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile("data/" + path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -813,7 +808,7 @@ func TestAllValuesFilesParseAsValidYAML(t *testing.T) {
 
 // TestBaseRecipeValidation verifies the base recipe passes all validations.
 func TestBaseRecipeValidation(t *testing.T) {
-	content, err := testMetadataFS.ReadFile("data/" + baseYAMLFile)
+	content, err := GetEmbeddedFS().ReadFile(baseYAMLFile)
 	if err != nil {
 		t.Fatalf("failed to read %s: %v", baseYAMLFile, err)
 	}
@@ -855,7 +850,7 @@ func TestAllComponentTypesValid(t *testing.T) {
 
 	for _, path := range files {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -930,13 +925,13 @@ func TestManifestHelmHooksRequired(t *testing.T) {
 
 	manifestFiles := collectManifestFiles(t)
 	if len(manifestFiles) == 0 {
-		t.Log("no manifest files found in data/components/*/manifests/")
+		t.Log("no manifest files found in components/*/manifests/")
 		return
 	}
 
 	for _, path := range manifestFiles {
 		t.Run(filepath.Base(path), func(t *testing.T) {
-			content, err := testMetadataFS.ReadFile(path)
+			content, err := GetEmbeddedFS().ReadFile(path)
 			if err != nil {
 				t.Fatalf("failed to read %s: %v", path, err)
 			}
@@ -1156,12 +1151,12 @@ func isStandardK8sAPI(apiVersion string) bool {
 	return standardK8sAPIVersions[apiVersion]
 }
 
-// collectManifestFiles returns all manifest YAML files in data/components/*/manifests/.
+// collectManifestFiles returns all manifest YAML files in components/*/manifests/.
 func collectManifestFiles(t *testing.T) []string {
 	t.Helper()
 
 	var files []string
-	err := fs.WalkDir(testMetadataFS, "data/components", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(GetEmbeddedFS(), "components", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1190,12 +1185,12 @@ func collectManifestFiles(t *testing.T) []string {
 // Helper Functions
 // ============================================================================
 
-// collectMetadataFiles returns all YAML files in data/ (excluding components/).
+// collectMetadataFiles returns all YAML files in overlays/ (metadata only).
 func collectMetadataFiles(t *testing.T) []string {
 	t.Helper()
 
 	var files []string
-	err := fs.WalkDir(testMetadataFS, "data", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(GetEmbeddedFS(), "overlays", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1224,12 +1219,12 @@ func collectMetadataFiles(t *testing.T) []string {
 	return files
 }
 
-// collectValuesFiles returns all values files in data/components/ (excluding manifests/).
+// collectValuesFiles returns all values files in components/ (excluding manifests/).
 func collectValuesFiles(t *testing.T) map[string]bool {
 	t.Helper()
 
 	files := make(map[string]bool)
-	err := fs.WalkDir(testMetadataFS, "data/components", func(path string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(GetEmbeddedFS(), "components", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -1240,9 +1235,8 @@ func collectValuesFiles(t *testing.T) map[string]bool {
 		if strings.Contains(path, "/manifests/") {
 			return nil
 		}
-		// Store relative path from data/
-		relPath := strings.TrimPrefix(path, "data/")
-		files[relPath] = true
+		// Store full path (components/...) for ReadFile and comparison with metadata valuesFile
+		files[path] = true
 		return nil
 	})
 	if err != nil {

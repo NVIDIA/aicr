@@ -30,7 +30,7 @@ components: []
 
 // TestEmbeddedDataProvider tests the embedded data provider.
 func TestEmbeddedDataProvider(t *testing.T) {
-	provider := NewEmbeddedDataProvider(dataFS, "data")
+	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 
 	t.Run("read existing file", func(t *testing.T) {
 		data, err := provider.ReadFile("registry.yaml")
@@ -62,7 +62,7 @@ func TestLayeredDataProvider_RequiresRegistry(t *testing.T) {
 	// Create temp directory without registry.yaml
 	tmpDir := t.TempDir()
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	_, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -91,7 +91,7 @@ components:
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -143,7 +143,7 @@ spec:
 		t.Fatalf("failed to write base.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -198,7 +198,7 @@ spec:
 		t.Fatalf("failed to write custom-overlay.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -236,7 +236,7 @@ func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 			t.Skipf("cannot create symlinks: %v", err)
 		}
 
-		embedded := NewEmbeddedDataProvider(dataFS, "data")
+		embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 		_, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 			ExternalDir:   tmpDir,
 			AllowSymlinks: false,
@@ -256,7 +256,7 @@ func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 			t.Fatalf("failed to write registry.yaml: %v", err)
 		}
 
-		embedded := NewEmbeddedDataProvider(dataFS, "data")
+		embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 		_, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 			ExternalDir: tmpDir,
 			MaxFileSize: 10, // Very small limit
@@ -268,7 +268,7 @@ func TestLayeredDataProvider_SecurityChecks(t *testing.T) {
 	})
 
 	t.Run("rejects missing directory", func(t *testing.T) {
-		embedded := NewEmbeddedDataProvider(dataFS, "data")
+		embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 		_, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 			ExternalDir: "/non/existent/path",
 		})
@@ -289,7 +289,7 @@ func TestLayeredDataProvider_FallsBackToEmbedded(t *testing.T) {
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -335,7 +335,7 @@ components:
 	}
 
 	// Create layered provider
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	layered, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -405,7 +405,7 @@ customField: customValue
 		t.Fatalf("failed to write custom values: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -462,7 +462,7 @@ spec:
 		t.Fatalf("failed to write walk-test.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -553,7 +553,7 @@ spec:
 		t.Fatalf("failed to write external-test.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -602,7 +602,7 @@ func TestLayeredDataProvider_SourceForRegistry(t *testing.T) {
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -639,7 +639,7 @@ components:
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -666,7 +666,7 @@ components:
 
 // TestEmbeddedDataProvider_WalkDir tests walking embedded filesystem.
 func TestEmbeddedDataProvider_WalkDir(t *testing.T) {
-	provider := NewEmbeddedDataProvider(dataFS, "data")
+	provider := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 
 	var files []string
 	err := provider.WalkDir("overlays", func(path string, d os.DirEntry, err error) error {
@@ -697,7 +697,7 @@ func TestLayeredDataProvider_NotDirectory(t *testing.T) {
 	tmpFile.Close()
 	defer os.Remove(tmpFile.Name())
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	_, err = NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpFile.Name(),
 	})
@@ -721,7 +721,7 @@ components:
 		t.Fatalf("failed to write registry.yaml: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -751,7 +751,7 @@ func TestLayeredDataProvider_ReadExternalFileError(t *testing.T) {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir: tmpDir,
 	})
@@ -793,7 +793,7 @@ func TestLayeredDataProvider_AllowSymlinks(t *testing.T) {
 		t.Skipf("cannot create symlinks: %v", err)
 	}
 
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
 		ExternalDir:   tmpDir,
 		AllowSymlinks: true, // Allow symlinks
@@ -826,7 +826,7 @@ func TestDataProviderGeneration(t *testing.T) {
 	startGen := GetDataProviderGeneration()
 
 	// Setting a provider should increment generation
-	embedded := NewEmbeddedDataProvider(dataFS, "data")
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	SetDataProvider(embedded)
 
 	newGen := GetDataProviderGeneration()

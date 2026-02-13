@@ -257,8 +257,8 @@ func TestDeployer_EnsureJob(t *testing.T) {
 		}
 
 		// Verify volumes
-		if len(job.Spec.Template.Spec.Volumes) != 2 {
-			t.Errorf("expected 2 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
+		if len(job.Spec.Template.Spec.Volumes) != 3 {
+			t.Errorf("expected 3 volumes, got %d", len(job.Spec.Template.Spec.Volumes))
 		}
 	})
 

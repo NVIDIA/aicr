@@ -12,22 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-kind: recipeMetadata
-apiVersion: eidos.nvidia.com/v1alpha1
-metadata:
-  name: h100-eks-inference
-
-spec:
-  # Inherits from eks-inference recipe (EKS + inference settings)
-  base: eks-inference
-
-  criteria:
-    service: eks
-    accelerator: h100
-    intent: inference
-
-  # Specific constraints for H100 on EKS inference workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
-  constraints:
-    - name: K8s.server.version
-      value: ">= 1.32.4"
+enabled: true
+additional_trustees:
+  - ayuskauskas
+  - coffeepac
+  - cullenmcdermott
+  - dims
+  - Kevin-Hawkins
+  - lockwobr
+  - mchmarny
+  - svcsectool
+  - tabern
+  - valcharry
+  - yuanchen8911

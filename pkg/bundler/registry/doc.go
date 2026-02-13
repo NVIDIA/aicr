@@ -39,7 +39,7 @@
 //
 // # Registration Pattern
 //
-// Component names are defined in pkg/recipe/data/registry.yaml.
+// Component names are defined in recipes/registry.yaml.
 // Bundlers self-register in their package init() functions:
 //
 //	package gpuoperator

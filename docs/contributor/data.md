@@ -25,10 +25,10 @@ The recipe system is a rule-based configuration engine that generates tailored s
 4. **Merging configurations** - Components, constraints, and values are merged with overlay precedence
 5. **Computing deployment order** - Topological sort of components based on dependency references
 
-The recipe data is organized in [`pkg/recipe/data/`](../../pkg/recipe/data/) as multiple YAML files:
+The recipe data is organized in [`recipes/`](../../recipes/) as multiple YAML files:
 
 ```
-pkg/recipe/data/
+recipes/
 ├── registry.yaml                  # Component registry (Helm & Kustomize configs)
 ├── overlays/                      # Recipe overlays (including base)
 │   ├── base.yaml                  # Root recipe - all recipes inherit from this
@@ -458,7 +458,7 @@ Base ValuesFile → Overlay ValuesFile → Overlay Overrides → CLI --set flags
 
 ### Component Values Files
 
-Values files are stored in `pkg/recipe/data/components/{component}/`:
+Values files are stored in `recipes/components/{component}/`:
 
 ```yaml
 # components/gpu-operator/values.yaml
@@ -882,7 +882,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
 
 ### Adding a New Recipe
 
-1. **Create the recipe file** in `pkg/recipe/data/`:
+1. **Create the recipe file** in `recipes/`:
    ```yaml
    kind: recipeMetadata
    apiVersion: eidos.nvidia.com/v1alpha1
@@ -952,7 +952,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
 
 ### Updating Component Values
 
-1. **Modify values file** in `pkg/recipe/data/components/{component}/values.yaml`
+1. **Modify values file** in `recipes/components/{component}/values.yaml`
 
 2. **Create variant values file** for specific environments:
    - `values.yaml` - Base configuration
@@ -1041,7 +1041,7 @@ jobs:
 
 When adding new recipe metadata or component configurations:
 
-1. **Create the new file** in `pkg/recipe/data/`
+1. **Create the new file** in `recipes/`
 2. **Run tests** to verify the file is valid:
    ```bash
    go test -v ./pkg/recipe/... -run TestAllMetadataFilesParseCorrectly
