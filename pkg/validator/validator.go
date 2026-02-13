@@ -108,6 +108,9 @@ type Validator struct {
 	// Cleanup controls whether to delete Jobs, ConfigMaps, and RBAC resources after validation.
 	// Defaults to true. Set to false to keep resources for debugging.
 	Cleanup bool
+
+	// ImagePullSecrets are secret names for pulling images from private registries.
+	ImagePullSecrets []string
 }
 
 // Option is a functional option for configuring Validator instances.
@@ -147,6 +150,13 @@ func WithRunID(runID string) Option {
 func WithCleanup(cleanup bool) Option {
 	return func(v *Validator) {
 		v.Cleanup = cleanup
+	}
+}
+
+// WithImagePullSecrets returns an Option that sets image pull secrets for validation Jobs.
+func WithImagePullSecrets(secrets []string) Option {
+	return func(v *Validator) {
+		v.ImagePullSecrets = secrets
 	}
 }
 
