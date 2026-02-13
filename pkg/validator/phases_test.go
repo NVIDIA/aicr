@@ -22,7 +22,19 @@ import (
 	"github.com/NVIDIA/eidos/pkg/measurement"
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/snapshotter"
+	"github.com/NVIDIA/eidos/pkg/validator/checks"
 )
+
+func init() {
+	// Register a test-only check for buildTestPattern tests.
+	// Cannot import deployment checks due to import cycle, so register directly.
+	checks.RegisterCheck(&checks.Check{
+		Name:        "test-registered-check",
+		Description: "Test-only check for buildTestPattern coverage",
+		Phase:       "deployment",
+		TestName:    "TestRegisteredCheck",
+	})
+}
 
 func TestValidatePhase(t *testing.T) {
 	// Skip if running with -short flag (for fast unit tests)
@@ -815,103 +827,6 @@ func TestDetermineStartPhase(t *testing.T) {
 	}
 }
 
-func TestCheckNameToTestName(t *testing.T) {
-	tests := []struct {
-		name      string
-		checkName string
-		want      string
-	}{
-		{"hyphenated name", "operator-health", "TestOperatorHealth"},
-		{"single word", "health", "TestHealth"},
-		{"multiple hyphens", "gpu-hardware-detection", "TestGpuHardwareDetection"},
-		{"already capitalized", "GPU", "TestGPU"},
-		{"empty string", "", "Test"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := checkNameToTestName(tt.checkName)
-			if got != tt.want {
-				t.Errorf("checkNameToTestName(%q) = %q, want %q", tt.checkName, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestBuildTestPattern(t *testing.T) {
-	tests := []struct {
-		name   string
-		recipe *recipe.RecipeResult
-		phase  string
-		want   string
-	}{
-		{
-			name: "nil validation returns empty",
-			recipe: &recipe.RecipeResult{
-				Validation: nil,
-			},
-			phase: "deployment",
-			want:  "",
-		},
-		{
-			name: "empty deployment returns empty",
-			recipe: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Deployment: &recipe.ValidationPhase{},
-				},
-			},
-			phase: "deployment",
-			want:  "",
-		},
-		{
-			name: "deployment with checks builds pattern",
-			recipe: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"operator-health", "expected-resources"},
-					},
-				},
-			},
-			phase: "deployment",
-			want:  "^(TestOperatorHealth|TestExpectedResources)$",
-		},
-		{
-			name: "performance phase returns empty (TODO stub)",
-			recipe: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Performance: &recipe.ValidationPhase{
-						Checks: []string{"nccl-bandwidth-test"},
-					},
-				},
-			},
-			phase: "performance",
-			want:  "",
-		},
-		{
-			name: "conformance phase returns empty (TODO stub)",
-			recipe: &recipe.RecipeResult{
-				Validation: &recipe.ValidationConfig{
-					Conformance: &recipe.ValidationPhase{
-						Checks: []string{"ai-workload-validation"},
-					},
-				},
-			},
-			phase: "conformance",
-			want:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := New()
-			got := v.buildTestPattern(tt.recipe, tt.phase)
-			if got != tt.want {
-				t.Errorf("buildTestPattern() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestValidateRecipeRegistrations(t *testing.T) {
 	validator := New()
 
@@ -987,6 +902,32 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 				Validation: nil,
 			},
 			phase:          "conformance",
+			expectWarnings: false,
+		},
+		{
+			name: "deployment - registered constraint no warning",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{
+							{Name: "Deployment.gpu-operator.version", Value: ">= v24.6.0"},
+						},
+					},
+				},
+			},
+			phase:          "deployment",
+			expectWarnings: false,
+		},
+		{
+			name: "readiness - no constraint validators to check",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					PreDeployment: &recipe.ValidationPhase{
+						Checks: []string{"gpu-hardware-detection"},
+					},
+				},
+			},
+			phase:          "readiness",
 			expectWarnings: false,
 		},
 	}
@@ -1115,6 +1056,45 @@ func TestBuildTestPattern(t *testing.T) {
 			phase:             "conformance",
 			wantPattern:       "",
 			wantExpectedTests: 0,
+		},
+		{
+			name: "deployment with registered check uses registry test name",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"test-registered-check"},
+					},
+				},
+			},
+			phase:             "deployment",
+			wantPattern:       "^(TestRegisteredCheck)$",
+			wantExpectedTests: 1,
+		},
+		{
+			name: "deployment with unregistered check falls back to generated name",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"some-unknown-check"},
+					},
+				},
+			},
+			phase:             "deployment",
+			wantPattern:       "^(TestSomeUnknownCheck)$",
+			wantExpectedTests: 1,
+		},
+		{
+			name: "deployment with multiple checks builds combined pattern",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"test-registered-check", "some-unknown-check"},
+					},
+				},
+			},
+			phase:             "deployment",
+			wantPattern:       "^(TestRegisteredCheck|TestSomeUnknownCheck)$",
+			wantExpectedTests: 2,
 		},
 	}
 

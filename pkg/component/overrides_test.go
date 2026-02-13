@@ -289,6 +289,33 @@ func TestApplyValueOverrides_Errors(t *testing.T) {
 			wantErr: true,
 			errMsg:  "field not found",
 		},
+		{
+			name:   "non-existent nested field",
+			target: &TestStruct{},
+			overrides: map[string]string{
+				"driver.nonexistent": "value",
+			},
+			wantErr: true,
+			errMsg:  "field not found",
+		},
+		{
+			name:   "traverse through non-struct field",
+			target: &TestStruct{},
+			overrides: map[string]string{
+				"name.sub": "value",
+			},
+			wantErr: true,
+			errMsg:  "cannot traverse non-struct field",
+		},
+		{
+			name:   "pointer to non-struct",
+			target: new(string),
+			overrides: map[string]string{
+				"anything": "value",
+			},
+			wantErr: true,
+			errMsg:  "must be a pointer to a struct",
+		},
 	}
 
 	for _, tt := range tests {
