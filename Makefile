@@ -143,7 +143,8 @@ LICENSE_IGNORES = \
 	-ignore '**/*lock.hcl' \
 	-ignore '**/*pb2*' \
 	-ignore 'bundles/**' \
-	-ignore 'dist/**'
+	-ignore 'dist/**' \
+	-ignore 'vendor/**'
 
 .PHONY: license
 license: ## Add/verify license headers in source files
