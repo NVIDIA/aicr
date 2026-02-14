@@ -67,10 +67,7 @@ Eidos uses a validator framework to check cluster state against requirements. To
 **Quick Start:**
 ```bash
 # Generate all necessary files
-eidos generate-validator \
-  --constraint Deployment.my-app.version \
-  --phase deployment \
-  --description "Validates my-app version"
+make generate-validator ARGS="--constraint Deployment.my-app.version --phase deployment --description 'Validates my-app version'"
 ```
 
 This creates three files with TODOs guiding implementation:

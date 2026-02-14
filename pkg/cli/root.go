@@ -131,7 +131,6 @@ func Execute() {
 			recipeCmd(),
 			bundleCmd(),
 			validateCmd(),
-			generateValidatorCmd(),
 		},
 		ShellComplete: commandLister,
 	}

@@ -65,6 +65,10 @@ tools-update: ## Reinstall/upgrade all tools to versions in .settings.yaml (non-
 	@echo "Updating tools to .settings.yaml..."
 	@AUTO_MODE=true bash tools/setup-tools --upgrade
 
+.PHONY: generate-validator
+generate-validator: ## Generate scaffolding for a new check or constraint validator
+	@python3 tools/generate-validator $(ARGS)
+
 .PHONY: flox-manifest
 flox-manifest: ## Generate Flox manifest.toml from .settings.yaml (alternative to tools-setup)
 	@bash tools/generate-flox-manifest

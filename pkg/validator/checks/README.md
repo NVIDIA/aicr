@@ -113,7 +113,7 @@ Use the generator to create a new check or constraint with all required files:
 
 **1. Generate a check:**
 ```bash
-eidos generate-validator --check my-check --phase deployment --description "Verify my component is healthy"
+make generate-validator ARGS="--check my-check --phase deployment --description 'Verify my component is healthy'"
 ```
 
 This creates:
@@ -199,7 +199,7 @@ Done! Your check will run inside validation Jobs.
 
 **Generate a constraint validator:**
 ```bash
-eidos generate-validator --constraint Deployment.my-app.version --phase deployment
+make generate-validator ARGS="--constraint Deployment.my-app.version --phase deployment"
 ```
 
 ### Key Principles
@@ -332,7 +332,7 @@ For `go test` to discover and run your check, you need a `Test*` function that:
 
 ### Adding a Test Wrapper
 
-**Note:** When using the generator (`eidos generate-validator`), test wrappers are automatically created. The following is for manual creation.
+**Note:** When using the generator (`make generate-validator`), test wrappers are automatically created. The following is for manual creation.
 
 **Step 1: Add Test Wrapper to Your Check's Integration Test File**
 
@@ -1065,10 +1065,7 @@ For constraint validators, Eidos provides an automated code generator that scaff
 **1. Generate validator scaffolding:**
 
 ```bash
-eidos generate-validator \
-  --constraint Deployment.my-app.version \
-  --phase deployment \
-  --description "Validates my-app version"
+make generate-validator ARGS="--constraint Deployment.my-app.version --phase deployment --description 'Validates my-app version'"
 ```
 
 This creates three files with TODOs guiding implementation:
@@ -1330,7 +1327,7 @@ func TestConstraintRegistrationCompleteness(t *testing.T) {
 
 **2. Code Generator**
 
-`eidos generate-validator` scaffolds all files correctly:
+`make generate-validator` scaffolds all files correctly:
 - Includes registration automatically in integration test
 - Provides TODOs for implementation
 - Follows naming conventions
