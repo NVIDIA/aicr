@@ -117,6 +117,10 @@ tags
 # Claude
 .claude/settings.local.json
 
+# Validator generator scaffolding output
+pkg/validator/checks/**/*_README.md
+pkg/validator/checks/**/*_recipe.yaml
+
 # KWOK
 kwok/logs/
 eidos-e2e.xml
