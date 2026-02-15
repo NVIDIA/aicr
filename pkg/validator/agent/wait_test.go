@@ -501,36 +501,28 @@ func TestStreamLogs_NoPod(t *testing.T) {
 }
 
 func TestParseGoTestJSON_InvalidJSON(t *testing.T) {
-	// Test with invalid JSON - should not panic
+	// Invalid JSON lines are skipped; result defaults to pass with no tests
 	result, err := parseGoTestJSON("not valid json")
-	// Invalid JSON should either return error or empty result
 	if err != nil {
-		t.Logf("parseGoTestJSON returned error for invalid JSON: %v", err)
-	} else if result != nil {
-		t.Logf("parseGoTestJSON returned result for invalid JSON: %+v", result)
+		t.Fatalf("parseGoTestJSON() unexpected error: %v", err)
+	}
+	if result.Status != statusPass {
+		t.Errorf("expected status %q for invalid JSON, got %q", statusPass, result.Status)
+	}
+	if len(result.Tests) != 0 {
+		t.Errorf("expected 0 tests for invalid JSON, got %d", len(result.Tests))
 	}
 }
 
 func TestParseGoTestJSON_EmptyOutput(t *testing.T) {
 	result, err := parseGoTestJSON("")
 	if err != nil {
-		t.Errorf("parseGoTestJSON() unexpected error for empty output: %v", err)
+		t.Fatalf("parseGoTestJSON() unexpected error: %v", err)
 	}
-	if result != nil && result.Status != "" {
-		// Empty output should return empty or nil result
-		t.Logf("Got result status: %s", result.Status)
+	if result.Status != statusPass {
+		t.Errorf("expected status %q for empty output, got %q", statusPass, result.Status)
 	}
-}
-
-func TestValidationResultStatus(t *testing.T) {
-	// Test different status values
-	statuses := []string{statusPass, statusFail, statusSkip}
-	for _, status := range statuses {
-		result := &ValidationResult{
-			Status: status,
-		}
-		if result.Status != status {
-			t.Errorf("expected Status %q, got %q", status, result.Status)
-		}
+	if len(result.Tests) != 0 {
+		t.Errorf("expected 0 tests for empty output, got %d", len(result.Tests))
 	}
 }

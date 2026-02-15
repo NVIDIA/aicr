@@ -83,7 +83,6 @@ pkg/validator/checks/
 ├── README.md                    # This file - Complete documentation
 ├── registry.go                  # Registration infrastructure
 ├── runner.go                    # Test runner for Job execution
-├── generator.go                 # Code generator for new checks/constraints
 ├── readiness/                   # Readiness phase checks
 │   ├── gpu_detection.go         # Example: GPU hardware check
 │   └── gpu_detection_test.go    # Unit tests + test wrapper

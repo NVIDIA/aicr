@@ -1007,6 +1007,21 @@ func TestCheckNameToTestName(t *testing.T) {
 			checkName: "",
 			want:      "Test",
 		},
+		{
+			name:      "dot separator",
+			checkName: "gpu.operator.check",
+			want:      "TestGpuOperatorCheck",
+		},
+		{
+			name:      "underscore separator",
+			checkName: "gpu_operator_check",
+			want:      "TestGpuOperatorCheck",
+		},
+		{
+			name:      "mixed separators",
+			checkName: "gpu-operator.health_check",
+			want:      "TestGpuOperatorHealthCheck",
+		},
 	}
 
 	for _, tt := range tests {
