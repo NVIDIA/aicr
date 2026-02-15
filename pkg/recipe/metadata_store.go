@@ -189,11 +189,15 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 				fmt.Sprintf("recipe %q not found (referenced in inheritance chain)", currentName))
 		}
 
-		// Prepend to chain (we're walking backwards, will reverse later)
-		chain = append([]*RecipeMetadata{recipe}, chain...)
+		chain = append(chain, recipe)
 
 		// Move to parent
 		currentName = recipe.Spec.Base
+	}
+
+	// Reverse so chain goes from root (base) to target
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
 	}
 
 	// Prepend base at the start (root of all inheritance)
@@ -207,7 +211,7 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 // FindMatchingOverlays finds all overlays that match the given criteria.
 // Returns overlays sorted by specificity (least specific first).
 func (s *MetadataStore) FindMatchingOverlays(criteria *Criteria) []*RecipeMetadata {
-	var matches []*RecipeMetadata
+	matches := make([]*RecipeMetadata, 0, len(s.Overlays))
 
 	for _, overlay := range s.Overlays {
 		if overlay.Spec.Criteria == nil {

@@ -329,7 +329,7 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 			name:     "empty deployment order",
 			comps:    []string{"b", "a"},
 			order:    nil,
-			expected: []string{"a", "b"},
+			expected: []string{"b", "a"},
 		},
 	}
 

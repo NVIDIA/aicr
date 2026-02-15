@@ -53,8 +53,9 @@
 //	b, _ := bundler.New()
 //	output, err := b.Make(ctx, recipeResult, "./bundle")
 //
-//	fmt.Println(output.Summary())
-//	fmt.Printf("Success: %d, Failed: %d\n", output.SuccessCount(), output.FailureCount())
+//	if output.HasErrors() {
+//	    // handle errors
+//	}
 //
 // # Deployment Instructions
 //

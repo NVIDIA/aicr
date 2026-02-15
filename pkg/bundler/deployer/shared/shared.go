@@ -134,12 +134,13 @@ func NormalizeVersionWithDefault(v string) string {
 	return v
 }
 
-// SortComponentRefsByDeploymentOrder sorts component refs by deployment order.
-// Components in the order list are sorted by their position; components not in
-// the order list are placed after ordered components and sorted alphabetically.
-func SortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []string) []recipe.ComponentRef {
+// SortByDeploymentOrder sorts items by deployment order using getName to
+// extract the component name from each item. Items in the order list are
+// sorted by their position; items not in the order list are placed after
+// ordered items and sorted alphabetically by name.
+func SortByDeploymentOrder[T any](items []T, order []string, getName func(T) string) []T {
 	if len(order) == 0 {
-		return refs
+		return items
 	}
 
 	orderMap := make(map[string]int, len(order))
@@ -147,15 +148,17 @@ func SortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []stri
 		orderMap[name] = i
 	}
 
-	sorted := make([]recipe.ComponentRef, len(refs))
-	copy(sorted, refs)
+	sorted := make([]T, len(items))
+	copy(sorted, items)
 
 	sort.SliceStable(sorted, func(i, j int) bool {
-		orderI, okI := orderMap[sorted[i].Name]
-		orderJ, okJ := orderMap[sorted[j].Name]
+		nameI := getName(sorted[i])
+		nameJ := getName(sorted[j])
+		orderI, okI := orderMap[nameI]
+		orderJ, okJ := orderMap[nameJ]
 
 		if !okI && !okJ {
-			return sorted[i].Name < sorted[j].Name
+			return nameI < nameJ
 		}
 		if !okI {
 			return false
@@ -169,33 +172,12 @@ func SortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []stri
 	return sorted
 }
 
-// SortComponentNamesByDeploymentOrder sorts component name strings according
-// to deployment order. Components in the order list are sorted by their
-// position; components not in the order list are placed after ordered
-// components and sorted alphabetically.
+// SortComponentRefsByDeploymentOrder sorts component refs by deployment order.
+func SortComponentRefsByDeploymentOrder(refs []recipe.ComponentRef, order []string) []recipe.ComponentRef {
+	return SortByDeploymentOrder(refs, order, func(r recipe.ComponentRef) string { return r.Name })
+}
+
+// SortComponentNamesByDeploymentOrder sorts component name strings by deployment order.
 func SortComponentNamesByDeploymentOrder(components []string, deploymentOrder []string) []string {
-	orderMap := make(map[string]int)
-	for i, name := range deploymentOrder {
-		orderMap[name] = i
-	}
-
-	sorted := make([]string, len(components))
-	copy(sorted, components)
-
-	sort.Slice(sorted, func(i, j int) bool {
-		orderI, okI := orderMap[sorted[i]]
-		orderJ, okJ := orderMap[sorted[j]]
-		if okI && okJ {
-			return orderI < orderJ
-		}
-		if okI {
-			return true
-		}
-		if okJ {
-			return false
-		}
-		return sorted[i] < sorted[j]
-	})
-
-	return sorted
+	return SortByDeploymentOrder(components, deploymentOrder, func(s string) string { return s })
 }

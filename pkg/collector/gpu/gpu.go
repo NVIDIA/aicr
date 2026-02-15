@@ -126,9 +126,9 @@ func getSMIReadings(data []byte) (map[string]measurement.Reading, error) {
 
 	// Only include details for the first GPU to keep output concise
 	gpu := smiDevice.GPUs[0]
-	prefix := "gpu"
+	const prefix = "gpu."
 	key := func(field string) string {
-		return fmt.Sprintf("%s.%s", prefix, field)
+		return prefix + field
 	}
 	smiData[key(measurement.KeyGPUModel)] = measurement.Str(gpu.ProductName)
 	smiData[key("product-architecture")] = measurement.Str(gpu.ProductArchitecture)

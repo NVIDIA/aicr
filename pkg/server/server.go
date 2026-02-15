@@ -162,7 +162,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(ctx, s.config.ShutdownTimeout)
 	defer cancel()
 
-	fmt.Println("shutting down server...")
+	slog.Info("shutting down server")
 	return s.httpServer.Shutdown(shutdownCtx)
 }
 

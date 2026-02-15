@@ -59,15 +59,6 @@
 //	nodes, err := m.GetSubtype("cluster").GetInt64("nodes")
 //	ready, err := m.GetSubtype("cluster").GetBool("ready")
 //
-// # Comparing Measurements
-//
-// Compare two measurements to find differences:
-//
-//	diffs, err := Compare(oldMeasurement, newMeasurement)
-//	for _, diff := range diffs {
-//	    fmt.Printf("Subtype %s changed\n", diff.Name)
-//	}
-//
 // # Filtering Data
 //
 // Filter sensitive or unwanted keys using wildcard patterns:
