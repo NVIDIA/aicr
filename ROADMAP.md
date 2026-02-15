@@ -16,19 +16,20 @@ This roadmap tracks remaining work for Eidos v2 launch and future enhancements.
 
 ### MVP Recipe Matrix Completion
 
-**Status:** In progress (5 of ~20 recipes complete)
+**Status:** In progress (6 leaf recipes complete)
 
 Expand recipe coverage for MVP platforms and accelerators.
 
 **Current:**
-- EKS + GB200 + Training
-- EKS + GB200 + Ubuntu + Training
-- H100 + Ubuntu + Inference
+- EKS + H100 + Training (+ Ubuntu, + Kubeflow)
+- EKS + H100 + Inference (+ Ubuntu, + Dynamo)
 
 **Needed:**
 
 | Platform | Accelerator | Intent | Status |
 |----------|-------------|--------|--------|
+| EKS | GB200 | Training | Partial (kernel-module-params only) |
+| EKS | A100 | Training | Not started |
 | GKE | H100 | Training | Not started |
 | GKE | H100 | Inference | Not started |
 | GKE | GB200 | Training | Not started |
@@ -37,8 +38,6 @@ Expand recipe coverage for MVP platforms and accelerators.
 | OKE | H100 | Training | Not started |
 | OKE | H100 | Inference | Not started |
 | OKE | GB200 | Training | Not started |
-| EKS | H100 | Training | Not started |
-| EKS | A100 | Training | Not started |
 
 **Acceptance:** each validates and generates bundles.
 
@@ -52,6 +51,7 @@ Expand recipe coverage for MVP platforms and accelerators.
 - Constraint evaluation against snapshots
 - Component health checks
 - Validation result reporting
+- Four-phase validation framework (readiness, deployment, performance, conformance)
 
 **Needed:**
 
@@ -61,7 +61,7 @@ Expand recipe coverage for MVP platforms and accelerators.
 | CNCF AI conformance | Generate conformance report | P1 |
 | Remediation guidance | Actionable fixes for common failures | P1 |
 
-**Acceptance:** `eidos validate --fabric` and `eidos validate --conformance ai` produce valid output.
+**Acceptance:** `eidos validate --deployment` and `eidos validate --conformance ai` produce valid output.
 
 ---
 
@@ -105,14 +105,12 @@ Migrate capabilities from Eidos v1 playbooks.
 | NIM Operator | NVIDIA Inference Microservices deployment |
 | KServe | Inference serving configurations |
 | Nsight Operator | Cluster-wide profiling and observability |
-| Monitoring | Metrics, logging, alerting components |
 | Storage | GPU workload storage configurations |
 
 #### Recipe Creation Tooling
 
 Simplify recipe development and contribution.
 
-- Snapshot-to-recipe transformation
 - Interactive recipe builder CLI
 - Recipe contribution workflow (PR template, validation gates)
 
@@ -130,10 +128,9 @@ Detect when clusters diverge from recipe-defined state.
 
 #### Enhanced Skyhook Integration
 
-Deeper OS-level node optimization.
+Deeper OS-level node optimization. Ubuntu done; RHEL and Amazon Linux remain.
 
-- OS-specific overlays (Ubuntu, RHEL, Amazon Linux)
-- Consistent Skyhook recipe per OS
+- OS-specific overlays for RHEL and Amazon Linux
 - Automated node configuration validation
 
 ---
@@ -148,10 +145,22 @@ Programmatic integration options.
 - GraphQL API for flexible querying
 - Multi-tenancy support
 
+## Completed
+
+Delivered capabilities (reference only).
+
+- **EKS + H100 recipes** — Training (+ Ubuntu, + Kubeflow) and Inference (+ Ubuntu, + Dynamo) overlays
+- **Snapshot-to-recipe transformation** — `ExtractCriteriaFromSnapshot` in `pkg/recipe/snapshot.go`
+- **Monitoring components** — kube-prometheus-stack, prometheus-adapter, nvsentinel, ephemeral-storage-metrics in registry; monitoring-hpa overlay
+- **Skyhook Ubuntu integration** — skyhook-operator + skyhook-customizations with H100 tuning manifest
+- **ArgoCD deployer** — `pkg/bundler/deployer/argocd/` alongside Helm deployer
+- **Validation framework** — Four-phase validation (readiness, deployment, performance, conformance)
+
 ## Revision History
 
 | Date | Change |
 |------|--------|
+| 2026-02-14 | Moved implemented items to Completed: EKS H100 recipes, snapshot-to-recipe, monitoring, Skyhook Ubuntu |
 | 2026-01-26 | Reorganized: removed completed items, streamlined structure |
 | 2026-01-17 | Restructured to JIRA format with Initiatives and Epics |
 | 2026-01-06 | Updated structure |
