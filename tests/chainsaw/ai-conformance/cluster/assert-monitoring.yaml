@@ -28,9 +28,8 @@ metadata:
   name: kube-prometheus-operator
   namespace: monitoring
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # Grafana — dashboards and visualization
 apiVersion: apps/v1
@@ -39,9 +38,8 @@ metadata:
   name: grafana
   namespace: monitoring
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # kube-state-metrics — Kubernetes object state metrics
 apiVersion: apps/v1
@@ -50,9 +48,8 @@ metadata:
   name: kube-state-metrics
   namespace: monitoring
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # Prometheus StatefulSet — time series database
 apiVersion: apps/v1
@@ -89,9 +86,8 @@ metadata:
   name: k8s-ephemeral-storage-metrics
   namespace: monitoring
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # Prometheus Adapter — custom metrics API for HPA
 apiVersion: apps/v1
@@ -100,6 +96,5 @@ metadata:
   name: prometheus-adapter
   namespace: monitoring
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"

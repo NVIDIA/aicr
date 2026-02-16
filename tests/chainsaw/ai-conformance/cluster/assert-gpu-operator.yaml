@@ -28,9 +28,8 @@ metadata:
   name: gpu-operator
   namespace: gpu-operator
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # Node Feature Discovery master
 # fullnameOverride: node-feature-discovery (from gpu-operator values.yaml)
@@ -40,9 +39,8 @@ metadata:
   name: node-feature-discovery-master
   namespace: gpu-operator
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # ClusterPolicy — umbrella health check for all GPU operator sub-components.
 # When status.state is "ready", the driver, device-plugin, toolkit, DCGM
@@ -133,9 +131,8 @@ metadata:
   name: node-feature-discovery-gc
   namespace: gpu-operator
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # NVIDIA DCGM DaemonSet — Data Center GPU Manager for health and diagnostics
 apiVersion: apps/v1

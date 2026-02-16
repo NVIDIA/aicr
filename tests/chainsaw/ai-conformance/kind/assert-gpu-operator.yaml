@@ -1,0 +1,82 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Assert GPU operator and managed components are healthy on kind.
+# Kind profile: driver.enabled=false (host drivers used via GPU passthrough).
+# Compared to the EKS cluster test:
+#   Removed: nvidia-driver-daemonset (driver disabled)
+#   Removed: nvidia-container-toolkit-daemonset (toolkit may not create a DaemonSet in kind)
+#   Removed: nvidia-dcgm (standalone DCGM not always present in kind)
+#   Removed: nvidia-mig-manager (MIG not used in kind smoke test)
+#   Removed: nvidia-device-plugin-mps-control-daemon (MPS not used in kind)
+#   Removed: node-feature-discovery-master, -worker, -gc (NFD names depend on
+#     Helm release/fullnameOverride; ClusterPolicy ready check covers NFD health)
+
+# GPU Operator controller
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+# ClusterPolicy — umbrella health check for all GPU operator sub-components
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: cluster-policy
+status:
+  state: ready
+---
+# NVIDIA operator validator DaemonSet
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-operator-validator
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# NVIDIA device plugin DaemonSet — exposes GPUs as allocatable resources
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# DCGM Exporter DaemonSet — GPU metrics for Prometheus
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-dcgm-exporter
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true
+---
+# GPU Feature Discovery DaemonSet — labels nodes with GPU properties
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: gpu-feature-discovery
+  namespace: gpu-operator
+status:
+  (numberReady > `0`): true
+  (desiredNumberScheduled > `0`): true

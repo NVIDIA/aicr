@@ -905,9 +905,12 @@ func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase st
 }
 
 // checkNameToTestName converts a check name to a test function name.
+// Handles '-', '.', and '_' separators for consistency with patternToFuncName.
 // Example: "operator-health" -> "TestOperatorHealth"
 func checkNameToTestName(checkName string) string {
-	parts := strings.Split(checkName, "-")
+	parts := strings.FieldsFunc(checkName, func(r rune) bool {
+		return r == '-' || r == '.' || r == '_'
+	})
 	for i, part := range parts {
 		if len(part) > 0 {
 			parts[i] = strings.ToUpper(string(part[0])) + part[1:]

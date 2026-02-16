@@ -450,6 +450,7 @@ func init() {
 \tchecks.RegisterConstraintValidator(&checks.ConstraintValidator{
 \t\tPattern:     "{{.ConstraintName}}",
 \t\tDescription: "{{.Description}}",
+\t\tFunc:        validate{{.FuncName}},
 \t\tTestName:    "{{.TestName}}",
 \t\tPhase:       "{{.Phase}}",
 \t})

@@ -268,15 +268,18 @@ func patternToFuncName(pattern string) string {
 
 // ListConstraintTests returns all registered constraint tests.
 // Includes both legacy ConstraintTest registrations and new ConstraintValidator registrations with Phase.
+// Deduplicates by pattern — new ConstraintValidator registrations take precedence.
 func ListConstraintTests(phase string) []*ConstraintTest {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
 
 	var tests []*ConstraintTest
+	seen := make(map[string]bool)
 
 	// Include tests from constraint validators (new single-registration pattern)
 	for _, validator := range constraintRegistry {
 		if validator.Phase != "" && (phase == "" || validator.Phase == phase) {
+			seen[validator.Pattern] = true
 			tests = append(tests, &ConstraintTest{
 				TestName:    validator.TestName,
 				Pattern:     validator.Pattern,
@@ -286,8 +289,11 @@ func ListConstraintTests(phase string) []*ConstraintTest {
 		}
 	}
 
-	// Include legacy test registry for backwards compatibility
+	// Include legacy test registry for backwards compatibility (skip duplicates)
 	for _, test := range constraintTestRegistry {
+		if seen[test.Pattern] {
+			continue
+		}
 		if phase == "" || test.Phase == phase {
 			tests = append(tests, test)
 		}
