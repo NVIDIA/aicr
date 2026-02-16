@@ -29,9 +29,8 @@ metadata:
   name: dynamo-operator-controller-manager
   namespace: dynamo-system
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # etcd — operator state storage
 apiVersion: apps/v1

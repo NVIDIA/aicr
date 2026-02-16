@@ -12,27 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert NVIDIA DRA driver controller and kubelet plugin are healthy.
-# fullnameOverride: nvidia-dra-driver-gpu (from values.yaml)
-# Chart: nvidia/nvidia-dra-driver-gpu 25.8.1
-# Requires Kubernetes 1.34+ (DRA GA).
+# Assert NVIDIA Network Operator is healthy.
+# This component is kind-only (not present in EKS recipes).
+# Chart: nvidia/network-operator v25.1.0
 
-# DRA driver controller — manages GPU resource claims
+# Network Operator controller
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nvidia-dra-driver-gpu-controller
-  namespace: nvidia-dra-driver
+  name: network-operator
+  namespace: nvidia-network-operator
 status:
   (conditions[?type == 'Available']):
     - status: "True"
----
-# DRA driver kubelet plugin — runs on GPU nodes, handles device allocation
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: nvidia-dra-driver-gpu-kubelet-plugin
-  namespace: nvidia-dra-driver
-status:
-  (numberReady > `0`): true
-  (desiredNumberScheduled > `0`): true

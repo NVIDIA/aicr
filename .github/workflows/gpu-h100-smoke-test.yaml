@@ -91,13 +91,19 @@ jobs:
       - name: Install bundle into cluster
         run: |
           cd bundle
-          chmod +x deploy.sh
           # Strip gpu-operator from deploy.sh — it was already installed
           # by the composite action with kind-specific settings.
           sed -i '/^echo "Installing gpu-operator/,/\${WAIT_ARGS}$/d' deploy.sh
           sed -i '/^echo "Applying manifests for gpu-operator/d' deploy.sh
           sed -i '/gpu-operator\/manifests\//d' deploy.sh
-          echo "--- deploy.sh (gpu-operator stripped) ---"
+          # Remove --wait for kai-scheduler — the SchedulingShard CR stays
+          # InProgress because the kai-operator checks deployment availability
+          # during its initial reconciliation burst (before pods are ready)
+          # and does not re-reconcile once they become available.
+          # All pods come up fine; chainsaw validates health later.
+          awk '/^echo "Installing kai-scheduler/{f=1} f && /\$\{WAIT_ARGS\}/{sub(/\$\{WAIT_ARGS\}/,""); f=0} 1' deploy.sh > deploy.tmp && mv deploy.tmp deploy.sh
+          chmod +x deploy.sh
+          echo "--- deploy.sh (modified) ---"
           cat deploy.sh
           ./deploy.sh
 
@@ -112,6 +118,18 @@ jobs:
             --kubeconfig="${HOME}/.kube/config" \
             --require-gpu \
             --image=ko.local:smoke-test
+
+      - name: Install chainsaw
+        run: |
+          CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml)
+          GOFLAGS= go install "github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
+          chainsaw version
+
+      - name: Run chainsaw health checks
+        run: |
+          chainsaw test \
+            --test-dir tests/chainsaw/ai-conformance/kind \
+            --config tests/chainsaw/chainsaw-config.yaml
 
       - name: Collect debug artifacts
         if: failure()

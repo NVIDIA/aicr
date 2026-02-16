@@ -22,6 +22,5 @@ metadata:
   name: skyhook-operator-controller-manager
   namespace: skyhook
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
