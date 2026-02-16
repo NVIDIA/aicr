@@ -91,6 +91,12 @@ runs:
       shell: bash
       run: docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
 
+    - name: Increase inotify limits
+      shell: bash
+      run: |
+        sudo sysctl -w fs.inotify.max_user_watches=524288
+        sudo sysctl -w fs.inotify.max_user_instances=1024
+
     - name: Create GPU-enabled kind cluster
       shell: bash
       run: |

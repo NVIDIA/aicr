@@ -12,27 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert NVIDIA DRA driver controller and kubelet plugin are healthy.
-# fullnameOverride: nvidia-dra-driver-gpu (from values.yaml)
-# Chart: nvidia/nvidia-dra-driver-gpu 25.8.1
-# Requires Kubernetes 1.34+ (DRA GA).
+# Assert NVSentinel controller and platform connector are healthy on kind.
+# Kind profile — reduced DaemonSet expectations compared to EKS.
+# Compared to the EKS cluster test:
+#   Removed: gpu-health-monitor-dcgm-4.x (may not schedule in kind)
+#   Removed: gpu-health-monitor-dcgm-3.x (may not schedule in kind)
+#   Removed: metadata-collector (may not schedule in kind)
+#   Removed: syslog-health-monitor-regular (may not schedule in kind)
+#   Removed: syslog-health-monitor-kata (may not schedule in kind)
 
-# DRA driver controller — manages GPU resource claims
+# NVSentinel controller — manages network policies and platform configuration
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: nvidia-dra-driver-gpu-controller
-  namespace: nvidia-dra-driver
+  name: labeler
+  namespace: nvsentinel
 status:
   (conditions[?type == 'Available']):
     - status: "True"
 ---
-# DRA driver kubelet plugin — runs on GPU nodes, handles device allocation
+# NVSentinel platform connector — DaemonSet on all nodes for platform telemetry
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: nvidia-dra-driver-gpu-kubelet-plugin
-  namespace: nvidia-dra-driver
+  name: platform-connectors
+  namespace: nvsentinel
 status:
   (numberReady > `0`): true
   (desiredNumberScheduled > `0`): true

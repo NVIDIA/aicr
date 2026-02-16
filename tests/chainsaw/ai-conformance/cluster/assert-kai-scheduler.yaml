@@ -23,9 +23,8 @@ metadata:
   name: kai-scheduler-default
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # KAI admission webhook — validates and mutates scheduling requests
 apiVersion: apps/v1
@@ -34,9 +33,8 @@ metadata:
   name: admission
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # KAI binder — binds pods to nodes after scheduling decisions
 apiVersion: apps/v1
@@ -45,9 +43,8 @@ metadata:
   name: binder
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # KAI operator — manages KAI scheduler lifecycle
 apiVersion: apps/v1
@@ -56,9 +53,8 @@ metadata:
   name: kai-operator
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # KAI pod grouper — groups related pods for gang scheduling
 apiVersion: apps/v1
@@ -67,9 +63,8 @@ metadata:
   name: pod-grouper
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # KAI podgroup controller — manages PodGroup lifecycle
 apiVersion: apps/v1
@@ -78,9 +73,8 @@ metadata:
   name: podgroup-controller
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # KAI queue controller — manages hierarchical scheduling queues
 apiVersion: apps/v1
@@ -89,6 +83,5 @@ metadata:
   name: queue-controller
   namespace: kai-scheduler
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"

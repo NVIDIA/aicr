@@ -23,9 +23,8 @@ metadata:
   name: labeler
   namespace: nvsentinel
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # NVSentinel platform connector — DaemonSet on all nodes for platform telemetry
 apiVersion: apps/v1

@@ -23,9 +23,8 @@ metadata:
   name: cert-manager
   namespace: cert-manager
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # Webhook — validates and mutates cert-manager resources
 apiVersion: apps/v1
@@ -34,9 +33,8 @@ metadata:
   name: cert-manager-webhook
   namespace: cert-manager
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
 ---
 # CA Injector — injects CA bundles into webhook configurations
 apiVersion: apps/v1
@@ -45,6 +43,5 @@ metadata:
   name: cert-manager-cainjector
   namespace: cert-manager
 status:
-  conditions:
-    - type: Available
-      status: "True"
+  (conditions[?type == 'Available']):
+    - status: "True"
