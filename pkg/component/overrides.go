@@ -27,6 +27,9 @@ import (
 	"github.com/NVIDIA/eidos/pkg/errors"
 )
 
+// titleCaser is cached to avoid per-call allocation.
+var titleCaser = cases.Title(language.English)
+
 // String constants for override values.
 const (
 	strVersion = "version"
@@ -450,8 +453,6 @@ func pathToFieldName(segment string) string {
 	if acronym, found := acronyms[segmentLower]; found {
 		return acronym
 	}
-
-	titleCaser := cases.Title(language.English)
 
 	// Handle underscore-separated words (e.g., "mig_strategy" -> "MIGStrategy")
 	if strings.Contains(segment, "_") {

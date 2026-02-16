@@ -15,10 +15,10 @@ require (
 	golang.org/x/text v0.34.0
 	golang.org/x/time v0.14.0
 	gopkg.in/yaml.v3 v3.0.1
-	k8s.io/api v0.35.0
-	k8s.io/apimachinery v0.35.0
-	k8s.io/client-go v0.35.0
-	k8s.io/utils v0.0.0-20260108192941-914a6e750570
+	k8s.io/api v0.35.1
+	k8s.io/apimachinery v0.35.1
+	k8s.io/client-go v0.35.1
+	k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2
 	oras.land/oras-go/v2 v2.6.0
 )
 

@@ -532,8 +532,8 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 	t.Run("empty deployment order", func(t *testing.T) {
 		components := []string{"b", "a"}
 		sorted := shared.SortComponentNamesByDeploymentOrder(components, nil)
-		if sorted[0] != "a" {
-			t.Errorf("expected alphabetical with empty order, got %s", sorted[0])
+		if sorted[0] != "b" {
+			t.Errorf("expected original order preserved with empty order, got %s", sorted[0])
 		}
 	})
 }

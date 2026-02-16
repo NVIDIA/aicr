@@ -18,7 +18,6 @@ package recipe
 import (
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strings"
 
@@ -564,10 +563,10 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 		for _, dependent := range dependents[node] {
 			inDegree[dependent]--
 			if inDegree[dependent] == 0 {
-				idx := sort.SearchStrings(queue, dependent)
-				queue = slices.Insert(queue, idx, dependent)
+				queue = append(queue, dependent)
 			}
 		}
+		sort.Strings(queue)
 	}
 
 	// Check if all nodes were processed (no cycles)
