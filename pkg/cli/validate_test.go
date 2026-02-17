@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -186,6 +187,7 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 	// Verify agent deployment flags exist
 	agentFlags := []string{
 		"namespace",
+		"validation-namespace",
 		"image",
 		"image-pull-secret",
 		"job-name",
@@ -213,10 +215,5 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 
 // hasFlag checks if a cli.Flag has the given name
 func hasFlag(flag interface{ Names() []string }, name string) bool {
-	for _, n := range flag.Names() {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(flag.Names(), name)
 }
