@@ -17,9 +17,7 @@
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
 
-# Override release name prefix to avoid eidos-stack- prefix in resource names
 dynamo-operator:
-  fullnameOverride: dynamo-operator
   controllerManager:
     tolerations:
       - operator: Exists
@@ -44,7 +42,6 @@ grove:
 # etcd for operator state storage
 etcd:
   enabled: true
-  fullnameOverride: dynamo-etcd
   tolerations:
     - operator: Exists
   image:
@@ -64,7 +61,6 @@ etcd:
 # NATS message broker for component communication
 nats:
   enabled: true
-  fullnameOverride: dynamo-nats
   podTemplate:
     merge:
       spec:
