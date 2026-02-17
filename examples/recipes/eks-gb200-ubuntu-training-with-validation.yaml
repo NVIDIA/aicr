@@ -15,7 +15,7 @@
 # Example recipe demonstrating multi-phase validation configuration
 # This shows how to configure validation checks for different deployment phases
 
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   version: v0.26.7-next

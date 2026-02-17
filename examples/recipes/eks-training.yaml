@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   version: v0.26.7-next
