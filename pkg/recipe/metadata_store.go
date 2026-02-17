@@ -293,8 +293,8 @@ func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, ap
 	applyRegistryDefaults(mergedSpec.ComponentRefs)
 
 	result := &RecipeResult{
-		Kind:            "recipeResult",
-		APIVersion:      "eidos.nvidia.com/v1alpha1",
+		Kind:            RecipeResultKind,
+		APIVersion:      RecipeAPIVersion,
 		Criteria:        criteria,
 		Constraints:     mergedSpec.Constraints,
 		ComponentRefs:   mergedSpec.ComponentRefs,

@@ -118,11 +118,11 @@ func TestAllMetadataFilesHaveRequiredFields(t *testing.T) {
 			}
 
 			// Validate kind and apiVersion values
-			if metadata.Kind != "recipeMetadata" {
-				t.Errorf("invalid kind: got %q, want %q", metadata.Kind, "recipeMetadata")
+			if metadata.Kind != RecipeMetadataKind {
+				t.Errorf("invalid kind: got %q, want %q", metadata.Kind, RecipeMetadataKind)
 			}
-			if metadata.APIVersion != "eidos.nvidia.com/v1alpha1" {
-				t.Errorf("invalid apiVersion: got %q, want %q", metadata.APIVersion, "eidos.nvidia.com/v1alpha1")
+			if metadata.APIVersion != RecipeAPIVersion {
+				t.Errorf("invalid apiVersion: got %q, want %q", metadata.APIVersion, RecipeAPIVersion)
 			}
 		})
 	}

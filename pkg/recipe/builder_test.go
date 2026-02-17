@@ -229,11 +229,11 @@ func TestBuilder_BuildFromCriteriaWithEvaluator(t *testing.T) {
 			}
 
 			// Basic result validation
-			if result.Kind != "recipeResult" {
-				t.Errorf("expected kind recipeResult, got %q", result.Kind)
+			if result.Kind != RecipeResultKind {
+				t.Errorf("expected kind %s, got %q", RecipeResultKind, result.Kind)
 			}
-			if result.APIVersion != "eidos.nvidia.com/v1alpha1" {
-				t.Errorf("expected apiVersion eidos.nvidia.com/v1alpha1, got %q", result.APIVersion)
+			if result.APIVersion != RecipeAPIVersion {
+				t.Errorf("expected apiVersion %s, got %q", RecipeAPIVersion, result.APIVersion)
 			}
 		})
 	}
