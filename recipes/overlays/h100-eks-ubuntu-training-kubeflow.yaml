@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: h100-eks-ubuntu-training-kubeflow
