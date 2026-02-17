@@ -33,28 +33,44 @@ spec:
 **3. Run tests** ([details](#testing-and-validation))
 ```bash
 make test  # Validates schema, criteria, references, constraints
-eidos recipe --service eks --accelerator gb200 --os ubuntu --intent training --format yaml
+make qualify  # Includes end to end tests before submitting
 ```
 
 **4. Open PR** ([best practices](#best-practices))
 - Include test output showing recipe generation works
 - Explain why the recipe is needed (new hardware, workload, platform)
-- Run `make qualify` before submitting
 
 ---
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Recipe Structure](#recipe-structure)
-- [Component Configuration](#component-configuration)
-- [File Naming Conventions](#file-naming-conventions)
-- [Constraints and Validation](#constraints-and-validation)
-- [Working with Recipes](#working-with-recipes)
-- [Best Practices](#best-practices)
-- [Testing and Validation](#testing-and-validation)
-- [Advanced Topics](#advanced-topics)
-- [Troubleshooting](#troubleshooting)
+- [Recipe Development Guide](#recipe-development-guide)
+  - [Quick Start: Contributing a Recipe](#quick-start-contributing-a-recipe)
+  - [Table of Contents](#table-of-contents)
+  - [Overview](#overview)
+  - [Recipe Structure](#recipe-structure)
+    - [Multi-Level Inheritance](#multi-level-inheritance)
+    - [Component Types](#component-types)
+  - [Component Configuration](#component-configuration)
+    - [Configuration Patterns](#configuration-patterns)
+    - [Value Merge Precedence](#value-merge-precedence)
+  - [File Naming Conventions](#file-naming-conventions)
+  - [Constraints and Validation](#constraints-and-validation)
+    - [Constraints](#constraints)
+    - [Validation Phases](#validation-phases)
+    - [Testing](#testing)
+  - [Working with Recipes](#working-with-recipes)
+    - [Adding a New Recipe](#adding-a-new-recipe)
+    - [Updating Recipes](#updating-recipes)
+  - [Best Practices](#best-practices)
+  - [Testing and Validation](#testing-and-validation)
+    - [Automated Tests](#automated-tests)
+    - [Running Tests](#running-tests)
+    - [Test Workflow](#test-workflow)
+  - [Advanced Topics](#advanced-topics)
+    - [External Data Sources](#external-data-sources)
+  - [Troubleshooting](#troubleshooting)
+  - [See Also](#see-also)
 
 ## Overview
 
