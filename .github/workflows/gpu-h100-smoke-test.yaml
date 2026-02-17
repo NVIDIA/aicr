@@ -23,7 +23,10 @@ on:
     paths:
       - '.github/workflows/gpu-h100-smoke-test.yaml'
       - '.github/actions/gpu-cluster-setup/**'
-      - '.github/actions/gpu-smoke-test/**'
+      - '.github/actions/gpu-operator-install/**'
+      - '.github/actions/eidos-build/**'
+      - '.github/actions/gpu-test-cleanup/**'
+      - '.github/actions/load-versions/**'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -53,84 +56,15 @@ jobs:
       - name: Set up GPU cluster
         uses: ./.github/actions/gpu-cluster-setup
 
-      # --- Build eidos ---
+      - name: Build eidos
+        uses: ./.github/actions/eidos-build
 
-      - name: Build eidos image and load into kind
-        env:
-          GOFLAGS: -mod=vendor
-        run: |
-          KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
-          GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
-          KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
-          kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
-
-      - name: Build eidos binary
-        env:
-          GOFLAGS: -mod=vendor
-        run: go build -o ./eidos ./cmd/eidos
-
-      # --- CUJ2: inference workflow ---
-
-      - name: Generate inference recipe
-        run: |
-          ./eidos recipe \
-            --service kind \
-            --accelerator h100 \
-            --os ubuntu \
-            --intent inference \
-            --platform dynamo \
-            --output recipe.yaml
-          echo "--- Recipe ---"
-          cat recipe.yaml
-
-      - name: Generate deployment bundle
-        run: |
-          ./eidos bundle \
-            --recipe recipe.yaml \
-            --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
-            --output bundle
-          echo "--- Bundle contents ---"
-          ls -la bundle/
-
-      - name: Install bundle into cluster
-        run: |
-          cd bundle
-          # Use --no-wait: several components (gpu-operator ClusterPolicy,
-          # kai-scheduler SchedulingShard, nvidia-dra-driver-gpu kubelet plugin)
-          # stay InProgress in kind because their CRs/DaemonSets require
-          # features not available in kind (DRA feature gates, driver modules).
-          # The explicit "Wait for GPU operands" step below gates on what
-          # actually matters (device plugin readiness).
-          chmod +x deploy.sh
-          echo "--- deploy.sh ---"
-          cat deploy.sh
-          ./deploy.sh --no-wait
-
-      # --- Wait for GPU operands (deployed asynchronously by GPU operator controller) ---
-
-      - name: Wait for GPU operands to be ready
-        run: |
-          echo "Waiting for GPU operator controller to deploy operands..."
-          # The GPU operator controller watches ClusterPolicy and creates
-          # DaemonSets for device-plugin, NFD, GFD, etc. This happens
-          # asynchronously after the helm install completes.
-          for i in $(seq 1 30); do
-            count=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-              get daemonset -l app=nvidia-device-plugin-daemonset --no-headers 2>/dev/null | wc -l)
-            if [[ "$count" -gt 0 ]]; then
-              echo "Device plugin DaemonSet found."
-              break
-            fi
-            echo "Waiting for device plugin DaemonSet to be created... (${i}/30)"
-            sleep 10
-          done
-          echo "Waiting for device plugin rollout..."
-          # Operands are excluded from control-plane nodes via nodeAffinity in
-          # the kind overlay, so all scheduled pods should become ready.
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-            rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s
-          echo "GPU Operator pods:"
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods
+      - name: Install GPU operator (bundle)
+        uses: ./.github/actions/gpu-operator-install
+        with:
+          method: bundle
+          accelerator: h100
+          platform: dynamo
 
       # --- Snapshot and validation ---
 
