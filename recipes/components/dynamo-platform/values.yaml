@@ -42,9 +42,10 @@ grove:
   enabled: false
 
 # etcd for operator state storage
+# Do NOT set fullnameOverride — the operator constructs the etcd endpoint from
+# the release name (<release>-etcd). Overriding the name breaks connectivity.
 etcd:
   enabled: true
-  fullnameOverride: dynamo-etcd
   tolerations:
     - operator: Exists
   image:
@@ -62,9 +63,10 @@ etcd:
       memory: 512Mi
 
 # NATS message broker for component communication
+# Do NOT set fullnameOverride — the operator constructs the NATS endpoint from
+# the release name (<release>-nats). Overriding the name breaks connectivity.
 nats:
   enabled: true
-  fullnameOverride: dynamo-nats
   podTemplate:
     merge:
       spec:

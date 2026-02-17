@@ -27,6 +27,9 @@ on:
       - '.github/actions/eidos-build/**'
       - '.github/actions/gpu-test-cleanup/**'
       - '.github/actions/load-versions/**'
+      - 'tests/manifests/**'
+      - 'tests/chainsaw/ai-conformance/**'
+      - 'recipes/components/dynamo-platform/**'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -41,7 +44,7 @@ jobs:
   gpu-smoke-test:
     name: GPU Smoke Test (nvkind + H100)
     runs-on: linux-amd64-gpu-h100-latest-1
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     env:
       KIND_CLUSTER_NAME: gpu-smoke-test
@@ -119,6 +122,68 @@ jobs:
             --test-dir tests/chainsaw/ai-conformance/kind \
             --config tests/chainsaw/chainsaw-config.yaml
 
+      # --- Dynamo vLLM inference smoke test ---
+
+      - name: Deploy Dynamo vLLM smoke test
+        run: |
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply \
+            -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
+
+          echo "Waiting for DynamoGraphDeployment to be reconciled..."
+          for i in $(seq 1 60); do
+            PHASE=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+              get dynamographdeployment vllm-smoke-test \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
+            if [[ "${PHASE}" == "True" ]]; then
+              echo "DynamoGraphDeployment is ready."
+              break
+            fi
+            echo "Waiting for DGD readiness... (${i}/60)"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get pods 2>/dev/null || true
+            sleep 10
+          done
+
+          if [[ "${PHASE}" != "True" ]]; then
+            echo "::error::DynamoGraphDeployment did not become ready within 10 minutes"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+              get dynamographdeployment vllm-smoke-test -o yaml 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "Dynamo pods:"
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get pods
+
+      - name: Validate Dynamo inference
+        run: |
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+            port-forward svc/vllm-smoke-test-frontend 8000:8000 &
+          PF_PID=$!
+          sleep 3
+
+          cleanup() { kill "${PF_PID}" 2>/dev/null || true; }
+          trap cleanup EXIT
+
+          echo "=== Checking /v1/models ==="
+          MODELS=$(curl -sf http://localhost:8000/v1/models)
+          echo "${MODELS}" | jq .
+          if ! echo "${MODELS}" | jq -e '.data | length > 0' >/dev/null 2>&1; then
+            echo "::error::No models reported by frontend"
+            exit 1
+          fi
+
+          echo "=== Sending chat completion ==="
+          RESPONSE=$(curl -sf http://localhost:8000/v1/chat/completions \
+            -H "Content-Type: application/json" \
+            -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"What is 2+2?"}],"max_tokens":30,"stream":false}')
+          echo "${RESPONSE}" | jq .
+
+          CONTENT=$(echo "${RESPONSE}" | jq -r '.choices[0].message.content')
+          if [[ -z "${CONTENT}" || "${CONTENT}" == "null" ]]; then
+            echo "::error::Empty response from vLLM"
+            exit 1
+          fi
+          echo "Dynamo vLLM inference smoke test passed."
+
       - name: Debug diagnostics
         if: failure()
         run: |
@@ -130,8 +195,36 @@ jobs:
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
           echo "=== Recent events (gpu-operator) ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          echo "=== Dynamo pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get pods -o wide 2>/dev/null || true
+          echo "=== DynamoGraphDeployment status ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get dynamographdeployment -o yaml 2>/dev/null || true
+          echo "=== Dynamo vLLM frontend logs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+            logs deployment/vllm-smoke-test-frontend --tail=200 2>/dev/null || true
+          echo "=== Dynamo vLLM frontend previous logs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+            logs deployment/vllm-smoke-test-frontend --previous --tail=200 2>/dev/null || true
+          echo "=== Dynamo vLLM worker logs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+            logs deployment/vllm-smoke-test-vllmdecodeworker --tail=200 2>/dev/null || true
+          echo "=== Dynamo vLLM worker previous logs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+            logs deployment/vllm-smoke-test-vllmdecodeworker --previous --tail=200 2>/dev/null || true
+          echo "=== Dynamo operator logs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+            logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
+          echo "=== Recent events (dynamo-system) ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== Node status ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
+
+      - name: Dynamo vLLM cleanup
+        if: always()
+        run: |
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" delete \
+            -f tests/manifests/dynamo-vllm-smoke-test.yaml \
+            -n dynamo-system --ignore-not-found 2>/dev/null || true
 
       - name: GPU Test Cleanup
         if: always()
