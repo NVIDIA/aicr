@@ -273,7 +273,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    "validation-namespace",
-			Usage:   "Kubernetes namespace where validation jobs will run (defaults to --namespace value if not specified)",
+			Usage:   "Kubernetes namespace where validation jobs will run. If not set via this flag or EIDOS_VALIDATION_NAMESPACE, defaults to the --namespace value.",
 			Sources: cli.EnvVars("EIDOS_VALIDATION_NAMESPACE"),
 			Value:   "eidos-validation",
 		},
