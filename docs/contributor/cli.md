@@ -348,7 +348,7 @@ spec:
       serviceAccountName: eidos
       containers:
       - name: eidos
-        image: ghcr.io/nvidia/eidos:latest
+        image: ghcr.io/nvidia/eidos-validator:latest
         command:
         - eidos
         - snapshot
@@ -2116,7 +2116,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: eidos
-        image: ghcr.io/nvidia/eidos:latest
+        image: ghcr.io/nvidia/eidos-validator:latest
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

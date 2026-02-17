@@ -136,7 +136,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Name:    "image",
 				Usage:   "Container image for agent Job",
 				Sources: cli.EnvVars("EIDOS_IMAGE"),
-				Value:   "ghcr.io/nvidia/eidos:latest",
+				Value:   "ghcr.io/nvidia/eidos-validator:latest",
 			},
 			&cli.StringSliceFlag{
 				Name:  "image-pull-secret",
