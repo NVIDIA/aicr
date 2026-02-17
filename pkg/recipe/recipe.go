@@ -29,11 +29,6 @@ type Validator interface {
 	Validate(ctx context.Context, recipe *Recipe) error
 }
 
-const (
-	// RecipeAPIVersion is the current API version for recipes
-	RecipeAPIVersion = "v1"
-)
-
 // RequestInfo holds simplified request metadata for documentation purposes.
 // This replaces the old Query type with just the fields needed for bundle documentation.
 type RequestInfo struct {
