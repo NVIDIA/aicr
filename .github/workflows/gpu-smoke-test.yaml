@@ -22,6 +22,7 @@ on:
       - "pull-request/*"
     paths:
       - '.github/workflows/gpu-smoke-test.yaml'
+      - '.github/actions/gpu-cluster-setup/**'
       - '.github/actions/gpu-smoke-test/**'
   workflow_dispatch: {}  # Allow manual runs
 
