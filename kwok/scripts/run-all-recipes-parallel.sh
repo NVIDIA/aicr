@@ -213,12 +213,13 @@ CLEANUP_DONE=false
 # Cleanup function
 cleanup() {
     # Prevent duplicate cleanups on multiple signals
+    # Capture exit code FIRST before any other commands
+    local exit_code=$?
+
     if [[ "$CLEANUP_DONE" == "true" ]]; then
         exit 1
     fi
     CLEANUP_DONE=true
-
-    local exit_code=$?
 
     # Kill any background jobs (helm, kubectl, etc.) to prevent hanging
     # Note: jobs -p only shows jobs from this shell, use pkill for child processes
