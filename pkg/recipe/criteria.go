@@ -544,7 +544,7 @@ func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 }
 
 // RecipeCriteriaKind is the kind value for RecipeCriteria resources.
-const RecipeCriteriaKind = "recipeCriteria"
+const RecipeCriteriaKind = "RecipeCriteria"
 
 // RecipeCriteriaAPIVersion is the API version for RecipeCriteria resources.
 const RecipeCriteriaAPIVersion = "eidos.nvidia.com/v1alpha1"
@@ -564,7 +564,7 @@ const RecipeCriteriaAPIVersion = "eidos.nvidia.com/v1alpha1"
 //	  accelerator: gb200
 //	  intent: training
 type RecipeCriteria struct {
-	// Kind is always "recipeCriteria".
+	// Kind is always "RecipeCriteria".
 	Kind string `json:"kind" yaml:"kind"`
 
 	// APIVersion is the API version (e.g., "eidos.nvidia.com/v1alpha1").
