@@ -53,7 +53,7 @@
 //
 // Criteria file format (YAML or JSON):
 //
-//	kind: recipeCriteria
+//	kind: RecipeCriteria
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	metadata:
 //	  name: my-deployment-criteria

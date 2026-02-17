@@ -130,7 +130,7 @@
 // RecipeCriteria: Kubernetes-style resource for criteria definition
 //
 //	type RecipeCriteria struct {
-//	    Kind       string    // Must be "recipeCriteria"
+//	    Kind       string    // Must be "RecipeCriteria"
 //	    APIVersion string    // Must be "eidos.nvidia.com/v1alpha1"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
@@ -140,7 +140,7 @@
 //
 // Example criteria file (criteria.yaml):
 //
-//	kind: recipeCriteria
+//	kind: RecipeCriteria
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training

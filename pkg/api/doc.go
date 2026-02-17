@@ -80,7 +80,7 @@
 //
 // Example request body:
 //
-//	kind: recipeCriteria
+//	kind: RecipeCriteria
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	metadata:
 //	  name: my-criteria
