@@ -197,7 +197,7 @@ test_cli_recipe() {
     --os ubuntu \
     --intent training \
     --output "$basic_recipe" 2>&1; then
-    if [ -f "$basic_recipe" ] && grep -q "kind: recipeResult" "$basic_recipe"; then
+    if [ -f "$basic_recipe" ] && grep -q "kind: RecipeResult" "$basic_recipe"; then
       # Show components from recipe
       local components
       components=$(grep "^  - name:" "$basic_recipe" 2>/dev/null | wc -l | tr -d ' ')
@@ -214,7 +214,7 @@ test_cli_recipe() {
   msg "--- Test: Recipe from criteria file ---"
   local criteria_file="${recipe_dir}/criteria.yaml"
   cat > "$criteria_file" << 'EOF'
-kind: recipeCriteria
+kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: h100-eks-ubuntu-training
@@ -283,7 +283,7 @@ test_api_recipe() {
   http_code=$(curl -s -w "%{http_code}" -o "$post_recipe" \
     -X POST "${eidosd_URL}/v1/recipe" \
     -H "Content-Type: application/x-yaml" \
-    -d 'kind: recipeCriteria
+    -d 'kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: h100-training
@@ -741,7 +741,7 @@ test_recipe_from_snapshot() {
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --intent training \
     --output "$snapshot_recipe" 2>&1; then
-    if [ -f "$snapshot_recipe" ] && grep -q "kind: recipeResult" "$snapshot_recipe"; then
+    if [ -f "$snapshot_recipe" ] && grep -q "kind: RecipeResult" "$snapshot_recipe"; then
       # Show detected criteria
       local service accelerator
       service=$(grep "^  service:" "$snapshot_recipe" 2>/dev/null | head -1 | awk '{print $2}')
@@ -1003,7 +1003,7 @@ YAML
   # Generate a recipe with deployment constraints
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   version: dev
@@ -1066,7 +1066,7 @@ RECIPE
   msg "--- Test: Deployment constraint (should fail) ---"
   local recipe_file_fail="${validate_dir}/recipe-with-failing-constraint.yaml"
   cat > "$recipe_file_fail" <<RECIPE
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   version: dev

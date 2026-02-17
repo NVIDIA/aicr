@@ -35,7 +35,6 @@ COPY . .
 # Pre-compile test binaries for faster Job startup
 RUN go test -c -o /usr/local/bin/readiness.test ./pkg/validator/checks/readiness && \
     go test -c -o /usr/local/bin/deployment.test ./pkg/validator/checks/deployment && \
-    go test -c -o /usr/local/bin/performance.test ./pkg/validator/checks/performance && \
-    go test -c -o /usr/local/bin/conformance.test ./pkg/validator/checks/conformance || true
+    go test -c -o /usr/local/bin/conformance.test ./pkg/validator/checks/conformance
 
 CMD ["/bin/bash"]

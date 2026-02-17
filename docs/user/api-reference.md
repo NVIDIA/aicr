@@ -188,7 +188,7 @@ spec:
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
   -d '{
-    "kind": "recipeCriteria",
+    "kind": "RecipeCriteria",
     "apiVersion": "eidos.nvidia.com/v1alpha1",
     "metadata": {"name": "training-config"},
     "spec": {
@@ -206,7 +206,7 @@ curl -X POST "http://localhost:8080/v1/recipe" \
 # Pretty print response
 curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}' \
+  -d '{"kind":"RecipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}' \
   | jq '.'
 ```
 

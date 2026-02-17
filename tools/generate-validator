@@ -266,7 +266,7 @@ func TestValidate{{.FuncName}}Registration(t *testing.T) {
 
 CHECK_RECIPE_TEMPLATE = """\
 # Sample recipe for testing {{.CheckName}} check
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   version: dev
@@ -625,7 +625,7 @@ func TestValidate{{.FuncName}}Registration(t *testing.T) {
 
 CONSTRAINT_RECIPE_TEMPLATE = """\
 # Sample recipe for testing {{.ConstraintName}} constraint
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   version: dev

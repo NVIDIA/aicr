@@ -703,7 +703,7 @@ deployOrder, err := mergedSpec.TopologicalSort()
 
 ```go
 return &RecipeResult{
-    Kind:            "recipeResult",
+    Kind:            "RecipeResult",
     APIVersion:      "eidos.nvidia.com/v1alpha1",
     Metadata:        metadata,
     Criteria:        criteria,
@@ -795,7 +795,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
 
 ```json
 {
-  "kind": "recipeResult",
+  "kind": "RecipeResult",
   "apiVersion": "eidos.nvidia.com/v1alpha1",
   "metadata": {
     "version": "v0.8.0",
