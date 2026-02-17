@@ -49,7 +49,7 @@ recreated for each snapshot to ensure clean state.
 		// Configure deployer
 		config := agent.Config{
 			Namespace: "gpu-operator",
-			Image:     "ghcr.io/nvidia/eidos:latest",
+			Image:     "ghcr.io/nvidia/eidos-validator:latest",
 			Output:    "cm://gpu-operator/eidos-snapshot",
 			NodeSelector: map[string]string{
 				"nodeGroup": "customer-gpu",

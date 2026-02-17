@@ -32,6 +32,26 @@ COPY vendor ./vendor/
 # changes don't re-download deps. See .dockerignore for context trimming.
 COPY . .
 
+# Build the eidos CLI binary at the path expected by the agent Job
+# Build flags match .goreleaser.yaml configuration
+# Extract version info from git (same as Makefile/GoReleaser)
+# ARG values can be overridden via --build-arg during CI builds
+ARG VERSION
+ARG COMMIT
+ARG DATE
+RUN set -e; \
+    VERSION="${VERSION:-$(git describe --tags --abbrev=0 2>/dev/null || echo 'dev')}"; \
+    COMMIT="${COMMIT:-$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')}"; \
+    DATE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"; \
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-w -s -extldflags '-static' \
+          -X github.com/NVIDIA/eidos/pkg/cli.version=${VERSION} \
+          -X github.com/NVIDIA/eidos/pkg/cli.commit=${COMMIT} \
+          -X github.com/NVIDIA/eidos/pkg/cli.date=${DATE}" \
+        -o /usr/local/bin/eidos \
+        ./cmd/eidos
+
 # Pre-compile test binaries for faster Job startup
 RUN go test -c -o /usr/local/bin/readiness.test ./pkg/validator/checks/readiness && \
     go test -c -o /usr/local/bin/deployment.test ./pkg/validator/checks/deployment && \

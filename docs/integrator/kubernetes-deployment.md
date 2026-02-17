@@ -311,7 +311,7 @@ spec:
       
       containers:
       - name: eidos
-        image: ghcr.io/nvidia/eidos:latest
+        image: ghcr.io/nvidia/eidos-validator:latest
         imagePullPolicy: IfNotPresent
         
         command:

@@ -1,0 +1,51 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Dynamo vLLM smoke test — minimal aggregated inference deployment.
+# Deploys a Frontend (API gateway) and a single vLLM decode worker
+# serving Qwen/Qwen3-0.6B (public, ungated, ~1.2GB).
+# No HuggingFace token required.
+#
+# Usage:
+#   kubectl apply -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
+#   kubectl port-forward svc/vllm-smoke-test-frontend 8000:8000 -n dynamo-system
+#   curl http://localhost:8000/v1/models
+#   curl http://localhost:8000/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{"model":"Qwen/Qwen3-0.6B","messages":[{"role":"user","content":"Hello!"}],"max_tokens":30,"stream":false}'
+
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-smoke-test
+spec:
+  services:
+    Frontend:
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+    VllmDecodeWorker:
+      componentType: worker
+      replicas: 1
+      resources:
+        limits:
+          gpu: "1"
+      extraPodSpec:
+        mainContainer:
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          workingDir: /workspace/examples/backends/vllm
+          command: ["python3", "-m", "dynamo.vllm"]
+          args: ["--model", "Qwen/Qwen3-0.6B"]

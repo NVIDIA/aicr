@@ -1645,9 +1645,9 @@ kubectl describe pod <pod-name> -n eidos-validation
 
 Verify image exists:
 ```bash
-docker pull ghcr.io/nvidia/eidos:latest
+docker pull ghcr.io/nvidia/eidos-validator:latest
 # or
-kubectl run test --image=ghcr.io/nvidia/eidos:latest --rm -it --restart=Never -- /bin/sh
+kubectl run test --image=ghcr.io/nvidia/eidos-validator:latest --rm -it --restart=Never -- /bin/sh
 ```
 
 #### Job Pods Crash

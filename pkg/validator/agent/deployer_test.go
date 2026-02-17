@@ -41,7 +41,7 @@ func createConfig() Config {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		SnapshotConfigMap:  "test-snapshot",
 		RecipeConfigMap:    "test-recipe",
 		TestPackage:        "./pkg/validator/checks/readiness",
