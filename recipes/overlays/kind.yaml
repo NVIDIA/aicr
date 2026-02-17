@@ -31,21 +31,78 @@ spec:
 
   # Kind-specific component overrides
   componentRefs:
-    # gpu-operator: configure for kind with GPU passthrough
-    # Assumes host has NVIDIA drivers pre-installed and GPUs passed through to kind
+    # gpu-operator: configure for kind with GPU passthrough (nvkind)
+    # Assumes host has NVIDIA drivers and container toolkit pre-configured
     - name: gpu-operator
       type: Helm
       overrides:
         driver:
           # Disable driver installation - use pre-installed host drivers
           enabled: false
+          rdma:
+            # Disable RDMA - requires driver kernel modules not available in kind
+            enabled: false
         toolkit:
+          # Disable toolkit - nvkind pre-configures the host container runtime
+          enabled: false
+        gdrcopy:
+          # Disable GDR copy - requires driver kernel modules not available in kind
+          enabled: false
+        migManager:
+          # Disable MIG manager - requires driver not available in kind
+          enabled: false
+        dcgm:
+          # Disable standalone DCGM hostengine in kind - use embedded exporter
+          enabled: false
+        # Disable custom DCGM exporter ConfigMap in kind — the manifest that
+        # creates it is applied AFTER helm --wait, causing a deadlock where
+        # ClusterPolicy stays InProgress waiting for exporter pods that need
+        # the ConfigMap. Use the exporter's built-in default metrics instead.
+        dcgmExporter:
+          config:
+            create: false
+            name: ""
+          # Exclude control-plane nodes — NFD labels them with GPU features
+          # (shared host kernel) but they lack actual device access, causing
+          # operand init containers to hang and ClusterPolicy to stay notReady.
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+        nfd:
           enabled: true
-          env:
-            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_ENVVAR_WHEN_UNPRIVILEGED
-              value: "false"
-            - name: ACCEPT_NVIDIA_VISIBLE_DEVICES_AS_VOLUME_MOUNTS
-              value: "true"
+        # Use chart-default device plugin env in kind (no CDI overrides)
+        devicePlugin:
+          env: []
+          # Exclude control-plane nodes (see dcgmExporter.affinity comment)
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+        gfd:
+          # Exclude control-plane nodes (see dcgmExporter.affinity comment)
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
+        validator:
+          # Exclude control-plane nodes (see dcgmExporter.affinity comment)
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: node-role.kubernetes.io/control-plane
+                        operator: DoesNotExist
         # Reduce resource requests for local development
         operator:
           resources:
