@@ -391,9 +391,10 @@ Resume a previous validation run from where it left off:
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
 
-			// If validation-namespace is not explicitly set, default to namespace value
+			// If validation-namespace is not explicitly set, default to namespace value,
+			// but only when still at its default (to avoid overriding env var values).
 			validationNamespace := cmd.String("validation-namespace")
-			if !cmd.IsSet("validation-namespace") {
+			if !cmd.IsSet("validation-namespace") && validationNamespace == "eidos-validation" {
 				validationNamespace = cmd.String("namespace")
 			}
 
