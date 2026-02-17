@@ -47,6 +47,8 @@ jobs:
 
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up GPU cluster
         uses: ./.github/actions/gpu-cluster-setup
@@ -57,7 +59,8 @@ jobs:
         env:
           GOFLAGS: -mod=vendor
         run: |
-          GOFLAGS= go install github.com/google/ko@v0.18.0
+          KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
+          GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
           KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
           kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
 
@@ -122,11 +125,10 @@ jobs:
             sleep 10
           done
           echo "Waiting for device plugin rollout..."
-          # Use || true: in a 2-node kind cluster (control-plane + worker),
-          # the device plugin DaemonSet runs on both nodes but the control-plane
-          # pod may not become ready (no GPU). This matches the T4 approach.
+          # Operands are excluded from control-plane nodes via nodeAffinity in
+          # the kind overlay, so all scheduled pods should become ready.
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-            rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s || true
+            rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s
           echo "GPU Operator pods:"
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods
 
@@ -182,6 +184,20 @@ jobs:
           chainsaw test \
             --test-dir tests/chainsaw/ai-conformance/kind \
             --config tests/chainsaw/chainsaw-config.yaml
+
+      - name: Debug diagnostics
+        if: failure()
+        run: |
+          echo "=== ClusterPolicy status ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get clusterpolicy -o yaml 2>/dev/null || true
+          echo "=== GPU Operator pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
+          echo "=== Non-running pods (all namespaces) ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
+          echo "=== Recent events (gpu-operator) ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          echo "=== Node status ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
 
       - name: GPU Test Cleanup
         if: always()
