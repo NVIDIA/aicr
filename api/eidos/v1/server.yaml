@@ -285,7 +285,7 @@ paths:
               minimal:
                 summary: Minimal criteria (single field)
                 value:
-                  kind: recipeCriteria
+                  kind: RecipeCriteria
                   apiVersion: eidos.nvidia.com/v1alpha1
                   metadata:
                     name: eks-minimal
@@ -294,7 +294,7 @@ paths:
               full:
                 summary: Full criteria specification
                 value:
-                  kind: recipeCriteria
+                  kind: RecipeCriteria
                   apiVersion: eidos.nvidia.com/v1alpha1
                   metadata:
                     name: gb200-eks-ubuntu-training
@@ -311,7 +311,7 @@ paths:
               minimal:
                 summary: Minimal criteria (single field)
                 value: |
-                  kind: recipeCriteria
+                  kind: RecipeCriteria
                   apiVersion: eidos.nvidia.com/v1alpha1
                   metadata:
                     name: eks-minimal
@@ -320,7 +320,7 @@ paths:
               full:
                 summary: Full criteria specification
                 value: |
-                  kind: recipeCriteria
+                  kind: RecipeCriteria
                   apiVersion: eidos.nvidia.com/v1alpha1
                   metadata:
                     name: gb200-eks-ubuntu-training
@@ -844,9 +844,9 @@ components:
       properties:
         kind:
           type: string
-          description: Resource kind (always "recipeCriteria")
-          enum: [recipeCriteria]
-          example: recipeCriteria
+          description: Resource kind (always "RecipeCriteria")
+          enum: [RecipeCriteria]
+          example: RecipeCriteria
         apiVersion:
           type: string
           description: API version
