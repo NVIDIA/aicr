@@ -133,8 +133,8 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Value:   "gpu-operator",
 			},
 			&cli.StringFlag{
-				Name:    "image",
-				Usage:   "Container image for agent Job",
+				Name:  "image",
+				Usage: "Container image for agent Job (must contain /usr/local/bin/eidos)",
 				Sources: cli.EnvVars("EIDOS_IMAGE"),
 				Value:   "ghcr.io/nvidia/eidos-validator:latest",
 			},
