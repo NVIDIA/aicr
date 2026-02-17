@@ -58,7 +58,7 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=traini
 # POST: Recipe from criteria file (YAML body)
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: recipeCriteria
+  -d 'kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: my-config
@@ -156,7 +156,7 @@ Generate an optimized configuration recipe from a criteria file body. This endpo
 The request body must be a `RecipeCriteria` resource:
 
 ```yaml
-kind: recipeCriteria
+kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: my-criteria
@@ -175,7 +175,7 @@ spec:
 # POST with YAML body
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: recipeCriteria
+  -d 'kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: training-config

@@ -18,7 +18,7 @@ From criteria file:
 ```shell
 # Create criteria file
 cat > /tmp/criteria.yaml << 'EOF'
-kind: recipeCriteria
+kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: gb200-eks-training
@@ -52,7 +52,7 @@ Recipe from API (POST with criteria body):
 ```shell
 curl -s -X POST "https://eidos.dgxc.io/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: recipeCriteria
+  -d 'kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: gb200-training

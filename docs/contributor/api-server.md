@@ -288,7 +288,7 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 POST requests accept a `RecipeCriteria` resource (Kubernetes-style):
 
 ```yaml
-kind: recipeCriteria
+kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: my-criteria
@@ -344,7 +344,7 @@ Shared with CLI - same logic as described in CLI architecture.
 **Request Body**: `RecipeCriteria` resource with kind, apiVersion, metadata, and spec fields.
 
 ```yaml
-kind: recipeCriteria
+kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: my-criteria

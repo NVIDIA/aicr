@@ -278,7 +278,7 @@ Generate recipes using a Kubernetes-style criteria file:
 
 The criteria file uses a Kubernetes-style format:
 ```yaml
-kind: recipeCriteria
+kind: RecipeCriteria
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: gb200-eks-ubuntu-training
@@ -1149,7 +1149,7 @@ image:
 4. **Create overlay that includes the component:**
 ```yaml
 # my-data/overlays/my-custom-overlay.yaml
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: my-custom-overlay

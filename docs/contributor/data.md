@@ -81,7 +81,7 @@ recipes/
 Each recipe file follows this structure:
 
 ```yaml
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: <recipe-name>  # Unique identifier (e.g., "eks-training", "gb200-eks-ubuntu-training")
@@ -228,7 +228,7 @@ Recipe files support **multi-level inheritance** through the `spec.base` field. 
 Each recipe can specify a parent recipe via `spec.base`:
 
 ```yaml
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: gb200-eks-ubuntu-training
@@ -311,7 +311,7 @@ base → eks → eks-training → gb200-eks-training → gb200-eks-ubuntu-traini
 
 ```yaml
 # overlays/base.yaml - Foundation for all recipes
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: base
@@ -339,7 +339,7 @@ spec:
 
 ```yaml
 # eks.yaml - EKS-specific settings
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: eks
@@ -357,7 +357,7 @@ spec:
 
 ```yaml
 # eks-training.yaml - EKS training workloads
-kind: recipeMetadata
+kind: RecipeMetadata
 apiVersion: eidos.nvidia.com/v1alpha1
 metadata:
   name: eks-training
@@ -884,7 +884,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
 
 1. **Create the recipe file** in `recipes/`:
    ```yaml
-   kind: recipeMetadata
+   kind: RecipeMetadata
    apiVersion: eidos.nvidia.com/v1alpha1
    metadata:
      name: l40-gke-ubuntu-inference  # Unique name
