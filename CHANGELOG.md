@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.4] - 2026-02-17
+
+### Bug Fixes
+
+- Default validation-namespace to namespace when not explicitly set  by [@mchmarny](https://github.com/mchmarny)
+- Build eidos CLI in validator image and update binary path  by [@mchmarny](https://github.com/mchmarny)
+
+### Refactor
+
+- *(ci)* Decompose gpu-smoke-test into composable actions  by [@dims](https://github.com/dims)
+
+### Tasks
+
+- Correct test command prior to PR  by [@mchmarny](https://github.com/mchmarny)
+- Clean changelog by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.6.3] - 2026-02-17
 
 ### Bug Fixes

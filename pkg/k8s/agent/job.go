@@ -115,7 +115,7 @@ func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 			{
 				Name:    "eidos",
 				Image:   d.config.Image,
-				Command: []string{"/ko-app/eidos"},
+				Command: []string{"eidos"},
 				Args:    args,
 				Env: []corev1.EnvVar{
 					{

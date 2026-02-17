@@ -128,7 +128,7 @@ eidos snapshot --deploy-agent \
 - `--deploy-agent`: Enable agent deployment mode
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `gpu-operator`)
-- `--image`: Container image (default: `ghcr.io/nvidia/eidos:latest`)
+- `--image`: Container image (default: `ghcr.io/nvidia/eidos-validator:latest`)
 - `--job-name`: Job name (default: `eidos`)
 - `--service-account-name`: ServiceAccount name (default: `eidos`)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
@@ -362,9 +362,9 @@ spec:
         fsGroup: 0
       containers:
         - name: eidos
-          image: ghcr.io/nvidia/eidos:latest
+          image: ghcr.io/nvidia/eidos-validator:latest
           command: ["/bin/sh", "-c"]
-          args: ["/ko-app/eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
+          args: ["eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
           securityContext:
             privileged: true
           volumeMounts:
@@ -406,9 +406,9 @@ spec:
         fsGroup: 0
       containers:
         - name: eidos
-          image: ghcr.io/nvidia/eidos:latest
+          image: ghcr.io/nvidia/eidos-validator:latest
           command: ["/bin/sh", "-c"]
-          args: ["/ko-app/eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
+          args: ["eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
           securityContext:
             privileged: true
           volumeMounts:
@@ -456,9 +456,9 @@ spec:
             fsGroup: 0
           containers:
             - name: eidos
-              image: ghcr.io/nvidia/eidos:latest
+              image: ghcr.io/nvidia/eidos-validator:latest
               command: ["/bin/sh", "-c"]
-              args: ["/ko-app/eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
+              args: ["eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
               securityContext:
                 privileged: true
               volumeMounts:

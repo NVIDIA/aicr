@@ -105,6 +105,7 @@ Validate Recipe:
 ```shell
 eidos validate \
   --recipe recipe.yaml \
+  --namespace gpu-operator \
   --snapshot cm://gpu-operator/eidos-snapshot | yq .
 ```
 
@@ -112,10 +113,8 @@ Validate Recipe sans Snapshot
 
 ```shell
 eidos validate \
-  --phase readiness \
-  --namespace gpu-operator \
+  --recipe recipe.yaml \
   --node-selector nodeGroup=customer-gpu
-  --output recipe.yaml
 ```
 
 ## Bundle

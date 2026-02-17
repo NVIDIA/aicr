@@ -273,7 +273,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    "validation-namespace",
-			Usage:   "Kubernetes namespace where validation jobs will run",
+			Usage:   "Kubernetes namespace where validation jobs will run. If not set via this flag or EIDOS_VALIDATION_NAMESPACE, defaults to the --namespace value.",
 			Sources: cli.EnvVars("EIDOS_VALIDATION_NAMESPACE"),
 			Value:   "eidos-validation",
 		},
@@ -390,7 +390,13 @@ Resume a previous validation run from where it left off:
 			recipeFilePath := cmd.String("recipe")
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
+
+			// If validation-namespace is not explicitly set, default to namespace value,
+			// but only when still at its default (to avoid overriding env var values).
 			validationNamespace := cmd.String("validation-namespace")
+			if !cmd.IsSet("validation-namespace") && validationNamespace == "eidos-validation" {
+				validationNamespace = cmd.String("namespace")
+			}
 
 			// Recipe is always required
 			if recipeFilePath == "" {

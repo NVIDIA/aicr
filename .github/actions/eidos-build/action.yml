@@ -1,0 +1,36 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Eidos Build'
+description: 'Builds the eidos container image (via ko) and CLI binary, and loads the image into kind.'
+
+runs:
+  using: 'composite'
+  steps:
+
+    - name: Build eidos image and load into kind
+      shell: bash
+      env:
+        GOFLAGS: -mod=vendor
+      run: |
+        KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
+        GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
+        KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/eidos
+        kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+
+    - name: Build eidos binary
+      shell: bash
+      env:
+        GOFLAGS: -mod=vendor
+      run: go build -o ./eidos ./cmd/eidos

@@ -36,7 +36,7 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
@@ -159,7 +159,7 @@ func TestDeployer_EnsureRBAC_Idempotent(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
@@ -191,7 +191,7 @@ func TestDeployer_EnsureJob(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 		Privileged:         true, // Test privileged mode (default for agent deployment)
 		NodeSelector: map[string]string{
@@ -289,7 +289,7 @@ func TestDeployer_EnsureJob_Unprivileged(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 		Privileged:         false, // Test unprivileged mode for PSS-restricted namespaces
 	}
@@ -374,7 +374,7 @@ func TestDeployer_Deploy(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
@@ -445,7 +445,7 @@ func TestDeployer_Cleanup(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
@@ -505,7 +505,7 @@ func TestDeployer_Cleanup_AttemptsAllDeletions(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
@@ -569,7 +569,7 @@ func TestDeployer_Cleanup_ReportsAllErrors(t *testing.T) {
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
 		JobName:            testName,
-		Image:              "ghcr.io/nvidia/eidos:latest",
+		Image:              "ghcr.io/nvidia/eidos-validator:latest",
 		Output:             "cm://test-namespace/eidos-snapshot",
 	}
 	deployer := NewDeployer(clientset, config)
