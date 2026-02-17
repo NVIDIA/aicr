@@ -41,6 +41,7 @@ NC='\033[0m' # No Color
 log_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+log_debug() { echo -e "${BLUE}[DEBUG]${NC} $*"; }
 
 # Use consistent namespace/release names so Helm can upgrade existing resources
 NAMESPACE="${KWOK_NAMESPACE:-eidos-kwok-test}"
