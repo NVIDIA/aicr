@@ -1,0 +1,46 @@
+apiVersion: dynamo.nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-agg
+  namespace: dynamo-workload
+spec:
+  services:
+    - name: Frontend
+      replicas: 1
+      componentType: frontend
+      spec:
+        image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+        command:
+          - python
+          - -m
+          - dynamo.runtime
+          - --service
+          - Frontend
+        envs:
+          - name: SERVED_MODEL_NAME
+            value: Qwen/Qwen3-0.6B
+        envFrom:
+          - secretRef:
+              name: hf-token-secret
+    - name: VllmDecodeWorker
+      replicas: 1
+      componentType: worker
+      spec:
+        image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+        command:
+          - python
+          - -m
+          - dynamo.runtime
+          - --service
+          - VllmDecodeWorker
+        envs:
+          - name: MODEL_NAME
+            value: Qwen/Qwen3-0.6B
+        envFrom:
+          - secretRef:
+              name: hf-token-secret
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+          requests:
+            nvidia.com/gpu: "1"
