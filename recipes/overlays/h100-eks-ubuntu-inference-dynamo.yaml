@@ -59,6 +59,18 @@ spec:
   #     --protocol tcp --port 4222 --source-group <gpu-sg-id>
 
   componentRefs:
+    # Disable CDI in the GPU Operator ClusterPolicy to prevent the
+    # KAI scheduler binder from injecting management.nvidia.com CDI
+    # annotations.  GPU Operator >= v25.10.0 with cdi.enabled=true
+    # triggers the KAI operator to set --cdi-enabled=true on the binder,
+    # which injects CDI device annotations that fail to resolve on nodes
+    # where the management.nvidia.com CDI spec lacks UUID-based entries.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        cdi:
+          enabled: false
+
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
