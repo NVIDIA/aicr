@@ -153,14 +153,75 @@ phases:
     duration: 64µs
 ```
 
-## Run Job
+## Run Inference Workload
 
-TODO: Add simple Dynamo workload
+### Create namespace and HuggingFace secret
+
+```shell
+kubectl create ns dynamo-workload
+
+# Create HuggingFace token secret (set HF_TOKEN env var first)
+sed "s/<your-hf-token>/$HF_TOKEN/" \
+  examples/demos/workloads/inference/hf-token-secret.yaml | kubectl apply -f -
+```
+
+### Deploy the DynamoGraphDeployment
+
+```shell
+kubectl apply -f examples/demos/workloads/inference/vllm-agg.yaml
+
+# Monitor deployment
+kubectl get dynamographdeployments -n dynamo-workload
+kubectl get pods -n dynamo-workload -w
+```
+
+Wait until all pods are `Running` and ready:
+```
+NAME                                    READY   STATUS    RESTARTS   AGE
+vllm-agg-frontend-0                     1/1     Running   0          2m
+vllm-agg-vllmdecodeworker-0             1/1     Running   0          2m
+```
+
+### Test the endpoint
+
+```shell
+# Port-forward the frontend service
+kubectl port-forward -n dynamo-workload svc/vllm-agg-frontend 8000:8000 &
+
+# Send a chat completion request
+curl -s http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "Qwen/Qwen3-0.6B",
+    "messages": [{"role": "user", "content": "What is Kubernetes?"}],
+    "max_tokens": 64
+  }'
+```
+
+Sample response:
+```json
+{
+  "id": "chatcmpl-abc123",
+  "object": "chat.completion",
+  "model": "Qwen/Qwen3-0.6B",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Kubernetes is an open-source container orchestration platform..."
+      },
+      "finish_reason": "length"
+    }
+  ]
+}
+```
 
 ## Success
 
-1) Job success
-2) Validation report correctly reflects the level of CNCF Conformance
+1) DynamoGraphDeployment pods are running and healthy
+2) OpenAI-compatible chat completions API returns successful responses
+3) Validation report correctly reflects the level of CNCF Conformance
 
 > Synthetic workload, perf checks beyond the basic fabric validation is out of scope here.
 
