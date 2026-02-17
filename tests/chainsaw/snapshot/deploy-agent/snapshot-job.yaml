@@ -39,7 +39,7 @@ spec:
       containers:
         - name: eidos
           image: localhost:5001/eidos:local
-          command: ["/ko-app/eidos"]
+          command: ["eidos"]
           args: ["snapshot", "-o", "cm://gpu-operator/eidos-e2e-snapshot"]
           env:
             - name: EIDOS_LOG_PREFIX

@@ -141,6 +141,10 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-${{ matrix.arch }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |

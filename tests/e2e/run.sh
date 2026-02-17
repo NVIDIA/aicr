@@ -639,7 +639,7 @@ spec:
       containers:
       - name: eidos
         image: ${EIDOS_IMAGE}
-        command: ["/ko-app/eidos"]
+        command: ["eidos"]
         args: ["snapshot", "-o", "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}"]
         env:
         - name: EIDOS_LOG_PREFIX
