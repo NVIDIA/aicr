@@ -167,19 +167,19 @@ func TestRecipeEndpointPOST(t *testing.T) {
 	}{
 		{
 			name:        "valid JSON body",
-			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "valid YAML body",
-			body:        "kind: recipeCriteria\napiVersion: eidos.nvidia.com/v1alpha1\nspec:\n  service: gke\n  accelerator: a100",
+			body:        "kind: RecipeCriteria\napiVersion: eidos.nvidia.com/v1alpha1\nspec:\n  service: gke\n  accelerator: a100",
 			contentType: "application/x-yaml",
 			wantStatus:  http.StatusOK,
 		},
 		{
 			name:        "valid JSON body with platform",
-			body:        `{"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
+			body:        `{"kind":"RecipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},

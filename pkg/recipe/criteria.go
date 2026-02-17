@@ -554,7 +554,7 @@ const RecipeCriteriaAPIVersion = "eidos.nvidia.com/v1alpha1"
 //
 // Example:
 //
-//	kind: recipeCriteria
+//	kind: RecipeCriteria
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
@@ -659,7 +659,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec) (*Criteria, error) {
 //
 // Example file (YAML):
 //
-//	kind: recipeCriteria
+//	kind: RecipeCriteria
 //	apiVersion: eidos.nvidia.com/v1alpha1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
@@ -698,7 +698,7 @@ func LoadCriteriaFromFile(path string) (*Criteria, error) {
 // Example JSON body:
 //
 //	{
-//	  "kind": "recipeCriteria",
+//	  "kind": "RecipeCriteria",
 //	  "apiVersion": "eidos.nvidia.com/v1alpha1",
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}

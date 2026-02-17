@@ -36,7 +36,7 @@ spec:
               rm -rf "${WORK}" && mkdir -p "${WORK}"
 
               cat > "${WORK}/criteria.yaml" << 'EOF'
-              kind: recipeCriteria
+              kind: RecipeCriteria
               apiVersion: eidos.nvidia.com/v1alpha1
               metadata:
                 name: test-criteria
@@ -48,25 +48,25 @@ spec:
               EOF
 
               cat > "${WORK}/criteria.json" << 'EOF'
-              {"kind":"recipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","metadata":{"name":"test"},"spec":{"service":"gke","accelerator":"a100","os":"ubuntu","intent":"inference"}}
+              {"kind":"RecipeCriteria","apiVersion":"eidos.nvidia.com/v1alpha1","metadata":{"name":"test"},"spec":{"service":"gke","accelerator":"a100","os":"ubuntu","intent":"inference"}}
               EOF
 
               echo 'kind: wrongKind' > "${WORK}/invalid-kind.yaml"
 
               cat > "${WORK}/invalid-version.yaml" << 'EOF'
-              kind: recipeCriteria
+              kind: RecipeCriteria
               apiVersion: wrong.version/v1
               EOF
 
               cat > "${WORK}/invalid-enum.yaml" << 'EOF'
-              kind: recipeCriteria
+              kind: RecipeCriteria
               apiVersion: eidos.nvidia.com/v1alpha1
               spec:
                 service: invalid-service
               EOF
 
               cat > "${WORK}/partial.yaml" << 'EOF'
-              kind: recipeCriteria
+              kind: RecipeCriteria
               apiVersion: eidos.nvidia.com/v1alpha1
               spec:
                 accelerator: h100
