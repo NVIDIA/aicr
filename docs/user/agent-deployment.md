@@ -364,7 +364,7 @@ spec:
         - name: eidos
           image: ghcr.io/nvidia/eidos-validator:latest
           command: ["/bin/sh", "-c"]
-          args: ["/usr/local/bin/eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
+          args: ["eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
           securityContext:
             privileged: true
           volumeMounts:
@@ -408,7 +408,7 @@ spec:
         - name: eidos
           image: ghcr.io/nvidia/eidos-validator:latest
           command: ["/bin/sh", "-c"]
-          args: ["/usr/local/bin/eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
+          args: ["eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
           securityContext:
             privileged: true
           volumeMounts:
@@ -458,7 +458,7 @@ spec:
             - name: eidos
               image: ghcr.io/nvidia/eidos-validator:latest
               command: ["/bin/sh", "-c"]
-              args: ["/usr/local/bin/eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
+              args: ["eidos snapshot -o cm://gpu-operator/eidos-snapshot"]
               securityContext:
                 privileged: true
               volumeMounts:

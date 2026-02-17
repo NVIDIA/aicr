@@ -68,7 +68,7 @@ spec:
           args:
             - |
               set -e
-              /usr/local/bin/eidos --debug --log-json snapshot -o cm://gpu-operator/eidos-snapshot
+              eidos --debug --log-json snapshot -o cm://gpu-operator/eidos-snapshot
           resources:
             requests:
               cpu: "1"

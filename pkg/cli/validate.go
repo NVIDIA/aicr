@@ -279,7 +279,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:    "image",
-			Usage:   "Container image for validation Jobs (must contain /usr/local/bin/eidos and Go toolchain)",
+			Usage:   "Container image for validation Jobs (must include Go toolchain)",
 			Sources: cli.EnvVars("EIDOS_VALIDATOR_IMAGE"),
 			Value:   "ghcr.io/nvidia/eidos-validator:latest",
 		},
