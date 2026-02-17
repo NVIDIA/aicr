@@ -267,12 +267,29 @@ verify_kwok_nodes() {
     local recipe="$1"
     local expected_total=$((SYSTEM_NODE_COUNT + GPU_NODE_COUNT))
 
+    log_debug "Checking for KWOK nodes (expected: $expected_total)..."
+
+    # Check if kubectl can connect to cluster
+    if ! kubectl cluster-info &>/dev/null; then
+        log_error "Cannot connect to Kubernetes cluster"
+        log_error "Make sure a KWOK cluster is running: make kwok-cluster"
+        exit 1
+    fi
+
     local actual_count
     actual_count=$(kubectl get nodes -l type=kwok --no-headers 2>/dev/null | wc -l | tr -d ' ')
 
+    log_debug "Found $actual_count KWOK nodes"
+
     if [[ "$actual_count" -lt "$expected_total" ]]; then
         log_error "Expected $expected_total KWOK nodes, found $actual_count"
-        log_error "Run 'make kwok-nodes RECIPE=$recipe' first"
+        log_error ""
+        log_error "To fix this, run:"
+        log_error "  make kwok-cluster              # Create cluster"
+        log_error "  make kwok-nodes RECIPE=$recipe # Create nodes"
+        log_error ""
+        log_error "Or run the full e2e workflow:"
+        log_error "  make kwok-e2e RECIPE=$recipe"
         exit 1
     fi
 
@@ -310,14 +327,29 @@ generate_bundle() {
 
     # Generate resolved recipe from criteria
     log_info "Generating resolved recipe..."
-    "$EIDOS_BIN" recipe "${recipe_args[@]}" --output "${WORK_DIR}/recipe.yaml"
+    log_debug "Running: $EIDOS_BIN recipe ${recipe_args[*]} --output ${WORK_DIR}/recipe.yaml"
+
+    if ! "$EIDOS_BIN" recipe "${recipe_args[@]}" --output "${WORK_DIR}/recipe.yaml" 2>&1; then
+        log_error "Recipe generation failed"
+        return 1
+    fi
+
+    if [[ ! -f "${WORK_DIR}/recipe.yaml" ]]; then
+        log_error "Recipe file not created: ${WORK_DIR}/recipe.yaml"
+        return 1
+    fi
+
+    log_debug "Generated recipe:"
+    head -20 "${WORK_DIR}/recipe.yaml"
 
     # Generate bundle with node scheduling flags for KWOK
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
     # - Skyhook customization (creates CRs that depend on operator CRDs)
     log_info "Generating bundle..."
-    "$EIDOS_BIN" bundle \
+
+    local bundle_output
+    if ! bundle_output=$("$EIDOS_BIN" bundle \
         --recipe "${WORK_DIR}/recipe.yaml" \
         --output "${WORK_DIR}/bundle" \
         --system-node-selector "eidos.nvidia.com/node-type=system" \
@@ -333,9 +365,21 @@ generate_bundle() {
         --set "networkoperator:operator.tolerations[2].value=true" \
         --set "networkoperator:operator.tolerations[2].effect=NoSchedule" \
         --set "dynamoplatform:etcd.persistence.enabled=false" \
-        --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false"
+        --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false" 2>&1); then
+        log_error "Bundle generation failed"
+        log_error "Bundle command output:"
+        echo "$bundle_output"
+        return 1
+    fi
+
+    if [[ ! -d "${WORK_DIR}/bundle" ]]; then
+        log_error "Bundle directory not created: ${WORK_DIR}/bundle"
+        return 1
+    fi
 
     log_info "Bundle generated at ${WORK_DIR}/bundle"
+    log_debug "Bundle contents:"
+    ls -1 "${WORK_DIR}/bundle" | head -10
 }
 
 # Deploy bundle to cluster using the generated deploy.sh
@@ -345,16 +389,25 @@ deploy_bundle() {
     local bundle_dir="${WORK_DIR}/bundle"
 
     if [[ ! -f "${bundle_dir}/deploy.sh" ]]; then
-        log_error "deploy.sh not found in bundle"
+        log_error "deploy.sh not found in bundle directory: $bundle_dir"
+        log_error "Bundle generation may have failed"
         return 1
     fi
+
+    log_debug "Bundle directory: $bundle_dir"
+    log_debug "Components in bundle:"
+    ls -1 "$bundle_dir" | grep -v "deploy.sh" | head -10
 
     # Run the generated deploy script without --wait since KWOK clusters
     # only validate scheduling, not pod readiness
     chmod +x "${bundle_dir}/deploy.sh"
     log_info "Running deploy.sh --no-wait..."
-    if ! "${bundle_dir}/deploy.sh" --no-wait 2>&1; then
+
+    local deploy_output
+    if ! deploy_output=$("${bundle_dir}/deploy.sh" --no-wait 2>&1); then
         log_error "Deploy script failed"
+        log_error "Last 50 lines of deploy output:"
+        echo "$deploy_output" | tail -50
         return 1
     fi
 
@@ -403,18 +456,38 @@ verify_pods() {
     # Check for scheduling failures - only fail if pods are truly unscheduled (no node assigned)
     # Pods in ContainerCreating on real nodes are scheduled but waiting for container start
     if [[ "$unscheduled_pods" -gt 0 ]]; then
-        log_error "Scheduling validation FAILED: $unscheduled_pods pods could not be scheduled"
+        log_error "=========================================="
+        log_error "Scheduling validation FAILED"
+        log_error "=========================================="
+        log_error "$unscheduled_pods pods could not be scheduled to nodes"
+        log_error ""
         log_error "Unscheduled pods:"
         kubectl get pods --all-namespaces --field-selector=status.phase=Pending -o wide | \
             awk 'NR==1 || $8=="<none>"'
+        log_error ""
         log_error "Events for unscheduled pods:"
-        kubectl get events --all-namespaces --field-selector reason=FailedScheduling
+        kubectl get events --all-namespaces --field-selector reason=FailedScheduling --sort-by='.lastTimestamp'
+        log_error ""
+        log_error "Common causes:"
+        log_error "  - Node selectors don't match available nodes"
+        log_error "  - Tolerations missing for node taints"
+        log_error "  - Insufficient resources on nodes"
+        log_error "=========================================="
         return 1
     fi
 
     if [[ "$failed_pods" -gt 0 ]]; then
-        log_error "Scheduling validation FAILED: $failed_pods pods Failed"
+        log_error "=========================================="
+        log_error "Scheduling validation FAILED"
+        log_error "=========================================="
+        log_error "$failed_pods pods are in Failed state"
+        log_error ""
         kubectl get pods --all-namespaces --field-selector=status.phase=Failed -o wide
+        log_error ""
+        log_error "Pod failure details:"
+        kubectl get pods --all-namespaces --field-selector=status.phase=Failed -o json | \
+            jq -r '.items[] | "\(.metadata.namespace)/\(.metadata.name): \(.status.containerStatuses[0].state.terminated.reason // "Unknown") - \(.status.containerStatuses[0].state.terminated.message // "")"'
+        log_error "=========================================="
         return 1
     fi
 
@@ -462,7 +535,14 @@ main() {
     # Set up cleanup trap
     trap cleanup EXIT
 
+    log_info "=========================================="
+    log_info "Starting validation for recipe: $recipe"
+    log_info "=========================================="
+
+    log_debug "Step 1: Checking dependencies..."
     check_deps
+
+    log_debug "Step 2: Cleaning up old test artifacts..."
     cleanup_old_tests
 
     # Create temp work directory
@@ -471,12 +551,21 @@ main() {
     log_info "Test namespace: $NAMESPACE"
     log_info "Helm release: $RELEASE_NAME"
 
+    log_debug "Step 3: Verifying KWOK nodes..."
     verify_kwok_nodes "$recipe"
+
+    log_debug "Step 4: Generating bundle..."
     generate_bundle "$recipe"
+
+    log_debug "Step 5: Deploying bundle..."
     deploy_bundle
+
+    log_debug "Step 6: Verifying pod scheduling..."
     verify_pods
 
-    log_info "Validation complete for recipe: $recipe"
+    log_info "=========================================="
+    log_info "✓ Validation PASSED for recipe: $recipe"
+    log_info "=========================================="
 }
 
 main "$@"
