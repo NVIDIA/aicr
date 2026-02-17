@@ -17,9 +17,7 @@
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
 
-# Override release name prefix to avoid eidos-stack- prefix in resource names
 dynamo-operator:
-  fullnameOverride: dynamo-operator
   controllerManager:
     tolerations:
       - operator: Exists

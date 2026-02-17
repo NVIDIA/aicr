@@ -34,7 +34,43 @@ spec:
     - name: K8s.server.version
       value: ">= 1.34"
 
+  # AWS Security Group Prerequisites (EKS only):
+  #
+  # Dynamo-platform's etcd (port 2379) and NATS (port 4222) typically run on
+  # system nodes. If GPU worker nodes are in a different subnet/security group,
+  # AWS SGs may block this traffic, causing pods to fail with:
+  #   - "Unable to create lease" (etcd unreachable)
+  #   - "JetStream not available" (NATS unreachable)
+  #
+  # To fix, allow ingress from the GPU node SG to the system node SG:
+  #
+  #   # 1. Find security group IDs for system and GPU nodes:
+  #   aws ec2 describe-instances \
+  #     --filters "Name=tag:eks:nodegroup-name,Values=<system-nodegroup>" \
+  #     --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" --output text
+  #   aws ec2 describe-instances \
+  #     --filters "Name=tag:eks:nodegroup-name,Values=<gpu-nodegroup>" \
+  #     --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" --output text
+  #
+  #   # 2. Allow etcd and NATS traffic from GPU nodes to system nodes:
+  #   aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
+  #     --protocol tcp --port 2379 --source-group <gpu-sg-id>
+  #   aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
+  #     --protocol tcp --port 4222 --source-group <gpu-sg-id>
+
   componentRefs:
+    # Disable CDI in the GPU Operator ClusterPolicy to prevent the
+    # KAI scheduler binder from injecting management.nvidia.com CDI
+    # annotations.  GPU Operator >= v25.10.0 with cdi.enabled=true
+    # triggers the KAI operator to set --cdi-enabled=true on the binder,
+    # which injects CDI device annotations that fail to resolve on nodes
+    # where the management.nvidia.com CDI spec lacks UUID-based entries.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        cdi:
+          enabled: false
+
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
