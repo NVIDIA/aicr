@@ -16,7 +16,7 @@
 #
 # Validates that eidos recipe --service eks --accelerator h100 produces
 # a valid recipe with the correct criteria and components.
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 criteria:
   service: eks

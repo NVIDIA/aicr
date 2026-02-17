@@ -14,7 +14,7 @@
 
 # Assert recipe structure for EKS GB200 training query.
 # Replaces grep-based checks in generate_recipe() from tools/e2e.
-kind: recipeResult
+kind: RecipeResult
 apiVersion: eidos.nvidia.com/v1alpha1
 criteria:
   service: eks
