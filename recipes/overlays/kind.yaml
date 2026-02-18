@@ -179,15 +179,9 @@ spec:
                 cpu: 500m
                 memory: 1Gi
 
-    # nvidia-dra-driver-gpu: DRA driver for GPU resource management
-    # For kind with GPU passthrough, use "/" as driver root (host drivers)
+    # nvidia-dra-driver-gpu: override driver root for kind GPU passthrough
     - name: nvidia-dra-driver-gpu
       type: Helm
-      source: https://helm.ngc.nvidia.com/nvidia
-      version: "25.12.0"
-      valuesFile: components/nvidia-dra-driver-gpu/values.yaml
-      dependencyRefs:
-        - gpu-operator
       overrides:
         # Use "/" for host-installed drivers (kind GPU passthrough)
         nvidiaDriverRoot: "/"

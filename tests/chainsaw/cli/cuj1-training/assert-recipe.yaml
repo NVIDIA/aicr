@@ -40,8 +40,10 @@ componentRefs: ## alphabetically sorted
   - name: cert-manager
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
+  - name: kai-scheduler
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
+  - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
   - name: skyhook-customizations
@@ -51,9 +53,11 @@ deploymentOrder:
   - aws-efa
   - cert-manager
   - gpu-operator
+  - kai-scheduler
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
   - kubeflow-trainer
+  - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
   - skyhook-operator

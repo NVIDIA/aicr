@@ -75,11 +75,6 @@ spec:
 
     - name: nvidia-dra-driver-gpu
       type: Helm
-      source: https://helm.ngc.nvidia.com/nvidia
-      version: "25.12.0"
-      valuesFile: components/nvidia-dra-driver-gpu/values.yaml
-      dependencyRefs:
-        - gpu-operator
       overrides:
         gpuResourcesEnabledOverride: true
         # EKS has no control-plane nodes — remove the default nodeAffinity
@@ -88,14 +83,6 @@ spec:
             nodeAffinity: null
           tolerations:
             - operator: Exists
-
-    - name: kai-scheduler
-      type: Helm
-      source: oci://ghcr.io/nvidia/kai-scheduler
-      version: v0.12.14
-      valuesFile: components/kai-scheduler/values.yaml
-      dependencyRefs:
-        - gpu-operator
 
     - name: dynamo-crds
       type: Helm
