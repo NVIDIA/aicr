@@ -420,6 +420,180 @@ func TestMergeComponentRef_AdvancedFields(t *testing.T) {
 			t.Errorf("tag = %q, want v2.0", result.Tag)
 		}
 	})
+
+	t.Run("expectedResources replaced by overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name: "gpu-operator",
+			ExpectedResources: []ExpectedResource{
+				{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+			},
+		}
+		overlay := ComponentRef{
+			Name: "gpu-operator",
+			ExpectedResources: []ExpectedResource{
+				{Kind: "DaemonSet", Name: "nvidia-driver", Namespace: "gpu-operator"},
+				{Kind: "DaemonSet", Name: "dcgm-exporter", Namespace: "gpu-operator"},
+			},
+		}
+		result := mergeComponentRef(base, overlay)
+		if len(result.ExpectedResources) != 2 {
+			t.Errorf("expectedResources len = %d, want 2", len(result.ExpectedResources))
+		}
+		if result.ExpectedResources[0].Kind != "DaemonSet" {
+			t.Errorf("expectedResources[0].Kind = %q, want DaemonSet", result.ExpectedResources[0].Kind)
+		}
+	})
+
+	t.Run("expectedResources inherited from base", func(t *testing.T) {
+		base := ComponentRef{
+			Name: "gpu-operator",
+			ExpectedResources: []ExpectedResource{
+				{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+			},
+		}
+		overlay := ComponentRef{
+			Name:      "gpu-operator",
+			Overrides: map[string]any{"cdi.enabled": true},
+		}
+		result := mergeComponentRef(base, overlay)
+		if len(result.ExpectedResources) != 1 {
+			t.Errorf("expectedResources len = %d, want 1 (inherited from base)", len(result.ExpectedResources))
+		}
+		if result.ExpectedResources[0].Name != "gpu-operator" {
+			t.Errorf("expectedResources[0].Name = %q, want gpu-operator", result.ExpectedResources[0].Name)
+		}
+	})
+
+	t.Run("cleanup inherited from base", func(t *testing.T) {
+		base := ComponentRef{Name: "nccl-doctor", Cleanup: true}
+		overlay := ComponentRef{Name: "nccl-doctor", Version: "v2.0"}
+		result := mergeComponentRef(base, overlay)
+		if !result.Cleanup {
+			t.Error("cleanup should be inherited from base when overlay doesn't set it")
+		}
+	})
+
+	t.Run("cleanup set by overlay", func(t *testing.T) {
+		base := ComponentRef{Name: "nccl-doctor"}
+		overlay := ComponentRef{Name: "nccl-doctor", Cleanup: true}
+		result := mergeComponentRef(base, overlay)
+		if !result.Cleanup {
+			t.Error("cleanup should be true when overlay sets it")
+		}
+	})
+}
+
+func TestMergeValidationConfig(t *testing.T) {
+	t.Run("overlay phases merge with base", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				PreDeployment: &ValidationPhase{
+					Checks: []string{"gpu-hardware-detection"},
+				},
+				Deployment: &ValidationPhase{
+					Timeout: "5m",
+					Checks:  []string{"operator-health"},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Timeout: "10m",
+					Checks:  []string{"operator-health", "expected-resources"},
+				},
+				Performance: &ValidationPhase{
+					Timeout:        "15m",
+					Infrastructure: "nccl-doctor",
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		if base.Validation == nil {
+			t.Fatal("validation should not be nil after merge")
+		}
+		if base.Validation.PreDeployment == nil {
+			t.Fatal("preDeployment should be preserved from base")
+		}
+		if base.Validation.PreDeployment.Checks[0] != "gpu-hardware-detection" {
+			t.Error("preDeployment checks should be preserved from base")
+		}
+		if base.Validation.Deployment.Timeout != "10m" {
+			t.Errorf("deployment timeout = %q, want 10m (from overlay)", base.Validation.Deployment.Timeout)
+		}
+		if len(base.Validation.Deployment.Checks) != 2 {
+			t.Errorf("deployment checks len = %d, want 2 (from overlay)", len(base.Validation.Deployment.Checks))
+		}
+		if base.Validation.Performance == nil {
+			t.Fatal("performance should be added from overlay")
+		}
+		if base.Validation.Performance.Infrastructure != "nccl-doctor" {
+			t.Errorf("performance infrastructure = %q, want nccl-doctor", base.Validation.Performance.Infrastructure)
+		}
+	})
+
+	t.Run("overlay validation into nil base", func(t *testing.T) {
+		base := RecipeMetadataSpec{}
+		overlay := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Checks: []string{"operator-health"},
+				},
+			},
+		}
+		base.Merge(&overlay)
+
+		if base.Validation == nil {
+			t.Fatal("validation should be set from overlay")
+		}
+		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0] != "operator-health" {
+			t.Error("deployment check should be set from overlay")
+		}
+	})
+
+	t.Run("nil overlay validation preserves base", func(t *testing.T) {
+		base := RecipeMetadataSpec{
+			Validation: &ValidationConfig{
+				Deployment: &ValidationPhase{
+					Checks: []string{"operator-health"},
+				},
+			},
+		}
+		overlay := RecipeMetadataSpec{}
+		base.Merge(&overlay)
+
+		if base.Validation == nil || base.Validation.Deployment == nil {
+			t.Fatal("validation should be preserved from base when overlay has nil")
+		}
+	})
+}
+
+func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
+	spec := RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "gpu-operator", Type: "Helm", Source: "https://example.com"},
+		},
+		Validation: &ValidationConfig{
+			Deployment: &ValidationPhase{
+				Checks: []string{"operator-health"},
+			},
+		},
+	}
+	criteria := NewCriteria()
+	result, err := finalizeRecipeResult(criteria, &spec, []string{"base"})
+	if err != nil {
+		t.Fatalf("finalizeRecipeResult() error: %v", err)
+	}
+	if result.Validation == nil {
+		t.Fatal("result.Validation should not be nil")
+	}
+	if result.Validation.Deployment == nil {
+		t.Fatal("result.Validation.Deployment should not be nil")
+	}
+	if result.Validation.Deployment.Checks[0] != "operator-health" {
+		t.Errorf("check = %q, want operator-health", result.Validation.Deployment.Checks[0])
+	}
 }
 
 // Helper function

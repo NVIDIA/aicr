@@ -299,6 +299,7 @@ func finalizeRecipeResult(criteria *Criteria, mergedSpec *RecipeMetadataSpec, ap
 		Constraints:     mergedSpec.Constraints,
 		ComponentRefs:   mergedSpec.ComponentRefs,
 		DeploymentOrder: deployOrder,
+		Validation:      mergedSpec.Validation,
 	}
 	result.Metadata.AppliedOverlays = appliedOverlays
 

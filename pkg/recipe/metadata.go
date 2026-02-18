@@ -371,6 +371,26 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 	sort.Slice(s.ComponentRefs, func(i, j int) bool {
 		return s.ComponentRefs[i].Name < s.ComponentRefs[j].Name
 	})
+
+	// Merge validation config - overlay phases take precedence
+	if other.Validation != nil {
+		if s.Validation == nil {
+			s.Validation = other.Validation
+		} else {
+			if other.Validation.PreDeployment != nil {
+				s.Validation.PreDeployment = other.Validation.PreDeployment
+			}
+			if other.Validation.Deployment != nil {
+				s.Validation.Deployment = other.Validation.Deployment
+			}
+			if other.Validation.Performance != nil {
+				s.Validation.Performance = other.Validation.Performance
+			}
+			if other.Validation.Conformance != nil {
+				s.Validation.Conformance = other.Validation.Conformance
+			}
+		}
+	}
 }
 
 // mergeComponentRef merges overlay into base, with overlay taking precedence
@@ -447,6 +467,16 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	// Path: overlay takes precedence if set (for Kustomize)
 	if overlay.Path != "" {
 		result.Path = overlay.Path
+	}
+
+	// Cleanup: overlay takes precedence if true
+	if overlay.Cleanup {
+		result.Cleanup = overlay.Cleanup
+	}
+
+	// ExpectedResources: overlay replaces if set
+	if len(overlay.ExpectedResources) > 0 {
+		result.ExpectedResources = overlay.ExpectedResources
 	}
 
 	return result
