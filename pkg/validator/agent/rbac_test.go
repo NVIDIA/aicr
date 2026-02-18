@@ -119,40 +119,55 @@ func TestEnsureRole(t *testing.T) {
 			t.Errorf("expected namespace %q, got %q", deployer.config.Namespace, role.Namespace)
 		}
 
-		// Verify policy rules (apps rule moved to ClusterRole)
-		if len(role.Rules) != 3 {
-			t.Errorf("expected 3 rules, got %d", len(role.Rules))
+		// Verify policy rules - now includes pod creation/deletion for nvidia-smi check
+		if len(role.Rules) != 5 {
+			t.Errorf("expected 5 rules, got %d", len(role.Rules))
+		}
+
+		// Check namespace/events/services/endpoints/nodes read rule
+		rule0 := role.Rules[0]
+		if !containsResource(rule0.Resources, "namespaces") || !containsResource(rule0.Resources, "events") ||
+			!containsResource(rule0.Resources, "services") || !containsResource(rule0.Resources, "endpoints") ||
+			!containsResource(rule0.Resources, "nodes") {
+			t.Errorf("expected namespaces/events/services/endpoints/nodes in first rule, got %v", rule0.Resources)
+		}
+		if !containsVerb(rule0.Verbs, "get") || !containsVerb(rule0.Verbs, "list") {
+			t.Errorf("expected get/list verbs, got %v", rule0.Verbs)
 		}
 
 		// Check ConfigMap rule
-		rule0 := role.Rules[0]
-		if len(rule0.Resources) != 1 || rule0.Resources[0] != "configmaps" {
-			t.Errorf("expected configmaps in first rule, got %v", rule0.Resources)
-		}
-		if !containsVerb(rule0.Verbs, "get") || !containsVerb(rule0.Verbs, "list") ||
-			!containsVerb(rule0.Verbs, "create") || !containsVerb(rule0.Verbs, "update") {
-
-			t.Errorf("expected get/list/create/update verbs for configmaps, got %v", rule0.Verbs)
-		}
-
-		// Check pods/services/endpoints rule
 		rule1 := role.Rules[1]
-		if len(rule1.Resources) != 3 {
-			t.Errorf("expected 3 resources in second rule, got %d", len(rule1.Resources))
+		if len(rule1.Resources) != 1 || rule1.Resources[0] != "configmaps" {
+			t.Errorf("expected configmaps in second rule, got %v", rule1.Resources)
 		}
-		if !containsResource(rule1.Resources, "pods") || !containsResource(rule1.Resources, "services") ||
-			!containsResource(rule1.Resources, "endpoints") {
-
-			t.Errorf("expected pods/services/endpoints in second rule, got %v", rule1.Resources)
-		}
-		if !containsVerb(rule1.Verbs, "get") || !containsVerb(rule1.Verbs, "list") {
-			t.Errorf("expected get/list verbs, got %v", rule1.Verbs)
+		if !containsVerb(rule1.Verbs, "get") || !containsVerb(rule1.Verbs, "list") ||
+			!containsVerb(rule1.Verbs, "create") || !containsVerb(rule1.Verbs, "update") {
+			t.Errorf("expected get/list/create/update verbs for configmaps, got %v", rule1.Verbs)
 		}
 
-		// Check batch rule (apps rule moved to ClusterRole for cluster-wide access)
+		// Check pods CRUD rule (needed for nvidia-smi check)
 		rule2 := role.Rules[2]
-		if rule2.APIGroups[0] != "batch" {
-			t.Errorf("expected batch API group, got %v", rule2.APIGroups)
+		if len(rule2.Resources) != 1 || rule2.Resources[0] != "pods" {
+			t.Errorf("expected pods in third rule, got %v", rule2.Resources)
+		}
+		if !containsVerb(rule2.Verbs, "get") || !containsVerb(rule2.Verbs, "list") ||
+			!containsVerb(rule2.Verbs, "create") || !containsVerb(rule2.Verbs, "delete") {
+			t.Errorf("expected get/list/create/delete verbs for pods, got %v", rule2.Verbs)
+		}
+
+		// Check pods/log and pods/status read rule
+		rule3 := role.Rules[3]
+		if !containsResource(rule3.Resources, "pods/log") || !containsResource(rule3.Resources, "pods/status") {
+			t.Errorf("expected pods/log and pods/status in fourth rule, got %v", rule3.Resources)
+		}
+		if !containsVerb(rule3.Verbs, "get") || !containsVerb(rule3.Verbs, "list") {
+			t.Errorf("expected get/list verbs for pod subresources, got %v", rule3.Verbs)
+		}
+
+		// Check batch rule
+		rule4 := role.Rules[4]
+		if rule4.APIGroups[0] != "batch" {
+			t.Errorf("expected batch API group, got %v", rule4.APIGroups)
 		}
 	})
 

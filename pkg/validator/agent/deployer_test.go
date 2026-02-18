@@ -87,8 +87,8 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Role not found: %v", err)
 		}
-		if len(role.Rules) != 3 {
-			t.Errorf("expected 3 rules, got %d", len(role.Rules))
+		if len(role.Rules) != 5 {
+			t.Errorf("expected 5 rules, got %d", len(role.Rules))
 		}
 
 		// Verify RoleBinding
