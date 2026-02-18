@@ -78,11 +78,13 @@ invalid: [unclosed`,
 				}
 				defer os.Remove(tmpfile.Name())
 
-				if _, err := tmpfile.Write([]byte(tt.template)); err != nil {
-					t.Fatal(err)
+				_, writeErr := tmpfile.Write([]byte(tt.template))
+				if writeErr != nil {
+					t.Fatal(writeErr)
 				}
-				if err := tmpfile.Close(); err != nil {
-					t.Fatal(err)
+				closeErr := tmpfile.Close()
+				if closeErr != nil {
+					t.Fatal(closeErr)
 				}
 
 				pod, err := loadPodFromTemplate(tmpfile.Name(), tt.data)
@@ -128,11 +130,13 @@ spec:
 	}
 	defer os.Remove(tmpfile.Name())
 
-	if _, err := tmpfile.Write([]byte(template)); err != nil {
-		t.Fatal(err)
+	_, writeErr := tmpfile.Write([]byte(template))
+	if writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatal(err)
+	closeErr := tmpfile.Close()
+	if closeErr != nil {
+		t.Fatal(closeErr)
 	}
 
 	data := map[string]string{

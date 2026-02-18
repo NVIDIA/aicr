@@ -114,7 +114,7 @@ func TestIsNodeGpuBusy(t *testing.T) {
 			name:     "node is busy with running GPU pod",
 			nodeName: "gpu-node-1",
 			pods: []v1.Pod{
-				createGpuPod("test-pod", "gpu-node-1", v1.PodRunning, true),
+				createGpuPod(v1.PodRunning, true),
 			},
 			wantBusy: true,
 			wantErr:  false,
@@ -123,7 +123,7 @@ func TestIsNodeGpuBusy(t *testing.T) {
 			name:     "node is busy with pending GPU pod",
 			nodeName: "gpu-node-1",
 			pods: []v1.Pod{
-				createGpuPod("test-pod", "gpu-node-1", v1.PodPending, true),
+				createGpuPod(v1.PodPending, true),
 			},
 			wantBusy: true,
 			wantErr:  false,
@@ -132,7 +132,7 @@ func TestIsNodeGpuBusy(t *testing.T) {
 			name:     "node is free - succeeded pod",
 			nodeName: "gpu-node-1",
 			pods: []v1.Pod{
-				createGpuPod("test-pod", "gpu-node-1", v1.PodSucceeded, true),
+				createGpuPod(v1.PodSucceeded, true),
 			},
 			wantBusy: false,
 			wantErr:  false,
@@ -141,7 +141,7 @@ func TestIsNodeGpuBusy(t *testing.T) {
 			name:     "node is free - failed pod",
 			nodeName: "gpu-node-1",
 			pods: []v1.Pod{
-				createGpuPod("test-pod", "gpu-node-1", v1.PodFailed, true),
+				createGpuPod(v1.PodFailed, true),
 			},
 			wantBusy: false,
 			wantErr:  false,
@@ -150,7 +150,7 @@ func TestIsNodeGpuBusy(t *testing.T) {
 			name:     "node is free - no GPU requests",
 			nodeName: "gpu-node-1",
 			pods: []v1.Pod{
-				createGpuPod("test-pod", "gpu-node-1", v1.PodRunning, false),
+				createGpuPod(v1.PodRunning, false),
 			},
 			wantBusy: false,
 			wantErr:  false,
@@ -211,10 +211,11 @@ func createNode(name string, unschedulable bool, hasGPU bool) v1.Node {
 	return node
 }
 
-func createGpuPod(name, nodeName string, phase v1.PodPhase, requestGPU bool) v1.Pod {
+func createGpuPod(phase v1.PodPhase, requestGPU bool) v1.Pod {
+	nodeName := "gpu-node-1"
 	pod := v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      "test-pod",
 			Namespace: "default",
 		},
 		Spec: v1.PodSpec{
