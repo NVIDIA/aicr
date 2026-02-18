@@ -25,10 +25,10 @@ fullnameOverride: nvidia-dra-driver-gpu
 
 nvidiaDriverRoot: /run/nvidia/driver
 
-gpuResourcesEnabledOverride: false
+gpuResourcesEnabledOverride: true
 resources:
   gpus:
-    enabled: false
+    enabled: true
 
 controller:
   priorityClassName: ""

@@ -184,7 +184,7 @@ spec:
     - name: nvidia-dra-driver-gpu
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia
-      version: "25.8.1"
+      version: "25.12.0"
       valuesFile: components/nvidia-dra-driver-gpu/values.yaml
       dependencyRefs:
         - gpu-operator
