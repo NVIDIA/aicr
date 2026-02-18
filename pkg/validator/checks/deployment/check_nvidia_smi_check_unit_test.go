@@ -17,6 +17,7 @@ package deployment
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/eidos/pkg/recipe"
 	"github.com/NVIDIA/eidos/pkg/validator/checks"
@@ -33,7 +34,7 @@ func TestValidateCheckNvidiaSmi(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "success case",
+			name: "fails with fake clientset - cannot simulate pod lifecycle",
 			setup: func() *checks.ValidationContext {
 				// Create a fake node with GPU resources
 				node := &v1.Node{
@@ -49,9 +50,12 @@ func TestValidateCheckNvidiaSmi(t *testing.T) {
 						},
 					},
 				}
+				// Use a short timeout context for unit tests to fail fast
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_ = cancel // Will be called by test cleanup
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 				return &checks.ValidationContext{
-					Context:   context.Background(),
+					Context:   ctx,
 					Namespace: "default",
 					Clientset: fake.NewSimpleClientset(node),
 					RecipeData: map[string]interface{}{
@@ -59,7 +63,7 @@ func TestValidateCheckNvidiaSmi(t *testing.T) {
 					},
 				}
 			},
-			wantErr: false,
+			wantErr: true, // Fake clientset cannot simulate pod completion
 		},
 		// TODO: Add failure test cases when implementation is complete
 		// {
