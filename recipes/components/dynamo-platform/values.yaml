@@ -35,9 +35,11 @@ dynamo-operator:
 kai-scheduler:
   enabled: false
 
-# Disable grove — enable when multinode inference coordination is needed
+# Grove operator for pod lifecycle management (required by DynamoGraphDeployment)
 grove:
-  enabled: false
+  enabled: true
+  tolerations:
+    - operator: Exists
 
 # etcd for operator state storage
 # Do NOT set fullnameOverride — the operator constructs the etcd endpoint from

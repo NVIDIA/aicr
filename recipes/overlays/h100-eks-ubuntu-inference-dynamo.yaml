@@ -59,17 +59,19 @@ spec:
   #     --protocol tcp --port 4222 --source-group <gpu-sg-id>
 
   componentRefs:
-    # Disable CDI in the GPU Operator ClusterPolicy to prevent the
-    # KAI scheduler binder from injecting management.nvidia.com CDI
-    # annotations.  GPU Operator >= v25.10.0 with cdi.enabled=true
-    # triggers the KAI operator to set --cdi-enabled=true on the binder,
-    # which injects CDI device annotations that fail to resolve on nodes
-    # where the management.nvidia.com CDI spec lacks UUID-based entries.
+    # Pin GPU Operator to v25.3.4 for dynamo inference recipes.
+    # GPU Operator v25.10.0+ with cdi.enabled=true triggers KAI scheduler
+    # to inject runtimeClassName: nvidia, which activates the
+    # management.nvidia.com CDI path and fails with "unresolvable CDI
+    # devices". v25.3.4 with cdi.default=false avoids this while still
+    # enabling CDI for DRA GPU allocation.
     - name: gpu-operator
       type: Helm
+      version: v25.3.4
       overrides:
         cdi:
-          enabled: false
+          enabled: true
+          default: false
 
     - name: nvidia-dra-driver-gpu
       type: Helm
@@ -90,7 +92,7 @@ spec:
     - name: kai-scheduler
       type: Helm
       source: oci://ghcr.io/nvidia/kai-scheduler
-      version: v0.12.10
+      version: v0.12.14
       valuesFile: components/kai-scheduler/values.yaml
       dependencyRefs:
         - gpu-operator
