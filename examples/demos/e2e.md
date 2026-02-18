@@ -168,18 +168,12 @@ Prep the deployment:
 chmod +x deploy.sh && ./deploy.sh
 ```
 
-View bundle README: 
-
-```shell
-grip --browser --quiet ./bundle/README.md
-```
-
 Bundle as an OCI image:
 
 ```shell
 eidos bundle \
   --recipe recipe.yaml \
-  --output oci://ghcr.io/NVIDIA/eidos-bundle \
+  --output oci://ghcr.io/nvidia/eidos-bundle-example \
   --deployer argocd \
   --image-refs .digest
 ```
@@ -187,13 +181,13 @@ eidos bundle \
 Review manifest: 
 
 ```shell
-crane manifest "ghcr.io/NVIDIA/eidos-bundle@$(cat .digest)" | jq .
+crane manifest "ghcr.io/nvidia/eidos-bundle-example@$(cat .digest)" | jq .
 ```
 
 Unpack the image: 
 
 ```shell
-skopeo copy "docker://ghcr.io/NVIDIA/eidos-bundle@$(cat .digest)" oci:image-oci
+skopeo copy "docker://ghcr.io/nvidia/eidos-bundle-example@$(cat .digest)" oci:image-oci
 mkdir -p ./eidos-unpacked
 oras pull --oci-layout "image-oci@$(cat .digest)" -o ./eidos-unpacked
 ```

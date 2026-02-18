@@ -32,10 +32,9 @@ Now generate bundles:
 ```shell
 eidos bundle \
   --recipe recipe.yaml \
-  --output ./bundle \
   --data ./examples/data \
   --deployer argocd \
-  --output oci://ghcr.io/NVIDIA/eidos-bundle \
+  --output oci://ghcr.io/nvidia/eidos-bundle \
   --system-node-selector nodeGroup=system-pool \
   --accelerated-node-selector nodeGroup=customer-gpu \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
