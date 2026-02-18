@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.3] - 2026-02-18
+
+### Bug Fixes
+
+- Add merge logic for ExpectedResources, Cleanup, and ValidationConfig in recipe overlays  by [@xdu31](https://github.com/xdu31)
+
 ## [0.7.2] - 2026-02-18
 
 ### Bug Fixes
