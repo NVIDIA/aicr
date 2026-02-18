@@ -112,6 +112,7 @@ func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, pod *v1.Pod, timeo
 			diagCtx, diagCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer diagCancel()
 
+			//nolint:contextcheck // intentionally using a fresh context for diagnostics after parent timeout
 			foundPod, err := p.ClientSet.CoreV1().Pods(p.Namespace).Get(diagCtx, pod.Name, metav1.GetOptions{})
 			if err != nil {
 				return fmt.Errorf("timed out waiting for pod %s to succeed, and failed to get current state: %w", pod.Name, err)
@@ -284,6 +285,8 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 				return nil
 			case v1.PodFailed:
 				return fmt.Errorf("pod %s entered Failed phase while waiting for Running", pod.Name)
+			case v1.PodPending, v1.PodSucceeded, v1.PodUnknown:
+				// continue polling
 			}
 		}
 	}

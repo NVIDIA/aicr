@@ -109,6 +109,24 @@ func TestValidateGPUOperatorVersion(t *testing.T) {
 			expectNoDeployment: true,
 			wantErr:            true,
 		},
+		{
+			name: "extract version from annotation",
+			deployment: func() *appsv1.Deployment {
+				d := createGPUOperatorDeployment("gpu-operator", "gpu-operator", nil,
+					"nvcr.io/nvidia/some-other-image:latest")
+				d.Annotations = map[string]string{
+					"nvidia.com/gpu-operator-version": "v24.9.0",
+				}
+				return d
+			}(),
+			constraint: recipe.Constraint{
+				Name:  "Deployment.gpu-operator.version",
+				Value: ">= v24.6.0",
+			},
+			wantVersion: "v24.9.0",
+			wantPassed:  true,
+			wantErr:     false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -147,6 +165,22 @@ func TestValidateGPUOperatorVersion(t *testing.T) {
 				t.Errorf("ValidateGPUOperatorVersion() passed = %v, want %v", gotPassed, tt.wantPassed)
 			}
 		})
+	}
+}
+
+func TestValidateGPUOperatorVersionNilClient(t *testing.T) {
+	ctx := &checks.ValidationContext{
+		Context:   context.Background(),
+		Clientset: nil,
+	}
+	constraint := recipe.Constraint{
+		Name:  "Deployment.gpu-operator.version",
+		Value: ">= v24.6.0",
+	}
+
+	_, _, err := ValidateGPUOperatorVersion(ctx, constraint)
+	if err == nil {
+		t.Error("ValidateGPUOperatorVersion() with nil clientset should return error")
 	}
 }
 

@@ -357,6 +357,115 @@ func TestLoadValidationContext_InvalidRecipeData(t *testing.T) {
 	}
 }
 
+func TestTestRunner_HasCheck(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			PreDeployment: &recipe.ValidationPhase{
+				Checks: []string{"gpu-hardware-detection"},
+			},
+			Deployment: &recipe.ValidationPhase{
+				Checks: []string{"operator-health", "check-nvidia-smi"},
+			},
+			Performance: &recipe.ValidationPhase{
+				Checks: []string{"nccl-bandwidth"},
+			},
+			Conformance: &recipe.ValidationPhase{
+				Checks: []string{"k8s-conformance"},
+			},
+		},
+	}
+
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	runner := &TestRunner{
+		t: t,
+		ctx: &ValidationContext{
+			Context:   context.Background(),
+			Clientset: fake.NewSimpleClientset(),
+			Recipe:    recipeResult,
+		},
+	}
+
+	tests := []struct {
+		name      string
+		phase     string
+		checkName string
+		want      bool
+	}{
+		{"readiness phase has check", "readiness", "gpu-hardware-detection", true},
+		{"preDeployment alias", "preDeployment", "gpu-hardware-detection", true},
+		{"readiness phase missing check", "readiness", "nonexistent", false},
+		{"deployment phase has check", "deployment", "operator-health", true},
+		{"deployment phase has second check", "deployment", "check-nvidia-smi", true},
+		{"deployment phase missing check", "deployment", "nonexistent", false},
+		{"performance phase has check", "performance", "nccl-bandwidth", true},
+		{"performance phase missing check", "performance", "nonexistent", false},
+		{"conformance phase has check", "conformance", "k8s-conformance", true},
+		{"conformance phase missing check", "conformance", "nonexistent", false},
+		{"unknown phase", "unknown", "operator-health", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := runner.HasCheck(tt.phase, tt.checkName)
+			if got != tt.want {
+				t.Errorf("HasCheck(%q, %q) = %v, want %v", tt.phase, tt.checkName, got, tt.want)
+			}
+		})
+	}
+
+	// Test nil recipe
+	t.Run("nil recipe", func(t *testing.T) {
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		nilRunner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    nil,
+			},
+		}
+		if nilRunner.HasCheck("deployment", "operator-health") {
+			t.Error("HasCheck() should return false with nil recipe")
+		}
+	})
+
+	// Test nil validation
+	t.Run("nil validation", func(t *testing.T) {
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		nilValRunner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe:    &recipe.RecipeResult{Validation: nil},
+			},
+		}
+		if nilValRunner.HasCheck("deployment", "operator-health") {
+			t.Error("HasCheck() should return false with nil validation")
+		}
+	})
+
+	// Test nil phase
+	t.Run("nil deployment phase", func(t *testing.T) {
+		//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+		nilPhaseRunner := &TestRunner{
+			t: t,
+			ctx: &ValidationContext{
+				Context:   context.Background(),
+				Clientset: fake.NewSimpleClientset(),
+				Recipe: &recipe.RecipeResult{
+					Validation: &recipe.ValidationConfig{
+						Deployment: nil,
+					},
+				},
+			},
+		}
+		if nilPhaseRunner.HasCheck("deployment", "operator-health") {
+			t.Error("HasCheck() should return false with nil deployment phase")
+		}
+	})
+}
+
 // Helper types for testing
 
 type testError struct {
