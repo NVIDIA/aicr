@@ -150,7 +150,7 @@ func verifySingleNode(ctx *checks.ValidationContext, t *testing.T, nodeName stri
 	// Check if pod failed
 	if waitErr != nil {
 		logSnippet := getLogSnippet(podLogs, logContextLines)
-		return fmt.Errorf("pod failed on node %s: %w\nLast %d lines of logs:\n%s",
+		return fmt.Errorf("pod failed on node %s: %w\nFirst %d lines of logs:\n%s",
 			nodeName, waitErr, logContextLines, logSnippet)
 	}
 

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -85,7 +86,10 @@ func (p *PodLifecycle) WaitForPodByName(ctx context.Context, podName string, tim
 				p.T.Logf("Found pod %s (status: %s)", podName, foundPod.Status.Phase)
 				return foundPod, nil
 			}
-			// Continue polling if pod not found
+			// Continue polling only if pod not found; fail fast on other errors
+			if !errors.IsNotFound(err) {
+				return nil, fmt.Errorf("error getting pod %s: %w", podName, err)
+			}
 		}
 	}
 }
@@ -104,8 +108,11 @@ func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, pod *v1.Pod, timeo
 	for {
 		select {
 		case <-ctx.Done():
-			// Get current pod state for error message
-			foundPod, err := p.ClientSet.CoreV1().Pods(p.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
+			// Get current pod state for error message using a fresh, short-lived context
+			diagCtx, diagCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer diagCancel()
+
+			foundPod, err := p.ClientSet.CoreV1().Pods(p.Namespace).Get(diagCtx, pod.Name, metav1.GetOptions{})
 			if err != nil {
 				return fmt.Errorf("timed out waiting for pod %s to succeed, and failed to get current state: %w", pod.Name, err)
 			}
@@ -191,7 +198,7 @@ func (p *PodLifecycle) GetPodLogs(ctx context.Context, pod *v1.Pod) (string, err
 	}
 	defer func() {
 		if closeErr := logsReader.Close(); closeErr != nil {
-			fmt.Printf("Error closing logs reader: %v\n", closeErr)
+			p.T.Logf("Error closing logs reader: %v", closeErr)
 		}
 	}()
 
@@ -203,7 +210,7 @@ func (p *PodLifecycle) GetPodLogs(ctx context.Context, pod *v1.Pod) (string, err
 	return string(logBytes), nil
 }
 
-// CleanupPod deletes a pod and waits for deletion to complete
+// CleanupPod deletes a pod
 func (p *PodLifecycle) CleanupPod(ctx context.Context, pod *v1.Pod) error {
 	cleanupCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -257,7 +264,29 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 	defer cancel()
 
 	p.T.Logf("Waiting for pod %s to reach Running state...", pod.Name)
-	return p.WaitForPodSuccess(waitCtx, pod, timeout)
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-waitCtx.Done():
+			return fmt.Errorf("timeout waiting for pod %s to reach Running state", pod.Name)
+		case <-ticker.C:
+			foundPod, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(waitCtx, pod.Name, metav1.GetOptions{})
+			if err != nil {
+				return fmt.Errorf("failed to get pod %s: %w", pod.Name, err)
+			}
+
+			switch foundPod.Status.Phase {
+			case v1.PodRunning:
+				p.T.Logf("Pod %s is now in Running state", pod.Name)
+				return nil
+			case v1.PodFailed:
+				return fmt.Errorf("pod %s entered Failed phase while waiting for Running", pod.Name)
+			}
+		}
+	}
 }
 
 // LoadPodFromTemplate reads and processes a pod template file with variable substitution
@@ -271,7 +300,6 @@ func loadPodFromTemplate(templatePath string, data map[string]string) (*v1.Pod, 
 	yamlContent := string(content)
 	for key, value := range data {
 		yamlContent = strings.ReplaceAll(yamlContent, "${"+key+"}", value)
-		fmt.Println("Pod Specs Template:", yamlContent)
 	}
 	pod := &v1.Pod{}
 	if err := yaml.Unmarshal([]byte(yamlContent), pod); err != nil {

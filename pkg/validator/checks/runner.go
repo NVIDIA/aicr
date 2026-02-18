@@ -227,7 +227,7 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	namespace, err := getNamespaceFromServiceAccount()
 	if err != nil {
 		cancel()
-		return nil, nil, fmt.Errorf("failed to get namespace from service account: %w", err)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to get namespace from service account", err)
 	}
 
 	// Load snapshot from mounted file using serializer (auto-detects YAML/JSON format)

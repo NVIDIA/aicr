@@ -14,7 +14,7 @@ Check nvidia smi works on GPU Nodes and that means GPU nodes are configured corr
 1. Edit `check_nvidia_smi_check.go` and implement `validateCheckNvidiaSmi()`:
 
 ```go
-func validateCheckNvidiaSmi(ctx *checks.ValidationContext) error {
+func validateCheckNvidiaSmi(ctx *checks.ValidationContext, t *testing.T) error {
     // Your validation logic here
     // Return nil if check passes, error if it fails
     return nil

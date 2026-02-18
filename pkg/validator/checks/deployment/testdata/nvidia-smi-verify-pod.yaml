@@ -36,4 +36,4 @@ spec:
   - key: dedicated
     value: user-workload
     operator: Equal
-    effect: NoExecute 
+    effect: NoExecute
