@@ -58,6 +58,21 @@ func (r *Reader) Read(url string) ([]byte, error) {
 **Decision Framework:**
 Choose solutions based on: testability, readability, consistency, simplicity, reversibility
 
+**Kubernetes Patterns:**
+- Use watch API instead of polling loops for efficiency
+- Use shared utilities from `pkg/k8s/pod` (WaitForJobCompletion, StreamLogs, GetPodLogs, WaitForPodReady, ParseConfigMapURI)
+- Never reimplement Job/Pod operations — always check `pkg/k8s/pod` first
+
+**Test Isolation:**
+- Always use `--no-cluster` flag in E2E tests (chainsaw, tools/e2e)
+- Always use `validator.WithNoCluster(true)` in unit tests
+- Never connect to production clusters from tests
+- Test mode skips RBAC creation and Job deployment
+
+**Configuration Options:**
+- Use pointer pattern for optional config (nil = not set, &value = set)
+- Avoid boolean flags to track whether option was set — pointers make intent clear
+
 ---
 
 ## Project Context
@@ -80,8 +95,9 @@ NVIDIA Eidos provides validated GPU-accelerated Kubernetes configurations throug
 
 **Package Architecture (Critical Principle):**
 - **User Interaction Packages** (`pkg/cli`, `pkg/api`): Focus solely on capturing user intent, validating input, and formatting output. No business logic.
-- **Functional Packages** (`pkg/oci`, `pkg/bundler`, `pkg/recipe`, `pkg/collector`): Self-contained, reusable business logic. Should be usable independently without CLI/API.
-- **Example**: OCI packaging logic lives in `pkg/oci` (not `pkg/cli`), so both CLI and API can use it. Deployers return structured `DeploymentInfo` so the CLI just formats output.
+- **Functional Packages** (`pkg/oci`, `pkg/bundler`, `pkg/recipe`, `pkg/collector`, `pkg/validator`): Self-contained, reusable business logic. Should be usable independently without CLI/API.
+- **Shared Utilities** (`pkg/k8s/pod`, `pkg/defaults`, `pkg/errors`): Common functionality reused across multiple packages. Avoid duplication.
+- **Example**: OCI packaging logic lives in `pkg/oci` (not `pkg/cli`), so both CLI and API can use it. Job/Pod operations live in `pkg/k8s/pod` so both agent packages can use them.
 
 ---
 

@@ -94,6 +94,8 @@ make tools-check  # Verify versions match .settings.yaml
 | `pkg/validator` | Constraint evaluation | Yes |
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/k8s/client` | Singleton Kubernetes client | Yes |
+| `pkg/k8s/pod` | Shared K8s Job/Pod utilities (wait, logs, ConfigMap URIs) | Yes |
+| `pkg/defaults` | Centralized timeout and configuration constants | Yes |
 
 **Critical Architecture Principle:**
 - `pkg/cli` and `pkg/api` = user interaction only, no business logic
@@ -298,6 +300,73 @@ ExpectContinueTimeout: 1 * time.Second,
 ExpectContinueTimeout: defaults.HTTPExpectContinueTimeout,
 ```
 
+## Kubernetes Patterns
+
+**Use watch API instead of polling** for efficiency and reduced API server load:
+```go
+// BAD - polling with sleep
+ticker := time.NewTicker(500 * time.Millisecond)
+for {
+    select {
+    case <-ticker.C:
+        pod, err := client.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
+        if pod.Status.Phase == v1.PodSucceeded {
+            return nil
+        }
+    }
+}
+
+// GOOD - watch API
+watcher, err := client.CoreV1().Pods(ns).Watch(ctx, metav1.ListOptions{
+    FieldSelector: "metadata.name=" + name,
+})
+defer watcher.Stop()
+for event := range watcher.ResultChan() {
+    pod := event.Object.(*v1.Pod)
+    if pod.Status.Phase == v1.PodSucceeded {
+        return nil
+    }
+}
+```
+
+**Use shared utilities from `pkg/k8s/pod`** instead of reimplementing:
+```go
+// Use for Job completion
+err := pod.WaitForJobCompletion(ctx, client, namespace, jobName, timeout)
+
+// Use for pod logs
+logs, err := pod.GetPodLogs(ctx, client, namespace, podName)
+
+// Use for streaming logs
+err := pod.StreamLogs(ctx, client, namespace, podName, os.Stdout)
+
+// Use for ConfigMap URI parsing
+namespace, name, err := pod.ParseConfigMapURI("cm://gpu-operator/eidos-snapshot")
+```
+
+## Test Isolation
+
+**Always use `--no-cluster` flag in tests** to prevent production cluster access:
+```go
+// Unit tests: Use WithNoCluster(true)
+v := validator.New(
+    validator.WithNoCluster(true),
+    validator.WithVersion(version),
+)
+
+// E2E tests: Use --no-cluster flag
+eidos validate --recipe recipe.yaml --snapshot snapshot.yaml --no-cluster
+
+// Chainsaw tests: Always include --no-cluster
+${EIDOS_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
+```
+
+**Test mode behavior:** When `NoCluster` is true:
+- Validator skips RBAC creation (ServiceAccount, Role, ClusterRole)
+- Validator skips Job deployment for checks
+- All checks report status as "skipped - no-cluster mode (test mode)"
+- Constraints are still evaluated inline (no cluster access needed)
+
 ## Anti-Patterns (Do Not Do)
 
 | Anti-Pattern | Correct Approach |
@@ -316,6 +385,10 @@ ExpectContinueTimeout: defaults.HTTPExpectContinueTimeout,
 | Create new files when editing suffices | Prefer `Edit` over `Write` |
 | Guess at missing parameters | Ask for clarification |
 | Continue after 3 failed fix attempts | Stop, reassess approach, explain blockers |
+| Use polling loops for K8s operations | Use watch API for efficiency |
+| Duplicate K8s utilities across packages | Use shared utilities from `pkg/k8s/pod` |
+| Run tests that connect to live clusters | Always use `--no-cluster` flag in tests |
+| Use boolean flags to track options | Use pointer pattern (nil = not set, &value = set) |
 
 ## Key Files
 
