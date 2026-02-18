@@ -30,6 +30,10 @@ on:
       - 'tests/manifests/**'
       - 'tests/chainsaw/ai-conformance/**'
       - 'recipes/components/dynamo-platform/**'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/kind-inference.yaml'
+      - 'recipes/overlays/h100-kind-inference.yaml'
+      - 'recipes/overlays/h100-kind-inference-dynamo.yaml'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:

@@ -34,14 +34,6 @@ spec:
       value: ">= 1.34"
 
   componentRefs:
-    # Disable CDI in the GPU Operator ClusterPolicy to prevent the
-    # KAI scheduler binder from injecting unresolvable CDI annotations.
-    - name: gpu-operator
-      type: Helm
-      overrides:
-        cdi:
-          enabled: false
-
     - name: kai-scheduler
       type: Helm
       source: oci://ghcr.io/nvidia/kai-scheduler
