@@ -17,16 +17,16 @@
 # Provides NVIDIA Dynamo inference serving: OpenAI-compatible endpoints,
 # KV-cache-aware routing, disaggregated prefill/decode, SLA-driven autoscaling.
 #
-# Resource naming:
-#   dynamo-operator: fullnameOverride=dynamo-operator
-#   etcd: default (<release>-etcd = dynamo-platform-etcd)
-#   nats: default (<release>-nats = dynamo-platform-nats)
+# Resource naming (all use default <release>-<subchart> pattern):
+#   dynamo-operator: <release>-dynamo-operator = dynamo-platform-dynamo-operator
+#   etcd: <release>-etcd = dynamo-platform-etcd
+#   nats: <release>-nats = dynamo-platform-nats
 
 # Dynamo Operator — manages DynamoComponent and DynamoGraphDeployment CRs
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: dynamo-operator-controller-manager
+  name: dynamo-platform-dynamo-operator-controller-manager
   namespace: dynamo-system
 status:
   (conditions[?type == 'Available']):
