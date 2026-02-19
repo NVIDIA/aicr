@@ -51,7 +51,14 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.issue.number,
-                body: `Welcome to Eidos, @${creator}! Thanks for opening your first issue.\n\nA maintainer will triage this shortly. In the meantime:\n- Check the [Contributing Guide](../blob/main/CONTRIBUTING.md) for project conventions\n- Browse existing [labels](../../labels) for related topics\n- Join the conversation in [Discussions](../../discussions) for questions`,
+                body: [
+                  `Welcome to Eidos, @${creator}! Thanks for opening your first issue.`,
+                  '',
+                  'A maintainer will triage this shortly. In the meantime:',
+                  '- Check the [Contributing Guide](../blob/main/CONTRIBUTING.md) for project conventions',
+                  '- Browse existing [labels](../../labels) for related topics',
+                  '- Join the conversation in [Discussions](../../discussions) for questions',
+                ].join('\n'),
               });
             }
 
@@ -74,6 +81,15 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: context.payload.pull_request.number,
-                body: `Welcome to Eidos, @${creator}! Thanks for your first pull request.\n\nBefore review, please ensure:\n- All commits are signed off per the [DCO](../blob/main/CONTRIBUTING.md#developer-certificate-of-origin)\n- CI checks pass (tests, lint, security scan)\n- The PR description explains the *why* behind your changes\n\nA maintainer will review this soon.`,
+                body: [
+                  `Welcome to Eidos, @${creator}! Thanks for your first pull request.`,
+                  '',
+                  'Before review, please ensure:',
+                  '- All commits are signed off per the [DCO](../blob/main/CONTRIBUTING.md#developer-certificate-of-origin)',
+                  '- CI checks pass (tests, lint, security scan)',
+                  '- The PR description explains the *why* behind your changes',
+                  '',
+                  'A maintainer will review this soon.',
+                ].join('\n'),
               });
             }
