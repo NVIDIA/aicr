@@ -97,6 +97,11 @@ func main() {
 				Value:   []string{"./cluster"},
 				Usage:   "directories containing assert-*.yaml files (can be repeated)",
 			},
+			&cli.StringSliceFlag{
+				Name:    "file",
+				Aliases: []string{"f"},
+				Usage:   "individual assert YAML files to include (can be repeated)",
+			},
 			&cli.DurationFlag{
 				Name:  "timeout",
 				Value: 2 * time.Minute,
@@ -150,6 +155,25 @@ func run(ctx context.Context, cmd *cli.Command) error {
 			added++
 		}
 		slog.Info("parsed assert files", "resources", added, "dir", dir)
+	}
+	// Parse individual files specified via --file.
+	for _, f := range cmd.StringSlice("file") {
+		parsed, err := parseYAMLFile(f, filepath.Base(f))
+		if err != nil {
+			return err
+		}
+		var added int
+		for _, res := range parsed {
+			key := res.APIVersion + "/" + res.Kind + "/" + res.Metadata.Namespace + "/" + res.Metadata.Name
+			if seen[key] {
+				slog.Debug("skipping duplicate resource", "key", key, "file", f)
+				continue
+			}
+			seen[key] = true
+			resources = append(resources, res)
+			added++
+		}
+		slog.Info("parsed assert file", "resources", added, "file", f)
 	}
 	if len(resources) == 0 {
 		return errors.New(errors.ErrCodeNotFound, "no resources found in any assert-*.yaml files")

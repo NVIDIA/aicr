@@ -195,7 +195,14 @@ jobs:
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind \
-            --dir tests/chainsaw/ai-conformance/cluster \
+            --file tests/chainsaw/ai-conformance/cluster/assert-crds.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kgateway.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml \
             --kubeconfig="${HOME}/.kube/config" \
             --debug
 
