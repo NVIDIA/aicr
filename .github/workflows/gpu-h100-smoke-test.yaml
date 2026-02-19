@@ -188,6 +188,36 @@ jobs:
           fi
           echo "Dynamo vLLM inference smoke test passed."
 
+      # --- DRA GPU allocation test ---
+
+      - name: Deploy DRA GPU test
+        run: |
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply \
+            -f tests/manifests/dra-gpu-test.yaml
+
+          echo "Waiting for DRA GPU test pod to complete..."
+          if kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            wait --for=jsonpath='{.status.phase}'=Succeeded pod/dra-gpu-test --timeout=120s; then
+            echo "DRA GPU allocation test passed."
+          else
+            echo "::error::DRA GPU test pod did not succeed"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+              logs pod/dra-gpu-test 2>/dev/null || true
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+              get pod/dra-gpu-test -o yaml 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "=== DRA GPU test logs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            logs pod/dra-gpu-test
+
+      - name: DRA GPU test cleanup
+        if: always()
+        run: |
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" delete \
+            -f tests/manifests/dra-gpu-test.yaml --ignore-not-found 2>/dev/null || true
+
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
