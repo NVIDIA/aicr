@@ -159,6 +159,8 @@ Navigate into the bundle:
 cd ./bundle && tree .
 ```
 
+![data flow](images/data.png)
+
 Review the checksums: 
 
 ```shell
@@ -209,6 +211,8 @@ View embedded data files structure:
 ```shell
 cd ../ && tree -L 2 ./recipes/
 ```
+
+![data flow](images/workflow.png)
 
 ## Runtime Data Support
 
