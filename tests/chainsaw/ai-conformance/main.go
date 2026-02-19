@@ -91,11 +91,11 @@ func main() {
 				Usage:   "path to kubeconfig file",
 				Sources: cli.EnvVars("KUBECONFIG"),
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:    "dir",
 				Aliases: []string{"d"},
-				Value:   "./cluster",
-				Usage:   "directory containing assert-*.yaml files",
+				Value:   []string{"./cluster"},
+				Usage:   "directories containing assert-*.yaml files (can be repeated)",
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -126,13 +126,35 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	ctx, cancel := context.WithTimeout(ctx, cmd.Duration("timeout"))
 	defer cancel()
 
-	// Parse YAML files.
-	dir := cmd.String("dir")
-	resources, err := parseAssertFiles(dir)
-	if err != nil {
-		return err
+	// Parse YAML files from all directories. Earlier directories take
+	// priority when the same resource (kind+name+namespace) appears in
+	// multiple directories (e.g., kind/ has a reduced gpu-operator set
+	// while cluster/ has the full set — we want the kind-specific one).
+	dirs := cmd.StringSlice("dir")
+	var resources []resourceIdentity
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		parsed, err := parseAssertFiles(dir)
+		if err != nil {
+			return err
+		}
+		var added int
+		for _, res := range parsed {
+			key := res.APIVersion + "/" + res.Kind + "/" + res.Metadata.Namespace + "/" + res.Metadata.Name
+			if seen[key] {
+				slog.Debug("skipping duplicate resource", "key", key, "dir", dir)
+				continue
+			}
+			seen[key] = true
+			resources = append(resources, res)
+			added++
+		}
+		slog.Info("parsed assert files", "resources", added, "dir", dir)
 	}
-	slog.Info("parsed assert files", "resources", len(resources), "dir", dir)
+	if len(resources) == 0 {
+		return errors.New(errors.ErrCodeNotFound, "no resources found in any assert-*.yaml files")
+	}
+	slog.Info("total resources to check", "count", len(resources))
 
 	// Build K8s clients.
 	kubeconfig := cmd.String("kubeconfig")

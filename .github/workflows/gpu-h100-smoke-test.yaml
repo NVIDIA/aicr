@@ -195,6 +195,7 @@ jobs:
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind \
+            --dir tests/chainsaw/ai-conformance/cluster \
             --kubeconfig="${HOME}/.kube/config" \
             --debug
 
