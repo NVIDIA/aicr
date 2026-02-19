@@ -26,7 +26,3 @@ global:
 # Helm uninstall already removes the deployments this hook would delete.
 postCleanup:
   enabled: false
-
-# CDI support for GPU device assignment
-admission:
-  cdi: true
