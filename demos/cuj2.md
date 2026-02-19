@@ -162,13 +162,13 @@ kubectl create ns dynamo-workload
 
 # Create HuggingFace token secret (set HF_TOKEN env var first)
 sed "s/<your-hf-token>/$HF_TOKEN/" \
-  examples/demos/workloads/inference/hf-token-secret.yaml | kubectl apply -f -
+  demos/workloads/inference/hf-token-secret.yaml | kubectl apply -f -
 ```
 
 ### Deploy the DynamoGraphDeployment
 
 ```shell
-kubectl apply -f examples/demos/workloads/inference/vllm-agg.yaml
+kubectl apply -f demos/workloads/inference/vllm-agg.yaml
 
 # Monitor deployment
 kubectl get dynamographdeployments -n dynamo-workload
@@ -188,7 +188,7 @@ vllm-agg-vllmdecodeworker-0             1/1     Running   0          2m
 
 ```shell
 # Launch the chat server (port-forward + local UI on port 9090)
-./examples/demos/workloads/inference/chat-server.sh
+./demos/workloads/inference/chat-server.sh
 ```
 
 Then open http://127.0.0.1:9090/chat.html in your browser.

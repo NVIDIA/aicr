@@ -272,8 +272,8 @@ cleanup: ## Cleans up Eidos Kubernetes resources (requires kubectl)
 .PHONY: demos
 demos: ## Creates demo GIFs using VHS tool (requires: brew install vhs)
 	@command -v vhs >/dev/null 2>&1 || (echo "Error: vhs is not installed. Install: brew install vhs" && exit 1)
-	vhs examples/demos/videos/cli.tape -o examples/demos/videos/cli.gif
-	vhs examples/demos/videos/e2e.tape -o examples/demos/videos/e2e.gif
+	vhs demos/videos/cli.tape -o demos/videos/cli.gif
+	vhs demos/videos/e2e.tape -o demos/videos/e2e.gif
 
 # =============================================================================
 # Tilt Local Development

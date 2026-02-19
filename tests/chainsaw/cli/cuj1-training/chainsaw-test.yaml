@@ -20,7 +20,7 @@ metadata:
 spec:
   description: |
     CUJ1: Critical User Journey - Training Workload.
-    Tests the complete eidos workflow from examples/demos/cuj1.md:
+    Tests the complete eidos workflow from demos/cuj1.md:
       Step 1: recipe (with --platform kubeflow)
       Step 2: validate (readiness phase)
       Step 3: bundle (with node scheduling)

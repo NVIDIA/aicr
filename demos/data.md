@@ -228,7 +228,7 @@ Integrity of the metadata is paramount!
 
 ### Demo
 
-- [This Demo](https://github.com/NVIDIA/eidos/blob/main/examples/demos/data.md) - Full architecture documentation
+- [This Demo](https://github.com/NVIDIA/eidos/blob/main/demos/data.md) - Full architecture documentation
 
 ### Documentation
 - [Data Architecture](https://github.com/NVIDIA/eidos/blob/main/docs/contributor/data.md) - Full architecture documentation
