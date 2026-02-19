@@ -1138,6 +1138,7 @@ metadata:
   namespace: gpu-operator
   labels:
     app.kubernetes.io/name: gpu-operator
+    app.kubernetes.io/version: v24.6.0
 spec:
   replicas: 1
   selector:
@@ -1150,9 +1151,16 @@ spec:
     spec:
       containers:
       - name: gpu-operator
-        image: nvcr.io/nvidia/gpu-operator:v25.10.1
+        image: nvcr.io/nvidia/gpu-operator:v24.6.0
         imagePullPolicy: IfNotPresent
 YAML
+
+  if [ $? -eq 0 ]; then
+    detail "Created fake GPU operator deployment (v24.6.0)"
+  else
+    skip "validate/expected-resources" "Could not create GPU operator deployment"
+    return 0
+  fi
 
   # Wait for deployment to be available
   kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
@@ -1188,16 +1196,33 @@ RECIPE
     --image "${EIDOS_VALIDATOR_IMAGE}" \
     --output "$result_file" 2>&1) || true
 
-  if [ -f "$result_file" ] && grep -q "expected-resources" "$result_file"; then
-    if grep -q "status: pass" "$result_file"; then
-      detail "Expected-resources check: PASS"
+  # DEBUG: Print captured output to see what's happening
+  detail "Captured validation output:"
+  echo "$result_output" | sed 's/^/    /'
+
+  # Check the output file for expected-resources check results
+  if [ -f "$result_file" ]; then
+    detail "Validation output file created: $result_file"
+  else
+    detail "Validation output file NOT created: $result_file"
+  fi
+
+  if [ -f "$result_file" ] && \
+     grep -q "TestCheckExpectedResources" "$result_file"; then
+    if grep -A1 "name: TestCheckExpectedResources" "$result_file" | grep -q "status: pass"; then
+      detail "Expected-resources check: PASS (gpu-operator deployment found)"
+      pass "validate/expected-resources-pass"
+    elif grep -q "summary:" "$result_file" && grep -q "status: pass" "$result_file"; then
+      # Fallback: check summary status
+      detail "Expected-resources check: PASS (from summary status)"
       pass "validate/expected-resources-pass"
     else
-      detail "Expected-resources check ran but did not pass"
+      detail "Check found but status unclear. Showing check section:"
+      grep -A5 "TestCheckExpectedResources" "$result_file" | sed 's/^/    /' || true
       fail "validate/expected-resources-pass" "Check did not pass"
     fi
   else
-    fail "validate/expected-resources-pass" "expected-resources not found in output"
+    fail "validate/expected-resources-pass" "TestCheckExpectedResources not found in output"
   fi
 
   # Test 2: Validate expected-resources with failing check (resource missing)
@@ -1231,16 +1256,22 @@ RECIPE
     --image "${EIDOS_VALIDATOR_IMAGE}" \
     --output "$result_file_fail" 2>&1) || true
 
-  if [ -f "$result_file_fail" ] && grep -q "expected-resources" "$result_file_fail"; then
-    if grep -q "status: fail" "$result_file_fail"; then
-      detail "Expected-resources check: FAIL (as expected - missing resource)"
+  # Check the output file for expected-resources check results
+  if [ -f "$result_file_fail" ] && \
+     grep -q "TestCheckExpectedResources" "$result_file_fail"; then
+    if grep -A1 "name: TestCheckExpectedResources" "$result_file_fail" | grep -q "status: fail"; then
+      detail "Expected-resources check: FAIL (nonexistent-deployment not found) - as expected"
+      pass "validate/expected-resources-fail"
+    elif grep -q "summary:" "$result_file_fail" && grep -q "status: fail" "$result_file_fail"; then
+      # Fallback: check summary status
+      detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/expected-resources-fail"
     else
       warn "Expected-resources check did not fail for missing resource"
       pass "validate/expected-resources-fail"
     fi
   else
-    warn "expected-resources not found in output (may be expected without validator image)"
+    warn "TestCheckExpectedResources not found in output (may be expected without validator image)"
     pass "validate/expected-resources-fail"
   fi
 
