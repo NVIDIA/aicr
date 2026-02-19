@@ -29,6 +29,7 @@ on:
       - '.github/actions/load-versions/**'
       - 'tests/manifests/**'
       - 'tests/chainsaw/ai-conformance/**'
+      - 'docs/conformance/cncf/**'
       - 'recipes/components/dynamo-platform/**'
       - 'recipes/overlays/kind.yaml'
       - 'recipes/overlays/kind-inference.yaml'
@@ -193,7 +194,7 @@ jobs:
       - name: Deploy DRA GPU test
         run: |
           kubectl --context="kind-${KIND_CLUSTER_NAME}" apply \
-            -f tests/manifests/dra-gpu-test.yaml
+            -f docs/conformance/cncf/manifests/dra-gpu-test.yaml
 
           echo "Waiting for DRA GPU test pod to complete..."
           if kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
@@ -216,7 +217,7 @@ jobs:
         if: always()
         run: |
           kubectl --context="kind-${KIND_CLUSTER_NAME}" delete \
-            -f tests/manifests/dra-gpu-test.yaml --ignore-not-found 2>/dev/null || true
+            -f docs/conformance/cncf/manifests/dra-gpu-test.yaml --ignore-not-found 2>/dev/null || true
 
       # --- Evidence collection ---
 
