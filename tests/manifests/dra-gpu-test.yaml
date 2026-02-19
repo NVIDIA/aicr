@@ -1,0 +1,41 @@
+# DRA GPU allocation test
+# Usage: kubectl apply -f tests/manifests/dra-gpu-test.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dra-test
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: gpu-claim
+  namespace: dra-test
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dra-gpu-test
+  namespace: dra-test
+spec:
+  restartPolicy: Never
+  tolerations:
+    - operator: Exists
+  resourceClaims:
+    - name: gpu
+      resourceClaimName: gpu-claim
+  containers:
+    - name: gpu-test
+      image: nvidia/cuda:12.9.0-base-ubuntu24.04
+      command: ["bash", "-c", "ls /dev/nvidia* && echo 'DRA GPU allocation successful'"]
+      resources:
+        claims:
+          - name: gpu

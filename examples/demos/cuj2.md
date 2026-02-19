@@ -184,11 +184,22 @@ vllm-agg-vllmdecodeworker-0             1/1     Running   0          2m
 
 ### Test the endpoint
 
+#### Option 1: Chat UI (browser)
+
 ```shell
-# Port-forward the frontend service
+# Launch the chat server (port-forward + local UI on port 9090)
+./examples/demos/workloads/inference/chat-server.sh
+```
+
+Then open http://127.0.0.1:9090/chat.html in your browser.
+
+Press `Ctrl+C` to stop.
+
+#### Option 2: curl (command line)
+
+```shell
 kubectl port-forward -n dynamo-workload svc/vllm-agg-frontend 8000:8000 &
 
-# Send a chat completion request
 curl -s http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
