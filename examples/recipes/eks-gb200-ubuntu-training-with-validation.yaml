@@ -97,6 +97,16 @@ componentRefs:
     source: https://helm.ngc.nvidia.com/nvidia
     version: v25.3.3
     valuesFile: components/gpu-operator/values-eks-training.yaml
+    expectedResources:
+      - kind: Deployment
+        name: gpu-operator
+        namespace: gpu-operator
+      - kind: DaemonSet
+        name: nvidia-driver-daemonset
+        namespace: gpu-operator
+      - kind: DaemonSet
+        name: nvidia-device-plugin-daemonset
+        namespace: gpu-operator
     overrides:
       cdi:
         default: false

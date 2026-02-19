@@ -241,6 +241,7 @@ func (s *MetadataStore) initBaseMergedSpec() (RecipeMetadataSpec, []string) {
 	mergedSpec := RecipeMetadataSpec{
 		Constraints:   make([]Constraint, len(s.Base.Spec.Constraints)),
 		ComponentRefs: make([]ComponentRef, len(s.Base.Spec.ComponentRefs)),
+		Validation:    s.Base.Spec.Validation,
 	}
 	copy(mergedSpec.Constraints, s.Base.Spec.Constraints)
 	copy(mergedSpec.ComponentRefs, s.Base.Spec.ComponentRefs)

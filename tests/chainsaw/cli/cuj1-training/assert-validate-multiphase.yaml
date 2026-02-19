@@ -22,6 +22,9 @@ phases:
   readiness:
     status: pass
   deployment:
-    status: skipped
+    status: pass
+    checks:
+      - name: expected-resources
+        status: pass
   conformance:
     status: skipped

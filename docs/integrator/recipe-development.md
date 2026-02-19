@@ -254,15 +254,23 @@ constraints:
 Optional multi-phase validation beyond basic constraints:
 
 ```yaml
+# expectedResources are declared on componentRefs, not under validation
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    expectedResources:
+      - kind: Deployment
+        name: gpu-operator
+        namespace: gpu-operator
+      - kind: DaemonSet
+        name: nvidia-driver-daemonset
+        namespace: gpu-operator
+
 validation:
   readiness:
     checks: [gpu-hardware-detection, kernel-parameters]
   deployment:
-    checks: [operator-health]
-    expectedResources:
-      - apiVersion: v1
-        kind: Pod
-        namespace: gpu-operator
+    checks: [operator-health, expected-resources]
   performance:
     infrastructure: nccl-doctor
     checks: [nccl-bandwidth-test]

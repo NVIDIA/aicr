@@ -38,6 +38,16 @@ spec:
       valuesFile: components/gpu-operator/values.yaml
       manifestFiles:
         - components/gpu-operator/manifests/dcgm-exporter.yaml
+      expectedResources:
+        - kind: Deployment
+          name: gpu-operator
+          namespace: gpu-operator
+        - kind: DaemonSet
+          name: nvidia-driver-daemonset
+          namespace: gpu-operator
+        - kind: DaemonSet
+          name: nvidia-device-plugin-daemonset
+          namespace: gpu-operator
       dependencyRefs:
         - cert-manager
 
@@ -86,3 +96,9 @@ spec:
       valuesFile: components/kai-scheduler/values.yaml
       dependencyRefs:
         - gpu-operator
+
+  validation:
+    deployment:
+      checks:
+        - expected-resources
+

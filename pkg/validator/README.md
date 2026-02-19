@@ -313,6 +313,15 @@ validation:
 
 **Checks** - Named validation tests:
 ```yaml
+# expected-resources check requires expectedResources on componentRefs
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    expectedResources:
+      - kind: Deployment
+        name: gpu-operator
+        namespace: gpu-operator
+
 validation:
   deployment:
     checks:
@@ -323,6 +332,18 @@ validation:
 ### Multi-Phase Recipe Example
 
 ```yaml
+# expectedResources are declared on componentRefs (used by expected-resources check)
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    expectedResources:
+      - kind: Deployment
+        name: gpu-operator
+        namespace: gpu-operator
+      - kind: DaemonSet
+        name: nvidia-driver-daemonset
+        namespace: gpu-operator
+
 validation:
   # Phase 1: Readiness (pre-deployment validation)
   readiness:

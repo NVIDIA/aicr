@@ -213,6 +213,18 @@ make generate-validator ARGS="--constraint Deployment.my-app.version --phase dep
 ### Example Recipe Usage
 
 ```yaml
+# expectedResources are declared on componentRefs (used by expected-resources check)
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    expectedResources:
+      - kind: Deployment
+        name: gpu-operator
+        namespace: gpu-operator
+      - kind: DaemonSet
+        name: nvidia-driver-daemonset
+        namespace: gpu-operator
+
 validation:
   deployment:
     constraints:
@@ -224,7 +236,7 @@ validation:
     checks:
       # These also run inside the Job
       - operator-health
-      - expected-resources
+      - expected-resources  # validates componentRefs[].expectedResources
 ```
 
 ## Registration Pattern

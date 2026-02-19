@@ -30,6 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/NVIDIA/eidos/pkg/defaults"
 	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/header"
 	k8sclient "github.com/NVIDIA/eidos/pkg/k8s/client"
@@ -59,6 +60,14 @@ const (
 	PhaseAll ValidationPhaseName = "all"
 )
 
+// Phase timeout aliases — defined in pkg/defaults/timeouts.go.
+const (
+	DefaultReadinessTimeout   = defaults.ValidateReadinessTimeout
+	DefaultDeploymentTimeout  = defaults.ValidateDeploymentTimeout
+	DefaultPerformanceTimeout = defaults.ValidatePerformanceTimeout
+	DefaultConformanceTimeout = defaults.ValidateConformanceTimeout
+)
+
 // PhaseOrder defines the canonical execution order for validation phases.
 // Readiness and deployment must run before performance or conformance.
 var PhaseOrder = []ValidationPhaseName{
@@ -66,6 +75,20 @@ var PhaseOrder = []ValidationPhaseName{
 	PhaseDeployment,
 	PhasePerformance,
 	PhaseConformance,
+}
+
+// resolvePhaseTimeout returns the timeout for a validation phase.
+// If the recipe specifies a timeout for the phase, it is used; otherwise the default is used.
+func resolvePhaseTimeout(phase *recipe.ValidationPhase, defaultTimeout time.Duration) time.Duration {
+	if phase != nil && phase.Timeout != "" {
+		parsed, err := time.ParseDuration(phase.Timeout)
+		if err == nil {
+			return parsed
+		}
+		slog.Warn("invalid phase timeout in recipe, using default",
+			"timeout", phase.Timeout, "default", defaultTimeout, "error", err)
+	}
+	return defaultTimeout
 }
 
 // ValidatePhase runs validation for a specific phase.
@@ -203,38 +226,21 @@ func (v *Validator) ValidatePhases(
 		}
 	}
 
-	// Calculate overall summary
+	// Calculate overall summary by phase status
 	totalPassed := 0
 	totalFailed := 0
 	totalSkipped := 0
-	totalChecks := 0
 
 	for _, phaseResult := range result.Phases {
-		for _, cv := range phaseResult.Constraints {
-			totalChecks++
-			switch cv.Status {
-			case ConstraintStatusPassed:
-				totalPassed++
-			case ConstraintStatusFailed:
-				totalFailed++
-			case ConstraintStatusSkipped:
-				totalSkipped++
-			}
-		}
-		totalChecks += len(phaseResult.Checks)
-		for _, check := range phaseResult.Checks {
-			switch check.Status {
-			case ValidationStatusPass:
-				totalPassed++
-			case ValidationStatusFail:
-				totalFailed++
-			case ValidationStatusSkipped:
-				totalSkipped++
-			case ValidationStatusWarning:
-				// Warnings don't affect pass/fail count
-			case ValidationStatusPartial:
-				// Partial status is not expected at check level
-			}
+		switch phaseResult.Status {
+		case ValidationStatusPass:
+			totalPassed++
+		case ValidationStatusFail:
+			totalFailed++
+		case ValidationStatusSkipped:
+			totalSkipped++
+		case ValidationStatusWarning, ValidationStatusPartial:
+			// Warnings and partial statuses are not expected at phase level
 		}
 	}
 
@@ -242,7 +248,7 @@ func (v *Validator) ValidatePhases(
 	result.Summary.Passed = totalPassed
 	result.Summary.Failed = totalFailed
 	result.Summary.Skipped = totalSkipped
-	result.Summary.Total = totalChecks
+	result.Summary.Total = len(result.Phases)
 	result.Summary.Duration = time.Since(start)
 
 	slog.Info("specified phases validation completed",
@@ -330,7 +336,7 @@ func (v *Validator) validateReadiness(
 					RecipeConfigMap:    recipeCMName,
 					TestPackage:        "./pkg/validator/checks/readiness",
 					TestPattern:        "", // Run all tests in package
-					Timeout:            5 * time.Minute,
+					Timeout:            resolvePhaseTimeout(recipeResult.Validation.PreDeployment, DefaultReadinessTimeout),
 				}
 
 				deployer := agent.NewDeployer(clientset, jobConfig)
@@ -465,7 +471,7 @@ func (v *Validator) validateDeployment(
 						TestPackage:        "./pkg/validator/checks/deployment",
 						TestPattern:        patternResult.Pattern,
 						ExpectedTests:      patternResult.ExpectedTests,
-						Timeout:            10 * time.Minute,
+						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Deployment, DefaultDeploymentTimeout),
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -603,13 +609,13 @@ func (v *Validator) validatePerformance(
 						SnapshotConfigMap:  snapshotCMName,
 						RecipeConfigMap:    recipeCMName,
 						TestPackage:        "./pkg/validator/checks/performance",
-						TestPattern:        "",               // Run all tests in package
-						Timeout:            30 * time.Minute, // Performance tests may take longer
-						NodeSelector:       nil,              // Will be set below if GPU required
+						TestPattern:        "", // Run all tests in package
+						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
+						NodeSelector:       nil, // Will be set below if GPU required
 					}
 
 					// Add GPU node selector if recipe specifies a GPU accelerator
-					if recipeResult != nil && recipeResult.Criteria != nil &&
+					if recipeResult.Criteria != nil &&
 						recipeResult.Criteria.Accelerator != "" &&
 						recipeResult.Criteria.Accelerator != recipe.CriteriaAcceleratorAny {
 
@@ -747,7 +753,7 @@ func (v *Validator) validateConformance(
 						RecipeConfigMap:    recipeCMName,
 						TestPackage:        "./pkg/validator/checks/conformance",
 						TestPattern:        "", // Run all tests in package
-						Timeout:            15 * time.Minute,
+						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -1384,38 +1390,21 @@ func (v *Validator) validateAll(
 		}
 	}
 
-	// Calculate overall summary
+	// Calculate overall summary by phase status
 	totalPassed := 0
 	totalFailed := 0
 	totalSkipped := 0
-	totalChecks := 0
 
 	for _, phaseResult := range result.Phases {
-		for _, cv := range phaseResult.Constraints {
-			totalChecks++
-			switch cv.Status {
-			case ConstraintStatusPassed:
-				totalPassed++
-			case ConstraintStatusFailed:
-				totalFailed++
-			case ConstraintStatusSkipped:
-				totalSkipped++
-			}
-		}
-		totalChecks += len(phaseResult.Checks)
-		for _, check := range phaseResult.Checks {
-			switch check.Status {
-			case ValidationStatusPass:
-				totalPassed++
-			case ValidationStatusFail:
-				totalFailed++
-			case ValidationStatusSkipped:
-				totalSkipped++
-			case ValidationStatusWarning:
-				// Warnings don't affect pass/fail count
-			case ValidationStatusPartial:
-				// Partial status is not expected at check level
-			}
+		switch phaseResult.Status {
+		case ValidationStatusPass:
+			totalPassed++
+		case ValidationStatusFail:
+			totalFailed++
+		case ValidationStatusSkipped:
+			totalSkipped++
+		case ValidationStatusWarning, ValidationStatusPartial:
+			// Warnings and partial statuses are not expected at phase level
 		}
 	}
 
@@ -1423,7 +1412,7 @@ func (v *Validator) validateAll(
 	result.Summary.Passed = totalPassed
 	result.Summary.Failed = totalFailed
 	result.Summary.Skipped = totalSkipped
-	result.Summary.Total = totalChecks
+	result.Summary.Total = len(result.Phases)
 	result.Summary.Duration = time.Since(start)
 
 	slog.Info("all phases validation completed",

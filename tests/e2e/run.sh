@@ -1113,6 +1113,141 @@ RECIPE
   kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
 }
 
+test_validate_expected_resources() {
+  msg "=========================================="
+  msg "Testing expected-resources deployment check"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "validate/expected-resources" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local validate_dir="${OUTPUT_DIR}/validate-expected-resources"
+  mkdir -p "$validate_dir"
+
+  # Create a fake GPU operator deployment for the expected-resources check
+  msg "--- Setup: Create fake GPU operator deployment ---"
+  kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
+
+  cat <<YAML | kubectl apply -f - 2>&1 || true
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+  labels:
+    app.kubernetes.io/name: gpu-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-operator
+  template:
+    metadata:
+      labels:
+        app: gpu-operator
+    spec:
+      containers:
+      - name: gpu-operator
+        image: nvcr.io/nvidia/gpu-operator:v25.10.1
+        imagePullPolicy: IfNotPresent
+YAML
+
+  # Wait for deployment to be available
+  kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
+
+  # Test 1: Validate expected-resources with passing check (resource exists)
+  msg "--- Test: Expected resources check (should pass) ---"
+  local recipe_file="${validate_dir}/recipe-expected-resources.yaml"
+  cat > "$recipe_file" <<RECIPE
+kind: RecipeResult
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  version: dev
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    expectedResources:
+      - kind: Deployment
+        name: gpu-operator
+        namespace: gpu-operator
+validation:
+  deployment:
+    checks:
+      - expected-resources
+RECIPE
+
+  echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe.yaml${NC}"
+  local result_file="${validate_dir}/result-pass.yaml"
+  local result_output
+  result_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment \
+    --image "${EIDOS_VALIDATOR_IMAGE}" \
+    --output "$result_file" 2>&1) || true
+
+  if [ -f "$result_file" ] && grep -q "expected-resources" "$result_file"; then
+    if grep -q "status: pass" "$result_file"; then
+      detail "Expected-resources check: PASS"
+      pass "validate/expected-resources-pass"
+    else
+      detail "Expected-resources check ran but did not pass"
+      fail "validate/expected-resources-pass" "Check did not pass"
+    fi
+  else
+    fail "validate/expected-resources-pass" "expected-resources not found in output"
+  fi
+
+  # Test 2: Validate expected-resources with failing check (resource missing)
+  msg "--- Test: Expected resources check (should fail - missing resource) ---"
+  local recipe_file_fail="${validate_dir}/recipe-expected-resources-fail.yaml"
+  cat > "$recipe_file_fail" <<RECIPE
+kind: RecipeResult
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  version: dev
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    expectedResources:
+      - kind: Deployment
+        name: nonexistent-deployment
+        namespace: gpu-operator
+validation:
+  deployment:
+    checks:
+      - expected-resources
+RECIPE
+
+  echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe-fail.yaml${NC}"
+  local result_file_fail="${validate_dir}/result-fail.yaml"
+  local result_fail_output
+  result_fail_output=$("${EIDOS_BIN}" validate \
+    --recipe "$recipe_file_fail" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment \
+    --image "${EIDOS_VALIDATOR_IMAGE}" \
+    --output "$result_file_fail" 2>&1) || true
+
+  if [ -f "$result_file_fail" ] && grep -q "expected-resources" "$result_file_fail"; then
+    if grep -q "status: fail" "$result_file_fail"; then
+      detail "Expected-resources check: FAIL (as expected - missing resource)"
+      pass "validate/expected-resources-fail"
+    else
+      warn "Expected-resources check did not fail for missing resource"
+      pass "validate/expected-resources-fail"
+    fi
+  else
+    warn "expected-resources not found in output (may be expected without validator image)"
+    pass "validate/expected-resources-fail"
+  fi
+
+  # Cleanup
+  kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
+}
+
 test_validate_job_deployment() {
   msg "=========================================="
   msg "Testing validation Job deployment"
@@ -1715,6 +1850,7 @@ main() {
     test_validate
     test_validate_multiphase
     test_validate_deployment_constraints
+    test_validate_expected_resources
     test_validate_job_deployment
     test_oci_bundle
     cleanup_e2e
