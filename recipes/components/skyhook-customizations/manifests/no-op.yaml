@@ -35,7 +35,7 @@ metadata:
     app.kubernetes.io/created-by: eidos
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
-  name: tuning
+  name: no-op
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
@@ -55,20 +55,11 @@ spec:
   {{- end }}
   # Static: Baked-in tuning for H100 Ubuntu training
   packages:
-    nvidia-tuned:
-      image: ghcr.io/nvidia/skyhook-packages/nvidia-tuned
-      version: "0.2.0"
-      interrupt:
-        type: reboot
-      env:
-        - name: INTERRUPT
-          value: "true"
+    no-op:
+      image: ghcr.io/nvidia/skyhook-packages/shellscript
+      version: 1.1.1"
       configMap:
-        {{- if $cust.intent }}
-        intent: {{ $cust.intent }}
-        {{- end }}
-        accelerator: {{ $cust.accelerator }}
-        {{- if $cust.service }}
-        service: {{ $cust.service }}
-        {{- end }}
+        apply.sh: |
+          #!/bin/bash
+          echo "No-op package applied"
 {{- end }}
