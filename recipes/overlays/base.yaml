@@ -101,4 +101,3 @@ spec:
     deployment:
       checks:
         - expected-resources
-
