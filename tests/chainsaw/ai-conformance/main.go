@@ -40,6 +40,7 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -76,6 +77,7 @@ type checkResult struct {
 	Resource resourceIdentity
 	Exists   bool
 	Err      error
+	Version  string // container image, label version, or CRD versions (best-effort)
 }
 
 func main() {
@@ -89,11 +91,16 @@ func main() {
 				Usage:   "path to kubeconfig file",
 				Sources: cli.EnvVars("KUBECONFIG"),
 			},
-			&cli.StringFlag{
+			&cli.StringSliceFlag{
 				Name:    "dir",
 				Aliases: []string{"d"},
-				Value:   "./cluster",
-				Usage:   "directory containing assert-*.yaml files",
+				Value:   []string{"./cluster"},
+				Usage:   "directories containing assert-*.yaml files (can be repeated)",
+			},
+			&cli.StringSliceFlag{
+				Name:    "file",
+				Aliases: []string{"f"},
+				Usage:   "individual assert YAML files to include (can be repeated)",
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
@@ -124,13 +131,54 @@ func run(ctx context.Context, cmd *cli.Command) error {
 	ctx, cancel := context.WithTimeout(ctx, cmd.Duration("timeout"))
 	defer cancel()
 
-	// Parse YAML files.
-	dir := cmd.String("dir")
-	resources, err := parseAssertFiles(dir)
-	if err != nil {
-		return err
+	// Parse YAML files from all directories. Earlier directories take
+	// priority when the same resource (kind+name+namespace) appears in
+	// multiple directories (e.g., kind/ has a reduced gpu-operator set
+	// while cluster/ has the full set — we want the kind-specific one).
+	dirs := cmd.StringSlice("dir")
+	var resources []resourceIdentity
+	seen := make(map[string]bool)
+	for _, dir := range dirs {
+		parsed, err := parseAssertFiles(dir)
+		if err != nil {
+			return err
+		}
+		var added int
+		for _, res := range parsed {
+			key := res.APIVersion + "/" + res.Kind + "/" + res.Metadata.Namespace + "/" + res.Metadata.Name
+			if seen[key] {
+				slog.Debug("skipping duplicate resource", "key", key, "dir", dir)
+				continue
+			}
+			seen[key] = true
+			resources = append(resources, res)
+			added++
+		}
+		slog.Info("parsed assert files", "resources", added, "dir", dir)
 	}
-	slog.Info("parsed assert files", "resources", len(resources), "dir", dir)
+	// Parse individual files specified via --file.
+	for _, f := range cmd.StringSlice("file") {
+		parsed, err := parseYAMLFile(f, filepath.Base(f))
+		if err != nil {
+			return err
+		}
+		var added int
+		for _, res := range parsed {
+			key := res.APIVersion + "/" + res.Kind + "/" + res.Metadata.Namespace + "/" + res.Metadata.Name
+			if seen[key] {
+				slog.Debug("skipping duplicate resource", "key", key, "file", f)
+				continue
+			}
+			seen[key] = true
+			resources = append(resources, res)
+			added++
+		}
+		slog.Info("parsed assert file", "resources", added, "file", f)
+	}
+	if len(resources) == 0 {
+		return errors.New(errors.ErrCodeNotFound, "no resources found in any assert-*.yaml files")
+	}
+	slog.Info("total resources to check", "count", len(resources))
 
 	// Build K8s clients.
 	kubeconfig := cmd.String("kubeconfig")
@@ -299,7 +347,7 @@ func checkSingleResource(
 		rc = dynClient.Resource(gvr)
 	}
 
-	_, err = rc.Get(ctx, res.Metadata.Name, metav1.GetOptions{})
+	obj, err := rc.Get(ctx, res.Metadata.Name, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return checkResult{Resource: res, Exists: false}
@@ -307,7 +355,79 @@ func checkSingleResource(
 		return checkResult{Resource: res, Err: errors.Wrap(errors.ErrCodeUnavailable,
 			fmt.Sprintf("failed to get %s %s", res.Kind, res.qualifiedName()), err)}
 	}
-	return checkResult{Resource: res, Exists: true}
+	return checkResult{Resource: res, Exists: true, Version: extractVersion(obj)}
+}
+
+// extractVersion extracts version/image info from a resource on a best-effort
+// basis. Returns empty string if extraction fails or the resource type has no
+// meaningful version info.
+func extractVersion(obj *unstructured.Unstructured) string {
+	switch obj.GetKind() {
+	case "Deployment", "DaemonSet", "StatefulSet":
+		return extractContainerImages(obj)
+	case "CustomResourceDefinition":
+		return extractCRDVersions(obj)
+	default:
+		return extractLabelVersion(obj)
+	}
+}
+
+// extractContainerImages returns a comma-separated list of container images
+// from workload resources (Deployment, DaemonSet, StatefulSet).
+func extractContainerImages(obj *unstructured.Unstructured) string {
+	containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+	if err != nil || !found || len(containers) == 0 {
+		return ""
+	}
+
+	var images []string
+	for _, c := range containers {
+		container, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		image, ok := container["image"].(string)
+		if !ok || image == "" {
+			continue
+		}
+		images = append(images, image)
+	}
+	return strings.Join(images, ", ")
+}
+
+// extractLabelVersion returns the app.kubernetes.io/version label if present,
+// falling back to the helm.sh/chart label.
+func extractLabelVersion(obj *unstructured.Unstructured) string {
+	labels := obj.GetLabels()
+	if v, ok := labels["app.kubernetes.io/version"]; ok {
+		return v
+	}
+	if v, ok := labels["helm.sh/chart"]; ok {
+		return v
+	}
+	return ""
+}
+
+// extractCRDVersions returns served version names from a CRD (e.g., "v1, v1beta1").
+func extractCRDVersions(obj *unstructured.Unstructured) string {
+	versions, found, err := unstructured.NestedSlice(obj.Object, "spec", "versions")
+	if err != nil || !found || len(versions) == 0 {
+		return ""
+	}
+
+	var names []string
+	for _, v := range versions {
+		ver, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := ver["name"].(string)
+		if !ok || name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // printResults writes a grouped summary to stdout and returns an error if any
@@ -347,7 +467,11 @@ func printResults(results []checkResult) error {
 				fmt.Printf("  ERROR  %-40s %-45s (%s)\n", kind, qname, r.Err)
 				errored++
 			case r.Exists:
-				fmt.Printf("  PASS   %-40s %s\n", kind, qname)
+				if r.Version != "" {
+					fmt.Printf("  PASS   %-40s %-45s %s\n", kind, qname, r.Version)
+				} else {
+					fmt.Printf("  PASS   %-40s %s\n", kind, qname)
+				}
 				passed++
 			default:
 				fmt.Printf("  FAIL   %-40s %-45s (not found)\n", kind, qname)

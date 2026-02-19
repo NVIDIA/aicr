@@ -188,6 +188,24 @@ jobs:
           fi
           echo "Dynamo vLLM inference smoke test passed."
 
+      # --- Evidence collection ---
+
+      - name: Collect AI conformance evidence
+        if: always()
+        run: |
+          go run ./tests/chainsaw/ai-conformance/ \
+            --dir tests/chainsaw/ai-conformance/kind \
+            --file tests/chainsaw/ai-conformance/cluster/assert-crds.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kgateway.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml \
+            --kubeconfig="${HOME}/.kube/config" \
+            --debug
+
       - name: Debug diagnostics
         if: failure()
         run: |
