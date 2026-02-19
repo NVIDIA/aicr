@@ -127,8 +127,8 @@ type ExpectedResource struct {
 
 // ValidationConfig defines validation phases and settings.
 type ValidationConfig struct {
-	// PreDeployment defines pre-deployment validation phase settings.
-	PreDeployment *ValidationPhase `json:"preDeployment,omitempty" yaml:"preDeployment,omitempty"`
+	// Readiness defines readiness validation phase settings.
+	Readiness *ValidationPhase `json:"readiness,omitempty" yaml:"readiness,omitempty"`
 
 	// Deployment defines deployment validation phase settings.
 	Deployment *ValidationPhase `json:"deployment,omitempty" yaml:"deployment,omitempty"`
@@ -377,8 +377,8 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		if s.Validation == nil {
 			s.Validation = other.Validation
 		} else {
-			if other.Validation.PreDeployment != nil {
-				s.Validation.PreDeployment = other.Validation.PreDeployment
+			if other.Validation.Readiness != nil {
+				s.Validation.Readiness = other.Validation.Readiness
 			}
 			if other.Validation.Deployment != nil {
 				s.Validation.Deployment = other.Validation.Deployment
