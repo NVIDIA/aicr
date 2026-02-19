@@ -188,6 +188,16 @@ jobs:
           fi
           echo "Dynamo vLLM inference smoke test passed."
 
+      # --- Evidence collection ---
+
+      - name: Collect AI conformance evidence
+        if: always()
+        run: |
+          go run ./tests/chainsaw/ai-conformance/ \
+            --dir tests/chainsaw/ai-conformance/kind \
+            --kubeconfig="${HOME}/.kube/config" \
+            --debug
+
       - name: Debug diagnostics
         if: failure()
         run: |
