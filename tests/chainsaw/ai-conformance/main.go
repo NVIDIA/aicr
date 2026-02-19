@@ -40,6 +40,7 @@ import (
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -76,6 +77,7 @@ type checkResult struct {
 	Resource resourceIdentity
 	Exists   bool
 	Err      error
+	Version  string // container image, label version, or CRD versions (best-effort)
 }
 
 func main() {
@@ -299,7 +301,7 @@ func checkSingleResource(
 		rc = dynClient.Resource(gvr)
 	}
 
-	_, err = rc.Get(ctx, res.Metadata.Name, metav1.GetOptions{})
+	obj, err := rc.Get(ctx, res.Metadata.Name, metav1.GetOptions{})
 	if err != nil {
 		if k8serrors.IsNotFound(err) {
 			return checkResult{Resource: res, Exists: false}
@@ -307,7 +309,79 @@ func checkSingleResource(
 		return checkResult{Resource: res, Err: errors.Wrap(errors.ErrCodeUnavailable,
 			fmt.Sprintf("failed to get %s %s", res.Kind, res.qualifiedName()), err)}
 	}
-	return checkResult{Resource: res, Exists: true}
+	return checkResult{Resource: res, Exists: true, Version: extractVersion(obj)}
+}
+
+// extractVersion extracts version/image info from a resource on a best-effort
+// basis. Returns empty string if extraction fails or the resource type has no
+// meaningful version info.
+func extractVersion(obj *unstructured.Unstructured) string {
+	switch obj.GetKind() {
+	case "Deployment", "DaemonSet", "StatefulSet":
+		return extractContainerImages(obj)
+	case "CustomResourceDefinition":
+		return extractCRDVersions(obj)
+	default:
+		return extractLabelVersion(obj)
+	}
+}
+
+// extractContainerImages returns a comma-separated list of container images
+// from workload resources (Deployment, DaemonSet, StatefulSet).
+func extractContainerImages(obj *unstructured.Unstructured) string {
+	containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+	if err != nil || !found || len(containers) == 0 {
+		return ""
+	}
+
+	var images []string
+	for _, c := range containers {
+		container, ok := c.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		image, ok := container["image"].(string)
+		if !ok || image == "" {
+			continue
+		}
+		images = append(images, image)
+	}
+	return strings.Join(images, ", ")
+}
+
+// extractLabelVersion returns the app.kubernetes.io/version label if present,
+// falling back to the helm.sh/chart label.
+func extractLabelVersion(obj *unstructured.Unstructured) string {
+	labels := obj.GetLabels()
+	if v, ok := labels["app.kubernetes.io/version"]; ok {
+		return v
+	}
+	if v, ok := labels["helm.sh/chart"]; ok {
+		return v
+	}
+	return ""
+}
+
+// extractCRDVersions returns served version names from a CRD (e.g., "v1, v1beta1").
+func extractCRDVersions(obj *unstructured.Unstructured) string {
+	versions, found, err := unstructured.NestedSlice(obj.Object, "spec", "versions")
+	if err != nil || !found || len(versions) == 0 {
+		return ""
+	}
+
+	var names []string
+	for _, v := range versions {
+		ver, ok := v.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := ver["name"].(string)
+		if !ok || name == "" {
+			continue
+		}
+		names = append(names, name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // printResults writes a grouped summary to stdout and returns an error if any
@@ -347,7 +421,11 @@ func printResults(results []checkResult) error {
 				fmt.Printf("  ERROR  %-40s %-45s (%s)\n", kind, qname, r.Err)
 				errored++
 			case r.Exists:
-				fmt.Printf("  PASS   %-40s %s\n", kind, qname)
+				if r.Version != "" {
+					fmt.Printf("  PASS   %-40s %-45s %s\n", kind, qname, r.Version)
+				} else {
+					fmt.Printf("  PASS   %-40s %s\n", kind, qname)
+				}
 				passed++
 			default:
 				fmt.Printf("  FAIL   %-40s %-45s (not found)\n", kind, qname)
