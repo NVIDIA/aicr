@@ -23,6 +23,10 @@ inputs:
     description: 'Accelerator type for recipe generation (bundle mode only, e.g. h100)'
     required: false
     default: ''
+  intent:
+    description: 'Intent for recipe generation (bundle mode only, e.g. inference, training)'
+    required: false
+    default: 'inference'
   platform:
     description: 'Platform for recipe generation (bundle mode only, e.g. dynamo)'
     required: false
@@ -63,7 +67,7 @@ runs:
 
     # --- Bundle mode: eidos recipe → bundle → deploy ---
 
-    - name: Generate inference recipe
+    - name: Generate recipe
       if: inputs.method == 'bundle'
       shell: bash
       run: |
@@ -75,7 +79,7 @@ runs:
           --service kind \
           --accelerator ${{ inputs.accelerator }} \
           --os ubuntu \
-          --intent inference \
+          --intent ${{ inputs.intent }} \
           ${PLATFORM_FLAG} \
           --output recipe.yaml
         echo "--- Recipe ---"

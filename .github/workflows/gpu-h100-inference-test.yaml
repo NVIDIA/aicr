@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: GPU Smoke Test (nvkind + H100)
+name: GPU Inference Test (nvkind + H100)
 
 on:
   schedule:
@@ -21,7 +21,7 @@ on:
     branches:
       - "pull-request/[0-9]+"
     paths:
-      - '.github/workflows/gpu-h100-smoke-test.yaml'
+      - '.github/workflows/gpu-h100-inference-test.yaml'
       - '.github/actions/gpu-cluster-setup/**'
       - '.github/actions/gpu-operator-install/**'
       - '.github/actions/eidos-build/**'
@@ -46,13 +46,13 @@ concurrency:
 
 jobs:
 
-  gpu-smoke-test:
-    name: GPU Smoke Test (nvkind + H100)
+  gpu-inference-test:
+    name: GPU Inference Test (nvkind + H100)
     runs-on: linux-amd64-gpu-h100-latest-1
     timeout-minutes: 45
 
     env:
-      KIND_CLUSTER_NAME: gpu-smoke-test
+      KIND_CLUSTER_NAME: gpu-inference-test
 
     steps:
 

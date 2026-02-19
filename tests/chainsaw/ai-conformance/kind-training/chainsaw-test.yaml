@@ -1,0 +1,115 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kind-training-cluster-health
+spec:
+  description: |
+    Kind Training Stack — Cluster Health Check.
+    Validates that all components of the h100-kind-training recipe are healthy
+    on a kind cluster with GPU passthrough. This test does NOT deploy workloads —
+    it validates already-deployed infrastructure.
+    Prerequisites: kind cluster with the training stack deployed.
+    Run with: chainsaw test --test-dir tests/chainsaw/ai-conformance/kind-training
+  timeouts:
+    assert: 300s
+  steps:
+
+    # ── Namespaces ─────────────────────────────────────────────────────
+    - name: assert-namespaces
+      description: Verify all expected namespaces exist and are active.
+      timeouts:
+        assert: 120s
+      try:
+        - assert:
+            file: assert-namespaces.yaml
+
+    # ── CRDs ───────────────────────────────────────────────────────────
+    - name: assert-crds
+      description: Verify critical CRDs are installed (dynamo, GPU operator, cert-manager).
+      timeouts:
+        assert: 120s
+      try:
+        - assert:
+            file: assert-crds.yaml
+
+    # ── cert-manager ───────────────────────────────────────────────────
+    - name: assert-cert-manager
+      description: Verify cert-manager controller, webhook, and cainjector are available.
+      try:
+        - assert:
+            file: ../cluster/assert-cert-manager.yaml
+
+    # ── GPU Operator ───────────────────────────────────────────────────
+    - name: assert-gpu-operator
+      description: Verify GPU operator and managed components are healthy (kind profile — no driver DaemonSet).
+      timeouts:
+        assert: 600s
+      try:
+        - assert:
+            file: ../kind/assert-gpu-operator.yaml
+
+    # ── Monitoring ─────────────────────────────────────────────────────
+    - name: assert-monitoring
+      description: Verify kube-prometheus-stack, ephemeral storage metrics, and prometheus-adapter.
+      try:
+        - assert:
+            file: ../cluster/assert-monitoring.yaml
+
+    # ── Skyhook ────────────────────────────────────────────────────────
+    - name: assert-skyhook
+      description: Verify Skyhook operator controller-manager is available.
+      try:
+        - assert:
+            file: ../cluster/assert-skyhook.yaml
+
+    # ── NVSentinel ─────────────────────────────────────────────────────
+    - name: assert-nvsentinel
+      description: Verify NVSentinel controller and platform connector are healthy (kind profile).
+      try:
+        - assert:
+            file: ../kind/assert-nvsentinel.yaml
+
+    # ── NVIDIA DRA Driver ──────────────────────────────────────────────
+    - name: assert-dra-driver
+      description: Verify DRA driver controller and kubelet plugin are healthy.
+      timeouts:
+        assert: 600s
+      try:
+        - assert:
+            file: ../cluster/assert-dra-driver.yaml
+
+    # ── Network Operator ───────────────────────────────────────────────
+    - name: assert-network-operator
+      description: Verify NVIDIA Network Operator is available.
+      try:
+        - assert:
+            file: ../kind/assert-network-operator.yaml
+
+    # ── KAI Scheduler ──────────────────────────────────────────────────
+    - name: assert-kai-scheduler
+      description: Verify KAI scheduler is available.
+      try:
+        - assert:
+            file: ../cluster/assert-kai-scheduler.yaml
+
+    # ── Dynamo Platform ────────────────────────────────────────────────
+    - name: assert-dynamo
+      description: Verify Dynamo operator, etcd, and NATS are healthy.
+      try:
+        - assert:
+            file: ../cluster/assert-dynamo.yaml
