@@ -1267,12 +1267,10 @@ RECIPE
       detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/expected-resources-fail"
     else
-      warn "Expected-resources check did not fail for missing resource"
-      pass "validate/expected-resources-fail"
+      fail "validate/expected-resources-fail" "Check did not fail for missing resource"
     fi
   else
-    warn "TestCheckExpectedResources not found in output (may be expected without validator image)"
-    pass "validate/expected-resources-fail"
+    fail "validate/expected-resources-fail" "TestCheckExpectedResources not found in output"
   fi
 
   # Cleanup

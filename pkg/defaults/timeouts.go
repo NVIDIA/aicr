@@ -112,6 +112,27 @@ const (
 	CLISnapshotTimeout = 5 * time.Minute
 )
 
+// Validation phase timeouts for validation phase operations.
+// These are used when the recipe does not specify a timeout.
+const (
+	// ValidateReadinessTimeout is the default timeout for readiness validation.
+	ValidateReadinessTimeout = 5 * time.Minute
+
+	// ValidateDeploymentTimeout is the default timeout for deployment validation.
+	ValidateDeploymentTimeout = 10 * time.Minute
+
+	// ValidatePerformanceTimeout is the default timeout for performance validation.
+	// Performance tests may take longer due to GPU benchmarks.
+	ValidatePerformanceTimeout = 30 * time.Minute
+
+	// ValidateConformanceTimeout is the default timeout for conformance validation.
+	ValidateConformanceTimeout = 15 * time.Minute
+
+	// ResourceVerificationTimeout is the timeout for verifying individual
+	// expected resources exist and are healthy during deployment validation.
+	ResourceVerificationTimeout = 10 * time.Second
+)
+
 // Pod operation timeouts for validation and agent operations.
 const (
 	// PodWaitTimeout is the maximum time to wait for pod operations to complete.

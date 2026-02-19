@@ -50,6 +50,13 @@ func TestTimeoutConstants(t *testing.T) {
 		// HTTP client timeouts
 		{"HTTPClientTimeout", HTTPClientTimeout, 10 * time.Second, 60 * time.Second},
 		{"HTTPConnectTimeout", HTTPConnectTimeout, 1 * time.Second, 15 * time.Second},
+
+		// Validation phase timeouts
+		{"ValidateReadinessTimeout", ValidateReadinessTimeout, 1 * time.Minute, 10 * time.Minute},
+		{"ValidateDeploymentTimeout", ValidateDeploymentTimeout, 5 * time.Minute, 30 * time.Minute},
+		{"ValidatePerformanceTimeout", ValidatePerformanceTimeout, 10 * time.Minute, 60 * time.Minute},
+		{"ValidateConformanceTimeout", ValidateConformanceTimeout, 5 * time.Minute, 30 * time.Minute},
+		{"ResourceVerificationTimeout", ResourceVerificationTimeout, 5 * time.Second, 30 * time.Second},
 	}
 
 	for _, tt := range tests {
@@ -98,6 +105,19 @@ func TestHTTPClientTimeoutRelationships(t *testing.T) {
 	if HTTPTLSHandshakeTimeout >= HTTPClientTimeout {
 		t.Errorf("HTTPTLSHandshakeTimeout (%v) should be less than HTTPClientTimeout (%v)",
 			HTTPTLSHandshakeTimeout, HTTPClientTimeout)
+	}
+}
+
+func TestValidationPhaseTimeoutRelationships(t *testing.T) {
+	// Readiness should be the shortest phase
+	if ValidateReadinessTimeout > ValidateDeploymentTimeout {
+		t.Errorf("ValidateReadinessTimeout (%v) should not exceed ValidateDeploymentTimeout (%v)",
+			ValidateReadinessTimeout, ValidateDeploymentTimeout)
+	}
+	// Resource verification should be much shorter than phase timeout
+	if ResourceVerificationTimeout >= ValidateDeploymentTimeout {
+		t.Errorf("ResourceVerificationTimeout (%v) should be less than ValidateDeploymentTimeout (%v)",
+			ResourceVerificationTimeout, ValidateDeploymentTimeout)
 	}
 }
 

@@ -307,6 +307,86 @@ func TestValidateExpectedResources(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "configmap exists",
+			setup: func() *checks.ValidationContext {
+				objects := []runtime.Object{
+					&corev1.ConfigMap{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu-config", Namespace: "gpu-operator"},
+					},
+				}
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(objects...)
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name: "gpu-operator",
+								Type: "Helm",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "ConfigMap", Name: "gpu-config", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name: "secret exists",
+			setup: func() *checks.ValidationContext {
+				objects := []runtime.Object{
+					&corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{Name: "gpu-credentials", Namespace: "gpu-operator"},
+					},
+				}
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(objects...)
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name: "gpu-operator",
+								Type: "Helm",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Secret", Name: "gpu-credentials", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name: "secret missing",
+			setup: func() *checks.ValidationContext {
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset()
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name: "gpu-operator",
+								Type: "Helm",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Secret", Name: "nonexistent-secret", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			wantErr:     true,
+			errContains: "not found",
+		},
+		{
 			name: "unsupported kind",
 			setup: func() *checks.ValidationContext {
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
