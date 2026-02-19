@@ -19,7 +19,7 @@ metadata:
 
 spec:
   # Inherits from h100-kind-inference (H100 + kind + inference settings)
-  # Adds Dynamo inference platform components.
+  # Adds Dynamo inference platform and Kubeflow Training Operator components.
   base: h100-kind-inference
 
   criteria:
@@ -68,3 +68,9 @@ spec:
               fileStore:
                 pvc:
                   storageClassName: standard
+
+    - name: kubeflow-trainer
+      type: Helm
+      valuesFile: components/kubeflow-trainer/values.yaml
+      manifestFiles:
+        - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
