@@ -1,5 +1,5 @@
 # DRA GPU allocation test
-# Usage: kubectl apply -f tests/manifests/dra-gpu-test.yaml
+# Usage: kubectl apply -f docs/conformance/cncf/manifests/dra-gpu-test.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -27,6 +27,10 @@ metadata:
   namespace: dra-test
 spec:
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
   tolerations:
     - operator: Exists
   resourceClaims:
@@ -36,6 +40,9 @@ spec:
     - name: gpu-test
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "ls /dev/nvidia* && echo 'DRA GPU allocation successful'"]
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
       resources:
         claims:
           - name: gpu
