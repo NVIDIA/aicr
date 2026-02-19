@@ -663,6 +663,69 @@ func TestValidatePhases_ContextCanceled(t *testing.T) {
 	}
 }
 
+func TestValidatePhases_SummaryCounts(t *testing.T) {
+	snapshot := createTestSnapshot()
+
+	tests := []struct {
+		name        string
+		recipe      *recipe.RecipeResult
+		phases      []ValidationPhaseName
+		wantPassed  int
+		wantFailed  int
+		wantSkipped int
+		wantTotal   int
+	}{
+		{
+			name: "readiness only configured - others skipped",
+			recipe: &recipe.RecipeResult{
+				Constraints: []recipe.Constraint{
+					{Name: "K8s.server.version", Value: ">= 1.32.4"},
+					{Name: "OS.release.ID", Value: "ubuntu"},
+				},
+				// No Deployment/Performance/Conformance configured
+			},
+			phases:      []ValidationPhaseName{PhaseReadiness, PhaseDeployment, PhasePerformance, PhaseConformance},
+			wantPassed:  1, // readiness
+			wantSkipped: 3, // deployment, performance, conformance
+			wantTotal:   4,
+		},
+		{
+			name: "single readiness phase",
+			recipe: &recipe.RecipeResult{
+				Constraints: []recipe.Constraint{
+					{Name: "K8s.server.version", Value: ">= 1.32.4"},
+				},
+			},
+			phases:     []ValidationPhaseName{PhaseReadiness},
+			wantPassed: 1, // readiness passes, summary reflects constraint count
+			wantTotal:  1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("test"), WithNoCluster(true))
+			result, err := v.ValidatePhases(context.Background(), tt.phases, tt.recipe, snapshot)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if result.Summary.Passed != tt.wantPassed {
+				t.Errorf("Summary.Passed = %d, want %d", result.Summary.Passed, tt.wantPassed)
+			}
+			if result.Summary.Failed != tt.wantFailed {
+				t.Errorf("Summary.Failed = %d, want %d", result.Summary.Failed, tt.wantFailed)
+			}
+			if result.Summary.Skipped != tt.wantSkipped {
+				t.Errorf("Summary.Skipped = %d, want %d", result.Summary.Skipped, tt.wantSkipped)
+			}
+			if result.Summary.Total != tt.wantTotal {
+				t.Errorf("Summary.Total = %d, want %d", result.Summary.Total, tt.wantTotal)
+			}
+		})
+	}
+}
+
 // TestMapTestStatusToValidationStatus tests the mapping of test status strings to validation status
 func TestMapTestStatusToValidationStatus(t *testing.T) {
 	tests := []struct {
