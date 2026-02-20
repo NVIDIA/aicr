@@ -360,7 +360,7 @@ func TestLoadValidationContext_InvalidRecipeData(t *testing.T) {
 func TestTestRunner_HasCheck(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
 		Validation: &recipe.ValidationConfig{
-			PreDeployment: &recipe.ValidationPhase{
+			Readiness: &recipe.ValidationPhase{
 				Checks: []string{"gpu-hardware-detection"},
 			},
 			Deployment: &recipe.ValidationPhase{
@@ -392,7 +392,6 @@ func TestTestRunner_HasCheck(t *testing.T) {
 		want      bool
 	}{
 		{"readiness phase has check", "readiness", "gpu-hardware-detection", true},
-		{"preDeployment alias", "preDeployment", "gpu-hardware-detection", true},
 		{"readiness phase missing check", "readiness", "nonexistent", false},
 		{"deployment phase has check", "deployment", "operator-health", true},
 		{"deployment phase has second check", "deployment", "check-nvidia-smi", true},

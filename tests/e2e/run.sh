@@ -852,19 +852,19 @@ test_validate_multiphase() {
   # Test 1: Readiness phase (default)
   msg "--- Test: Validate with --phase readiness ---"
   echo -e "${DIM}  \$ eidos validate --phase readiness${NC}"
-  local predeployment_result="${validate_dir}/validation-predeployment.yaml"
-  local predeployment_output
-  predeployment_output=$("${EIDOS_BIN}" validate \
+  local readiness_result="${validate_dir}/validation-readiness.yaml"
+  local readiness_output
+  readiness_output=$("${EIDOS_BIN}" validate \
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase readiness \
-    --output "$predeployment_result" 2>&1) || true
+    --output "$readiness_result" 2>&1) || true
 
-  if echo "$predeployment_output" | grep -q "readiness"; then
+  if echo "$readiness_output" | grep -q "readiness"; then
     detail "Readiness phase: PASS"
-    pass "validate/phase-predeployment"
+    pass "validate/phase-readiness"
   else
-    fail "validate/phase-predeployment" "Readiness phase not found in output"
+    fail "validate/phase-readiness" "Readiness phase not found in output"
   fi
 
   # Test 2: Deployment phase

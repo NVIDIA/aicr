@@ -156,9 +156,9 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 
 	var checkList []string
 	switch phase {
-	case "readiness", "preDeployment":
-		if r.ctx.Recipe.Validation.PreDeployment != nil {
-			checkList = r.ctx.Recipe.Validation.PreDeployment.Checks
+	case "readiness":
+		if r.ctx.Recipe.Validation.Readiness != nil {
+			checkList = r.ctx.Recipe.Validation.Readiness.Checks
 		}
 	case "deployment":
 		if r.ctx.Recipe.Validation.Deployment != nil {

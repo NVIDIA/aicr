@@ -108,7 +108,7 @@ func TestValidatePhase(t *testing.T) {
 	}
 }
 
-func TestValidatePreDeployment(t *testing.T) {
+func TestValidateReadiness(t *testing.T) {
 	// Skip if running with -short flag (for fast unit tests)
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
@@ -136,7 +136,7 @@ func TestValidatePreDeployment(t *testing.T) {
 				{Name: "OS.release.ID", Value: "ubuntu"},
 			},
 			validationConfig: &recipe.ValidationConfig{
-				PreDeployment: &recipe.ValidationPhase{
+				Readiness: &recipe.ValidationPhase{
 					Checks: []string{"gpu-hardware-detection", "kernel-parameters"},
 				},
 			},
@@ -445,8 +445,8 @@ func TestValidateAll_PhaseOrder(t *testing.T) {
 	}
 
 	// Verify readiness has constraint results
-	preDeployPhase := result.Phases["readiness"]
-	if len(preDeployPhase.Constraints) == 0 {
+	readinessPhase := result.Phases["readiness"]
+	if len(readinessPhase.Constraints) == 0 {
 		t.Error("readiness phase should have constraint results")
 	}
 
@@ -540,7 +540,7 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 			{Name: "OS.release.ID", Value: "ubuntu"},
 		},
 		Validation: &recipe.ValidationConfig{
-			PreDeployment: &recipe.ValidationPhase{
+			Readiness: &recipe.ValidationPhase{
 				Checks: []string{"gpu-hardware-detection", "kernel-parameters", "os-prerequisites"},
 			},
 			Deployment: &recipe.ValidationPhase{
@@ -1018,7 +1018,7 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 			name: "readiness - no constraint validators to check",
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
-					PreDeployment: &recipe.ValidationPhase{
+					Readiness: &recipe.ValidationPhase{
 						Checks: []string{"gpu-hardware-detection"},
 					},
 				},

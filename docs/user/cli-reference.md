@@ -542,7 +542,7 @@ eidos validate \
   --kubeconfig ~/.kube/prod-cluster
 ```
 
-**Output Structure (Pre-Deployment Phase):**
+**Output Structure (Readiness Phase):**
 ```yaml
 apiVersion: eidos.nvidia.com/v1alpha1
 kind: ValidationResult
@@ -590,10 +590,10 @@ metadata:
 recipeSource: recipe.yaml
 snapshotSource: snapshot.yaml
 summary:
-  passed: 10
+  passed: 3
   failed: 0
-  skipped: 0
-  total: 10
+  skipped: 1
+  total: 4
   status: pass
   duration: 58.4µs
 phases:

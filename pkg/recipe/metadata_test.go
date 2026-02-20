@@ -487,7 +487,7 @@ func TestMergeValidationConfig(t *testing.T) {
 	t.Run("overlay phases merge with base", func(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
-				PreDeployment: &ValidationPhase{
+				Readiness: &ValidationPhase{
 					Checks: []string{"gpu-hardware-detection"},
 				},
 				Deployment: &ValidationPhase{
@@ -513,11 +513,11 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation == nil {
 			t.Fatal("validation should not be nil after merge")
 		}
-		if base.Validation.PreDeployment == nil {
-			t.Fatal("preDeployment should be preserved from base")
+		if base.Validation.Readiness == nil {
+			t.Fatal("readiness should be preserved from base")
 		}
-		if base.Validation.PreDeployment.Checks[0] != "gpu-hardware-detection" {
-			t.Error("preDeployment checks should be preserved from base")
+		if base.Validation.Readiness.Checks[0] != "gpu-hardware-detection" {
+			t.Error("readiness checks should be preserved from base")
 		}
 		if base.Validation.Deployment.Timeout != "10m" {
 			t.Errorf("deployment timeout = %q, want 10m (from overlay)", base.Validation.Deployment.Timeout)
