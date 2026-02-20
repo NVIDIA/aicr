@@ -261,9 +261,10 @@ components:
           - controller.nodeSelector
         tolerationPaths:
           - controller.tolerations
+          - node.tolerations
       accelerated:
-        nodeSelectorPaths:
-          - node.nodeSelector
+        # No nodeSelectorPaths — CSI node DaemonSet must run on ALL nodes
+        # (not just GPU nodes) since any node may need EBS volumes.
         tolerationPaths:
           - node.tolerations
 
