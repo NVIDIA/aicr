@@ -1273,6 +1273,148 @@ RECIPE
     fail "validate/expected-resources-fail" "TestCheckExpectedResources not found in output"
   fi
 
+  # Tests 3 & 4: Manual expectedResources with a real helm-installed workload
+  # These tests install a real Helm chart (Bitnami nginx) on the Kind cluster,
+  # then verify that manual expectedResources in the recipe correctly match
+  # the deployed workload.
+  if ! command -v helm &> /dev/null; then
+    skip "validate/expected-resources-manual-pass" "helm CLI not available"
+    skip "validate/expected-resources-manual-merge" "helm CLI not available"
+  else
+    local nginx_ns="eidos-e2e-nginx"
+    local nginx_release="nginx-test"
+    local helm_install_ok=false
+
+    # Setup: Install Bitnami nginx
+    msg "--- Setup: Installing Bitnami nginx chart ---"
+    kubectl create namespace "$nginx_ns" --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
+    echo -e "${DIM}  \$ helm install $nginx_release nginx --repo https://charts.bitnami.com/bitnami -n $nginx_ns${NC}"
+    if helm install "$nginx_release" nginx \
+        --repo https://charts.bitnami.com/bitnami \
+        --namespace "$nginx_ns" \
+        --set replicaCount=1 \
+        --set service.type=ClusterIP \
+        --set "resources.requests.cpu=50m" \
+        --set "resources.requests.memory=64Mi" \
+        --wait --timeout 120s 2>&1; then
+      detail "Installed $nginx_release in $nginx_ns"
+      helm_install_ok=true
+    else
+      detail "helm install failed (network or chart issue)"
+    fi
+
+    if [ "$helm_install_ok" = true ]; then
+      # Test 3: Manual expectedResources pointing to real Deployment (should pass)
+      msg "--- Test: Manual expectedResources matching deployed workload ---"
+      local recipe_manual="${validate_dir}/recipe-manual-pass.yaml"
+      cat > "$recipe_manual" <<RECIPE
+kind: RecipeResult
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  version: dev
+componentRefs:
+  - name: ${nginx_release}
+    type: Helm
+    source: https://charts.bitnami.com/bitnami
+    chart: nginx
+    namespace: ${nginx_ns}
+    expectedResources:
+      - kind: Deployment
+        name: ${nginx_release}
+        namespace: ${nginx_ns}
+validation:
+  deployment:
+    checks:
+      - expected-resources
+RECIPE
+
+      echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe-manual-pass.yaml${NC}"
+      local result_manual="${validate_dir}/result-manual-pass.yaml"
+      local result_manual_output
+      result_manual_output=$("${EIDOS_BIN}" validate \
+        --recipe "$recipe_manual" \
+        --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+        --phase deployment \
+        --image "${EIDOS_VALIDATOR_IMAGE}" \
+        --output "$result_manual" 2>&1) || true
+
+      detail "Captured validation output:"
+      echo "$result_manual_output" | sed 's/^/    /'
+
+      if [ -f "$result_manual" ] && grep -q "TestCheckExpectedResources" "$result_manual"; then
+        if grep -A1 "name: TestCheckExpectedResources" "$result_manual" | grep -q "status: pass"; then
+          detail "Expected-resources check passed for deployed nginx"
+          pass "validate/expected-resources-manual-pass"
+        else
+          fail "validate/expected-resources-manual-pass" "Check did not pass for deployed resource"
+        fi
+      else
+        fail "validate/expected-resources-manual-pass" "TestCheckExpectedResources not found in output"
+      fi
+
+      # Test 4: Merge — one real resource + one fake resource
+      # The real nginx Deployment should be found; the fake one should cause a failure.
+      msg "--- Test: Manual expectedResources merge (real + fake) ---"
+      local recipe_merge="${validate_dir}/recipe-manual-merge.yaml"
+      cat > "$recipe_merge" <<RECIPE
+kind: RecipeResult
+apiVersion: eidos.nvidia.com/v1alpha1
+metadata:
+  version: dev
+componentRefs:
+  - name: ${nginx_release}
+    type: Helm
+    source: https://charts.bitnami.com/bitnami
+    chart: nginx
+    namespace: ${nginx_ns}
+    expectedResources:
+      - kind: Deployment
+        name: ${nginx_release}
+        namespace: ${nginx_ns}
+      - kind: Deployment
+        name: nonexistent-deploy
+        namespace: ${nginx_ns}
+validation:
+  deployment:
+    checks:
+      - expected-resources
+RECIPE
+
+      echo -e "${DIM}  \$ eidos validate --phase deployment --recipe recipe-manual-merge.yaml${NC}"
+      local result_merge="${validate_dir}/result-manual-merge.yaml"
+      local result_merge_output
+      result_merge_output=$("${EIDOS_BIN}" validate \
+        --recipe "$recipe_merge" \
+        --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+        --phase deployment \
+        --image "${EIDOS_VALIDATOR_IMAGE}" \
+        --output "$result_merge" 2>&1) || true
+
+      detail "Captured validation output:"
+      echo "$result_merge_output" | sed 's/^/    /'
+
+      # The check should run and fail (because nonexistent-deploy doesn't exist)
+      if [ -f "$result_merge" ] && grep -q "TestCheckExpectedResources" "$result_merge"; then
+        if grep -A1 "name: TestCheckExpectedResources" "$result_merge" | grep -q "status: fail"; then
+          detail "Expected-resources check correctly failed for missing resource in merge"
+          pass "validate/expected-resources-manual-merge"
+        else
+          fail "validate/expected-resources-manual-merge" "Check should have failed for nonexistent-deploy but passed"
+        fi
+      else
+        fail "validate/expected-resources-manual-merge" "TestCheckExpectedResources not found in output"
+      fi
+    else
+      skip "validate/expected-resources-manual-pass" "helm install failed"
+      skip "validate/expected-resources-manual-merge" "helm install failed"
+    fi
+
+    # Cleanup nginx chart
+    msg "--- Cleanup: Removing nginx chart ---"
+    helm uninstall "$nginx_release" -n "$nginx_ns" 2>&1 || true
+    kubectl delete namespace "$nginx_ns" 2>&1 || true
+  fi
+
   # Cleanup
   kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
 }

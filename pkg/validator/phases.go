@@ -871,36 +871,36 @@ func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResul
 	// Log warnings if anything is unregistered
 	if len(unregisteredConstraints) > 0 || len(unregisteredChecks) > 0 {
 		var msg strings.Builder
-		msg.WriteString(fmt.Sprintf("recipe contains unregistered validations for phase %s (will be skipped):\n", phase))
+		fmt.Fprintf(&msg, "recipe contains unregistered validations for phase %s (will be skipped):\n", phase)
 
 		if len(unregisteredConstraints) > 0 {
-			msg.WriteString(fmt.Sprintf("\nUnregistered constraints (%d):\n", len(unregisteredConstraints)))
+			fmt.Fprintf(&msg, "\nUnregistered constraints (%d):\n", len(unregisteredConstraints))
 			for _, name := range unregisteredConstraints {
-				msg.WriteString(fmt.Sprintf("  - %s\n", name))
+				fmt.Fprintf(&msg, "  - %s\n", name)
 			}
 
 			// Show available constraints for this phase
 			available := checks.ListConstraintTests(phase)
 			if len(available) > 0 {
-				msg.WriteString(fmt.Sprintf("\nAvailable constraints for phase '%s' (%d):\n", phase, len(available)))
+				fmt.Fprintf(&msg, "\nAvailable constraints for phase '%s' (%d):\n", phase, len(available))
 				for _, ct := range available {
-					msg.WriteString(fmt.Sprintf("  - %s: %s\n", ct.Pattern, ct.Description))
+					fmt.Fprintf(&msg, "  - %s: %s\n", ct.Pattern, ct.Description)
 				}
 			}
 		}
 
 		if len(unregisteredChecks) > 0 {
-			msg.WriteString(fmt.Sprintf("\nUnregistered checks (%d):\n", len(unregisteredChecks)))
+			fmt.Fprintf(&msg, "\nUnregistered checks (%d):\n", len(unregisteredChecks))
 			for _, name := range unregisteredChecks {
-				msg.WriteString(fmt.Sprintf("  - %s\n", name))
+				fmt.Fprintf(&msg, "  - %s\n", name)
 			}
 
 			// Show available checks for this phase
 			available := checks.ListChecks(phase)
 			if len(available) > 0 {
-				msg.WriteString(fmt.Sprintf("\nAvailable checks for phase '%s' (%d):\n", phase, len(available)))
+				fmt.Fprintf(&msg, "\nAvailable checks for phase '%s' (%d):\n", phase, len(available))
 				for _, check := range available {
-					msg.WriteString(fmt.Sprintf("  - %s: %s\n", check.Name, check.Description))
+					fmt.Fprintf(&msg, "  - %s: %s\n", check.Name, check.Description)
 				}
 			}
 		}
@@ -1443,6 +1443,14 @@ func (v *Validator) ensureDataConfigMaps(
 	snapshotYAML, err := yaml.Marshal(snap)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
+	}
+
+	// Auto-discover expected resources from component manifests.
+	// NOTE: This intentionally mutates recipeResult.ComponentRefs[].ExpectedResources
+	// in place *before* serialization below, so the check pod sees the full
+	// expected resources list (manual + auto-discovered) in the deployed ConfigMap.
+	if resolveErr := resolveExpectedResources(ctx, recipeResult); resolveErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to resolve expected resources", resolveErr)
 	}
 
 	// Serialize recipe to YAML

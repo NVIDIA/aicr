@@ -57,10 +57,10 @@ func MarshalYAMLWithHeader(v any, header ValuesHeader) ([]byte, error) {
 	var buf bytes.Buffer
 
 	// Write header comments
-	buf.WriteString(fmt.Sprintf("# %s Helm Values\n", header.ComponentName))
+	fmt.Fprintf(&buf, "# %s Helm Values\n", header.ComponentName)
 	buf.WriteString("# Generated from Cloud Native Stack Recipe\n")
-	buf.WriteString(fmt.Sprintf("# Bundler Version: %s\n", header.BundlerVersion))
-	buf.WriteString(fmt.Sprintf("# Recipe Version: %s\n", header.RecipeVersion))
+	fmt.Fprintf(&buf, "# Bundler Version: %s\n", header.BundlerVersion)
+	fmt.Fprintf(&buf, "# Recipe Version: %s\n", header.RecipeVersion)
 	buf.WriteString("\n")
 
 	// Serialize the values

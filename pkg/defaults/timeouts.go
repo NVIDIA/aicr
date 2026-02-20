@@ -131,6 +131,10 @@ const (
 	// ResourceVerificationTimeout is the timeout for verifying individual
 	// expected resources exist and are healthy during deployment validation.
 	ResourceVerificationTimeout = 10 * time.Second
+
+	// ComponentRenderTimeout is the maximum time to render a single component
+	// via helm template or manifest file rendering during resource discovery.
+	ComponentRenderTimeout = 60 * time.Second
 )
 
 // Pod operation timeouts for validation and agent operations.
