@@ -23,8 +23,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
+	"github.com/NVIDIA/eidos/pkg/defaults"
 	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/manifest"
 	"github.com/NVIDIA/eidos/pkg/recipe"
@@ -32,9 +32,6 @@ import (
 )
 
 const (
-	// componentRenderTimeout is the maximum time to render a single component.
-	componentRenderTimeout = 60 * time.Second
-
 	// helmCommand is the CLI command for Helm operations.
 	helmCommand = "helm"
 )
@@ -55,6 +52,11 @@ type componentDiscovery struct {
 // CLI tool availability is checked up front; missing tools cause a hard error if
 // components of that type exist. Rendering failures for individual components are
 // logged as warnings and do not block other components.
+//
+// Note: Phase 1 (helm template) requires network access for chart downloads
+// (HTTP repos via --repo, OCI registries via oci:// prefix) and the helm CLI.
+// Offline/air-gapped environments will see warnings for components with chart
+// coordinates but can still use manually declared expectedResources.
 func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeResult) error {
 	// Check if helm CLI is needed and verify availability up front.
 	needsHelm := false
@@ -105,7 +107,7 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 		// Phase 2: Render manifestFiles (Go templates bundled alongside the chart).
 		// Uses the same rendering logic as the bundler (pkg/manifest.Render).
 		if len(ref.ManifestFiles) > 0 {
-			manifestResources := renderManifestFiles(*ref, values)
+			manifestResources := renderManifestFiles(ctx, *ref, values)
 			discovered = append(discovered, manifestResources...)
 		}
 
@@ -172,7 +174,7 @@ func countByKind(resources []recipe.ExpectedResource) string {
 // then extracts workload resources from the output.
 // Supports both HTTP repos (--repo flag) and OCI registries (oci:// prefix in source).
 func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map[string]any) ([]recipe.ExpectedResource, error) {
-	ctx, cancel := context.WithTimeout(ctx, componentRenderTimeout)
+	ctx, cancel := context.WithTimeout(ctx, defaults.ComponentRenderTimeout)
 	defer cancel()
 
 	var args []string
@@ -257,10 +259,15 @@ func executeSubprocess(ctx context.Context, name string, args ...string) ([]byte
 // Helm-compatible data, then extracts workload resources from the output.
 // This uses the same rendering logic as the bundler (pkg/manifest.Render).
 // Rendering errors for individual files are logged as warnings and skipped.
-func renderManifestFiles(ref recipe.ComponentRef, values map[string]any) []recipe.ExpectedResource {
+func renderManifestFiles(ctx context.Context, ref recipe.ComponentRef, values map[string]any) []recipe.ExpectedResource {
 	var resources []recipe.ExpectedResource
 
 	for _, manifestPath := range ref.ManifestFiles {
+		if ctx.Err() != nil {
+			slog.Warn("context cancelled during manifest file rendering",
+				"component", ref.Name, "error", ctx.Err())
+			break
+		}
 		content, err := recipe.GetManifestContent(manifestPath)
 		if err != nil {
 			slog.Warn("failed to load manifest file for resource discovery",

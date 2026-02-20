@@ -1445,7 +1445,10 @@ func (v *Validator) ensureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
 	}
 
-	// Auto-discover expected resources from component manifests
+	// Auto-discover expected resources from component manifests.
+	// NOTE: This intentionally mutates recipeResult.ComponentRefs[].ExpectedResources
+	// in place *before* serialization below, so the check pod sees the full
+	// expected resources list (manual + auto-discovered) in the deployed ConfigMap.
 	if resolveErr := resolveExpectedResources(ctx, recipeResult); resolveErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to resolve expected resources", resolveErr)
 	}

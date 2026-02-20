@@ -22,7 +22,7 @@ import (
 	"strings"
 	"text/template"
 
-	"sigs.k8s.io/yaml"
+	"gopkg.in/yaml.v3"
 )
 
 // RenderInput provides the data needed to render a manifest template.

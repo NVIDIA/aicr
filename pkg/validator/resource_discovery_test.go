@@ -15,6 +15,7 @@
 package validator
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"strings"
@@ -607,7 +608,7 @@ func TestRenderManifestFiles(t *testing.T) {
 			recipe.SetDataProvider(&testDataProvider{files: tt.files})
 			t.Cleanup(func() { recipe.SetDataProvider(orig) })
 
-			got := renderManifestFiles(tt.ref, tt.values)
+			got := renderManifestFiles(context.Background(), tt.ref, tt.values)
 			if len(got) != len(tt.want) {
 				t.Fatalf("renderManifestFiles() got %d resources, want %d", len(got), len(tt.want))
 			}

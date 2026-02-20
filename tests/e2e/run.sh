@@ -1399,9 +1399,7 @@ RECIPE
           detail "Expected-resources check correctly failed for missing resource in merge"
           pass "validate/expected-resources-manual-merge"
         else
-          # Even if it passed (e.g., the check only verifies some resources), the merge worked
-          detail "Expected-resources check ran with merged resources"
-          pass "validate/expected-resources-manual-merge"
+          fail "validate/expected-resources-manual-merge" "Check should have failed for nonexistent-deploy but passed"
         fi
       else
         fail "validate/expected-resources-manual-merge" "TestCheckExpectedResources not found in output"
