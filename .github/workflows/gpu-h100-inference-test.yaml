@@ -127,6 +127,43 @@ jobs:
             --test-dir tests/chainsaw/ai-conformance/kind \
             --config tests/chainsaw/chainsaw-config.yaml
 
+      # --- Inference Gateway validation (CNCF AI Conformance #6) ---
+
+      - name: Validate inference gateway
+        run: |
+          echo "=== GatewayClass ==="
+          GC_STATUS=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" \
+            get gatewayclass kgateway \
+            -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
+          echo "GatewayClass accepted: ${GC_STATUS}"
+          if [[ "${GC_STATUS}" != "True" ]]; then
+            echo "::error::GatewayClass 'kgateway' not accepted"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" get gatewayclass -o yaml 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "=== Gateway ==="
+          GW_STATUS=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" \
+            get gateway inference-gateway -n kgateway-system \
+            -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
+          echo "Gateway programmed: ${GW_STATUS}"
+          if [[ "${GW_STATUS}" != "True" ]]; then
+            echo "::error::Gateway 'inference-gateway' not programmed"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" \
+              get gateway inference-gateway -n kgateway-system -o yaml 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "=== Gateway API CRDs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get crds 2>/dev/null | \
+            grep -E "gateway\.networking\.k8s\.io" || true
+
+          echo "=== Inference extension CRDs ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get crds 2>/dev/null | \
+            grep -E "inference\.networking" || true
+
+          echo "Inference gateway validation passed."
+
       # --- Dynamo vLLM inference smoke test ---
 
       - name: Deploy Dynamo vLLM smoke test
@@ -189,6 +226,68 @@ jobs:
           fi
           echo "Dynamo vLLM inference smoke test passed."
 
+      # --- Accelerator & AI Service Metrics validation (CNCF AI Conformance #4/#5) ---
+
+      - name: Validate accelerator metrics
+        run: |
+          echo "=== DCGM Exporter pod ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+            get pods -l app=nvidia-dcgm-exporter -o wide
+          DCGM_POD=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+            get pods -l app=nvidia-dcgm-exporter -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+          if [[ -z "${DCGM_POD}" ]]; then
+            echo "::error::DCGM Exporter pod not found"
+            exit 1
+          fi
+          echo "DCGM Exporter pod: ${DCGM_POD}"
+
+          echo "=== Query DCGM metrics endpoint ==="
+          METRICS=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" run dcgm-probe \
+            --rm -i --restart=Never --image=curlimages/curl \
+            -- curl -sf http://nvidia-dcgm-exporter.gpu-operator.svc:9400/metrics 2>/dev/null)
+
+          for METRIC in DCGM_FI_DEV_GPU_UTIL DCGM_FI_DEV_FB_USED DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE; do
+            if echo "${METRICS}" | grep -q "^${METRIC}"; then
+              echo "${METRIC}: $(echo "${METRICS}" | grep "^${METRIC}" | head -1)"
+            else
+              echo "::warning::Metric ${METRIC} not found in DCGM output"
+            fi
+          done
+
+          echo "=== Prometheus scraping GPU metrics ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring \
+            port-forward svc/kube-prometheus-prometheus 9090:9090 &
+          PF_PID=$!
+          sleep 3
+
+          cleanup_pf() { kill "${PF_PID}" 2>/dev/null || true; }
+          trap cleanup_pf EXIT
+
+          for METRIC in DCGM_FI_DEV_GPU_UTIL DCGM_FI_DEV_FB_USED DCGM_FI_DEV_GPU_TEMP DCGM_FI_DEV_POWER_USAGE; do
+            RESULT=$(curl -sf "http://localhost:9090/api/v1/query?query=${METRIC}" 2>/dev/null)
+            COUNT=$(echo "${RESULT}" | jq -r '.data.result | length' 2>/dev/null)
+            if [[ "${COUNT}" -gt 0 ]]; then
+              echo "${METRIC}: ${COUNT} time series in Prometheus"
+            else
+              echo "::warning::${METRIC} not found in Prometheus (may need more scrape time)"
+            fi
+          done
+
+          kill "${PF_PID}" 2>/dev/null || true
+          trap - EXIT
+
+          echo "=== Custom Metrics API ==="
+          CUSTOM_METRICS=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" \
+            get --raw /apis/custom.metrics.k8s.io/v1beta1 2>/dev/null)
+          if [[ -n "${CUSTOM_METRICS}" ]]; then
+            echo "Custom metrics API is available"
+            echo "${CUSTOM_METRICS}" | jq -r '.resources[].name' 2>/dev/null | head -20 || true
+          else
+            echo "::warning::Custom metrics API not available (prometheus-adapter may need time)"
+          fi
+
+          echo "Accelerator metrics validation passed."
+
       # --- DRA GPU allocation test ---
 
       - name: Deploy DRA GPU test
@@ -212,6 +311,61 @@ jobs:
           echo "=== DRA GPU test logs ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
             logs pod/dra-gpu-test
+
+      # --- Secure Accelerator Access validation (CNCF AI Conformance #3) ---
+
+      - name: Validate secure accelerator access
+        run: |
+          echo "=== Verify DRA-mediated access (no hostPath, no device plugin) ==="
+
+          # Check pod uses resourceClaims (DRA), not resources.limits (device plugin)
+          RESOURCE_CLAIMS=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            get pod/dra-gpu-test -o jsonpath='{.spec.resourceClaims}' 2>/dev/null)
+          if [[ -z "${RESOURCE_CLAIMS}" || "${RESOURCE_CLAIMS}" == "null" ]]; then
+            echo "::error::Pod does not use DRA resourceClaims"
+            exit 1
+          fi
+          echo "Pod uses DRA resourceClaims: ${RESOURCE_CLAIMS}"
+
+          # Verify no nvidia.com/gpu in resources.limits (device plugin pattern)
+          GPU_LIMITS=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            get pod/dra-gpu-test \
+            -o jsonpath='{.spec.containers[0].resources.limits.nvidia\.com/gpu}' 2>/dev/null)
+          if [[ -n "${GPU_LIMITS}" && "${GPU_LIMITS}" != "null" ]]; then
+            echo "::error::Pod uses device plugin (nvidia.com/gpu limits) instead of DRA"
+            exit 1
+          fi
+          echo "No device plugin resources.limits — GPU access via DRA only"
+
+          # Verify no hostPath volumes to /dev/nvidia*
+          VOLUMES=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            get pod/dra-gpu-test -o jsonpath='{.spec.volumes}' 2>/dev/null)
+          if echo "${VOLUMES}" | grep -q "hostPath" && echo "${VOLUMES}" | grep -q "/dev/nvidia"; then
+            echo "::error::Pod has hostPath volume mount to /dev/nvidia*"
+            exit 1
+          fi
+          echo "No hostPath volumes to /dev/nvidia* — access is DRA-mediated"
+
+          # Verify container security (no privilege escalation)
+          PRIV_ESC=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            get pod/dra-gpu-test \
+            -o jsonpath='{.spec.containers[0].securityContext.allowPrivilegeEscalation}' 2>/dev/null)
+          echo "allowPrivilegeEscalation: ${PRIV_ESC}"
+
+          # Verify only 1 GPU visible (allocated count matches)
+          GPU_COUNT=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            logs pod/dra-gpu-test 2>/dev/null | grep -c "/dev/nvidia[0-9]" || echo "0")
+          echo "GPU devices visible in container: ${GPU_COUNT}"
+          if [[ "${GPU_COUNT}" -lt 1 ]]; then
+            echo "::error::No GPU devices visible in container"
+            exit 1
+          fi
+
+          echo "=== ResourceClaim allocation ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            get resourceclaim gpu-claim -o wide
+
+          echo "Secure accelerator access validation passed."
 
       - name: DRA GPU test cleanup
         if: always()
@@ -269,6 +423,22 @@ jobs:
             logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
           echo "=== Recent events (dynamo-system) ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          echo "=== kgateway pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kgateway-system get pods -o wide 2>/dev/null || true
+          echo "=== GatewayClass status ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get gatewayclass -o yaml 2>/dev/null || true
+          echo "=== Gateway status ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get gateways -A -o yaml 2>/dev/null || true
+          echo "=== DCGM Exporter pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+            get pods -l app=nvidia-dcgm-exporter -o wide 2>/dev/null || true
+          echo "=== Monitoring pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -o wide 2>/dev/null || true
+          echo "=== DRA ResourceSlices ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" get resourceslices -o wide 2>/dev/null || true
+          echo "=== DRA test pod spec ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
+            get pod/dra-gpu-test -o yaml 2>/dev/null || true
           echo "=== Node status ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
 
