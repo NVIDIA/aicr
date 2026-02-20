@@ -16,10 +16,20 @@
   .msg .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
   .msg.user .avatar { background: #533483; }
   .msg.assistant .avatar { background: #0f3460; }
-  .msg .bubble { padding: 12px 16px; border-radius: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg .bubble { padding: 12px 16px; border-radius: 12px; line-height: 1.6; word-break: break-word; }
   .msg.user .bubble { background: #533483; border-bottom-right-radius: 4px; }
   .msg.assistant .bubble { background: #16213e; border: 1px solid #0f3460; border-bottom-left-radius: 4px; }
-  .msg.assistant .bubble .thinking { color: #666; font-style: italic; font-size: 13px; }
+  .msg.assistant .bubble .thinking { color: #888; font-style: italic; font-size: 13px; margin-bottom: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; }
+  .bubble h1, .bubble h2, .bubble h3 { margin: 12px 0 6px; color: #fff; }
+  .bubble h1 { font-size: 1.3em; } .bubble h2 { font-size: 1.15em; } .bubble h3 { font-size: 1.05em; }
+  .bubble p { margin: 6px 0; }
+  .bubble ul, .bubble ol { margin: 6px 0 6px 20px; }
+  .bubble li { margin: 2px 0; }
+  .bubble code { background: #0d1b2a; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  .bubble pre { background: #0d1b2a; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+  .bubble pre code { background: none; padding: 0; }
+  .bubble strong { color: #fff; }
+  .bubble hr { border: none; border-top: 1px solid #0f3460; margin: 12px 0; }
   #input-area { padding: 16px 24px; background: #16213e; border-top: 1px solid #0f3460; }
   #input-row { max-width: 720px; margin: 0 auto; display: flex; gap: 8px; }
   #input { flex: 1; padding: 12px 16px; border-radius: 12px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0; font-size: 15px; outline: none; resize: none; font-family: inherit; }
@@ -41,96 +51,205 @@
 <div id="input-area">
   <div id="input-row">
     <textarea id="input" rows="1" placeholder="Type a message... (Shift+Enter for newline)" autofocus></textarea>
-    <button id="send" onclick="send()">Send</button>
+    <button id="send" onclick="sendMsg()">Send</button>
   </div>
 </div>
 <script>
-const API = '/v1/chat/completions';
-const MODEL = 'Qwen/Qwen3-0.6B';
-let messages = [];
-let sending = false;
+var API = '/v1/chat/completions';
+var MODEL = 'Qwen/Qwen3-0.6B';
+var messages = [];
+var sending = false;
 
-const chat = document.getElementById('chat');
-const input = document.getElementById('input');
-const btn = document.getElementById('send');
+var chatEl = document.getElementById('chat');
+var inputEl = document.getElementById('input');
+var btnEl = document.getElementById('send');
 
-input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+inputEl.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }
 });
 
-input.addEventListener('input', () => {
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+inputEl.addEventListener('input', function() {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
 });
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function md(src) {
+  // Extract code blocks first to protect them
+  var codeBlocks = [];
+  var text = src.replace(/```(\w*)\n([\s\S]*?)```/g, function(m, lang, code) {
+    codeBlocks.push('<pre><code>' + escapeHtml(code) + '</code></pre>');
+    return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+  });
+
+  // Process line by line
+  var lines = text.split('\n');
+  var html = [];
+  var inList = false;
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // Check for code block placeholder
+    var cbMatch = line.match(/^\x00CB(\d+)\x00$/);
+    if (cbMatch) {
+      if (inList) { html.push('</ul>'); inList = false; }
+      html.push(codeBlocks[parseInt(cbMatch[1])]);
+      continue;
+    }
+
+    // Headings
+    var hMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (hMatch) {
+      if (inList) { html.push('</ul>'); inList = false; }
+      var level = hMatch[1].length;
+      html.push('<h' + level + '>' + inlineFormat(hMatch[2]) + '</h' + level + '>');
+      continue;
+    }
+
+    // Horizontal rule
+    if (line.match(/^---+$/)) {
+      if (inList) { html.push('</ul>'); inList = false; }
+      html.push('<hr>');
+      continue;
+    }
+
+    // Unordered list
+    var liMatch = line.match(/^[-*]\s+(.+)$/);
+    if (liMatch) {
+      if (!inList) { html.push('<ul>'); inList = true; }
+      html.push('<li>' + inlineFormat(liMatch[1]) + '</li>');
+      continue;
+    }
+
+    // Ordered list
+    var olMatch = line.match(/^\d+\.\s+(.+)$/);
+    if (olMatch) {
+      if (!inList) { html.push('<ul>'); inList = true; }
+      html.push('<li>' + inlineFormat(olMatch[1]) + '</li>');
+      continue;
+    }
+
+    // End list if we hit a non-list line
+    if (inList) { html.push('</ul>'); inList = false; }
+
+    // Empty line = paragraph break
+    if (line.trim() === '') {
+      html.push('<br>');
+      continue;
+    }
+
+    // Regular text
+    html.push('<p>' + inlineFormat(line) + '</p>');
+  }
+
+  if (inList) html.push('</ul>');
+  return html.join('\n');
+}
+
+function inlineFormat(text) {
+  // Inline code (protect first)
+  var codes = [];
+  text = text.replace(/`([^`]+)`/g, function(m, code) {
+    codes.push('<code>' + escapeHtml(code) + '</code>');
+    return '\x00IC' + (codes.length - 1) + '\x00';
+  });
+
+  // Escape HTML in remaining text
+  text = escapeHtml(text);
+
+  // Bold + italic
+  text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+  // Restore inline code
+  text = text.replace(/\x00IC(\d+)\x00/g, function(m, idx) {
+    return codes[parseInt(idx)];
+  });
+
+  return text;
+}
 
 function addMsg(role, content) {
-  const status = chat.querySelector('.status');
+  var status = chatEl.querySelector('.status');
   if (status) status.remove();
 
-  const div = document.createElement('div');
-  div.className = `msg ${role}`;
-  const avatar = role === 'user' ? 'You' : 'AI';
-  div.innerHTML = `<div class="avatar">${avatar}</div><div class="bubble"></div>`;
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
+  var div = document.createElement('div');
+  div.className = 'msg ' + role;
+  var avatar = role === 'user' ? 'You' : 'AI';
+  div.innerHTML = '<div class="avatar">' + avatar + '</div><div class="bubble"></div>';
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
 
-  const bubble = div.querySelector('.bubble');
+  var bubble = div.querySelector('.bubble');
   if (content) setContent(bubble, content);
   return bubble;
 }
 
 function setContent(bubble, text) {
-  // Separate thinking from response
-  const thinkMatch = text.match(/<think>([\s\S]*?)<\/think>/);
-  let display = text.replace(/<think>[\s\S]*?<\/think>\s*/, '');
+  // Strip <think>...</think> blocks (model reasoning)
+  var thinkMatch = text.match(/<think>([\s\S]*?)<\/think>/);
+  var display = text.replace(/<think>[\s\S]*?<\/think>\s*/, '');
+
   // Handle unclosed think tags (streaming)
-  if (!display && text.includes('<think>')) {
-    const after = text.split('<think>').pop();
-    bubble.innerHTML = `<div class="thinking">${after.replace('</think>', '').trim() || 'Thinking...'}</div>`;
+  if (!display && text.indexOf('<think>') !== -1) {
+    var parts = text.split('<think>');
+    var after = parts[parts.length - 1];
+    bubble.innerHTML = '<div class="thinking">' + escapeHtml(after.replace('</think>', '').trim() || 'Thinking...') + '</div>';
     return;
   }
+
+  var rendered = md(display.trim() || text);
+
   if (thinkMatch && thinkMatch[1].trim()) {
-    bubble.innerHTML = `<div class="thinking">${thinkMatch[1].trim()}</div><br>${display.trim()}`;
+    bubble.innerHTML = '<div class="thinking">' + escapeHtml(thinkMatch[1].trim()) + '</div>' + rendered;
   } else {
-    bubble.textContent = display.trim() || text;
+    bubble.innerHTML = rendered;
   }
 }
 
-async function send() {
-  const text = input.value.trim();
+function sendMsg() {
+  var text = inputEl.value.trim();
   if (!text || sending) return;
 
   sending = true;
-  btn.disabled = true;
-  input.value = '';
-  input.style.height = 'auto';
+  btnEl.disabled = true;
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
 
   addMsg('user', text);
   messages.push({ role: 'user', content: text });
 
-  const bubble = addMsg('assistant', '');
+  var bubble = addMsg('assistant', '');
   bubble.textContent = 'Thinking...';
 
-  try {
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, messages, max_tokens: 512 }),
-    });
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const content = data.choices[0].message.content;
-    messages.push({ role: 'assistant', content });
+  fetch(API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, messages: messages, max_tokens: 512 }),
+  })
+  .then(function(res) {
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  })
+  .then(function(data) {
+    var content = data.choices[0].message.content;
+    messages.push({ role: 'assistant', content: content });
     setContent(bubble, content);
-  } catch (err) {
-    bubble.textContent = `Error: ${err.message}. Make sure port-forward is running.`;
-  }
-
-  sending = false;
-  btn.disabled = false;
-  chat.scrollTop = chat.scrollHeight;
-  input.focus();
+  })
+  .catch(function(err) {
+    bubble.textContent = 'Error: ' + err.message + '. Make sure port-forward is running.';
+  })
+  .finally(function() {
+    sending = false;
+    btnEl.disabled = false;
+    chatEl.scrollTop = chatEl.scrollHeight;
+    inputEl.focus();
+  });
 }
 </script>
 </body>

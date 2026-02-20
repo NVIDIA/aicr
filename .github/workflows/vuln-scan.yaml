@@ -40,7 +40,7 @@ concurrency:
 
 env:
   SARIF_OUTPUT: 'vulnerability-scan-results.sarif'
-  SEVERITY_LEVELS: 'HIGH,CRITICAL'
+  SEVERITY_LEVELS: 'MEDIUM,HIGH,CRITICAL'
 
 jobs:
   trivy-repo-scan:
@@ -85,3 +85,22 @@ jobs:
         uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
         with:
           sarif_file: ${{ env.SARIF_OUTPUT }}
+
+  malware-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Malware Scan
+        uses: ./.github/actions/malware-scan
+        with:
+          scan_path: '.'
+          category: 'clamav'

@@ -14,18 +14,6 @@ eidos recipe \
   --output recipe.yaml
 ```
 
-## Validate Recipe Constraints
-
-```shell
-eidos validate \
-  --phase readiness \
-  --namespace gpu-operator \
-  --node-selector nodeGroup=customer-gpu
-  --output recipe.yaml
-```
-
-> Assuming cluster meets recipe constraints
-
 ## Generate Bundle
 
 > Assuming user updates selectors and tolerations as needed
@@ -33,17 +21,15 @@ eidos validate \
 ```shell
 eidos bundle \
   --recipe recipe.yaml \
-  --system-node-selector nodeGroup=system-pool \
-  --accelerated-node-selector nodeGroup=gpu-worker \
-  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
+  --accelerated-node-selector nodeGroup=gpu-worker\
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
   --output bundle
 ```
 
 ## Install Bundle into the Cluster
 
 ```shell
-chmod +x deploy.sh
-./deploy.sh
+cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
 ## Validate Cluster 

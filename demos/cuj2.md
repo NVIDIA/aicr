@@ -182,6 +182,31 @@ vllm-agg-frontend-0                     1/1     Running   0          2m
 vllm-agg-vllmdecodeworker-0             1/1     Running   0          2m
 ```
 
+### Architecture
+
+```
+  ┌─────────┐   HTTP    ┌────────────────┐  NATS   ┌────────────────────┐
+  │  Client  │─────────▶│   Frontend     │────────▶│  VllmDecodeWorker  │
+  │ (OpenAI  │  :8000   │                │  :4222  │                    │
+  │  API)    │◀─────────│  vllm-runtime  │◀────────│  dynamo.vllm       │
+  └─────────┘           │  Qwen3-0.6B   │         │  Qwen3-0.6B       │
+                        │                │         │  1x H100 GPU       │
+                        │  CPU node      │         │  GPU node          │
+                        └────────────────┘         └────────────────────┘
+                         ip-100-64-83-166           ip-100-64-171-120
+                         svc: :8000                 svc: :9090
+
+  Services:
+    Frontend          1/1 Ready   componentType: frontend
+    VllmDecodeWorker  1/1 Ready   componentType: worker   gpu: 1
+
+  Flow:
+    1. Client sends OpenAI request (/v1/chat/completions) → Frontend :8000
+    2. Frontend dispatches inference work via NATS :4222
+    3. VllmDecodeWorker runs Qwen/Qwen3-0.6B on H100, returns result
+    4. Response streams back: Worker → NATS → Frontend → Client
+```
+
 ### Test the endpoint
 
 #### Option 1: Chat UI (browser)
