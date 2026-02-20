@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/eidos/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/eidos/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/eidos/pkg/bundler/result"
+	"github.com/NVIDIA/eidos/pkg/bundler/validations"
 	"github.com/NVIDIA/eidos/pkg/component"
 	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
@@ -126,6 +127,9 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir string) (*result.Output, error) {
 	start := time.Now()
 
+	// Reset warnings so they dont accumulate between multiple bundle generations
+	b.warnings = nil
+
 	// Validate input
 	if input == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe input cannot be nil")
@@ -163,11 +167,11 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 			"failed to extract component values", err)
 	}
 
-	// Validate workload-selector for skyhook-customizations with training intent
-	b.validateWorkloadSelector(recipeResult)
-
-	// Validate accelerated selector for skyhook-customizations with training/inference intent
-	b.validateAcceleratedSelector(recipeResult)
+	// Run component-specific validations
+	if err := b.runComponentValidations(ctx, recipeResult); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"component validation failed", err)
+	}
 
 	// Route based on deployer
 	deployer := b.Config.Deployer()
@@ -235,7 +239,7 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 	resultOutput.Results = append(resultOutput.Results, helmResult)
 
 	// Populate deployment info from generator output
-	notes := make([]string, 0)
+	var notes []string
 	if len(b.warnings) > 0 {
 		notes = append(notes, b.warnings...)
 	}
@@ -455,9 +459,9 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply workload selector (for components like skyhook-customizations)
+	// Apply workload selector
 	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
-		if paths := comp.GetAcceleratedWorkloadSelectorPaths(); len(paths) > 0 {
+		if paths := comp.GetWorkloadSelectorPaths(); len(paths) > 0 {
 			component.ApplyNodeSelectorOverrides(values, workloadSelector, paths...)
 		}
 	}
@@ -480,83 +484,65 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 	}
 }
 
-// validateWorkloadSelector validates that workload-selector is set when skyhook-customizations
-// is present with training intent.
-func (b *DefaultBundler) validateWorkloadSelector(recipeResult *recipe.RecipeResult) {
+// runComponentValidations executes all component-specific validations registered in the registry.
+// Collects warnings and errors based on validation severity.
+func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
 	if b.Config == nil {
-		return
+		return nil
 	}
 
-	// Check if skyhook-customizations component exists
-	hasSkyhookCustomizations := false
+	// Get component registry
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		slog.Debug("failed to load component registry for validations",
+			"error", err,
+		)
+		return nil // Non-fatal, continue without validations
+	}
+
+	// Iterate through components in recipe
 	for _, ref := range recipeResult.ComponentRefs {
-		if ref.Name == "skyhook-customizations" {
-			hasSkyhookCustomizations = true
-			break
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled during validation", err)
+		}
+
+		// Get component config from registry
+		comp := registry.Get(ref.Name)
+		if comp == nil {
+			continue // Unknown component, skip
+		}
+
+		// Get validations for this component
+		componentValidations := comp.GetValidations()
+		if len(componentValidations) == 0 {
+			continue // No validations configured
+		}
+
+		// Run validations
+		warnings, validationErrors := validations.RunValidations(
+			ctx,
+			ref.Name,
+			componentValidations,
+			recipeResult,
+			b.Config,
+		)
+
+		// Collect warnings (prepend "Warning: " if not already present)
+		for _, warning := range warnings {
+			msg := warning
+			if !strings.HasPrefix(warning, "Warning: ") {
+				msg = "Warning: " + warning
+			}
+			b.warnings = append(b.warnings, msg)
+		}
+
+		// Return first error (errors are blocking)
+		if len(validationErrors) > 0 {
+			return validationErrors[0]
 		}
 	}
 
-	if !hasSkyhookCustomizations {
-		return
-	}
-
-	// Check if intent is training
-	if recipeResult.Criteria == nil || recipeResult.Criteria.Intent != recipe.CriteriaIntentTraining {
-		return
-	}
-
-	// Check if workload-selector is not set
-	selector := b.Config.WorkloadSelector()
-	if len(selector) == 0 {
-		slog.Warn("skyhook-customizations is enabled with training intent but --workload-selector is not set",
-			"component", "skyhook-customizations",
-			"intent", "training",
-		)
-		// Store warning to be added to deployment notes
-		b.warnings = append(b.warnings, "Warning: skyhook-customizations is enabled with training intent but --workload-selector is not set. This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.")
-	}
-}
-
-// validateAcceleratedSelector validates that accelerated-node-selector is set when skyhook-customizations
-// is present with training or inference intent.
-func (b *DefaultBundler) validateAcceleratedSelector(recipeResult *recipe.RecipeResult) {
-	if b.Config == nil {
-		return
-	}
-
-	// Check if skyhook-customizations component exists
-	hasSkyhookCustomizations := false
-	for _, ref := range recipeResult.ComponentRefs {
-		if ref.Name == "skyhook-customizations" {
-			hasSkyhookCustomizations = true
-			break
-		}
-	}
-
-	if !hasSkyhookCustomizations {
-		return
-	}
-
-	// Check if intent is training or inference
-	if recipeResult.Criteria == nil {
-		return
-	}
-	intent := recipeResult.Criteria.Intent
-	if intent != recipe.CriteriaIntentTraining && intent != recipe.CriteriaIntentInference {
-		return
-	}
-
-	// Check if accelerated-node-selector is not set
-	selector := b.Config.AcceleratedNodeSelector()
-	if len(selector) == 0 {
-		slog.Warn("skyhook-customizations is enabled with training/inference intent but --accelerated-node-selector is not set",
-			"component", "skyhook-customizations",
-			"intent", intent,
-		)
-		// Store warning to be added to deployment notes
-		warningMsg := fmt.Sprintf("Warning: skyhook-customizations is enabled with %s intent but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.", intent)
-		b.warnings = append(b.warnings, warningMsg)
-	}
+	return nil
 }
 
 // writeRecipeFile serializes the recipe to the bundle directory.

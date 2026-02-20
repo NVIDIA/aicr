@@ -55,6 +55,11 @@ type ComponentConfig struct {
 
 	// NodeScheduling defines paths for injecting node selectors and tolerations.
 	NodeScheduling NodeSchedulingConfig `yaml:"nodeScheduling,omitempty"`
+
+	PodScheduling PodSchedulingConfig `yaml:"podScheduling,omitempty"`
+
+	// Validations defines component-specific validation checks.
+	Validations []ComponentValidationConfig `yaml:"validations,omitempty"`
 }
 
 // HelmConfig contains default Helm chart settings for a component.
@@ -101,15 +106,42 @@ type SchedulingPaths struct {
 	// TolerationPaths are paths where tolerations are injected.
 	TolerationPaths []string `yaml:"tolerationPaths,omitempty"`
 
-	// WorkloadSelectorPaths are paths where workload selectors are injected.
-	// Used for components like skyhook-customizations to prevent eviction of running workloads.
-	WorkloadSelectorPaths []string `yaml:"workloadSelectorPaths,omitempty"`
-
 	// TaintPaths are paths where taints are injected as structured objects.
+	// Intended to be used instea of TaintStrPaths for components that need to set specific parts of taints
+	// and can't process the string format.
 	TaintPaths []string `yaml:"taintPaths,omitempty"`
 
 	// TaintStrPaths are paths where taints are injected as strings (format: key=value:effect or key:effect).
 	TaintStrPaths []string `yaml:"taintStrPaths,omitempty"`
+}
+
+// PodSchedulingConfig defines paths for pod scheduling injection.
+type PodSchedulingConfig struct {
+	// Workload defines paths for workload pod scheduling.
+	Workload WorkloadSchedulingPaths `yaml:"workload,omitempty"`
+}
+
+// WorkloadSchedulingPaths holds the Helm value paths for workload scheduling.
+type WorkloadSchedulingPaths struct {
+	// WorkloadSelectorPaths are paths where workload selectors are injected.
+	WorkloadSelectorPaths []string `yaml:"workloadSelectorPaths,omitempty"`
+}
+
+// ComponentValidationConfig defines a component-specific validation check.
+type ComponentValidationConfig struct {
+	// Function is the name of the validation function to execute (e.g., "CheckWorkloadSelectorMissing").
+	Function string `yaml:"function"`
+
+	// Severity determines whether failures are warnings or errors ("warning" or "error").
+	Severity string `yaml:"severity"`
+
+	// Conditions are optional conditions that must be met for the validation to run.
+	// Values are arrays of strings for OR matching (single element arrays are equivalent to single values).
+	// Example: {"intent": ["training"]} or {"intent": ["training", "inference"]}
+	Conditions map[string][]string `yaml:"conditions,omitempty"`
+
+	// Message is an optional detail message to append to validation failures/warnings.
+	Message string `yaml:"message,omitempty"`
 }
 
 // Global component registry (loaded once, thread-safe access)
@@ -298,12 +330,12 @@ func (c *ComponentConfig) GetAcceleratedTolerationPaths() []string {
 	return c.NodeScheduling.Accelerated.TolerationPaths
 }
 
-// GetAcceleratedWorkloadSelectorPaths returns all accelerated workload selector paths for a component.
-func (c *ComponentConfig) GetAcceleratedWorkloadSelectorPaths() []string {
+// GetWorkloadSelectorPaths returns all workload selector paths for a component.
+func (c *ComponentConfig) GetWorkloadSelectorPaths() []string {
 	if c == nil {
 		return nil
 	}
-	return c.NodeScheduling.Accelerated.WorkloadSelectorPaths
+	return c.PodScheduling.Workload.WorkloadSelectorPaths
 }
 
 // GetAcceleratedTaintStrPaths returns all accelerated taint string paths for a component.
@@ -312,6 +344,14 @@ func (c *ComponentConfig) GetAcceleratedTaintStrPaths() []string {
 		return nil
 	}
 	return c.NodeScheduling.Accelerated.TaintStrPaths
+}
+
+// GetValidations returns all validation configurations for a component.
+func (c *ComponentConfig) GetValidations() []ComponentValidationConfig {
+	if c == nil {
+		return nil
+	}
+	return c.Validations
 }
 
 // GetType returns the component deployment type based on which config is present.

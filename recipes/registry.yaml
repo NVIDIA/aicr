@@ -39,41 +39,6 @@ apiVersion: eidos.nvidia.com/v1alpha1
 kind: ComponentRegistry
 
 components:
-  - name: skyhook-operator
-    displayName: skyhook
-    valueOverrideKeys:
-      - skyhook
-    helm:
-      defaultRepository: https://nvidia.github.io/skyhook
-      defaultChart: skyhook-operator
-      defaultNamespace: skyhook
-    nodeScheduling:
-      system:
-        nodeSelectorPaths:
-          - controllerManager.selectors
-        tolerationPaths:
-          - controllerManager.tolerations
-
-  - name: skyhook-customizations
-    displayName: skyhook-customizations
-    valueOverrideKeys:
-      - skyhookcustomizations
-    helm:
-      # Manifest-only component - no external Helm chart, uses manifestFiles
-      defaultRepository: ""
-      defaultNamespace: skyhook
-    nodeScheduling:
-      system:
-        nodeSelectorPaths:
-          - systemNodeSelector
-        tolerationPaths:
-          - systemTolerations
-      accelerated:
-        nodeSelectorPaths:
-          - acceleratedNodeSelector
-        tolerationPaths:
-          - acceleratedTolerations
-
   - name: gpu-operator
     displayName: gpu-operator
     valueOverrideKeys:
@@ -186,8 +151,24 @@ components:
           - nodeSelector
         tolerationPaths:
           - tolerations
+    podScheduling:
+      workload:
         workloadSelectorPaths:
           - workloadSelector
+    validations:
+      - function: CheckWorkloadSelectorMissing
+        severity: warning
+        conditions:
+          intent:
+            - training
+        message: "This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction."
+      - function: CheckAcceleratedSelectorMissing
+        severity: warning
+        conditions:
+          intent:
+            - training
+            - inference
+        message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
 
   - name: nvsentinel
     displayName: nvsentinel

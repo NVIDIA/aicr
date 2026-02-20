@@ -137,13 +137,13 @@ func TestParseNodeSelectors(t *testing.T) {
 
 func TestParseTaint(t *testing.T) {
 	tests := []struct {
-		name    string
+		name     string
 		taintStr string
-		want    *corev1.Taint
-		wantErr bool
+		want     *corev1.Taint
+		wantErr  bool
 	}{
 		{
-			name:    "taint with key, value, and effect",
+			name:     "taint with key, value, and effect",
 			taintStr: "skyhook.io/runtime-required=true:NoSchedule",
 			want: &corev1.Taint{
 				Key:    "skyhook.io/runtime-required",
@@ -153,7 +153,7 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "taint with key and effect (no value)",
+			name:     "taint with key and effect (no value)",
 			taintStr: "dedicated:NoSchedule",
 			want: &corev1.Taint{
 				Key:    "dedicated",
@@ -163,7 +163,7 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "taint with PreferNoSchedule effect",
+			name:     "taint with PreferNoSchedule effect",
 			taintStr: "workload-type=training:PreferNoSchedule",
 			want: &corev1.Taint{
 				Key:    "workload-type",
@@ -173,7 +173,7 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "taint with NoExecute effect",
+			name:     "taint with NoExecute effect",
 			taintStr: "node.kubernetes.io/not-ready:NoExecute",
 			want: &corev1.Taint{
 				Key:    "node.kubernetes.io/not-ready",
@@ -183,7 +183,7 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "taint with value containing equals",
+			name:     "taint with value containing equals",
 			taintStr: "key=value=with=equals:NoSchedule",
 			want: &corev1.Taint{
 				Key:    "key",
@@ -193,28 +193,58 @@ func TestParseTaint(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "empty taint string",
+			name:     "empty taint string",
 			taintStr: "",
-			want:    nil,
-			wantErr: true,
+			want:     nil,
+			wantErr:  true,
 		},
 		{
-			name:    "invalid format - no colon",
+			name:     "invalid format - no colon",
 			taintStr: "key=value",
-			want:    nil,
-			wantErr: true,
+			want:     nil,
+			wantErr:  true,
 		},
 		{
-			name:    "invalid format - multiple colons",
+			name:     "invalid format - multiple colons",
 			taintStr: "key=value:effect:extra",
-			want:    nil,
-			wantErr: true,
+			want:     nil,
+			wantErr:  true,
 		},
 		{
-			name:    "invalid format - only colon",
+			name:     "invalid format - only colon",
 			taintStr: ":NoSchedule",
-			want:    nil,
-			wantErr: true,
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid taint effect - InvalidEffect",
+			taintStr: "key=value:InvalidEffect",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid taint effect - empty effect",
+			taintStr: "key=value:",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid taint effect - random string",
+			taintStr: "key=value:BadEffect",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid taint effect - lowercase",
+			taintStr: "key=value:noschedule",
+			want:     nil,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid taint effect - mixed case",
+			taintStr: "key=value:NoScheduleButWrong",
+			want:     nil,
+			wantErr:  true,
 		},
 	}
 
@@ -283,6 +313,42 @@ func TestParseTolerations(t *testing.T) {
 		{
 			name:        "invalid toleration too many colons",
 			tolerations: []string{"key:value:extra"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid taint effect - InvalidEffect",
+			tolerations: []string{"key=value:InvalidEffect"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid taint effect - empty effect",
+			tolerations: []string{"key=value:"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid taint effect - random string",
+			tolerations: []string{"key=value:BadEffect"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid taint effect - lowercase",
+			tolerations: []string{"key=value:noschedule"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid taint effect - mixed case",
+			tolerations: []string{"key=value:NoScheduleButWrong"},
+			wantLen:     0,
+			wantErr:     true,
+		},
+		{
+			name:        "invalid taint effect in second toleration",
+			tolerations: []string{"key1=value1:NoSchedule", "key2=value2:InvalidEffect"},
 			wantLen:     0,
 			wantErr:     true,
 		},

@@ -828,9 +828,20 @@ bundles/
 
 The `--workload-gate` and `--workload-selector` flags are day 2 operational options for cluster scaling operations:
 
-- **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [skyhook documentation](hhttps://github.com/NVIDIA/skyhook/blob/main/docs/runtime_required.md).
+- **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [skyhook documentation](https://github.com/NVIDIA/skyhook/blob/main/docs/runtime_required.md).
 
 - **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent skyhook from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
+
+**Component Validation System:**
+
+Eidos includes a component-driven validation system that automatically checks bundle configuration and displays warnings or errors during bundle generation. Validations are defined in the component registry and run automatically when components are included in a recipe.
+
+**How Validations Work:**
+
+1. **Automatic Execution**: When generating a bundle, validations are automatically executed for each component in the recipe
+2. **Condition-Based**: Validations can be configured to run only when specific conditions are met (e.g., intent, service, accelerator)
+3. **Severity Levels**: Each validation can be configured as a "warning" (non-blocking) or "error" (blocking)
+4. **Custom Messages**: Each validation can include an optional detail message that provides actionable guidance
 
 **Validation Warnings:**
 
@@ -839,15 +850,47 @@ When generating bundles with skyhook-customizations enabled, validation warnings
 1. **Workload Selector Warning**: When skyhook-customizations is enabled with training intent, if `--workload-selector` is not set, a warning will be displayed:
 
 ```
-Warning: skyhook-customizations is enabled with training intent but --workload-selector is not set. 
+Warning: skyhook-customizations is enabled but --workload-selector is not set. 
 This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
 ```
 
 2. **Accelerated Selector Warning**: When skyhook-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
 
 ```
-Warning: skyhook-customizations is enabled with {training|inference} intent but --accelerated-node-selector is not set. 
+Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. 
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
+```
+
+**Viewing Validation Warnings:**
+
+Validation warnings are displayed in the bundle output after successful generation:
+
+```shell
+Note:
+  ⚠ Warning: skyhook-customizations is enabled but --workload-selector is not set. This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
+  ⚠ Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
+```
+
+**Resolving Validation Warnings:**
+
+To resolve the warnings, include the appropriate flags when generating the bundle:
+
+```shell
+# Resolve workload selector warning
+eidos bundle -r recipe.yaml \
+  --workload-selector workload-type=training \
+  -o ./bundle
+
+# Resolve accelerated selector warning
+eidos bundle -r recipe.yaml \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  -o ./bundle
+
+# Resolve both warnings
+eidos bundle -r recipe.yaml \
+  --workload-selector workload-type=training \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  -o ./bundle
 ```
 
 **Examples:**

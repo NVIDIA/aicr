@@ -51,6 +51,11 @@ This directory contains architecture documentation for the Eidos (Eidos) tooling
 - **[API Server Architecture](api-server.md)**: HTTP REST API for recipe generation and bundle creation
   - Endpoints: `GET /v1/recipe` (query mode only), `POST /v1/bundle` (bundle generation)
   - Does not support snapshot capture or validation (use CLI or agent)
+- **[Component Validation System](validations.md)**: Component-driven validation framework
+  - Automatic validation execution during bundle generation
+  - Condition-based validation (intent, service, accelerator, etc.)
+  - Severity levels (warnings vs errors)
+  - Extensible validation function registry
 - **Bundler Framework**: Extensible system for generating deployment artifacts
   - Execution model: Multiple bundlers run concurrently by default
   - Registration: Bundlers self-register via `init()` function

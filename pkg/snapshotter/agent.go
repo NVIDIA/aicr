@@ -241,6 +241,19 @@ func DefaultTolerations() []corev1.Toleration {
 	}
 }
 
+func validateTaintEffect(effect corev1.TaintEffect) error {
+	switch effect {
+	case corev1.TaintEffectNoSchedule:
+		return nil
+	case corev1.TaintEffectPreferNoSchedule:
+		return nil
+	case corev1.TaintEffectNoExecute:
+		return nil
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s", effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
+	}
+}
+
 // ParseTolerations parses toleration strings in format "key=value:effect" or "key:effect".
 // If no tolerations are provided, returns DefaultTolerations() which accepts all taints.
 func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
@@ -269,6 +282,10 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		} else {
 			key = parts[0]
 			// No value means Exists operator
+		}
+
+		if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 		}
 
 		toleration := corev1.Toleration{
@@ -318,6 +335,10 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	// Validate key is not empty
 	if key == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, key cannot be empty", taintStr))
+	}
+
+	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
 	}
 
 	taint := &corev1.Taint{
