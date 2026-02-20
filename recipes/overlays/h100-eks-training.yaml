@@ -33,7 +33,6 @@ spec:
       value: ">= 1.32.4"
 
   componentRefs:
-
     # H100-specific GPU Operator overrides (inherits valuesFile from eks-training)
     - name: gpu-operator
       type: Helm
@@ -46,7 +45,8 @@ spec:
     - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/tuning.yaml
+        # Temporarily disabled until skyhook-customizations is fixed
+        - components/skyhook-customizations/manifests/no-op.yaml
       overrides:
         service: aws
         accelerator: h100
