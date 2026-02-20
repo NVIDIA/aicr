@@ -40,7 +40,7 @@ concurrency:
 
 env:
   SARIF_OUTPUT: 'vulnerability-scan-results.sarif'
-  SEVERITY_LEVELS: 'HIGH,CRITICAL'
+  SEVERITY_LEVELS: 'MEDIUM,HIGH,CRITICAL'
 
 jobs:
   trivy-repo-scan:

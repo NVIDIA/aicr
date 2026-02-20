@@ -191,13 +191,75 @@ jobs:
           tag: ${{ github.ref_name }}
 
   # =============================================================================
-  # Attestation Job (runs after all images are pushed)
+  # Container Image Vulnerability Scan (runs after all images are built)
+  # =============================================================================
+
+  image-vuln-scan:
+    name: Image Vuln Scan (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: [build, docker-manifest]
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ghcr.io/nvidia/eidos
+          - ghcr.io/nvidia/eidosd
+          - ghcr.io/nvidia/eidos-validator
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Scan container image
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8  # v0.33.1
+        with:
+          scan-type: 'image'
+          image-ref: '${{ matrix.image }}:${{ github.ref_name }}'
+          scanners: 'vuln'
+          ignore-unfixed: true
+          format: 'sarif'
+          output: 'image-scan-results.sarif'
+          severity: 'MEDIUM,HIGH,CRITICAL'
+          limit-severities-for-sarif: true
+        continue-on-error: true
+
+      - name: Check SARIF file exists
+        id: check_sarif
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f "image-scan-results.sarif" ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload SARIF to GitHub Security
+        if: steps.check_sarif.outputs.exists == 'true'
+        uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
+        with:
+          sarif_file: image-scan-results.sarif
+          category: 'trivy-image-${{ matrix.image }}'
+        continue-on-error: true
+
+  # =============================================================================
+  # Attestation Job (runs after all images are pushed and scanned)
   # =============================================================================
 
   attest:
     name: Attest Images
     runs-on: ubuntu-latest
-    needs: [build, docker-manifest]
+    needs: [build, docker-manifest, image-vuln-scan]
     if: needs.build.outputs.release_outcome == 'success'
     timeout-minutes: 10
     permissions:
