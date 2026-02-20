@@ -293,10 +293,10 @@ func (v *Validator) validateReadiness(
 	// For multi-phase validation, validateAll() manages RBAC lifecycle.
 	// For single-phase validation, the CLI/API should call agent.EnsureRBAC() first.
 	//nolint:dupl // Phase validation methods have similar structure by design
-	if recipeResult.Validation != nil && recipeResult.Validation.PreDeployment != nil && len(recipeResult.Validation.PreDeployment.Checks) > 0 {
+	if recipeResult.Validation != nil && recipeResult.Validation.Readiness != nil && len(recipeResult.Validation.Readiness.Checks) > 0 {
 		if v.NoCluster {
 			slog.Info("no-cluster mode enabled, skipping cluster check execution for readiness phase")
-			for _, checkName := range recipeResult.Validation.PreDeployment.Checks {
+			for _, checkName := range recipeResult.Validation.Readiness.Checks {
 				check := CheckResult{
 					Name:   checkName,
 					Status: ValidationStatusPass,
@@ -310,9 +310,9 @@ func (v *Validator) validateReadiness(
 				// If Kubernetes is not available (e.g., running in test mode), skip check execution
 				slog.Warn("Kubernetes client unavailable, skipping check execution",
 					"error", err,
-					"checks", len(recipeResult.Validation.PreDeployment.Checks))
+					"checks", len(recipeResult.Validation.Readiness.Checks))
 				// Add skeleton check results
-				for _, checkName := range recipeResult.Validation.PreDeployment.Checks {
+				for _, checkName := range recipeResult.Validation.Readiness.Checks {
 					check := CheckResult{
 						Name:   checkName,
 						Status: ValidationStatusPass,
@@ -336,7 +336,7 @@ func (v *Validator) validateReadiness(
 					RecipeConfigMap:    recipeCMName,
 					TestPackage:        "./pkg/validator/checks/readiness",
 					TestPattern:        "", // Run all tests in package
-					Timeout:            resolvePhaseTimeout(recipeResult.Validation.PreDeployment, DefaultReadinessTimeout),
+					Timeout:            resolvePhaseTimeout(recipeResult.Validation.Readiness, DefaultReadinessTimeout),
 				}
 
 				deployer := agent.NewDeployer(clientset, jobConfig)
