@@ -16,7 +16,7 @@ name: GPU Inference Test (nvkind + H100)
 
 on:
   schedule:
-    - cron: '0 6,18 * * *'  # Every 12 hours (2x daily)
+    - cron: '15 6,18 * * *'  # Every 12 hours (2x daily), offset from T4 smoke test
   push:
     branches:
       - "pull-request/[0-9]+"
@@ -284,3 +284,4 @@ jobs:
         uses: ./.github/actions/gpu-test-cleanup
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact_name_prefix: gpu-inference-test-debug

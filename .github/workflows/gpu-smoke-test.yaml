@@ -19,7 +19,7 @@ on:
     - cron: '0 6,18 * * *'  # Every 12 hours (2x daily)
   push:
     branches:
-      - "pull-request/*"
+      - "pull-request/[0-9]+"
     paths:
       - '.github/workflows/gpu-smoke-test.yaml'
       - '.github/actions/gpu-cluster-setup/**'
