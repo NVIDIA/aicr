@@ -77,12 +77,6 @@ spec:
       type: Helm
       overrides:
         gpuResourcesEnabledOverride: true
-        # EKS has no control-plane nodes — remove the default nodeAffinity
-        controller:
-          affinity:
-            nodeAffinity: null
-          tolerations:
-            - operator: Exists
 
     - name: dynamo-crds
       type: Helm
