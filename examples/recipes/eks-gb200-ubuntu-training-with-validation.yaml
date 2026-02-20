@@ -152,6 +152,7 @@ componentRefs:
 
 deploymentOrder:
   - cert-manager
+  - kube-prometheus-stack
   - gpu-operator
   - nvidia-dra-driver-gpu
   - nvsentinel

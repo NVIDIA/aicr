@@ -52,10 +52,10 @@ deploymentOrder:
   - aws-ebs-csi-driver
   - aws-efa
   - cert-manager
-  - gpu-operator
-  - kai-scheduler
   - kube-prometheus-stack
+  - gpu-operator
   - k8s-ephemeral-storage-metrics
+  - kai-scheduler
   - kubeflow-trainer
   - nvidia-dra-driver-gpu
   - nvsentinel

@@ -63,6 +63,7 @@ componentRefs:
     valuesFile: components/skyhook-operator/values.yaml
 deploymentOrder:
   - cert-manager
+  - kube-prometheus-stack
   - gpu-operator
   - nvsentinel
   - skyhook-operator

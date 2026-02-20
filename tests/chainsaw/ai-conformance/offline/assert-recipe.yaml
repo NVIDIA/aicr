@@ -57,13 +57,13 @@ deploymentOrder:
   - aws-efa
   - cert-manager
   - dynamo-crds
-  - gpu-operator
-  - kai-scheduler
   - kgateway-crds
   - kgateway
   - kube-prometheus-stack
   - dynamo-platform
+  - gpu-operator
   - k8s-ephemeral-storage-metrics
+  - kai-scheduler
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter

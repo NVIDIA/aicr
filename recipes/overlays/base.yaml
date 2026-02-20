@@ -50,6 +50,7 @@ spec:
           namespace: gpu-operator
       dependencyRefs:
         - cert-manager
+        - kube-prometheus-stack
 
     - name: nvsentinel
       type: Helm
