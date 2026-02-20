@@ -678,6 +678,8 @@ eidos bundle [flags]
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable) |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
+| `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
+| `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
 
 **Behavior:**
 - All components from the recipe are bundled automatically
@@ -768,6 +770,12 @@ eidos bundle -r recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   -o ./bundles
 
+# Day 2 options: workload-gate and workload-selector for skyhook
+eidos bundle -r recipe.yaml \
+  --workload-gate skyhook.io/runtime-required=true:NoSchedule \
+  --workload-selector workload-type=training \
+  -o ./bundles
+
 # Generate ArgoCD Application manifests for GitOps
 eidos bundle -r recipe.yaml --deployer argocd -o ./bundles
 
@@ -814,6 +822,91 @@ bundles/
 │   └── argocd/
 │       └── application.yaml       # ArgoCD Application (sync-wave: 1)
 └── README.md                      # ArgoCD deployment guide
+```
+
+**Day 2 Options:**
+
+The `--workload-gate` and `--workload-selector` flags are day 2 operational options for cluster scaling operations:
+
+- **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [skyhook documentation](https://github.com/NVIDIA/skyhook/blob/main/docs/runtime_required.md).
+
+- **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent skyhook from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
+
+**Component Validation System:**
+
+Eidos includes a component-driven validation system that automatically checks bundle configuration and displays warnings or errors during bundle generation. Validations are defined in the component registry and run automatically when components are included in a recipe.
+
+**How Validations Work:**
+
+1. **Automatic Execution**: When generating a bundle, validations are automatically executed for each component in the recipe
+2. **Condition-Based**: Validations can be configured to run only when specific conditions are met (e.g., intent, service, accelerator)
+3. **Severity Levels**: Each validation can be configured as a "warning" (non-blocking) or "error" (blocking)
+4. **Custom Messages**: Each validation can include an optional detail message that provides actionable guidance
+
+**Validation Warnings:**
+
+When generating bundles with skyhook-customizations enabled, validation warnings are displayed for missing configuration:
+
+1. **Workload Selector Warning**: When skyhook-customizations is enabled with training intent, if `--workload-selector` is not set, a warning will be displayed:
+
+```
+Warning: skyhook-customizations is enabled but --workload-selector is not set. 
+This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
+```
+
+2. **Accelerated Selector Warning**: When skyhook-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
+
+```
+Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. 
+Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
+```
+
+**Viewing Validation Warnings:**
+
+Validation warnings are displayed in the bundle output after successful generation:
+
+```shell
+Note:
+  ⚠ Warning: skyhook-customizations is enabled but --workload-selector is not set. This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
+  ⚠ Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
+```
+
+**Resolving Validation Warnings:**
+
+To resolve the warnings, include the appropriate flags when generating the bundle:
+
+```shell
+# Resolve workload selector warning
+eidos bundle -r recipe.yaml \
+  --workload-selector workload-type=training \
+  -o ./bundle
+
+# Resolve accelerated selector warning
+eidos bundle -r recipe.yaml \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  -o ./bundle
+
+# Resolve both warnings
+eidos bundle -r recipe.yaml \
+  --workload-selector workload-type=training \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  -o ./bundle
+```
+
+**Examples:**
+```shell
+# Generate bundle with day 2 options for training workloads
+eidos bundle -r recipe.yaml \
+  --workload-gate skyhook.io/runtime-required=true:NoSchedule \
+  --workload-selector workload-type=training \
+  --workload-selector intent=training \
+  --accelerated-node-selector accelerator=nvidia-h100 \
+  -o ./bundles
+
+# Generate bundle for inference workloads with accelerated selector
+eidos bundle -r recipe.yaml \
+  --accelerated-node-selector accelerator=nvidia-h100 \
+  -o ./bundles
 ```
 
 ArgoCD Applications use multi-source to:

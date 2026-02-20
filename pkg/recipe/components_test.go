@@ -210,6 +210,124 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	}
 }
 
+func TestComponentRegistry_TaintStrPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	// Test skyhook-operator has taint string paths
+	skyhookOp := registry.Get("skyhook-operator")
+	if skyhookOp == nil {
+		t.Fatal("skyhook-operator not found in registry")
+	}
+
+	taintStrPaths := skyhookOp.GetAcceleratedTaintStrPaths()
+	if len(taintStrPaths) == 0 {
+		t.Error("skyhook-operator should have accelerated taint string paths")
+	}
+
+	// Verify specific path exists
+	if !slices.Contains(taintStrPaths, "controllerManager.manager.env.runtimeRequiredTaint") {
+		t.Error("skyhook-operator should have 'controllerManager.manager.env.runtimeRequiredTaint' in accelerated taint string paths")
+	}
+}
+
+func TestComponentRegistry_WorkloadSelectorPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	// Test skyhook-customizations has workload selector paths
+	skyhookCust := registry.Get("skyhook-customizations")
+	if skyhookCust == nil {
+		t.Fatal("skyhook-customizations not found in registry")
+	}
+
+	workloadSelectorPaths := skyhookCust.GetWorkloadSelectorPaths()
+	if len(workloadSelectorPaths) == 0 {
+		t.Error("skyhook-customizations should have workload selector paths")
+	}
+
+	// Verify specific path exists
+	if !slices.Contains(workloadSelectorPaths, "workloadSelector") {
+		t.Error("skyhook-customizations should have 'workloadSelector' in workload selector paths")
+	}
+}
+
+func TestComponentRegistry_Validations(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	// Test skyhook-customizations has validations
+	skyhookCust := registry.Get("skyhook-customizations")
+	if skyhookCust == nil {
+		t.Fatal("skyhook-customizations not found in registry")
+	}
+
+	validations := skyhookCust.GetValidations()
+	if len(validations) == 0 {
+		t.Error("skyhook-customizations should have validations configured")
+	}
+
+	// Verify specific validations exist
+	foundWorkloadSelector := false
+	foundAcceleratedSelector := false
+	for _, v := range validations {
+		if v.Function == "CheckWorkloadSelectorMissing" {
+			foundWorkloadSelector = true
+			if v.Severity != "warning" {
+				t.Errorf("CheckWorkloadSelectorMissing should have severity 'warning', got %q", v.Severity)
+			}
+			if v.Conditions == nil {
+				t.Error("CheckWorkloadSelectorMissing should have conditions")
+			} else {
+				intentValues, ok := v.Conditions["intent"]
+				if !ok || !slices.Contains(intentValues, "training") {
+					t.Error("CheckWorkloadSelectorMissing should have condition intent containing 'training'")
+				}
+			}
+			if v.Message == "" {
+				t.Error("CheckWorkloadSelectorMissing should have a message")
+			}
+		}
+		if v.Function == "CheckAcceleratedSelectorMissing" {
+			foundAcceleratedSelector = true
+			if v.Severity != "warning" {
+				t.Errorf("CheckAcceleratedSelectorMissing should have severity 'warning', got %q", v.Severity)
+			}
+			if v.Conditions == nil {
+				t.Error("CheckAcceleratedSelectorMissing should have conditions")
+			} else {
+				intentValues, ok := v.Conditions["intent"]
+				if !ok {
+					t.Error("CheckAcceleratedSelectorMissing should have condition intent")
+				} else {
+					if !slices.Contains(intentValues, "training") {
+						t.Error("CheckAcceleratedSelectorMissing should have condition intent containing 'training'")
+					}
+					if !slices.Contains(intentValues, "inference") {
+						t.Error("CheckAcceleratedSelectorMissing should have condition intent containing 'inference'")
+					}
+				}
+			}
+			if v.Message == "" {
+				t.Error("CheckAcceleratedSelectorMissing should have a message")
+			}
+		}
+	}
+
+	if !foundWorkloadSelector {
+		t.Error("skyhook-customizations should have CheckWorkloadSelectorMissing validation")
+	}
+	if !foundAcceleratedSelector {
+		t.Error("skyhook-customizations should have CheckAcceleratedSelectorMissing validation")
+	}
+}
+
 func TestComponentRegistry_PathSyntax(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {

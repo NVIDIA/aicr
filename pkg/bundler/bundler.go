@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/eidos/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/eidos/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/eidos/pkg/bundler/result"
+	"github.com/NVIDIA/eidos/pkg/bundler/validations"
 	"github.com/NVIDIA/eidos/pkg/component"
 	"github.com/NVIDIA/eidos/pkg/errors"
 	"github.com/NVIDIA/eidos/pkg/recipe"
@@ -50,6 +51,9 @@ type DefaultBundler struct {
 	// AllowLists defines which criteria values are permitted for bundle requests.
 	// When set, the bundler validates that the recipe's criteria are within the allowed values.
 	AllowLists *recipe.AllowLists
+
+	// warnings stores warning messages to be added to deployment notes.
+	warnings []string
 }
 
 // Option defines a functional option for configuring DefaultBundler.
@@ -123,6 +127,9 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir string) (*result.Output, error) {
 	start := time.Now()
 
+	// Reset warnings so they dont accumulate between multiple bundle generations
+	b.warnings = nil
+
 	// Validate input
 	if input == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe input cannot be nil")
@@ -158,6 +165,12 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to extract component values", err)
+	}
+
+	// Run component-specific validations
+	if err := b.runComponentValidations(ctx, recipeResult); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"component validation failed", err)
 	}
 
 	// Route based on deployer
@@ -226,9 +239,14 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 	resultOutput.Results = append(resultOutput.Results, helmResult)
 
 	// Populate deployment info from generator output
+	var notes []string
+	if len(b.warnings) > 0 {
+		notes = append(notes, b.warnings...)
+	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  "Helm per-component bundle",
 		Steps: output.DeploymentSteps,
+		Notes: notes,
 	}
 
 	slog.Debug("helm bundle generation complete",
@@ -284,10 +302,17 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 	resultOutput.Results = append(resultOutput.Results, argocdResult)
 
 	// Populate deployment info from generator output
+	notes := make([]string, 0)
+	if len(output.DeploymentNotes) > 0 {
+		notes = append(notes, output.DeploymentNotes...)
+	}
+	if len(b.warnings) > 0 {
+		notes = append(notes, b.warnings...)
+	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  "ArgoCD applications",
 		Steps: output.DeploymentSteps,
-		Notes: output.DeploymentNotes,
+		Notes: notes,
 	}
 
 	slog.Debug("argocd applications generation complete",
@@ -329,7 +354,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 		}
 
-		// Apply node selectors and tolerations based on component type
+		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values)
 
 		componentValues[ref.Name] = values
@@ -433,6 +458,91 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			component.ApplyTolerationsOverrides(values, tolerations, paths...)
 		}
 	}
+
+	// Apply workload selector
+	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
+		if paths := comp.GetWorkloadSelectorPaths(); len(paths) > 0 {
+			component.ApplyNodeSelectorOverrides(values, workloadSelector, paths...)
+		}
+	}
+
+	// Apply workload-gate taint (as string format for skyhook-operator)
+	if taint := b.Config.WorkloadGateTaint(); taint != nil {
+		if paths := comp.GetAcceleratedTaintStrPaths(); len(paths) > 0 {
+			taintStr := taint.ToString()
+			overrides := make(map[string]string, len(paths))
+			for _, path := range paths {
+				overrides[path] = taintStr
+			}
+			if err := component.ApplyMapOverrides(values, overrides); err != nil {
+				slog.Warn("failed to apply workload-gate taint",
+					"component", componentName,
+					"error", err,
+				)
+			}
+		}
+	}
+}
+
+// runComponentValidations executes all component-specific validations registered in the registry.
+// Collects warnings and errors based on validation severity.
+func (b *DefaultBundler) runComponentValidations(ctx context.Context, recipeResult *recipe.RecipeResult) error {
+	if b.Config == nil {
+		return nil
+	}
+
+	// Get component registry
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		slog.Debug("failed to load component registry for validations",
+			"error", err,
+		)
+		return nil // Non-fatal, continue without validations
+	}
+
+	// Iterate through components in recipe
+	for _, ref := range recipeResult.ComponentRefs {
+		if err := ctx.Err(); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled during validation", err)
+		}
+
+		// Get component config from registry
+		comp := registry.Get(ref.Name)
+		if comp == nil {
+			continue // Unknown component, skip
+		}
+
+		// Get validations for this component
+		componentValidations := comp.GetValidations()
+		if len(componentValidations) == 0 {
+			continue // No validations configured
+		}
+
+		// Run validations
+		warnings, validationErrors := validations.RunValidations(
+			ctx,
+			ref.Name,
+			componentValidations,
+			recipeResult,
+			b.Config,
+		)
+
+		// Collect warnings (prepend "Warning: " if not already present)
+		for _, warning := range warnings {
+			msg := warning
+			if !strings.HasPrefix(warning, "Warning: ") {
+				msg = "Warning: " + warning
+			}
+			b.warnings = append(b.warnings, msg)
+		}
+
+		// Return first error (errors are blocking)
+		if len(validationErrors) > 0 {
+			return validationErrors[0]
+		}
+	}
+
+	return nil
 }
 
 // writeRecipeFile serializes the recipe to the bundle directory.

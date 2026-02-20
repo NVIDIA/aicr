@@ -241,6 +241,19 @@ func DefaultTolerations() []corev1.Toleration {
 	}
 }
 
+func validateTaintEffect(effect corev1.TaintEffect) error {
+	switch effect {
+	case corev1.TaintEffectNoSchedule:
+		return nil
+	case corev1.TaintEffectPreferNoSchedule:
+		return nil
+	case corev1.TaintEffectNoExecute:
+		return nil
+	default:
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid taint effect %q, expected %s, %s, or %s", effect, corev1.TaintEffectNoSchedule, corev1.TaintEffectPreferNoSchedule, corev1.TaintEffectNoExecute))
+	}
+}
+
 // ParseTolerations parses toleration strings in format "key=value:effect" or "key:effect".
 // If no tolerations are provided, returns DefaultTolerations() which accepts all taints.
 func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
@@ -271,6 +284,10 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 			// No value means Exists operator
 		}
 
+		if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
+		}
+
 		toleration := corev1.Toleration{
 			Key:    key,
 			Effect: corev1.TaintEffect(effect),
@@ -286,6 +303,54 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 		result = append(result, toleration)
 	}
 	return result, nil
+}
+
+// ParseTaint parses a single taint string in format "key=value:effect" or "key:effect".
+// Returns a corev1.Taint struct.
+func ParseTaint(taintStr string) (*corev1.Taint, error) {
+	if taintStr == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "taint string cannot be empty")
+	}
+
+	// Format: key=value:effect or key:effect (for exists operator)
+	var key, value, effect string
+
+	// Split by colon to get effect
+	parts := strings.Split(taintStr, ":")
+	if len(parts) != 2 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, expected key=value:effect or key:effect", taintStr))
+	}
+	effect = parts[1]
+
+	// Parse key and value
+	if strings.Contains(parts[0], "=") {
+		kvParts := strings.SplitN(parts[0], "=", 2)
+		key = kvParts[0]
+		value = kvParts[1]
+	} else {
+		key = parts[0]
+		// No value means empty value (taints don't have operators like tolerations)
+	}
+
+	// Validate key is not empty
+	if key == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, key cannot be empty", taintStr))
+	}
+
+	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid taint effect", err)
+	}
+
+	taint := &corev1.Taint{
+		Key:    key,
+		Effect: corev1.TaintEffect(effect),
+	}
+
+	if value != "" {
+		taint.Value = value
+	}
+
+	return taint, nil
 }
 
 // measureWithAgent deploys a Kubernetes Job to capture snapshot on cluster nodes.

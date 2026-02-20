@@ -100,6 +100,12 @@ type Config struct {
 
 	// repoURL specifies the Git repository URL for ArgoCD applications.
 	repoURL string
+
+	// workloadGateTaint specifies the taint for skyhook-operator runtime required feature.
+	workloadGateTaint *corev1.Taint
+
+	// workloadSelector contains label selector for skyhook-customizations to prevent eviction of running training jobs.
+	workloadSelector map[string]string
 }
 
 // Getter methods for read-only access
@@ -191,6 +197,28 @@ func (c *Config) Deployer() DeployerType {
 // RepoURL returns the Git repository URL for ArgoCD applications.
 func (c *Config) RepoURL() string {
 	return c.repoURL
+}
+
+// WorkloadGateTaint returns a copy of the workload gate taint.
+func (c *Config) WorkloadGateTaint() *corev1.Taint {
+	if c.workloadGateTaint == nil {
+		return nil
+	}
+	// Return a copy to prevent modification
+	taint := *c.workloadGateTaint
+	return &taint
+}
+
+// WorkloadSelector returns a copy of the workload selector map.
+func (c *Config) WorkloadSelector() map[string]string {
+	if c.workloadSelector == nil {
+		return nil
+	}
+	result := make(map[string]string, len(c.workloadSelector))
+	for k, v := range c.workloadSelector {
+		result[k] = v
+	}
+	return result
 }
 
 // Validate checks if the Config has valid settings.
@@ -305,6 +333,31 @@ func WithDeployer(deployer DeployerType) Option {
 func WithRepoURL(repoURL string) Option {
 	return func(c *Config) {
 		c.repoURL = repoURL
+	}
+}
+
+// WithWorkloadGateTaint sets the taint for skyhook-operator runtime required feature.
+func WithWorkloadGateTaint(taint *corev1.Taint) Option {
+	return func(c *Config) {
+		if taint == nil {
+			return
+		}
+		// Create a copy to prevent external modifications
+		taintCopy := *taint
+		c.workloadGateTaint = &taintCopy
+	}
+}
+
+// WithWorkloadSelector sets the label selector for skyhook-customizations to prevent eviction of running training jobs.
+func WithWorkloadSelector(selector map[string]string) Option {
+	return func(c *Config) {
+		if selector == nil {
+			return
+		}
+		c.workloadSelector = make(map[string]string, len(selector))
+		for k, v := range selector {
+			c.workloadSelector[k] = v
+		}
 	}
 }
 

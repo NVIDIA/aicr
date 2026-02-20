@@ -48,6 +48,8 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 //   - system-node-toleration: Tolerations for system components in format "key=value:effect" (can be repeated)
 //   - accelerated-node-selector: Node selectors for GPU nodes in format "key=value" (can be repeated)
 //   - accelerated-node-toleration: Tolerations for GPU nodes in format "key=value:effect" (can be repeated)
+//   - workload-gate: Taint for skyhook-operator runtime required in format "key=value:effect" or "key:effect"
+//   - workload-selector: Label selector for skyhook-customizations in format "key=value" (can be repeated)
 //
 // The response is a zip archive containing the Helm per-component bundle:
 //   - README.md: Root deployment guide
@@ -133,6 +135,8 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 			config.WithSystemNodeTolerations(params.systemNodeTolerations),
 			config.WithAcceleratedNodeSelector(params.acceleratedNodeSelector),
 			config.WithAcceleratedNodeTolerations(params.acceleratedNodeTolerations),
+			config.WithWorkloadGateTaint(params.workloadGateTaint),
+			config.WithWorkloadSelector(params.workloadSelector),
 			config.WithDeployer(params.deployer),
 			config.WithRepoURL(params.repoURL),
 		)),
@@ -251,6 +255,8 @@ type bundleParams struct {
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
 	acceleratedNodeTolerations []corev1.Toleration
+	workloadGateTaint          *corev1.Taint
+	workloadSelector           map[string]string
 	deployer                   config.DeployerType
 	repoURL                    string
 }
@@ -305,6 +311,21 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 
 	// Parse repo URL (for ArgoCD deployer)
 	params.repoURL = query.Get("repo")
+
+	// Parse workload-gate taint
+	workloadGateStr := query.Get("workload-gate")
+	if workloadGateStr != "" {
+		params.workloadGateTaint, err = snapshotter.ParseTaint(workloadGateStr)
+		if err != nil {
+			return nil, eidoserrors.Wrap(eidoserrors.ErrCodeInvalidRequest, "Invalid workload-gate parameter", err)
+		}
+	}
+
+	// Parse workload-selector
+	params.workloadSelector, err = snapshotter.ParseNodeSelectors(query["workload-selector"])
+	if err != nil {
+		return nil, eidoserrors.Wrap(eidoserrors.ErrCodeInvalidRequest, "Invalid workload-selector parameter", err)
+	}
 
 	return params, nil
 }
