@@ -16,9 +16,25 @@ trap 'rm -rf "${HELM_WORKDIR}"' EXIT
 cd "${HELM_WORKDIR}"
 
 WAIT_ARGS="--wait --timeout 10m"
+MAX_RETRIES=2
 if [[ "${1:-}" == "--no-wait" ]]; then
   WAIT_ARGS=""
+  MAX_RETRIES=0
 fi
+
+helm_install() {
+  local attempt=0
+  while true; do
+    if "$@"; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [[ ${MAX_RETRIES} -eq 0 ]] || [[ ${attempt} -ge ${MAX_RETRIES} ]]; then
+      return 1
+    fi
+    echo "Retrying (${attempt}/${MAX_RETRIES})..."
+  done
+}
 
 echo "Deploying Cloud Native Stack components..."
 
@@ -27,13 +43,13 @@ echo "Deploying Cloud Native Stack components..."
 {{ if .HasChart -}}
 echo "Installing {{ .Name }} ({{ .Namespace }})..."
 {{ if .IsOCI -}}
-helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+helm_install helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
   ${WAIT_ARGS}
 {{ else -}}
-helm upgrade --install {{ .Name }} {{ .ChartName }} \
+helm_install helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
