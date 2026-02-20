@@ -22,7 +22,7 @@ inputs:
   artifact_name_prefix:
     description: 'Prefix for the uploaded artifact name'
     required: false
-    default: 'gpu-smoke-test-debug'
+    default: 'gpu-test-debug'
 
 runs:
   using: 'composite'
@@ -39,7 +39,7 @@ runs:
         kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
         kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
         kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" describe pod/gpu-smoke-test > /tmp/debug-artifacts/gpu-pod-describe.txt || true
+        kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded > /tmp/debug-artifacts/non-running-pods.txt || true
 
     - name: Export kind logs
       if: failure()
