@@ -59,6 +59,15 @@ spec:
                   resources:
                     requests:
                       storage: 50Gi
+    # EKS has no control-plane nodes — remove the default nodeAffinity
+    # that requires node-role.kubernetes.io/control-plane
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        controller:
+          affinity:
+            nodeAffinity: null
+
     - name: aws-efa
       type: Helm
       version: v0.5.3
