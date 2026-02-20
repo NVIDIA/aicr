@@ -31,6 +31,7 @@ on:
       - 'tests/chainsaw/ai-conformance/**'
       - 'docs/conformance/cncf/**'
       - 'recipes/components/dynamo-platform/**'
+      - 'recipes/components/prometheus-adapter/**'
       - 'recipes/overlays/kind.yaml'
       - 'recipes/overlays/kind-inference.yaml'
       - 'recipes/overlays/h100-kind-inference.yaml'
@@ -288,6 +289,53 @@ jobs:
 
           echo "Accelerator metrics validation passed."
 
+      # --- Pod Autoscaling readiness validation (CNCF AI Conformance #8b) ---
+      # Validates the custom metrics pipeline (DCGM → Prometheus → prometheus-adapter
+      # → custom metrics API) that HPA consumes. Dynamo uses PodCliqueSets (not
+      # Deployments), so we validate the API directly rather than creating an HPA.
+      #
+      # Note: DCGM exporter runs as a DaemonSet in gpu-operator namespace, so
+      # Prometheus labels GPU metrics with namespace=gpu-operator. We query that
+      # namespace to validate the full metrics pipeline.
+
+      - name: Validate custom metrics for pod autoscaling
+        run: |
+          echo "=== Custom metrics API availability ==="
+          RESOURCES=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" \
+            get --raw /apis/custom.metrics.k8s.io/v1beta1 2>/dev/null)
+          if [[ -z "${RESOURCES}" ]]; then
+            echo "::error::Custom metrics API not available"
+            exit 1
+          fi
+          echo "Custom metrics API is available"
+          echo "${RESOURCES}" | jq -r '.resources[].name' 2>/dev/null | head -20
+
+          # DCGM exporter runs in gpu-operator namespace, so custom metrics are
+          # attributed to the DCGM exporter pod there (not workload pods).
+          METRICS_NS="gpu-operator"
+
+          # At least one GPU metric must be available via the custom metrics API
+          HAS_METRICS=false
+          for METRIC in gpu_utilization gpu_memory_used gpu_power_usage; do
+            echo "=== Query ${METRIC} ==="
+            RESULT=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw \
+              "/apis/custom.metrics.k8s.io/v1beta1/namespaces/${METRICS_NS}/pods/*/${METRIC}" 2>/dev/null)
+            if [[ -n "${RESULT}" ]] && echo "${RESULT}" | jq -e '.items | length > 0' >/dev/null 2>&1; then
+              echo "${METRIC} metrics available:"
+              echo "${RESULT}" | jq '.items[] | {pod: .describedObject.name, value: .value}' 2>/dev/null
+              HAS_METRICS=true
+            else
+              echo "::warning::${METRIC} not available in ${METRICS_NS} namespace"
+            fi
+          done
+
+          if [[ "${HAS_METRICS}" != "true" ]]; then
+            echo "::error::No GPU custom metrics available via custom metrics API (prometheus-adapter pipeline broken)"
+            exit 1
+          fi
+
+          echo "Custom metrics pipeline validated — GPU metrics available for HPA consumption."
+
       # --- DRA GPU allocation test ---
 
       - name: Deploy DRA GPU test
@@ -423,6 +471,14 @@ jobs:
             logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
           echo "=== Recent events (dynamo-system) ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          echo "=== Custom metrics API ==="
+          for METRIC in gpu_utilization gpu_memory_used gpu_power_usage; do
+            echo "--- ${METRIC} ---"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw \
+              "/apis/custom.metrics.k8s.io/v1beta1/namespaces/gpu-operator/pods/*/${METRIC}" 2>/dev/null | jq . || true
+          done
+          echo "=== prometheus-adapter pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -l app.kubernetes.io/name=prometheus-adapter -o wide 2>/dev/null || true
           echo "=== kgateway pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kgateway-system get pods -o wide 2>/dev/null || true
           echo "=== GatewayClass status ==="
