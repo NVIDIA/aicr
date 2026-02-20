@@ -20,25 +20,35 @@ if [[ "${1:-}" == "--no-wait" ]]; then
   WAIT_ARGS=""
 fi
 
+# Components that use operator patterns with custom resources that reconcile
+# asynchronously. Helm --wait may time out waiting for CR readiness even though
+# all pods start successfully. These components are installed without --wait.
+ASYNC_COMPONENTS="kai-scheduler"
+
 echo "Deploying Cloud Native Stack components..."
 
 # Install components in order
 {{ range .Components -}}
 {{ if .HasChart -}}
 echo "Installing {{ .Name }} ({{ .Namespace }})..."
+COMPONENT_WAIT_ARGS="${WAIT_ARGS}"
+if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then
+  COMPONENT_WAIT_ARGS=""
+  echo "  (async component — skipping --wait)"
+fi
 {{ if .IsOCI -}}
 helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-  ${WAIT_ARGS}
+  ${COMPONENT_WAIT_ARGS}
 {{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-  ${WAIT_ARGS}
+  ${COMPONENT_WAIT_ARGS}
 {{ end -}}
 {{ end -}}
 {{ if .HasManifests -}}
