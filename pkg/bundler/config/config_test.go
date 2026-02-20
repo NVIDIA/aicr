@@ -23,6 +23,12 @@ import (
 // testValueTrue is used as a consistent value string for test assertions.
 const testValueTrue = "true"
 
+// testValueModified is used as a consistent value string for test assertions.
+const testValueModified = "modified"
+
+// testValueAdded is used as a consistent value string for test assertions.
+const testValueAdded = "added"
+
 func TestConfigImmutability(t *testing.T) {
 	cfg := NewConfig()
 
@@ -168,8 +174,8 @@ func TestValueOverridesImmutability(t *testing.T) {
 
 	// Get and modify returned map
 	got := cfg.ValueOverrides()
-	got["gpuoperator"]["key"] = "modified"
-	got["gpuoperator"]["new"] = "added"
+	got["gpuoperator"]["key"] = testValueModified
+	got["gpuoperator"]["new"] = testValueAdded
 
 	// Verify original config unchanged
 	fresh := cfg.ValueOverrides()
@@ -233,8 +239,8 @@ func TestNodeSelectorOptions(t *testing.T) {
 		cfg := NewConfig(WithSystemNodeSelector(selectors))
 
 		got := cfg.SystemNodeSelector()
-		got["key"] = "modified"
-		got["new"] = "added"
+		got["key"] = testValueModified
+		got["new"] = testValueAdded
 
 		fresh := cfg.SystemNodeSelector()
 		if fresh["key"] != "value" {
@@ -651,8 +657,8 @@ func TestWorkloadSelectorOptions(t *testing.T) {
 		cfg := NewConfig(WithWorkloadSelector(selector))
 
 		got := cfg.WorkloadSelector()
-		got["workload-type"] = "modified"
-		got["new"] = "added"
+		got["workload-type"] = testValueModified
+		got["new"] = testValueAdded
 
 		fresh := cfg.WorkloadSelector()
 		if fresh["workload-type"] != "training" {

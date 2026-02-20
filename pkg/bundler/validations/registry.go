@@ -115,7 +115,7 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 			}
 			for _, err := range checkErrors {
 				if validation.Message != "" {
-					errors = append(errors, fmt.Errorf("%v. %s", err, validation.Message))
+					errors = append(errors, fmt.Errorf("%w. %s", err, validation.Message))
 				} else {
 					errors = append(errors, err)
 				}
@@ -132,7 +132,7 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 			// Even if severity is warning, checkErrors should still be errors
 			for _, err := range checkErrors {
 				if validation.Message != "" {
-					errors = append(errors, fmt.Errorf("%v. %s", err, validation.Message))
+					errors = append(errors, fmt.Errorf("%w. %s", err, validation.Message))
 				} else {
 					errors = append(errors, err)
 				}
