@@ -135,6 +135,114 @@ func TestParseNodeSelectors(t *testing.T) {
 	}
 }
 
+func TestParseTaint(t *testing.T) {
+	tests := []struct {
+		name    string
+		taintStr string
+		want    *corev1.Taint
+		wantErr bool
+	}{
+		{
+			name:    "taint with key, value, and effect",
+			taintStr: "skyhook.io/runtime-required=true:NoSchedule",
+			want: &corev1.Taint{
+				Key:    "skyhook.io/runtime-required",
+				Value:  "true",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "taint with key and effect (no value)",
+			taintStr: "dedicated:NoSchedule",
+			want: &corev1.Taint{
+				Key:    "dedicated",
+				Value:  "",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "taint with PreferNoSchedule effect",
+			taintStr: "workload-type=training:PreferNoSchedule",
+			want: &corev1.Taint{
+				Key:    "workload-type",
+				Value:  "training",
+				Effect: corev1.TaintEffectPreferNoSchedule,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "taint with NoExecute effect",
+			taintStr: "node.kubernetes.io/not-ready:NoExecute",
+			want: &corev1.Taint{
+				Key:    "node.kubernetes.io/not-ready",
+				Value:  "",
+				Effect: corev1.TaintEffectNoExecute,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "taint with value containing equals",
+			taintStr: "key=value=with=equals:NoSchedule",
+			want: &corev1.Taint{
+				Key:    "key",
+				Value:  "value=with=equals",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			wantErr: false,
+		},
+		{
+			name:    "empty taint string",
+			taintStr: "",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "invalid format - no colon",
+			taintStr: "key=value",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "invalid format - multiple colons",
+			taintStr: "key=value:effect:extra",
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "invalid format - only colon",
+			taintStr: ":NoSchedule",
+			want:    nil,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseTaint(tt.taintStr)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseTaint() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if got == nil {
+					t.Fatal("ParseTaint() returned nil, want non-nil")
+				}
+				if got.Key != tt.want.Key {
+					t.Errorf("ParseTaint() Key = %s, want %s", got.Key, tt.want.Key)
+				}
+				if got.Value != tt.want.Value {
+					t.Errorf("ParseTaint() Value = %s, want %s", got.Value, tt.want.Value)
+				}
+				if got.Effect != tt.want.Effect {
+					t.Errorf("ParseTaint() Effect = %s, want %s", got.Effect, tt.want.Effect)
+				}
+			}
+		})
+	}
+}
+
 func TestParseTolerations(t *testing.T) {
 	tests := []struct {
 		name        string

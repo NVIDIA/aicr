@@ -154,6 +154,41 @@ components:
           - cainjector.tolerations
           - startupapicheck.tolerations
 
+  - name: skyhook-operator
+    displayName: skyhook
+    valueOverrideKeys:
+      - skyhook
+    helm:
+      defaultRepository: https://nvidia.github.io/skyhook
+      defaultChart: skyhook-operator
+      defaultNamespace: skyhook
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controllerManager.selectors
+        tolerationPaths:
+          - controllerManager.tolerations
+      accelerated:
+        taintStrPaths:
+          - controllerManager.manager.env.runtimeRequiredTaint
+
+  - name: skyhook-customizations
+    displayName: skyhook-customizations
+    valueOverrideKeys:
+      - skyhookcustomizations
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: skyhook
+    nodeScheduling:
+      accelerated:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+        workloadSelectorPaths:
+          - workloadSelector
+
   - name: nvsentinel
     displayName: nvsentinel
     valueOverrideKeys:

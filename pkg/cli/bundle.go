@@ -47,6 +47,8 @@ type bundleCmdOptions struct {
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
 	acceleratedNodeTolerations []corev1.Toleration
+	workloadGateTaint          *corev1.Taint
+	workloadSelector           map[string]string
 
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
@@ -151,6 +153,21 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --accelerated-node-toleration", err)
 	}
 
+	// Parse workload-gate taint
+	workloadGateStr := cmd.String("workload-gate")
+	if workloadGateStr != "" {
+		opts.workloadGateTaint, err = snapshotter.ParseTaint(workloadGateStr)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-gate", err)
+		}
+	}
+
+	// Parse workload-selector
+	opts.workloadSelector, err = snapshotter.ParseNodeSelectors(cmd.StringSlice("workload-selector"))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-selector", err)
+	}
+
 	return opts, nil
 }
 
@@ -239,6 +256,14 @@ Package with explicit tag (overrides CLI version):
 				Usage: "Toleration for accelerated/GPU nodes (format: key=value:effect, can be repeated)",
 			},
 			&cli.StringFlag{
+				Name:  "workload-gate",
+				Usage: "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+			},
+			&cli.StringSliceFlag{
+				Name:  "workload-selector",
+				Usage: "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+			},
+			&cli.StringFlag{
 				Name:    "deployer",
 				Aliases: []string{"d"},
 				Value:   string(config.DeployerHelm),
@@ -310,6 +335,8 @@ Package with explicit tag (overrides CLI version):
 				config.WithSystemNodeTolerations(opts.systemNodeTolerations),
 				config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
 				config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
+				config.WithWorkloadGateTaint(opts.workloadGateTaint),
+				config.WithWorkloadSelector(opts.workloadSelector),
 			)
 
 			b, err := bundler.NewWithConfig(cfg)

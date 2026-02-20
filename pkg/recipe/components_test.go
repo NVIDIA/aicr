@@ -210,6 +210,52 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	}
 }
 
+func TestComponentRegistry_TaintStrPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	// Test skyhook-operator has taint string paths
+	skyhookOp := registry.Get("skyhook-operator")
+	if skyhookOp == nil {
+		t.Fatal("skyhook-operator not found in registry")
+	}
+
+	taintStrPaths := skyhookOp.GetAcceleratedTaintStrPaths()
+	if len(taintStrPaths) == 0 {
+		t.Error("skyhook-operator should have accelerated taint string paths")
+	}
+
+	// Verify specific path exists
+	if !slices.Contains(taintStrPaths, "controllerManager.manager.env.runtimeRequiredTaint") {
+		t.Error("skyhook-operator should have 'controllerManager.manager.env.runtimeRequiredTaint' in accelerated taint string paths")
+	}
+}
+
+func TestComponentRegistry_WorkloadSelectorPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	// Test skyhook-customizations has workload selector paths
+	skyhookCust := registry.Get("skyhook-customizations")
+	if skyhookCust == nil {
+		t.Fatal("skyhook-customizations not found in registry")
+	}
+
+	workloadSelectorPaths := skyhookCust.GetAcceleratedWorkloadSelectorPaths()
+	if len(workloadSelectorPaths) == 0 {
+		t.Error("skyhook-customizations should have accelerated workload selector paths")
+	}
+
+	// Verify specific path exists
+	if !slices.Contains(workloadSelectorPaths, "workloadSelector") {
+		t.Error("skyhook-customizations should have 'workloadSelector' in accelerated workload selector paths")
+	}
+}
+
 func TestComponentRegistry_PathSyntax(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {

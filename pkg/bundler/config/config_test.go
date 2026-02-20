@@ -549,3 +549,117 @@ func TestDeployerTypeString(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkloadGateTaintOptions(t *testing.T) {
+	t.Run("WithWorkloadGateTaint with valid taint", func(t *testing.T) {
+		taint := &corev1.Taint{
+			Key:    "skyhook.io/runtime-required",
+			Value:  "true",
+			Effect: corev1.TaintEffectNoSchedule,
+		}
+		cfg := NewConfig(WithWorkloadGateTaint(taint))
+
+		got := cfg.WorkloadGateTaint()
+		if got == nil {
+			t.Fatal("WorkloadGateTaint() returned nil")
+		}
+		if got.Key != "skyhook.io/runtime-required" {
+			t.Errorf("WorkloadGateTaint().Key = %s, want skyhook.io/runtime-required", got.Key)
+		}
+		if got.Value != "true" {
+			t.Errorf("WorkloadGateTaint().Value = %s, want true", got.Value)
+		}
+		if got.Effect != corev1.TaintEffectNoSchedule {
+			t.Errorf("WorkloadGateTaint().Effect = %s, want NoSchedule", got.Effect)
+		}
+	})
+
+	t.Run("WithWorkloadGateTaint with nil input", func(t *testing.T) {
+		cfg := NewConfig(WithWorkloadGateTaint(nil))
+		got := cfg.WorkloadGateTaint()
+		if got != nil {
+			t.Errorf("WorkloadGateTaint() = %v, want nil for nil input", got)
+		}
+	})
+
+	t.Run("WorkloadGateTaint returns nil for default config", func(t *testing.T) {
+		cfg := NewConfig()
+		got := cfg.WorkloadGateTaint()
+		if got != nil {
+			t.Errorf("WorkloadGateTaint() = %v, want nil", got)
+		}
+	})
+
+	t.Run("WorkloadGateTaint with taint without value", func(t *testing.T) {
+		taint := &corev1.Taint{
+			Key:    "dedicated",
+			Effect: corev1.TaintEffectNoSchedule,
+		}
+		cfg := NewConfig(WithWorkloadGateTaint(taint))
+
+		got := cfg.WorkloadGateTaint()
+		if got == nil {
+			t.Fatal("WorkloadGateTaint() returned nil")
+		}
+		if got.Key != "dedicated" {
+			t.Errorf("WorkloadGateTaint().Key = %s, want dedicated", got.Key)
+		}
+		if got.Value != "" {
+			t.Errorf("WorkloadGateTaint().Value = %s, want empty", got.Value)
+		}
+	})
+}
+
+func TestWorkloadSelectorOptions(t *testing.T) {
+	t.Run("WithWorkloadSelector with valid selector", func(t *testing.T) {
+		selector := map[string]string{
+			"workload-type": "training",
+			"app":           "pytorch",
+		}
+		cfg := NewConfig(WithWorkloadSelector(selector))
+
+		got := cfg.WorkloadSelector()
+		if got == nil {
+			t.Fatal("WorkloadSelector() returned nil")
+		}
+		if got["workload-type"] != "training" {
+			t.Errorf("WorkloadSelector()[workload-type] = %s, want training", got["workload-type"])
+		}
+		if got["app"] != "pytorch" {
+			t.Errorf("WorkloadSelector()[app] = %s, want pytorch", got["app"])
+		}
+	})
+
+	t.Run("WithWorkloadSelector with nil input", func(t *testing.T) {
+		cfg := NewConfig(WithWorkloadSelector(nil))
+		got := cfg.WorkloadSelector()
+		if got != nil {
+			t.Errorf("WorkloadSelector() = %v, want nil for nil input", got)
+		}
+	})
+
+	t.Run("WorkloadSelector returns nil for default config", func(t *testing.T) {
+		cfg := NewConfig()
+		got := cfg.WorkloadSelector()
+		if got != nil {
+			t.Errorf("WorkloadSelector() = %v, want nil", got)
+		}
+	})
+
+	t.Run("WorkloadSelector immutability", func(t *testing.T) {
+		selector := map[string]string{"workload-type": "training"}
+		cfg := NewConfig(WithWorkloadSelector(selector))
+
+		got := cfg.WorkloadSelector()
+		got["workload-type"] = "modified"
+		got["new"] = "added"
+
+		fresh := cfg.WorkloadSelector()
+		if fresh["workload-type"] != "training" {
+			t.Error("modifying returned map affected config - not immutable")
+		}
+		if _, exists := fresh["new"]; exists {
+			t.Error("adding key to returned map affected config - not immutable")
+		}
+	})
+}

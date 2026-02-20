@@ -50,6 +50,9 @@ type DefaultBundler struct {
 	// AllowLists defines which criteria values are permitted for bundle requests.
 	// When set, the bundler validates that the recipe's criteria are within the allowed values.
 	AllowLists *recipe.AllowLists
+
+	// warnings stores warning messages to be added to deployment notes.
+	warnings []string
 }
 
 // Option defines a functional option for configuring DefaultBundler.
@@ -160,6 +163,12 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 			"failed to extract component values", err)
 	}
 
+	// Validate workload-selector for skyhook-customizations with training intent
+	b.validateWorkloadSelector(recipeResult)
+
+	// Validate accelerated selector for skyhook-customizations with training/inference intent
+	b.validateAcceleratedSelector(recipeResult)
+
 	// Route based on deployer
 	deployer := b.Config.Deployer()
 	if deployer == config.DeployerArgoCD {
@@ -226,9 +235,14 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 	resultOutput.Results = append(resultOutput.Results, helmResult)
 
 	// Populate deployment info from generator output
+	notes := make([]string, 0)
+	if len(b.warnings) > 0 {
+		notes = append(notes, b.warnings...)
+	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  "Helm per-component bundle",
 		Steps: output.DeploymentSteps,
+		Notes: notes,
 	}
 
 	slog.Debug("helm bundle generation complete",
@@ -284,10 +298,17 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 	resultOutput.Results = append(resultOutput.Results, argocdResult)
 
 	// Populate deployment info from generator output
+	notes := make([]string, 0)
+	if len(output.DeploymentNotes) > 0 {
+		notes = append(notes, output.DeploymentNotes...)
+	}
+	if len(b.warnings) > 0 {
+		notes = append(notes, b.warnings...)
+	}
 	resultOutput.Deployment = &result.DeploymentInfo{
 		Type:  "ArgoCD applications",
 		Steps: output.DeploymentSteps,
-		Notes: output.DeploymentNotes,
+		Notes: notes,
 	}
 
 	slog.Debug("argocd applications generation complete",
@@ -329,7 +350,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 		}
 
-		// Apply node selectors and tolerations based on component type
+		// Apply node selectors, tolerations, workload selector, and taints based on component type
 		b.applyNodeSchedulingOverrides(ref.Name, values)
 
 		componentValues[ref.Name] = values
@@ -432,6 +453,109 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		if paths := comp.GetAcceleratedTolerationPaths(); len(paths) > 0 {
 			component.ApplyTolerationsOverrides(values, tolerations, paths...)
 		}
+	}
+
+	// Apply workload selector (for components like skyhook-customizations)
+	if workloadSelector := b.Config.WorkloadSelector(); len(workloadSelector) > 0 {
+		if paths := comp.GetAcceleratedWorkloadSelectorPaths(); len(paths) > 0 {
+			component.ApplyNodeSelectorOverrides(values, workloadSelector, paths...)
+		}
+	}
+
+	// Apply workload-gate taint (as string format for skyhook-operator)
+	if taint := b.Config.WorkloadGateTaint(); taint != nil {
+		if paths := comp.GetAcceleratedTaintStrPaths(); len(paths) > 0 {
+			taintStr := taint.ToString()
+			overrides := make(map[string]string, len(paths))
+			for _, path := range paths {
+				overrides[path] = taintStr
+			}
+			if err := component.ApplyMapOverrides(values, overrides); err != nil {
+				slog.Warn("failed to apply workload-gate taint",
+					"component", componentName,
+					"error", err,
+				)
+			}
+		}
+	}
+}
+
+// validateWorkloadSelector validates that workload-selector is set when skyhook-customizations
+// is present with training intent.
+func (b *DefaultBundler) validateWorkloadSelector(recipeResult *recipe.RecipeResult) {
+	if b.Config == nil {
+		return
+	}
+
+	// Check if skyhook-customizations component exists
+	hasSkyhookCustomizations := false
+	for _, ref := range recipeResult.ComponentRefs {
+		if ref.Name == "skyhook-customizations" {
+			hasSkyhookCustomizations = true
+			break
+		}
+	}
+
+	if !hasSkyhookCustomizations {
+		return
+	}
+
+	// Check if intent is training
+	if recipeResult.Criteria == nil || recipeResult.Criteria.Intent != recipe.CriteriaIntentTraining {
+		return
+	}
+
+	// Check if workload-selector is not set
+	selector := b.Config.WorkloadSelector()
+	if len(selector) == 0 {
+		slog.Warn("skyhook-customizations is enabled with training intent but --workload-selector is not set",
+			"component", "skyhook-customizations",
+			"intent", "training",
+		)
+		// Store warning to be added to deployment notes
+		b.warnings = append(b.warnings, "Warning: skyhook-customizations is enabled with training intent but --workload-selector is not set. This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.")
+	}
+}
+
+// validateAcceleratedSelector validates that accelerated-node-selector is set when skyhook-customizations
+// is present with training or inference intent.
+func (b *DefaultBundler) validateAcceleratedSelector(recipeResult *recipe.RecipeResult) {
+	if b.Config == nil {
+		return
+	}
+
+	// Check if skyhook-customizations component exists
+	hasSkyhookCustomizations := false
+	for _, ref := range recipeResult.ComponentRefs {
+		if ref.Name == "skyhook-customizations" {
+			hasSkyhookCustomizations = true
+			break
+		}
+	}
+
+	if !hasSkyhookCustomizations {
+		return
+	}
+
+	// Check if intent is training or inference
+	if recipeResult.Criteria == nil {
+		return
+	}
+	intent := recipeResult.Criteria.Intent
+	if intent != recipe.CriteriaIntentTraining && intent != recipe.CriteriaIntentInference {
+		return
+	}
+
+	// Check if accelerated-node-selector is not set
+	selector := b.Config.AcceleratedNodeSelector()
+	if len(selector) == 0 {
+		slog.Warn("skyhook-customizations is enabled with training/inference intent but --accelerated-node-selector is not set",
+			"component", "skyhook-customizations",
+			"intent", intent,
+		)
+		// Store warning to be added to deployment notes
+		warningMsg := fmt.Sprintf("Warning: skyhook-customizations is enabled with %s intent but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.", intent)
+		b.warnings = append(b.warnings, warningMsg)
 	}
 }
 

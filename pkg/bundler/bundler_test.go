@@ -809,3 +809,214 @@ func computeTestChecksum(content []byte) string {
 	}
 	return string(hash)
 }
+
+func TestValidateWorkloadSelector(t *testing.T) {
+	t.Run("no warning when skyhook-customizations not present", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentTraining,
+			},
+		}
+
+		bundler.validateWorkloadSelector(recipeResult)
+		if len(bundler.warnings) != 0 {
+			t.Errorf("validateWorkloadSelector() added warnings when skyhook-customizations not present: %v", bundler.warnings)
+		}
+	})
+
+	t.Run("no warning when intent is not training", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentInference,
+			},
+		}
+
+		bundler.validateWorkloadSelector(recipeResult)
+		if len(bundler.warnings) != 0 {
+			t.Errorf("validateWorkloadSelector() added warnings when intent is not training: %v", bundler.warnings)
+		}
+	})
+
+	t.Run("warning when workload-selector not set with training intent", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentTraining,
+			},
+		}
+
+		bundler.validateWorkloadSelector(recipeResult)
+		if len(bundler.warnings) != 1 {
+			t.Fatalf("validateWorkloadSelector() added %d warnings, want 1", len(bundler.warnings))
+		}
+		if !strings.Contains(bundler.warnings[0], "workload-selector") {
+			t.Errorf("validateWorkloadSelector() warning doesn't mention workload-selector: %s", bundler.warnings[0])
+		}
+	})
+
+	t.Run("no warning when workload-selector is set", func(t *testing.T) {
+		cfg := config.NewConfig(
+			config.WithWorkloadSelector(map[string]string{"workload-type": "training"}),
+		)
+		bundler, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentTraining,
+			},
+		}
+
+		bundler.validateWorkloadSelector(recipeResult)
+		if len(bundler.warnings) != 0 {
+			t.Errorf("validateWorkloadSelector() added warnings when workload-selector is set: %v", bundler.warnings)
+		}
+	})
+}
+
+func TestValidateAcceleratedSelector(t *testing.T) {
+	t.Run("no warning when skyhook-customizations not present", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentTraining,
+			},
+		}
+
+		bundler.validateAcceleratedSelector(recipeResult)
+		if len(bundler.warnings) != 0 {
+			t.Errorf("validateAcceleratedSelector() added warnings when skyhook-customizations not present: %v", bundler.warnings)
+		}
+	})
+
+	t.Run("no warning when intent is not training or inference", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: "other",
+			},
+		}
+
+		bundler.validateAcceleratedSelector(recipeResult)
+		if len(bundler.warnings) != 0 {
+			t.Errorf("validateAcceleratedSelector() added warnings when intent is not training/inference: %v", bundler.warnings)
+		}
+	})
+
+	t.Run("warning when accelerated-node-selector not set with training intent", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentTraining,
+			},
+		}
+
+		bundler.validateAcceleratedSelector(recipeResult)
+		if len(bundler.warnings) != 1 {
+			t.Fatalf("validateAcceleratedSelector() added %d warnings, want 1", len(bundler.warnings))
+		}
+		if !strings.Contains(bundler.warnings[0], "accelerated-node-selector") {
+			t.Errorf("validateAcceleratedSelector() warning doesn't mention accelerated-node-selector: %s", bundler.warnings[0])
+		}
+		if !strings.Contains(bundler.warnings[0], "training") {
+			t.Errorf("validateAcceleratedSelector() warning doesn't mention training intent: %s", bundler.warnings[0])
+		}
+	})
+
+	t.Run("warning when accelerated-node-selector not set with inference intent", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentInference,
+			},
+		}
+
+		bundler.validateAcceleratedSelector(recipeResult)
+		if len(bundler.warnings) != 1 {
+			t.Fatalf("validateAcceleratedSelector() added %d warnings, want 1", len(bundler.warnings))
+		}
+		if !strings.Contains(bundler.warnings[0], "inference") {
+			t.Errorf("validateAcceleratedSelector() warning doesn't mention inference intent: %s", bundler.warnings[0])
+		}
+	})
+
+	t.Run("no warning when accelerated-node-selector is set", func(t *testing.T) {
+		cfg := config.NewConfig(
+			config.WithAcceleratedNodeSelector(map[string]string{"nodeGroup": "gpu-worker"}),
+		)
+		bundler, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{Name: "skyhook-customizations"},
+			},
+			Criteria: &recipe.Criteria{
+				Intent: recipe.CriteriaIntentTraining,
+			},
+		}
+
+		bundler.validateAcceleratedSelector(recipeResult)
+		if len(bundler.warnings) != 0 {
+			t.Errorf("validateAcceleratedSelector() added warnings when accelerated-node-selector is set: %v", bundler.warnings)
+		}
+	})
+}

@@ -100,6 +100,16 @@ type SchedulingPaths struct {
 
 	// TolerationPaths are paths where tolerations are injected.
 	TolerationPaths []string `yaml:"tolerationPaths,omitempty"`
+
+	// WorkloadSelectorPaths are paths where workload selectors are injected.
+	// Used for components like skyhook-customizations to prevent eviction of running workloads.
+	WorkloadSelectorPaths []string `yaml:"workloadSelectorPaths,omitempty"`
+
+	// TaintPaths are paths where taints are injected as structured objects.
+	TaintPaths []string `yaml:"taintPaths,omitempty"`
+
+	// TaintStrPaths are paths where taints are injected as strings (format: key=value:effect or key:effect).
+	TaintStrPaths []string `yaml:"taintStrPaths,omitempty"`
 }
 
 // Global component registry (loaded once, thread-safe access)
@@ -286,6 +296,22 @@ func (c *ComponentConfig) GetAcceleratedTolerationPaths() []string {
 		return nil
 	}
 	return c.NodeScheduling.Accelerated.TolerationPaths
+}
+
+// GetAcceleratedWorkloadSelectorPaths returns all accelerated workload selector paths for a component.
+func (c *ComponentConfig) GetAcceleratedWorkloadSelectorPaths() []string {
+	if c == nil {
+		return nil
+	}
+	return c.NodeScheduling.Accelerated.WorkloadSelectorPaths
+}
+
+// GetAcceleratedTaintStrPaths returns all accelerated taint string paths for a component.
+func (c *ComponentConfig) GetAcceleratedTaintStrPaths() []string {
+	if c == nil {
+		return nil
+	}
+	return c.NodeScheduling.Accelerated.TaintStrPaths
 }
 
 // GetType returns the component deployment type based on which config is present.

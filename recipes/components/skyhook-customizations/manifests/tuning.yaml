@@ -53,6 +53,12 @@ spec:
     matchLabels:
       {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
   {{- end }}
+  # Dynamic: Supports --workload-selector CLI flag
+  {{- if $cust.workloadSelector }}
+  podNonInterruptLabels:
+    matchLabels:
+      {{- toYaml $cust.workloadSelector | nindent 6 }}
+  {{- end }}
   # Static: Baked-in tuning for H100 Ubuntu training
   packages:
     nvidia-tuned:
