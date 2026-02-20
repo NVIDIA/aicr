@@ -40,16 +40,17 @@ python3 -c "
 import http.server, urllib.request, io
 
 API = 'http://127.0.0.1:${API_PORT}'
-HTML = open('$(dirname "$0")/chat.html', 'rb').read() if __import__('os').path.exists('$(dirname "$0")/chat.html') else b''
+HTML_PATH = '$(dirname "$0")/chat.html'
 
 class H(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/' or self.path == '/chat.html':
+            html = open(HTML_PATH, 'rb').read() if __import__('os').path.exists(HTML_PATH) else b''
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')
-            self.send_header('Content-Length', len(HTML))
+            self.send_header('Content-Length', len(html))
             self.end_headers()
-            self.wfile.write(HTML)
+            self.wfile.write(html)
         elif self.path.startswith('/v1/'):
             self._proxy()
         else:
