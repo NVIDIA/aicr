@@ -72,10 +72,12 @@ jobs:
     outputs:
       release_outcome: ${{ steps.release.outputs.release_outcome }}
     permissions:
+      actions: read
       contents: write
       packages: write
       id-token: write
       attestations: write
+      security-events: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -98,6 +100,13 @@ jobs:
         uses: ./.github/actions/go-build-release
         with:
           ko_version: ${{ steps.versions.outputs.ko }}
+
+      - name: Malware Scan Release Binaries
+        if: steps.release.outcome == 'success'
+        uses: ./.github/actions/malware-scan
+        with:
+          scan_path: dist/
+          category: 'clamav-release-binaries'
 
   # =============================================================================
   # Docker Jobs: Native per-arch validator builds (parallel with GoReleaser)
