@@ -30,12 +30,57 @@ concurrency:
 jobs:
 
   label:
-    name: Label PRs by Path
+    name: Label PRs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Apply Labels
+      - name: Label by Path
         uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b  # v6.0.1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           sync-labels: true
+
+      - name: Label by Size
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+
+            const changes = pr.additions + pr.deletions;
+            let size;
+            if (changes < 10) size = 'size/XS';
+            else if (changes < 50) size = 'size/S';
+            else if (changes < 200) size = 'size/M';
+            else if (changes < 500) size = 'size/L';
+            else size = 'size/XL';
+
+            const sizeLabels = ['size/XS', 'size/S', 'size/M', 'size/L', 'size/XL'];
+
+            // Remove existing size labels that don't match
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            for (const label of labels) {
+              if (sizeLabels.includes(label.name) && label.name !== size) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  name: label.name,
+                });
+              }
+            }
+
+            // Apply new size label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [size],
+            });
