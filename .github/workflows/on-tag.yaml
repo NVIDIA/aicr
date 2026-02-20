@@ -259,7 +259,7 @@ jobs:
   attest:
     name: Attest Images
     runs-on: ubuntu-latest
-    needs: [build, docker-manifest, image-vuln-scan]
+    needs: [build, docker-manifest]
     if: needs.build.outputs.release_outcome == 'success'
     timeout-minutes: 10
     permissions:
@@ -305,7 +305,7 @@ jobs:
   publish:
     name: Publish Release
     runs-on: ubuntu-latest
-    needs: [attest]
+    needs: [attest, image-vuln-scan]
     timeout-minutes: 5
     permissions:
       contents: write

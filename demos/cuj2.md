@@ -72,9 +72,11 @@ phases:
 ```shell
 eidos bundle \
   --recipe recipe.yaml \
-  --system-node-selector nodeGroup=system-pool \
   --accelerated-node-selector nodeGroup=gpu-worker \
-  --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --system-node-toleration dedicated=system-workload:NoSchedule \
+  --system-node-toleration dedicated=system-workload:NoExecute \
   --output bundle
 ```
 
