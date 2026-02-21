@@ -63,6 +63,63 @@ rules:
           namespace: {resource: "namespace"}
           pod: {resource: "pod"}
 
+    # Workload-attributed GPU metrics
+    # DCGM exporter adds exported_namespace/exported_pod labels when a GPU is
+    # actively used by a workload. These rules map those labels to Kubernetes
+    # resources so HPA can read per-pod GPU metrics in the workload namespace.
+    - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL{exported_namespace!="",exported_pod!=""}'
+      metricsQuery: 'avg_over_time(<<.Series>>{<<.LabelMatchers>>}[2m])'
+      name:
+        matches: "DCGM_FI_DEV_GPU_UTIL"
+        as: "workload_gpu_utilization"
+      resources:
+        overrides:
+          exported_namespace: {resource: "namespace"}
+          exported_pod: {resource: "pod"}
+
+    - seriesQuery: 'DCGM_FI_DEV_FB_USED{exported_namespace!="",exported_pod!=""}'
+      metricsQuery: 'avg_over_time(<<.Series>>{<<.LabelMatchers>>}[2m])'
+      name:
+        matches: "DCGM_FI_DEV_FB_USED"
+        as: "workload_gpu_memory_used"
+      resources:
+        overrides:
+          exported_namespace: {resource: "namespace"}
+          exported_pod: {resource: "pod"}
+
+  # External metrics for cluster-wide GPU autoscaling (HPA type: External)
+  # These are not scoped to any pod or namespace, enabling HPA in any namespace
+  # to scale based on cluster-wide GPU metrics.
+  # Note: no <<.LabelMatchers>> — these are unconditional cluster-wide aggregations.
+  external:
+    - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL'
+      metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_GPU_UTIL[2m]))'
+      name:
+        matches: "DCGM_FI_DEV_GPU_UTIL"
+        as: "dcgm_gpu_utilization"
+      resources:
+        namespaced: false
+
+    - seriesQuery: 'DCGM_FI_DEV_FB_USED'
+      metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_FB_USED[2m]))'
+      name:
+        matches: "DCGM_FI_DEV_FB_USED"
+        as: "dcgm_gpu_memory_used"
+      resources:
+        namespaced: false
+
+    - seriesQuery: 'DCGM_FI_DEV_POWER_USAGE'
+      metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_POWER_USAGE[2m]))'
+      name:
+        matches: "DCGM_FI_DEV_POWER_USAGE"
+        as: "dcgm_gpu_power_usage"
+      resources:
+        namespaced: false
+
+# Shorten the metrics relist interval so external metrics discovery
+# picks up new Prometheus series faster (chart default is 1m).
+metricsRelistInterval: 30s
+
 # Resource configuration for the adapter
 resources:
   requests:

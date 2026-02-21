@@ -32,6 +32,10 @@ on:
       - 'recipes/components/dynamo-platform/**'
       - 'recipes/overlays/kind.yaml'
       - 'recipes/overlays/h100-kind-training.yaml'
+      - 'kwok/manifests/karpenter/**'
+      - 'kwok/scripts/install-karpenter-kwok.sh'
+      - 'kwok/scripts/validate-cluster-autoscaling.sh'
+      - 'recipes/components/prometheus-adapter/**'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -171,6 +175,12 @@ jobs:
           echo "=== gang-worker-1 logs ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
             logs gang-worker-1 2>/dev/null || true
+
+      # --- Cluster Autoscaling validation ---
+
+      - name: Cluster Autoscaling (Karpenter + KWOK)
+
+        run: bash kwok/scripts/validate-cluster-autoscaling.sh
 
       # --- Evidence collection ---
 

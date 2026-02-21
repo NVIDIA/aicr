@@ -44,6 +44,7 @@ testing_tools:
   kwok: 'v0.7.0'
   chainsaw: 'v0.2.14'
   yq: 'v4.52.4'
+  karpenter: 'v1.8.0'
 
 # Quality Thresholds
 quality:
