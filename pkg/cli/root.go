@@ -19,7 +19,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/urfave/cli/v3"
 
@@ -135,7 +137,10 @@ func Execute() {
 		ShellComplete: commandLister,
 	}
 
-	if err := cmd.Run(context.Background(), os.Args); err != nil {
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
+	if err := cmd.Run(ctx, os.Args); err != nil {
 		exitCode := errors.ExitCodeFromError(err)
 		slog.Error("command failed", "error", err, "exitCode", exitCode)
 		os.Exit(exitCode)

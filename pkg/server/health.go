@@ -60,7 +60,6 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			Timestamp: time.Now(),
 			Reason:    "service is initializing",
 		}
-		w.WriteHeader(http.StatusServiceUnavailable)
 		serializer.RespondJSON(w, http.StatusServiceUnavailable, resp)
 		return
 	}

@@ -112,7 +112,7 @@ func New(opts ...Option) *Server {
 	}
 
 	s.httpServer = &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", config.Address, config.Port),
+		Addr:              fmt.Sprintf("%s:%d", s.config.Address, s.config.Port),
 		Handler:           mux,
 		ReadTimeout:       config.ReadTimeout,
 		WriteTimeout:      config.WriteTimeout,
@@ -151,7 +151,7 @@ func (s *Server) Start(ctx context.Context) error {
 		// Use fresh context for shutdown - parent context is already canceled
 		return s.Shutdown(context.Background()) //nolint:contextcheck // intentional: need fresh context for graceful shutdown
 	case err := <-errChan:
-		return err
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "http server error", err)
 	}
 }
 

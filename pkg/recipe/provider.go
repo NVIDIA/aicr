@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
@@ -96,9 +97,9 @@ type LayeredDataProvider struct {
 	externalDir string
 
 	// Cached merged registry (computed once on first access)
+	mergedRegistryOnce sync.Once
 	mergedRegistry     []byte
 	mergedRegistryErr  error
-	mergedRegistryDone bool
 
 	// Track which files came from external (for debugging)
 	externalFiles map[string]bool
@@ -339,63 +340,60 @@ func (p *LayeredDataProvider) Source(path string) string {
 // getMergedRegistry returns the merged registryFileName content.
 // External registry components are merged with embedded, with external taking precedence.
 func (p *LayeredDataProvider) getMergedRegistry() ([]byte, error) {
-	if p.mergedRegistryDone {
-		slog.Debug("returning cached merged registry")
-		return p.mergedRegistry, p.mergedRegistryErr
-	}
+	p.mergedRegistryOnce.Do(func() {
+		slog.Debug("merging registry files")
 
-	slog.Debug("merging registry files")
-	p.mergedRegistryDone = true
+		// Load embedded registry
+		embeddedData, err := p.embedded.ReadFile(registryFileName)
+		if err != nil {
+			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read embedded registry", err)
+			return
+		}
 
-	// Load embedded registry
-	embeddedData, err := p.embedded.ReadFile(registryFileName)
-	if err != nil {
-		p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read embedded registry", err)
-		return nil, p.mergedRegistryErr
-	}
+		var embeddedReg ComponentRegistry
+		if unmarshalErr := yaml.Unmarshal(embeddedData, &embeddedReg); unmarshalErr != nil {
+			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse embedded registry", unmarshalErr)
+			return
+		}
 
-	var embeddedReg ComponentRegistry
-	if unmarshalErr := yaml.Unmarshal(embeddedData, &embeddedReg); unmarshalErr != nil {
-		p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse embedded registry", unmarshalErr)
-		return nil, p.mergedRegistryErr
-	}
+		// Load external registry
+		externalPath := filepath.Join(p.externalDir, registryFileName)
+		externalData, err := os.ReadFile(externalPath)
+		if err != nil {
+			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external registry", err)
+			return
+		}
 
-	// Load external registry
-	externalPath := filepath.Join(p.externalDir, registryFileName)
-	externalData, err := os.ReadFile(externalPath)
-	if err != nil {
-		p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external registry", err)
-		return nil, p.mergedRegistryErr
-	}
+		var externalReg ComponentRegistry
+		if unmarshalErr := yaml.Unmarshal(externalData, &externalReg); unmarshalErr != nil {
+			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse external registry", unmarshalErr)
+			return
+		}
 
-	var externalReg ComponentRegistry
-	if unmarshalErr := yaml.Unmarshal(externalData, &externalReg); unmarshalErr != nil {
-		p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse external registry", unmarshalErr)
-		return nil, p.mergedRegistryErr
-	}
+		// Validate schema version compatibility
+		if externalReg.APIVersion != "" && externalReg.APIVersion != embeddedReg.APIVersion {
+			slog.Warn("external registry has different API version",
+				"embedded", embeddedReg.APIVersion,
+				"external", externalReg.APIVersion)
+		}
 
-	// Validate schema version compatibility
-	if externalReg.APIVersion != "" && externalReg.APIVersion != embeddedReg.APIVersion {
-		slog.Warn("external registry has different API version",
-			"embedded", embeddedReg.APIVersion,
-			"external", externalReg.APIVersion)
-	}
+		// Merge: external components override embedded by name
+		merged := mergeRegistries(&embeddedReg, &externalReg)
 
-	// Merge: external components override embedded by name
-	merged := mergeRegistries(&embeddedReg, &externalReg)
+		// Serialize merged registry
+		p.mergedRegistry, p.mergedRegistryErr = yaml.Marshal(merged)
+		if p.mergedRegistryErr != nil {
+			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to serialize merged registry", p.mergedRegistryErr)
+			return
+		}
 
-	// Serialize merged registry
-	p.mergedRegistry, p.mergedRegistryErr = yaml.Marshal(merged)
-	if p.mergedRegistryErr != nil {
-		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to serialize merged registry", p.mergedRegistryErr)
-	}
+		slog.Info("merged component registries",
+			"embedded_components", len(embeddedReg.Components),
+			"external_components", len(externalReg.Components),
+			"merged_components", len(merged.Components))
+	})
 
-	slog.Info("merged component registries",
-		"embedded_components", len(embeddedReg.Components),
-		"external_components", len(externalReg.Components),
-		"merged_components", len(merged.Components))
-
-	return p.mergedRegistry, nil
+	return p.mergedRegistry, p.mergedRegistryErr
 }
 
 // mergeRegistries merges external registry into embedded.

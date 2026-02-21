@@ -152,7 +152,10 @@ type prefixWriter struct {
 }
 
 func (pw *prefixWriter) Write(p []byte) (n int, err error) {
-	// Add prefix to the line
 	line := fmt.Sprintf("%s %s", pw.prefix, string(p))
-	return pw.writer.Write([]byte(line))
+	_, err = pw.writer.Write([]byte(line))
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
