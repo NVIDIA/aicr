@@ -42,7 +42,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -85,6 +85,9 @@ jobs:
 
           if [[ "${{ needs.test.result }}" == "success" ]]; then
             echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.test.result }}" == "cancelled" ]]; then
+            echo "Recipe validations were cancelled" >> $GITHUB_STEP_SUMMARY
+            exit 1
           else
             echo "Some recipe validations failed - check job logs" >> $GITHUB_STEP_SUMMARY
             exit 1
