@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'KWOK Cluster Test'
-description: 'Test recipes using KWOK simulated nodes in a shared Kind cluster'
+description: 'Test recipes using KWOK simulated nodes in parallel Kind clusters'
 
 inputs:
   recipe:
@@ -160,39 +160,39 @@ runs:
       id: validate
       shell: bash
       env:
-        KWOK_CLUSTER: aicr-kwok-test
+        KWOK_CLUSTER_PREFIX: aicr-kwok-test
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
       run: |
-        bash kwok/scripts/run-all-recipes.sh ${{ inputs.recipe }}
+        if [[ -n "${{ inputs.recipe }}" ]]; then
+          # Single recipe: use sequential script with dedicated cluster
+          KWOK_CLUSTER=aicr-kwok-test bash kwok/scripts/run-all-recipes.sh ${{ inputs.recipe }}
+        else
+          # All recipes: use parallel script for faster execution
+          bash kwok/scripts/run-all-recipes-parallel.sh
+        fi
 
     - name: Collect debug artifacts
       if: failure()
       shell: bash
-      env:
-        KWOK_CLUSTER: aicr-kwok-test
       run: |
         mkdir -p /tmp/kwok-debug-artifacts
-        kubectl get all --all-namespaces > /tmp/kwok-debug-artifacts/all-resources.txt || true
-        kubectl get nodes -o wide > /tmp/kwok-debug-artifacts/nodes.txt || true
-        kubectl get nodes -l type=kwok -o yaml > /tmp/kwok-debug-artifacts/kwok-nodes.yaml || true
-        kubectl get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/kwok-debug-artifacts/events.txt || true
-        kubectl get pods --all-namespaces -o wide > /tmp/kwok-debug-artifacts/pods.txt || true
-
-        # Get pending pod details
-        for ns in $(kubectl get ns -o jsonpath='{.items[*].metadata.name}'); do
-          for pod in $(kubectl get pods -n "$ns" --field-selector=status.phase=Pending -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-            kubectl describe pod -n "$ns" "$pod" > "/tmp/kwok-debug-artifacts/pending-${ns}-${pod}.txt" 2>/dev/null || true
-          done
+        # Collect from whichever cluster is still running
+        for cluster in $(kind get clusters 2>/dev/null); do
+          kind export kubeconfig --name "$cluster" 2>/dev/null || continue
+          kubectl get all --all-namespaces > "/tmp/kwok-debug-artifacts/${cluster}-resources.txt" || true
+          kubectl get nodes -o wide > "/tmp/kwok-debug-artifacts/${cluster}-nodes.txt" || true
+          kubectl get events --all-namespaces --sort-by='.lastTimestamp' > "/tmp/kwok-debug-artifacts/${cluster}-events.txt" || true
+          kubectl get pods --all-namespaces -o wide > "/tmp/kwok-debug-artifacts/${cluster}-pods.txt" || true
         done
 
     - name: Export Kind logs
       if: failure()
       shell: bash
-      env:
-        KWOK_CLUSTER: aicr-kwok-test
       run: |
         mkdir -p /tmp/kwok-kind-logs
-        kind export logs /tmp/kwok-kind-logs --name "${KWOK_CLUSTER}" || true
+        for cluster in $(kind get clusters 2>/dev/null); do
+          kind export logs "/tmp/kwok-kind-logs/${cluster}" --name "$cluster" || true
+        done
 
     - name: Upload debug artifacts
       if: failure() && inputs.upload_artifacts == 'true'
@@ -207,8 +207,8 @@ runs:
     - name: Cleanup
       if: always()
       shell: bash
-      env:
-        KWOK_CLUSTER: aicr-kwok-test
       run: |
-        kind delete cluster --name "${KWOK_CLUSTER}" || true
+        for cluster in $(kind get clusters 2>/dev/null); do
+          kind delete cluster --name "$cluster" || true
+        done
         docker system prune -f || true
