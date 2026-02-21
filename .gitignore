@@ -123,6 +123,7 @@ tags
 # Claude
 .claude/settings.local.json
 docs/plans
+.worktrees/
 
 # Validator generator scaffolding output
 pkg/validator/checks/**/*_README.md
