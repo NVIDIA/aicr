@@ -102,7 +102,7 @@ func Serve() error {
 
 	if err := s.Run(ctx); err != nil {
 		slog.Error("server exited with error", "error", err)
-		return err
+		return errors.Wrap(errors.ErrCodeInternal, "server exited with error", err)
 	}
 
 	return nil

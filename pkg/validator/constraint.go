@@ -97,8 +97,7 @@ func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 	if pc.Operator != OperatorExact && pc.Operator != OperatorEQ && pc.Operator != OperatorNE {
 		pc.IsVersionComparison = true
 	} else if looksLikeVersion(pc.Value) {
-		// For exact match or == with version-like values, still treat as potential version
-		pc.IsVersionComparison = looksLikeVersion(pc.Value)
+		pc.IsVersionComparison = true
 	}
 
 	return pc, nil

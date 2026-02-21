@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -85,7 +86,7 @@ func GetAll() []string {
 func RunValidations(ctx context.Context, componentName string, validations []recipe.ComponentValidationConfig, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config) (warnings []string, errors []error) {
 	for _, validation := range validations {
 		if err := ctx.Err(); err != nil {
-			return warnings, append(errors, fmt.Errorf("context cancelled: %w", err))
+			return warnings, append(errors, aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context cancelled during validation", err))
 		}
 
 		fn := Get(validation.Function)

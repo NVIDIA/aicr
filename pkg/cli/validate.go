@@ -23,6 +23,7 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -314,7 +315,7 @@ func validateCmdFlags() []cli.Flag {
 		&cli.DurationFlag{
 			Name:  "timeout",
 			Usage: "Timeout for waiting for Job completion",
-			Value: 5 * time.Minute,
+			Value: defaults.CLISnapshotTimeout,
 		},
 		&cli.BoolFlag{
 			Name:  "cleanup",

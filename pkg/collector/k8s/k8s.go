@@ -18,6 +18,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -36,9 +37,12 @@ type Collector struct {
 func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting Kubernetes cluster information")
 
+	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorK8sTimeout)
+	defer cancel()
+
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "K8s collector context cancelled", err)
 	}
 
 	if err := k.getClient(); err != nil {

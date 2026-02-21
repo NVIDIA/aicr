@@ -21,9 +21,9 @@ import (
 	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -208,7 +208,7 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 // IMPORTANT: The caller is responsible for calling the returned cancel function
 // when the validation context is no longer needed.
 func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
 
 	// Create in-cluster Kubernetes client
 	config, err := rest.InClusterConfig()

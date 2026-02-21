@@ -125,7 +125,7 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 	_, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, clusterRole, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		slog.Error("failed to create ClusterRole", "name", clusterRoleName, "error", err)
-		return err
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRole", err)
 	}
 	if errors.IsAlreadyExists(err) {
 		slog.Debug("ClusterRole already exists", "name", clusterRoleName)
@@ -176,7 +176,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 	_, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
 	if err != nil && !errors.IsAlreadyExists(err) {
 		slog.Error("failed to create ClusterRoleBinding", "name", clusterRoleBindingName, "error", err)
-		return err
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
 	}
 	if errors.IsAlreadyExists(err) {
 		slog.Debug("ClusterRoleBinding already exists", "name", clusterRoleBindingName)

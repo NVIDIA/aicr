@@ -155,3 +155,17 @@ const (
 	// PodReadyTimeout is the timeout for waiting for pods to become ready.
 	PodReadyTimeout = 2 * time.Minute
 )
+
+// Job configuration constants.
+const (
+	// JobTTLAfterFinished is the time-to-live for completed Jobs.
+	// Jobs are kept for debugging purposes before automatic cleanup.
+	JobTTLAfterFinished = 1 * time.Hour
+)
+
+// Server size limits.
+const (
+	// ServerMaxHeaderBytes is the maximum size of request headers (64KB).
+	// Prevents header-based attacks.
+	ServerMaxHeaderBytes = 1 << 16
+)

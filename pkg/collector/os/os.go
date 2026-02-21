@@ -18,6 +18,8 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
 
@@ -33,29 +35,32 @@ type Collector struct {
 func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting OS configuration")
 
+	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorTimeout)
+	defer cancel()
+
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "OS collector context cancelled", err)
 	}
 
 	grub, err := c.collectGRUB(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect GRUB configuration", err)
 	}
 
 	sysctl, err := c.collectSysctl(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect sysctl configuration", err)
 	}
 
 	kmod, err := c.collectKMod(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect kernel modules", err)
 	}
 
 	release, err := c.collectRelease(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect OS release", err)
 	}
 
 	res := &measurement.Measurement{

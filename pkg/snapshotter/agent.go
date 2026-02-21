@@ -25,6 +25,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/agent"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -164,7 +165,7 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 	// Wait for Job completion
 	timeout := config.Timeout
 	if timeout == 0 {
-		timeout = 5 * time.Minute
+		timeout = defaults.K8sJobCompletionTimeout
 	}
 
 	slog.Info("waiting for Job completion",
@@ -172,7 +173,7 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		slog.Duration("timeout", timeout))
 
 	// Wait for Pod to be ready before streaming logs
-	podReadyTimeout := 60 * time.Second
+	podReadyTimeout := defaults.K8sPodReadyTimeout
 	logCtx, cancelLogs := context.WithCancel(ctx)
 	defer cancelLogs()
 
@@ -437,7 +438,7 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	// Wait for Job completion
 	timeout := n.AgentConfig.Timeout
 	if timeout == 0 {
-		timeout = 5 * time.Minute
+		timeout = defaults.K8sJobCompletionTimeout
 	}
 
 	slog.Info("waiting for Job completion",
@@ -445,7 +446,7 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		slog.Duration("timeout", timeout))
 
 	// Wait for Pod to be ready before streaming logs
-	podReadyTimeout := 60 * time.Second
+	podReadyTimeout := defaults.K8sPodReadyTimeout
 	logCtx, cancelLogs := context.WithCancel(ctx)
 	defer cancelLogs()
 
@@ -491,7 +492,8 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	switch {
 	case finalOutput == "" || finalOutput == "-" || finalOutput == serializer.StdoutURI:
 		// Output snapshot data to stdout for consumption by caller
-		fmt.Println(string(snapshotData))
+		os.Stdout.Write(snapshotData)
+		os.Stdout.Write([]byte("\n"))
 	case strings.HasPrefix(finalOutput, serializer.ConfigMapURIScheme):
 		// Already in ConfigMap (written by Job)
 		slog.Info("snapshot saved to ConfigMap", slog.String("uri", finalOutput))

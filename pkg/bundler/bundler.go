@@ -331,7 +331,7 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 
 	for _, ref := range recipeResult.ComponentRefs {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during component value extraction", err)
 		}
 
 		// Get base values from recipe

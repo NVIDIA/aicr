@@ -50,7 +50,6 @@
 //	config.Port = 9090
 //	config.RateLimit = 200  // 200 requests/sec
 //	config.RateLimitBurst = 400
-//	config.MaxBulkRequests = 50
 //
 //	if err := server.RunWithConfig(config); err != nil {
 //	    panic(err)

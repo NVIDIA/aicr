@@ -46,7 +46,6 @@
 //
 //	factory := collector.NewDefaultFactory(
 //	    collector.WithSystemDServices([]string{"containerd.service", "kubelet.service"}),
-//	    collector.WithVersion("v1.0.0"),
 //	)
 //
 // # Available Collectors

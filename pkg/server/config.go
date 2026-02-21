@@ -41,8 +41,6 @@ type Config struct {
 	RateLimit      rate.Limit // requests per second
 	RateLimitBurst int        // burst size
 
-	// Request limits
-	MaxBulkRequests int
 
 	// Timeouts
 	ReadTimeout     time.Duration
@@ -66,7 +64,6 @@ func parseConfig() *Config {
 		Port:            8080,
 		RateLimit:       100, // 100 req/s
 		RateLimitBurst:  200, // burst of 200
-		MaxBulkRequests: 100,
 		ReadTimeout:     defaults.ServerReadTimeout,
 		WriteTimeout:    defaults.ServerWriteTimeout,
 		IdleTimeout:     defaults.ServerIdleTimeout,

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -122,7 +121,7 @@ func (v *Validator) ValidatePhase(
 			// Cleanup RBAC after phase completes (only if cleanup enabled)
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 				defer cancel()
 				if cleanupErr := deployer.CleanupRBAC(cleanupCtx); cleanupErr != nil {
 					slog.Warn("failed to cleanup RBAC resources", "error", cleanupErr)
@@ -137,7 +136,7 @@ func (v *Validator) ValidatePhase(
 			// Always cleanup data ConfigMaps (recipe/snapshot) - these are internal
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 				defer cancel()
 				v.cleanupDataConfigMaps(cleanupCtx, clientset)
 			}()
@@ -154,9 +153,6 @@ func (v *Validator) ValidatePhase(
 		return v.validatePerformance(ctx, recipeResult, snap)
 	case PhaseConformance:
 		return v.validateConformance(ctx, recipeResult, snap)
-	case PhaseAll:
-		// Should not reach here - PhaseAll is handled above
-		return v.validateAll(ctx, recipeResult, snap)
 	default:
 		return v.validateReadiness(ctx, recipeResult, snap)
 	}
@@ -1084,7 +1080,7 @@ func (v *Validator) runPhaseJob(
 			slog.Warn("failed to capture Job logs", "job", config.JobName, "error", logErr)
 		} else if logs != "" {
 			// Output logs to stderr for debugging
-			fmt.Fprintf(os.Stderr, "\n=== Job Logs (%s) ===\n%s\n=== End Job Logs ===\n\n", config.JobName, logs)
+			slog.Info("validation job logs", "job", config.JobName, "logs", logs)
 		}
 
 		// Cleanup failed Job (only if cleanup enabled)
@@ -1279,7 +1275,7 @@ func (v *Validator) validateAll(
 			// Cleanup RBAC at the end (deferred to ensure cleanup even on error, only if cleanup enabled)
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 				defer cancel()
 				if cleanupErr := deployer.CleanupRBAC(cleanupCtx); cleanupErr != nil {
 					slog.Warn("failed to cleanup RBAC resources", "error", cleanupErr)
@@ -1295,7 +1291,7 @@ func (v *Validator) validateAll(
 			// Always cleanup data ConfigMaps (recipe/snapshot) - these are internal
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 				defer cancel()
 				v.cleanupDataConfigMaps(cleanupCtx, clientset)
 			}()
@@ -1309,7 +1305,7 @@ func (v *Validator) validateAll(
 			// Cleanup ValidationResult ConfigMap at the end (only if cleanup enabled)
 			//nolint:contextcheck // Using separate context for cleanup to avoid cancellation
 			defer func() {
-				cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 				defer cancel()
 				v.cleanupValidationResultConfigMap(cleanupCtx, clientset)
 			}()

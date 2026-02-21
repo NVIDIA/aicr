@@ -15,19 +15,12 @@
 package recipe
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
-
-// Validator defines the interface for validating recipes before bundling.
-type Validator interface {
-	// Validate checks if the recipe is valid for this bundler.
-	Validate(ctx context.Context, recipe *Recipe) error
-}
 
 // RequestInfo holds simplified request metadata for documentation purposes.
 // This replaces the old Query type with just the fields needed for bundle documentation.

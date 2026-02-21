@@ -124,7 +124,7 @@ func TestImageCollector_CollectWithCanceledContext(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, m)
-	assert.Equal(t, context.Canceled, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestImageCollector_MultipleLocations(t *testing.T) {

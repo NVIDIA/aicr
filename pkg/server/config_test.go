@@ -40,10 +40,6 @@ func TestParseConfig(t *testing.T) {
 			t.Errorf("expected rate limit burst 200, got %d", cfg.RateLimitBurst)
 		}
 
-		if cfg.MaxBulkRequests != 100 {
-			t.Errorf("expected max bulk requests 100, got %d", cfg.MaxBulkRequests)
-		}
-
 		if cfg.ReadTimeout != 10*time.Second {
 			t.Errorf("expected read timeout 10s, got %v", cfg.ReadTimeout)
 		}

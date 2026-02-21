@@ -182,7 +182,7 @@ func TestNodeCollector_CollectNodeCanceledContext(t *testing.T) {
 	nodeData, err := collector.collectNode(ctx)
 	assert.Error(t, err)
 	assert.Nil(t, nodeData)
-	assert.Equal(t, context.Canceled, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestParseProvider(t *testing.T) {

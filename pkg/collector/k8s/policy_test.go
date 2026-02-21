@@ -150,7 +150,7 @@ func TestPolicyCollector_WithCanceledContext(t *testing.T) {
 	m, err := collector.Collect(ctx)
 	assert.Error(t, err)
 	assert.Nil(t, m)
-	assert.Equal(t, context.Canceled, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestPolicyCollector_ParsesClusterPolicySpec(t *testing.T) {

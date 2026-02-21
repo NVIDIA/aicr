@@ -23,7 +23,4 @@ const (
 
 	// FullAPIVersion is the complete API version string
 	FullAPIVersion = APIDomain + "/" + APIVersion
-
-	// Kind is the resource kind for snapshots
-	Kind = "Snapshot"
 )

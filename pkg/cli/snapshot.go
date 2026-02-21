@@ -16,10 +16,10 @@ package cli
 
 import (
 	"context"
-	"time"
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -163,7 +163,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			&cli.DurationFlag{
 				Name:  "timeout",
 				Usage: "Timeout for waiting for Job completion",
-				Value: 5 * time.Minute,
+				Value: defaults.CLISnapshotTimeout,
 			},
 			&cli.BoolFlag{
 				Name:  "cleanup",
@@ -207,9 +207,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			}
 
 			// Create factory
-			factory := collector.NewDefaultFactory(
-				collector.WithVersion(version),
-			)
+			factory := collector.NewDefaultFactory()
 
 			// Create output serializer
 			var ser serializer.Serializer

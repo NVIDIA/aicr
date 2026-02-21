@@ -41,19 +41,10 @@ func WithSystemDServices(services []string) Option {
 	}
 }
 
-// WithVersion sets the version for the factory.
-func WithVersion(version string) Option {
-	return func(f *DefaultFactory) {
-		f.Version = version
-	}
-}
-
 // DefaultFactory is the standard implementation of Factory that creates collectors
-// with production dependencies. It configures default systemd services to monitor
-// and supports version tracking.
+// with production dependencies. It configures default systemd services to monitor.
 type DefaultFactory struct {
 	SystemDServices []string
-	Version         string
 }
 
 // NewDefaultFactory creates a new DefaultFactory with default configuration.
@@ -88,7 +79,7 @@ func (f *DefaultFactory) CreateSystemDCollector() Collector {
 	}
 }
 
-// CreateGrubCollector creates a GRUB collector.
+// CreateOSCollector creates an OS collector.
 func (f *DefaultFactory) CreateOSCollector() Collector {
 	return &os.Collector{}
 }

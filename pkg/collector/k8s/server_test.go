@@ -71,7 +71,7 @@ func TestKubernetesCollector_CollectWithCanceledContext(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, m)
-	assert.Equal(t, context.Canceled, err)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestKubernetesCollector_CollectWithTimeout(t *testing.T) {
@@ -88,7 +88,7 @@ func TestKubernetesCollector_CollectWithTimeout(t *testing.T) {
 	// Should fail with deadline exceeded
 	assert.Error(t, err)
 	assert.Nil(t, m)
-	assert.Equal(t, context.DeadlineExceeded, err)
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {

@@ -40,6 +40,11 @@ func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 
 	scanner := bufio.NewScanner(stream)
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled during log streaming", ctx.Err())
+		default:
+		}
 		if _, err := logWriter.Write(append(scanner.Bytes(), '\n')); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to write log output", err)
 		}

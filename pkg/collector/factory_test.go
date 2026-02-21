@@ -87,14 +87,6 @@ func TestWithSystemDServices(t *testing.T) {
 	}
 }
 
-func TestWithVersion(t *testing.T) {
-	factory := NewDefaultFactory(WithVersion("v1.2.3"))
-
-	if factory.Version != "v1.2.3" {
-		t.Errorf("expected v1.2.3, got %s", factory.Version)
-	}
-}
-
 func TestNewDefaultFactory_Defaults(t *testing.T) {
 	factory := NewDefaultFactory()
 

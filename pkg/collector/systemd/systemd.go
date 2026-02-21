@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/coreos/go-systemd/v22/dbus"
@@ -48,6 +49,9 @@ type Collector struct {
 // it returns an empty measurement instead of failing.
 func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting SystemD service configurations")
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorTimeout)
+	defer cancel()
 
 	services := s.Services
 	if len(services) == 0 {
