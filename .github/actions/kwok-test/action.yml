@@ -13,13 +13,12 @@
 # limitations under the License.
 
 name: 'KWOK Cluster Test'
-description: 'Test recipes using KWOK simulated nodes in parallel Kind clusters'
+description: 'Test a single recipe using KWOK simulated nodes in a Kind cluster'
 
 inputs:
   recipe:
-    description: 'Recipe name to test (empty = all testable recipes)'
-    required: false
-    default: ''
+    description: 'Recipe name to test'
+    required: true
   go_version:
     description: 'Go version to install'
     required: true
@@ -156,20 +155,13 @@ runs:
         make build
         ls -la dist/
 
-    - name: Run KWOK recipe tests
+    - name: Run KWOK recipe test
       id: validate
       shell: bash
       env:
-        KWOK_CLUSTER_PREFIX: aicr-kwok-test
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
       run: |
-        if [[ -n "${{ inputs.recipe }}" ]]; then
-          # Single recipe: use sequential script with dedicated cluster
-          KWOK_CLUSTER=aicr-kwok-test bash kwok/scripts/run-all-recipes.sh ${{ inputs.recipe }}
-        else
-          # All recipes: use parallel script for faster execution
-          bash kwok/scripts/run-all-recipes-parallel.sh
-        fi
+        KWOK_CLUSTER=aicr-kwok-test bash kwok/scripts/run-all-recipes.sh ${{ inputs.recipe }}
 
     - name: Collect debug artifacts
       if: failure()
@@ -198,7 +190,7 @@ runs:
       if: failure() && inputs.upload_artifacts == 'true'
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
-        name: kwok-debug-${{ github.run_id }}
+        name: kwok-debug-${{ inputs.recipe }}-${{ github.run_id }}
         path: |
           /tmp/kwok-debug-artifacts/
           /tmp/kwok-kind-logs/

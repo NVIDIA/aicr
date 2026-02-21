@@ -46,10 +46,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: KWOK Recipe Tests
+  discover:
+    name: Discover Recipes
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 2
+    outputs:
+      recipes: ${{ steps.find.outputs.recipes }}
+    steps:
+      - name: Checkout overlays
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            recipes/overlays
+          sparse-checkout-cone-mode: false
+
+      - name: Find testable recipes
+        id: find
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # If a specific recipe was requested via workflow_dispatch, use it
+          if [[ -n "${{ github.event.inputs.recipe }}" ]]; then
+            recipes=$(jq -nc '[$recipe]' --arg recipe "${{ github.event.inputs.recipe }}")
+            echo "recipes=${recipes}" >> "$GITHUB_OUTPUT"
+            echo "Using specific recipe: ${{ github.event.inputs.recipe }}"
+            exit 0
+          fi
+
+          # Scan overlays for recipes with a cloud service criteria
+          recipes="[]"
+          for overlay in recipes/overlays/*.yaml; do
+            name=$(basename "$overlay" .yaml)
+            # yq is pre-installed on ubuntu-latest runners
+            service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
+            if [[ -n "$service" && "$service" != "null" && "$service" != "any" ]]; then
+              recipes=$(echo "$recipes" | jq -c --arg r "$name" '. + [$r]')
+            fi
+          done
+
+          echo "recipes=${recipes}" >> "$GITHUB_OUTPUT"
+          echo "Discovered $(echo "$recipes" | jq 'length') recipe(s): $(echo "$recipes" | jq -c '.')"
+
+  test:
+    name: KWOK (${{ matrix.recipe }})
+    needs: discover
+    if: ${{ needs.discover.outputs.recipes != '[]' && needs.discover.outputs.recipes != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.discover.outputs.recipes) }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -60,10 +109,10 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
-      - name: Run KWOK tests
+      - name: Run KWOK test
         uses: ./.github/actions/kwok-test
         with:
-          recipe: ${{ github.event.inputs.recipe }}
+          recipe: ${{ matrix.recipe }}
           go_version: ${{ steps.versions.outputs.go }}
           kind_version: ${{ steps.versions.outputs.kind }}
           helm_version: ${{ steps.versions.outputs.helm }}
@@ -85,6 +134,8 @@ jobs:
 
           if [[ "${{ needs.test.result }}" == "success" ]]; then
             echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.test.result }}" == "skipped" ]]; then
+            echo "No recipes to test" >> $GITHUB_STEP_SUMMARY
           elif [[ "${{ needs.test.result }}" == "cancelled" ]]; then
             echo "Recipe validations were cancelled" >> $GITHUB_STEP_SUMMARY
             exit 1

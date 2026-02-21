@@ -479,10 +479,6 @@ endif
 kwok-test-all: build ## Run all KWOK recipe tests in a shared cluster
 	@bash kwok/scripts/run-all-recipes.sh
 
-.PHONY: kwok-test-all-parallel
-kwok-test-all-parallel: build ## Run all KWOK recipe tests in parallel across multiple clusters
-	@bash kwok/scripts/run-all-recipes-parallel.sh
-
 # =============================================================================
 # Combined Development Targets
 # =============================================================================
@@ -547,7 +543,6 @@ help-full: ## Displays commands grouped by category
 	@echo "  make kwok-status    Show KWOK cluster and node status"
 	@echo "  make kwok-e2e       Full KWOK workflow (RECIPE=<name>)"
 	@echo "  make kwok-test-all  Run all recipes in shared cluster"
-	@echo "  make kwok-test-all-parallel  Run all recipes in parallel clusters (faster)"
 	@echo ""
 	@echo "\033[1m=== Code Maintenance ===\033[0m"
 	@echo "  make tidy           Format code and update dependencies"
