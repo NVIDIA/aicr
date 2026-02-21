@@ -143,8 +143,8 @@ func (v *Validator) ValidatePhase(
 		}
 	}
 
-	// Run the requested phase
-	switch phase {
+	// Run the requested phase (PhaseAll is handled by early return above)
+	switch phase { //nolint:exhaustive // PhaseAll handled above
 	case PhaseReadiness:
 		return v.validateReadiness(ctx, recipeResult, snap)
 	case PhaseDeployment:

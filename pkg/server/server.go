@@ -117,7 +117,7 @@ func New(opts ...Option) *Server {
 		ReadTimeout:       config.ReadTimeout,
 		WriteTimeout:      config.WriteTimeout,
 		IdleTimeout:       config.IdleTimeout,
-		MaxHeaderBytes:    defaults.ServerMaxHeaderBytes,         // 64KB limit to prevent header-based attacks
+		MaxHeaderBytes:    defaults.ServerMaxHeaderBytes,    // 64KB limit to prevent header-based attacks
 		ReadHeaderTimeout: defaults.ServerReadHeaderTimeout, // Prevent slow header attacks
 	}
 

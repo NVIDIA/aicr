@@ -17,6 +17,7 @@ package recipe
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -107,10 +108,10 @@ components:
 
 	// Should contain both embedded and custom components
 	content := string(data)
-	if !contains(content, "custom-component") {
+	if !strings.Contains(content, "custom-component") {
 		t.Error("merged registry should contain custom-component from external")
 	}
-	if !contains(content, "gpu-operator") {
+	if !strings.Contains(content, "gpu-operator") {
 		t.Error("merged registry should contain gpu-operator from embedded")
 	}
 }
@@ -158,7 +159,7 @@ spec:
 	}
 
 	content := string(data)
-	if !contains(content, "custom-base") {
+	if !strings.Contains(content, "custom-base") {
 		t.Error("overlays/base.yaml should be from external directory")
 	}
 
@@ -213,7 +214,7 @@ spec:
 	}
 
 	content := string(data)
-	if !contains(content, "custom-overlay") {
+	if !strings.Contains(content, "custom-overlay") {
 		t.Error("should be able to read custom overlay from external")
 	}
 }
@@ -420,10 +421,10 @@ customField: customValue
 	}
 
 	content := string(data)
-	if !contains(content, "customField") {
+	if !strings.Contains(content, "customField") {
 		t.Error("custom values should contain customField")
 	}
-	if !contains(content, "customValue") {
+	if !strings.Contains(content, "customValue") {
 		t.Error("custom values should contain customValue")
 	}
 
@@ -493,7 +494,7 @@ spec:
 		// Check that external file is included
 		foundExternal := false
 		for _, f := range files {
-			if contains(f, "walk-test.yaml") {
+			if strings.Contains(f, "walk-test.yaml") {
 				foundExternal = true
 				break
 			}
@@ -584,7 +585,7 @@ spec:
 	// Check external file is present
 	foundExternal := false
 	for _, f := range files {
-		if contains(f, "external-test.yaml") {
+		if strings.Contains(f, "external-test.yaml") {
 			foundExternal = true
 			break
 		}
@@ -611,13 +612,13 @@ func TestLayeredDataProvider_SourceForRegistry(t *testing.T) {
 	}
 
 	source := provider.Source("registry.yaml")
-	if !contains(source, "merged") {
+	if !strings.Contains(source, "merged") {
 		t.Errorf("expected source to contain 'merged', got %q", source)
 	}
-	if !contains(source, "embedded") {
+	if !strings.Contains(source, "embedded") {
 		t.Errorf("expected source to contain 'embedded', got %q", source)
 	}
-	if !contains(source, "external") {
+	if !strings.Contains(source, "external") {
 		t.Errorf("expected source to contain 'external', got %q", source)
 	}
 }
@@ -839,19 +840,4 @@ func TestDataProviderGeneration(t *testing.T) {
 	if GetDataProviderGeneration() != startGen+2 {
 		t.Errorf("expected generation %d, got %d", startGen+2, GetDataProviderGeneration())
 	}
-}
-
-// contains checks if s contains substr.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr ||
-		len(s) > 0 && len(substr) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

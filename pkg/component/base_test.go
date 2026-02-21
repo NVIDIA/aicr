@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,7 +282,7 @@ func TestBaseBundler_GenerateChecksums(t *testing.T) {
 
 	contentStr := string(content)
 	for _, tf := range testFiles {
-		if !filepath.IsAbs(tf.name) && !contains(contentStr, tf.name) {
+		if !filepath.IsAbs(tf.name) && !strings.Contains(contentStr, tf.name) {
 			t.Errorf("Checksums file does not contain %s", tf.name)
 		}
 	}
@@ -540,10 +541,6 @@ func TestBaseBundler_GenerateFileFromTemplate(t *testing.T) {
 		})
 	}
 }
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || contains(s[1:], substr)))
-}
-
 func TestGetBundlerVersion(t *testing.T) {
 	tests := []struct {
 		name   string

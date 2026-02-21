@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	authv1 "k8s.io/api/authorization/v1"
@@ -73,7 +74,7 @@ func TestCheckPermissions(t *testing.T) {
 			}
 
 			if tt.wantErr && err != nil && tt.errContains != "" {
-				if !contains(err.Error(), tt.errContains) {
+				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("CheckPermissions() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
@@ -152,19 +153,4 @@ func TestCheckPermission(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-			len(s) > len(substr)+1 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

@@ -16,7 +16,7 @@ package validations
 
 import (
 	"context"
-	"strings"
+	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -129,7 +129,7 @@ func TestCheckWorkloadSelectorMissing(t *testing.T) {
 			}
 
 			if tt.wantWarningMsg != "" && len(warnings) > 0 {
-				if !contains(warnings, tt.wantWarningMsg) {
+				if !slices.Contains(warnings, tt.wantWarningMsg) {
 					t.Errorf("CheckWorkloadSelectorMissing() warning message = %v, want to contain %q", warnings, tt.wantWarningMsg)
 				}
 			}
@@ -260,7 +260,7 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 			}
 
 			if tt.wantWarningMsg != "" && len(warnings) > 0 {
-				if !contains(warnings, tt.wantWarningMsg) {
+				if !slices.Contains(warnings, tt.wantWarningMsg) {
 					t.Errorf("CheckAcceleratedSelectorMissing() warning message = %v, want to contain %q", warnings, tt.wantWarningMsg)
 				}
 			}
@@ -385,14 +385,4 @@ func TestCheckConditions(t *testing.T) {
 			}
 		})
 	}
-}
-
-// contains checks if a slice of strings contains a substring.
-func contains(slice []string, substr string) bool {
-	for _, s := range slice {
-		if strings.Contains(s, substr) {
-			return true
-		}
-	}
-	return false
 }

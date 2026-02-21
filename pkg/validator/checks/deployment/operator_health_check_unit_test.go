@@ -16,6 +16,7 @@ package deployment
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
@@ -153,7 +154,7 @@ func TestCheckOperatorHealth(t *testing.T) {
 			}
 
 			if tt.wantErr && err != nil && tt.errContains != "" {
-				if !containsString(err.Error(), tt.errContains) {
+				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("CheckOperatorHealth() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
@@ -213,7 +214,7 @@ func TestCheckOperatorHealthWithDifferentNamespaces(t *testing.T) {
 		t.Error("CheckOperatorHealth() should fail when pods are in wrong namespace")
 	}
 
-	if !containsString(err.Error(), "no gpu-operator pods found") {
+	if !strings.Contains(err.Error(), "no gpu-operator pods found") {
 		t.Errorf("CheckOperatorHealth() error = %v, should contain 'no gpu-operator pods found'", err)
 	}
 }
@@ -249,7 +250,7 @@ func TestCheckOperatorHealthWithWrongLabels(t *testing.T) {
 		t.Error("CheckOperatorHealth() should fail when pods have wrong labels")
 	}
 
-	if !containsString(err.Error(), "no gpu-operator pods found") {
+	if !strings.Contains(err.Error(), "no gpu-operator pods found") {
 		t.Errorf("CheckOperatorHealth() error = %v, should contain 'no gpu-operator pods found'", err)
 	}
 }
@@ -268,22 +269,6 @@ func createGPUOperatorPod(name, namespace string, phase corev1.PodPhase) corev1.
 			Phase: phase,
 		},
 	}
-}
-
-// Helper function to check if a string contains a substring
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-			len(s) > len(substr)+1 && findSubstr(s, substr)))
-}
-
-func findSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // fakeAPIError implements error interface for simulating API errors

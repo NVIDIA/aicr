@@ -15,6 +15,7 @@
 package component
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -291,16 +292,16 @@ func TestMarshalYAMLWithHeader(t *testing.T) {
 				RecipeVersion:  "2.0.0",
 			},
 			verify: func(t *testing.T, result string) {
-				if !contains(result, "# GPU Operator Helm Values") {
+				if !strings.Contains(result, "# GPU Operator Helm Values") {
 					t.Error("missing component name in header")
 				}
-				if !contains(result, "# Bundler Version: 1.2.3") {
+				if !strings.Contains(result, "# Bundler Version: 1.2.3") {
 					t.Error("missing bundler version in header")
 				}
-				if !contains(result, "# Recipe Version: 2.0.0") {
+				if !strings.Contains(result, "# Recipe Version: 2.0.0") {
 					t.Error("missing recipe version in header")
 				}
-				if !contains(result, "key: value") {
+				if !strings.Contains(result, "key: value") {
 					t.Error("missing YAML content")
 				}
 			},
@@ -314,10 +315,10 @@ func TestMarshalYAMLWithHeader(t *testing.T) {
 				RecipeVersion:  "",
 			},
 			verify: func(t *testing.T, result string) {
-				if !contains(result, "# Generated from Cloud Native Stack Recipe") {
+				if !strings.Contains(result, "# Generated from Cloud Native Stack Recipe") {
 					t.Error("missing standard header line")
 				}
-				if !contains(result, "test: data") {
+				if !strings.Contains(result, "test: data") {
 					t.Error("missing YAML content")
 				}
 			},
@@ -339,13 +340,13 @@ func TestMarshalYAMLWithHeader(t *testing.T) {
 				RecipeVersion:  "v2.0.0",
 			},
 			verify: func(t *testing.T, result string) {
-				if !contains(result, "driver:") {
+				if !strings.Contains(result, "driver:") {
 					t.Error("missing driver section")
 				}
-				if !contains(result, "version: 550.0.0") {
+				if !strings.Contains(result, "version: 550.0.0") {
 					t.Error("missing driver version")
 				}
-				if !contains(result, "mig:") {
+				if !strings.Contains(result, "mig:") {
 					t.Error("missing mig section")
 				}
 			},
@@ -359,7 +360,7 @@ func TestMarshalYAMLWithHeader(t *testing.T) {
 				RecipeVersion:  "1.0.0",
 			},
 			verify: func(t *testing.T, result string) {
-				if !contains(result, "null") {
+				if !strings.Contains(result, "null") {
 					t.Error("nil should serialize to null")
 				}
 			},
@@ -373,10 +374,10 @@ func TestMarshalYAMLWithHeader(t *testing.T) {
 				RecipeVersion:  "1.0.0",
 			},
 			verify: func(t *testing.T, result string) {
-				if !contains(result, "- item1") {
+				if !strings.Contains(result, "- item1") {
 					t.Error("missing first item")
 				}
-				if !contains(result, "- item2") {
+				if !strings.Contains(result, "- item2") {
 					t.Error("missing second item")
 				}
 			},

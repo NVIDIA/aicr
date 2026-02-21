@@ -17,6 +17,7 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -73,7 +74,7 @@ func TestBuildKubeClient_PathResolution(t *testing.T) {
 			}
 
 			if err != nil && tt.errorContains != "" {
-				if !containsString(err.Error(), tt.errorContains) {
+				if !strings.Contains(err.Error(), tt.errorContains) {
 					t.Errorf("BuildKubeClient() error = %v, want error containing %q", err, tt.errorContains)
 				}
 			}
@@ -124,7 +125,7 @@ func TestBuildKubeClient_ExplicitPath(t *testing.T) {
 		t.Error("BuildKubeClient() with invalid config should return error")
 	}
 
-	if !containsString(err.Error(), "failed to build kube config") {
+	if !strings.Contains(err.Error(), "failed to build kube config") {
 		t.Errorf("BuildKubeClient() error = %v, want error containing 'failed to build kube config'", err)
 	}
 }
@@ -219,14 +220,4 @@ func TestGetKubeClient_CallsOnce(t *testing.T) {
 	if successCount > 0 && failCount > 0 {
 		t.Errorf("GetKubeClient() returned inconsistent results: %d successes, %d failures", successCount, failCount)
 	}
-}
-
-// containsString checks if a string contains a substring.
-func containsString(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

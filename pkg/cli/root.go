@@ -138,13 +138,14 @@ func Execute() {
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
 
 	if err := cmd.Run(ctx, os.Args); err != nil {
+		cancel()
 		exitCode := errors.ExitCodeFromError(err)
 		slog.Error("command failed", "error", err, "exitCode", exitCode)
 		os.Exit(exitCode)
 	}
+	cancel()
 }
 
 func commandLister(_ context.Context, cmd *cli.Command) {

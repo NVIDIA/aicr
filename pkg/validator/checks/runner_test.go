@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -55,7 +56,7 @@ func TestNewTestRunner_FailsOutsideKubernetes(t *testing.T) {
 	}
 
 	// Error should mention in-cluster config
-	if err != nil && !contains(err.Error(), "in-cluster") {
+	if err != nil && !strings.Contains(err.Error(), "in-cluster") {
 		t.Errorf("Error should mention in-cluster config, got: %v", err)
 	}
 }
@@ -168,7 +169,7 @@ func TestRunCheck_Failure(t *testing.T) {
 			t.Error("t.Fatalf should have been called when check failed")
 		}
 
-		if !contains(mockT.fatalMessage, "failed") {
+		if !strings.Contains(mockT.fatalMessage, "failed") {
 			t.Errorf("Fatal message should indicate check failed, got: %s", mockT.fatalMessage)
 		}
 	}()
@@ -252,7 +253,7 @@ measurements:
 	}
 
 	// Error should be about in-cluster config, not snapshot file
-	if err != nil && contains(err.Error(), "no such file") {
+	if err != nil && strings.Contains(err.Error(), "no such file") {
 		t.Errorf("Should fail on in-cluster config, not snapshot file, got: %v", err)
 	}
 
@@ -289,7 +290,7 @@ func TestLoadValidationContext_DefaultSnapshotPath(t *testing.T) {
 	}
 
 	// Error should be about in-cluster config or default snapshot path
-	if err != nil && !contains(err.Error(), "in-cluster") && !contains(err.Error(), "/data/snapshot") {
+	if err != nil && !strings.Contains(err.Error(), "in-cluster") && !strings.Contains(err.Error(), "/data/snapshot") {
 		t.Logf("Error: %v", err)
 	}
 }
@@ -324,7 +325,7 @@ func TestLoadValidationContext_WithRecipeData(t *testing.T) {
 	}
 
 	// The error should be about in-cluster config, not recipe parsing
-	if err != nil && contains(err.Error(), "recipe") && contains(err.Error(), "unmarshal") {
+	if err != nil && strings.Contains(err.Error(), "recipe") && strings.Contains(err.Error(), "unmarshal") {
 		t.Errorf("Recipe data parsing failed, got: %v", err)
 	}
 }
@@ -494,22 +495,6 @@ func (m *mockTestingT) Logf(format string, args ...interface{}) {
 }
 
 func (m *mockTestingT) Helper() {}
-
-// Helper function to check if string contains substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-			len(s) > len(substr)+1 && findSubstr(s, substr)))
-}
-
-func findSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
 
 // Test with actual check that uses snapshot
 func TestRunCheck_WithSnapshotData(t *testing.T) {

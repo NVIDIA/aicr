@@ -18,6 +18,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -302,7 +303,7 @@ func TestDefaultRootHandler(t *testing.T) {
 	}
 
 	// Should contain the test route
-	if !contains(body, "/api/v1/test") {
+	if !strings.Contains(body, "/api/v1/test") {
 		t.Error("expected response to contain /api/v1/test route")
 	}
 }
@@ -466,17 +467,4 @@ func TestResponseWriter(t *testing.T) {
 			t.Errorf("default status = %d, want %d", rw.Status(), http.StatusOK)
 		}
 	})
-}
-
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsMiddle(s, substr)))
-}
-
-func containsMiddle(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

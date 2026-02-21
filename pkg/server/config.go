@@ -41,7 +41,6 @@ type Config struct {
 	RateLimit      rate.Limit // requests per second
 	RateLimitBurst int        // burst size
 
-
 	// Timeouts
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration

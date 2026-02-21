@@ -35,6 +35,7 @@ package recipe
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -132,7 +133,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 				return
 			}
 			if tt.wantErr && tt.errMsg != "" && err != nil {
-				if !containsString(err.Error(), tt.errMsg) {
+				if !strings.Contains(err.Error(), tt.errMsg) {
 					t.Errorf("ValidateDependencies() error = %v, want error containing %q", err, tt.errMsg)
 				}
 			}
@@ -594,11 +595,6 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 	if result.Validation.Deployment.Checks[0] != "operator-health" {
 		t.Errorf("check = %q, want operator-health", result.Validation.Deployment.Checks[0])
 	}
-}
-
-// Helper function
-func containsString(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || containsString(s[1:], substr)))
 }
 
 // TestOverlayAddsNewComponent verifies that overlay recipes can add components

@@ -16,6 +16,7 @@ package deployment
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -423,7 +424,7 @@ func TestValidateExpectedResources(t *testing.T) {
 			}
 
 			if tt.wantErr && err != nil && tt.errContains != "" {
-				if !containsString(err.Error(), tt.errContains) {
+				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("validateExpectedResources() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
