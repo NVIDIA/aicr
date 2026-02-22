@@ -72,3 +72,12 @@ spec:
       type: Helm
       version: v0.5.3
       valuesFile: components/aws-efa/values.yaml
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

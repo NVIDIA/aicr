@@ -137,6 +137,13 @@ const (
 	ComponentRenderTimeout = 60 * time.Second
 )
 
+// DRA test timeouts for conformance validation.
+const (
+	// DRATestPodTimeout is the timeout for the DRA test pod to complete.
+	// The pod runs a simple CUDA device check but may need time for image pull.
+	DRATestPodTimeout = 5 * time.Minute
+)
+
 // Pod operation timeouts for validation and agent operations.
 const (
 	// PodWaitTimeout is the maximum time to wait for pod operations to complete.

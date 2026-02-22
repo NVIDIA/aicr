@@ -15,15 +15,53 @@
 package conformance
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
+
+const (
+	draTestNamespace = "dra-test"
+	draTestPrefix    = "dra-gpu-test-"
+	draClaimPrefix   = "gpu-claim-"
+)
+
+// draTestRun holds per-invocation resource names to avoid collisions.
+type draTestRun struct {
+	podName   string
+	claimName string
+}
+
+func newDRATestRun() (*draTestRun, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
+	}
+	suffix := hex.EncodeToString(b)
+	return &draTestRun{
+		podName:   draTestPrefix + suffix,
+		claimName: draClaimPrefix + suffix,
+	}, nil
+}
+
+var claimGVR = schema.GroupVersionResource{
+	Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims",
+}
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
@@ -36,29 +74,109 @@ func init() {
 }
 
 // CheckSecureAcceleratorAccess validates CNCF requirement #3: Secure Accelerator Access.
-// Verifies that a DRA-based GPU workload uses proper access patterns:
-// resourceClaims instead of device plugin, no hostPath to GPU devices,
-// and ResourceClaim is allocated.
+// Creates a DRA-based GPU test pod with unique names, waits for completion, and verifies
+// proper access patterns: resourceClaims instead of device plugin, no hostPath to GPU
+// devices, and ResourceClaim is allocated.
 func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 1. Get the DRA test pod (deployed by workflow before aicr validate runs)
-	pod, err := ctx.Clientset.CoreV1().Pods("dra-test").Get(
-		ctx.Context, "dra-gpu-test", metav1.GetOptions{})
+	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
-			"DRA test pod not found (deploy dra-gpu-test.yaml first)", err)
+		return err
 	}
 
-	// 2. Pod uses resourceClaims (DRA pattern)
+	run, err := newDRATestRun()
+	if err != nil {
+		return err
+	}
+
+	// Deploy DRA test resources and ensure cleanup.
+	if err = deployDRATestResources(ctx.Context, ctx.Clientset, dynClient, run); err != nil {
+		return err
+	}
+	defer cleanupDRATestResources(ctx.Context, ctx.Clientset, dynClient, run)
+
+	// Wait for test pod to reach terminal state.
+	pod, err := waitForDRATestPod(ctx.Context, ctx.Clientset, run)
+	if err != nil {
+		return err
+	}
+
+	// Validate DRA access patterns on the completed pod.
+	return validateDRAPatterns(ctx.Context, dynClient, pod, run)
+}
+
+// deployDRATestResources creates the namespace, ResourceClaim, and Pod for the DRA test.
+func deployDRATestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *draTestRun) error {
+	// 1. Create namespace (idempotent).
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{Name: draTestNamespace},
+	}
+	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+
+	// 2. Create ResourceClaim with unique name.
+	claim := buildResourceClaim(run)
+	if _, err := dynClient.Resource(claimGVR).Namespace(draTestNamespace).Create(
+		ctx, claim, metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ResourceClaim", err)
+	}
+
+	// 3. Create Pod with unique name.
+	pod := buildDRATestPod(run)
+	if _, err := clientset.CoreV1().Pods(draTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create DRA test pod", err)
+	}
+
+	return nil
+}
+
+// waitForDRATestPod polls until the DRA test pod reaches a terminal state.
+func waitForDRATestPod(ctx context.Context, clientset kubernetes.Interface, run *draTestRun) (*corev1.Pod, error) {
+	var resultPod *corev1.Pod
+
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.DRATestPodTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
+		func(ctx context.Context) (bool, error) {
+			pod, err := clientset.CoreV1().Pods(draTestNamespace).Get(
+				ctx, run.podName, metav1.GetOptions{})
+			if err != nil {
+				return false, errors.Wrap(errors.ErrCodeInternal, "failed to get DRA test pod", err)
+			}
+			switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
+			case corev1.PodSucceeded, corev1.PodFailed:
+				resultPod = pod
+				return true, nil
+			default:
+				return false, nil
+			}
+		},
+	)
+	if err != nil {
+		// Distinguish timeout from other poll errors (RBAC, NotFound, etc).
+		if ctx.Err() != nil || waitCtx.Err() != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "DRA test pod did not complete in time", err)
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal, "DRA test pod polling failed", err)
+	}
+
+	return resultPod, nil
+}
+
+// validateDRAPatterns verifies the completed pod uses proper DRA access patterns.
+func validateDRAPatterns(ctx context.Context, dynClient dynamic.Interface, pod *corev1.Pod, run *draTestRun) error {
+	// 1. Pod uses resourceClaims (DRA pattern).
 	if len(pod.Spec.ResourceClaims) == 0 {
 		return errors.New(errors.ErrCodeInternal,
 			"pod does not use DRA resourceClaims")
 	}
 
-	// 3. No nvidia.com/gpu in resources.limits (device plugin pattern)
+	// 2. No nvidia.com/gpu in resources.limits (device plugin pattern).
 	for _, c := range pod.Spec.Containers {
 		if c.Resources.Limits != nil {
 			if _, hasGPU := c.Resources.Limits["nvidia.com/gpu"]; hasGPU {
@@ -68,7 +186,7 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 		}
 	}
 
-	// 4. No hostPath volumes to /dev/nvidia*
+	// 3. No hostPath volumes to /dev/nvidia*.
 	for _, vol := range pod.Spec.Volumes {
 		if vol.HostPath != nil && strings.Contains(vol.HostPath.Path, "/dev/nvidia") {
 			return errors.New(errors.ErrCodeInternal,
@@ -76,23 +194,14 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 		}
 	}
 
-	// 5. ResourceClaim exists
-	dynClient, err := getDynamicClient(ctx)
-	if err != nil {
-		return err
-	}
-	gvr := schema.GroupVersionResource{
-		Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims",
-	}
-	_, err = dynClient.Resource(gvr).Namespace("dra-test").Get(
-		ctx.Context, "gpu-claim", metav1.GetOptions{})
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "ResourceClaim gpu-claim not found", err)
+	// 4. ResourceClaim exists.
+	if _, err := dynClient.Resource(claimGVR).Namespace(draTestNamespace).Get(
+		ctx, run.claimName, metav1.GetOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeNotFound,
+			fmt.Sprintf("ResourceClaim %s not found", run.claimName), err)
 	}
 
-	// 6. Pod completed successfully — proves DRA allocation worked.
-	// Note: status.allocation may be cleared after pod completion, so we verify
-	// success via the pod phase rather than the claim's allocation status.
+	// 5. Pod completed successfully — proves DRA allocation worked.
 	if pod.Status.Phase != corev1.PodSucceeded {
 		return errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DRA test pod phase=%s (want Succeeded), GPU allocation may have failed",
@@ -100,4 +209,101 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 	}
 
 	return nil
+}
+
+// cleanupDRATestResources removes test resources. Best-effort: errors are ignored
+// since cleanup failures should not mask test results.
+// The namespace is intentionally NOT deleted — it's harmless to leave and
+// namespace deletion can hang on DRA finalizers.
+func cleanupDRATestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *draTestRun) {
+	// Delete pod first (releases claim reservation), then claim.
+	_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(draTestNamespace).Delete(
+		ctx, run.podName, metav1.DeleteOptions{}))
+	waitForDeletion(ctx, func() error {
+		_, err := clientset.CoreV1().Pods(draTestNamespace).Get(ctx, run.podName, metav1.GetOptions{})
+		return err
+	})
+	_ = k8s.IgnoreNotFound(dynClient.Resource(claimGVR).Namespace(draTestNamespace).Delete(
+		ctx, run.claimName, metav1.DeleteOptions{}))
+}
+
+// waitForDeletion polls until a resource is gone (NotFound) or the context expires.
+func waitForDeletion(ctx context.Context, getFunc func() error) {
+	pollCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+	_ = wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
+		func(ctx context.Context) (bool, error) {
+			err := getFunc()
+			if k8serrors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, nil
+		},
+	)
+}
+
+// buildDRATestPod returns the Pod spec for the DRA GPU allocation test.
+func buildDRATestPod(run *draTestRun) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      run.podName,
+			Namespace: draTestNamespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Tolerations: []corev1.Toleration{
+				{Operator: corev1.TolerationOpExists},
+			},
+			ResourceClaims: []corev1.PodResourceClaim{
+				{
+					Name:              "gpu",
+					ResourceClaimName: strPtr(run.claimName),
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:    "gpu-test",
+					Image:   "nvidia/cuda:12.9.0-base-ubuntu24.04",
+					Command: []string{"bash", "-c", "ls /dev/nvidia* && echo 'DRA GPU allocation successful'"},
+					Resources: corev1.ResourceRequirements{
+						Claims: []corev1.ResourceClaim{
+							{Name: "gpu"},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// buildResourceClaim returns the unstructured ResourceClaim for the DRA test.
+func buildResourceClaim(run *draTestRun) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "resource.k8s.io/v1",
+			"kind":       "ResourceClaim",
+			"metadata": map[string]interface{}{
+				"name":      run.claimName,
+				"namespace": draTestNamespace,
+			},
+			"spec": map[string]interface{}{
+				"devices": map[string]interface{}{
+					"requests": []interface{}{
+						map[string]interface{}{
+							"name": "gpu",
+							"exactly": map[string]interface{}{
+								"deviceClassName": "gpu.nvidia.com",
+								"allocationMode":  "ExactCount",
+								"count":           int64(1),
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
 }

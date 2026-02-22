@@ -27,4 +27,4 @@ phases:
       - name: expected-resources
         status: pass
   conformance:
-    status: skipped
+    status: pass

@@ -21,32 +21,27 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestCheckSecureAcceleratorAccess(t *testing.T) {
 	tests := []struct {
-		name           string
-		k8sObjects     []runtime.Object
-		dynamicObjects []runtime.Object
-		clientset      bool
-		wantErr        bool
-		errContains    string
+		name        string
+		podPhase    corev1.PodPhase
+		clientset   bool
+		wantErr     bool
+		errContains string
 	}{
 		{
-			name: "valid DRA pod succeeded with claim",
-			k8sObjects: []runtime.Object{
-				createDRAPod(true, false, false, corev1.PodSucceeded),
-			},
-			dynamicObjects: []runtime.Object{
-				createResourceClaim("dra-test", "gpu-claim"),
-			},
+			name:      "DRA allocation succeeds",
+			podPhase:  corev1.PodSucceeded,
 			clientset: true,
 			wantErr:   false,
 		},
@@ -57,59 +52,8 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 			errContains: "kubernetes client is not available",
 		},
 		{
-			name:        "pod not found",
-			k8sObjects:  []runtime.Object{},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "DRA test pod not found",
-		},
-		{
-			name: "pod without resourceClaims",
-			k8sObjects: []runtime.Object{
-				createDRAPod(false, false, false, corev1.PodSucceeded),
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "does not use DRA resourceClaims",
-		},
-		{
-			name: "pod uses device plugin",
-			k8sObjects: []runtime.Object{
-				createDRAPod(true, true, false, corev1.PodSucceeded),
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "uses device plugin",
-		},
-		{
-			name: "pod has hostPath to GPU device",
-			k8sObjects: []runtime.Object{
-				createDRAPod(true, false, true, corev1.PodSucceeded),
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "hostPath volume to /dev/nvidia0",
-		},
-		{
-			name: "ResourceClaim not found",
-			k8sObjects: []runtime.Object{
-				createDRAPod(true, false, false, corev1.PodSucceeded),
-			},
-			dynamicObjects: []runtime.Object{
-				// No ResourceClaim
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "ResourceClaim gpu-claim not found",
-		},
-		{
-			name: "pod not succeeded",
-			k8sObjects: []runtime.Object{
-				createDRAPod(true, false, false, corev1.PodFailed),
-			},
-			dynamicObjects: []runtime.Object{
-				createResourceClaim("dra-test", "gpu-claim"),
-			},
+			name:        "DRA allocation fails",
+			podPhase:    corev1.PodFailed,
 			clientset:   true,
 			wantErr:     true,
 			errContains: "GPU allocation may have failed",
@@ -122,14 +66,66 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 
 			if tt.clientset {
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-				clientset := fake.NewSimpleClientset(tt.k8sObjects...)
+				clientset := fake.NewSimpleClientset()
+				podDeleted := false
+
+				// Reactor: match any pod with the DRA test prefix.
+				// Returns the pod with desired phase, or NotFound after deletion.
+				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					ga := action.(k8stesting.GetAction)
+					if strings.HasPrefix(ga.GetName(), draTestPrefix) && ga.GetNamespace() == draTestNamespace {
+						if podDeleted {
+							return true, nil, k8serrors.NewNotFound(
+								schema.GroupResource{Resource: "pods"}, ga.GetName())
+						}
+						run := &draTestRun{podName: ga.GetName(), claimName: draClaimPrefix + ga.GetName()[len(draTestPrefix):]}
+						return true, &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      run.podName,
+								Namespace: draTestNamespace,
+							},
+							Spec: *buildDRATestPod(run).Spec.DeepCopy(),
+							Status: corev1.PodStatus{
+								Phase: tt.podPhase,
+							},
+						}, nil
+					}
+					return false, nil, nil
+				})
+
+				// Reactor: mark pod as deleted so subsequent Gets return NotFound.
+				clientset.PrependReactor("delete", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					da := action.(k8stesting.DeleteAction)
+					if strings.HasPrefix(da.GetName(), draTestPrefix) && da.GetNamespace() == draTestNamespace {
+						podDeleted = true
+						return true, nil, nil
+					}
+					return false, nil, nil
+				})
 
 				scheme := runtime.NewScheme()
 				dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 					map[schema.GroupVersionResource]string{
 						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims"}: "ResourceClaimList",
-					},
-					tt.dynamicObjects...)
+					})
+
+				// Reactor: match any ResourceClaim with the DRA claim prefix.
+				dynClient.PrependReactor("get", "resourceclaims", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					ga := action.(k8stesting.GetAction)
+					if strings.HasPrefix(ga.GetName(), draClaimPrefix) && ga.GetNamespace() == draTestNamespace {
+						return true, &unstructured.Unstructured{
+							Object: map[string]interface{}{
+								"apiVersion": "resource.k8s.io/v1",
+								"kind":       "ResourceClaim",
+								"metadata": map[string]interface{}{
+									"name":      ga.GetName(),
+									"namespace": draTestNamespace,
+								},
+							},
+						}, nil
+					}
+					return false, nil, nil
+				})
 
 				ctx = &checks.ValidationContext{
 					Context:       context.Background(),
@@ -168,78 +164,5 @@ func TestCheckSecureAcceleratorAccessRegistration(t *testing.T) {
 	}
 	if check.Func == nil {
 		t.Fatal("Func is nil")
-	}
-}
-
-// createDRAPod creates a test pod simulating DRA-based GPU access.
-func createDRAPod(hasResourceClaims, hasDevicePlugin, hasHostPath bool, phase corev1.PodPhase) *corev1.Pod {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "dra-gpu-test",
-			Namespace: "dra-test",
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{
-				{
-					Name:  "gpu-workload",
-					Image: "nvidia/cuda:12.0-base",
-				},
-			},
-		},
-		Status: corev1.PodStatus{
-			Phase: phase,
-		},
-	}
-
-	if hasResourceClaims {
-		pod.Spec.ResourceClaims = []corev1.PodResourceClaim{
-			{
-				Name:              "gpu",
-				ResourceClaimName: strPtr("gpu-claim"),
-			},
-		}
-	}
-
-	if hasDevicePlugin {
-		pod.Spec.Containers[0].Resources = corev1.ResourceRequirements{
-			Limits: corev1.ResourceList{
-				"nvidia.com/gpu": resource.MustParse("1"),
-			},
-		}
-	}
-
-	if hasHostPath {
-		hostPathType := corev1.HostPathCharDev
-		pod.Spec.Volumes = []corev1.Volume{
-			{
-				Name: "gpu-device",
-				VolumeSource: corev1.VolumeSource{
-					HostPath: &corev1.HostPathVolumeSource{
-						Path: "/dev/nvidia0",
-						Type: &hostPathType,
-					},
-				},
-			},
-		}
-	}
-
-	return pod
-}
-
-func strPtr(s string) *string {
-	return &s
-}
-
-// createResourceClaim creates an unstructured ResourceClaim.
-func createResourceClaim(namespace, name string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "resource.k8s.io/v1",
-			"kind":       "ResourceClaim",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": namespace,
-			},
-		},
 	}
 }
