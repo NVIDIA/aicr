@@ -165,6 +165,12 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Resources: []string{"queues", "podgroups"},
 				Verbs:     []string{"get", "list"},
 			},
+			// Conformance: gang-scheduling — PodGroup lifecycle for functional test
+			{
+				APIGroups: []string{"scheduling.run.ai"},
+				Resources: []string{"podgroups"},
+				Verbs:     []string{"create", "delete"},
+			},
 			// Conformance: Cluster autoscaling (Karpenter)
 			{
 				APIGroups: []string{"karpenter.sh"},

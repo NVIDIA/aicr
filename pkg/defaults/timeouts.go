@@ -137,11 +137,15 @@ const (
 	ComponentRenderTimeout = 60 * time.Second
 )
 
-// DRA test timeouts for conformance validation.
+// Conformance test timeouts for DRA and gang scheduling validation.
 const (
 	// DRATestPodTimeout is the timeout for the DRA test pod to complete.
 	// The pod runs a simple CUDA device check but may need time for image pull.
 	DRATestPodTimeout = 5 * time.Minute
+
+	// GangTestPodTimeout is the timeout for gang scheduling test pods to complete.
+	// Two pods must be co-scheduled, each pulling a CUDA image and running nvidia-smi.
+	GangTestPodTimeout = 5 * time.Minute
 )
 
 // Pod operation timeouts for validation and agent operations.

@@ -29,7 +29,6 @@ on:
       - 'pkg/validator/checks/conformance/**'
       - '.github/actions/gpu-test-cleanup/**'
       - '.github/actions/load-versions/**'
-      - 'docs/conformance/cncf/manifests/gang-scheduling-test.yaml'
       - 'tests/chainsaw/ai-conformance/kind-training/**'
       - 'recipes/components/dynamo-platform/**'
       - 'recipes/overlays/kind.yaml'
@@ -128,6 +127,8 @@ jobs:
       # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
       # Runs after chainsaw to ensure the DCGM → Prometheus → adapter pipeline
       # has had time to bootstrap (pod-autoscaling check needs live metric data).
+      # Gang scheduling (PodGroup + 2 GPU pods) is exercised by the self-contained
+      # gang-scheduling conformance check — no separate deploy step needed.
 
       - name: Validate cluster
         run: |
@@ -140,52 +141,6 @@ jobs:
             --kubeconfig="${HOME}/.kube/config" \
             --require-gpu \
             --image=ko.local:smoke-test
-
-      # --- Gang scheduling test with PodGroup + KAI scheduler ---
-
-      - name: Deploy gang scheduling test
-        run: |
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply \
-            -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml
-
-          echo "Waiting for gang scheduling pods to complete..."
-          for i in $(seq 1 60); do
-            PHASE_0=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" \
-              -n gang-scheduling-test get pod gang-worker-0 \
-              -o jsonpath='{.status.phase}' 2>/dev/null)
-            PHASE_1=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" \
-              -n gang-scheduling-test get pod gang-worker-1 \
-              -o jsonpath='{.status.phase}' 2>/dev/null)
-
-            if [[ "${PHASE_0}" == "Succeeded" && "${PHASE_1}" == "Succeeded" ]]; then
-              echo "Both gang scheduling pods succeeded!"
-              break
-            fi
-
-            if [[ "${PHASE_0}" == "Failed" || "${PHASE_1}" == "Failed" ]]; then
-              echo "::error::Gang scheduling pod failed (worker-0=${PHASE_0}, worker-1=${PHASE_1})"
-              kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-                describe pods 2>/dev/null || true
-              exit 1
-            fi
-
-            echo "Waiting for pod completion... worker-0=${PHASE_0}, worker-1=${PHASE_1} (${i}/60)"
-            sleep 10
-          done
-
-          if [[ "${PHASE_0}" != "Succeeded" || "${PHASE_1}" != "Succeeded" ]]; then
-            echo "::error::Gang scheduling pods did not complete within 10 minutes"
-            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-              describe pods 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "=== gang-worker-0 logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            logs gang-worker-0 2>/dev/null || true
-          echo "=== gang-worker-1 logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            logs gang-worker-1 2>/dev/null || true
 
       # --- Cluster Autoscaling validation ---
 
@@ -222,35 +177,14 @@ jobs:
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get queues -A 2>/dev/null || true
           echo "=== KAI scheduler podgroups ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get podgroups -A 2>/dev/null || true
-          echo "=== Gang scheduling test pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            describe pods 2>/dev/null || true
-          echo "=== gang-worker-0 logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            logs gang-worker-0 --tail=50 2>/dev/null || true
-          echo "=== gang-worker-1 logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            logs gang-worker-1 --tail=50 2>/dev/null || true
-          echo "=== ResourceClaims ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            get resourceclaims -o yaml 2>/dev/null || true
           echo "=== Non-running pods (all namespaces) ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A \
             --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
-          echo "=== Recent events (gang-scheduling-test) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gang-scheduling-test \
-            get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== GPU Operator pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
           echo "=== Node resources ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" describe nodes 2>/dev/null | \
             grep -A 20 "Allocated resources" || true
-
-      - name: Gang scheduling test cleanup
-        if: always()
-        run: |
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" delete \
-            -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml --ignore-not-found 2>/dev/null || true
 
       - name: GPU Test Cleanup
         if: always()

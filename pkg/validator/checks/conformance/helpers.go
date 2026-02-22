@@ -25,6 +25,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
 
@@ -132,4 +133,55 @@ func containsAllMetrics(text string, required []string) []string {
 		}
 	}
 	return missing
+}
+
+// gpuDriverName is the DRA driver name for NVIDIA GPUs.
+const gpuDriverName = "gpu.nvidia.com"
+
+// countAvailableGPUs counts total GPU devices from ResourceSlices and subtracts
+// allocated devices from ResourceClaims to determine how many are free.
+func countAvailableGPUs(ctx context.Context, dynClient dynamic.Interface) (total, free int, err error) {
+	sliceGVR := schema.GroupVersionResource{
+		Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices",
+	}
+
+	// Count total GPU devices from ResourceSlices.
+	slices, err := dynClient.Resource(sliceGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "failed to list ResourceSlices", err)
+	}
+	for _, slice := range slices.Items {
+		driver, _, _ := unstructured.NestedString(slice.Object, "spec", "driver")
+		if driver != gpuDriverName {
+			continue
+		}
+		devices, found, _ := unstructured.NestedSlice(slice.Object, "spec", "devices")
+		if found {
+			total += len(devices)
+		}
+	}
+
+	// Count allocated GPU devices from ResourceClaims.
+	var allocated int
+	claims, err := dynClient.Resource(claimGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "failed to list ResourceClaims", err)
+	}
+	for _, claim := range claims.Items {
+		results, found, _ := unstructured.NestedSlice(claim.Object, "status", "allocation", "devices", "results")
+		if !found {
+			continue
+		}
+		for _, r := range results {
+			result, ok := r.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if result["driver"] == gpuDriverName {
+				allocated++
+			}
+		}
+	}
+
+	return total, total - allocated, nil
 }

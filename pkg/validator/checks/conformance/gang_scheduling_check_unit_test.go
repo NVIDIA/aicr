@@ -16,15 +16,48 @@ package conformance
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+// createGPUResourceSlice creates an unstructured ResourceSlice with the given number of GPU devices.
+func createGPUResourceSlice(name string, numDevices int) *unstructured.Unstructured {
+	devices := make([]interface{}, numDevices)
+	for i := range numDevices {
+		devices[i] = map[string]interface{}{
+			"name": fmt.Sprintf("gpu-%d", i),
+			"basic": map[string]interface{}{
+				"attributes": map[string]interface{}{},
+			},
+		}
+	}
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "resource.k8s.io/v1",
+			"kind":       "ResourceSlice",
+			"metadata": map[string]interface{}{
+				"name": name,
+			},
+			"spec": map[string]interface{}{
+				"driver":  gpuDriverName,
+				"devices": devices,
+			},
+		},
+	}
+}
 
 func TestCheckGangScheduling(t *testing.T) {
 	// Build the full set of KAI scheduler deployments for the happy path.
@@ -38,23 +71,30 @@ func TestCheckGangScheduling(t *testing.T) {
 		createDeployment("kai-scheduler", "queue-controller", 1),
 	}
 
+	// Common dynamic objects: CRDs + ResourceSlice with 4 GPUs.
+	fullDynamicObjects := []runtime.Object{
+		createCRD("queues.scheduling.run.ai"),
+		createCRD("podgroups.scheduling.run.ai"),
+		createGPUResourceSlice("gpu-node-0", 4),
+	}
+
 	tests := []struct {
 		name           string
 		k8sObjects     []runtime.Object
 		dynamicObjects []runtime.Object
 		clientset      bool
+		podPhase       corev1.PodPhase
+		claimsListErr  error
 		wantErr        bool
 		errContains    string
 	}{
 		{
-			name:       "all healthy",
-			k8sObjects: allDeployments,
-			dynamicObjects: []runtime.Object{
-				createCRD("queues.scheduling.run.ai"),
-				createCRD("podgroups.scheduling.run.ai"),
-			},
-			clientset: true,
-			wantErr:   false,
+			name:           "all healthy with gang scheduling",
+			k8sObjects:     allDeployments,
+			dynamicObjects: fullDynamicObjects,
+			clientset:      true,
+			podPhase:       corev1.PodSucceeded,
+			wantErr:        false,
 		},
 		{
 			name:        "no clientset",
@@ -65,7 +105,7 @@ func TestCheckGangScheduling(t *testing.T) {
 		{
 			name: "missing one deployment",
 			k8sObjects: []runtime.Object{
-				// Only first 6 — missing queue-controller
+				// Only first 6 -- missing queue-controller
 				createDeployment("kai-scheduler", "kai-scheduler-default", 1),
 				createDeployment("kai-scheduler", "admission", 1),
 				createDeployment("kai-scheduler", "binder", 1),
@@ -103,6 +143,36 @@ func TestCheckGangScheduling(t *testing.T) {
 			wantErr:     true,
 			errContains: "podgroups.scheduling.run.ai not found",
 		},
+		{
+			name:       "insufficient GPUs",
+			k8sObjects: allDeployments,
+			dynamicObjects: []runtime.Object{
+				createCRD("queues.scheduling.run.ai"),
+				createCRD("podgroups.scheduling.run.ai"),
+				createGPUResourceSlice("gpu-node-0", 1), // only 1 GPU, need 2
+			},
+			clientset:   true,
+			wantErr:     true,
+			errContains: "insufficient free GPUs",
+		},
+		{
+			name:           "gang test pod fails",
+			k8sObjects:     allDeployments,
+			dynamicObjects: fullDynamicObjects,
+			clientset:      true,
+			podPhase:       corev1.PodFailed,
+			wantErr:        true,
+			errContains:    "gang scheduling may have failed",
+		},
+		{
+			name:           "resourceclaim list fails",
+			k8sObjects:     allDeployments,
+			dynamicObjects: fullDynamicObjects,
+			clientset:      true,
+			claimsListErr:  fmt.Errorf("resourceclaims list failed"),
+			wantErr:        true,
+			errContains:    "failed to list ResourceClaims",
+		},
 	}
 
 	for _, tt := range tests {
@@ -113,12 +183,81 @@ func TestCheckGangScheduling(t *testing.T) {
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 				clientset := fake.NewSimpleClientset(tt.k8sObjects...)
 
+				// Track deleted pods to return NotFound on subsequent Gets.
+				var mu sync.Mutex
+				deletedPods := make(map[string]bool)
+
+				// Reactor: match any pod with the gang worker prefix.
+				// Returns a pod with the desired phase and correct gang labels.
+				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					ga := action.(k8stesting.GetAction)
+					if strings.HasPrefix(ga.GetName(), gangPodPrefix) && ga.GetNamespace() == gangTestNamespace {
+						mu.Lock()
+						deleted := deletedPods[ga.GetName()]
+						mu.Unlock()
+						if deleted {
+							return true, nil, k8serrors.NewNotFound(
+								schema.GroupResource{Resource: "pods"}, ga.GetName())
+						}
+						// Extract suffix from pod name: "gang-worker-SUFFIX-N" -> SUFFIX
+						nameAfterPrefix := ga.GetName()[len(gangPodPrefix):]
+						lastDash := strings.LastIndex(nameAfterPrefix, "-")
+						suffix := nameAfterPrefix[:lastDash]
+						groupName := gangGroupPrefix + suffix
+
+						return true, &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      ga.GetName(),
+								Namespace: gangTestNamespace,
+								Labels: map[string]string{
+									"pod-group.scheduling.run.ai/name":     groupName,
+									"pod-group.scheduling.run.ai/group-id": groupName,
+								},
+							},
+							Spec: corev1.PodSpec{
+								SchedulerName: "kai-scheduler",
+								RestartPolicy: corev1.RestartPolicyNever,
+								ResourceClaims: []corev1.PodResourceClaim{
+									{Name: "gpu", ResourceClaimName: strPtr("test-claim")},
+								},
+								Containers: []corev1.Container{
+									{Name: "worker", Image: "nvidia/cuda:12.9.0-base-ubuntu24.04"},
+								},
+							},
+							Status: corev1.PodStatus{Phase: tt.podPhase},
+						}, nil
+					}
+					return false, nil, nil
+				})
+
+				// Reactor: mark pod as deleted so subsequent Gets return NotFound.
+				clientset.PrependReactor("delete", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					da := action.(k8stesting.DeleteAction)
+					if strings.HasPrefix(da.GetName(), gangPodPrefix) && da.GetNamespace() == gangTestNamespace {
+						mu.Lock()
+						deletedPods[da.GetName()] = true
+						mu.Unlock()
+						return true, nil, nil
+					}
+					return false, nil, nil
+				})
+
 				scheme := runtime.NewScheme()
 				dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 					map[schema.GroupVersionResource]string{
 						{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+						{Group: "scheduling.run.ai", Version: "v2alpha2", Resource: "podgroups"}:              "PodGroupList",
+						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims"}:                 "ResourceClaimList",
+						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}:                 "ResourceSliceList",
 					},
 					tt.dynamicObjects...)
+				if tt.claimsListErr != nil {
+					dynClient.PrependReactor("list", "resourceclaims",
+						func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+							return true, nil, tt.claimsListErr
+						},
+					)
+				}
 
 				ctx = &checks.ValidationContext{
 					Context:       context.Background(),
