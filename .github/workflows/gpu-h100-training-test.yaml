@@ -25,6 +25,8 @@ on:
       - '.github/actions/gpu-cluster-setup/**'
       - '.github/actions/gpu-operator-install/**'
       - '.github/actions/aicr-build/**'
+      - 'Dockerfile.validator'
+      - 'pkg/validator/checks/conformance/**'
       - '.github/actions/gpu-test-cleanup/**'
       - '.github/actions/load-versions/**'
       - 'docs/conformance/cncf/manifests/gang-scheduling-test.yaml'
@@ -104,19 +106,12 @@ jobs:
           fi
           echo "Snapshot correctly detected ${GPU_COUNT}x ${GPU_MODEL}"
 
-      - name: Validate cluster
-        run: |
-          ./aicr validate \
-            --recipe recipe.yaml \
-            --phase readiness \
-            --phase deployment \
-            --phase conformance \
-            --namespace gpu-operator \
-            --kubeconfig="${HOME}/.kube/config" \
-            --require-gpu \
-            --image=ko.local:smoke-test
+      # --- Install Karpenter before validation so cluster-autoscaling check passes ---
 
-      # --- Health checks ---
+      - name: Install Karpenter + KWOK (setup)
+        run: bash kwok/scripts/validate-cluster-autoscaling.sh --setup
+
+      # --- Health checks (run before conformance to give metrics pipeline time) ---
 
       - name: Install chainsaw
         run: |
@@ -129,6 +124,22 @@ jobs:
           chainsaw test \
             --test-dir tests/chainsaw/ai-conformance/kind-training \
             --config tests/chainsaw/chainsaw-config.yaml
+
+      # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
+      # Runs after chainsaw to ensure the DCGM → Prometheus → adapter pipeline
+      # has had time to bootstrap (pod-autoscaling check needs live metric data).
+
+      - name: Validate cluster
+        run: |
+          ./aicr validate \
+            --recipe recipe.yaml \
+            --phase readiness \
+            --phase deployment \
+            --phase conformance \
+            --namespace gpu-operator \
+            --kubeconfig="${HOME}/.kube/config" \
+            --require-gpu \
+            --image=ko.local:smoke-test
 
       # --- Gang scheduling test with PodGroup + KAI scheduler ---
 
@@ -179,8 +190,7 @@ jobs:
       # --- Cluster Autoscaling validation ---
 
       - name: Cluster Autoscaling (Karpenter + KWOK)
-
-        run: bash kwok/scripts/validate-cluster-autoscaling.sh
+        run: bash kwok/scripts/validate-cluster-autoscaling.sh --exercise
 
       # --- Evidence collection ---
 

@@ -35,6 +35,18 @@ spec:
     # Assumes host has NVIDIA drivers and container toolkit pre-configured
     - name: gpu-operator
       type: Helm
+      # Override base expectedResources to exclude nvidia-driver-daemonset —
+      # Kind uses pre-installed host drivers (driver.enabled: false).
+      expectedResources:
+        - kind: Deployment
+          name: gpu-operator
+          namespace: gpu-operator
+        - kind: DaemonSet
+          name: nvidia-device-plugin-daemonset
+          namespace: gpu-operator
+        - kind: DaemonSet
+          name: nvidia-dcgm-exporter
+          namespace: gpu-operator
       overrides:
         driver:
           # Disable driver installation - use pre-installed host drivers
@@ -194,3 +206,12 @@ spec:
       valuesFile: components/network-operator/values.yaml
       dependencyRefs:
         - cert-manager
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

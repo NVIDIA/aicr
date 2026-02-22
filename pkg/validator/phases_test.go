@@ -1156,7 +1156,7 @@ func TestBuildTestPattern(t *testing.T) {
 			wantExpectedTests: 0,
 		},
 		{
-			name: "conformance phase not implemented returns empty",
+			name: "conformance phase builds pattern from checks",
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Conformance: &recipe.ValidationPhase{
@@ -1165,8 +1165,8 @@ func TestBuildTestPattern(t *testing.T) {
 				},
 			},
 			phase:             "conformance",
-			wantPattern:       "",
-			wantExpectedTests: 0,
+			wantPattern:       "^(TestConformanceCheck)$",
+			wantExpectedTests: 1,
 		},
 		{
 			name: "deployment with registered check uses registry test name",

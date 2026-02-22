@@ -32,7 +32,9 @@
 #
 # Usage:
 #   export KIND_CLUSTER_NAME=gpu-inference-test
-#   ./validate-cluster-autoscaling.sh
+#   ./validate-cluster-autoscaling.sh              # Run everything (default)
+#   ./validate-cluster-autoscaling.sh --setup      # Install Karpenter + create NodePool only
+#   ./validate-cluster-autoscaling.sh --exercise   # Run metrics + autoscaling exercise only
 
 set -euo pipefail
 
@@ -295,17 +297,31 @@ test_consolidation() {
 # Main
 # -------------------------------------------------------------------
 main() {
-    log_info "=== Cluster Autoscaling ==="
+    local mode="all"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --setup)    mode="setup"; shift ;;
+            --exercise) mode="exercise"; shift ;;
+            *)          echo "Unknown option: $1"; exit 1 ;;
+        esac
+    done
+
+    log_info "=== Cluster Autoscaling (mode=${mode}) ==="
     log_info "Kind cluster: ${KIND_CLUSTER_NAME}"
 
-    install_karpenter
-    create_nodepool
-    verify_external_metrics
-    deploy_test_workload
-    wait_for_hpa_scale
-    wait_for_kwok_nodes
-    verify_pods_scheduled
-    test_consolidation
+    if [[ "${mode}" == "all" || "${mode}" == "setup" ]]; then
+        install_karpenter
+        create_nodepool
+    fi
+
+    if [[ "${mode}" == "all" || "${mode}" == "exercise" ]]; then
+        verify_external_metrics
+        deploy_test_workload
+        wait_for_hpa_scale
+        wait_for_kwok_nodes
+        verify_pods_scheduled
+        test_consolidation
+    fi
 
     log_info "=== Cluster autoscaling validation PASSED ==="
 }

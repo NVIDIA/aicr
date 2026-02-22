@@ -118,6 +118,70 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Resources: []string{"pods", "services", "nodes"},
 				Verbs:     []string{"get", "list"},
 			},
+			// Conformance: cluster-wide core resources (platform-health, robust-controller)
+			{
+				APIGroups: []string{""},
+				Resources: []string{"namespaces", "endpoints"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: CRD discovery (inference-gateway, dra-support, gang-scheduling, robust-controller)
+			{
+				APIGroups: []string{"apiextensions.k8s.io"},
+				Resources: []string{"customresourcedefinitions"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: DRA support validation (resource.k8s.io/v1 — GA)
+			{
+				APIGroups: []string{"resource.k8s.io"},
+				Resources: []string{"resourceslices", "resourceclaims"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: GPU operator ClusterPolicy
+			{
+				APIGroups: []string{"nvidia.com"},
+				Resources: []string{"clusterpolicies"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: Gateway API validation
+			{
+				APIGroups: []string{"gateway.networking.k8s.io"},
+				Resources: []string{"gatewayclasses", "gateways"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: Gang scheduling (KAI scheduler)
+			{
+				APIGroups: []string{"scheduling.run.ai"},
+				Resources: []string{"queues", "podgroups"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: Cluster autoscaling (Karpenter)
+			{
+				APIGroups: []string{"karpenter.sh"},
+				Resources: []string{"nodepools"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: Aggregated metrics APIs (pod-autoscaling, ai-service-metrics)
+			{
+				APIGroups: []string{"custom.metrics.k8s.io"},
+				Resources: []string{"*"},
+				Verbs:     []string{"get", "list"},
+			},
+			{
+				APIGroups: []string{"external.metrics.k8s.io"},
+				Resources: []string{"*"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: Robust controller — webhook configurations and endpoint health
+			{
+				APIGroups: []string{"admissionregistration.k8s.io"},
+				Resources: []string{"validatingwebhookconfigurations"},
+				Verbs:     []string{"get", "list"},
+			},
+			{
+				APIGroups: []string{"discovery.k8s.io"},
+				Resources: []string{"endpointslices"},
+				Verbs:     []string{"get", "list"},
+			},
 		},
 	}
 

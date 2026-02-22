@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -42,6 +43,10 @@ type ValidationContext struct {
 
 	// RESTConfig provides Kubernetes API access for cluster queries (used for e.g. remote command execution)
 	RESTConfig *rest.Config
+
+	// DynamicClient provides dynamic Kubernetes API access for reading custom resources (CRDs).
+	// If nil, checks should create one from RESTConfig. Set this in unit tests for injection.
+	DynamicClient dynamic.Interface
 
 	// RecipeData contains recipe metadata that may be needed for validation
 	RecipeData map[string]interface{}
