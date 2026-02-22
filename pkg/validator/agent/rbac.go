@@ -136,6 +136,17 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Resources: []string{"resourceslices", "resourceclaims"},
 				Verbs:     []string{"get", "list"},
 			},
+			// Conformance: secure-accelerator-access — DRA test pod lifecycle
+			{
+				APIGroups: []string{""},
+				Resources: []string{"namespaces", "pods"},
+				Verbs:     []string{"create", "delete"},
+			},
+			{
+				APIGroups: []string{"resource.k8s.io"},
+				Resources: []string{"resourceclaims"},
+				Verbs:     []string{"create", "delete"},
+			},
 			// Conformance: GPU operator ClusterPolicy
 			{
 				APIGroups: []string{"nvidia.com"},

@@ -51,6 +51,5 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - gang-scheduling
-        - robust-controller
         - pod-autoscaling
         - cluster-autoscaling
