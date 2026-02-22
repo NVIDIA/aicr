@@ -31,7 +31,6 @@ on:
       - '.github/actions/load-versions/**'
       - 'tests/manifests/**'
       - 'tests/chainsaw/ai-conformance/**'
-      - 'docs/conformance/cncf/**'
       - 'recipes/components/dynamo-platform/**'
       - 'recipes/components/prometheus-adapter/**'
       - 'recipes/overlays/kind.yaml'
@@ -109,38 +108,14 @@ jobs:
           fi
           echo "Snapshot correctly detected ${GPU_COUNT}x ${GPU_MODEL}"
 
-      # --- Deploy DRA test pod (prerequisite for secure-accelerator-access check) ---
-
-      - name: Deploy DRA GPU test
-        run: |
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply \
-            -f docs/conformance/cncf/manifests/dra-gpu-test.yaml
-
-          echo "Waiting for DRA GPU test pod to complete..."
-          if kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
-            wait --for=jsonpath='{.status.phase}'=Succeeded pod/dra-gpu-test --timeout=120s; then
-            echo "DRA GPU allocation test passed."
-          else
-            echo "::error::DRA GPU test pod did not succeed"
-            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
-              logs pod/dra-gpu-test 2>/dev/null || true
-            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
-              get pod/dra-gpu-test -o yaml 2>/dev/null || true
-            exit 1
-          fi
-
-          echo "=== DRA GPU test logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
-            logs pod/dra-gpu-test
-
       # --- Install Karpenter before validation so cluster-autoscaling check passes ---
 
       - name: Install Karpenter + KWOK (setup)
         run: bash kwok/scripts/validate-cluster-autoscaling.sh --setup
 
       # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
-      # Replaces previous bash assertion steps for: inference-gateway,
-      # accelerator-metrics, pod-autoscaling, secure-accelerator-access.
+      # Includes self-contained secure-accelerator-access check (creates its own
+      # DRA test resources, validates, and cleans up automatically).
 
       - name: Validate cluster
         run: |
@@ -258,12 +233,6 @@ jobs:
       - name: Cluster Autoscaling (Karpenter + KWOK)
         run: bash kwok/scripts/validate-cluster-autoscaling.sh --exercise
 
-      - name: DRA GPU test cleanup
-        if: always()
-        run: |
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" delete \
-            -f docs/conformance/cncf/manifests/dra-gpu-test.yaml --ignore-not-found 2>/dev/null || true
-
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
@@ -337,9 +306,6 @@ jobs:
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -o wide 2>/dev/null || true
           echo "=== DRA ResourceSlices ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get resourceslices -o wide 2>/dev/null || true
-          echo "=== DRA test pod spec ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dra-test \
-            get pod/dra-gpu-test -o yaml 2>/dev/null || true
           echo "=== Node status ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
 
