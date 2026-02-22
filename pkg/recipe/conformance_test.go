@@ -36,6 +36,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 		criteria           func() *Criteria
 		requiredComponents []string
 		requiredChecks     []string
+		wantDRAConstraint  bool // K8s >= 1.34 required for DRA GA
 	}{
 		{
 			name: "h100-kind-inference-dynamo",
@@ -71,6 +72,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"pod-autoscaling",
 				"cluster-autoscaling",
 			},
+			wantDRAConstraint: true,
 		},
 		{
 			name: "h100-kind-training",
@@ -102,6 +104,74 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"pod-autoscaling",
 				"cluster-autoscaling",
 			},
+			wantDRAConstraint: true,
+		},
+		{
+			name: "h100-eks-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kgateway-crds",
+				"kgateway",
+				"dynamo-crds",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"robust-controller",
+				"secure-accelerator-access",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: true,
+		},
+		{
+			name: "h100-eks-ubuntu-training",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
 		},
 	}
 
@@ -153,15 +223,17 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			}
 
 			// 5. DRA constraint present (K8s >= 1.34 required for DRA GA)
-			var hasDRAConstraint bool
-			for _, c := range result.Constraints {
-				if c.Name == "K8s.server.version" && strings.Contains(c.Value, "1.34") {
-					hasDRAConstraint = true
-					break
+			if tt.wantDRAConstraint {
+				var hasDRAConstraint bool
+				for _, c := range result.Constraints {
+					if c.Name == "K8s.server.version" && strings.Contains(c.Value, "1.34") {
+						hasDRAConstraint = true
+						break
+					}
 				}
-			}
-			if !hasDRAConstraint {
-				t.Error("Missing K8s >= 1.34 constraint (required for DRA GA)")
+				if !hasDRAConstraint {
+					t.Error("Missing K8s >= 1.34 constraint (required for DRA GA)")
+				}
 			}
 
 			t.Logf("Recipe %s: %d components, %d conformance checks",
