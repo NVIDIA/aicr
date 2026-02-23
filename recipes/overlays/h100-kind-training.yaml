@@ -60,3 +60,16 @@ spec:
               fileStore:
                 pvc:
                   storageClassName: standard
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - robust-controller
+        - pod-autoscaling
+        - cluster-autoscaling

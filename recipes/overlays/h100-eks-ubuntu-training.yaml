@@ -41,3 +41,15 @@ spec:
       value: ">= 6.8"
 
   componentRefs: []
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling

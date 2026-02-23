@@ -1,0 +1,89 @@
+[
+  {
+    "name": "p5.48xlarge",
+    "offerings": [
+      {
+        "Price": 98.32,
+        "Available": true,
+        "Requirements": [
+          { "key": "karpenter.sh/capacity-type", "operator": "In", "values": ["on-demand"] },
+          { "key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-east-1a"] }
+        ]
+      },
+      {
+        "Price": 98.32,
+        "Available": true,
+        "Requirements": [
+          { "key": "karpenter.sh/capacity-type", "operator": "In", "values": ["on-demand"] },
+          { "key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-east-1b"] }
+        ]
+      }
+    ],
+    "architecture": "amd64",
+    "operatingSystems": ["linux"],
+    "resources": {
+      "cpu": "192",
+      "memory": "2048Gi",
+      "ephemeral-storage": "3800Gi",
+      "nvidia.com/gpu": "8"
+    }
+  },
+  {
+    "name": "g5.xlarge",
+    "offerings": [
+      {
+        "Price": 1.006,
+        "Available": true,
+        "Requirements": [
+          { "key": "karpenter.sh/capacity-type", "operator": "In", "values": ["on-demand"] },
+          { "key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-east-1a"] }
+        ]
+      },
+      {
+        "Price": 1.006,
+        "Available": true,
+        "Requirements": [
+          { "key": "karpenter.sh/capacity-type", "operator": "In", "values": ["on-demand"] },
+          { "key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-east-1b"] }
+        ]
+      }
+    ],
+    "architecture": "amd64",
+    "operatingSystems": ["linux"],
+    "resources": {
+      "cpu": "4",
+      "memory": "16Gi",
+      "ephemeral-storage": "250Gi",
+      "nvidia.com/gpu": "1"
+    }
+  },
+  {
+    "name": "g5.2xlarge",
+    "offerings": [
+      {
+        "Price": 1.212,
+        "Available": true,
+        "Requirements": [
+          { "key": "karpenter.sh/capacity-type", "operator": "In", "values": ["on-demand"] },
+          { "key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-east-1a"] }
+        ]
+      },
+      {
+        "Price": 1.212,
+        "Available": true,
+        "Requirements": [
+          { "key": "karpenter.sh/capacity-type", "operator": "In", "values": ["on-demand"] },
+          { "key": "topology.kubernetes.io/zone", "operator": "In", "values": ["us-east-1b"] }
+        ]
+      }
+    ],
+    "architecture": "amd64",
+    "operatingSystems": ["linux"],
+    "resources": {
+      "cpu": "8",
+      "memory": "32Gi",
+      "ephemeral-storage": "450Gi",
+      "nvidia.com/gpu": "1"
+    }
+  }
+]

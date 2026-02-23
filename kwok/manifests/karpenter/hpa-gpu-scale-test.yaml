@@ -1,0 +1,99 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# HPA-driven GPU autoscaling test for CNCF AI Conformance cluster_autoscaling.
+#
+# This validates the full metrics-driven autoscaling chain:
+#   GPU workload → DCGM metrics → Prometheus → prometheus-adapter → HPA
+#   → Deployment scales → pending pods → Karpenter → KWOK nodes provisioned
+#
+# The HPA uses an external GPU metric (dcgm_gpu_power_usage) which is always > 0
+# when a GPU exists (idle H100 draws ~46W). When the metric exceeds the low
+# threshold, HPA scales the Deployment beyond what the real GPU node can serve,
+# causing overflow pods to trigger Karpenter KWOK node provisioning.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-overflow-workers
+  namespace: autoscaling-test
+  labels:
+    app: gpu-overflow-workers
+    test: cluster-autoscaling
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-overflow-workers
+  template:
+    metadata:
+      labels:
+        app: gpu-overflow-workers
+        test: cluster-autoscaling
+    spec:
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Equal
+          value: "present"
+          effect: NoSchedule
+        - key: kwok.x-k8s.io/node
+          operator: Exists
+          effect: NoSchedule
+      nodeSelector:
+        karpenter.sh/nodepool: gpu-autoscaling-test
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gpu-workload
+          image: ubuntu:22.04
+          command: ["sleep", "120"]
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+            requests:
+              nvidia.com/gpu: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      restartPolicy: Always
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: gpu-overflow-hpa
+  namespace: autoscaling-test
+  labels:
+    test: cluster-autoscaling
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: gpu-overflow-workers
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    # External metric: cluster-wide average GPU power draw (watts).
+    # Power usage is always > 0 when a GPU exists (idle H100 draws ~46W).
+    # With a low threshold, this reliably triggers scale-up.
+    - type: External
+      external:
+        metric:
+          name: dcgm_gpu_power_usage
+        target:
+          type: AverageValue
+          averageValue: "10"

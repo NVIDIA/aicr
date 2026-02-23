@@ -137,6 +137,47 @@ const (
 	ComponentRenderTimeout = 60 * time.Second
 )
 
+// Conformance test timeouts for DRA and gang scheduling validation.
+const (
+	// DRATestPodTimeout is the timeout for the DRA test pod to complete.
+	// The pod runs a simple CUDA device check but may need time for image pull.
+	DRATestPodTimeout = 5 * time.Minute
+
+	// GangTestPodTimeout is the timeout for gang scheduling test pods to complete.
+	// Two pods must be co-scheduled, each pulling a CUDA image and running nvidia-smi.
+	GangTestPodTimeout = 5 * time.Minute
+)
+
+// HPA behavioral test timeouts for conformance validation.
+const (
+	// HPAScaleTimeout is the timeout for waiting for HPA to report scaling intent.
+	// The HPA needs time to read metrics and compute desired replicas.
+	HPAScaleTimeout = 3 * time.Minute
+
+	// HPAPollInterval is the interval for polling HPA status during behavioral tests.
+	HPAPollInterval = 10 * time.Second
+)
+
+// Karpenter behavioral test timeouts for conformance validation.
+const (
+	// KarpenterNodeTimeout is the timeout for Karpenter to provision KWOK nodes.
+	KarpenterNodeTimeout = 3 * time.Minute
+
+	// KarpenterPollInterval is the interval for polling Karpenter node provisioning.
+	KarpenterPollInterval = 10 * time.Second
+)
+
+// Deployment and pod scheduling test timeouts for conformance validation.
+const (
+	// DeploymentScaleTimeout is the timeout for waiting for Deployment controller
+	// to observe and act on HPA scale-up by increasing replica count.
+	DeploymentScaleTimeout = 2 * time.Minute
+
+	// PodScheduleTimeout is the timeout for waiting for test pods to be scheduled
+	// on Karpenter-provisioned nodes after the HPA scales up.
+	PodScheduleTimeout = 2 * time.Minute
+)
+
 // Pod operation timeouts for validation and agent operations.
 const (
 	// PodWaitTimeout is the maximum time to wait for pod operations to complete.

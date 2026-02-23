@@ -32,3 +32,15 @@ spec:
   # 2-node kind cluster. The skyhook-operator deployment itself is inherited
   # from the base kind recipe.
   componentRefs: []
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - secure-accelerator-access
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway
+        - pod-autoscaling

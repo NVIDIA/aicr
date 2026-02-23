@@ -738,6 +738,9 @@ func (v *Validator) validateConformance(
 					// Validate that all recipe constraints/checks are registered (logs warnings for missing)
 					v.validateRecipeRegistrations(recipeResult, "conformance")
 
+					// Build test pattern from recipe (check/constraint names -> test names)
+					patternResult := v.buildTestPattern(recipeResult, "conformance")
+
 					// Deploy ONE Job for ALL conformance checks and constraints in this phase
 					jobConfig := agent.Config{
 						Namespace:          v.Namespace,
@@ -748,7 +751,8 @@ func (v *Validator) validateConformance(
 						SnapshotConfigMap:  snapshotCMName,
 						RecipeConfigMap:    recipeCMName,
 						TestPackage:        "./pkg/validator/checks/conformance",
-						TestPattern:        "", // Run all tests in package
+						TestPattern:        patternResult.Pattern,
+						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
 					}
 
@@ -949,7 +953,30 @@ func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase st
 	case string(PhasePerformance):
 		// TODO(#140): Implement for performance phase
 	case string(PhaseConformance):
-		// TODO(#141): Implement for conformance phase
+		if recipeResult.Validation != nil && recipeResult.Validation.Conformance != nil {
+			// Add tests for constraints
+			for _, constraint := range recipeResult.Validation.Conformance.Constraints {
+				testName, ok := checks.GetTestNameForConstraint(constraint.Name)
+				if ok && !uniqueTests[testName] {
+					testNames = append(testNames, testName)
+					uniqueTests[testName] = true
+					slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
+				}
+			}
+
+			// Add tests for explicit checks
+			for _, checkName := range recipeResult.Validation.Conformance.Checks {
+				testName, ok := checks.GetTestNameForCheck(checkName)
+				if !ok {
+					testName = checkNameToTestName(checkName)
+				}
+				if !uniqueTests[testName] {
+					testNames = append(testNames, testName)
+					uniqueTests[testName] = true
+					slog.Debug("check mapped to test", "check", checkName, "test", testName)
+				}
+			}
+		}
 	}
 
 	if len(testNames) == 0 {

@@ -13,20 +13,22 @@
 # limitations under the License.
 
 name: 'AICR Build'
-description: 'Builds the aicr container image (via ko) and CLI binary, and loads the image into kind.'
+description: 'Builds the aicr validator image (via Dockerfile) and CLI binary, and loads the image into kind.'
 
 runs:
   using: 'composite'
   steps:
 
-    - name: Build aicr image and load into kind
+    - name: Install ko
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
       run: |
         KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
         GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
-        KO_DOCKER_REPO=ko.local ko build --bare --sbom=none --tags=smoke-test ./cmd/aicr
+
+    - name: Build aicr validator image and load into kind
+      shell: bash
+      run: |
+        docker build -f Dockerfile.validator -t ko.local:smoke-test .
         kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
 
     - name: Build aicr binary

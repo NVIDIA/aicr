@@ -12,18 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package conformance
 
 import (
-	"github.com/NVIDIA/aicr/pkg/cli"
+	"testing"
 
-	// Import check packages for side-effect registration.
-	// Each package's init() function registers its validators.
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/conformance"
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/deployment"
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/readiness"
+	"github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
-func main() {
-	cli.Execute()
+func TestDRASupport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	runner, err := checks.NewTestRunner(t)
+	if err != nil {
+		t.Skipf("Not in Job environment: %v", err)
+	}
+	defer runner.Cancel()
+
+	if !runner.HasCheck("conformance", "dra-support") {
+		t.Skip("Check dra-support not enabled in recipe")
+	}
+
+	t.Logf("Running check: dra-support")
+
+	ctx := runner.Context()
+	err = CheckDRASupport(ctx)
+
+	if err != nil {
+		t.Errorf("Check failed: %v", err)
+	} else {
+		t.Logf("Check passed: dra-support")
+	}
 }
