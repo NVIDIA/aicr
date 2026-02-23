@@ -32,47 +32,46 @@ type Collector struct {
 	RestConfig *rest.Config
 }
 
-// Collect retrieves Kubernetes cluster version information from the API server.
-// This provides cluster version details for comparison across environments.
+// Collect retrieves Kubernetes cluster information from the API server.
+// Individual sub-collectors degrade gracefully — if any sub-collector fails,
+// a warning is logged and that subtype is populated with empty data.
 func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting Kubernetes cluster information")
 
 	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorK8sTimeout)
 	defer cancel()
 
-	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "K8s collector context cancelled", err)
 	}
 
 	if err := k.getClient(); err != nil {
-		return nil, err
-	}
-	// Cluster Version
-	versions, err := k.collectServer(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect server version", err)
+		slog.Warn("kubernetes client unavailable - returning empty K8s measurement",
+			slog.String("error", err.Error()))
+		return emptyK8sMeasurement(), nil
 	}
 
-	// Cluster Images
-	images, err := k.collectContainerImages(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect container images", err)
-	}
+	// Each sub-collector degrades gracefully: log warning and use empty data on failure.
+	versions := collectSafe("server", func() (map[string]measurement.Reading, error) {
+		return k.collectServer(ctx)
+	})
 
-	// Cluster Policies
-	policies, err := k.collectClusterPolicies(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect cluster policies", err)
-	}
+	images := collectSafe("image", func() (map[string]measurement.Reading, error) {
+		return k.collectContainerImages(ctx)
+	})
 
-	// Node
-	node, err := k.collectNode(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect node", err)
-	}
+	policies := collectSafe("policy", func() (map[string]measurement.Reading, error) {
+		return k.collectClusterPolicies(ctx)
+	})
 
-	// Build measurement using builder pattern
+	node := collectSafe("node", func() (map[string]measurement.Reading, error) {
+		return k.collectNode(ctx)
+	})
+
+	helm := k.collectHelmReleases(ctx)
+
+	argocd := k.collectArgocdApplications(ctx)
+
 	res := measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("server").Set(measurement.KeyVersion, versions[measurement.KeyVersion]).
@@ -82,9 +81,37 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		WithSubtype(measurement.Subtype{Name: "image", Data: images}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: policies}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
+		WithSubtype(measurement.Subtype{Name: "helm", Data: helm}).
+		WithSubtype(measurement.Subtype{Name: "argocd", Data: argocd}).
 		Build()
 
 	return res, nil
+}
+
+// collectSafe calls a sub-collector function and returns its result.
+// On error, it logs a warning and returns an empty map so the snapshot continues.
+func collectSafe(name string, fn func() (map[string]measurement.Reading, error)) map[string]measurement.Reading {
+	data, err := fn()
+	if err != nil {
+		slog.Warn("failed to collect "+name+" - skipping",
+			slog.String("collector", name),
+			slog.String("error", err.Error()))
+		return make(map[string]measurement.Reading)
+	}
+	return data
+}
+
+// emptyK8sMeasurement returns a K8s measurement with all subtypes empty.
+func emptyK8sMeasurement() *measurement.Measurement {
+	empty := make(map[string]measurement.Reading)
+	return measurement.NewMeasurement(measurement.TypeK8s).
+		WithSubtype(measurement.Subtype{Name: "server", Data: empty}).
+		WithSubtype(measurement.Subtype{Name: "image", Data: empty}).
+		WithSubtype(measurement.Subtype{Name: "policy", Data: empty}).
+		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
+		WithSubtype(measurement.Subtype{Name: "helm", Data: empty}).
+		WithSubtype(measurement.Subtype{Name: "argocd", Data: empty}).
+		Build()
 }
 
 func (k *Collector) getClient() error {

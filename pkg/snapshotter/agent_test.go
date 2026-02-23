@@ -51,9 +51,6 @@ func TestAgentConfig_Defaults(t *testing.T) {
 	// Test that AgentConfig can be instantiated with zero values
 	cfg := AgentConfig{}
 
-	if cfg.Enabled {
-		t.Error("AgentConfig.Enabled should default to false")
-	}
 	if cfg.Cleanup {
 		t.Error("AgentConfig.Cleanup should default to false")
 	}
@@ -504,7 +501,6 @@ func TestAgentOutputURILogic(t *testing.T) {
 func TestAgentConfigWithTemplatePath(t *testing.T) {
 	// Test that AgentConfig can hold TemplatePath
 	cfg := AgentConfig{
-		Enabled:      true,
 		Namespace:    "gpu-operator",
 		TemplatePath: "/path/to/template.tmpl",
 		Output:       "output.yaml",

@@ -119,7 +119,6 @@ func parseValidationPhases(phaseStrs []string) ([]validator.ValidationPhaseName,
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
 	agentConfig := &snapshotter.AgentConfig{
-		Enabled:            true,
 		Kubeconfig:         cfg.kubeconfig,
 		Namespace:          cfg.namespace,
 		Image:              cfg.image,
