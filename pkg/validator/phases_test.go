@@ -122,55 +122,41 @@ func TestValidateReadiness(t *testing.T) {
 	snapshot := createTestSnapshot()
 
 	tests := []struct {
-		name             string
-		constraints      []recipe.Constraint
-		validationConfig *recipe.ValidationConfig
-		wantStatus       ValidationStatus
-		wantConstraints  int
-		wantChecks       int
+		name            string
+		constraints     []recipe.Constraint
+		wantStatus      ValidationStatus
+		wantConstraints int
 	}{
 		{
-			name: "with constraints and checks",
+			name: "single constraint",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1.32.4"},
+			},
+			wantStatus:      ValidationStatusPass,
+			wantConstraints: 1,
+		},
+		{
+			name: "multiple constraints",
 			constraints: []recipe.Constraint{
 				{Name: "K8s.server.version", Value: ">= 1.32.4"},
 				{Name: "OS.release.ID", Value: "ubuntu"},
 			},
-			validationConfig: &recipe.ValidationConfig{
-				Readiness: &recipe.ValidationPhase{
-					Checks: []string{"gpu-hardware-detection", "kernel-parameters"},
-				},
-			},
 			wantStatus:      ValidationStatusPass,
 			wantConstraints: 2,
-			wantChecks:      2,
 		},
 		{
-			name: "constraints only",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 1.32.4"},
-			},
-			validationConfig: nil,
-			wantStatus:       ValidationStatusPass,
-			wantConstraints:  1,
-			wantChecks:       0,
-		},
-		{
-			name:             "no constraints or checks",
-			constraints:      []recipe.Constraint{},
-			validationConfig: nil,
-			wantStatus:       ValidationStatusPass,
-			wantConstraints:  0,
-			wantChecks:       0,
+			name:            "no constraints",
+			constraints:     []recipe.Constraint{},
+			wantStatus:      ValidationStatusPass,
+			wantConstraints: 0,
 		},
 		{
 			name: "failing constraint",
 			constraints: []recipe.Constraint{
 				{Name: "K8s.server.version", Value: ">= 99.0"}, // Will fail
 			},
-			validationConfig: nil,
-			wantStatus:       ValidationStatusFail,
-			wantConstraints:  1,
-			wantChecks:       0,
+			wantStatus:      ValidationStatusFail,
+			wantConstraints: 1,
 		},
 	}
 
@@ -179,7 +165,6 @@ func TestValidateReadiness(t *testing.T) {
 			v := New(WithVersion("test"), WithNoCluster(true))
 			recipeResult := &recipe.RecipeResult{
 				Constraints: tt.constraints,
-				Validation:  tt.validationConfig,
 			}
 
 			result, err := v.validateReadiness(context.Background(), recipeResult, snapshot)
@@ -198,10 +183,6 @@ func TestValidateReadiness(t *testing.T) {
 
 			if len(phaseResult.Constraints) != tt.wantConstraints {
 				t.Errorf("Constraints count = %d, want %d", len(phaseResult.Constraints), tt.wantConstraints)
-			}
-
-			if len(phaseResult.Checks) != tt.wantChecks {
-				t.Errorf("Checks count = %d, want %d", len(phaseResult.Checks), tt.wantChecks)
 			}
 		})
 	}
@@ -540,9 +521,6 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 			{Name: "OS.release.ID", Value: "ubuntu"},
 		},
 		Validation: &recipe.ValidationConfig{
-			Readiness: &recipe.ValidationPhase{
-				Checks: []string{"gpu-hardware-detection", "kernel-parameters", "os-prerequisites"},
-			},
 			Deployment: &recipe.ValidationPhase{
 				Checks: []string{"operator-health", "expected-resources"},
 			},
@@ -1015,12 +993,10 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 			expectWarnings: false,
 		},
 		{
-			name: "readiness - no constraint validators to check",
+			name: "readiness - not validated by registration check",
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
-					Readiness: &recipe.ValidationPhase{
-						Checks: []string{"gpu-hardware-detection"},
-					},
+					Readiness: &recipe.ValidationPhase{},
 				},
 			},
 			phase:          "readiness",

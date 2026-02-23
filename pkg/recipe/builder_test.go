@@ -278,9 +278,11 @@ func TestGetEmbeddedFS(t *testing.T) {
 
 // TestConstraintWarning tests the ConstraintWarning struct.
 func TestConstraintWarning(t *testing.T) {
+	const k8sVersionConstraint = "K8s.server.version"
+
 	warning := ConstraintWarning{
 		Overlay:    "h100-eks-ubuntu-training-kubeflow",
-		Constraint: "K8s.server.version",
+		Constraint: k8sVersionConstraint,
 		Expected:   ">= 1.32.4",
 		Actual:     "1.30.0",
 		Reason:     "expected >= 1.32.4, got 1.30.0",
@@ -289,8 +291,8 @@ func TestConstraintWarning(t *testing.T) {
 	if warning.Overlay != "h100-eks-ubuntu-training-kubeflow" {
 		t.Errorf("expected overlay h100-eks-ubuntu-training-kubeflow, got %q", warning.Overlay)
 	}
-	if warning.Constraint != "K8s.server.version" {
-		t.Errorf("expected constraint K8s.server.version, got %q", warning.Constraint)
+	if warning.Constraint != k8sVersionConstraint {
+		t.Errorf("expected constraint %s, got %q", k8sVersionConstraint, warning.Constraint)
 	}
 	if warning.Expected != ">= 1.32.4" {
 		t.Errorf("expected expression >= 1.32.4, got %q", warning.Expected)

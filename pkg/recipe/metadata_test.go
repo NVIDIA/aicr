@@ -489,7 +489,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Readiness: &ValidationPhase{
-					Checks: []string{"gpu-hardware-detection"},
+					Constraints: []Constraint{{Name: "K8s.server.version", Value: ">= 1.30"}},
 				},
 				Deployment: &ValidationPhase{
 					Timeout: "5m",
@@ -517,8 +517,8 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation.Readiness == nil {
 			t.Fatal("readiness should be preserved from base")
 		}
-		if base.Validation.Readiness.Checks[0] != "gpu-hardware-detection" {
-			t.Error("readiness checks should be preserved from base")
+		if base.Validation.Readiness.Constraints[0].Name != "K8s.server.version" {
+			t.Error("readiness constraints should be preserved from base")
 		}
 		if base.Validation.Deployment.Timeout != "10m" {
 			t.Errorf("deployment timeout = %q, want 10m (from overlay)", base.Validation.Deployment.Timeout)

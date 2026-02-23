@@ -67,7 +67,7 @@ type ConstraintValidatorFunc func(ctx *ValidationContext, constraint recipe.Cons
 
 // Check represents a registered validation check.
 type Check struct {
-	// Name is the unique identifier for this check (e.g., "gpu-hardware-detection")
+	// Name is the unique identifier for this check (e.g., "operator-health")
 	Name string
 
 	// Description explains what this check validates

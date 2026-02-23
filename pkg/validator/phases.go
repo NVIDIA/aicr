@@ -258,12 +258,12 @@ func (v *Validator) ValidatePhases(
 	return result, nil
 }
 
-// validateReadiness validates readiness phase.
-// Evaluates constraints inline and runs checks as Kubernetes Jobs.
+// validateReadiness validates the readiness phase.
+// Evaluates recipe constraints inline against the snapshot — no cluster access needed.
 //
 //nolint:unparam // error return may be used in future implementations
 func (v *Validator) validateReadiness(
-	ctx context.Context,
+	_ context.Context,
 	recipeResult *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
 ) (*ValidationResult, error) {
@@ -275,75 +275,12 @@ func (v *Validator) validateReadiness(
 	phaseResult := &PhaseResult{
 		Status:      ValidationStatusPass,
 		Constraints: []ConstraintValidation{},
-		Checks:      []CheckResult{},
 	}
 
 	// Evaluate recipe-level constraints (spec.constraints) inline
 	for _, constraint := range recipeResult.Constraints {
 		cv := v.evaluateConstraint(constraint, snap)
 		phaseResult.Constraints = append(phaseResult.Constraints, cv)
-	}
-
-	// Run named checks as Kubernetes Jobs if defined in validation config
-	// Note: RBAC resources must be created by the caller before invoking this function.
-	// For multi-phase validation, validateAll() manages RBAC lifecycle.
-	// For single-phase validation, the CLI/API should call agent.EnsureRBAC() first.
-	//nolint:dupl // Phase validation methods have similar structure by design
-	if recipeResult.Validation != nil && recipeResult.Validation.Readiness != nil && len(recipeResult.Validation.Readiness.Checks) > 0 {
-		if v.NoCluster {
-			slog.Info("no-cluster mode enabled, skipping cluster check execution for readiness phase")
-			for _, checkName := range recipeResult.Validation.Readiness.Checks {
-				check := CheckResult{
-					Name:   checkName,
-					Status: ValidationStatusSkipped,
-					Reason: "skipped - no-cluster mode (test mode)",
-				}
-				phaseResult.Checks = append(phaseResult.Checks, check)
-			}
-		} else {
-			clientset, _, err := k8sclient.GetKubeClient()
-			if err != nil {
-				// If Kubernetes is not available (e.g., running in test mode), skip check execution
-				slog.Warn("Kubernetes client unavailable, skipping check execution",
-					"error", err,
-					"checks", len(recipeResult.Validation.Readiness.Checks))
-				// Add skeleton check results
-				for _, checkName := range recipeResult.Validation.Readiness.Checks {
-					check := CheckResult{
-						Name:   checkName,
-						Status: ValidationStatusPass,
-						Reason: "skipped - Kubernetes unavailable (test mode)",
-					}
-					phaseResult.Checks = append(phaseResult.Checks, check)
-				}
-			} else {
-				// ConfigMap names (created once per validation run by validateAll)
-				snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
-				recipeCMName := fmt.Sprintf("aicr-recipe-%s", v.RunID)
-
-				// Deploy ONE Job for ALL readiness checks in this phase
-				jobConfig := agent.Config{
-					Namespace:          v.Namespace,
-					JobName:            fmt.Sprintf("aicr-%s-readiness", v.RunID),
-					Image:              v.Image,
-					ImagePullSecrets:   v.ImagePullSecrets,
-					ServiceAccountName: "aicr-validator",
-					SnapshotConfigMap:  snapshotCMName,
-					RecipeConfigMap:    recipeCMName,
-					TestPackage:        "./pkg/validator/checks/readiness",
-					TestPattern:        "", // Run all tests in package
-					Timeout:            resolvePhaseTimeout(recipeResult.Validation.Readiness, DefaultReadinessTimeout),
-				}
-
-				deployer := agent.NewDeployer(clientset, jobConfig)
-
-				// Run the phase Job and aggregate results
-				phaseJobResult := v.runPhaseJob(ctx, deployer, jobConfig, "readiness")
-
-				// Merge Job results into phase result
-				phaseResult.Checks = phaseJobResult.Checks
-			}
-		}
 	}
 
 	// Determine phase status based on constraints
@@ -379,7 +316,6 @@ func (v *Validator) validateReadiness(
 	slog.Info("readiness validation completed",
 		"status", phaseResult.Status,
 		"constraints", len(phaseResult.Constraints),
-		"checks", len(phaseResult.Checks),
 		"duration", phaseResult.Duration)
 
 	return result, nil

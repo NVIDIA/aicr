@@ -48,7 +48,7 @@ The validator reads Job logs and updates the unified ValidationResult ConfigMap.
 The validation Job needs permissions to:
 - Read/write ConfigMaps (for inputs and results)
 - Read pods, services, deployments (for deployment phase checks)
-- Read nodes (for readiness phase checks)
+- Read nodes (for deployment phase checks)
 
 ## Usage Example
 
@@ -59,13 +59,13 @@ clientset, err := k8sclient.GetKubeClient()
 // Configure validation agent
 config := agent.Config{
     Namespace:          "aicr-validation",
-    JobName:            "aicr-validation-readiness",
+    JobName:            "aicr-validation-deployment",
     Image:              "ghcr.io/nvidia/aicr-validator:latest",  // Validator image with Go toolchain
     ServiceAccountName: "aicr-validator",
     SnapshotConfigMap:  "aicr-snapshot",
     RecipeConfigMap:    "aicr-recipe",
-    TestPackage:        "./pkg/validator/checks/readiness",
-    TestPattern:        "TestGpuHardwareDetection",
+    TestPackage:        "./pkg/validator/checks/deployment",
+    TestPattern:        "TestOperatorHealth",
     Timeout:            5 * time.Minute,
     Cleanup:            true,
 }
@@ -123,9 +123,9 @@ The validator package uses this agent to run checks:
 
 ```go
 // In pkg/validator/phases.go
-func (v *Validator) validateReadiness(ctx context.Context, ...) {
+func (v *Validator) validateDeployment(ctx context.Context, ...) {
     // For each check in recipe
-    for _, checkName := range recipe.Validation.Readiness.Checks {
+    for _, checkName := range recipe.Validation.Deployment.Checks {
         // Deploy Job for this check
         deployer := agent.NewDeployer(...)
         deployer.Deploy(ctx)

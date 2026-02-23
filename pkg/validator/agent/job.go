@@ -196,7 +196,7 @@ func (d *Deployer) buildJobSpec() *batchv1.Job {
 }
 
 // testBinaryName derives the pre-compiled test binary name from a TestPackage path.
-// Example: "./pkg/validator/checks/readiness" → "readiness.test"
+// Example: "./pkg/validator/checks/deployment" → "deployment.test"
 func testBinaryName(testPackage string) string {
 	return filepath.Base(testPackage) + ".test"
 }

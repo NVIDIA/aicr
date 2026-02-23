@@ -266,10 +266,10 @@ func TestListChecks(t *testing.T) {
 		originalRegistry[k] = v
 	}
 	checkRegistry = map[string]*Check{
-		"readiness-1":   {Name: "readiness-1", Phase: "readiness"},
-		"readiness-2":   {Name: "readiness-2", Phase: "readiness"},
 		"deployment-1":  {Name: "deployment-1", Phase: "deployment"},
+		"deployment-2":  {Name: "deployment-2", Phase: "deployment"},
 		"performance-1": {Name: "performance-1", Phase: "performance"},
+		"conformance-1": {Name: "conformance-1", Phase: "conformance"},
 	}
 	registryMu.Unlock()
 
@@ -290,14 +290,9 @@ func TestListChecks(t *testing.T) {
 			wantCount: 4,
 		},
 		{
-			name:      "list readiness checks",
-			phase:     "readiness",
-			wantCount: 2,
-		},
-		{
 			name:      "list deployment checks",
 			phase:     "deployment",
-			wantCount: 1,
+			wantCount: 2,
 		},
 		{
 			name:      "list performance checks",
@@ -305,8 +300,13 @@ func TestListChecks(t *testing.T) {
 			wantCount: 1,
 		},
 		{
-			name:      "list non-existent phase",
+			name:      "list conformance checks",
 			phase:     "conformance",
+			wantCount: 1,
+		},
+		{
+			name:      "list non-existent phase",
+			phase:     "readiness",
 			wantCount: 0,
 		},
 	}

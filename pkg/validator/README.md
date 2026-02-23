@@ -35,7 +35,7 @@ fmt.Printf("Status: %s, Passed: %d, Failed: %d\n",
 
 | Phase | Execution | Data Source | Purpose |
 |-------|-----------|-------------|---------|
-| **Readiness** | Constraints inline, Checks in Jobs | Snapshot only | Validate prerequisites before deployment |
+| **Readiness** | Constraints evaluated inline (no cluster access) | Snapshot only | Validate prerequisites before deployment |
 | **Deployment** | All in Jobs | Snapshot + Live cluster | Verify deployed resources |
 | **Performance** | All in Jobs | Snapshot + Live cluster | Measure system performance |
 | **Conformance** | All in Jobs | Snapshot + Live cluster | Validate API conformance |
@@ -48,7 +48,7 @@ Recipe Definition
 ┌─────────────────────────────────────────────────────┐
 │ Readiness Phase                                     │
 │ • Constraints: Evaluated inline (snapshot)          │
-│ • Checks: Run in Jobs (GPU detection, kernel, OS)   │
+│ • No checks — constraint-only gate                  │
 └─────────────────────────────────────────────────────┘
     ↓ (if passed)
 ┌─────────────────────────────────────────────────────┐
@@ -141,22 +141,30 @@ Checks execute via Go's standard test framework:
 
 ```go
 // Check function (registered in init())
-func CheckGPUHardwareDetection(ctx *checks.ValidationContext) error {
-    // Access snapshot data and K8s API
-    for _, m := range ctx.Snapshot.Measurements {
-        if m.Type == measurement.TypeGPU { /* validate */ }
+func CheckOperatorHealth(ctx *checks.ValidationContext) error {
+    // Access live cluster via K8s API
+    pods, err := ctx.Clientset.CoreV1().Pods("gpu-operator").List(
+        ctx.Context,
+        metav1.ListOptions{LabelSelector: "app=gpu-operator"},
+    )
+    if err != nil {
+        return fmt.Errorf("failed to list pods: %w", err)
     }
-    return nil
+    // Verify at least one pod is running
+    for _, pod := range pods.Items {
+        if pod.Status.Phase == "Running" { return nil }
+    }
+    return fmt.Errorf("no GPU operator pods running")
 }
 
 // Test wrapper (enables Job execution)
-func TestGPUHardwareDetection(t *testing.T) {
+func TestOperatorHealth(t *testing.T) {
     runner, err := checks.NewTestRunner(t)  // Loads context from Job env
     if err != nil {
         t.Skipf("Skipping (not in Kubernetes): %v", err)
         return
     }
-    runner.RunCheck("gpu-hardware-detection")  // Executes check
+    runner.RunCheck("operator-health")  // Executes check
 }
 ```
 
@@ -180,7 +188,7 @@ Each validation run is assigned a unique **RunID** for resource isolation and re
 All resources created during a validation run include the RunID:
 - Input ConfigMaps: `aicr-snapshot-{runID}`, `aicr-recipe-{runID}` (shared by all phases)
 - Output ConfigMap: `aicr-validation-result-{runID}` (progressively updated)
-- Jobs: `aicr-{runID}-readiness`, `aicr-{runID}-deployment`, etc. (one per phase)
+- Jobs: `aicr-{runID}-deployment`, `aicr-{runID}-performance`, etc. (one per phase, readiness has no Job)
 
 **Benefits:**
 - **Concurrent Validations**: Multiple validation runs can execute simultaneously without conflicts
@@ -345,7 +353,7 @@ componentRefs:
         namespace: gpu-operator
 
 validation:
-  # Phase 1: Readiness (pre-deployment validation)
+  # Phase 1: Readiness (pre-deployment validation, constraints only, no cluster access)
   readiness:
     constraints:
       - name: GPU.count
@@ -354,10 +362,6 @@ validation:
         value: "== ubuntu"
       - name: Kernel.version
         value: ">= 5.15.0"
-    checks:
-      - gpu-hardware-detection
-      - kernel-parameters
-      - os-prerequisites
 
   # Phase 2: Deployment (verify deployed resources)
   deployment:
@@ -551,7 +555,7 @@ Deployment, performance, and conformance constraints need **live cluster access*
 - Measure network bandwidth
 - Check API conformance
 
-Only readiness constraints can evaluate inline because they only need snapshot data.
+Readiness is constraint-only and evaluates inline because it only needs snapshot data (no cluster access, no Jobs).
 
 ### Why ConfigMaps for Results?
 
@@ -612,8 +616,6 @@ validation:
     constraints:
       - name: GPU.count
         value: ">= 8"
-    checks:
-      - gpu-hardware-detection
 
   deployment:
     constraints:

@@ -26,7 +26,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	_ "github.com/NVIDIA/aicr/pkg/validator/checks/conformance" // Import for init() registration
 	_ "github.com/NVIDIA/aicr/pkg/validator/checks/deployment"  // Import for init() registration
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/readiness"   // Import for init() registration
 )
 
 // TestConstraintRegistrationCompleteness ensures that every registered constraint
@@ -129,7 +128,7 @@ func findTestFunctions(t *testing.T) map[string]bool {
 	tests := make(map[string]bool)
 
 	// Check all phase directories
-	phaseDirs := []string{"readiness", "deployment", "performance", "conformance"}
+	phaseDirs := []string{"deployment", "performance", "conformance"}
 
 	for _, phaseDir := range phaseDirs {
 		checksDir := filepath.Join(".", phaseDir)
@@ -185,7 +184,7 @@ func findIntegrationTestFunctions(t *testing.T) map[string]bool {
 	tests := make(map[string]bool)
 
 	// Check all phase directories
-	phaseDirs := []string{"readiness", "deployment", "performance", "conformance"}
+	phaseDirs := []string{"deployment", "performance", "conformance"}
 
 	for _, phaseDir := range phaseDirs {
 		checksDir := filepath.Join(".", phaseDir)

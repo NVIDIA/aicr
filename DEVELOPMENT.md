@@ -234,7 +234,7 @@ aicr/
 - **Location**: `pkg/validator/`
 - **Purpose**: Multi-phase validation of cluster configuration against recipe requirements
 - **Phases**:
-  - **Readiness**: Validates infrastructure prerequisites (K8s version, OS, kernel) and runs readiness checks
+  - **Readiness**: Evaluates constraints inline against snapshot (K8s version, OS, kernel) — no checks or Jobs
   - **Deployment**: Validates component deployment health and expected resources
   - **Performance**: Validates system performance and network fabric health
   - **Conformance**: Validates workload-specific requirements and conformance
