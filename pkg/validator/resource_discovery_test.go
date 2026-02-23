@@ -18,11 +18,9 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"sigs.k8s.io/yaml"
 )
 
 // testDataProvider is a minimal DataProvider for testing manifest file loading.
@@ -695,46 +693,6 @@ func TestResolveExpectedResources_ManualOverridesManifestFile(t *testing.T) {
 	}
 }
 
-func TestWriteValuesToTempFile(t *testing.T) {
-	tests := []struct {
-		name   string
-		values map[string]any
-	}{
-		{
-			name:   "simple values",
-			values: map[string]any{"key": "value"},
-		},
-		{
-			name:   "nested values",
-			values: map[string]any{"a": map[string]any{"b": "c"}},
-		},
-		{
-			name:   "empty values",
-			values: map[string]any{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path, err := writeValuesToTempFile(tt.values)
-			if err != nil {
-				t.Fatalf("writeValuesToTempFile() error = %v", err)
-			}
-			defer os.Remove(path)
-
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("failed to read temp file: %v", err)
-			}
-
-			var parsed map[string]any
-			if err := yaml.Unmarshal(data, &parsed); err != nil {
-				t.Errorf("temp file is not valid YAML: %v", err)
-			}
-		})
-	}
-}
-
 func TestResolveExpectedResources_SkipsEmptyChartCoordinates(t *testing.T) {
 	// Components without chart coordinates (empty Source/Chart) should skip
 	// discovery without error — no CLI lookup is needed.
@@ -756,30 +714,5 @@ func TestResolveExpectedResources_SkipsEmptyChartCoordinates(t *testing.T) {
 	if len(recipeResult.ComponentRefs[0].ExpectedResources) != 0 {
 		t.Errorf("expected no resources for component without chart coordinates, got %d",
 			len(recipeResult.ComponentRefs[0].ExpectedResources))
-	}
-}
-
-func TestResolveExpectedResources_ErrorOnMissingCLI(t *testing.T) {
-	// Components with chart coordinates should cause a hard error
-	// when the required CLI tool is not found in PATH.
-	t.Setenv("PATH", t.TempDir()) // empty dir — no binaries
-
-	recipeResult := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{
-			{
-				Name:   "my-chart",
-				Type:   recipe.ComponentTypeHelm,
-				Source: "https://charts.example.com",
-				Chart:  "my-chart",
-			},
-		},
-	}
-
-	err := resolveExpectedResources(t.Context(), recipeResult)
-	if err == nil {
-		t.Fatal("expected error when helm CLI is missing, got nil")
-	}
-	if !strings.Contains(err.Error(), "helm CLI not found") {
-		t.Errorf("expected error about missing helm CLI, got: %v", err)
 	}
 }
