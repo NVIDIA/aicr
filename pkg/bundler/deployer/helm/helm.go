@@ -78,6 +78,10 @@ type GeneratorInput struct {
 	// ComponentManifests maps component name → manifest path → content.
 	// Each component's manifests are placed in its own manifests/ subdirectory.
 	ComponentManifests map[string]map[string][]byte
+
+	// DataFiles lists additional file paths (relative to output dir) to include
+	// in checksum generation. Used for external data files copied into the bundle.
+	DataFiles []string
 }
 
 // GeneratorOutput contains the result of Helm bundle generation.
@@ -162,6 +166,12 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	}
 	output.Files = append(output.Files, undeployPath)
 	output.TotalSize += undeploySize
+
+	// Include external data files in the file list (for checksums)
+	for _, dataFile := range input.DataFiles {
+		absPath := filepath.Join(outputDir, dataFile)
+		output.Files = append(output.Files, absPath)
+	}
 
 	// Generate checksums.txt if requested
 	if input.IncludeChecksums {

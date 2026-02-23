@@ -43,7 +43,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-duplicate-flags"
-              ${AICR_BIN} bundle --recipe "${WORK}/recipe.yaml" --recipe "${WORK}/recipe.yaml" \
+              ${AICR_BIN} bundle --skip-attestation --recipe "${WORK}/recipe.yaml" --recipe "${WORK}/recipe.yaml" \
                 -o "${WORK}/out" 2>&1 || true
             check:
               (contains($stderr, 'can only be specified once') || contains($stdout, 'can only be specified once')): true

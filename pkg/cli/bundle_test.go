@@ -178,6 +178,11 @@ func TestBundleCmd(t *testing.T) {
 		}
 	}
 
+	// Verify attestation flag exists
+	if !flagNames["skip-attestation"] {
+		t.Error("expected flag 'skip-attestation' to be defined")
+	}
+
 	// Verify removed flags don't exist (replaced by oci:// URI in --output)
 	removedFlags := []string{"output-format", "registry", "repository", "tag", "push", "F"}
 	for _, flag := range removedFlags {

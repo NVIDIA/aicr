@@ -34,7 +34,6 @@ permissions:
 
 jobs:
   build-and-attest:
-    needs: [tests, security-scan]
     name: Build and Attest Binaries
     runs-on: ubuntu-latest
     timeout-minutes: 15

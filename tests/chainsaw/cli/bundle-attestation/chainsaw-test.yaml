@@ -1,0 +1,270 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-attestation
+spec:
+  description: |
+    Tests bundle attestation creation and verification.
+    Covers: --skip-attestation, verify trust levels, tamper detection,
+    JSON output, --require-creator, and trust update.
+    No cluster needed.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: setup
+      description: Generate recipe for attestation tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: bundle-skip-attestation
+      description: Bundle with --skip-attestation produces no attestation files.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/bundle" --skip-attestation
+              # Should have standard bundle files
+              test -f "${WORK}/bundle/checksums.txt"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -f "${WORK}/bundle/recipe.yaml"
+              # Should NOT have attestation files
+              test ! -f "${WORK}/bundle/bundle-attestation.sigstore.json"
+              test ! -f "${WORK}/bundle/aicr-attestation.sigstore.json"
+            check:
+              ($error == null): true
+
+    - name: verify-unattested-bundle
+      description: Verify unattested bundle reports trust level unverified.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle"
+            check:
+              ($error == null): true
+              (contains($stdout, 'unverified')): true
+              (contains($stdout, 'Checksums verified')): true
+
+    - name: verify-min-trust-level-unverified
+      description: Verify with --min-trust-level unverified passes for unattested bundle.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle" --min-trust-level unverified
+            check:
+              ($error == null): true
+
+    - name: verify-min-trust-level-unknown-passes
+      description: --min-trust-level unknown always passes for any valid bundle.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle" --min-trust-level unknown
+            check:
+              ($error == null): true
+
+    - name: verify-min-trust-level-attested-fails
+      description: --min-trust-level attested fails for unattested bundle (level 2 < level 3).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle" --min-trust-level attested 2>&1 || true
+            check:
+              (contains($stdout, 'does not meet minimum') || contains($stderr, 'does not meet minimum')): true
+
+    - name: verify-min-trust-level-verified-fails
+      description: --min-trust-level verified fails for unattested bundle (level 2 < level 4).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle" --min-trust-level verified 2>&1 || true
+            check:
+              (contains($stdout, 'does not meet minimum') || contains($stderr, 'does not meet minimum')): true
+
+    - name: verify-json-output
+      description: Verify with --format json produces valid JSON with expected fields.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle" --format json --min-trust-level unknown
+            check:
+              ($error == null): true
+              (contains($stdout, '"checksumsPassed"')): true
+              (contains($stdout, '"trustLevel"')): true
+              (contains($stdout, '"unverified"')): true
+
+    - name: verify-tampered-bundle
+      description: Verify detects tampered files via checksum mismatch.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              # Tamper with a file
+              echo "tampered content" > "${WORK}/bundle/deploy.sh"
+              OUTPUT=$(${AICR_BIN} verify "${WORK}/bundle" --format json --min-trust-level unknown 2>&1)
+              echo "$OUTPUT"
+              echo "$OUTPUT" | grep -q '"checksumsPassed": false'
+            check:
+              ($error == null): true
+
+    - name: verify-missing-checksums
+      description: Verify reports trust level unknown when checksums.txt is missing.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              # Rebuild a clean bundle for remaining tests
+              rm -rf "${WORK}/bundle"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/bundle" --skip-attestation
+              # Remove checksums
+              rm -f "${WORK}/bundle/checksums.txt"
+              OUTPUT=$(${AICR_BIN} verify "${WORK}/bundle" --format json --min-trust-level unknown 2>&1)
+              echo "$OUTPUT"
+              echo "$OUTPUT" | grep -q '"trustLevel": "unknown"'
+            check:
+              ($error == null): true
+
+    - name: verify-nonexistent-dir
+      description: Verify returns clear error for nonexistent directory.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              ${AICR_BIN} verify /tmp/nonexistent-bundle-dir-xyz 2>&1 || true
+            check:
+              (contains($stdout, 'not found') || contains($stderr, 'not found')): true
+
+    - name: verify-require-creator-fails
+      description: --require-creator fails when bundle has no creator (unattested).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              # Rebuild clean bundle
+              rm -rf "${WORK}/bundle"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/bundle" --skip-attestation
+              ${AICR_BIN} verify "${WORK}/bundle" \
+                --require-creator someone@example.com --min-trust-level unknown 2>&1 || true
+            check:
+              (contains($stdout, 'does not match required') || contains($stderr, 'does not match required')): true
+
+    - name: verify-require-tool-version-fails
+      description: --require-tool-version fails when version doesn't match.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} verify "${WORK}/bundle" \
+                --require-tool-version v99.99.99 --min-trust-level unknown 2>&1 || true
+            check:
+              (contains($stdout, 'does not match required') || contains($stderr, 'does not match required')): true
+
+    - name: help-bundle-skip-attestation
+      description: Bundle --help shows --skip-attestation flag.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              ${AICR_BIN} bundle --help
+            check:
+              ($error == null): true
+              (contains($stdout, 'skip-attestation')): true
+
+    - name: help-verify-flags
+      description: Verify --help shows all verification flags.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              ${AICR_BIN} verify --help
+            check:
+              ($error == null): true
+              (contains($stdout, 'min-trust-level')): true
+              (contains($stdout, 'require-creator')): true
+              (contains($stdout, 'require-tool-version')): true
+              (contains($stdout, 'format')): true
+
+    - name: help-trust-update
+      description: Trust --help shows update subcommand.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              ${AICR_BIN} trust --help
+            check:
+              ($error == null): true
+              (contains($stdout, 'update')): true
+
+    - name: argocd-bundle-skip-attestation
+      description: ArgoCD bundle with --skip-attestation works.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/argocd-bundle" --deployer argocd --skip-attestation
+              test -f "${WORK}/argocd-bundle/checksums.txt"
+              test ! -f "${WORK}/argocd-bundle/bundle-attestation.sigstore.json"
+            check:
+              ($error == null): true
+
+    - name: trust-update
+      description: Trust update fetches Sigstore trusted root without error.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              ${AICR_BIN} trust update
+            check:
+              ($error == null): true
+              (contains($stdout, 'Trusted root updated') || contains($stderr, 'trusted root updated')): true
+
+    - name: cleanup
+      description: Remove temporary files.
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-attestation

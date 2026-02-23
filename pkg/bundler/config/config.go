@@ -106,6 +106,9 @@ type Config struct {
 
 	// workloadSelector contains label selector for skyhook-customizations to prevent eviction of running training jobs.
 	workloadSelector map[string]string
+
+	// skipAttestation disables bundle attestation and binary verification.
+	skipAttestation bool
 }
 
 // Getter methods for read-only access
@@ -219,6 +222,11 @@ func (c *Config) WorkloadSelector() map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+// SkipAttestation returns whether bundle attestation is disabled.
+func (c *Config) SkipAttestation() bool {
+	return c.skipAttestation
 }
 
 // Validate checks if the Config has valid settings.
@@ -358,6 +366,13 @@ func WithWorkloadSelector(selector map[string]string) Option {
 		for k, v := range selector {
 			c.workloadSelector[k] = v
 		}
+	}
+}
+
+// WithSkipAttestation sets whether bundle attestation should be skipped.
+func WithSkipAttestation(skip bool) Option {
+	return func(c *Config) {
+		c.skipAttestation = skip
 	}
 }
 

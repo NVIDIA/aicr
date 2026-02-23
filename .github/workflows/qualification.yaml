@@ -103,6 +103,30 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
 
+  cli-e2e:
+    name: CLI E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run CLI E2E Tests
+        uses: ./.github/actions/cli-e2e
+        with:
+          go_version: ${{ steps.versions.outputs.go }}
+          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
+
   e2e:
     name: E2E
     runs-on: ubuntu-latest

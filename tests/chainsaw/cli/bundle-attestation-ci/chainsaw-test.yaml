@@ -1,0 +1,114 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-attestation-ci
+  labels:
+    requires: attested-binary
+    ci: "true" # required binary built in CI
+spec:
+  description: |
+    Full attestation chain tests. Requires an attested binary (AICR_ATTESTED=true)
+    and OIDC authentication. Only runs in CI via the cli-e2e action.
+    Use --selector 'requires!=attested-binary' to skip locally.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: setup
+      description: Generate recipe for attested bundle tests.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-ci"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: create-attested-bundle
+      description: Create bundle with real Sigstore attestation.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-ci"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/bundle"
+            check:
+              ($error == null): true
+
+    - name: attested-bundle-has-files
+      description: Attested bundle contains both attestation files.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-attestation-ci"
+              test -f "${WORK}/bundle/bundle-attestation.sigstore.json"
+              test -f "${WORK}/bundle/aicr-attestation.sigstore.json"
+              test -f "${WORK}/bundle/checksums.txt"
+              test -f "${WORK}/bundle/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: verify-full-chain
+      description: Verify full attestation chain with relaxed identity regexp.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-ci"
+              ${AICR_BIN} verify "${WORK}/bundle" \
+                --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/.*' \
+                --format json
+            check:
+              ($error == null): true
+              (contains($stdout, 'checksumsPassed')): true
+              (contains($stdout, 'bundleAttested')): true
+
+    - name: verify-min-trust-attested
+      description: Attested bundle meets --min-trust-level attested.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-ci"
+              ${AICR_BIN} verify "${WORK}/bundle" \
+                --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/.*' \
+                --min-trust-level attested
+            check:
+              ($error == null): true
+
+    - name: verify-min-trust-verified
+      description: Attested bundle meets --min-trust-level verified (full chain).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-attestation-ci"
+              ${AICR_BIN} verify "${WORK}/bundle" \
+                --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/.*' \
+                --min-trust-level verified
+            check:
+              ($error == null): true
+
+    - name: cleanup
+      description: Remove temporary files.
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-attestation-ci

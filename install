@@ -263,6 +263,17 @@ main() {
   "${BIN_NAME}" --version
   [[ -f "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json" ]] && \
     msg "Attestation: ${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
+
+  # Fetch latest Sigstore trusted root for offline verification.
+  # The trusted root enables 'aicr verify' to check attestation signatures
+  # without contacting Sigstore infrastructure. If this fails (e.g., no network),
+  # verification still works using the embedded TUF root compiled into the binary.
+  msg "Updating Sigstore trusted root..."
+  if ! "${BIN_NAME}" trust update 2>/dev/null; then
+    msg "Warning: could not fetch latest trusted root (network may be unavailable)"
+    msg "  Verification will use the embedded root. To update later, run:"
+    msg "    ${BIN_NAME} trust update"
+  fi
 }
 
 # Run main function

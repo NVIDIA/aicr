@@ -83,3 +83,64 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 func GetChecksumFilePath(bundleDir string) string {
 	return filepath.Join(bundleDir, ChecksumFileName)
 }
+
+// VerifyChecksums reads a checksums.txt file and verifies each file's SHA256 digest.
+// Returns a list of error descriptions for any mismatches or read failures.
+// An empty return means all checksums are valid.
+func VerifyChecksums(bundleDir string) []string {
+	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
+	data, err := os.ReadFile(checksumPath)
+	if err != nil {
+		return []string{fmt.Sprintf("failed to read %s: %v", ChecksumFileName, err)}
+	}
+
+	var errs []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Format: <hex-digest>  <relative-path> (two spaces, sha256sum compatible)
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) != 2 {
+			errs = append(errs, fmt.Sprintf("invalid checksum line: %s", line))
+			continue
+		}
+
+		expectedDigest := parts[0]
+		relativePath := parts[1]
+		filePath := filepath.Join(bundleDir, relativePath)
+
+		fileData, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			errs = append(errs, fmt.Sprintf("failed to read %s: %v", relativePath, readErr))
+			continue
+		}
+
+		hash := sha256.Sum256(fileData)
+		actualDigest := hex.EncodeToString(hash[:])
+		if actualDigest != expectedDigest {
+			errs = append(errs, fmt.Sprintf("checksum mismatch: %s (expected %s, got %s)", relativePath, expectedDigest, actualDigest))
+		}
+	}
+
+	return errs
+}
+
+// CountEntries returns the number of entries in a checksums.txt file.
+func CountEntries(bundleDir string) int {
+	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
+	data, err := os.ReadFile(checksumPath)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}

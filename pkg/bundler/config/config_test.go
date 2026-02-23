@@ -44,6 +44,18 @@ func TestConfigImmutability(t *testing.T) {
 	if cfg.Verbose() {
 		t.Error("Verbose() = true, want false")
 	}
+
+	if cfg.SkipAttestation() {
+		t.Error("SkipAttestation() = true, want false (default)")
+	}
+}
+
+func TestConfigSkipAttestation(t *testing.T) {
+	cfg := NewConfig(WithSkipAttestation(true))
+
+	if !cfg.SkipAttestation() {
+		t.Error("SkipAttestation() = false, want true")
+	}
 }
 
 func TestConfigValidate(t *testing.T) {

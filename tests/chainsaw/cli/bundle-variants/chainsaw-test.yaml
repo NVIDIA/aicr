@@ -45,7 +45,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/basic"
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/basic"
               test -f "${WORK}/basic/deploy.sh"
               test -f "${WORK}/basic/README.md"
               test -f "${WORK}/basic/recipe.yaml"
@@ -61,7 +61,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/sys-sel" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/sys-sel" \
                 --system-node-selector nodeGroup=system-pool
               found=false
               for vfile in "${WORK}"/sys-sel/*/values.yaml; do
@@ -78,7 +78,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/accel-sel" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/accel-sel" \
                 --accelerated-node-selector accelerator=nvidia-gpu
               found=false
               for vfile in "${WORK}"/accel-sel/*/values.yaml; do
@@ -95,7 +95,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/sys-tol" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/sys-tol" \
                 --system-node-toleration dedicated=system-workload:NoSchedule
               found=false
               for vfile in "${WORK}"/sys-tol/*/values.yaml; do
@@ -112,7 +112,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/accel-tol" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/accel-tol" \
                 --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
               found=false
               for vfile in "${WORK}"/accel-tol/*/values.yaml; do
@@ -129,7 +129,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/value-override" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/value-override" \
                 --set gpu-operator:driver.version=999.99.99
               found=false
               for vfile in "${WORK}"/value-override/*/values.yaml; do
@@ -146,7 +146,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/combined" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/combined" \
                 --system-node-selector nodeGroup=system-pool \
                 --system-node-toleration dedicated=system:NoSchedule \
                 --accelerated-node-selector accelerator=nvidia-gpu \
@@ -169,7 +169,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-variants"
-              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/argocd" \
+              ${AICR_BIN} bundle --skip-attestation -r "${WORK}/recipe.yaml" -o "${WORK}/argocd" \
                 --deployer argocd
               test -f "${WORK}/argocd/app-of-apps.yaml"
               grep -q "kind: Application" "${WORK}/argocd/app-of-apps.yaml"

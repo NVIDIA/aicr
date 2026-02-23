@@ -58,7 +58,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-scheduling"
-              ${AICR_BIN} bundle \
+              ${AICR_BIN} bundle --skip-attestation \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle" \
                 --system-node-selector nodeGroup=system-pool \

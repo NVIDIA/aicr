@@ -74,6 +74,16 @@ build_binary() {
 
   msg "Using binary: ${AICR_BIN}"
   export AICR_BIN
+
+  # Detect binary attestation (created by goreleaser cosign hook when SLSA_PREDICATE is set)
+  ATTEST_FILE="$(dirname "$AICR_BIN")/aicr-attestation.sigstore.json"
+  if [[ -f "$ATTEST_FILE" ]]; then
+    export AICR_ATTESTED=true
+    msg "Binary attestation found: ${ATTEST_FILE}"
+  else
+    export AICR_ATTESTED=false
+    msg "No binary attestation found (attestation chainsaw tests will skip)"
+  fi
 }
 
 # ============================================================================
@@ -90,6 +100,7 @@ msg "Running chainsaw tests (no-cluster CLI tests)"
 chainsaw test \
   --no-cluster \
   --config "${ROOT}/tests/chainsaw/chainsaw-config.yaml" \
-  --test-dir "${ROOT}/tests/chainsaw/cli/"
+  --test-dir "${ROOT}/tests/chainsaw/cli/" \
+  --selector 'ci!=true'
 
 msg "All tests passed!"

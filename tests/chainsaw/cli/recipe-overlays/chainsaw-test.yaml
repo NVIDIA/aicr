@@ -73,7 +73,7 @@ spec:
 
                 # Generate bundle
                 echo "=== ${basename}: bundle ==="
-                ${AICR_BIN} bundle -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" || \
+                ${AICR_BIN} bundle --skip-attestation -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" || \
                   { echo "FAIL: bundle generation for ${basename}" >&2; exit 1; }
 
                 # Verify bundle structure

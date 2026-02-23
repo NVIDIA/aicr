@@ -45,6 +45,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      id-token: write
     with:
       coverage_report: 'true'
 
