@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -57,7 +58,11 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 
 	for i := range recipeResult.ComponentRefs {
 		if ctx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout, "context cancelled during expected resource discovery", ctx.Err())
+			code := errors.ErrCodeTimeout
+			if ctx.Err() == context.Canceled {
+				code = errors.ErrCodeInternal
+			}
+			return errors.Wrap(code, "context cancelled during expected resource discovery", ctx.Err())
 		}
 
 		ref := &recipeResult.ComponentRefs[i]
@@ -161,7 +166,9 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 
 	settings := cli.New()
 
-	regClient, err := registry.NewClient()
+	regClient, err := registry.NewClient(
+		registry.ClientOptCredentialsFile(settings.RegistryConfig),
+	)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create helm registry client", err)
 	}
@@ -187,6 +194,7 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 	if err != nil {
 		return nil, err
 	}
+	defer os.RemoveAll(chartPath) // clean up downloaded chart archive/directory
 
 	chrt, err := loader.Load(chartPath)
 	if err != nil {
@@ -203,6 +211,10 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 
 // locateChart resolves a chart reference to a local path by downloading it.
 // Supports HTTP repos (via --repo equivalent) and OCI registries (oci:// prefix).
+//
+// Note: LocateChart does not accept a context — chart downloads are not
+// cancellable via ComponentRenderTimeout. The timeout still bounds the
+// subsequent rendering step (RunWithContext).
 func locateChart(install *action.Install, ref recipe.ComponentRef, settings *cli.EnvSettings) (string, error) {
 	if strings.HasPrefix(ref.Source, "oci://") {
 		install.RepoURL = ""
