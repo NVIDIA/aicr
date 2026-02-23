@@ -208,7 +208,7 @@ func TestCheckRobustController(t *testing.T) {
 						func(action k8stesting.Action) (bool, runtime.Object, error) {
 							return true, nil, k8serrors.NewInternalError(fmt.Errorf("server error"))
 						})
-				// "accept" and "": use default behavior (create succeeds via tracker).
+					// "accept" and "": use default behavior (create succeeds via tracker).
 				}
 
 				ctx = &checks.ValidationContext{

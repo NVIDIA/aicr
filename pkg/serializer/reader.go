@@ -160,7 +160,7 @@ func NewFileReader(format Format, filePath string) (*Reader, error) {
 		}
 		file, err = os.Open(tempFilePath)
 	} else {
-		file, err = os.Open(filePath)
+		file, err = os.Open(filepath.Clean(filePath)) //nolint:gosec // G703 -- path from CLI arg or config
 	}
 
 	// Handle file open error

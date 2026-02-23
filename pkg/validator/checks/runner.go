@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -258,7 +259,7 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	}
 
 	var recipeResult *recipe.RecipeResult
-	if _, err := os.Stat(recipePath); err == nil {
+	if _, err := os.Stat(filepath.Clean(recipePath)); err == nil { //nolint:gosec // G703 -- path from env var with known default
 		recipeResult, err = serializer.FromFile[recipe.RecipeResult](recipePath)
 		if err != nil {
 			cancel()

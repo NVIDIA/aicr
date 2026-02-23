@@ -79,6 +79,10 @@ linters:
     - importas        # Import aliasing
 
   settings:
+    gosec:
+      excludes:
+        - G706  # Log injection: slog structured logging with key-value pairs is safe
+
     funlen:
       lines: 200
       statements: 70

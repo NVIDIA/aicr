@@ -42,7 +42,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "all healthy",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
@@ -89,7 +89,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "Gateway not programmed",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "False"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("False"))
 			},
 			hasDynClient: true,
 			wantErr:      true,
@@ -99,7 +99,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "missing CRD",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 			},
 			hasDynClient: true,
@@ -110,12 +110,12 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "no ready endpoints",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
 			},
-			k8sObjects:  []runtime.Object{}, // No EndpointSlices
+			k8sObjects:   []runtime.Object{}, // No EndpointSlices
 			hasDynClient: true,
 			wantErr:      true,
 			errContains:  "no ready endpoints for inference-gateway proxy",
@@ -124,7 +124,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "endpoints exist but not for inference-gateway",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
@@ -141,7 +141,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "no HTTPRoutes but endpoints ready",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))

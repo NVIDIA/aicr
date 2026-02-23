@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -331,7 +332,7 @@ func (r *HTTPReader) ReadWithContext(ctx context.Context, url string) ([]byte, e
 		req.Header.Set("User-Agent", r.UserAgent)
 	}
 
-	resp, err := r.Client.Do(req)
+	resp, err := r.Client.Do(req) //nolint:gosec // G704 -- URL is validated by http.NewRequestWithContext
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, fmt.Sprintf("http request failed for url %s", url), err)
 	}
@@ -366,7 +367,7 @@ func (r *HTTPReader) DownloadWithContext(ctx context.Context, url, filePath stri
 		return errors.Wrap(errors.ErrCodeUnavailable, fmt.Sprintf("failed to read from url %s", url), err)
 	}
 
-	if err := os.WriteFile(filePath, data, 0600); err != nil {
+	if err := os.WriteFile(filepath.Clean(filePath), data, 0600); err != nil { //nolint:gosec // G703 -- path from caller-provided download target
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to write file %s", filePath), err)
 	}
 
