@@ -1071,7 +1071,7 @@ go build -ldflags="$(LDFLAGS)" -o bin/aicrd ./cmd/aicrd
 Production images are built with ko (automated in CI/CD). For local development:
 
 ```dockerfile
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN go build -ldflags="-X github.com/NVIDIA/aicr/pkg/api.version=v1.0.0" \
