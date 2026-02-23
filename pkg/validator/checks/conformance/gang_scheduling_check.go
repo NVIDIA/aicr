@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -84,11 +85,16 @@ func newGangTestRun() (*gangTestRun, error) {
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "gang-scheduling",
-		Description: "Verify KAI scheduler components, CRDs, and gang scheduling with PodGroup",
-		Phase:       phaseConformance,
-		Func:        CheckGangScheduling,
-		TestName:    "TestGangScheduling",
+		Name:                  "gang-scheduling",
+		Description:           "Verify KAI scheduler components, CRDs, and gang scheduling with PodGroup",
+		Phase:                 phaseConformance,
+		Func:                  CheckGangScheduling,
+		TestName:              "TestGangScheduling",
+		RequirementID:         "gang_scheduling",
+		EvidenceTitle:         "Gang Scheduling (KAI Scheduler)",
+		EvidenceDescription:   "Demonstrates that the cluster supports gang (all-or-nothing) scheduling using KAI scheduler with PodGroups.",
+		EvidenceFile:          "gang-scheduling.md",
+		SubmissionRequirement: true,
 	})
 }
 
@@ -268,6 +274,40 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) er
 			return errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s does not use DRA resourceClaims", run.pods[i]))
 		}
+	}
+
+	// Verify co-scheduling: PodScheduled condition timestamps must be within tolerance.
+	// This proves gang (all-or-nothing) semantics — pods scheduled together, not sequentially.
+	var scheduleTimes []time.Time
+	for i, pod := range pods {
+		var found bool
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionTrue {
+				scheduleTimes = append(scheduleTimes, cond.LastTransitionTime.Time)
+				found = true
+				break
+			}
+		}
+		if !found {
+			return errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("gang test pod %s missing PodScheduled=True condition", run.pods[i]))
+		}
+	}
+
+	earliest := scheduleTimes[0]
+	latest := scheduleTimes[0]
+	for _, t := range scheduleTimes[1:] {
+		if t.Before(earliest) {
+			earliest = t
+		}
+		if t.After(latest) {
+			latest = t
+		}
+	}
+	if latest.Sub(earliest) > defaults.CoScheduleWindow {
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("gang scheduling pods not co-scheduled: schedule times span %s (max %s)",
+				latest.Sub(earliest), defaults.CoScheduleWindow))
 	}
 
 	return nil

@@ -144,7 +144,7 @@ func TestCheckRobustController(t *testing.T) {
 			clientset:         true,
 			dgdCreateBehavior: "rbac-forbidden",
 			wantErr:           true,
-			errContains:       "unexpected error testing webhook rejection",
+			errContains:       "RBAC denied the request",
 		},
 		{
 			name: "webhook non-admission error",

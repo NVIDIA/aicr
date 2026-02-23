@@ -167,6 +167,20 @@ const (
 	KarpenterPollInterval = 10 * time.Second
 )
 
+// Gang scheduling co-scheduling validation.
+const (
+	// CoScheduleWindow is the maximum time span between PodScheduled timestamps
+	// for gang-scheduled pods. If pods are scheduled further apart than this,
+	// they are not considered co-scheduled.
+	CoScheduleWindow = 30 * time.Second
+)
+
+// Evidence rendering timeouts.
+const (
+	// EvidenceRenderTimeout is the timeout for rendering conformance evidence markdown.
+	EvidenceRenderTimeout = 30 * time.Second
+)
+
 // Deployment and pod scheduling test timeouts for conformance validation.
 const (
 	// DeploymentScaleTimeout is the timeout for waiting for Deployment controller

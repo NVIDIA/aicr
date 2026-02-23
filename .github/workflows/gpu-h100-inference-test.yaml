@@ -129,7 +129,9 @@ jobs:
             --namespace gpu-operator \
             --kubeconfig="${HOME}/.kube/config" \
             --require-gpu \
-            --image=ko.local:smoke-test
+            --image=ko.local:smoke-test \
+            --output=validation-result.yaml \
+            --evidence-dir=conformance-evidence
 
       - name: Install chainsaw
         run: |
@@ -247,6 +249,16 @@ jobs:
             --file tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml \
             --kubeconfig="${HOME}/.kube/config" \
             --debug
+
+      - name: Upload conformance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-evidence
+          path: |
+            conformance-evidence/
+            validation-result.yaml
+          if-no-files-found: warn
 
       - name: Debug diagnostics
         if: failure()

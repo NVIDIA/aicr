@@ -201,9 +201,18 @@ func addClusterAutoReactors(clientset *fake.Clientset, nodePoolName string) {
 			return true, deploy, nil
 		})
 
-	// Node List reactor: return a KWOK node with discovered NodePool label.
+	// Node List reactor: return empty on first call (baseline), then KWOK node.
+	// This matches the production flow: baseline is captured before test resources,
+	// then waitForKarpenterNodes sees new nodes provisioned above baseline.
+	var nodeListCalls int
 	clientset.PrependReactor("list", "nodes",
 		func(action k8stesting.Action) (bool, runtime.Object, error) {
+			nodeListCalls++
+			if nodeListCalls == 1 {
+				// First call: baseline (no pre-existing Karpenter nodes)
+				return true, &corev1.NodeList{}, nil
+			}
+			// Subsequent calls: Karpenter provisioned a new KWOK node
 			return true, &corev1.NodeList{
 				Items: []corev1.Node{
 					{
@@ -338,7 +347,7 @@ func TestValidateClusterAutoscaling(t *testing.T) {
 					return true, deploy, nil
 				})
 
-			// Node List reactor.
+			// Node List reactor: return empty on first call (baseline), then KWOK nodes.
 			nodes := make([]corev1.Node, tt.kwokNodes)
 			for i := range nodes {
 				nodes[i] = corev1.Node{
@@ -350,8 +359,15 @@ func TestValidateClusterAutoscaling(t *testing.T) {
 					},
 				}
 			}
+			var nodeListCalls int
 			clientset.PrependReactor("list", "nodes",
 				func(action k8stesting.Action) (bool, runtime.Object, error) {
+					nodeListCalls++
+					if nodeListCalls == 1 {
+						// First call: baseline (no pre-existing Karpenter nodes)
+						return true, &corev1.NodeList{}, nil
+					}
+					// Subsequent calls: return configured KWOK nodes
 					return true, &corev1.NodeList{Items: nodes}, nil
 				})
 
