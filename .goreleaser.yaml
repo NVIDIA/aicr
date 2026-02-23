@@ -33,6 +33,16 @@ builds:
       -X github.com/NVIDIA/aicr/pkg/cli.version={{.Version}}
       -X github.com/NVIDIA/aicr/pkg/cli.commit={{.ShortCommit}}
       -X github.com/NVIDIA/aicr/pkg/cli.date={{.Date}}
+    hooks:
+      post:
+        - cmd: >-
+            bash -c '[ -z "${GITHUB_ACTIONS:-}" ] && exit 0;
+            cosign attest-blob
+            --predicate /tmp/slsa-predicate.json
+            --type https://slsa.dev/provenance/v1
+            --bundle "$(dirname "{{ .Path }}")/aicr-attestation.sigstore.json"
+            --yes "{{ .Path }}"'
+          output: true
     goos:
       - darwin
       - linux
@@ -122,8 +132,11 @@ archives:
     ids:
       - aicr
     formats:
-      - binary
-    name_template: "{{ .Binary }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+      - tar.gz
+    name_template: "{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - src: "dist/aicr_{{ .Os }}_{{ .Arch }}*/aicr-attestation.sigstore.json"
+        strip_parent: true
 
 changelog:
   sort: asc

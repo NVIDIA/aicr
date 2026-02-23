@@ -54,8 +54,11 @@ has_tools() {
 }
 
 normalize_arch() {
-  local arch="$1"
-  [[ $arch == "x86_64" ]] && echo "amd64" || echo "$arch"
+  case "$1" in
+    x86_64)  echo "amd64" ;;
+    aarch64) echo "arm64" ;;
+    *)       echo "$1" ;;
+  esac
 }
 
 get_os() {
