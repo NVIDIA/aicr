@@ -18,9 +18,15 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestCheckPodAutoscaling(t *testing.T) {
@@ -71,6 +77,99 @@ func TestCheckPodAutoscaling(t *testing.T) {
 			if tt.wantErr && err != nil && tt.errContains != "" {
 				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("CheckPodAutoscaling() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateHPABehavior(t *testing.T) {
+	tests := []struct {
+		name            string
+		desiredReplicas int32
+		currentReplicas int32
+		deployReplicas  int32
+		wantErr         bool
+		errContains     string
+		useShortTimeout bool // use very short timeout to trigger timeout error
+	}{
+		{
+			name:            "scaling intent detected and deployment scales",
+			desiredReplicas: 2,
+			currentReplicas: 1,
+			deployReplicas:  2,
+			wantErr:         false,
+		},
+		{
+			name:            "no scaling intent",
+			desiredReplicas: 1,
+			currentReplicas: 1,
+			wantErr:         true,
+			errContains:     "HPA did not report scaling intent",
+			useShortTimeout: true,
+		},
+		{
+			name:            "scale from zero",
+			desiredReplicas: 3,
+			currentReplicas: 0,
+			deployReplicas:  3,
+			wantErr:         false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			clientset := fake.NewSimpleClientset()
+
+			// HPA Get reactor: return HPA with specified status.
+			clientset.PrependReactor("get", "horizontalpodautoscalers",
+				func(action k8stesting.Action) (bool, runtime.Object, error) {
+					hpa := &autoscalingv2.HorizontalPodAutoscaler{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      action.(k8stesting.GetAction).GetName(),
+							Namespace: action.GetNamespace(),
+						},
+						Status: autoscalingv2.HorizontalPodAutoscalerStatus{
+							DesiredReplicas: tt.desiredReplicas,
+							CurrentReplicas: tt.currentReplicas,
+						},
+					}
+					return true, hpa, nil
+				})
+
+			// Deployment Get reactor: return Deployment with scaled replicas.
+			clientset.PrependReactor("get", "deployments",
+				func(action k8stesting.Action) (bool, runtime.Object, error) {
+					deploy := &appsv1.Deployment{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      action.(k8stesting.GetAction).GetName(),
+							Namespace: action.GetNamespace(),
+						},
+						Status: appsv1.DeploymentStatus{
+							Replicas: tt.deployReplicas,
+						},
+					}
+					return true, deploy, nil
+				})
+
+			ctx := context.Background()
+			if tt.useShortTimeout {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 1*time.Second)
+				defer cancel()
+			}
+
+			err := validateHPABehavior(ctx, clientset)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateHPABehavior() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && err != nil && tt.errContains != "" {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("validateHPABehavior() error = %v, should contain %q", err, tt.errContains)
 				}
 			}
 		})

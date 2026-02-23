@@ -20,17 +20,20 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestCheckInferenceGateway(t *testing.T) {
 	tests := []struct {
 		name         string
-		setup        func(*dynamicfake.FakeDynamicClient) // populate objects via Create
+		setup        func(*dynamicfake.FakeDynamicClient) // populate dynamic objects via Create
+		k8sObjects   []runtime.Object                     // EndpointSlice objects for Clientset
 		hasDynClient bool
 		wantErr      bool
 		errContains  string
@@ -39,10 +42,14 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "all healthy",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("kgateway-system", "inference-gateway", "Programmed", "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
 				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
+				createDynObject(t, dc, httpRouteGVR, "default", createHTTPRoute("default", "my-route", "inference-gateway"))
+			},
+			k8sObjects: []runtime.Object{
+				createReadyEndpointSlice("kgateway-system", "gateway-proxy-abc"),
 			},
 			hasDynClient: true,
 			wantErr:      false,
@@ -82,7 +89,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "Gateway not programmed",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("kgateway-system", "inference-gateway", "Programmed", "False"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "False"))
 			},
 			hasDynClient: true,
 			wantErr:      true,
@@ -92,12 +99,59 @@ func TestCheckInferenceGateway(t *testing.T) {
 			name: "missing CRD",
 			setup: func(dc *dynamicfake.FakeDynamicClient) {
 				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
-				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway("kgateway-system", "inference-gateway", "Programmed", "True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
 				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
 			},
 			hasDynClient: true,
 			wantErr:      true,
 			errContains:  "CRD httproutes.gateway.networking.k8s.io not found",
+		},
+		{
+			name: "no ready endpoints",
+			setup: func(dc *dynamicfake.FakeDynamicClient) {
+				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
+				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
+				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
+			},
+			k8sObjects:  []runtime.Object{}, // No EndpointSlices
+			hasDynClient: true,
+			wantErr:      true,
+			errContains:  "no ready endpoints for inference-gateway proxy",
+		},
+		{
+			name: "endpoints exist but not for inference-gateway",
+			setup: func(dc *dynamicfake.FakeDynamicClient) {
+				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
+				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
+				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
+			},
+			k8sObjects: []runtime.Object{
+				// EndpointSlice for a different service (e.g. controller manager), not gateway proxy
+				createNonGatewayEndpointSlice("kgateway-system", "controller-manager-abc"),
+			},
+			hasDynClient: true,
+			wantErr:      true,
+			errContains:  "no ready endpoints for inference-gateway proxy",
+		},
+		{
+			name: "no HTTPRoutes but endpoints ready",
+			setup: func(dc *dynamicfake.FakeDynamicClient) {
+				createDynObject(t, dc, gcGVR, "", createGatewayClass("True"))
+				createDynObject(t, dc, gwGVR, "kgateway-system", createGateway( "True"))
+				createDynObject(t, dc, crdGVR, "", createCRD("gateways.gateway.networking.k8s.io"))
+				createDynObject(t, dc, crdGVR, "", createCRD("httproutes.gateway.networking.k8s.io"))
+				createDynObject(t, dc, crdGVR, "", createCRD("inferencepools.inference.networking.x-k8s.io"))
+				// No HTTPRoutes — informational, should still pass
+			},
+			k8sObjects: []runtime.Object{
+				createReadyEndpointSlice("kgateway-system", "gateway-proxy-abc"),
+			},
+			hasDynClient: true,
+			wantErr:      false,
 		},
 	}
 
@@ -106,12 +160,16 @@ func TestCheckInferenceGateway(t *testing.T) {
 			var ctx *checks.ValidationContext
 
 			if tt.hasDynClient {
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(tt.k8sObjects...)
+
 				scheme := runtime.NewScheme()
 				dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 					map[schema.GroupVersionResource]string{
-						gcGVR:  "GatewayClassList",
-						gwGVR:  "GatewayList",
-						crdGVR: "CustomResourceDefinitionList",
+						gcGVR:        "GatewayClassList",
+						gwGVR:        "GatewayList",
+						crdGVR:       "CustomResourceDefinitionList",
+						httpRouteGVR: "HTTPRouteList",
 					})
 				if tt.setup != nil {
 					tt.setup(dynClient)
@@ -119,6 +177,7 @@ func TestCheckInferenceGateway(t *testing.T) {
 
 				ctx = &checks.ValidationContext{
 					Context:       context.Background(),
+					Clientset:     clientset,
 					DynamicClient: dynClient,
 				}
 			} else {
@@ -208,7 +267,10 @@ func createGatewayClass(condStatus string) *unstructured.Unstructured {
 }
 
 // createGateway creates an unstructured Gateway with the given condition.
-func createGateway(namespace, name, condType, condStatus string) *unstructured.Unstructured {
+func createGateway(condStatus string) *unstructured.Unstructured {
+	const namespace = "kgateway-system"
+	const name = "inference-gateway"
+	const condType = "Programmed"
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "gateway.networking.k8s.io/v1",
@@ -224,6 +286,69 @@ func createGateway(namespace, name, condType, condStatus string) *unstructured.U
 						"status": condStatus,
 					},
 				},
+			},
+		},
+	}
+}
+
+// createHTTPRoute creates an unstructured HTTPRoute with a parentRef to the given gateway.
+func createHTTPRoute(namespace, name, parentGateway string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "gateway.networking.k8s.io/v1",
+			"kind":       "HTTPRoute",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": namespace,
+			},
+			"spec": map[string]interface{}{
+				"parentRefs": []interface{}{
+					map[string]interface{}{
+						"name": parentGateway,
+					},
+				},
+			},
+		},
+	}
+}
+
+// createReadyEndpointSlice creates an EndpointSlice with a ready endpoint
+// labeled as belonging to the inference-gateway proxy service.
+func createReadyEndpointSlice(namespace, name string) *discoveryv1.EndpointSlice {
+	ready := true
+	return &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kubernetes.io/service-name": "gloo-proxy-inference-gateway",
+			},
+		},
+		Endpoints: []discoveryv1.Endpoint{
+			{
+				Addresses:  []string{"10.0.0.1"},
+				Conditions: discoveryv1.EndpointConditions{Ready: &ready},
+			},
+		},
+	}
+}
+
+// createNonGatewayEndpointSlice creates an EndpointSlice with a ready endpoint
+// that belongs to a non-gateway service (e.g. controller manager).
+func createNonGatewayEndpointSlice(namespace, name string) *discoveryv1.EndpointSlice {
+	ready := true
+	return &discoveryv1.EndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"kubernetes.io/service-name": "kgateway-controller-manager",
+			},
+		},
+		Endpoints: []discoveryv1.Endpoint{
+			{
+				Addresses:  []string{"10.0.0.2"},
+				Conditions: discoveryv1.EndpointConditions{Ready: &ready},
 			},
 		},
 	}

@@ -39,12 +39,14 @@ const (
 	draTestNamespace = "dra-test"
 	draTestPrefix    = "dra-gpu-test-"
 	draClaimPrefix   = "gpu-claim-"
+	draNoClaimPrefix = "dra-no-claim-"
 )
 
 // draTestRun holds per-invocation resource names to avoid collisions.
 type draTestRun struct {
-	podName   string
-	claimName string
+	podName        string
+	claimName      string
+	noClaimPodName string
 }
 
 func newDRATestRun() (*draTestRun, error) {
@@ -54,8 +56,9 @@ func newDRATestRun() (*draTestRun, error) {
 	}
 	suffix := hex.EncodeToString(b)
 	return &draTestRun{
-		podName:   draTestPrefix + suffix,
-		claimName: draClaimPrefix + suffix,
+		podName:        draTestPrefix + suffix,
+		claimName:      draClaimPrefix + suffix,
+		noClaimPodName: draNoClaimPrefix + suffix,
 	}, nil
 }
 
@@ -105,7 +108,12 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 	}
 
 	// Validate DRA access patterns on the completed pod.
-	return validateDRAPatterns(ctx.Context, dynClient, pod, run)
+	if err = validateDRAPatterns(ctx.Context, dynClient, pod, run); err != nil {
+		return err
+	}
+
+	// Validate isolation: a pod without DRA claims cannot access GPU devices.
+	return validateDRAIsolation(ctx.Context, ctx.Clientset, run)
 }
 
 // deployDRATestResources creates the namespace, ResourceClaim, and Pod for the DRA test.
@@ -211,6 +219,87 @@ func validateDRAPatterns(ctx context.Context, dynClient dynamic.Interface, pod *
 	return nil
 }
 
+// validateDRAIsolation verifies that a pod WITHOUT DRA ResourceClaims cannot see GPU devices.
+// This proves GPU access is truly mediated by DRA — the scheduler does not expose devices
+// to pods that lack claims.
+func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, run *draTestRun) error {
+	// Create no-claim pod.
+	pod := buildNoClaimTestPod(run)
+	if _, err := clientset.CoreV1().Pods(draTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create no-claim isolation test pod", err)
+	}
+	defer func() {
+		_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(draTestNamespace).Delete(
+			ctx, run.noClaimPodName, metav1.DeleteOptions{}))
+		waitForDeletion(ctx, func() error {
+			_, err := clientset.CoreV1().Pods(draTestNamespace).Get(
+				ctx, run.noClaimPodName, metav1.GetOptions{})
+			return err
+		})
+	}()
+
+	// Wait for no-claim pod to reach terminal state.
+	var resultPod *corev1.Pod
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.DRATestPodTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
+		func(ctx context.Context) (bool, error) {
+			p, err := clientset.CoreV1().Pods(draTestNamespace).Get(
+				ctx, run.noClaimPodName, metav1.GetOptions{})
+			if err != nil {
+				return false, errors.Wrap(errors.ErrCodeInternal,
+					"failed to get no-claim isolation test pod", err)
+			}
+			switch p.Status.Phase { //nolint:exhaustive // only terminal states matter
+			case corev1.PodSucceeded, corev1.PodFailed:
+				resultPod = p
+				return true, nil
+			default:
+				return false, nil
+			}
+		},
+	)
+	if err != nil {
+		if ctx.Err() != nil || waitCtx.Err() != nil {
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"no-claim isolation test pod did not complete in time", err)
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			"no-claim isolation test pod polling failed", err)
+	}
+
+	// Strict success criteria: require Succeeded (exit 0 = script confirmed no GPU visible).
+	// Failed means either GPU was visible (exit 1) or the container failed for other reasons.
+	if resultPod.Status.Phase != corev1.PodSucceeded {
+		exitCode := int32(-1)
+		if len(resultPod.Status.ContainerStatuses) > 0 {
+			cs := resultPod.Status.ContainerStatuses[0]
+			if cs.State.Terminated != nil {
+				exitCode = cs.State.Terminated.ExitCode
+			}
+		}
+		if exitCode == 1 {
+			return errors.New(errors.ErrCodeInternal,
+				"GPU devices visible without DRA claim — isolation broken (container exit code 1)")
+		}
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("no-claim isolation test pod failed with exit code %d — cannot verify isolation",
+				exitCode))
+	}
+
+	// Verify no hostPath to GPU devices on the no-claim pod.
+	for _, vol := range resultPod.Spec.Volumes {
+		if vol.HostPath != nil && strings.Contains(vol.HostPath.Path, "/dev/nvidia") {
+			return errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("no-claim pod has hostPath volume to %s — isolation broken",
+					vol.HostPath.Path))
+		}
+	}
+
+	return nil
+}
+
 // cleanupDRATestResources removes test resources. Best-effort: errors are ignored
 // since cleanup failures should not mask test results.
 // The namespace is intentionally NOT deleted — it's harmless to leave and
@@ -225,6 +314,9 @@ func cleanupDRATestResources(ctx context.Context, clientset kubernetes.Interface
 	})
 	_ = k8s.IgnoreNotFound(dynClient.Resource(claimGVR).Namespace(draTestNamespace).Delete(
 		ctx, run.claimName, metav1.DeleteOptions{}))
+	// Delete no-claim isolation pod (best-effort, may already be cleaned up by validateDRAIsolation).
+	_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(draTestNamespace).Delete(
+		ctx, run.noClaimPodName, metav1.DeleteOptions{}))
 }
 
 // waitForDeletion polls until a resource is gone (NotFound) or the context expires.
@@ -269,6 +361,33 @@ func buildDRATestPod(run *draTestRun) *corev1.Pod {
 						Claims: []corev1.ResourceClaim{
 							{Name: "gpu"},
 						},
+					},
+				},
+			},
+		},
+	}
+}
+
+// buildNoClaimTestPod returns a Pod spec identical to the DRA test pod but WITHOUT ResourceClaims.
+// If the cluster properly mediates GPU access through DRA, this pod will not see GPU devices.
+func buildNoClaimTestPod(run *draTestRun) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      run.noClaimPodName,
+			Namespace: draTestNamespace,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Tolerations: []corev1.Toleration{
+				{Operator: corev1.TolerationOpExists},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:  "isolation-test",
+					Image: "nvidia/cuda:12.9.0-base-ubuntu24.04",
+					Command: []string{
+						"bash", "-c",
+						"if ls /dev/nvidia* 2>/dev/null; then echo 'FAIL: GPU visible without DRA claim' && exit 1; else echo 'PASS: GPU isolated' && exit 0; fi",
 					},
 				},
 			},

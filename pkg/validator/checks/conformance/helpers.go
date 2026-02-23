@@ -123,6 +123,9 @@ func verifyDaemonSetReady(ctx *checks.ValidationContext, namespace, name string)
 	return nil
 }
 
+// int32Ptr returns a pointer to the given int32 value.
+func int32Ptr(i int32) *int32 { return &i }
+
 // containsAllMetrics checks that all required metric names appear in the given text.
 // Returns the list of missing metrics.
 func containsAllMetrics(text string, required []string) []string {

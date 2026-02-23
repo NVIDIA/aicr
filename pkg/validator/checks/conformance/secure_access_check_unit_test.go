@@ -103,6 +103,39 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 					return false, nil, nil
 				})
 
+				// Reactor: return no-claim pod with Succeeded phase for isolation test.
+				noClaimPodDeleted := false
+				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					ga := action.(k8stesting.GetAction)
+					if strings.HasPrefix(ga.GetName(), draNoClaimPrefix) && ga.GetNamespace() == draTestNamespace {
+						if noClaimPodDeleted {
+							return true, nil, k8serrors.NewNotFound(
+								schema.GroupResource{Resource: "pods"}, ga.GetName())
+						}
+						return true, &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      ga.GetName(),
+								Namespace: draTestNamespace,
+							},
+							Spec: *buildNoClaimTestPod(&draTestRun{noClaimPodName: ga.GetName()}).Spec.DeepCopy(),
+							Status: corev1.PodStatus{
+								Phase: corev1.PodSucceeded,
+							},
+						}, nil
+					}
+					return false, nil, nil
+				})
+
+				// Reactor: mark no-claim pod as deleted.
+				clientset.PrependReactor("delete", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					da := action.(k8stesting.DeleteAction)
+					if strings.HasPrefix(da.GetName(), draNoClaimPrefix) && da.GetNamespace() == draTestNamespace {
+						noClaimPodDeleted = true
+						return true, nil, nil
+					}
+					return false, nil, nil
+				})
+
 				scheme := runtime.NewScheme()
 				dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 					map[schema.GroupVersionResource]string{

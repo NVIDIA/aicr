@@ -15,14 +15,23 @@
 package conformance
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+const robustTestPrefix = "robust-test-"
+
+var dgdGVR = schema.GroupVersionResource{
+	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamographdeployments",
+}
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
@@ -103,5 +112,62 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 			"DynamoGraphDeployment CRD not found", err)
 	}
 
-	return nil
+	// 4. Validating webhook actively rejects invalid resources (behavioral test).
+	return validateWebhookRejects(ctx)
+}
+
+// validateWebhookRejects verifies that the Dynamo validating webhook actively rejects
+// invalid DynamoGraphDeployment resources. This proves the webhook is not just present
+// but functionally operational.
+func validateWebhookRejects(ctx *checks.ValidationContext) error {
+	dynClient, err := getDynamicClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Generate unique test resource name.
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
+	}
+	name := robustTestPrefix + hex.EncodeToString(b)
+
+	// Build an intentionally invalid DynamoGraphDeployment (empty services).
+	dgd := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "nvidia.com/v1alpha1",
+			"kind":       "DynamoGraphDeployment",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": "dynamo-system",
+			},
+			"spec": map[string]interface{}{
+				"services": map[string]interface{}{},
+			},
+		},
+	}
+
+	// Attempt to create the invalid resource — the webhook should reject it.
+	_, createErr := dynClient.Resource(dgdGVR).Namespace("dynamo-system").Create(
+		ctx.Context, dgd, metav1.CreateOptions{})
+
+	if createErr == nil {
+		// Webhook did not reject — clean up the accidentally created resource.
+		_ = dynClient.Resource(dgdGVR).Namespace("dynamo-system").Delete(
+			ctx.Context, name, metav1.DeleteOptions{})
+		return errors.New(errors.ErrCodeInternal,
+			"validating webhook did not reject invalid DynamoGraphDeployment")
+	}
+
+	// Check if the error is specifically a webhook admission rejection.
+	// We intentionally do NOT check k8serrors.IsForbidden() here because Forbidden
+	// can also come from RBAC denials, which would produce false positives.
+	errMsg := createErr.Error()
+	if strings.Contains(errMsg, "admission webhook") || strings.Contains(errMsg, "denied the request") {
+		return nil // PASS — webhook properly rejected the invalid resource
+	}
+
+	// Non-admission error (RBAC, network, CRD not installed, etc).
+	return errors.Wrap(errors.ErrCodeInternal,
+		"unexpected error testing webhook rejection", createErr)
 }

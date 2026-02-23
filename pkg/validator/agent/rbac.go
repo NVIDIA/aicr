@@ -153,10 +153,22 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Resources: []string{"clusterpolicies"},
 				Verbs:     []string{"get", "list"},
 			},
+			// Conformance: robust-controller webhook behavioral test
+			{
+				APIGroups: []string{"nvidia.com"},
+				Resources: []string{"dynamographdeployments"},
+				Verbs:     []string{"create", "delete"},
+			},
 			// Conformance: Gateway API validation
 			{
 				APIGroups: []string{"gateway.networking.k8s.io"},
 				Resources: []string{"gatewayclasses", "gateways"},
+				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: inference-gateway data-plane validation (HTTPRoute discovery)
+			{
+				APIGroups: []string{"gateway.networking.k8s.io"},
+				Resources: []string{"httproutes"},
 				Verbs:     []string{"get", "list"},
 			},
 			// Conformance: Gang scheduling (KAI scheduler)
@@ -198,6 +210,18 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				APIGroups: []string{"discovery.k8s.io"},
 				Resources: []string{"endpointslices"},
 				Verbs:     []string{"get", "list"},
+			},
+			// Conformance: HPA behavioral tests (pod-autoscaling)
+			{
+				APIGroups: []string{"autoscaling"},
+				Resources: []string{"horizontalpodautoscalers"},
+				Verbs:     []string{"get", "list", "create", "delete"},
+			},
+			// Conformance: HPA behavioral tests — Deployment lifecycle
+			{
+				APIGroups: []string{"apps"},
+				Resources: []string{"deployments"},
+				Verbs:     []string{"create", "delete"},
 			},
 		},
 	}

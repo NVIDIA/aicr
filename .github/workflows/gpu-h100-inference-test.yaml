@@ -39,7 +39,6 @@ on:
       - 'recipes/overlays/h100-kind-inference-dynamo.yaml'
       - 'kwok/manifests/karpenter/**'
       - 'kwok/scripts/install-karpenter-kwok.sh'
-      - 'kwok/scripts/validate-cluster-autoscaling.sh'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -111,7 +110,10 @@ jobs:
       # --- Install Karpenter before validation so cluster-autoscaling check passes ---
 
       - name: Install Karpenter + KWOK (setup)
-        run: bash kwok/scripts/validate-cluster-autoscaling.sh --setup
+        run: |
+          export KARPENTER_VERSION=$(yq eval '.testing_tools.karpenter' .settings.yaml)
+          bash kwok/scripts/install-karpenter-kwok.sh
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f kwok/manifests/karpenter/nodepool.yaml
 
       # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
       # Includes self-contained secure-accelerator-access check (creates its own
@@ -227,11 +229,6 @@ jobs:
             exit 1
           fi
           echo "Dynamo vLLM inference smoke test passed."
-
-      # --- Cluster Autoscaling validation ---
-
-      - name: Cluster Autoscaling (Karpenter + KWOK)
-        run: bash kwok/scripts/validate-cluster-autoscaling.sh --exercise
 
       # --- Evidence collection ---
 

@@ -16,41 +16,46 @@ package conformance
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestCheckRobustController(t *testing.T) {
 	tests := []struct {
-		name           string
-		k8sObjects     []runtime.Object
-		dynamicObjects []runtime.Object
-		clientset      bool
-		wantErr        bool
-		errContains    string
+		name              string
+		k8sObjects        []runtime.Object
+		dynamicObjects    []runtime.Object
+		clientset         bool
+		dgdCreateBehavior string // "reject", "accept", "rbac-forbidden", "error", "" (skip webhook test)
+		wantErr           bool
+		errContains       string
 	}{
 		{
 			name: "all healthy",
 			k8sObjects: []runtime.Object{
 				createDeployment("dynamo-system", "dynamo-platform-dynamo-operator-controller-manager", 1),
-				createDynamoWebhookConfig("dynamo-system", "dynamo-webhook-service"),
-				createEndpointSlice("dynamo-system", "dynamo-webhook-service"),
+				createDynamoWebhookConfig(),
+				createEndpointSlice(),
 			},
 			dynamicObjects: []runtime.Object{
 				createCRD("dynamographdeployments.nvidia.com"),
 			},
-			clientset: true,
-			wantErr:   false,
+			clientset:         true,
+			dgdCreateBehavior: "reject",
+			wantErr:           false,
 		},
 		{
 			name:        "no clientset",
@@ -90,7 +95,7 @@ func TestCheckRobustController(t *testing.T) {
 			name: "webhook endpoint missing",
 			k8sObjects: []runtime.Object{
 				createDeployment("dynamo-system", "dynamo-platform-dynamo-operator-controller-manager", 1),
-				createDynamoWebhookConfig("dynamo-system", "dynamo-webhook-service"),
+				createDynamoWebhookConfig(),
 				// No endpoints for the webhook service
 			},
 			clientset:   true,
@@ -101,8 +106,8 @@ func TestCheckRobustController(t *testing.T) {
 			name: "CRD missing",
 			k8sObjects: []runtime.Object{
 				createDeployment("dynamo-system", "dynamo-platform-dynamo-operator-controller-manager", 1),
-				createDynamoWebhookConfig("dynamo-system", "dynamo-webhook-service"),
-				createEndpointSlice("dynamo-system", "dynamo-webhook-service"),
+				createDynamoWebhookConfig(),
+				createEndpointSlice(),
 			},
 			dynamicObjects: []runtime.Object{
 				// No CRD
@@ -110,6 +115,51 @@ func TestCheckRobustController(t *testing.T) {
 			clientset:   true,
 			wantErr:     true,
 			errContains: "DynamoGraphDeployment CRD not found",
+		},
+		{
+			name: "webhook does not reject invalid resource",
+			k8sObjects: []runtime.Object{
+				createDeployment("dynamo-system", "dynamo-platform-dynamo-operator-controller-manager", 1),
+				createDynamoWebhookConfig(),
+				createEndpointSlice(),
+			},
+			dynamicObjects: []runtime.Object{
+				createCRD("dynamographdeployments.nvidia.com"),
+			},
+			clientset:         true,
+			dgdCreateBehavior: "accept",
+			wantErr:           true,
+			errContains:       "validating webhook did not reject",
+		},
+		{
+			name: "RBAC forbidden not treated as webhook rejection",
+			k8sObjects: []runtime.Object{
+				createDeployment("dynamo-system", "dynamo-platform-dynamo-operator-controller-manager", 1),
+				createDynamoWebhookConfig(),
+				createEndpointSlice(),
+			},
+			dynamicObjects: []runtime.Object{
+				createCRD("dynamographdeployments.nvidia.com"),
+			},
+			clientset:         true,
+			dgdCreateBehavior: "rbac-forbidden",
+			wantErr:           true,
+			errContains:       "unexpected error testing webhook rejection",
+		},
+		{
+			name: "webhook non-admission error",
+			k8sObjects: []runtime.Object{
+				createDeployment("dynamo-system", "dynamo-platform-dynamo-operator-controller-manager", 1),
+				createDynamoWebhookConfig(),
+				createEndpointSlice(),
+			},
+			dynamicObjects: []runtime.Object{
+				createCRD("dynamographdeployments.nvidia.com"),
+			},
+			clientset:         true,
+			dgdCreateBehavior: "error",
+			wantErr:           true,
+			errContains:       "unexpected error testing webhook rejection",
 		},
 	}
 
@@ -122,15 +172,43 @@ func TestCheckRobustController(t *testing.T) {
 				clientset := fake.NewSimpleClientset(tt.k8sObjects...)
 
 				scheme := runtime.NewScheme()
+				gvrMap := map[schema.GroupVersionResource]string{
+					{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+					dgdGVR: "DynamoGraphDeploymentList",
+				}
 				var dynClient *dynamicfake.FakeDynamicClient
 				if len(tt.dynamicObjects) > 0 {
 					dynClient = dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
-						map[schema.GroupVersionResource]string{
-							{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
-						},
-						tt.dynamicObjects...)
+						gvrMap, tt.dynamicObjects...)
 				} else {
-					dynClient = dynamicfake.NewSimpleDynamicClient(scheme)
+					dynClient = dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
+						gvrMap)
+				}
+
+				// Add reactor for DGD create based on test behavior.
+				switch tt.dgdCreateBehavior {
+				case "reject":
+					dynClient.PrependReactor("create", "dynamographdeployments",
+						func(action k8stesting.Action) (bool, runtime.Object, error) {
+							return true, nil, k8serrors.NewForbidden(
+								schema.GroupResource{Group: "nvidia.com", Resource: "dynamographdeployments"},
+								"",
+								fmt.Errorf("admission webhook denied the request"))
+						})
+				case "rbac-forbidden":
+					dynClient.PrependReactor("create", "dynamographdeployments",
+						func(action k8stesting.Action) (bool, runtime.Object, error) {
+							return true, nil, k8serrors.NewForbidden(
+								schema.GroupResource{Group: "nvidia.com", Resource: "dynamographdeployments"},
+								"",
+								fmt.Errorf("User system:serviceaccount:test:sa cannot create resource"))
+						})
+				case "error":
+					dynClient.PrependReactor("create", "dynamographdeployments",
+						func(action k8stesting.Action) (bool, runtime.Object, error) {
+							return true, nil, k8serrors.NewInternalError(fmt.Errorf("server error"))
+						})
+				// "accept" and "": use default behavior (create succeeds via tracker).
 				}
 
 				ctx = &checks.ValidationContext{
@@ -174,7 +252,9 @@ func TestCheckRobustControllerRegistration(t *testing.T) {
 }
 
 // createDynamoWebhookConfig creates a ValidatingWebhookConfiguration for testing.
-func createDynamoWebhookConfig(namespace, serviceName string) *admissionregistrationv1.ValidatingWebhookConfiguration {
+func createDynamoWebhookConfig() *admissionregistrationv1.ValidatingWebhookConfiguration {
+	const namespace = "dynamo-system"
+	const serviceName = "dynamo-webhook-service"
 	sideEffectsNone := admissionregistrationv1.SideEffectClassNone
 	return &admissionregistrationv1.ValidatingWebhookConfiguration{
 		ObjectMeta: metav1.ObjectMeta{
@@ -197,7 +277,9 @@ func createDynamoWebhookConfig(namespace, serviceName string) *admissionregistra
 }
 
 // createEndpointSlice creates a minimal EndpointSlice for a service.
-func createEndpointSlice(namespace, serviceName string) *discoveryv1.EndpointSlice {
+func createEndpointSlice() *discoveryv1.EndpointSlice {
+	const namespace = "dynamo-system"
+	const serviceName = "dynamo-webhook-service"
 	return &discoveryv1.EndpointSlice{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      serviceName + "-abc",
