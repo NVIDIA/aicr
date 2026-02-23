@@ -17,23 +17,20 @@ package validator
 import (
 	"bufio"
 	"context"
-	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"helm.sh/helm/v3/pkg/action"
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/registry"
 	"sigs.k8s.io/yaml"
-)
-
-const (
-	// helmCommand is the CLI command for Helm operations.
-	helmCommand = "helm"
 )
 
 // componentDiscovery tracks the discovery results for a single component.
@@ -45,39 +42,29 @@ type componentDiscovery struct {
 // resolveExpectedResources discovers expected workload resources from two sources
 // and merges them with any manually declared expectedResources:
 //
-//  1. Helm chart rendering via CLI subprocess (helm template)
+//  1. Helm chart rendering via the Helm Go SDK (equivalent to `helm template`)
 //  2. Manifest file rendering via shared pkg/manifest.Render() — same logic as the bundler
 //
 // Manual expectedResources take precedence over auto-discovered ones.
-// CLI tool availability is checked up front; missing tools cause a hard error if
-// components of that type exist. Rendering failures for individual components are
-// logged as warnings and do not block other components.
+// Rendering failures for individual components are logged as warnings and do not
+// block other components.
 //
 // Note: Phase 1 (helm template) requires network access for chart downloads
-// (HTTP repos via --repo, OCI registries via oci:// prefix) and the helm CLI.
-// Offline/air-gapped environments will see warnings for components with chart
-// coordinates but can still use manually declared expectedResources.
+// (HTTP repos and OCI registries). Offline/air-gapped environments will see
+// warnings for components with chart coordinates but can still use manually
+// declared expectedResources.
 func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeResult) error {
-	// Check if helm CLI is needed and verify availability up front.
-	needsHelm := false
-	for i := range recipeResult.ComponentRefs {
-		ref := &recipeResult.ComponentRefs[i]
-		if ref.Type == recipe.ComponentTypeHelm && ref.Source != "" && ref.Chart != "" {
-			needsHelm = true
-			break
-		}
-	}
-
-	if needsHelm {
-		if _, err := exec.LookPath(helmCommand); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
-				"helm CLI not found but required for Helm chart resource discovery", err)
-		}
-	}
-
 	summaries := make([]componentDiscovery, 0, len(recipeResult.ComponentRefs))
 
 	for i := range recipeResult.ComponentRefs {
+		if ctx.Err() != nil {
+			code := errors.ErrCodeTimeout
+			if ctx.Err() == context.Canceled {
+				code = errors.ErrCodeInternal
+			}
+			return errors.Wrap(code, "context cancelled during expected resource discovery", ctx.Err())
+		}
+
 		ref := &recipeResult.ComponentRefs[i]
 
 		// Load values once — needed for both chart rendering and manifestFile rendering.
@@ -90,8 +77,8 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 
 		var discovered []recipe.ExpectedResource
 
-		// Phase 1: Render Helm chart via CLI subprocess.
-		if ref.Type == recipe.ComponentTypeHelm && needsHelm && ref.Source != "" && ref.Chart != "" {
+		// Phase 1: Render Helm chart via SDK (equivalent to `helm template`).
+		if ref.Type == recipe.ComponentTypeHelm && ref.Source != "" && ref.Chart != "" {
 			slog.Debug("auto-discovering expected resources via helm template",
 				"component", ref.Name, "chart", ref.Chart, "version", ref.Version)
 
@@ -170,89 +157,83 @@ func countByKind(resources []recipe.ExpectedResource) string {
 	return strings.Join(parts, ", ")
 }
 
-// renderHelmTemplate invokes `helm template` as a subprocess to render a chart,
-// then extracts workload resources from the output.
-// Supports both HTTP repos (--repo flag) and OCI registries (oci:// prefix in source).
+// renderHelmTemplate uses the Helm Go SDK to render a chart (equivalent to
+// `helm template`), then extracts workload resources from the output.
+// Supports both HTTP repos and OCI registries (oci:// prefix in source).
 func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map[string]any) ([]recipe.ExpectedResource, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaults.ComponentRenderTimeout)
 	defer cancel()
 
-	var args []string
-	if strings.HasPrefix(ref.Source, "oci://") {
-		// OCI registries: chart reference is <source>/<chart>, no --repo flag
-		args = []string{"template", ref.Name, ref.Source + "/" + ref.Chart,
-			"--namespace", ref.Namespace,
-		}
-	} else {
-		// HTTP repos: use --repo flag with separate chart name
-		args = []string{"template", ref.Name, ref.Chart,
-			"--repo", ref.Source,
-			"--namespace", ref.Namespace,
-		}
+	settings := cli.New()
+
+	regClient, err := registry.NewClient(
+		registry.ClientOptCredentialsFile(settings.RegistryConfig),
+	)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create helm registry client", err)
 	}
+
+	actionCfg := &action.Configuration{
+		RegistryClient: regClient,
+		Log: func(format string, v ...interface{}) {
+			slog.Debug(fmt.Sprintf(format, v...))
+		},
+	}
+
+	install := action.NewInstall(actionCfg)
+	install.DryRun = true
+	install.ClientOnly = true
+	install.ReleaseName = ref.Name
+	install.Namespace = ref.Namespace
+	install.Replace = true
 	if ref.Version != "" {
-		args = append(args, "--version", ref.Version)
+		install.Version = ref.Version
 	}
 
-	// Write values to a temp file if non-empty
-	if len(values) > 0 {
-		valuesFile, err := writeValuesToTempFile(values)
-		if err != nil {
-			return nil, err
-		}
-		defer os.Remove(valuesFile)
-		args = append(args, "-f", valuesFile)
-	}
-
-	output, err := executeSubprocess(ctx, helmCommand, args...)
+	chartPath, err := locateChart(install, ref, settings)
 	if err != nil {
 		return nil, err
 	}
+	defer os.RemoveAll(chartPath) // clean up downloaded chart archive/directory
 
-	return extractWorkloadResources(string(output), ref.Namespace), nil
+	chrt, err := loader.Load(chartPath)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load helm chart", err)
+	}
+
+	rel, err := install.RunWithContext(ctx, chrt, values)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "helm template rendering failed", err)
+	}
+
+	return extractWorkloadResources(rel.Manifest, ref.Namespace), nil
 }
 
-// writeValuesToTempFile marshals values to a temporary YAML file.
-// The caller is responsible for removing the file (defer os.Remove).
-func writeValuesToTempFile(values map[string]any) (string, error) {
-	data, err := yaml.Marshal(values)
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to marshal values to YAML", err)
-	}
-
-	f, err := os.CreateTemp("", "aicr-values-*.yaml")
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to create temp values file", err)
-	}
-
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(f.Name()) //nolint:gosec // path from os.CreateTemp is safe
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to write temp values file", err)
-	}
-
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name()) //nolint:gosec // path from os.CreateTemp is safe
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to close temp values file", err)
-	}
-
-	return f.Name(), nil
-}
-
-// executeSubprocess runs a CLI command and returns its stdout.
-func executeSubprocess(ctx context.Context, name string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if stderrors.As(err, &exitErr) {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("command %s failed (stderr: %s)", name, string(exitErr.Stderr)), err)
+// locateChart resolves a chart reference to a local path by downloading it.
+// Supports HTTP repos (via --repo equivalent) and OCI registries (oci:// prefix).
+//
+// Note: LocateChart does not accept a context — chart downloads are not
+// cancellable via ComponentRenderTimeout. The timeout still bounds the
+// subsequent rendering step (RunWithContext).
+func locateChart(install *action.Install, ref recipe.ComponentRef, settings *cli.EnvSettings) (string, error) {
+	if strings.HasPrefix(ref.Source, "oci://") {
+		install.RepoURL = ""
+		chartRef := ref.Source + "/" + ref.Chart
+		path, err := install.LocateChart(chartRef, settings)
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to locate OCI chart %s", chartRef), err)
 		}
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("command %s failed", name), err)
+		return path, nil
 	}
-	return output, nil
+
+	install.RepoURL = ref.Source
+	path, err := install.LocateChart(ref.Chart, settings)
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to locate chart %s from %s", ref.Chart, ref.Source), err)
+	}
+	return path, nil
 }
 
 // renderManifestFiles renders each manifestFile as a Go template with

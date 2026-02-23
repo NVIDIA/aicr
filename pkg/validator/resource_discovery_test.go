@@ -18,11 +18,10 @@ import (
 	"context"
 	"io/fs"
 	"os"
-	"strings"
+	"path/filepath"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"sigs.k8s.io/yaml"
 )
 
 // testDataProvider is a minimal DataProvider for testing manifest file loading.
@@ -695,46 +694,6 @@ func TestResolveExpectedResources_ManualOverridesManifestFile(t *testing.T) {
 	}
 }
 
-func TestWriteValuesToTempFile(t *testing.T) {
-	tests := []struct {
-		name   string
-		values map[string]any
-	}{
-		{
-			name:   "simple values",
-			values: map[string]any{"key": "value"},
-		},
-		{
-			name:   "nested values",
-			values: map[string]any{"a": map[string]any{"b": "c"}},
-		},
-		{
-			name:   "empty values",
-			values: map[string]any{},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path, err := writeValuesToTempFile(tt.values)
-			if err != nil {
-				t.Fatalf("writeValuesToTempFile() error = %v", err)
-			}
-			defer os.Remove(path)
-
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("failed to read temp file: %v", err)
-			}
-
-			var parsed map[string]any
-			if err := yaml.Unmarshal(data, &parsed); err != nil {
-				t.Errorf("temp file is not valid YAML: %v", err)
-			}
-		})
-	}
-}
-
 func TestResolveExpectedResources_SkipsEmptyChartCoordinates(t *testing.T) {
 	// Components without chart coordinates (empty Source/Chart) should skip
 	// discovery without error — no CLI lookup is needed.
@@ -759,27 +718,239 @@ func TestResolveExpectedResources_SkipsEmptyChartCoordinates(t *testing.T) {
 	}
 }
 
-func TestResolveExpectedResources_ErrorOnMissingCLI(t *testing.T) {
-	// Components with chart coordinates should cause a hard error
-	// when the required CLI tool is not found in PATH.
-	t.Setenv("PATH", t.TempDir()) // empty dir — no binaries
+func TestRenderHelmTemplate_LocalChart(t *testing.T) {
+	// Build a minimal Helm chart in a temp directory to test the SDK rendering
+	// path without network access.
+	chartDir := t.TempDir()
+
+	// Chart.yaml — minimal valid chart metadata
+	chartYAML := `apiVersion: v2
+name: test-chart
+version: 0.1.0
+`
+	if err := os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(chartYAML), 0o644); err != nil {
+		t.Fatalf("failed to write Chart.yaml: %v", err)
+	}
+
+	// templates/ directory with a Deployment and a DaemonSet
+	templatesDir := filepath.Join(chartDir, "templates")
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
+		t.Fatalf("failed to create templates dir: %v", err)
+	}
+
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: server
+  template:
+    metadata:
+      labels:
+        app: server
+    spec:
+      containers:
+        - name: server
+          image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(templatesDir, "deployment.yaml"), []byte(deploymentYAML), 0o644); err != nil {
+		t.Fatalf("failed to write deployment.yaml: %v", err)
+	}
+
+	daemonsetYAML := `apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}-agent
+  namespace: {{ .Release.Namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+    spec:
+      containers:
+        - name: agent
+          image: busybox:latest
+`
+	if err := os.WriteFile(filepath.Join(templatesDir, "daemonset.yaml"), []byte(daemonsetYAML), 0o644); err != nil {
+		t.Fatalf("failed to write daemonset.yaml: %v", err)
+	}
+
+	// Use a file:// source so locateChart resolves locally without network.
+	ref := recipe.ComponentRef{
+		Name:      "my-release",
+		Namespace: "test-ns",
+		Type:      recipe.ComponentTypeHelm,
+		Source:    "", // not used for local path
+		Chart:     chartDir,
+		Version:   "0.1.0",
+	}
+
+	resources, err := renderHelmTemplate(t.Context(), ref, nil)
+	if err != nil {
+		t.Fatalf("renderHelmTemplate() error = %v", err)
+	}
+
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d: %v", len(resources), resources)
+	}
+
+	// Verify the extracted resources
+	foundDeployment := false
+	foundDaemonSet := false
+	for _, r := range resources {
+		switch {
+		case r.Kind == "Deployment" && r.Name == "my-release-server" && r.Namespace == "test-ns":
+			foundDeployment = true
+		case r.Kind == "DaemonSet" && r.Name == "my-release-agent" && r.Namespace == "test-ns":
+			foundDaemonSet = true
+		}
+	}
+
+	if !foundDeployment {
+		t.Errorf("expected Deployment my-release-server in test-ns, got %v", resources)
+	}
+	if !foundDaemonSet {
+		t.Errorf("expected DaemonSet my-release-agent in test-ns, got %v", resources)
+	}
+}
+
+func TestRenderHelmTemplate_WithValues(t *testing.T) {
+	// Test that values are passed through to the chart rendering.
+	chartDir := t.TempDir()
+
+	chartYAML := `apiVersion: v2
+name: values-test
+version: 0.1.0
+`
+	if err := os.WriteFile(filepath.Join(chartDir, "Chart.yaml"), []byte(chartYAML), 0o644); err != nil {
+		t.Fatalf("failed to write Chart.yaml: %v", err)
+	}
+
+	templatesDir := filepath.Join(chartDir, "templates")
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
+		t.Fatalf("failed to create templates dir: %v", err)
+	}
+
+	// Template that conditionally creates a StatefulSet based on values
+	ssYAML := `{{- if .Values.statefulset.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Values.statefulset.name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+        - name: db
+          image: postgres:latest
+{{- end }}
+`
+	if err := os.WriteFile(filepath.Join(templatesDir, "statefulset.yaml"), []byte(ssYAML), 0o644); err != nil {
+		t.Fatalf("failed to write statefulset.yaml: %v", err)
+	}
+
+	ref := recipe.ComponentRef{
+		Name:      "db-release",
+		Namespace: "db-ns",
+		Type:      recipe.ComponentTypeHelm,
+		Chart:     chartDir,
+		Version:   "0.1.0",
+	}
+
+	// With values that enable the StatefulSet
+	values := map[string]any{
+		"statefulset": map[string]any{
+			"enabled": true,
+			"name":    "my-database",
+		},
+	}
+
+	resources, err := renderHelmTemplate(t.Context(), ref, values)
+	if err != nil {
+		t.Fatalf("renderHelmTemplate() error = %v", err)
+	}
+
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 resource, got %d: %v", len(resources), resources)
+	}
+
+	if resources[0].Kind != "StatefulSet" || resources[0].Name != "my-database" || resources[0].Namespace != "db-ns" {
+		t.Errorf("expected StatefulSet my-database in db-ns, got %v", resources[0])
+	}
+
+	// With values that disable the StatefulSet — need a fresh chart dir
+	// because renderHelmTemplate cleans up the downloaded chart path.
+	chartDir2 := t.TempDir()
+	writeErr := os.WriteFile(filepath.Join(chartDir2, "Chart.yaml"), []byte(chartYAML), 0o644)
+	if writeErr != nil {
+		t.Fatalf("failed to write Chart.yaml: %v", writeErr)
+	}
+	templatesDir2 := filepath.Join(chartDir2, "templates")
+	mkdirErr := os.MkdirAll(templatesDir2, 0o755)
+	if mkdirErr != nil {
+		t.Fatalf("failed to create templates dir: %v", mkdirErr)
+	}
+	writeErr = os.WriteFile(filepath.Join(templatesDir2, "statefulset.yaml"), []byte(ssYAML), 0o644)
+	if writeErr != nil {
+		t.Fatalf("failed to write statefulset.yaml: %v", writeErr)
+	}
+
+	ref2 := recipe.ComponentRef{
+		Name:      "db-release",
+		Namespace: "db-ns",
+		Type:      recipe.ComponentTypeHelm,
+		Chart:     chartDir2,
+		Version:   "0.1.0",
+	}
+
+	disabledValues := map[string]any{
+		"statefulset": map[string]any{"enabled": false},
+	}
+
+	resources, err = renderHelmTemplate(t.Context(), ref2, disabledValues)
+	if err != nil {
+		t.Fatalf("renderHelmTemplate() with disabled error = %v", err)
+	}
+
+	if len(resources) != 0 {
+		t.Errorf("expected 0 resources when disabled, got %d: %v", len(resources), resources)
+	}
+}
+
+func TestResolveExpectedResources_ContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancel immediately
 
 	recipeResult := &recipe.RecipeResult{
 		ComponentRefs: []recipe.ComponentRef{
 			{
-				Name:   "my-chart",
-				Type:   recipe.ComponentTypeHelm,
-				Source: "https://charts.example.com",
-				Chart:  "my-chart",
+				Name:      "some-chart",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://charts.example.com",
+				Chart:     "my-chart",
+				Namespace: "default",
 			},
 		},
 	}
 
-	err := resolveExpectedResources(t.Context(), recipeResult)
+	err := resolveExpectedResources(ctx, recipeResult)
 	if err == nil {
-		t.Fatal("expected error when helm CLI is missing, got nil")
-	}
-	if !strings.Contains(err.Error(), "helm CLI not found") {
-		t.Errorf("expected error about missing helm CLI, got: %v", err)
+		t.Fatal("expected error for cancelled context, got nil")
 	}
 }

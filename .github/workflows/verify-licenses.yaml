@@ -82,5 +82,6 @@ jobs:
           GOFLAGS: -mod=vendor
         run: |
           # Allowed licenses (all CNCF-approved)
+          # https://github.com/cncf/foundation/blob/main/allowed-third-party-license-policy.md
           go-licenses check ./... \
-            --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT
+            --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0
