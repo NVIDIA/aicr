@@ -95,6 +95,38 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+
+      - name: Generate SLSA predicate
+        run: |
+          set -euo pipefail
+          PREDICATE="${RUNNER_TEMP}/slsa-predicate.json"
+          cat > "$PREDICATE" <<EOF
+          {
+            "buildDefinition": {
+              "buildType": "https://aicr.nvidia.com/binary/v1",
+              "externalParameters": {
+                "repository": "${{ github.repository }}",
+                "ref": "${{ github.ref }}"
+              },
+              "resolvedDependencies": [{
+                "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+                "digest": { "gitCommit": "${{ github.sha }}" }
+              }]
+            },
+            "runDetails": {
+              "builder": {
+                "id": "https://github.com/${{ github.repository }}/.github/workflows/on-tag.yaml"
+              },
+              "metadata": {
+                "invocationId": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }
+            }
+          }
+          EOF
+          echo "SLSA_PREDICATE=${PREDICATE}" >> "$GITHUB_ENV"
+
       - name: Build and Release
         id: release
         uses: ./.github/actions/go-build-release

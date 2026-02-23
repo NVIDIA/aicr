@@ -36,9 +36,9 @@ builds:
     hooks:
       post:
         - cmd: >-
-            bash -c '[ -z "${GITHUB_ACTIONS:-}" ] && exit 0;
+            bash -c '[ -z "${SLSA_PREDICATE:-}" ] && exit 0;
             cosign attest-blob
-            --predicate /tmp/slsa-predicate.json
+            --predicate "${SLSA_PREDICATE}"
             --type https://slsa.dev/provenance/v1
             --bundle "$(dirname "{{ .Path }}")/aicr-attestation.sigstore.json"
             --yes "{{ .Path }}"'
