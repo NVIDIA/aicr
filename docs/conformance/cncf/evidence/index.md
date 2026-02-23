@@ -16,8 +16,4 @@
 | 6 | `robust_controller` | Robust AI Operator (Dynamo) | PASS | [robust-operator.md](robust-operator.md) |
 | 7 | `pod_autoscaling` | Pod Autoscaling (HPA + GPU metrics) | PASS | [pod-autoscaling.md](pod-autoscaling.md) |
 
-## Not Yet Collected
-
-| Requirement | Feature | Status |
-|-------------|---------|--------|
-| `cluster_autoscaling` | Cluster Autoscaling | TODO |
+| 8 | `cluster_autoscaling` | Cluster Autoscaling (EKS ASG) | PASS | [cluster-autoscaling.md](cluster-autoscaling.md) |

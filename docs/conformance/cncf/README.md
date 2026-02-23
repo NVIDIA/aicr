@@ -115,4 +115,4 @@ See [evidence/index.md](evidence/index.md) for a summary of all collected eviden
 | 5 | Inference API Gateway | `ai_inference` | [evidence/inference-gateway.md](evidence/inference-gateway.md) |
 | 6 | Robust AI Operator | `robust_controller` | [evidence/robust-operator.md](evidence/robust-operator.md) |
 | 7 | Pod Autoscaling | `pod_autoscaling` | [evidence/pod-autoscaling.md](evidence/pod-autoscaling.md) |
-| 8 | Cluster Autoscaling | `cluster_autoscaling` | TODO |
+| 8 | Cluster Autoscaling | `cluster_autoscaling` | [evidence/cluster-autoscaling.md](evidence/cluster-autoscaling.md) |
