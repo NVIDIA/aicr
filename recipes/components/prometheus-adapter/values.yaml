@@ -31,8 +31,9 @@ rules:
   default: false
   custom:
     # GPU Utilization - scale based on GPU usage percentage
+    # Uses last_over_time for faster HPA response (~60s vs ~4min with avg_over_time)
     - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL{namespace!="",pod!=""}'
-      metricsQuery: 'avg_over_time(<<.Series>>[2m])'
+      metricsQuery: 'last_over_time(<<.Series>>[1m])'
       name:
         matches: "DCGM_FI_DEV_GPU_UTIL"
         as: "gpu_utilization"
@@ -43,7 +44,7 @@ rules:
 
     # GPU Memory Usage - scale based on GPU memory consumption
     - seriesQuery: 'DCGM_FI_DEV_FB_USED{namespace!="",pod!=""}'
-      metricsQuery: 'avg_over_time(<<.Series>>[2m])'
+      metricsQuery: 'last_over_time(<<.Series>>[1m])'
       name:
         matches: "DCGM_FI_DEV_FB_USED"
         as: "gpu_memory_used"
@@ -54,7 +55,7 @@ rules:
 
     # GPU Power Usage - scale based on power consumption
     - seriesQuery: 'DCGM_FI_DEV_POWER_USAGE{namespace!="",pod!=""}'
-      metricsQuery: 'avg_over_time(<<.Series>>[2m])'
+      metricsQuery: 'last_over_time(<<.Series>>[1m])'
       name:
         matches: "DCGM_FI_DEV_POWER_USAGE"
         as: "gpu_power_usage"
@@ -68,7 +69,7 @@ rules:
     # actively used by a workload. These rules map those labels to Kubernetes
     # resources so HPA can read per-pod GPU metrics in the workload namespace.
     - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL{exported_namespace!="",exported_pod!=""}'
-      metricsQuery: 'avg_over_time(<<.Series>>{<<.LabelMatchers>>}[2m])'
+      metricsQuery: 'last_over_time(<<.Series>>{<<.LabelMatchers>>}[1m])'
       name:
         matches: "DCGM_FI_DEV_GPU_UTIL"
         as: "workload_gpu_utilization"
@@ -78,7 +79,7 @@ rules:
           exported_pod: {resource: "pod"}
 
     - seriesQuery: 'DCGM_FI_DEV_FB_USED{exported_namespace!="",exported_pod!=""}'
-      metricsQuery: 'avg_over_time(<<.Series>>{<<.LabelMatchers>>}[2m])'
+      metricsQuery: 'last_over_time(<<.Series>>{<<.LabelMatchers>>}[1m])'
       name:
         matches: "DCGM_FI_DEV_FB_USED"
         as: "workload_gpu_memory_used"
@@ -90,7 +91,8 @@ rules:
   # External metrics for cluster-wide GPU autoscaling (HPA type: External)
   # These are not scoped to any pod or namespace, enabling HPA in any namespace
   # to scale based on cluster-wide GPU metrics.
-  # Note: no <<.LabelMatchers>> — these are unconditional cluster-wide aggregations.
+  # Uses avg_over_time for smoothing — external metrics feed dashboards/alerts
+  # where spike resistance is preferred over responsiveness.
   external:
     - seriesQuery: 'DCGM_FI_DEV_GPU_UTIL'
       metricsQuery: 'avg(avg_over_time(DCGM_FI_DEV_GPU_UTIL[2m]))'
