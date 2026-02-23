@@ -32,11 +32,16 @@ var httpRouteGVR = schema.GroupVersionResource{
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "inference-gateway",
-		Description: "Verify Gateway API for AI/ML inference routing (GatewayClass, Gateway, CRDs)",
-		Phase:       phaseConformance,
-		Func:        CheckInferenceGateway,
-		TestName:    "TestInferenceGateway",
+		Name:                  "inference-gateway",
+		Description:           "Verify Gateway API for AI/ML inference routing (GatewayClass, Gateway, CRDs)",
+		Phase:                 phaseConformance,
+		Func:                  CheckInferenceGateway,
+		TestName:              "TestInferenceGateway",
+		RequirementID:         "ai_inference",
+		EvidenceTitle:         "Inference API Gateway (kgateway)",
+		EvidenceDescription:   "Demonstrates that the cluster supports Kubernetes Gateway API for AI/ML inference routing with an operational GatewayClass and Gateway.",
+		EvidenceFile:          "inference-gateway.md",
+		SubmissionRequirement: true,
 	})
 }
 

@@ -215,7 +215,7 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 			{
 				APIGroups: []string{"autoscaling"},
 				Resources: []string{"horizontalpodautoscalers"},
-				Verbs:     []string{"get", "list", "create", "delete"},
+				Verbs:     []string{"get", "list", "create", "update", "delete"},
 			},
 			// Conformance: HPA behavioral tests — Deployment lifecycle
 			{

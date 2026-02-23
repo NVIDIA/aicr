@@ -42,11 +42,16 @@ const (
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "pod-autoscaling",
-		Description: "Verify custom and external metrics APIs expose GPU metrics for HPA",
-		Phase:       phaseConformance,
-		Func:        CheckPodAutoscaling,
-		TestName:    "TestPodAutoscaling",
+		Name:                  "pod-autoscaling",
+		Description:           "Verify custom and external metrics APIs expose GPU metrics for HPA",
+		Phase:                 phaseConformance,
+		Func:                  CheckPodAutoscaling,
+		TestName:              "TestPodAutoscaling",
+		RequirementID:         "pod_autoscaling",
+		EvidenceTitle:         "Pod Autoscaling (HPA)",
+		EvidenceDescription:   "Demonstrates that the custom and external metrics APIs expose GPU metrics for HPA-driven pod autoscaling.",
+		EvidenceFile:          "pod-autoscaling.md",
+		SubmissionRequirement: true,
 	})
 }
 
@@ -191,8 +196,28 @@ func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) er
 		return err
 	}
 
-	// Wait for Deployment to actually scale (proves HPA → Deployment controller chain).
-	return waitForDeploymentScale(ctx, clientset, nsName, deployName)
+	// Wait for Deployment to actually scale up (proves HPA → Deployment controller chain).
+	if err := waitForDeploymentScale(ctx, clientset, nsName, deployName); err != nil {
+		return err
+	}
+
+	// Scale-down: patch HPA with high target so metric reads well below threshold.
+	// This triggers the HPA to compute desiredReplicas = minReplicas (scale-down).
+	// We Get the current HPA first to preserve resourceVersion (required by Update).
+	slog.Info("testing scale-down: updating HPA with unreachable metric target")
+	currentHPA, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Get(
+		ctx, hpaName, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to get HPA for scale-down test", err)
+	}
+	currentHPA.Spec.Metrics[0].External.Target.AverageValue = resourceQuantityPtr("999999")
+	if _, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Update(
+		ctx, currentHPA, metav1.UpdateOptions{}); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to update HPA target for scale-down", err)
+	}
+
+	// Wait for Deployment to scale down (proves HPA scale-down path works).
+	return waitForDeploymentScaleDown(ctx, clientset, nsName, deployName)
 }
 
 // buildHPATestDeployment creates a minimal Deployment for the HPA behavioral test.
@@ -263,6 +288,13 @@ func buildHPATestHPA(name, deployName, namespace string) *autoscalingv2.Horizont
 							AverageValue: resourceQuantityPtr("10"),
 						},
 					},
+				},
+			},
+			// Allow immediate scale-down (bypass default 5-min stabilization window)
+			// so the scale-down behavioral test completes in reasonable time.
+			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
+				ScaleDown: &autoscalingv2.HPAScalingRules{
+					StabilizationWindowSeconds: int32Ptr(0),
 				},
 			},
 		},
@@ -345,6 +377,42 @@ func waitForDeploymentScale(ctx context.Context, clientset kubernetes.Interface,
 				"deployment did not scale up within timeout — HPA may not be effective", err)
 		}
 		return errors.Wrap(errors.ErrCodeInternal, "deployment scale verification failed", err)
+	}
+
+	return nil
+}
+
+// waitForDeploymentScaleDown polls the Deployment until status.replicas <= 1, proving
+// that the HPA's scale-down recommendation was enacted by the Deployment controller.
+func waitForDeploymentScaleDown(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.DeploymentScaleTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
+		func(ctx context.Context) (bool, error) {
+			deploy, getErr := clientset.AppsV1().Deployments(namespace).Get(
+				ctx, deployName, metav1.GetOptions{})
+			if getErr != nil {
+				slog.Debug("failed to get deployment for scale-down check", "error", getErr)
+				return false, nil
+			}
+
+			replicas := deploy.Status.Replicas
+			slog.Debug("deployment replica status (scale-down)", "name", deployName, "replicas", replicas)
+
+			if replicas <= 1 {
+				slog.Info("deployment scaled down", "name", deployName, "replicas", replicas)
+				return true, nil
+			}
+			return false, nil
+		},
+	)
+	if err != nil {
+		if ctx.Err() != nil || waitCtx.Err() != nil {
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"deployment did not scale down within timeout — HPA scale-down may not be effective", err)
+		}
+		return errors.Wrap(errors.ErrCodeInternal, "deployment scale-down verification failed", err)
 	}
 
 	return nil

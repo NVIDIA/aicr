@@ -68,11 +68,16 @@ var claimGVR = schema.GroupVersionResource{
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "secure-accelerator-access",
-		Description: "Verify DRA-mediated GPU access (no device plugin, no hostPath)",
-		Phase:       phaseConformance,
-		Func:        CheckSecureAcceleratorAccess,
-		TestName:    "TestSecureAcceleratorAccess",
+		Name:                  "secure-accelerator-access",
+		Description:           "Verify DRA-mediated GPU access (no device plugin, no hostPath)",
+		Phase:                 phaseConformance,
+		Func:                  CheckSecureAcceleratorAccess,
+		TestName:              "TestSecureAcceleratorAccess",
+		RequirementID:         "secure_accelerator_access",
+		EvidenceTitle:         "Secure Accelerator Access",
+		EvidenceDescription:   "Demonstrates that GPU access is exclusively mediated through DRA with no direct host device access or hostPath mounts.",
+		EvidenceFile:          "secure-accelerator-access.md",
+		SubmissionRequirement: true,
 	})
 }
 

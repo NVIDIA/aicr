@@ -36,6 +36,8 @@ func init() {
 		Func:        CheckPlatformHealth,
 		TestName:    "TestPlatformHealth",
 	})
+	// Note: platform-health is a diagnostic check, not a CNCF submission requirement.
+	// No evidence metadata fields set.
 }
 
 // CheckPlatformHealth validates that all expected platform components from the recipe

@@ -34,11 +34,16 @@ const dcgmExporterURL = "http://nvidia-dcgm-exporter.gpu-operator.svc:9400/metri
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "accelerator-metrics",
-		Description: "Verify DCGM exporter exposes required GPU metrics (utilization, memory, temperature, power)",
-		Phase:       phaseConformance,
-		Func:        CheckAcceleratorMetrics,
-		TestName:    "TestAcceleratorMetrics",
+		Name:                  "accelerator-metrics",
+		Description:           "Verify DCGM exporter exposes required GPU metrics (utilization, memory, temperature, power)",
+		Phase:                 phaseConformance,
+		Func:                  CheckAcceleratorMetrics,
+		TestName:              "TestAcceleratorMetrics",
+		RequirementID:         "accelerator_metrics",
+		EvidenceTitle:         "Accelerator & AI Service Metrics",
+		EvidenceDescription:   "Demonstrates that the DCGM exporter exposes per-GPU metrics (utilization, memory, temperature, power) in Prometheus format.",
+		EvidenceFile:          "accelerator-metrics.md",
+		SubmissionRequirement: true,
 	})
 }
 

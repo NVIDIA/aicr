@@ -17,11 +17,13 @@ package conformance
 import (
 	"crypto/rand"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -35,11 +37,16 @@ var dgdGVR = schema.GroupVersionResource{
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "robust-controller",
-		Description: "Verify Dynamo operator deployment, validating webhook, and DynamoGraphDeployment CRD",
-		Phase:       phaseConformance,
-		Func:        CheckRobustController,
-		TestName:    "TestRobustController",
+		Name:                  "robust-controller",
+		Description:           "Verify Dynamo operator deployment, validating webhook, and DynamoGraphDeployment CRD",
+		Phase:                 phaseConformance,
+		Func:                  CheckRobustController,
+		TestName:              "TestRobustController",
+		RequirementID:         "robust_controller",
+		EvidenceTitle:         "Robust AI Operator (Dynamo Platform)",
+		EvidenceDescription:   "Demonstrates that a complex AI operator (Dynamo) can be installed and functions reliably, including operator pods, webhooks, and custom resource reconciliation.",
+		EvidenceFile:          "robust-operator.md",
+		SubmissionRequirement: true,
 	})
 }
 
@@ -159,15 +166,23 @@ func validateWebhookRejects(ctx *checks.ValidationContext) error {
 			"validating webhook did not reject invalid DynamoGraphDeployment")
 	}
 
-	// Check if the error is specifically a webhook admission rejection.
-	// We intentionally do NOT check k8serrors.IsForbidden() here because Forbidden
-	// can also come from RBAC denials, which would produce false positives.
-	errMsg := createErr.Error()
-	if strings.Contains(errMsg, "admission webhook") || strings.Contains(errMsg, "denied the request") {
-		return nil // PASS — webhook properly rejected the invalid resource
+	// Webhook rejections produce Forbidden (403) or Invalid (422) API errors.
+	// Use k8serrors type predicates instead of brittle string matching.
+	// IsForbidden can also match RBAC denials, so we explicitly exclude those
+	// by checking the structured status message for RBAC patterns.
+	if k8serrors.IsForbidden(createErr) || k8serrors.IsInvalid(createErr) {
+		var statusErr *k8serrors.StatusError
+		if stderrors.As(createErr, &statusErr) {
+			msg := statusErr.Status().Message
+			if strings.Contains(msg, "cannot create resource") {
+				return errors.Wrap(errors.ErrCodeInternal,
+					"RBAC denied the request, not an admission webhook rejection", createErr)
+			}
+		}
+		return nil // PASS — webhook rejected the invalid resource
 	}
 
-	// Non-admission error (RBAC, network, CRD not installed, etc).
+	// Non-admission error (network, CRD not installed, server error, etc).
 	return errors.Wrap(errors.ErrCodeInternal,
 		"unexpected error testing webhook rejection", createErr)
 }

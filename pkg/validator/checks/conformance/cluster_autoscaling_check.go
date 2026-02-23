@@ -43,11 +43,16 @@ const (
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "cluster-autoscaling",
-		Description: "Verify Karpenter controller is deployed and a GPU-aware NodePool exists",
-		Phase:       phaseConformance,
-		Func:        CheckClusterAutoscaling,
-		TestName:    "TestClusterAutoscaling",
+		Name:                  "cluster-autoscaling",
+		Description:           "Verify Karpenter controller is deployed and a GPU-aware NodePool exists",
+		Phase:                 phaseConformance,
+		Func:                  CheckClusterAutoscaling,
+		TestName:              "TestClusterAutoscaling",
+		RequirementID:         "cluster_autoscaling",
+		EvidenceTitle:         "Cluster Autoscaling (Karpenter)",
+		EvidenceDescription:   "Demonstrates that the cluster supports GPU-aware autoscaling via Karpenter with NodePools configured for nvidia.com/gpu limits.",
+		EvidenceFile:          "cluster-autoscaling.md",
+		SubmissionRequirement: true,
 	})
 }
 
@@ -144,6 +149,17 @@ func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interf
 			cleanupCtx, nsName, metav1.DeleteOptions{}))
 	}()
 
+	// Baseline: count existing Karpenter nodes for this pool before creating test resources.
+	// This ensures we detect a NEW scale-up, not pre-existing nodes from prior runs.
+	baselineNodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s", karpenterNodePoolLabel, nodePoolName),
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to count baseline Karpenter nodes", err)
+	}
+	baselineNodeCount := len(baselineNodes.Items)
+	slog.Info("baseline Karpenter node count", "pool", nodePoolName, "count", baselineNodeCount)
+
 	// Create Deployment: GPU-requesting pods with Karpenter nodeSelector.
 	deploy := buildClusterAutoTestDeployment(deployName, nsName, nodePoolName)
 	if _, err := clientset.AppsV1().Deployments(nsName).Create(
@@ -163,8 +179,8 @@ func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interf
 		return err
 	}
 
-	// Wait for Karpenter to provision KWOK nodes.
-	if err := waitForKarpenterNodes(ctx, clientset, nodePoolName); err != nil {
+	// Wait for Karpenter to provision KWOK nodes (above baseline count).
+	if err := waitForKarpenterNodes(ctx, clientset, nodePoolName, baselineNodeCount); err != nil {
 		return err
 	}
 
@@ -317,8 +333,9 @@ func waitForClusterAutoHPAScale(ctx context.Context, clientset kubernetes.Interf
 	return nil
 }
 
-// waitForKarpenterNodes polls until at least one node with the discovered NodePool label exists.
-func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, nodePoolName string) error {
+// waitForKarpenterNodes polls until nodes with the discovered NodePool label exceed the
+// baseline count. This proves Karpenter provisioned NEW nodes, not just pre-existing ones.
+func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, nodePoolName string, baselineNodeCount int) error {
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.KarpenterNodeTimeout)
 	defer cancel()
 
@@ -332,9 +349,10 @@ func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, 
 				return false, nil
 			}
 
-			if len(nodes.Items) > 0 {
-				slog.Info("Karpenter provisioned KWOK GPU node(s)",
-					"count", len(nodes.Items))
+			if len(nodes.Items) > baselineNodeCount {
+				slog.Info("Karpenter provisioned new KWOK GPU node(s)",
+					"total", len(nodes.Items), "baseline", baselineNodeCount,
+					"new", len(nodes.Items)-baselineNodeCount)
 				return true, nil
 			}
 			return false, nil
@@ -372,7 +390,7 @@ func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, na
 
 			var scheduled int
 			for _, pod := range pods.Items {
-				if pod.Status.Phase != corev1.PodPending {
+				if pod.Status.Phase == corev1.PodRunning || pod.Status.Phase == corev1.PodSucceeded {
 					scheduled++
 				}
 			}

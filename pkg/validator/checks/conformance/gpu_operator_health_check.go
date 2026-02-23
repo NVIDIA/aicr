@@ -32,6 +32,8 @@ func init() {
 		Func:        CheckGPUOperatorHealth,
 		TestName:    "TestGPUOperatorHealth",
 	})
+	// Note: gpu-operator-health is a diagnostic check, not a CNCF submission requirement.
+	// No evidence metadata fields set.
 }
 
 // CheckGPUOperatorHealth validates CNCF requirement #1: GPU Management.

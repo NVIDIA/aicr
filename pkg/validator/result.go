@@ -157,4 +157,7 @@ type CheckResult struct {
 
 	// Remediation provides actionable guidance for fixing failures.
 	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`
+
+	// Duration is how long this check took to run.
+	Duration time.Duration `json:"duration,omitempty" yaml:"duration,omitempty"`
 }

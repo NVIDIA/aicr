@@ -295,7 +295,7 @@ func (v *Validator) validateReadiness(
 			for _, checkName := range recipeResult.Validation.Readiness.Checks {
 				check := CheckResult{
 					Name:   checkName,
-					Status: ValidationStatusPass,
+					Status: ValidationStatusSkipped,
 					Reason: "skipped - no-cluster mode (test mode)",
 				}
 				phaseResult.Checks = append(phaseResult.Checks, check)
@@ -427,7 +427,7 @@ func (v *Validator) validateDeployment(
 				for _, checkName := range recipeResult.Validation.Deployment.Checks {
 					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
 						Name:   checkName,
-						Status: ValidationStatusPass,
+						Status: ValidationStatusSkipped,
 						Reason: "skipped - no-cluster mode (test mode)",
 					})
 				}
@@ -569,7 +569,7 @@ func (v *Validator) validatePerformance(
 				for _, checkName := range recipeResult.Validation.Performance.Checks {
 					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
 						Name:   checkName,
-						Status: ValidationStatusPass,
+						Status: ValidationStatusSkipped,
 						Reason: "skipped - no-cluster mode (test mode)",
 					})
 				}
@@ -713,7 +713,7 @@ func (v *Validator) validateConformance(
 				for _, checkName := range recipeResult.Validation.Conformance.Checks {
 					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
 						Name:   checkName,
-						Status: ValidationStatusPass,
+						Status: ValidationStatusSkipped,
 						Reason: "skipped - no-cluster mode (test mode)",
 					})
 				}
@@ -727,7 +727,7 @@ func (v *Validator) validateConformance(
 					// Add skeleton check result
 					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
 						Name:   "conformance",
-						Status: ValidationStatusPass,
+						Status: ValidationStatusSkipped,
 						Reason: "skipped - Kubernetes unavailable (test mode)",
 					})
 				} else {
@@ -1174,8 +1174,9 @@ func (v *Validator) runPhaseJob(
 	if len(jobResult.Tests) > 0 {
 		for _, test := range jobResult.Tests {
 			checkResult := CheckResult{
-				Name:   test.Name,
-				Status: mapTestStatusToValidationStatus(test.Status),
+				Name:     test.Name,
+				Status:   mapTestStatusToValidationStatus(test.Status),
+				Duration: test.Duration,
 			}
 
 			// Parse constraint results from test output

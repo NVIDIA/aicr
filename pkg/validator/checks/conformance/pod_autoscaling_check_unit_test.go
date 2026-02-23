@@ -17,6 +17,7 @@ package conformance
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -122,32 +123,48 @@ func TestValidateHPABehavior(t *testing.T) {
 			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 			clientset := fake.NewSimpleClientset()
 
-			// HPA Get reactor: return HPA with specified status.
+			// Track whether HPA was updated (target patched for scale-down).
+			var hpaUpdated atomic.Bool
+
+			// HPA Get reactor: return HPA with both Spec and Status so Get-then-Update works.
 			clientset.PrependReactor("get", "horizontalpodautoscalers",
 				func(action k8stesting.Action) (bool, runtime.Object, error) {
-					hpa := &autoscalingv2.HorizontalPodAutoscaler{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      action.(k8stesting.GetAction).GetName(),
-							Namespace: action.GetNamespace(),
-						},
-						Status: autoscalingv2.HorizontalPodAutoscalerStatus{
-							DesiredReplicas: tt.desiredReplicas,
-							CurrentReplicas: tt.currentReplicas,
-						},
+					hpa := buildHPATestHPA(
+						action.(k8stesting.GetAction).GetName(),
+						"hpa-deploy-test",
+						action.GetNamespace(),
+					)
+					hpa.ResourceVersion = "1"
+					hpa.Status = autoscalingv2.HorizontalPodAutoscalerStatus{
+						DesiredReplicas: tt.desiredReplicas,
+						CurrentReplicas: tt.currentReplicas,
 					}
 					return true, hpa, nil
 				})
 
-			// Deployment Get reactor: return Deployment with scaled replicas.
+			// HPA Update reactor: accept the scale-down target patch.
+			clientset.PrependReactor("update", "horizontalpodautoscalers",
+				func(action k8stesting.Action) (bool, runtime.Object, error) {
+					hpaUpdated.Store(true)
+					ua := action.(k8stesting.UpdateAction)
+					return true, ua.GetObject(), nil
+				})
+
+			// Deployment Get reactor: return scaled-up replicas initially,
+			// then scaled-down (1 replica) after HPA target is patched.
 			clientset.PrependReactor("get", "deployments",
 				func(action k8stesting.Action) (bool, runtime.Object, error) {
+					replicas := tt.deployReplicas
+					if hpaUpdated.Load() {
+						replicas = 1 // simulate scale-down
+					}
 					deploy := &appsv1.Deployment{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      action.(k8stesting.GetAction).GetName(),
 							Namespace: action.GetNamespace(),
 						},
 						Status: appsv1.DeploymentStatus{
-							Replicas: tt.deployReplicas,
+							Replicas: replicas,
 						},
 					}
 					return true, deploy, nil
