@@ -42,7 +42,9 @@ toolkit:
 dcgmExporter:
   serviceMonitor:
     enabled: true
-    interval: 60s
+    # 30s for faster HPA metric availability; doubles scrape load vs 60s
+    interval: 30s
+    honorLabels: true
   config:
     name: "dcgm-exporter"
     create: true
