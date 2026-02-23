@@ -115,8 +115,17 @@ jobs:
 
       - name: Install chainsaw
         run: |
-          CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml)
-          GOFLAGS= go install "github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
+          set -euo pipefail
+          VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml)
+          VERSION="${VERSION#v}"
+          TAR="chainsaw_linux_amd64.tar.gz"
+          URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
+          TMP="$(mktemp -d)"
+          curl -fsSL -o "${TMP}/${TAR}" "${URL}"
+          tar -xzf "${TMP}/${TAR}" -C "${TMP}"
+          sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
+          sudo chmod +x /usr/local/bin/chainsaw
+          rm -rf "${TMP}"
           chainsaw version
 
       - name: Run chainsaw health checks

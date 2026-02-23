@@ -365,11 +365,21 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     else
         log_info "Installing Chainsaw ${CHAINSAW_VERSION}..."
         if prompt_continue; then
-            if command_exists go; then
-                go install github.com/kyverno/chainsaw@"${CHAINSAW_VERSION}"
-            else
-                log_warning "Install chainsaw manually: go install github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
-            fi
+            local ver="${CHAINSAW_VERSION#v}"
+            local os_name; os_name="$(uname -s | tr '[:upper:]' '[:lower:]')"
+            local arch; arch="$(uname -m)"
+            case "${arch}" in
+                x86_64) arch="amd64" ;;
+                aarch64|arm64) arch="arm64" ;;
+            esac
+            local tar="chainsaw_${os_name}_${arch}.tar.gz"
+            local url="https://github.com/kyverno/chainsaw/releases/download/v${ver}/${tar}"
+            local tmp; tmp="$(mktemp -d)"
+            curl -fsSL -o "${tmp}/${tar}" "${url}"
+            tar -xzf "${tmp}/${tar}" -C "${tmp}"
+            sudo mv "${tmp}/chainsaw" /usr/local/bin/chainsaw
+            sudo chmod +x /usr/local/bin/chainsaw
+            rm -rf "${tmp}"
             log_success "Chainsaw installed"
         fi
     fi
