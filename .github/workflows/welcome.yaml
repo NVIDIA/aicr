@@ -22,14 +22,16 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
 
   welcome:
     name: Welcome New Contributor
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
     timeout-minutes: 5
     steps:
       - name: Welcome First-Time Issue Author

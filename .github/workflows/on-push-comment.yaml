@@ -25,8 +25,7 @@ on:
       - completed
 
 permissions:
-  actions: read        # Required to download artifacts from other workflow runs
-  pull-requests: write
+  contents: read
 
 jobs:
   # COUPLING: This workflow depends on "On Push Qualification" producing these artifacts:
@@ -266,4 +265,35 @@ jobs:
                 body: body
               });
               console.log(`Created new comment on PR #${prNumber}`);
+            }
+
+      - name: Post unavailable notice
+        if: steps.download-pr.outcome != 'success' || steps.download-meta.outcome != 'success'
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea  # v7.0.1
+        with:
+          script: |
+            // Get PR number from workflow_run payload
+            const prs = context.payload.workflow_run.pull_requests;
+            if (!prs || prs.length === 0) return;
+            const prNumber = prs[0].number;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('## Coverage Report')
+            );
+
+            // Only post if there's no existing coverage comment
+            if (!botComment) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: '## Coverage Report\n\nCoverage data unavailable for this run. This can happen if the qualification workflow was cancelled or failed before generating coverage artifacts.',
+              });
             }

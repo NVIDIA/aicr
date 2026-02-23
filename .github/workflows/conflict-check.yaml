@@ -22,7 +22,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 concurrency:
   group: ${{ github.workflow }}
@@ -32,6 +31,9 @@ jobs:
   conflicts:
     name: Check Open PRs for Conflicts
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     timeout-minutes: 10
     steps:
       - name: Check Mergeable State

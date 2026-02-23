@@ -17,17 +17,18 @@ name: Dependabot Auto-Merge
 on:
   pull_request_target:
     types: [opened, synchronize]
-  workflow_dispatch: {}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
 
   auto-merge:
     name: Auto-Merge Patch Updates
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     timeout-minutes: 5
     if: github.actor == 'dependabot[bot]'
     steps:

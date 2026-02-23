@@ -20,13 +20,15 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  issues: write
+  contents: read
 
 jobs:
 
   triage:
     name: Auto-Triage Issues
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
     timeout-minutes: 5
     steps:
       - name: Add needs-triage on new issue

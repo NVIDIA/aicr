@@ -125,6 +125,7 @@ jobs:
     name: KWOK Test Summary
     needs: test
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: always()
     steps:
       - name: Check test results

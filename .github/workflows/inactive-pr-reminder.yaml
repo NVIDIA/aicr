@@ -20,7 +20,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}
@@ -30,6 +30,8 @@ jobs:
   remind:
     name: Nudge Inactive PRs
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     timeout-minutes: 10
     steps:
       - name: Check for Inactive PRs
