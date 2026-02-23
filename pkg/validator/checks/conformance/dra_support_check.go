@@ -23,11 +23,16 @@ import (
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "dra-support",
-		Description: "Verify DRA driver controller, kubelet plugin, and ResourceSlices exist",
-		Phase:       phaseConformance,
-		Func:        CheckDRASupport,
-		TestName:    "TestDRASupport",
+		Name:                  "dra-support",
+		Description:           "Verify DRA driver controller, kubelet plugin, and ResourceSlices exist",
+		Phase:                 phaseConformance,
+		Func:                  CheckDRASupport,
+		TestName:              "TestDRASupport",
+		RequirementID:         "dra_support",
+		EvidenceTitle:         "DRA Support (Dynamic Resource Allocation)",
+		EvidenceDescription:   "Demonstrates that the cluster supports Dynamic Resource Allocation with a functioning DRA driver, kubelet plugin, and GPU ResourceSlices.",
+		EvidenceFile:          "dra-support.md",
+		SubmissionRequirement: true,
 	})
 }
 

@@ -15,22 +15,38 @@
 package conformance
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+const robustTestPrefix = "robust-test-"
+
+var dgdGVR = schema.GroupVersionResource{
+	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamographdeployments",
+}
+
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "robust-controller",
-		Description: "Verify Dynamo operator deployment, validating webhook, and DynamoGraphDeployment CRD",
-		Phase:       phaseConformance,
-		Func:        CheckRobustController,
-		TestName:    "TestRobustController",
+		Name:                  "robust-controller",
+		Description:           "Verify Dynamo operator deployment, validating webhook, and DynamoGraphDeployment CRD",
+		Phase:                 phaseConformance,
+		Func:                  CheckRobustController,
+		TestName:              "TestRobustController",
+		RequirementID:         "robust_controller",
+		EvidenceTitle:         "Robust AI Operator (Dynamo Platform)",
+		EvidenceDescription:   "Demonstrates that a complex AI operator (Dynamo) can be installed and functions reliably, including operator pods, webhooks, and custom resource reconciliation.",
+		EvidenceFile:          "robust-operator.md",
+		SubmissionRequirement: true,
 	})
 }
 
@@ -103,5 +119,70 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 			"DynamoGraphDeployment CRD not found", err)
 	}
 
-	return nil
+	// 4. Validating webhook actively rejects invalid resources (behavioral test).
+	return validateWebhookRejects(ctx)
+}
+
+// validateWebhookRejects verifies that the Dynamo validating webhook actively rejects
+// invalid DynamoGraphDeployment resources. This proves the webhook is not just present
+// but functionally operational.
+func validateWebhookRejects(ctx *checks.ValidationContext) error {
+	dynClient, err := getDynamicClient(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Generate unique test resource name.
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
+	}
+	name := robustTestPrefix + hex.EncodeToString(b)
+
+	// Build an intentionally invalid DynamoGraphDeployment (empty services).
+	dgd := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "nvidia.com/v1alpha1",
+			"kind":       "DynamoGraphDeployment",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": "dynamo-system",
+			},
+			"spec": map[string]interface{}{
+				"services": map[string]interface{}{},
+			},
+		},
+	}
+
+	// Attempt to create the invalid resource — the webhook should reject it.
+	_, createErr := dynClient.Resource(dgdGVR).Namespace("dynamo-system").Create(
+		ctx.Context, dgd, metav1.CreateOptions{})
+
+	if createErr == nil {
+		// Webhook did not reject — clean up the accidentally created resource.
+		_ = dynClient.Resource(dgdGVR).Namespace("dynamo-system").Delete(
+			ctx.Context, name, metav1.DeleteOptions{})
+		return errors.New(errors.ErrCodeInternal,
+			"validating webhook did not reject invalid DynamoGraphDeployment")
+	}
+
+	// Webhook rejections produce Forbidden (403) or Invalid (422) API errors.
+	// Use k8serrors type predicates instead of brittle string matching.
+	// IsForbidden can also match RBAC denials, so we explicitly exclude those
+	// by checking the structured status message for RBAC patterns.
+	if k8serrors.IsForbidden(createErr) || k8serrors.IsInvalid(createErr) {
+		var statusErr *k8serrors.StatusError
+		if stderrors.As(createErr, &statusErr) {
+			msg := statusErr.Status().Message
+			if strings.Contains(msg, "cannot create resource") {
+				return errors.Wrap(errors.ErrCodeInternal,
+					"RBAC denied the request, not an admission webhook rejection", createErr)
+			}
+		}
+		return nil // PASS — webhook rejected the invalid resource
+	}
+
+	// Non-admission error (network, CRD not installed, server error, etc).
+	return errors.Wrap(errors.ErrCodeInternal,
+		"unexpected error testing webhook rejection", createErr)
 }

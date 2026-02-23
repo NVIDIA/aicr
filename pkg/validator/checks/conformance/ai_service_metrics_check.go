@@ -26,11 +26,16 @@ const prometheusBaseURL = "http://kube-prometheus-prometheus.monitoring.svc:9090
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
-		Name:        "ai-service-metrics",
-		Description: "Verify GPU metrics flow through Prometheus and custom metrics API is available",
-		Phase:       phaseConformance,
-		Func:        CheckAIServiceMetrics,
-		TestName:    "TestAIServiceMetrics",
+		Name:                  "ai-service-metrics",
+		Description:           "Verify GPU metrics flow through Prometheus and custom metrics API is available",
+		Phase:                 phaseConformance,
+		Func:                  CheckAIServiceMetrics,
+		TestName:              "TestAIServiceMetrics",
+		RequirementID:         "accelerator_metrics",
+		EvidenceTitle:         "Accelerator & AI Service Metrics",
+		EvidenceDescription:   "Demonstrates that GPU metrics flow through Prometheus and are available via the Kubernetes custom metrics API for HPA scaling.",
+		EvidenceFile:          "accelerator-metrics.md",
+		SubmissionRequirement: true,
 	})
 }
 

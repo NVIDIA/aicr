@@ -13,15 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# CNCF AI Conformance Evidence Collection
-# Collects evidence for Must-have requirements (Kubernetes 1.34)
+# DEPRECATED: Use 'aicr validate --evidence-dir' instead.
 #
-# Usage: ./docs/conformance/cncf/collect-evidence.sh [section]
-#   Sections: dra, gang, secure, metrics, gateway, operator, all (default: all)
-#
-# Each section produces a separate evidence file under docs/conformance/cncf/evidence/
+# Evidence is now generated directly from validation results:
+#   aicr validate -r recipe.yaml --phase conformance --evidence-dir ./evidence
+#   aicr validate -r recipe.yaml --phase conformance --evidence-dir ./evidence --result result.yaml
 
-set -euo pipefail
+echo "DEPRECATED: Use 'aicr validate --evidence-dir' instead." >&2
+exit 1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"

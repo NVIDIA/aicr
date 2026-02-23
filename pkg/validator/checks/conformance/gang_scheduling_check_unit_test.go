@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	corev1 "k8s.io/api/core/v1"
@@ -187,8 +188,12 @@ func TestCheckGangScheduling(t *testing.T) {
 				var mu sync.Mutex
 				deletedPods := make(map[string]bool)
 
+				// Co-scheduling timestamp: all gang pods share the same schedule time.
+				scheduleTime := metav1.NewTime(time.Now())
+
 				// Reactor: match any pod with the gang worker prefix.
-				// Returns a pod with the desired phase and correct gang labels.
+				// Returns a pod with the desired phase, correct gang labels,
+				// and PodScheduled condition with co-scheduling timestamp.
 				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
 					ga := action.(k8stesting.GetAction)
 					if strings.HasPrefix(ga.GetName(), gangPodPrefix) && ga.GetNamespace() == gangTestNamespace {
@@ -224,7 +229,16 @@ func TestCheckGangScheduling(t *testing.T) {
 									{Name: "worker", Image: "nvidia/cuda:12.9.0-base-ubuntu24.04"},
 								},
 							},
-							Status: corev1.PodStatus{Phase: tt.podPhase},
+							Status: corev1.PodStatus{
+								Phase: tt.podPhase,
+								Conditions: []corev1.PodCondition{
+									{
+										Type:               corev1.PodScheduled,
+										Status:             corev1.ConditionTrue,
+										LastTransitionTime: scheduleTime,
+									},
+								},
+							},
 						}, nil
 					}
 					return false, nil, nil

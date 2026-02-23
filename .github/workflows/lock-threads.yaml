@@ -20,8 +20,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  issues: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}
@@ -31,6 +30,9 @@ jobs:
   lock:
     name: Lock Closed Threads
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
     timeout-minutes: 10
     steps:
       - name: Lock Stale Issues and PRs

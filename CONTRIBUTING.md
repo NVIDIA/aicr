@@ -195,6 +195,22 @@ Trust is established through evidence, not assertions. Every released artifact c
 
 4. **Merge**: Once approved and CI passes, a maintainer will merge
 
+### Issue and PR Lifecycle
+
+Automated bots manage the lifecycle of issues and pull requests:
+
+| Day | Action |
+|-----|--------|
+| 0 | Issue/PR opened, `needs-triage` label added to issues |
+| 14 | Inactive PRs receive a reminder comment |
+| 30 | Inactive PRs marked `lifecycle/stale` |
+| 44 | Stale PRs auto-closed |
+| 60 | Inactive issues marked `lifecycle/stale` |
+| 74 | Stale issues auto-closed |
+| 90+ | Closed issues/PRs locked |
+
+**To prevent auto-close:** Add the `lifecycle/frozen` label. PRs with `do-not-merge` are also exempt.
+
 ### After Merging
 
 ```bash

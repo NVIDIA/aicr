@@ -19,6 +19,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -263,7 +264,7 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 // LoadPodFromTemplate reads and processes a pod template file with variable substitution
 // It takes a template path and a map of variables to replace in the format ${KEY}
 func loadPodFromTemplate(templatePath string, data map[string]string) (*v1.Pod, error) {
-	content, err := os.ReadFile(templatePath)
+	content, err := os.ReadFile(filepath.Clean(templatePath)) //nolint:gosec // G703 -- path from embedded template config
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read template", err)
 	}

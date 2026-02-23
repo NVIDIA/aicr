@@ -82,6 +82,25 @@ type Check struct {
 	// TestName is the Go test function name (e.g., "TestCheckOperatorHealth")
 	// If empty, derived from Name automatically
 	TestName string
+
+	// RequirementID is the CNCF conformance requirement ID (e.g., "dra_support").
+	// Empty for checks that are not CNCF submission requirements.
+	RequirementID string
+
+	// EvidenceTitle is the human-readable title for evidence documents (e.g., "DRA Support").
+	EvidenceTitle string
+
+	// EvidenceDescription is a one-paragraph description for evidence documents.
+	EvidenceDescription string
+
+	// EvidenceFile is the output filename for evidence (e.g., "dra-support.md").
+	// Multiple checks can share the same EvidenceFile (combined evidence).
+	// Empty means this check produces no evidence file.
+	EvidenceFile string
+
+	// SubmissionRequirement indicates this check maps to a CNCF submission requirement.
+	// Only checks with this set to true appear in the submission evidence index.
+	SubmissionRequirement bool
 }
 
 // ConstraintValidator represents a registered constraint validator.
@@ -185,6 +204,29 @@ func GetCheck(name string) (*Check, bool) {
 
 	check, ok := checkRegistry[name]
 	return check, ok
+}
+
+// GetCheckByTestName does a reverse lookup: Go test name → Check.
+func GetCheckByTestName(testName string) (*Check, bool) {
+	registryMu.RLock()
+	defer registryMu.RUnlock()
+
+	for _, check := range checkRegistry {
+		if check.TestName == testName {
+			return check, true
+		}
+	}
+	return nil, false
+}
+
+// ResolveCheck tries check name first, then test name.
+// This handles the identity mismatch where CheckResult.Name can be either
+// a check registry name (--no-cluster path) or a Go test name (normal cluster runs).
+func ResolveCheck(name string) (*Check, bool) {
+	if check, ok := GetCheck(name); ok {
+		return check, true
+	}
+	return GetCheckByTestName(name)
 }
 
 // GetConstraintValidator retrieves a constraint validator by pattern.

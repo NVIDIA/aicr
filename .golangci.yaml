@@ -16,7 +16,7 @@ version: "2"
 
 # Run configuration
 run:
-  go: "1.25"
+  go: "1.26"
   timeout: 5m
   tests: true
   modules-download-mode: readonly
@@ -79,6 +79,10 @@ linters:
     - importas        # Import aliasing
 
   settings:
+    gosec:
+      excludes:
+        - G706  # Log injection: slog structured logging with key-value pairs is safe
+
     funlen:
       lines: 200
       statements: 70

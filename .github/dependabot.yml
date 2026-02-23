@@ -32,6 +32,12 @@ updates:
         exclude-patterns:
           # klog has independent versioning
           - "k8s.io/klog/v2"
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+      opencontainers:
+        patterns:
+          - "github.com/opencontainers/*"
 
   - package-ecosystem: "github-actions"
     directories:

@@ -12,14 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ignore:
-  - vulnerability: CVE-2025-61732
-    package:
-      name: stdlib
-      version: go1.24.12
-    until: "2025-12-31"
-  - vulnerability: CVE-2025-68121
-    package:
-      name: stdlib
-      version: go1.24.12
-    until: "2025-12-31"
+ignore: []
+
+exclude:
+  - '**/.terraform/**'

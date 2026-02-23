@@ -37,13 +37,15 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  issues: write
-  pull-requests: write
+  contents: read
 
 jobs:
   stale:
     name: Mark stale issues and PRs
     runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
     timeout-minutes: 10
 
     steps:

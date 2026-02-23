@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/evidence"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -158,6 +159,8 @@ func runValidation(
 	cleanup bool,
 	imagePullSecrets []string,
 	noCluster bool,
+	evidenceDir string,
+	evidenceResultPath string,
 ) error {
 
 	slog.Info("running validation",
@@ -217,6 +220,30 @@ func runValidation(
 		"failed", result.Summary.Failed,
 		"skipped", result.Summary.Skipped,
 		"duration", result.Summary.Duration)
+
+	// Generate evidence if requested. Strict: failure is an error.
+	if evidenceDir != "" {
+		// Use a saved result file for evidence when --result is provided,
+		// otherwise use the result from the validation run we just completed.
+		evidenceSource := result
+		if evidenceResultPath != "" {
+			slog.Info("loading saved result for evidence rendering", "path", evidenceResultPath)
+			saved, loadErr := serializer.FromFile[validator.ValidationResult](evidenceResultPath)
+			if loadErr != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to load evidence result", loadErr)
+			}
+			evidenceSource = saved
+		}
+
+		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
+		defer evidenceCancel()
+
+		renderer := evidence.New(evidence.WithOutputDir(evidenceDir))
+		if err := renderer.Render(evidenceCtx, evidenceSource); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", err)
+		}
+		slog.Info("conformance evidence written", "dir", evidenceDir)
+	}
 
 	// If cleanup is disabled, provide helpful debugging info
 	if !cleanup {
@@ -332,6 +359,14 @@ func validateCmdFlags() []cli.Flag {
 			Sources: cli.EnvVars("AICR_REQUIRE_GPU"),
 			Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
 		},
+		&cli.StringFlag{
+			Name:  "evidence-dir",
+			Usage: "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
+		},
+		&cli.StringFlag{
+			Name:  "result",
+			Usage: "Use a saved validation result file as the source for evidence rendering (live validation still runs). Requires --phase conformance and --evidence-dir.",
+		},
 		outputFlag,
 		formatFlag,
 		kubeconfigFlag,
@@ -385,13 +420,46 @@ Run validation without failing on constraint errors (informational mode):
 
 Resume a previous validation run from where it left off:
   aicr validate -r recipe.yaml -s snapshot.yaml --resume 20260206-140523-a3f9
+
+Generate conformance evidence alongside validation:
+  aicr validate -r recipe.yaml -s snapshot.yaml \
+    --phase conformance --evidence-dir ./evidence
+
+Use a saved result file for evidence instead of the live run:
+  aicr validate -r recipe.yaml -s snapshot.yaml \
+    --phase conformance --evidence-dir ./evidence \
+    --result validation-result.yaml
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			// Note: --phase allows multiple values so it's not included here
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "resume"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "resume", "result"); err != nil {
 				return err
+			}
+
+			evidenceDir := cmd.String("evidence-dir")
+			resultPath := cmd.String("result")
+
+			// Parse phases (default to readiness if none specified)
+			phases, err := parseValidationPhases(cmd.StringSlice("phase"))
+			if err != nil {
+				return err
+			}
+
+			// Validate evidence flag constraints.
+			hasConformance := false
+			for _, p := range phases {
+				if p == validator.PhaseConformance || p == validator.PhaseAll {
+					hasConformance = true
+					break
+				}
+			}
+			if evidenceDir != "" && !hasConformance {
+				return errors.New(errors.ErrCodeInvalidRequest, "--evidence-dir requires --phase conformance")
+			}
+			if resultPath != "" && evidenceDir == "" {
+				return errors.New(errors.ErrCodeInvalidRequest, "--result requires --evidence-dir")
 			}
 
 			recipeFilePath := cmd.String("recipe")
@@ -417,12 +485,6 @@ Resume a previous validation run from where it left off:
 			}
 
 			failOnError := cmd.Bool("fail-on-error")
-
-			// Parse phases (default to readiness if none specified)
-			phases, err := parseValidationPhases(cmd.StringSlice("phase"))
-			if err != nil {
-				return err
-			}
 
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
@@ -460,7 +522,7 @@ Resume a previous validation run from where it left off:
 				}
 			}
 
-			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"))
+			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), evidenceDir, resultPath)
 		},
 	}
 }

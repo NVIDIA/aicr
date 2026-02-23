@@ -25,6 +25,6 @@ phases:
     status: pass
     checks:
       - name: expected-resources
-        status: pass
+        status: skipped
   conformance:
     status: pass

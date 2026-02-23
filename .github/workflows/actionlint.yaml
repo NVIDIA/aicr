@@ -12,24 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: On Push Qualification
+name: Lint GitHub Actions
 
 on:
   push:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
   pull_request:
     branches:
       - main
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'LICENSE'
-  workflow_dispatch: {}  # Allow manual runs
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -40,30 +38,17 @@ concurrency:
 
 jobs:
 
-  tests:
-    uses: ./.github/workflows/qualification.yaml
-    permissions:
-      actions: read
-      contents: read
-    with:
-      coverage_report: 'true'
-
-  security-scan:
-    name: Security Scan
+  actionlint:
+    name: Lint Workflows
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-      security-events: write  # required by codeql-action/upload-sarif in security-scan
+    timeout-minutes: 5
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Security Scan
-        uses: ./.github/actions/security-scan
+      - name: Run actionlint
+        uses: reviewdog/action-actionlint@a5524e1de9f1c345efc2e244a8b348e17f1b8e58  # v1.65.0
         with:
-          severity: 'MEDIUM'
-          category: 'trivy-fs'
+          fail_on_error: true

@@ -39,7 +39,6 @@ on:
       - 'recipes/overlays/h100-kind-inference-dynamo.yaml'
       - 'kwok/manifests/karpenter/**'
       - 'kwok/scripts/install-karpenter-kwok.sh'
-      - 'kwok/scripts/validate-cluster-autoscaling.sh'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -81,37 +80,20 @@ jobs:
 
       # --- Snapshot and validation ---
 
-      - name: Run aicr snapshot
-        run: |
-          ./aicr snapshot --deploy-agent \
-            --kubeconfig="${HOME}/.kube/config" \
-            --namespace=default \
-            --image=ko.local:smoke-test \
-            --require-gpu \
-            --output=snapshot.yaml
-          echo "--- Snapshot output ---"
-          cat snapshot.yaml
-
-      - name: Validate snapshot detected GPU
-        run: |
-          GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[0].data["gpu.model"]' snapshot.yaml)
-          GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[0].data["gpu-count"]' snapshot.yaml)
-          echo "GPU model: ${GPU_MODEL}"
-          echo "GPU count: ${GPU_COUNT}"
-          if [[ "${GPU_MODEL}" != *"H100"* ]]; then
-            echo "::error::Expected H100 GPU in snapshot, got: ${GPU_MODEL}"
-            exit 1
-          fi
-          if [[ "${GPU_COUNT}" -lt 1 ]]; then
-            echo "::error::Expected gpu-count >= 1, got: ${GPU_COUNT}"
-            exit 1
-          fi
-          echo "Snapshot correctly detected ${GPU_COUNT}x ${GPU_MODEL}"
+      - name: Snapshot and validate GPU
+        uses: ./.github/actions/gpu-snapshot-validate
+        with:
+          gpu_model: H100
+          min_gpu_count: '1'
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
       # --- Install Karpenter before validation so cluster-autoscaling check passes ---
 
       - name: Install Karpenter + KWOK (setup)
-        run: bash kwok/scripts/validate-cluster-autoscaling.sh --setup
+        run: |
+          export KARPENTER_VERSION=$(yq eval '.testing_tools.karpenter' .settings.yaml)
+          bash kwok/scripts/install-karpenter-kwok.sh
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f kwok/manifests/karpenter/nodepool.yaml
 
       # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
       # Includes self-contained secure-accelerator-access check (creates its own
@@ -127,12 +109,23 @@ jobs:
             --namespace gpu-operator \
             --kubeconfig="${HOME}/.kube/config" \
             --require-gpu \
-            --image=ko.local:smoke-test
+            --image=ko.local:smoke-test \
+            --output=validation-result.yaml \
+            --evidence-dir=conformance-evidence
 
       - name: Install chainsaw
         run: |
-          CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml)
-          GOFLAGS= go install "github.com/kyverno/chainsaw@${CHAINSAW_VERSION}"
+          set -euo pipefail
+          VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml)
+          VERSION="${VERSION#v}"
+          TAR="chainsaw_linux_amd64.tar.gz"
+          URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
+          TMP="$(mktemp -d)"
+          curl -fsSL -o "${TMP}/${TAR}" "${URL}"
+          tar -xzf "${TMP}/${TAR}" -C "${TMP}"
+          sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
+          sudo chmod +x /usr/local/bin/chainsaw
+          rm -rf "${TMP}"
           chainsaw version
 
       - name: Run chainsaw health checks
@@ -228,11 +221,6 @@ jobs:
           fi
           echo "Dynamo vLLM inference smoke test passed."
 
-      # --- Cluster Autoscaling validation ---
-
-      - name: Cluster Autoscaling (Karpenter + KWOK)
-        run: bash kwok/scripts/validate-cluster-autoscaling.sh --exercise
-
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
@@ -250,6 +238,16 @@ jobs:
             --file tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml \
             --kubeconfig="${HOME}/.kube/config" \
             --debug
+
+      - name: Upload conformance evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+        with:
+          name: conformance-evidence
+          path: |
+            conformance-evidence/
+            validation-result.yaml
+          if-no-files-found: warn
 
       - name: Debug diagnostics
         if: failure()

@@ -24,8 +24,9 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/deployment" // Import for init() registration
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/readiness"  // Import for init() registration
+	_ "github.com/NVIDIA/aicr/pkg/validator/checks/conformance" // Import for init() registration
+	_ "github.com/NVIDIA/aicr/pkg/validator/checks/deployment"  // Import for init() registration
+	_ "github.com/NVIDIA/aicr/pkg/validator/checks/readiness"   // Import for init() registration
 )
 
 // TestConstraintRegistrationCompleteness ensures that every registered constraint
@@ -232,6 +233,123 @@ func findIntegrationTestFunctions(t *testing.T) map[string]bool {
 	}
 
 	return tests
+}
+
+// TestEvidenceMetadataCompleteness ensures that every conformance check with
+// SubmissionRequirement=true has complete evidence metadata.
+func TestEvidenceMetadataCompleteness(t *testing.T) {
+	conformanceChecks := checks.ListChecks("conformance")
+	if len(conformanceChecks) == 0 {
+		t.Skip("No conformance checks registered")
+	}
+
+	for _, check := range conformanceChecks {
+		if !check.SubmissionRequirement {
+			continue
+		}
+
+		t.Run(check.Name, func(t *testing.T) {
+			if check.RequirementID == "" {
+				t.Errorf("check %q has SubmissionRequirement=true but empty RequirementID", check.Name)
+			}
+			if check.EvidenceTitle == "" {
+				t.Errorf("check %q has SubmissionRequirement=true but empty EvidenceTitle", check.Name)
+			}
+			if check.EvidenceDescription == "" {
+				t.Errorf("check %q has SubmissionRequirement=true but empty EvidenceDescription", check.Name)
+			}
+			if check.EvidenceFile == "" {
+				t.Errorf("check %q has SubmissionRequirement=true but empty EvidenceFile", check.Name)
+			}
+		})
+	}
+}
+
+// TestResolveCheckDualLookup verifies that ResolveCheck finds checks by both
+// check name and Go test name (handles the identity mismatch).
+func TestResolveCheckDualLookup(t *testing.T) {
+	conformanceChecks := checks.ListChecks("conformance")
+	if len(conformanceChecks) == 0 {
+		t.Skip("No conformance checks registered")
+	}
+
+	for _, check := range conformanceChecks {
+		t.Run("by_name/"+check.Name, func(t *testing.T) {
+			resolved, ok := checks.ResolveCheck(check.Name)
+			if !ok {
+				t.Errorf("ResolveCheck(%q) not found by check name", check.Name)
+				return
+			}
+			if resolved.Name != check.Name {
+				t.Errorf("ResolveCheck(%q) returned check %q", check.Name, resolved.Name)
+			}
+		})
+
+		t.Run("by_test/"+check.TestName, func(t *testing.T) {
+			resolved, ok := checks.ResolveCheck(check.TestName)
+			if !ok {
+				t.Errorf("ResolveCheck(%q) not found by test name", check.TestName)
+				return
+			}
+			if resolved.Name != check.Name {
+				t.Errorf("ResolveCheck(%q) returned check %q, want %q", check.TestName, resolved.Name, check.Name)
+			}
+		})
+	}
+}
+
+// TestGetCheckByTestNameReverseLookup verifies that GetCheckByTestName
+// can find all registered checks by their TestName.
+func TestGetCheckByTestNameReverseLookup(t *testing.T) {
+	allChecks := checks.ListChecks("")
+	if len(allChecks) == 0 {
+		t.Skip("No checks registered")
+	}
+
+	for _, check := range allChecks {
+		if check.TestName == "" {
+			continue
+		}
+
+		t.Run(check.TestName, func(t *testing.T) {
+			found, ok := checks.GetCheckByTestName(check.TestName)
+			if !ok {
+				t.Errorf("GetCheckByTestName(%q) not found", check.TestName)
+				return
+			}
+			if found.Name != check.Name {
+				t.Errorf("GetCheckByTestName(%q) returned %q, want %q", check.TestName, found.Name, check.Name)
+			}
+		})
+	}
+}
+
+// TestSharedEvidenceFileIntentional verifies that only known pairs of checks
+// share an EvidenceFile (accelerator-metrics + ai-service-metrics).
+func TestSharedEvidenceFileIntentional(t *testing.T) {
+	conformanceChecks := checks.ListChecks("conformance")
+	if len(conformanceChecks) == 0 {
+		t.Skip("No conformance checks registered")
+	}
+
+	// Known intentional shared files: accelerator-metrics.md
+	allowedShared := map[string]bool{
+		"accelerator-metrics.md": true,
+	}
+
+	fileToChecks := make(map[string][]string)
+	for _, check := range conformanceChecks {
+		if check.EvidenceFile == "" {
+			continue
+		}
+		fileToChecks[check.EvidenceFile] = append(fileToChecks[check.EvidenceFile], check.Name)
+	}
+
+	for file, checkNames := range fileToChecks {
+		if len(checkNames) > 1 && !allowedShared[file] {
+			t.Errorf("unexpected shared EvidenceFile %q used by checks: %v", file, checkNames)
+		}
+	}
 }
 
 // checkNameToTestName converts a check name to test function name.

@@ -57,6 +57,12 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatePerformanceTimeout", ValidatePerformanceTimeout, 10 * time.Minute, 60 * time.Minute},
 		{"ValidateConformanceTimeout", ValidateConformanceTimeout, 5 * time.Minute, 30 * time.Minute},
 		{"ResourceVerificationTimeout", ResourceVerificationTimeout, 5 * time.Second, 30 * time.Second},
+
+		// Gang scheduling co-scheduling window
+		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
+
+		// Evidence rendering timeout
+		{"EvidenceRenderTimeout", EvidenceRenderTimeout, 10 * time.Second, 60 * time.Second},
 	}
 
 	for _, tt := range tests {
