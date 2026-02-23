@@ -139,6 +139,36 @@ For more information:
 - [SPDX Specification](https://spdx.dev/)
 - [Sigstore Cosign](https://docs.sigstore.dev/cosign/overview/)
 
+### CLI Binary Attestation
+
+CLI binary releases are attested with SLSA Build Provenance v1 using Cosign keyless
+signing via GitHub Actions OIDC. Each release archive (`.tar.gz`) contains:
+
+- `aicr` — the binary
+- `aicr-attestation.sigstore.json` — SLSA Build Provenance v1 attestation (Sigstore bundle format)
+
+The attestation cryptographically proves which repository, commit, and workflow produced
+the binary. It is logged to the public [Rekor](https://rekor.sigstore.dev/) transparency
+log and can be verified offline.
+
+**Verify a binary attestation:**
+
+```shell
+cosign verify-blob-attestation \
+  --bundle aicr-attestation.sigstore.json \
+  --type https://slsa.dev/provenance/v1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
+  aicr
+```
+
+The install script (`./install`) performs this verification automatically when
+[Cosign](https://docs.sigstore.dev/cosign/system_config/installation/) is available.
+
+**On-demand attested builds:** The `Build Attested Binaries` workflow
+(`.github/workflows/build-attested.yaml`) can be triggered manually from the
+Actions tab to produce attested binaries from any branch without cutting a release.
+
 ### Setup
 
 Export variables for the image you want to verify:
