@@ -14,10 +14,10 @@
 | 4 | `accelerator_metrics` / `ai_service_metrics` | Accelerator & AI Service Metrics | PASS | [accelerator-metrics.md](accelerator-metrics.md) |
 | 5 | `ai_inference` | Inference API Gateway (kgateway) | PASS | [inference-gateway.md](inference-gateway.md) |
 | 6 | `robust_controller` | Robust AI Operator (Dynamo) | PASS | [robust-operator.md](robust-operator.md) |
+| 7 | `pod_autoscaling` | Pod Autoscaling (HPA + GPU metrics) | PASS | [pod-autoscaling.md](pod-autoscaling.md) |
 
 ## Not Yet Collected
 
 | Requirement | Feature | Status |
 |-------------|---------|--------|
 | `cluster_autoscaling` | Cluster Autoscaling | TODO |
-| `pod_autoscaling` | Pod Autoscaling (HPA) | TODO |
