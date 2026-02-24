@@ -601,84 +601,34 @@ test_snapshot() {
   msg "=========================================="
 
   if [ "$FAKE_GPU_ENABLED" != "true" ]; then
-    skip "snapshot/deploy-agent" "Fake GPU not enabled"
+    skip "snapshot/agent" "Fake GPU not enabled"
     return 0
   fi
 
   # Clean up any existing snapshot
   kubectl delete cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1
 
-  # Test: Snapshot with deploy-agent using custom Job (with nvidia-smi hostPath)
-  msg "--- Test: Snapshot with deploy-agent ---"
+  # Test: Snapshot via agent deployment from the CI runner.
+  # The snapshot command always deploys a Job to capture data on a cluster node.
+  msg "--- Test: Snapshot via agent deployment ---"
   detail "Image: ${AICR_IMAGE}"
   detail "Output: cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}"
 
-  # Create a custom Job that mounts nvidia-smi from host
-  echo -e "${DIM}  \$ kubectl apply -f snapshot-job.yaml${NC}"
-  kubectl delete job aicr-e2e-snapshot -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1
-  sleep 2
+  echo -e "${DIM}  \$ aicr snapshot --image ${AICR_IMAGE} --namespace ${SNAPSHOT_NAMESPACE} -o cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}${NC}"
+  local snapshot_output
+  snapshot_output=$("${AICR_BIN}" snapshot \
+    --image "${AICR_IMAGE}" \
+    --namespace "${SNAPSHOT_NAMESPACE}" \
+    --output "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --timeout 120s \
+    --privileged \
+    --node-selector kubernetes.io/os=linux 2>&1) || true
 
-  kubectl apply -f - << EOF
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: aicr-e2e-snapshot
-  namespace: ${SNAPSHOT_NAMESPACE}
-spec:
-  completions: 1
-  backoffLimit: 0
-  ttlSecondsAfterFinished: 300
-  template:
-    spec:
-      serviceAccountName: aicr
-      restartPolicy: Never
-      nodeSelector:
-        kubernetes.io/os: linux
-      hostPID: true
-      hostNetwork: true
-      containers:
-      - name: aicr
-        image: ${AICR_IMAGE}
-        command: ["aicr"]
-        args: ["snapshot", "-o", "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}"]
-        env:
-        - name: AICR_LOG_PREFIX
-          value: agent
-        - name: NODE_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: spec.nodeName
-        securityContext:
-          privileged: true
-          runAsUser: 0
-        volumeMounts:
-        - name: tmp
-          mountPath: /tmp
-        - name: run-systemd
-          mountPath: /run/systemd
-          readOnly: true
-        - name: nvidia-smi
-          mountPath: /usr/bin/nvidia-smi
-          readOnly: true
-      volumes:
-      - name: tmp
-        emptyDir: {}
-      - name: run-systemd
-        hostPath:
-          path: /run/systemd
-          type: Directory
-      - name: nvidia-smi
-        hostPath:
-          path: /usr/local/bin/nvidia-smi
-          type: File
-EOF
-
-  # Wait for job to complete
-  if kubectl wait --for=condition=complete job/aicr-e2e-snapshot -n "$SNAPSHOT_NAMESPACE" --timeout=120s > /dev/null 2>&1; then
-    pass "snapshot/deploy-agent"
+  if kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
+    pass "snapshot/agent"
   else
-    kubectl logs -n "$SNAPSHOT_NAMESPACE" -l job-name=aicr-e2e-snapshot 2>/dev/null || true
-    fail "snapshot/deploy-agent" "Job did not complete"
+    echo "$snapshot_output"
+    fail "snapshot/agent" "Snapshot ConfigMap not created"
     return 1
   fi
 
