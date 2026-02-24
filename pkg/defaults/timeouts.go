@@ -139,6 +139,12 @@ const (
 
 // Conformance test timeouts for DRA and gang scheduling validation.
 const (
+	// CheckExecutionTimeout is the parent context timeout for checks running
+	// inside a K8s Job. Must be long enough for behavioral checks (DRA pod
+	// creation + image pull + GPU allocation + isolation verification) and
+	// shorter than the Job-level ValidateConformanceTimeout.
+	CheckExecutionTimeout = 10 * time.Minute
+
 	// DRATestPodTimeout is the timeout for the DRA test pod to complete.
 	// The pod runs a simple CUDA device check but may need time for image pull.
 	DRATestPodTimeout = 5 * time.Minute

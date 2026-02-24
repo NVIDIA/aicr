@@ -58,6 +58,9 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidateConformanceTimeout", ValidateConformanceTimeout, 5 * time.Minute, 30 * time.Minute},
 		{"ResourceVerificationTimeout", ResourceVerificationTimeout, 5 * time.Second, 30 * time.Second},
 
+		// Conformance check execution timeout
+		{"CheckExecutionTimeout", CheckExecutionTimeout, 5 * time.Minute, 15 * time.Minute},
+
 		// Gang scheduling co-scheduling window
 		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
 
@@ -124,6 +127,20 @@ func TestValidationPhaseTimeoutRelationships(t *testing.T) {
 	if ResourceVerificationTimeout >= ValidateDeploymentTimeout {
 		t.Errorf("ResourceVerificationTimeout (%v) should be less than ValidateDeploymentTimeout (%v)",
 			ResourceVerificationTimeout, ValidateDeploymentTimeout)
+	}
+}
+
+func TestCheckExecutionTimeoutRelationships(t *testing.T) {
+	// Check execution timeout must be shorter than the conformance Job timeout
+	// to allow the Job to observe completion before its own deadline.
+	if CheckExecutionTimeout >= ValidateConformanceTimeout {
+		t.Errorf("CheckExecutionTimeout (%v) should be less than ValidateConformanceTimeout (%v)",
+			CheckExecutionTimeout, ValidateConformanceTimeout)
+	}
+	// Individual check timeouts must fit within the execution context.
+	if DRATestPodTimeout >= CheckExecutionTimeout {
+		t.Errorf("DRATestPodTimeout (%v) should be less than CheckExecutionTimeout (%v)",
+			DRATestPodTimeout, CheckExecutionTimeout)
 	}
 }
 

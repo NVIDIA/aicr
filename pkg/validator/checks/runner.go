@@ -222,7 +222,7 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 // IMPORTANT: The caller is responsible for calling the returned cancel function
 // when the validation context is no longer needed.
 func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), defaults.CheckExecutionTimeout)
 
 	// Create in-cluster Kubernetes client
 	config, err := rest.InClusterConfig()
