@@ -1421,6 +1421,21 @@ RECIPE
   local data_dir="${validate_dir}/data"
   mkdir -p "${data_dir}/checks/gpu-operator"
 
+  # --data requires a registry.yaml in the external directory
+  cat > "${data_dir}/registry.yaml" <<'REGISTRY'
+apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    healthCheck:
+      assertFile: checks/gpu-operator/assert.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
+      defaultChart: nvidia/gpu-operator
+      defaultNamespace: gpu-operator
+REGISTRY
+
   cat > "${data_dir}/checks/gpu-operator/assert.yaml" <<'ASSERT'
 apiVersion: apps/v1
 kind: Deployment
