@@ -1828,53 +1828,55 @@ test_output_formats() {
 
 test_deploy_agent_cli() {
   msg "=========================================="
-  msg "Testing snapshot --deploy-agent CLI"
+  msg "Testing snapshot agent CLI flags"
   msg "=========================================="
 
-  # This test verifies the CLI flags work, not the actual deployment
-  # (actual deployment is tested in test_snapshot)
+  # The snapshot command always deploys an agent Job.
+  # This test verifies the agent-related CLI flags are present and accepted.
 
-  # Test 1: Help shows deploy-agent flag
-  msg "--- Test: snapshot --help shows deploy-agent ---"
   local help_output
   help_output=$("${AICR_BIN}" snapshot --help 2>&1)
-  if echo "$help_output" | grep -q "deploy-agent"; then
-    detail "--deploy-agent flag documented"
-    pass "cli/deploy-agent/help"
+
+  # Test 1: Help shows agent-related flags
+  msg "--- Test: snapshot --help shows agent flags ---"
+  local missing_flags=()
+  for flag in "--namespace" "--image" "--node-selector" "--toleration" "--timeout" "--cleanup"; do
+    if ! echo "$help_output" | grep -q -- "$flag"; then
+      missing_flags+=("$flag")
+    fi
+  done
+
+  if [ ${#missing_flags[@]} -eq 0 ]; then
+    detail "All agent flags documented"
+    pass "cli/agent-flags/help"
   else
-    fail "cli/deploy-agent/help" "--deploy-agent not in help output"
+    fail "cli/agent-flags/help" "Missing flags: ${missing_flags[*]}"
   fi
 
-  # Test 2: deploy-agent with namespace flag
-  msg "--- Test: deploy-agent requires namespace ---"
-  # Running without a cluster should fail gracefully
-  echo -e "${DIM}  \$ aicr snapshot --deploy-agent --namespace test-ns --image test:latest (dry-run check)${NC}"
+  # Test 2: Agent flags are accepted (should fail with cluster error, not parse error)
+  msg "--- Test: agent flags accepted ---"
+  echo -e "${DIM}  \$ aicr snapshot --namespace test-ns --image test:latest (dry-run check)${NC}"
 
-  # We can't actually run deploy-agent without proper cluster access,
-  # but we can verify the flags are accepted
   local deploy_output
-  deploy_output=$("${AICR_BIN}" snapshot --deploy-agent --namespace nonexistent-test-ns --image "test:latest" 2>&1) || true
+  deploy_output=$("${AICR_BIN}" snapshot --namespace nonexistent-test-ns --image "test:latest" 2>&1) || true
 
-  # Should fail with cluster/namespace error, not flag parsing error
   if echo "$deploy_output" | grep -qi "not found\|connection refused\|forbidden\|unauthorized\|cannot\|failed"; then
     detail "Flags accepted (expected cluster error)"
-    pass "cli/deploy-agent/flags"
+    pass "cli/agent-flags/accepted"
   elif echo "$deploy_output" | grep -qi "unknown flag\|invalid\|usage"; then
-    fail "cli/deploy-agent/flags" "Flag parsing error"
+    fail "cli/agent-flags/accepted" "Flag parsing error"
   else
-    # If it somehow succeeded or gave unexpected output
     detail "Command executed (output: ${deploy_output:0:50}...)"
-    pass "cli/deploy-agent/flags"
+    pass "cli/agent-flags/accepted"
   fi
 
-  # Test 3: Verify image flag is supported
-  msg "--- Test: --image flag for deploy-agent ---"
+  # Test 3: Verify --image flag is supported
+  msg "--- Test: --image flag ---"
   if echo "$help_output" | grep -q -- "--image"; then
     detail "--image flag documented"
-    pass "cli/deploy-agent/image-flag"
+    pass "cli/agent-flags/image-flag"
   else
-    warn "--image flag not found in help (may be optional)"
-    pass "cli/deploy-agent/image-flag"
+    fail "cli/agent-flags/image-flag" "--image not in help output"
   fi
 }
 
