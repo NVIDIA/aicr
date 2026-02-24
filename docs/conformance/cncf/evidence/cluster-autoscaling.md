@@ -1,12 +1,9 @@
 # Cluster Autoscaling
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-23 22:08:05 UTC
+**Generated:** 2026-02-24 20:26:59 UTC
 **Kubernetes Version:** v1.34
-**Platform:** EKS (p5.48xlarge, NVIDIA H100 80GB HBM3)
-
-> **Note:** Cluster-specific identifiers (account IDs, AMI IDs, node hostnames,
-> capacity reservation IDs) have been sanitized in this evidence document.
+**Platform:** linux/amd64
 
 ---
 
@@ -33,37 +30,56 @@ up/down based on workload demand. The ASG is configured with p5.48xlarge instanc
 
 **Auto Scaling Groups**
 ```
-$ aws autoscaling describe-auto-scaling-groups --query '...'
-+---------+------------+------+------+----------------+
-| Desired | Instances  | Max  | Min  |     Name       |
-+---------+------------+------+------+----------------+
-|  1      |  1         |  1   |  1   |  <cluster>-cpu |
-|  1      |  1         |  2   |  1   |  <cluster>-gpu |
-|  3      |  3         |  3   |  3   |  <cluster>-sys |
-+---------+------------+------+------+----------------+
+-------------------------------------------------------------
+|                 DescribeAutoScalingGroups                 |
++---------+------------+------+------+----------------------+
+| Desired | Instances  | Max  | Min  |        Name          |
++---------+------------+------+------+----------------------+
+|  1      |  1         |  1   |  1   |  ktsetfavua-cpu      |
+|  1      |  1         |  1   |  1   |  ktsetfavua-gpu      |
+|  3      |  3         |  3   |  3   |  ktsetfavua-system   |
++---------+------------+------+------+----------------------+
 ```
 
 ### GPU ASG Configuration
 
 **GPU ASG details**
 ```
+---------------------------------------
+|      DescribeAutoScalingGroups      |
 +------------------+------------------+
 |  DesiredCapacity |  1               |
 |  HealthCheckType |  EC2             |
-|  MaxSize         |  2               |
+|  LaunchTemplate  |  ktsetfavua-gpu  |
+|  MaxSize         |  1               |
 |  MinSize         |  1               |
-|  InstanceType    |  p5.48xlarge     |
+|  Name            |  ktsetfavua-gpu  |
 +------------------+------------------+
-|  AvailabilityZone: us-east-1e      |
-+------------------------------------+
+||         AvailabilityZones         ||
+|+-----------------------------------+|
+||  us-east-1e                       ||
+|+-----------------------------------+|
 ```
 
-### Launch Template
+### Launch Template (GPU Instance Type)
 
-**GPU instance type and capacity reservation**
+**GPU launch template**
 ```
-Instance Type:               p5.48xlarge
-Capacity Reservation:        capacity-reservations-only (dedicated)
+-------------------------------------------------------------------
+|                 DescribeLaunchTemplateVersions                  |
++---------------------------------------+-------------------------+
+|                ImageId                |      InstanceType       |
++---------------------------------------+-------------------------+
+|  ami-XXXXXXXXXXXX                     |  p5.48xlarge            |
++---------------------------------------+-------------------------+
+||                      CapacityReservation                      ||
+|+--------------------------------+------------------------------+|
+||  CapacityReservationPreference |  capacity-reservations-only  ||
+|+--------------------------------+------------------------------+|
+|||                  CapacityReservationTarget                  |||
+||+------------------------------+------------------------------+||
+|||  CapacityReservationId       |  cr-0cbe491320188dfa6        |||
+||+------------------------------+------------------------------+||
 ```
 
 ## Capacity Reservation
@@ -73,9 +89,12 @@ on-demand availability risk.
 
 **GPU capacity reservation**
 ```
+---------------------------------------
+|    DescribeCapacityReservations     |
 +------------+------------------------+
 |  AZ        |  us-east-1e            |
-|  Available |  4                     |
+|  Available |  0                     |
+|  ID        |  cr-0cbe491320188dfa6  |
 |  State     |  active                |
 |  Total     |  10                    |
 |  Type      |  p5.48xlarge           |
@@ -89,13 +108,13 @@ appropriate labels and GPU resources.
 
 **GPU nodes**
 ```
-$ kubectl get nodes -o custom-columns=NAME:...,GPU:...,INSTANCE-TYPE:...,VERSION:...
-NAME          GPU      INSTANCE-TYPE   VERSION
-gpu-node-1    8        p5.48xlarge     v1.34.1
-sys-node-1    <none>   m4.16xlarge     v1.34.2
-sys-node-2    <none>   m4.16xlarge     v1.34.2
-sys-node-3    <none>   m4.16xlarge     v1.34.1
-cpu-node-1    <none>   m4.16xlarge     v1.34.2
+$ kubectl get nodes -o custom-columns=NAME:.metadata.name,GPU:.status.capacity.nvidia\.com/gpu,INSTANCE-TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,VERSION:.status.nodeInfo.kubeletVersion
+NAME                             GPU      INSTANCE-TYPE   VERSION
+ip-100-64-171-120.ec2.internal   8        p5.48xlarge     v1.34.1
+ip-100-64-4-149.ec2.internal     <none>   m4.16xlarge     v1.34.2
+ip-100-64-6-88.ec2.internal      <none>   m4.16xlarge     v1.34.2
+ip-100-64-83-166.ec2.internal    <none>   m4.16xlarge     v1.34.1
+ip-100-64-9-88.ec2.internal      <none>   m4.16xlarge     v1.34.2
 ```
 
 ## Autoscaler Integration
@@ -106,53 +125,17 @@ automatically scale GPU nodes based on pending pod requests.
 
 **ASG autoscaler tags**
 ```
-+-------------------------------------------------------+--------+
-|                         Key                           | Value  |
-+-------------------------------------------------------+--------+
-|  k8s.io/cluster-autoscaler/enabled                    |  true  |
-|  k8s.io/cluster-autoscaler/<cluster-name>             |  owned |
-|  kubernetes.io/cluster/<cluster-name>                 |  owned |
-+-------------------------------------------------------+--------+
+------------------------------------------------------------------------------
+|                                DescribeTags                                |
++-------------------------------------------------------------------+--------+
+|                                Key                                | Value  |
++-------------------------------------------------------------------+--------+
+|  k8s.io/cluster-autoscaler/enabled                                |  true  |
+|  k8s.io/cluster-autoscaler/ktsetfavua-dgxc-k8s-aws-use1-non-prod  |  owned |
+|  k8s.io/cluster/ktsetfavua-dgxc-k8s-aws-use1-non-prod             |  owned |
+|  kubernetes.io/cluster/ktsetfavua-dgxc-k8s-aws-use1-non-prod      |  owned |
++-------------------------------------------------------------------+--------+
 ```
-
-## Alternative: Automated Autoscaling Demo
-
-For a fully automated demonstration, deploy the Kubernetes Cluster Autoscaler or
-Karpenter to trigger scale-up/down based on pending GPU pods:
-
-```bash
-# 1. Create IAM role with autoscaling permissions
-#    Required: autoscaling:DescribeAutoScalingGroups, autoscaling:SetDesiredCapacity,
-#    autoscaling:TerminateInstanceInAutoScalingGroup, ec2:DescribeLaunchTemplateVersions,
-#    ec2:DescribeInstanceTypes
-
-# 2. Deploy Cluster Autoscaler with IRSA (IAM Roles for Service Accounts)
-#    Set eks.amazonaws.com/role-arn on the service account
-
-# 3. Create a pending GPU pod to trigger scale-up
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: gpu-pending
-spec:
-  tolerations: [{operator: Exists}]
-  containers:
-    - name: gpu
-      image: nvidia/cuda:12.9.0-base-ubuntu24.04
-      resources:
-        limits:
-          nvidia.com/gpu: 8  # request all GPUs on a new node
-EOF
-
-# 4. Cluster Autoscaler detects pending pod → scales ASG → new node joins
-# 5. Pod schedules on new node
-# 6. Delete pod → Autoscaler scales down after cool-down period
-```
-
-> **Note:** This requires an IAM role with EC2 and Auto Scaling permissions
-> associated with the Cluster Autoscaler service account via IRSA. The IAM
-> configuration is cluster-specific and managed by the infrastructure team.
 
 ## Platform Support
 
