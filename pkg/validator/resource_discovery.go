@@ -25,9 +25,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/registry"
 	"sigs.k8s.io/yaml"
@@ -53,7 +56,7 @@ type componentDiscovery struct {
 // (HTTP repos and OCI registries). Offline/air-gapped environments will see
 // warnings for components with chart coordinates but can still use manually
 // declared expectedResources.
-func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeResult) error {
+func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeResult, kubeVersion string) error {
 	summaries := make([]componentDiscovery, 0, len(recipeResult.ComponentRefs))
 
 	for i := range recipeResult.ComponentRefs {
@@ -82,7 +85,7 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 			slog.Debug("auto-discovering expected resources via helm template",
 				"component", ref.Name, "chart", ref.Chart, "version", ref.Version)
 
-			chartResources, err := renderHelmTemplate(ctx, *ref, values)
+			chartResources, err := renderHelmTemplate(ctx, *ref, values, kubeVersion)
 			if err != nil {
 				slog.Warn("failed to render helm chart for expected resource discovery",
 					"component", ref.Name, "error", err)
@@ -160,7 +163,7 @@ func countByKind(resources []recipe.ExpectedResource) string {
 // renderHelmTemplate uses the Helm Go SDK to render a chart (equivalent to
 // `helm template`), then extracts workload resources from the output.
 // Supports both HTTP repos and OCI registries (oci:// prefix in source).
-func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map[string]any) ([]recipe.ExpectedResource, error) {
+func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map[string]any, kubeVersion string) ([]recipe.ExpectedResource, error) {
 	ctx, cancel := context.WithTimeout(ctx, defaults.ComponentRenderTimeout)
 	defer cancel()
 
@@ -188,6 +191,13 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 	install.Replace = true
 	if ref.Version != "" {
 		install.Version = ref.Version
+	}
+
+	if kubeVersion != "" {
+		kv, parseErr := chartutil.ParseKubeVersion(kubeVersion)
+		if parseErr == nil {
+			install.KubeVersion = kv
+		}
 	}
 
 	chartPath, err := locateChart(install, ref, settings)
@@ -350,6 +360,28 @@ func mergeExpectedResources(manual, discovered []recipe.ExpectedResource) []reci
 	}
 
 	return result
+}
+
+// kubeVersionFromSnapshot extracts the Kubernetes server version from a snapshot.
+// Returns empty string if not found.
+func kubeVersionFromSnapshot(snap *snapshotter.Snapshot) string {
+	if snap == nil {
+		return ""
+	}
+	for _, m := range snap.Measurements {
+		if m == nil || m.Type != measurement.TypeK8s {
+			continue
+		}
+		for _, st := range m.Subtypes {
+			if st.Name != "server" {
+				continue
+			}
+			if reading, ok := st.Data[measurement.KeyVersion]; ok {
+				return reading.String()
+			}
+		}
+	}
+	return ""
 }
 
 // splitYAMLDocuments splits a multi-document YAML string on "---" separators.
