@@ -1,0 +1,175 @@
+metadata:
+  kubernetesVersion: v1.34
+  platformName: "Kubernetes Platforms Powered by NVIDIA AI Cluster Runtime (AICR)"
+  platformVersion: "0.7.7"
+  vendorName: "NVIDIA"
+  websiteUrl: "https://github.com/NVIDIA/aicr"
+  repoUrl: "https://github.com/NVIDIA/aicr"
+  documentationUrl: "https://github.com/NVIDIA/aicr/blob/main/README.md"
+  productLogoUrl: "https://www.nvidia.com/favicon.ico"
+  description: >-
+    Kubernetes platforms powered by NVIDIA AI Cluster Runtime (AICR) are CNCF AI
+    Conformant. AICR generates validated, GPU-accelerated Kubernetes
+    configurations that satisfy all CNCF AI Conformance requirements.
+  contactEmailAddress: "aicr-maintainers@nvidia.com"
+
+spec:
+  accelerators:
+    - id: dra_support
+      description: "Support Dynamic Resource Allocation (DRA) APIs to enable more flexible and fine-grained resource requests beyond simple counts."
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/dra-support.md"
+      notes: >-
+        DRA API (resource.k8s.io/v1) is enabled with DeviceClass, ResourceClaim,
+        ResourceClaimTemplate, and ResourceSlice resources available. The NVIDIA
+        DRA driver runs as controller and kubelet-plugin pods, advertising
+        individual H100 GPU devices via ResourceSlices with unique UUIDs, PCI
+        bus IDs, CUDA compute capability, and memory capacity. GPU allocation to
+        pods is mediated through ResourceClaims.
+  networking:
+    - id: ai_inference
+      description: >-
+        Support the Kubernetes Gateway API with an implementation for advanced
+        traffic management for inference services, which enables capabilities
+        like weighted traffic splitting, header-based routing (for OpenAI
+        protocol headers), and optional integration with service meshes.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/inference-gateway.md"
+      notes: >-
+        kgateway controller is deployed with full Gateway API CRD support
+        (GatewayClass, Gateway, HTTPRoute, GRPCRoute, ReferenceGrant). Inference
+        extension CRDs (InferencePool, InferenceModelRewrite,
+        InferenceObjective) are registered. An active inference gateway is
+        verified with GatewayClass Accepted=True and Gateway Programmed=True
+        conditions.
+  schedulingOrchestration:
+    - id: gang_scheduling
+      description: >-
+        The platform must allow for the installation and successful operation of
+        at least one gang scheduling solution that ensures all-or-nothing
+        scheduling for distributed AI workloads (e.g. Kueue, Volcano, etc.) To
+        be conformant, the vendor must demonstrate that their platform can
+        successfully run at least one such solution.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/gang-scheduling.md"
+      notes: >-
+        KAI Scheduler is deployed with operator, scheduler, admission
+        controller, pod-grouper, and queue-controller components. PodGroup CRD
+        (scheduling.run.ai) is registered. Gang scheduling is verified by
+        deploying a PodGroup with minMember=2 and two GPU pods, demonstrating
+        all-or-nothing atomic scheduling.
+    - id: cluster_autoscaling
+      description: >-
+        If the platform provides a cluster autoscaler or an equivalent
+        mechanism, it must be able to scale up/down node groups containing
+        specific accelerator types based on pending pods requesting those
+        accelerators.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/cluster-autoscaling.md"
+      notes: >-
+        Demonstrated on EKS with a GPU Auto Scaling Group (p5.48xlarge, 8x H100
+        per node). The ASG is tagged for Cluster Autoscaler discovery
+        (k8s.io/cluster-autoscaler/enabled,
+        k8s.io/cluster-autoscaler/<cluster>=owned) and supports scaling from
+        min=1 to max=2 GPU nodes based on pending pod demand.
+    - id: pod_autoscaling
+      description: >-
+        If the platform supports the HorizontalPodAutoscaler, it must function
+        correctly for pods utilizing accelerators. This includes the ability to
+        scale these Pods based on custom metrics relevant to AI/ML workloads.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/pod-autoscaling.md"
+      notes: >-
+        Prometheus adapter exposes GPU custom metrics (gpu_utilization,
+        gpu_memory_used, gpu_power_usage) via the Kubernetes custom metrics API.
+        HPA is configured to target gpu_utilization at 50% threshold. Under GPU
+        stress testing (CUDA N-Body Simulation), HPA successfully scales
+        replicas from 1 to 2 pods when utilization exceeds the target, and
+        scales back down when GPU load is removed.
+  observability:
+    - id: accelerator_metrics
+      description: >-
+        For supported accelerator types, the platform must allow for the
+        installation and successful operation of at least one accelerator
+        metrics solution that exposes fine-grained performance metrics via a
+        standardized, machine-readable metrics endpoint. This must include a
+        core set of metrics for per-accelerator utilization and memory usage.
+        Additionally, other relevant metrics such as temperature, power draw,
+        and interconnect bandwidth should be exposed if the underlying hardware
+        or virtualization layer makes them available. The list of metrics should
+        align with emerging standards, such as OpenTelemetry metrics, to ensure
+        interoperability. The platform may provide a managed solution, but this
+        is not required for conformance.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/accelerator-metrics.md"
+      notes: >-
+        DCGM Exporter runs on GPU nodes exposing metrics at :9400/metrics in
+        Prometheus format. Per-GPU metrics include utilization, memory usage,
+        temperature (26-31C), and power draw (66-115W). Metrics include
+        pod/namespace/container labels for per-workload attribution. Prometheus
+        actively scrapes DCGM metrics via ServiceMonitor.
+    - id: ai_service_metrics
+      description: >-
+        Provide a monitoring system capable of discovering and collecting
+        metrics from workloads that expose them in a standard format (e.g.
+        Prometheus exposition format). This ensures easy integration for
+        collecting key metrics from common AI frameworks and servers.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/accelerator-metrics.md"
+      notes: >-
+        Prometheus and Grafana are deployed as the monitoring stack. Prometheus
+        discovers and scrapes workloads exposing metrics in Prometheus
+        exposition format via ServiceMonitors. The prometheus-adapter bridges
+        these metrics into the Kubernetes custom metrics API for consumption by
+        HPA and other controllers.
+  security:
+    - id: secure_accelerator_access
+      description: >-
+        Ensure that access to accelerators from within containers is properly
+        isolated and mediated by the Kubernetes resource management framework
+        (device plugin or DRA) and container runtime, preventing unauthorized
+        access or interference between workloads.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/secure-accelerator-access.md"
+      notes: >-
+        GPU Operator manages all GPU lifecycle components (driver, device-plugin,
+        DCGM, toolkit, validator, MIG manager). 8x H100 GPUs are individually
+        advertised via ResourceSlices with DRA. Pod volumes contain only
+        kube-api-access projected tokens — no hostPath mounts to /dev/nvidia
+        devices. Device isolation is verified: a test pod requesting 1 GPU sees
+        only the single allocated device.
+  operator:
+    - id: robust_controller
+      description: >-
+        The platform must prove that at least one complex AI operator with a
+        CRD (e.g., Ray, Kubeflow) can be installed and functions reliably. This
+        includes verifying that the operator's pods run correctly, its webhooks
+        are operational, and its custom resources can be reconciled.
+      level: MUST
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/robust-operator.md"
+      notes: >-
+        NVIDIA Dynamo operator is deployed with 6 CRDs (DynamoGraphDeployment,
+        DynamoComponentDeployment, DynamoGraphDeploymentRequest,
+        DynamoGraphDeploymentScalingAdapter, DynamoModel, DynamoWorkerMetadata).
+        Validating webhooks are active and verified via rejection test (invalid
+        CR correctly denied). A DynamoGraphDeployment custom resource is
+        reconciled with frontend and GPU-enabled worker pods running
+        successfully.
