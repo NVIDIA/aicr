@@ -22,6 +22,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
@@ -319,8 +320,8 @@ func TestCheckHelmValuesRegistration(t *testing.T) {
 		t.Errorf("Name = %v, want helm-values", check.Name)
 	}
 
-	if check.Phase != "deployment" { //nolint:goconst // test literal
-		t.Errorf("Phase = %v, want deployment", check.Phase)
+	if check.Phase != string(validator.PhaseDeployment) {
+		t.Errorf("Phase = %v, want %v", check.Phase, validator.PhaseDeployment)
 	}
 
 	if check.Description == "" {

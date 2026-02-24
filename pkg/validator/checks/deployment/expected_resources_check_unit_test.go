@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -443,8 +444,8 @@ func TestValidateExpectedResourcesRegistration(t *testing.T) {
 		t.Errorf("Name = %v, want expected-resources", check.Name)
 	}
 
-	if check.Phase != "deployment" {
-		t.Errorf("Phase = %v, want deployment", check.Phase)
+	if check.Phase != string(validator.PhaseDeployment) {
+		t.Errorf("Phase = %v, want %v", check.Phase, validator.PhaseDeployment)
 	}
 
 	if check.Description == "" {
