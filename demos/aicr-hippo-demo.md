@@ -76,10 +76,10 @@
   │  ┌──────────────────────────────────────────────────────────────┐      │
   │  │ CNCF AI Conformance — All 9 Requirements PASS                │      │
   │  │                                                              │      │
-  │  │  ✅ DRA Support          ✅ Gang Scheduling                  │      │
-  │  │  ✅ Secure GPU Access    ✅ Accelerator Metrics              │      │
-  │  │  ✅ AI Service Metrics   ✅ Inference Gateway                │      │
-  │  │  ✅ Robust Controller    ✅ Pod Autoscaling (HPA)            │      │
+  │  │  ✅ DRA Support          ✅ Gang Scheduling                  │       │
+  │  │  ✅ Secure GPU Access    ✅ Accelerator Metrics              │       │
+  │  │  ✅ AI Service Metrics   ✅ Inference Gateway                │       │
+  │  │  ✅ Robust Controller    ✅ Pod Autoscaling (HPA)            │       │
   │  │  ✅ Cluster Autoscaling                                      │      │
   │  └──────────────────────────────────────────────────────────────┘      │
   └────────────────────────────────────────────────────────────────────────┘
