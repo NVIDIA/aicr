@@ -383,7 +383,7 @@ func TestResolveExpectedResources_NoManifestFiles(t *testing.T) {
 		},
 	}
 
-	err := resolveExpectedResources(t.Context(), recipeResult)
+	err := resolveExpectedResources(t.Context(), recipeResult, "")
 	if err != nil {
 		t.Fatalf("resolveExpectedResources() error = %v", err)
 	}
@@ -408,7 +408,7 @@ func TestResolveExpectedResources_ManualOnly(t *testing.T) {
 		},
 	}
 
-	_ = resolveExpectedResources(t.Context(), recipeResult)
+	_ = resolveExpectedResources(t.Context(), recipeResult, "")
 
 	got := recipeResult.ComponentRefs[0].ExpectedResources
 	if len(got) != 1 {
@@ -453,7 +453,7 @@ func TestResolveExpectedResources_MultipleComponents(t *testing.T) {
 		},
 	}
 
-	_ = resolveExpectedResources(t.Context(), recipeResult)
+	_ = resolveExpectedResources(t.Context(), recipeResult, "")
 
 	// comp-a: should have 1 discovered resource from manifestFiles
 	if got := len(recipeResult.ComponentRefs[0].ExpectedResources); got != 1 {
@@ -640,7 +640,7 @@ func TestResolveExpectedResources_ManifestFileAutoDetect(t *testing.T) {
 		},
 	}
 
-	_ = resolveExpectedResources(t.Context(), recipeResult)
+	_ = resolveExpectedResources(t.Context(), recipeResult, "")
 
 	got := recipeResult.ComponentRefs[0].ExpectedResources
 	want := []recipe.ExpectedResource{
@@ -677,7 +677,7 @@ func TestResolveExpectedResources_ManualOverridesManifestFile(t *testing.T) {
 		},
 	}
 
-	_ = resolveExpectedResources(t.Context(), recipeResult)
+	_ = resolveExpectedResources(t.Context(), recipeResult, "")
 
 	got := recipeResult.ComponentRefs[0].ExpectedResources
 	want := []recipe.ExpectedResource{
@@ -707,7 +707,7 @@ func TestResolveExpectedResources_SkipsEmptyChartCoordinates(t *testing.T) {
 		},
 	}
 
-	err := resolveExpectedResources(t.Context(), recipeResult)
+	err := resolveExpectedResources(t.Context(), recipeResult, "")
 	if err != nil {
 		t.Errorf("resolveExpectedResources() error = %v", err)
 	}
@@ -793,7 +793,7 @@ spec:
 		Version:   "0.1.0",
 	}
 
-	resources, err := renderHelmTemplate(t.Context(), ref, nil)
+	resources, err := renderHelmTemplate(t.Context(), ref, nil, "")
 	if err != nil {
 		t.Fatalf("renderHelmTemplate() error = %v", err)
 	}
@@ -881,7 +881,7 @@ spec:
 		},
 	}
 
-	resources, err := renderHelmTemplate(t.Context(), ref, values)
+	resources, err := renderHelmTemplate(t.Context(), ref, values, "")
 	if err != nil {
 		t.Fatalf("renderHelmTemplate() error = %v", err)
 	}
@@ -923,7 +923,7 @@ spec:
 		"statefulset": map[string]any{"enabled": false},
 	}
 
-	resources, err = renderHelmTemplate(t.Context(), ref2, disabledValues)
+	resources, err = renderHelmTemplate(t.Context(), ref2, disabledValues, "")
 	if err != nil {
 		t.Fatalf("renderHelmTemplate() with disabled error = %v", err)
 	}
@@ -949,7 +949,7 @@ func TestResolveExpectedResources_ContextCancelled(t *testing.T) {
 		},
 	}
 
-	err := resolveExpectedResources(ctx, recipeResult)
+	err := resolveExpectedResources(ctx, recipeResult, "")
 	if err == nil {
 		t.Fatal("expected error for cancelled context, got nil")
 	}
