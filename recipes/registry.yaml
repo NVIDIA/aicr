@@ -43,6 +43,8 @@ components:
     displayName: gpu-operator
     valueOverrideKeys:
       - gpuoperator
+    healthCheck:
+      assertFile: checks/gpu-operator/assert.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator

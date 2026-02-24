@@ -1,0 +1,7 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  (readyReplicas == spec.replicas): true

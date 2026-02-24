@@ -1371,7 +1371,7 @@ RECIPE
 
 test_validate_chainsaw_healthcheck() {
   msg "=========================================="
-  msg "Testing Chainsaw health check via --data"
+  msg "Testing Chainsaw health check assertions"
   msg "=========================================="
 
   if [ "$FAKE_GPU_ENABLED" != "true" ]; then
@@ -1421,38 +1421,8 @@ YAML
   # Wait for deployment to be available
   kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
 
-  # Setup: Create --data directory with registry + healthCheck assert file
-  msg "--- Setup: Create --data directory with Chainsaw assert ---"
-  local data_dir="${validate_dir}/data"
-  mkdir -p "${data_dir}/checks/gpu-operator"
-
-  cat > "${data_dir}/registry.yaml" <<'REGISTRY'
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ComponentRegistry
-components:
-  - name: gpu-operator
-    displayName: GPU Operator
-    healthCheck:
-      assertFile: checks/gpu-operator/assert.yaml
-    helm:
-      defaultRepository: https://helm.ngc.nvidia.com/nvidia
-      defaultChart: nvidia/gpu-operator
-      defaultNamespace: gpu-operator
-REGISTRY
-
-  # Test 1: Chainsaw health check should pass (gpu-operator Deployment exists and is available)
-  msg "--- Test: Chainsaw health check (should pass) ---"
-  cat > "${data_dir}/checks/gpu-operator/assert.yaml" <<'ASSERT'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gpu-operator
-  namespace: gpu-operator
-status:
-  availableReplicas: 1
-ASSERT
-
-  local recipe_file="${validate_dir}/recipe-chainsaw-pass.yaml"
+  # Create recipe that includes gpu-operator with deployment phase check
+  local recipe_file="${validate_dir}/recipe-chainsaw.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
@@ -1468,7 +1438,13 @@ validation:
       - expected-resources
 RECIPE
 
-  echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml${NC}"
+  # Test 1: Chainsaw health check should pass using embedded registry
+  # The embedded registry.yaml has healthCheck.assertFile for gpu-operator,
+  # and the embedded assert file (recipes/checks/gpu-operator/assert.yaml)
+  # checks that readyReplicas == spec.replicas. No --data needed.
+  msg "--- Test: Chainsaw health check via embedded registry (should pass) ---"
+
+  echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe.yaml${NC}"
   local result_file="${validate_dir}/result-chainsaw-pass.yaml"
   local result_output
   local validate_exit=0
@@ -1476,7 +1452,6 @@ RECIPE
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    --data "${data_dir}" \
     --image "${AICR_VALIDATOR_IMAGE}" \
     --output "$result_file" 2>&1) || validate_exit=$?
 
@@ -1486,7 +1461,7 @@ RECIPE
   if [ -f "$result_file" ] && \
      grep -q "TestCheckExpectedResources" "$result_file"; then
     if grep -A1 "name: TestCheckExpectedResources" "$result_file" | grep -q "status: pass"; then
-      detail "Chainsaw health check: PASS (gpu-operator deployment found via assert)"
+      detail "Chainsaw health check: PASS (gpu-operator deployment found via embedded assert)"
       pass "validate/chainsaw-healthcheck-pass"
     elif grep -q "summary:" "$result_file" && grep -q "status: pass" "$result_file"; then
       detail "Chainsaw health check: PASS (from summary status)"
@@ -1500,8 +1475,11 @@ RECIPE
     fail "validate/chainsaw-healthcheck-pass" "TestCheckExpectedResources not found in output"
   fi
 
-  # Test 2: Chainsaw health check should fail (assert file checks for nonexistent resource)
-  msg "--- Test: Chainsaw health check (should fail - nonexistent resource) ---"
+  # Test 2: Chainsaw health check should fail (--data overrides assert to check nonexistent resource)
+  msg "--- Test: Chainsaw health check via --data override (should fail - nonexistent resource) ---"
+  local data_dir="${validate_dir}/data"
+  mkdir -p "${data_dir}/checks/gpu-operator"
+
   cat > "${data_dir}/checks/gpu-operator/assert.yaml" <<'ASSERT'
 apiVersion: apps/v1
 kind: Deployment
@@ -1509,7 +1487,7 @@ metadata:
   name: nonexistent-gpu-operator
   namespace: gpu-operator
 status:
-  availableReplicas: 1
+  (readyReplicas == spec.replicas): true
 ASSERT
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml (should fail)${NC}"
