@@ -28,7 +28,7 @@ runs:
       run: |
         set -euo pipefail
         PREDICATE="${RUNNER_TEMP}/slsa-predicate.json"
-        cat > "$PREDICATE" <<EOF
+        cat > "$PREDICATE" <<-EOF
         {
           "buildDefinition": {
             "buildType": "https://aicr.nvidia.com/binary/v1",

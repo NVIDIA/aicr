@@ -35,6 +35,8 @@ builds:
       -X github.com/NVIDIA/aicr/pkg/cli.date={{.Date}}
     hooks:
       post:
+        ## cosign v1 attestation with slsa provenance v1. 
+        ## NOTE: below aicrd currently attests via github attestation
         - cmd: >-
             bash -c '[ -z "${SLSA_PREDICATE:-}" ] && exit 0;
             cosign attest-blob

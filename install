@@ -238,7 +238,7 @@ main() {
       "${temp_dir}/${BIN_NAME}" 2>/dev/null; then
       msg "Attestation verified: binary built by github.com/NVIDIA/aicr"
     else
-      msg "Warning: attestation verification failed (binary may not be from an official release)"
+      msg "Warning: attestation verification failed — cannot confirm this binary was built by the official CI pipeline"
     fi
   elif [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
     msg "Tip: install cosign to verify binary attestation (https://docs.sigstore.dev/cosign/system_config/installation/)"
