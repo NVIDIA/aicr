@@ -1,0 +1,54 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Generate SLSA Predicate'
+description: 'Generate a SLSA Build Provenance v1 predicate JSON for cosign attest-blob'
+
+inputs:
+  workflow_file:
+    description: 'Workflow filename for builder ID (e.g., on-tag.yaml)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate SLSA predicate
+      shell: bash
+      run: |
+        set -euo pipefail
+        PREDICATE="${RUNNER_TEMP}/slsa-predicate.json"
+        cat > "$PREDICATE" <<-EOF
+        {
+          "buildDefinition": {
+            "buildType": "https://aicr.nvidia.com/binary/v1",
+            "externalParameters": {
+              "repository": "${{ github.repository }}",
+              "ref": "${{ github.ref }}"
+            },
+            "resolvedDependencies": [{
+              "uri": "git+https://github.com/${{ github.repository }}@${{ github.ref }}",
+              "digest": { "gitCommit": "${{ github.sha }}" }
+            }]
+          },
+          "runDetails": {
+            "builder": {
+              "id": "https://github.com/${{ github.repository }}/.github/workflows/${{ inputs.workflow_file }}"
+            },
+            "metadata": {
+              "invocationId": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            }
+          }
+        }
+        EOF
+        echo "SLSA_PREDICATE=${PREDICATE}" >> "$GITHUB_ENV"

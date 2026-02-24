@@ -54,8 +54,11 @@ has_tools() {
 }
 
 normalize_arch() {
-  local arch="$1"
-  [[ $arch == "x86_64" ]] && echo "amd64" || echo "$arch"
+  case "$1" in
+    x86_64)  echo "amd64" ;;
+    aarch64) echo "arm64" ;;
+    *)       echo "$1" ;;
+  esac
 }
 
 get_os() {
@@ -68,6 +71,10 @@ get_os() {
 
 get_binary_name() {
   echo "${BIN_NAME}_${1}_${2}_${3}"  # version, os, arch
+}
+
+get_archive_name() {
+  echo "${BIN_NAME}_${1}_${2}_${3}.tar.gz"  # version, os, arch
 }
 
 # ==============================================================================
@@ -192,44 +199,70 @@ main() {
   has_tools "${REQUIRED_TOOLS[@]}"
   
   # Fetch release information
-  local release_json
+  local release_json archive_name
   release_json=$(fetch_latest_release)
   version=$(extract_version "$release_json")
-  binary_name=$(get_binary_name "$version" "$os" "$arch")
-  
+  archive_name=$(get_archive_name "$version" "$os" "$arch")
+
   msg "Platform: $os/$arch"
   msg "Version: $version"
-  
-  # Download and verify binary
+
+  # Download archive and checksums
   temp_dir=$(mktemp -d)
   trap "rm -rf $temp_dir" EXIT
 
-  # Extract asset URLs from release JSON (handles both public and private repos)
-  local binary_url checksum_url
-  binary_url=$(extract_asset_url "$release_json" "$binary_name")
+  local archive_url checksum_url
+  archive_url=$(extract_asset_url "$release_json" "$archive_name")
   checksum_url=$(extract_asset_url "$release_json" "$CHECKSUMS_FILE")
 
-  download_release_asset "$binary_url" "${temp_dir}/${binary_name}" "$binary_name"
+  download_release_asset "$archive_url" "${temp_dir}/${archive_name}" "$archive_name"
   download_release_asset "$checksum_url" "${temp_dir}/checksums.txt" "checksums"
-  
-  # Verify checksum
+
+  # Verify archive checksum
   msg "Verifying checksum..."
-  (cd "$temp_dir" && grep "$binary_name" checksums.txt | shasum -a 256 --check --strict) \
+  (cd "$temp_dir" && grep "$archive_name" checksums.txt | shasum -a 256 --check --strict) \
     || err "Checksum verification failed"
-  
-  # Install binary
-  chmod +x "${temp_dir}/${binary_name}"
+
+  # Extract archive
+  msg "Extracting archive..."
+  tar -xzf "${temp_dir}/${archive_name}" -C "$temp_dir"
+
+  # Optional: verify attestation if cosign is available
+  if command -v cosign &>/dev/null && [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
+    msg "Verifying attestation with cosign..."
+    if cosign verify-blob-attestation \
+      --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
+      --type https://slsa.dev/provenance/v1 \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
+      "${temp_dir}/${BIN_NAME}" 2>/dev/null; then
+      msg "Attestation verified: binary built by github.com/NVIDIA/aicr"
+    else
+      msg "Warning: attestation verification failed — cannot confirm this binary was built by the official CI pipeline"
+    fi
+  elif [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
+    msg "Tip: install cosign to verify binary attestation (https://docs.sigstore.dev/cosign/system_config/installation/)"
+  fi
+
+  # Install binary and attestation
+  chmod +x "${temp_dir}/${BIN_NAME}"
   msg "Installing $BIN_NAME to $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
   if [[ -w "$INSTALL_DIR" ]]; then
-    mv "${temp_dir}/${binary_name}" "${INSTALL_DIR}/${BIN_NAME}"
+    mv "${temp_dir}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
+    [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]] && \
+      mv "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
   else
-    sudo mv "${temp_dir}/${binary_name}" "${INSTALL_DIR}/${BIN_NAME}"
+    sudo mv "${temp_dir}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
+    [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]] && \
+      sudo mv "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
   fi
-  
+
   # Verify installation
   msg "$BIN_NAME installed successfully!"
   "${BIN_NAME}" --version
+  [[ -f "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json" ]] && \
+    msg "Attestation: ${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
 }
 
 # Run main function

@@ -95,6 +95,14 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+
+      - name: Generate SLSA predicate
+        uses: ./.github/actions/generate-slsa-predicate
+        with:
+          workflow_file: on-tag.yaml
+
       - name: Build and Release
         id: release
         uses: ./.github/actions/go-build-release

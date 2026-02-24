@@ -549,6 +549,17 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |
 | `make bump-patch` | Bump patch version (1.2.3 → 1.2.4) |
 
+### Binary Attestation
+
+Release binaries are attested with SLSA Build Provenance v1 via a GoReleaser build
+hook that calls `cosign attest-blob`. The hook is guarded by the `$SLSA_PREDICATE`
+environment variable — it only runs when a workflow explicitly generates the predicate.
+Local `make build` is unaffected.
+
+To produce attested binaries without a release tag, use the **Build Attested Binaries**
+workflow (`.github/workflows/build-attested.yaml`) from the Actions tab. It runs
+`goreleaser release --snapshot` with cosign and uploads tar.gz archives as artifacts.
+
 ### Local Development
 
 | Target | Description |
