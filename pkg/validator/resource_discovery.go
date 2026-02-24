@@ -47,7 +47,7 @@ type componentDiscovery struct {
 // The loaded content is set on ComponentRef.HealthCheckAsserts so the
 // expected-resources check can use Chainsaw CLI instead of the default typed checks.
 // Load failures are logged as warnings and do not block other components.
-func resolveHealthCheckAsserts(recipeResult *recipe.RecipeResult) {
+func resolveHealthCheckAsserts(ctx context.Context, recipeResult *recipe.RecipeResult) {
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
 		slog.Warn("failed to load component registry for health check assert resolution", "error", err)
@@ -57,6 +57,11 @@ func resolveHealthCheckAsserts(recipeResult *recipe.RecipeResult) {
 	provider := recipe.GetDataProvider()
 
 	for i := range recipeResult.ComponentRefs {
+		if ctx.Err() != nil {
+			slog.Warn("context canceled during health check assert resolution", "error", ctx.Err())
+			return
+		}
+
 		ref := &recipeResult.ComponentRefs[i]
 
 		config := registry.Get(ref.Name)

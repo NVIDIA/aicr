@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ spec:
               rm -rf "${WORK}" && mkdir -p "${WORK}/data/checks/gpu-operator"
 
               # Create a registry.yaml with healthCheck.assertFile for gpu-operator
-              cat > "${WORK}/data/registry.yaml" << 'EOF'
+              cat > "${WORK}/data/registry.yaml" <<'EOF'
               apiVersion: aicr.nvidia.com/v1alpha1
               kind: ComponentRegistry
               components:
@@ -52,7 +52,7 @@ spec:
               EOF
 
               # Create a Chainsaw-style assert file for gpu-operator
-              cat > "${WORK}/data/checks/gpu-operator/assert.yaml" << 'EOF'
+              cat > "${WORK}/data/checks/gpu-operator/assert.yaml" <<'EOF'
               apiVersion: apps/v1
               kind: Deployment
               metadata:
@@ -67,7 +67,7 @@ spec:
                 -o "${WORK}/recipe.yaml"
 
               # Create a minimal snapshot
-              cat > "${WORK}/snapshot.yaml" << 'SNAP'
+              cat > "${WORK}/snapshot.yaml" <<'SNAP'
               measurements:
                 - type: K8s
                   subtypes:

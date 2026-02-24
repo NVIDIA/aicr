@@ -58,11 +58,20 @@ RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/depl
 RUN CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
 # Install Chainsaw CLI for component health check assertions.
-ARG CHAINSAW_VERSION=v0.2.12
+# Version and checksums from .settings.yaml and upstream checksums.txt.
+ARG CHAINSAW_VERSION=v0.2.14
 RUN set -e; \
     ARCH=$(go env GOARCH); \
-    curl -fsSL "https://github.com/kyverno/chainsaw/releases/download/${CHAINSAW_VERSION}/chainsaw_linux_${ARCH}.tar.gz" \
-    | tar xz -C /out chainsaw
+    case "${ARCH}" in \
+      amd64) CHECKSUM="f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e" ;; \
+      arm64) CHECKSUM="b6494b71e490ab825890fc12cc575de7f59bfa637d5cfe73c66987e4454e397c" ;; \
+      *) echo "unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/chainsaw.tar.gz \
+      "https://github.com/kyverno/chainsaw/releases/download/${CHAINSAW_VERSION}/chainsaw_linux_${ARCH}.tar.gz"; \
+    echo "${CHECKSUM}  /tmp/chainsaw.tar.gz" | sha256sum -c -; \
+    tar xz -C /out chainsaw -f /tmp/chainsaw.tar.gz; \
+    rm -f /tmp/chainsaw.tar.gz
 
 # ---------------------------------------------------------------------------
 # Final stage: CUDA runtime provides nvidia-smi for GPU validation

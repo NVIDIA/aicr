@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -177,6 +177,33 @@ func TestRunMultipleComponents(t *testing.T) {
 		if r.Error == nil {
 			t.Errorf("results[%d].Error = nil, want non-nil", i)
 		}
+	}
+}
+
+func TestGenerateTestManifestInvalidName(t *testing.T) {
+	tests := []struct {
+		name          string
+		componentName string
+	}{
+		{"uppercase letters", "GPU-Operator"},
+		{"spaces", "gpu operator"},
+		{"special chars", "gpu_operator!"},
+		{"template injection", "x\ninjected: true"},
+		{"starts with hyphen", "-gpu-operator"},
+		{"ends with hyphen", "gpu-operator-"},
+		{"empty string", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			path := filepath.Join(tmpDir, "chainsaw-test.yaml")
+
+			err := generateTestManifest(path, tt.componentName, 2*time.Minute)
+			if err == nil {
+				t.Errorf("generateTestManifest(%q) expected error for invalid name, got nil", tt.componentName)
+			}
+		})
 	}
 }
 

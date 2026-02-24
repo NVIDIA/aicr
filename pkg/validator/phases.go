@@ -1441,7 +1441,7 @@ func (v *Validator) ensureDataConfigMaps(
 	// Resolve Chainsaw health check assert files from the component registry.
 	// This must run before resolveExpectedResources so that components with
 	// assert files skip auto-discovery (Chainsaw replaces typed replica checks).
-	resolveHealthCheckAsserts(recipeResult)
+	resolveHealthCheckAsserts(ctx, recipeResult)
 
 	// Auto-discover expected resources from component manifests.
 	// NOTE: This intentionally mutates recipeResult.ComponentRefs[].ExpectedResources

@@ -1471,13 +1471,14 @@ RECIPE
   echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml${NC}"
   local result_file="${validate_dir}/result-chainsaw-pass.yaml"
   local result_output
+  local validate_exit=0
   result_output=$("${AICR_BIN}" validate \
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
     --data "${data_dir}" \
     --image "${AICR_VALIDATOR_IMAGE}" \
-    --output "$result_file" 2>&1) || true
+    --output "$result_file" 2>&1) || validate_exit=$?
 
   detail "Captured validation output:"
   echo "$result_output" | sed 's/^/    /'
@@ -1514,13 +1515,14 @@ ASSERT
   echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml (should fail)${NC}"
   local result_file_fail="${validate_dir}/result-chainsaw-fail.yaml"
   local result_fail_output
+  local validate_fail_exit=0
   result_fail_output=$("${AICR_BIN}" validate \
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
     --data "${data_dir}" \
     --image "${AICR_VALIDATOR_IMAGE}" \
-    --output "$result_file_fail" 2>&1) || true
+    --output "$result_file_fail" 2>&1) || validate_fail_exit=$?
 
   detail "Captured validation output:"
   echo "$result_fail_output" | sed 's/^/    /'

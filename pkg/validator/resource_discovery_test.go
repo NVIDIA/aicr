@@ -1073,7 +1073,7 @@ components:
 				ComponentRefs: tt.componentRefs,
 			}
 
-			resolveHealthCheckAsserts(recipeResult)
+			resolveHealthCheckAsserts(t.Context(), recipeResult)
 
 			for _, ref := range recipeResult.ComponentRefs {
 				want, ok := tt.wantHealthAsserts[ref.Name]

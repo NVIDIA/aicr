@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,10 +23,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"text/template"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -53,6 +55,10 @@ type Result struct {
 	// Error contains any error from executing Chainsaw.
 	Error error
 }
+
+// validComponentName matches DNS-1123 label names (lowercase alphanumeric + hyphens).
+// Used to validate component names before injecting into text/template to prevent injection.
+var validComponentName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // chainsawTestTemplate is the Chainsaw test manifest template.
 var chainsawTestTemplate = template.Must(template.New("chainsaw-test").Parse(`apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -85,15 +91,24 @@ func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration) 
 	results := make([]Result, len(asserts))
 
 	var wg sync.WaitGroup
-	// Limit concurrency to 4 parallel Chainsaw runs.
-	sem := make(chan struct{}, 4)
+	sem := make(chan struct{}, defaults.ChainsawMaxParallel)
 
 	for i, ca := range asserts {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+
+			// Acquire semaphore with context cancellation check.
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				results[i] = Result{
+					Component: ca.Name,
+					Error:     errors.Wrap(errors.ErrCodeInternal, "context canceled before execution", ctx.Err()),
+				}
+				return
+			}
 
 			results[i] = runSingle(ctx, ca, timeout)
 		}()
@@ -155,6 +170,11 @@ func runSingle(ctx context.Context, ca ComponentAssert, timeout time.Duration) R
 
 // generateTestManifest writes a chainsaw-test.yaml file for the given component.
 func generateTestManifest(path, componentName string, timeout time.Duration) error {
+	if !validComponentName.MatchString(componentName) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid component name %q: must be a DNS-1123 label (lowercase alphanumeric and hyphens)", componentName))
+	}
+
 	data := chainsawTestData{
 		Name:    componentName,
 		Timeout: fmt.Sprintf("%ds", int(timeout.Seconds())),
