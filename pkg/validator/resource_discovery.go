@@ -114,9 +114,9 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 
 		ref := &recipeResult.ComponentRefs[i]
 
-		// Skip auto-discovery for components with Chainsaw health check asserts.
-		// These components use Chainsaw CLI assertions instead of typed replica checks.
-		if ref.HealthCheckAsserts != "" {
+		// Skip auto-discovery for components with Chainsaw health check asserts,
+		// unless the recipe already has manual expectedResources (which take precedence).
+		if ref.HealthCheckAsserts != "" && len(ref.ExpectedResources) == 0 {
 			slog.Debug("skipping auto-discovery for component with chainsaw health check",
 				"component", ref.Name)
 			continue

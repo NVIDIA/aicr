@@ -56,7 +56,10 @@ func validateExpectedResources(ctx *checks.ValidationContext) error {
 	var failures []string
 
 	for _, ref := range ctx.Recipe.ComponentRefs {
-		if ref.HealthCheckAsserts != "" {
+		// Manual expectedResources take precedence over Chainsaw health check asserts.
+		// This allows users to override the registry's healthCheck.assertFile by
+		// declaring expectedResources explicitly in the recipe.
+		if ref.HealthCheckAsserts != "" && len(ref.ExpectedResources) == 0 {
 			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
 				Name:       ref.Name,
 				AssertYAML: ref.HealthCheckAsserts,

@@ -441,12 +441,37 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 		errContains string
 	}{
 		{
-			name: "component with HealthCheckAsserts skips typed client checks",
+			name: "manual expectedResources take precedence over HealthCheckAsserts",
 			setup: func() *checks.ValidationContext {
-				// No K8s objects — if the typed client path ran, it would fail.
-				// But since HealthCheckAsserts is set, it should go to chainsaw path.
-				// Use a nonexistent deployment name so chainsaw always fails even if
-				// the binary is installed and a local cluster is accessible.
+				// No K8s objects — typed client check will fail for the missing Deployment.
+				// Even though HealthCheckAsserts is set, manual expectedResources take precedence.
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset()
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "test-component",
+								Type:               "Helm",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: something\n",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			// Typed client fails because the Deployment doesn't exist in the fake clientset
+			wantErr:     true,
+			errContains: "not found",
+		},
+		{
+			name: "HealthCheckAsserts used when no manual expectedResources",
+			setup: func() *checks.ValidationContext {
+				// No manual expectedResources → Chainsaw path activates.
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 				clientset := fake.NewSimpleClientset()
 				return &checks.ValidationContext{
@@ -458,10 +483,6 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 								Name:               "test-chainsaw-component",
 								Type:               "Helm",
 								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nonexistent-chainsaw-test\n  namespace: nonexistent-ns\n",
-								// These expectedResources should NOT be checked (chainsaw path)
-								ExpectedResources: []recipe.ExpectedResource{
-									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
-								},
 							},
 						},
 					},

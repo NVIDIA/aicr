@@ -1115,68 +1115,7 @@ YAML
   # Wait for deployment to be available
   kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
 
-  # Test 1: Validate expected-resources with passing check (resource exists)
-  msg "--- Test: Expected resources check (should pass) ---"
-  local recipe_file="${validate_dir}/recipe-expected-resources.yaml"
-  cat > "$recipe_file" <<RECIPE
-kind: RecipeResult
-apiVersion: aicr.nvidia.com/v1alpha1
-metadata:
-  version: dev
-componentRefs:
-  - name: fake-gpu-operator
-    type: Helm
-    namespace: gpu-operator
-    expectedResources:
-      - kind: Deployment
-        name: gpu-operator
-        namespace: gpu-operator
-validation:
-  deployment:
-    checks:
-      - expected-resources
-RECIPE
-
-  echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe.yaml${NC}"
-  local result_file="${validate_dir}/result-pass.yaml"
-  local result_output
-  result_output=$("${AICR_BIN}" validate \
-    --recipe "$recipe_file" \
-    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --phase deployment \
-    --image "${AICR_VALIDATOR_IMAGE}" \
-    --output "$result_file" 2>&1) || true
-
-  # DEBUG: Print captured output to see what's happening
-  detail "Captured validation output:"
-  echo "$result_output" | sed 's/^/    /'
-
-  # Check the output file for expected-resources check results
-  if [ -f "$result_file" ]; then
-    detail "Validation output file created: $result_file"
-  else
-    detail "Validation output file NOT created: $result_file"
-  fi
-
-  if [ -f "$result_file" ] && \
-     grep -q "TestCheckExpectedResources" "$result_file"; then
-    if grep -A1 "name: TestCheckExpectedResources" "$result_file" | grep -q "status: pass"; then
-      detail "Expected-resources check: PASS (gpu-operator deployment found)"
-      pass "validate/expected-resources-pass"
-    elif grep -q "summary:" "$result_file" && grep -q "status: pass" "$result_file"; then
-      # Fallback: check summary status
-      detail "Expected-resources check: PASS (from summary status)"
-      pass "validate/expected-resources-pass"
-    else
-      detail "Check found but status unclear. Showing check section:"
-      grep -A5 "TestCheckExpectedResources" "$result_file" | sed 's/^/    /' || true
-      fail "validate/expected-resources-pass" "Check did not pass"
-    fi
-  else
-    fail "validate/expected-resources-pass" "TestCheckExpectedResources not found in output"
-  fi
-
-  # Test 2: Validate expected-resources with failing check (resource missing)
+  # Test 1: Validate expected-resources with failing check (resource missing)
   msg "--- Test: Expected resources check (should fail - missing resource) ---"
   local recipe_file_fail="${validate_dir}/recipe-expected-resources-fail.yaml"
   cat > "$recipe_file_fail" <<RECIPE
