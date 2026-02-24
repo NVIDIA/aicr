@@ -45,8 +45,7 @@ spec:
     - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        # Temporarily disabled until skyhook-customizations is fixed
-        - components/skyhook-customizations/manifests/no-op.yaml
+        - components/skyhook-customizations/manifests/tuning.yaml
       overrides:
         service: aws
         accelerator: h100

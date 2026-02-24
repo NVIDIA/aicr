@@ -63,7 +63,7 @@ spec:
   packages:
     nvidia-tuned:
       image: ghcr.io/nvidia/skyhook-packages/nvidia-tuned
-      version: "0.2.0"
+      version: "0.2.1"
       interrupt:
         type: reboot
       env:
