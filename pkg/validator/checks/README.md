@@ -69,12 +69,12 @@ Validation checks run inside Kubernetes Jobs to verify cluster configuration and
 
 | Phase | Constraints | Checks | Execution Context |
 |-------|-------------|--------|-------------------|
-| **Readiness** | Evaluated inline from snapshot | Run in Jobs | Snapshot data only |
+| **Readiness** | Evaluated inline from snapshot | N/A (constraint-only) | Snapshot data only |
 | **Deployment** | Run in Jobs (need cluster access) | Run in Jobs | Snapshot + Live cluster |
 | **Performance** | Run in Jobs (need measurements) | Run in Jobs | Snapshot + Live cluster |
 | **Conformance** | Run in Jobs (need cluster access) | Run in Jobs | Snapshot + Live cluster |
 
-**Key Insight:** Readiness validates prerequisites from snapshot data. All other phases need live cluster access, so their constraints AND checks run inside Jobs.
+**Key Insight:** Readiness = Constraints Only. It validates prerequisites from snapshot data with no cluster access and no Jobs. All other phases need live cluster access, so their constraints AND checks run inside Jobs.
 
 ### Directory Structure
 
@@ -84,9 +84,6 @@ pkg/validator/checks/
 ├── registry.go                  # Registration infrastructure
 ├── runner.go                    # Test runner for Job execution
 ├── generator.go                 # Code generator for new checks/constraints
-├── readiness/                   # Readiness phase checks
-│   ├── gpu_detection.go         # Example: GPU hardware check
-│   └── gpu_detection_test.go    # Unit tests + test wrapper
 ├── deployment/                  # Deployment phase checks + constraints
 │   ├── operator_health_check.go           # Check registration and implementation
 │   ├── operator_health_check_test.go      # Integration test (runs in Jobs)
@@ -204,7 +201,7 @@ make generate-validator ARGS="--constraint Deployment.my-app.version --phase dep
 
 ### Key Principles
 
-1. **Readiness = Snapshot Only** - Pre-deployment checks use captured data
+1. **Readiness = Constraints Only** - Pre-deployment constraints evaluated inline from snapshot data (no checks, no Jobs, no cluster access)
 2. **Other Phases = Cluster Access Required** - Deployment/Performance/Conformance need live queries
 3. **Self-Registration** - Checks auto-discover via init()
 4. **Job Isolation** - Each check runs in its own Job for resource control
@@ -334,7 +331,7 @@ type ValidationContext struct {
 
 Validation checks run inside Kubernetes Jobs via `go test`. The Jobs execute:
 ```bash
-go test -v -json ./pkg/validator/checks/readiness -run gpu-hardware-detection
+go test -v -json ./pkg/validator/checks/deployment -run operator-health
 ```
 
 For `go test` to discover and run your check, you need a `Test*` function that:
@@ -377,7 +374,6 @@ The test wrapper function name must match the check name pattern:
 
 | Check Name | Test Wrapper Function |
 |------------|----------------------|
-| `gpu-hardware-detection` | `TestGPUHardwareDetection` |
 | `operator-health` | `TestOperatorHealth` |
 | `nccl-bandwidth` | `TestNCCLBandwidth` |
 
@@ -474,7 +470,7 @@ The validation Job automatically sets these environment variables:
 | `AICR_SNAPSHOT_PATH` | Path to mounted snapshot file | `/data/snapshot/snapshot.yaml` |
 | `AICR_RECIPE_PATH` | Path to mounted recipe file | `/data/recipe/recipe.yaml` |
 | `AICR_NAMESPACE` | Namespace where Job is running | `aicr-validation` |
-| `AICR_RESULT_CONFIGMAP` | ConfigMap name for results | `aicr-validation-readiness-gpu-detection-result` |
+| `AICR_RESULT_CONFIGMAP` | ConfigMap name for results | `aicr-validation-deployment-operator-health-result` |
 
 ### Local vs Job Execution
 
@@ -483,7 +479,7 @@ The validation Job automatically sets these environment variables:
 - Unit tests **run** (use mocked context)
 - Fast feedback during development
 
-**Job execution** (`go test -run gpu-hardware-detection`):
+**Job execution** (`go test -run operator-health`):
 - Test wrappers **run** (inside Kubernetes)
 - Unit tests **excluded** by `-run` pattern
 - Real validation against live cluster
@@ -927,17 +923,16 @@ func TestConstraintValidatorRegistration(t *testing.T) {
 #### Testing Checks Locally
 
 ```go
-func TestGPUDetection(t *testing.T) {
-    snapshot := loadTestSnapshot()
-    clientset := fake.NewSimpleClientset()
+func TestOperatorHealthLocal(t *testing.T) {
+    deployment := createTestDeployment("gpu-operator", "gpu-operator")
+    clientset := fake.NewSimpleClientset(deployment)
 
     ctx := &checks.ValidationContext{
         Context:   context.Background(),
-        Snapshot:  snapshot,
         Clientset: clientset,
     }
 
-    check, ok := checks.GetCheck("gpu-hardware-detection")
+    check, ok := checks.GetCheck("operator-health")
     if !ok {
         t.Fatal("check not registered")
     }
@@ -1475,30 +1470,30 @@ Job logs: testing: warning: no tests to run
 Check test function naming:
 ```go
 // Correct
-func TestGPUHardwareDetection(t *testing.T) { ... }
+func TestOperatorHealth(t *testing.T) { ... }
 
-// Wrong - lowercase 'gpu'
-func TestGpuHardwareDetection(t *testing.T) { ... }
+// Wrong - lowercase
+func TestOperatorhealth(t *testing.T) { ... }
 
 // Wrong - underscore separator
-func Test_gpu_hardware_detection(t *testing.T) { ... }
+func Test_operator_health(t *testing.T) { ... }
 ```
 
 **Naming rule:** Convert kebab-case check name to PascalCase:
-- `gpu-hardware-detection` → `TestGPUHardwareDetection`
 - `operator-health` → `TestOperatorHealth`
 - `nccl-bandwidth` → `TestNCCLBandwidth`
+- `expected-resources` → `TestExpectedResources`
 
 Verify test file compiles:
 ```bash
-go test -c ./pkg/validator/checks/readiness/
+go test -c ./pkg/validator/checks/deployment/
 ```
 
 #### Test Wrapper Fails: "check not found in registry"
 
 **Symptom:**
 ```
-Job logs: Check "gpu-hardware-detection" not found in registry
+Job logs: Check "operator-health" not found in registry
 ```
 
 **Causes:**
@@ -1513,22 +1508,22 @@ Verify check registration:
 // Must be in same package as check function
 func init() {
     checks.RegisterCheck(&checks.Check{
-        Name:  "gpu-hardware-detection",  // ← Must match exactly
-        Phase: "readiness",
-        Func:  CheckGPUHardwareDetection,
+        Name:  "operator-health",  // ← Must match exactly
+        Phase: "deployment",
+        Func:  CheckOperatorHealth,
     })
 }
 ```
 
 Verify test wrapper uses same name:
 ```go
-func TestGPUHardwareDetection(t *testing.T) {
+func TestOperatorHealth(t *testing.T) {
     runner, err := checks.NewTestRunner(t)
     if err != nil {
         t.Skipf("Skipping integration test: %v", err)
         return
     }
-    runner.RunCheck("gpu-hardware-detection")  // ← Must match registration
+    runner.RunCheck("operator-health")  // ← Must match registration
 }
 ```
 
@@ -1725,12 +1720,10 @@ kind: ClusterRole
 metadata:
   name: aicr-validator
 rules:
-  # Readiness phase
+  # Deployment phase
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list"]
-
-  # Deployment phase
   - apiGroups: ["apps"]
     resources: ["deployments", "daemonsets", "statefulsets"]
     verbs: ["get", "list"]
@@ -2372,6 +2365,6 @@ Both use `init()` for self-registration and are discovered automatically at runt
 
 - **registry.go**: Check and constraint validator registration infrastructure
 - **runner.go**: Test runner for Job execution
-- **readiness/gpu_detection.go**: Example check implementation
+- **deployment/operator_health_check.go**: Example check implementation
 - **deployment/constraints.go**: Example constraint validator implementation
 - **Constraint Parser**: `pkg/validator/constraint_expression.go`

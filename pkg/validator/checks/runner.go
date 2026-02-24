@@ -49,14 +49,14 @@ type testingT interface {
 //
 // Example usage in test wrappers:
 //
-//	func TestGPUHardwareDetection(t *testing.T) {
+//	func TestOperatorHealth(t *testing.T) {
 //	    runner, err := checks.NewTestRunner(t)
 //	    if err != nil {
 //	        t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
 //	        return
 //	    }
 //	    defer runner.Cancel() // Clean up context when test completes
-//	    runner.RunCheck("gpu-hardware-detection")
+//	    runner.RunCheck("operator-health")
 //	}
 type TestRunner struct {
 	t      testingT
@@ -157,10 +157,6 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 
 	var checkList []string
 	switch phase {
-	case "readiness":
-		if r.ctx.Recipe.Validation.Readiness != nil {
-			checkList = r.ctx.Recipe.Validation.Readiness.Checks
-		}
 	case "deployment":
 		if r.ctx.Recipe.Validation.Deployment != nil {
 			checkList = r.ctx.Recipe.Validation.Deployment.Checks

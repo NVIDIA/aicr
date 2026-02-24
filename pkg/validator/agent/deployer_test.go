@@ -44,8 +44,8 @@ func createConfig() Config {
 		Image:              "ghcr.io/nvidia/aicr-validator:latest",
 		SnapshotConfigMap:  "test-snapshot",
 		RecipeConfigMap:    "test-recipe",
-		TestPackage:        "./pkg/validator/checks/readiness",
-		TestPattern:        "TestGpuHardwareDetection",
+		TestPackage:        "./pkg/validator/checks/deployment",
+		TestPattern:        "TestOperatorHealth",
 		Timeout:            5 * time.Minute,
 		ImagePullSecrets:   []string{"regcred"},
 		NodeSelector: map[string]string{

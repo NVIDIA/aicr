@@ -49,8 +49,7 @@ RUN set -e; \
         ./cmd/aicr
 
 # Pre-compile test binaries for in-cluster validation Jobs
-RUN CGO_ENABLED=0 go test -c -o /out/readiness.test ./pkg/validator/checks/readiness && \
-    CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/deployment && \
+RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/deployment && \
     CGO_ENABLED=0 go test -c -o /out/conformance.test ./pkg/validator/checks/conformance
 
 # Build test2json tool — converts verbose test output to JSON event stream.
@@ -69,7 +68,6 @@ LABEL org.opencontainers.image.title="aicr-validator" \
 
 # Copy compiled binaries
 COPY --from=builder /out/aicr /usr/local/bin/aicr
-COPY --from=builder /out/readiness.test /usr/local/bin/readiness.test
 COPY --from=builder /out/deployment.test /usr/local/bin/deployment.test
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 COPY --from=builder /out/test2json /usr/local/bin/test2json

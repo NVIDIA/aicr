@@ -267,8 +267,7 @@ componentRefs:
         namespace: gpu-operator
 
 validation:
-  readiness:
-    checks: [gpu-hardware-detection, kernel-parameters]
+  # Readiness phase has no checks — constraints are evaluated inline from snapshot.
   deployment:
     checks: [operator-health, expected-resources]
   performance:

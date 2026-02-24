@@ -53,12 +53,9 @@ constraints:
 
 # Multi-phase validation configuration
 validation:
-  # Readiness phase: Validate infrastructure before installing components
-  readiness:
-    checks:
-      - gpu-hardware-detection
-      - kernel-parameters
-      - os-prerequisites
+  # Readiness phase: Constraint-only gate (evaluated inline from snapshot, no Jobs)
+  # Constraints are defined at the top level (spec.constraints) and evaluated
+  # during readiness. No checks or Jobs needed.
 
   # Deployment phase: Validate component deployment
   deployment:

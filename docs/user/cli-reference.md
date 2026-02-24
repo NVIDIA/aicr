@@ -447,7 +447,7 @@ Validation can be run in different phases to validate different aspects of the d
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `readiness` | Validates infrastructure prerequisites (K8s version, OS, kernel) and runs readiness checks | Before deploying any components |
+| `readiness` | Evaluates constraints inline against snapshot (K8s version, OS, kernel) — no checks or Jobs | Before deploying any components |
 | `deployment` | Validates component deployment health and expected resources | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
@@ -570,13 +570,6 @@ phases:
         expected: ubuntu
         actual: ubuntu
         status: passed
-    checks:
-      - name: gpu-hardware-detection
-        status: pass
-      - name: kernel-parameters
-        status: pass
-      - name: os-prerequisites
-        status: pass
     duration: 20.5µs
 ```
 
@@ -608,13 +601,6 @@ phases:
         expected: ubuntu
         actual: ubuntu
         status: passed
-    checks:
-      - name: gpu-hardware-detection
-        status: pass
-      - name: kernel-parameters
-        status: pass
-      - name: os-prerequisites
-        status: pass
     duration: 20.7µs
   deployment:
     status: pass

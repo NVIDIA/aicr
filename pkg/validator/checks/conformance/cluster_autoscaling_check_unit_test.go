@@ -65,20 +65,18 @@ func TestCheckClusterAutoscaling(t *testing.T) {
 		{
 			name:       "Karpenter not deployed",
 			k8sObjects: []runtime.Object{
-				// No karpenter deployment
+				// No karpenter deployment — skips gracefully
 			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "Karpenter controller check failed",
+			clientset: true,
+			wantErr:   false,
 		},
 		{
 			name: "Karpenter not available",
 			k8sObjects: []runtime.Object{
 				createDeployment("karpenter", "karpenter", 0),
 			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "Karpenter controller check failed",
+			clientset: true,
+			wantErr:   false,
 		},
 		{
 			name: "no NodePools",

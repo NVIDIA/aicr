@@ -295,12 +295,12 @@ func TestBuildTestCommand(t *testing.T) {
 	}{
 		{
 			name:        "basic test command",
-			testPackage: "./pkg/validator/checks/readiness",
-			testPattern: "TestGpuHardwareDetection",
+			testPackage: "./pkg/validator/checks/deployment",
+			testPattern: "TestOperatorHealth",
 			wantContain: []string{
-				"readiness.test",
+				"deployment.test",
 				"-test.v",
-				"-test.run 'TestGpuHardwareDetection'",
+				"-test.run 'TestOperatorHealth'",
 				"| test2json |",
 				"tee /tmp/test-output.json",
 				"--- BEGIN TEST OUTPUT ---",
@@ -327,10 +327,10 @@ func TestBuildTestCommand(t *testing.T) {
 		},
 		{
 			name:        "no pattern",
-			testPackage: "./pkg/validator/checks/readiness",
+			testPackage: "./pkg/validator/checks/deployment",
 			testPattern: "",
 			wantContain: []string{
-				"readiness.test -test.v",
+				"deployment.test -test.v",
 				"| test2json |",
 			},
 		},
@@ -358,7 +358,7 @@ func TestTestBinaryName(t *testing.T) {
 		testPackage string
 		want        string
 	}{
-		{"./pkg/validator/checks/readiness", "readiness.test"},
+		{"./pkg/validator/checks/deployment", "deployment.test"},
 		{"./pkg/validator/checks/deployment", "deployment.test"},
 		{"./pkg/validator/checks/performance", "performance.test"},
 		{"./pkg/validator/checks/conformance", "conformance.test"},
