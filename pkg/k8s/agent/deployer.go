@@ -30,7 +30,7 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 	// Step 0: Check permissions before attempting deployment
 	_, err := d.CheckPermissions(ctx)
 	if err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeUnauthorized, "insufficient permissions to deploy agent\n\nTo deploy the agent, you need cluster admin privileges or ask your cluster admin to run:\n  kubectl apply -f deployments/aicr-agent/1-deps.yaml\n  kubectl apply -f deployments/aicr-agent/2-job.yaml", err)
+		return aicrerrors.Wrap(aicrerrors.ErrCodeUnauthorized, "insufficient permissions to deploy agent\n\nTo deploy the agent, you need cluster admin privileges.\nRun: aicr snapshot", err)
 	}
 
 	// Step 1: Ensure RBAC resources (idempotent - reuses if already exists)

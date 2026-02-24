@@ -321,13 +321,13 @@ The binary is output to `./dist/`. Use it directly or add it to your PATH.
 Deploy an agent Job on a GPU node to capture the cluster state:
 
 ```bash
-aicr snapshot --deploy-agent --namespace gpu-operator --output snapshot.yaml
+aicr snapshot --namespace gpu-operator --output snapshot.yaml
 ```
 
 The snapshot is also saved as a ConfigMap for reuse. To store it directly:
 
 ```bash
-aicr snapshot --deploy-agent --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 ```
 
 Then reference it in validate with `--snapshot cm://gpu-operator/aicr-snapshot`.
@@ -687,13 +687,13 @@ The binary is output to `./dist/`. Use it directly or add it to your PATH.
 Deploy an agent Job on a GPU node to capture the cluster state:
 
 ```bash
-aicr snapshot --deploy-agent --namespace gpu-operator --output snapshot.yaml
+aicr snapshot --namespace gpu-operator --output snapshot.yaml
 ```
 
 The snapshot is also saved as a ConfigMap for reuse. To store it directly:
 
 ```bash
-aicr snapshot --deploy-agent --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
+aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 ```
 
 Then reference it in validate with `--snapshot cm://gpu-operator/aicr-snapshot`.

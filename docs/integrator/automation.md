@@ -40,8 +40,7 @@ jobs:
       
       - name: Deploy AICR Agent
         run: |
-          kubectl apply -f https://raw.githubusercontent.com/nvidia/aicr/main/deployments/aicr-agent/1-deps.yaml
-          kubectl apply -f https://raw.githubusercontent.com/nvidia/aicr/main/deployments/aicr-agent/2-job.yaml
+          aicr snapshot --output cm://gpu-operator/aicr-snapshot --timeout 300s
       
       - name: Wait for completion
         run: |
@@ -88,9 +87,7 @@ capture_snapshot:
   stage: snapshot
   image: bitnami/kubectl:latest
   script:
-    - kubectl apply -f deployments/aicr-agent/2-job.yaml
-    - kubectl wait --for=condition=complete job/aicr -n gpu-operator
-    - kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}' > snapshot.yaml
+    - aicr snapshot --output snapshot.yaml --timeout 300s
   artifacts:
     paths:
       - snapshot.yaml
@@ -225,9 +222,7 @@ for cluster_config in "${CLUSTERS[@]}"; do
   kubectl config use-context "$CLUSTER"
   
   # Capture snapshot
-  kubectl apply -f deployments/aicr-agent/2-job.yaml
-  kubectl wait --for=condition=complete --timeout=300s job/aicr -n gpu-operator
-  kubectl get configmap aicr-snapshot -n gpu-operator -o jsonpath='{.data.snapshot\.yaml}' > "snapshot-${CLUSTER}.yaml"
+  aicr snapshot --output "snapshot-${CLUSTER}.yaml" --timeout 300s
   
   # Generate recipe (can use ConfigMap directly or file)
   # Option 1: Use ConfigMap
@@ -390,32 +385,15 @@ done
 ```hcl
 # modules/aicr-agent/main.tf
 
-resource "kubectl_manifest" "aicr_deps" {
-  yaml_body = file("${path.module}/manifests/1-deps.yaml")
-}
-
-resource "kubectl_manifest" "aicr_job" {
-  yaml_body = templatefile("${path.module}/manifests/2-job.yaml", {
-    node_selector = var.node_selector
-    tolerations   = var.tolerations
-    image_version = var.image_version
-  })
-  
-  depends_on = [kubectl_manifest.aicr_deps]
-}
-
-# Wait for job completion and get snapshot from ConfigMap
-resource "null_resource" "wait_for_snapshot" {
+# Deploy agent and capture snapshot using CLI
+resource "null_resource" "capture_snapshot" {
   provisioner "local-exec" {
     command = <<-EOT
-      kubectl wait --for=condition=complete \
-        --timeout=300s job/aicr -n gpu-operator
-      kubectl get configmap aicr-snapshot -n gpu-operator \
-        -o jsonpath='{.data.snapshot\.yaml}' > ${var.snapshot_output}
+      aicr snapshot \
+        --output ${var.snapshot_output} \
+        --timeout 300s
     EOT
   }
-  
-  depends_on = [kubectl_manifest.aicr_job]
 }
 
 # Generate recipe (can use ConfigMap directly)

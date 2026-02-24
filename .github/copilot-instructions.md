@@ -872,14 +872,9 @@ make e2e-tilt
 ### Agent Deployment Pattern
 
 ```bash
-# Deploy agent for automated snapshots
-kubectl apply -f deployments/aicr-agent/1-deps.yaml
-kubectl apply -f deployments/aicr-agent/2-job.yaml
+# Deploy agent for automated snapshots (CLI handles RBAC + Job lifecycle)
+aicr snapshot --output snapshot.yaml
 
-# Check logs
-kubectl logs -n gpu-operator job/aicr
-
-# Get snapshot from ConfigMap
-kubectl get configmap aicr-snapshot -n gpu-operator \
-  -o jsonpath='{.data.snapshot\.yaml}' > snapshot.yaml
+# Or write to ConfigMap
+aicr snapshot --output cm://gpu-operator/aicr-snapshot
 ```

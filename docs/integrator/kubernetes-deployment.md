@@ -41,7 +41,7 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 kubectl create namespace aicr
 
 # Deploy API server
-kubectl apply -k https://github.com/NVIDIA/aicr/deployments/aicrd
+kubectl apply -k https://github.com/NVIDIA/aicr/deploy/aicrd
 
 # Check deployment
 kubectl get pods -n aicr

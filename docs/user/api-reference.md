@@ -27,7 +27,7 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 | Bundle creation | ✅ POST /v1/bundle | ✅ `aicr bundle` |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
-| Agent deployment | ❌ Use CLI | ✅ `--deploy-agent` |
+| Agent deployment | ❌ Use CLI | ✅ `aicr snapshot` |
 
 ## Base URL
 

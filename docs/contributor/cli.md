@@ -395,7 +395,7 @@ subjects:
 - RBAC RoleBinding must reference correct namespace
 - ConfigMap automatically created if doesn't exist
 - Supports update pattern (overwrite existing snapshots)
-- For complete examples, see [deployments/aicr-agent/](../../../deployments/aicr-agent/)
+- RBAC and Job resources are created programmatically by `pkg/k8s/agent`
 ```
 
 ### Recipe Command: `pkg/cli/recipe.go`

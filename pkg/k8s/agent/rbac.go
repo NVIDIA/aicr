@@ -108,6 +108,11 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Verbs:     []string{"get", "list"},
 			},
 			{
+				APIGroups: []string{""},
+				Resources: []string{"secrets"},
+				Verbs:     []string{"get", "list"},
+			},
+			{
 				APIGroups: []string{"nvidia.com"},
 				Resources: []string{"clusterpolicies"},
 				Verbs:     []string{"get", "list"},

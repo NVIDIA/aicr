@@ -96,7 +96,6 @@ curl -s "https://aicr.dgxc.io/v1/recipe?service=eks&accelerator=l40&intent=train
 
 ```shell
 aicr snapshot \
-    --deploy-agent \
     --namespace gpu-operator \
     --node-selector nodeGroup=customer-gpu \
     --output cm://gpu-operator/aicr-snapshot

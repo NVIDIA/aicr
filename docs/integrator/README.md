@@ -25,7 +25,7 @@ This section is for integrators who:
 
 ```shell
 # Deploy API server to Kubernetes
-kubectl apply -k https://github.com/NVIDIA/aicr/deployments/aicrd
+kubectl apply -k https://github.com/NVIDIA/aicr/deploy/aicrd
 
 # Generate recipe via API
 curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"

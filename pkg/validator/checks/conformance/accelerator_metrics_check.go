@@ -91,4 +91,3 @@ func checkAcceleratorMetricsWithURL(ctx *checks.ValidationContext, url string) e
 
 	return nil
 }
-

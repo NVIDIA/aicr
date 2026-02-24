@@ -77,7 +77,6 @@ aicr snapshot [flags]
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
 | `--format` | `-f` | string | yaml | Output format: json, yaml, table |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
-| `--deploy-agent` | | bool | false | Deploy Kubernetes Job to capture snapshot on cluster nodes |
 | `--namespace` | `-n` | string | gpu-operator | Kubernetes namespace for agent deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr-validator:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
@@ -118,25 +117,22 @@ aicr --debug snapshot
 # Table format (human-readable)
 aicr snapshot --format table
 
-# Agent deployment mode: Deploy Job to capture snapshot on cluster node
-aicr snapshot --deploy-agent
+# With custom kubeconfig
+aicr snapshot --kubeconfig ~/.kube/prod-cluster
 
-# Agent deployment with custom kubeconfig
-aicr snapshot --deploy-agent --kubeconfig ~/.kube/prod-cluster
-
-# Agent deployment targeting specific nodes
-aicr snapshot --deploy-agent \
+# Targeting specific nodes
+aicr snapshot \
   --namespace gpu-operator \
   --node-selector accelerator=nvidia-h100 \
   --node-selector zone=us-west1-a
 
-# Agent deployment with tolerations for tainted nodes
+# With tolerations for tainted nodes
 # (By default all taints are tolerated - only needed to restrict tolerations)
-aicr snapshot --deploy-agent \
+aicr snapshot \
   --toleration nvidia.com/gpu=present:NoSchedule
 
-# Agent deployment: Full example with all options
-aicr snapshot --deploy-agent \
+# Full example with all options
+aicr snapshot \
   --kubeconfig ~/.kube/config \
   --namespace gpu-operator \
   --image ghcr.io/nvidia/aicr:v0.8.0 \
@@ -154,8 +150,8 @@ aicr snapshot --template examples/templates/snapshot-template.md.tmpl
 # Template with file output
 aicr snapshot --template examples/templates/snapshot-template.md.tmpl --output report.md
 
-# Agent deployment with custom template
-aicr snapshot --deploy-agent \
+# With custom template
+aicr snapshot \
   --namespace gpu-operator \
   --template examples/templates/snapshot-template.md.tmpl \
   --output cluster-report.yaml
@@ -191,7 +187,7 @@ See `examples/templates/snapshot-template.md.tmpl` for a complete example templa
 
 **Agent Deployment Mode:**
 
-When `--deploy-agent` is specified, AICR deploys a Kubernetes Job to capture the snapshot instead of running locally:
+When running against a cluster, AICR deploys a Kubernetes Job to capture the snapshot:
 
 1. **Deploys RBAC**: ServiceAccount, Role, RoleBinding, ClusterRole, ClusterRoleBinding
 2. **Creates Job**: Runs `aicr snapshot` as a container on the target node
@@ -954,12 +950,10 @@ kubectl logs -n gpu-operator -l app=nvidia-operator-validator
 
 ```shell
 # Step 1: Agent captures snapshot to ConfigMap (using CLI deployment)
-aicr snapshot --deploy-agent --output cm://gpu-operator/aicr-snapshot
+aicr snapshot --output cm://gpu-operator/aicr-snapshot
 
-# Alternative: Manual kubectl deployment
-kubectl apply -f deployments/aicr-agent/1-deps.yaml
-kubectl apply -f deployments/aicr-agent/2-job.yaml
-kubectl wait --for=condition=complete job/aicr -n gpu-operator --timeout=5m
+# The CLI handles agent deployment automatically
+# No manual kubectl steps needed
 
 # Step 2: Generate recipe from ConfigMap
 aicr recipe \
