@@ -107,10 +107,13 @@ runs:
         # features not available in kind (DRA feature gates, driver modules).
         # The explicit "Wait for GPU operands" step below gates on what
         # actually matters (device plugin readiness).
+        # --best-effort: some components (e.g. network-operator) have Helm
+        # hooks that may time out in Kind; continue deploying remaining
+        # components so the overall stack is functional.
         chmod +x deploy.sh
         echo "--- deploy.sh ---"
         cat deploy.sh
-        ./deploy.sh --no-wait
+        ./deploy.sh --no-wait --best-effort
 
     - name: Wait for GPU operands (bundle)
       if: inputs.method == 'bundle'

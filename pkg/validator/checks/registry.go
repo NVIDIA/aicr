@@ -54,6 +54,11 @@ type ValidationContext struct {
 	// Recipe contains the full recipe with validation constraints
 	// Only available when running inside Jobs (not in unit tests)
 	Recipe *recipe.RecipeResult
+
+	// Artifacts collects diagnostic evidence during check execution.
+	// Nil when artifact capture is not active (e.g., non-conformance phases).
+	// Checks should nil-check before recording.
+	Artifacts *ArtifactCollector
 }
 
 // CheckFunc is the function signature for a validation check.

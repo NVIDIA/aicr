@@ -65,6 +65,8 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	if condErr := checkCondition(gc, "Accepted", "True"); condErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "GatewayClass not accepted", condErr)
 	}
+	recordArtifact(ctx, "GatewayClass Status",
+		"Name:     kgateway\nAccepted: True")
 
 	// 2. Gateway "inference-gateway" programmed
 	gwGVR := schema.GroupVersionResource{
@@ -78,6 +80,8 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	if condErr := checkCondition(gw, "Programmed", "True"); condErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "Gateway not programmed", condErr)
 	}
+	recordArtifact(ctx, "Gateway Status",
+		"Name:       inference-gateway\nNamespace:  kgateway-system\nProgrammed: True")
 
 	// 3. Required CRDs exist
 	crdGVR := schema.GroupVersionResource{
@@ -88,13 +92,16 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 		"httproutes.gateway.networking.k8s.io",
 		"inferencepools.inference.networking.x-k8s.io",
 	}
+	var crdSummary strings.Builder
 	for _, crdName := range requiredCRDs {
 		_, err := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{})
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("CRD %s not found", crdName), err)
 		}
+		fmt.Fprintf(&crdSummary, "  %s: present\n", crdName)
 	}
+	recordArtifact(ctx, "Required CRDs", crdSummary.String())
 
 	// 4. Gateway data-plane readiness (behavioral validation).
 	return validateGatewayDataPlane(ctx)
@@ -186,6 +193,9 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) error {
 		return errors.New(errors.ErrCodeInternal,
 			"no ready endpoints for inference-gateway proxy in kgateway-system")
 	}
+
+	recordArtifact(ctx, "Gateway Data Plane",
+		"Endpoint readiness: ready endpoints found for inference-gateway proxy")
 
 	return nil
 }

@@ -16,6 +16,7 @@ package conformance
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -62,7 +63,27 @@ func checkAcceleratorMetricsWithURL(ctx *checks.ValidationContext, url string) e
 			"DCGM exporter metrics endpoint unreachable", err)
 	}
 
-	missing := containsAllMetrics(string(body), requiredDCGMMetrics)
+	metricsText := string(body)
+
+	// Record a sample of the raw metrics output (keep small to avoid
+	// exceeding K8s pod log line limits when base64-encoded as an artifact).
+	recordArtifact(ctx, "DCGM Exporter Metrics (sample)",
+		truncateLines(metricsText, 8))
+
+	missing := containsAllMetrics(metricsText, requiredDCGMMetrics)
+
+	// Record which required metrics were found/missing.
+	var sb strings.Builder
+	for _, m := range requiredDCGMMetrics {
+		found := !slices.Contains(missing, m)
+		status := "FOUND"
+		if !found {
+			status = "MISSING"
+		}
+		fmt.Fprintf(&sb, "  %-30s %s\n", m, status)
+	}
+	recordArtifact(ctx, "Required DCGM Metrics", sb.String())
+
 	if len(missing) > 0 {
 		return errors.New(errors.ErrCodeNotFound,
 			fmt.Sprintf("DCGM metrics missing: %s", strings.Join(missing, ", ")))
@@ -70,3 +91,4 @@ func checkAcceleratorMetricsWithURL(ctx *checks.ValidationContext, url string) e
 
 	return nil
 }
+

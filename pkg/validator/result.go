@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
 // ValidationStatus represents the overall validation outcome.
@@ -160,4 +161,8 @@ type CheckResult struct {
 
 	// Duration is how long this check took to run.
 	Duration time.Duration `json:"duration,omitempty" yaml:"duration,omitempty"`
+
+	// Artifacts contains diagnostic evidence captured during live check execution.
+	// Ephemeral: only populated during live validation runs, never persisted.
+	Artifacts []checks.Artifact `json:"-" yaml:"-"`
 }

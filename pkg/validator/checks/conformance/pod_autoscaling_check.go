@@ -75,6 +75,10 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 		return errors.Wrap(errors.ErrCodeNotFound,
 			"custom metrics API not available (prometheus-adapter not ready)", err)
 	}
+	var statusCode int
+	result.StatusCode(&statusCode)
+	recordArtifact(ctx, "Custom Metrics API",
+		fmt.Sprintf("Endpoint:    %s\nHTTP Status: %d\nStatus:      available", rawURL, statusCode))
 
 	// 2. GPU custom metrics have data (poll with retries — adapter relist is 30s)
 	metrics := []string{"gpu_utilization", "gpu_memory_used", "gpu_power_usage"}
@@ -138,8 +142,17 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 			"external metric dcgm_gpu_power_usage has no data")
 	}
 
+	recordArtifact(ctx, "External Metrics API",
+		fmt.Sprintf("Endpoint:  %s\nMetric:    dcgm_gpu_power_usage\nItems:     %d\nStatus:    available with data",
+			extPath, len(extResp.Items)))
+
 	// 4. HPA behavioral validation: prove HPA reads external metrics and computes scale-up.
-	return validateHPABehavior(ctx.Context, ctx.Clientset)
+	if err := validateHPABehavior(ctx.Context, ctx.Clientset); err != nil {
+		return err
+	}
+	recordArtifact(ctx, "HPA Behavioral Test",
+		"Scale-up:   PASS — HPA computed desiredReplicas > currentReplicas, deployment scaled\nScale-down: PASS — HPA reduced replicas after target increased")
+	return nil
 }
 
 // validateHPABehavior creates a Deployment + HPA targeting a low external metric threshold,

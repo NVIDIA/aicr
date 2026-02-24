@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -108,12 +109,15 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 	}
 
 	// 1. All KAI scheduler deployments available.
+	var schedulerSummary strings.Builder
 	for _, name := range kaiSchedulerDeployments {
 		if err := verifyDeploymentAvailable(ctx, "kai-scheduler", name); err != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("KAI scheduler component %s check failed", name), err)
 		}
+		fmt.Fprintf(&schedulerSummary, "  %-25s available\n", name)
 	}
+	recordArtifact(ctx, "KAI Scheduler Components", schedulerSummary.String())
 
 	// 2. Required CRDs for gang scheduling.
 	dynClient, err := getDynamicClient(ctx)
@@ -139,6 +143,8 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 	if gpuErr != nil {
 		return gpuErr
 	}
+	recordArtifact(ctx, "GPU Availability",
+		fmt.Sprintf("Total GPUs: %d\nFree GPUs:  %d\nRequired:   %d", total, free, gangMinMembers))
 	if free < gangMinMembers {
 		return errors.New(errors.ErrCodeUnavailable,
 			fmt.Sprintf("insufficient free GPUs for gang scheduling test: %d free of %d total (need %d)",
@@ -161,7 +167,29 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		return err
 	}
 
-	return validateGangPatterns(pods, run)
+	if err := validateGangPatterns(pods, run); err != nil {
+		return err
+	}
+
+	// Record gang test results with scheduling timestamps.
+	var gangResults strings.Builder
+	for i, pod := range pods {
+		if pod == nil {
+			continue
+		}
+		var schedTime string
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionTrue {
+				schedTime = cond.LastTransitionTime.Format(time.RFC3339)
+				break
+			}
+		}
+		fmt.Fprintf(&gangResults, "Pod %d: %s  phase=%s  scheduler=%s  scheduled=%s\n",
+			i, pod.Name, pod.Status.Phase, pod.Spec.SchedulerName, schedTime)
+	}
+	recordArtifact(ctx, "Gang Scheduling Test Results", gangResults.String())
+
+	return nil
 }
 
 // deployGangTestResources creates the namespace, PodGroup, ResourceClaims, and Pods.

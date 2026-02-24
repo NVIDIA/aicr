@@ -227,6 +227,7 @@ func runValidation(
 		evidenceSource := result
 		if evidenceResultPath != "" {
 			slog.Info("loading saved result for evidence rendering", "path", evidenceResultPath)
+			slog.Warn("saved results do not include diagnostic artifacts; evidence output will contain check status only")
 			saved, loadErr := serializer.FromFile[validator.ValidationResult](evidenceResultPath)
 			if loadErr != nil {
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to load evidence result", loadErr)
@@ -364,7 +365,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:  "result",
-			Usage: "Use a saved validation result file as the source for evidence rendering (live validation still runs). Requires --phase conformance and --evidence-dir.",
+			Usage: "Use a saved validation result file as the source for evidence rendering (live validation still runs). Note: saved results do not include diagnostic artifacts captured during live runs. Requires --phase conformance and --evidence-dir.",
 		},
 		outputFlag,
 		formatFlag,

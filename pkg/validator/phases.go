@@ -1001,6 +1001,37 @@ func parseConstraintResult(output []string) *ConstraintValidation {
 	return nil
 }
 
+// extractArtifacts separates artifact lines from regular test output.
+// ARTIFACT: lines are base64-encoded JSON produced by TestRunner.Cancel().
+// t.Logf prefixes output with source location (e.g. "runner.go:102: ARTIFACT:..."),
+// so we use Contains + SplitN (same approach as CONSTRAINT_RESULT parsing).
+// Lines that contain ARTIFACT: but fail to decode are preserved in reason output
+// and a warning is logged, so debugging context is never silently lost.
+func extractArtifacts(output []string) ([]checks.Artifact, []string) {
+	var artifacts []checks.Artifact
+	var reasonLines []string
+	for _, line := range output {
+		if !strings.Contains(line, "ARTIFACT:") {
+			reasonLines = append(reasonLines, line)
+			continue
+		}
+		parts := strings.SplitN(line, "ARTIFACT:", 2)
+		if len(parts) != 2 {
+			reasonLines = append(reasonLines, line)
+			continue
+		}
+		encoded := strings.TrimSpace(parts[1])
+		a, err := checks.DecodeArtifact(encoded)
+		if err != nil {
+			slog.Warn("failed to decode artifact line", "error", err)
+			reasonLines = append(reasonLines, line)
+			continue
+		}
+		artifacts = append(artifacts, *a)
+	}
+	return artifacts, reasonLines
+}
+
 func (v *Validator) runPhaseJob(
 	ctx context.Context,
 	deployer *agent.Deployer,
@@ -1122,16 +1153,18 @@ func (v *Validator) runPhaseJob(
 				result.Constraints = append(result.Constraints, *constraintResult)
 			}
 
-			// Build reason from test output
-			if len(test.Output) > 0 {
-				// Include last few lines of output as reason (useful for failures)
+			// Extract artifacts from test output and build reason from remaining lines.
+			artifacts, reasonLines := extractArtifacts(test.Output)
+			checkResult.Artifacts = artifacts
+
+			// Build reason from last few non-artifact output lines
+			if len(reasonLines) > 0 {
 				maxLines := 5
-				startIdx := len(test.Output) - maxLines
+				startIdx := len(reasonLines) - maxLines
 				if startIdx < 0 {
 					startIdx = 0
 				}
-				relevantOutput := test.Output[startIdx:]
-				checkResult.Reason = strings.Join(relevantOutput, "\n")
+				checkResult.Reason = strings.Join(reasonLines[startIdx:], "\n")
 			} else {
 				checkResult.Reason = fmt.Sprintf("Test %s: %s", test.Status, test.Name)
 			}

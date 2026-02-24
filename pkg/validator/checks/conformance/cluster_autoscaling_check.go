@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -68,10 +69,20 @@ func CheckClusterAutoscaling(ctx *checks.ValidationContext) error {
 	// 1. Karpenter controller deployment running.
 	// Skip gracefully when Karpenter is not installed — the cluster may use
 	// a different autoscaling mechanism (e.g., ASG, Cluster Autoscaler).
-	if err := verifyDeploymentAvailable(ctx, "karpenter", "karpenter"); err != nil {
+	deploy, deployErr := getDeploymentIfAvailable(ctx, "karpenter", "karpenter")
+	if deployErr != nil {
 		slog.Info("Karpenter not found, skipping cluster autoscaling check — cluster may use ASG or Cluster Autoscaler instead")
 		return nil
 	}
+	expected := int32(1)
+	if deploy.Spec.Replicas != nil {
+		expected = *deploy.Spec.Replicas
+	}
+	recordArtifact(ctx, "Karpenter Controller",
+		fmt.Sprintf("Name:      %s/%s\nReplicas:  %d/%d available\nImage:     %s",
+			deploy.Namespace, deploy.Name,
+			deploy.Status.AvailableReplicas, expected,
+			firstContainerImage(deploy.Spec.Template.Spec.Containers)))
 
 	// 2. GPU NodePool exists with nvidia.com/gpu limits
 	dynClient, err := getDynamicClient(ctx)
@@ -100,6 +111,9 @@ func CheckClusterAutoscaling(ctx *checks.ValidationContext) error {
 			"no NodePool with nvidia.com/gpu limits found")
 	}
 
+	recordArtifact(ctx, "GPU NodePools",
+		fmt.Sprintf("Count: %d\nNames: %s", len(gpuNodePoolNames),
+			strings.Join(gpuNodePoolNames, ", ")))
 	slog.Info("discovered GPU NodePools", "pools", gpuNodePoolNames)
 
 	// 3. Behavioral validation: try each discovered GPU NodePool until one succeeds.
@@ -110,6 +124,8 @@ func CheckClusterAutoscaling(ctx *checks.ValidationContext) error {
 		slog.Info("attempting behavioral validation with NodePool", "nodePool", poolName)
 		lastErr = validateClusterAutoscaling(ctx.Context, ctx.Clientset, poolName)
 		if lastErr == nil {
+			recordArtifact(ctx, "Cluster Autoscaling Behavioral Test",
+				fmt.Sprintf("NodePool:    %s\nHPA:         scaling intent detected\nKarpenter:   new node(s) provisioned\nPods:        scheduled on new nodes", poolName))
 			return nil
 		}
 		slog.Debug("behavioral validation failed for NodePool",

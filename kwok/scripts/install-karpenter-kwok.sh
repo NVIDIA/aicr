@@ -67,7 +67,7 @@ install_kwok() {
     helm upgrade --install kwok-controller kwok/kwok \
         --namespace kube-system \
         --set hostNetwork=true \
-        --wait --timeout 120s
+        --wait --timeout 300s
 
     helm upgrade --install kwok-stage-fast kwok/stage-fast \
         --namespace kube-system

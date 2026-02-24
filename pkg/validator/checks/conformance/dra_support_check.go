@@ -15,6 +15,8 @@
 package conformance
 
 import (
+	"fmt"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -45,13 +47,33 @@ func CheckDRASupport(ctx *checks.ValidationContext) error {
 	}
 
 	// 1. DRA driver controller Deployment available
-	if err := verifyDeploymentAvailable(ctx, "nvidia-dra-driver", "nvidia-dra-driver-gpu-controller"); err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "DRA driver controller check failed", err)
+	deploy, deployErr := getDeploymentIfAvailable(ctx, "nvidia-dra-driver", "nvidia-dra-driver-gpu-controller")
+	if deploy != nil {
+		expected := int32(1)
+		if deploy.Spec.Replicas != nil {
+			expected = *deploy.Spec.Replicas
+		}
+		recordArtifact(ctx, "DRA Controller Deployment",
+			fmt.Sprintf("Name:      %s/%s\nReplicas:  %d/%d available\nImage:     %s",
+				deploy.Namespace, deploy.Name,
+				deploy.Status.AvailableReplicas, expected,
+				firstContainerImage(deploy.Spec.Template.Spec.Containers)))
+	}
+	if deployErr != nil {
+		return errors.Wrap(errors.ErrCodeNotFound, "DRA driver controller check failed", deployErr)
 	}
 
 	// 2. DRA kubelet plugin DaemonSet ready
-	if err := verifyDaemonSetReady(ctx, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "DRA kubelet plugin check failed", err)
+	ds, dsErr := getDaemonSetIfReady(ctx, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin")
+	if ds != nil {
+		recordArtifact(ctx, "DRA Kubelet Plugin DaemonSet",
+			fmt.Sprintf("Name:      %s/%s\nReady:     %d/%d pods\nImage:     %s",
+				ds.Namespace, ds.Name,
+				ds.Status.NumberReady, ds.Status.DesiredNumberScheduled,
+				firstContainerImage(ds.Spec.Template.Spec.Containers)))
+	}
+	if dsErr != nil {
+		return errors.Wrap(errors.ErrCodeNotFound, "DRA kubelet plugin check failed", dsErr)
 	}
 
 	// 3. ResourceSlices exist (GPU resources advertised via resource.k8s.io/v1 — GA)
@@ -66,6 +88,8 @@ func CheckDRASupport(ctx *checks.ValidationContext) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list ResourceSlices", err)
 	}
+	recordArtifact(ctx, "ResourceSlices",
+		fmt.Sprintf("Total ResourceSlices: %d", len(slices.Items)))
 	if len(slices.Items) == 0 {
 		return errors.New(errors.ErrCodeNotFound, "no ResourceSlices found (GPU resources not advertised)")
 	}

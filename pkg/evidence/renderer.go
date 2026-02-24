@@ -132,10 +132,11 @@ func (r *Renderer) buildEntries(conformance *validator.PhaseResult) []EvidenceEn
 		}
 
 		entry := CheckEntry{
-			Name:     check.Name,
-			Status:   cr.Status,
-			Reason:   cr.Reason,
-			Duration: cr.Duration,
+			Name:      check.Name,
+			Status:    cr.Status,
+			Reason:    cr.Reason,
+			Duration:  cr.Duration,
+			Artifacts: cr.Artifacts,
 		}
 
 		g, exists := groups[check.EvidenceFile]

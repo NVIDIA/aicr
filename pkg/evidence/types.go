@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
 // EvidenceEntry holds all data needed to render a single evidence document.
@@ -58,4 +59,7 @@ type CheckEntry struct {
 
 	// Duration is how long the check took.
 	Duration time.Duration
+
+	// Artifacts contains diagnostic evidence captured during check execution.
+	Artifacts []checks.Artifact
 }

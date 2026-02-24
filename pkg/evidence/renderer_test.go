@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/checks"
 
 	// Import conformance checks to register them.
 	_ "github.com/NVIDIA/aicr/pkg/validator/checks/conformance"
@@ -335,5 +336,107 @@ func TestRenderIndexContent(t *testing.T) {
 	}
 	if !strings.Contains(s, "test-index") {
 		t.Error("index.md should contain run ID")
+	}
+}
+
+func TestRenderWithArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	r := New(WithOutputDir(dir))
+
+	result := &validator.ValidationResult{
+		RunID: "test-artifacts",
+		Phases: map[string]*validator.PhaseResult{
+			"conformance": {
+				Checks: []validator.CheckResult{
+					{
+						Name:     "dra-support",
+						Status:   validator.ValidationStatusPass,
+						Reason:   "DRA controller healthy",
+						Duration: 5 * time.Second,
+						Artifacts: []checks.Artifact{
+							{Label: "DRA Controller Pods", Data: "NAME                   READY   STATUS\ndra-controller-abc12   1/1     Running"},
+							{Label: "ResourceSlice Count", Data: "Total ResourceSlices: 8"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := r.Render(context.Background(), result); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "dra-support.md"))
+	if err != nil {
+		t.Fatalf("failed to read dra-support.md: %v", err)
+	}
+
+	s := string(content)
+
+	// Verify artifact labels are present.
+	if !strings.Contains(s, "#### DRA Controller Pods") {
+		t.Error("evidence should contain artifact label 'DRA Controller Pods'")
+	}
+	if !strings.Contains(s, "#### ResourceSlice Count") {
+		t.Error("evidence should contain artifact label 'ResourceSlice Count'")
+	}
+
+	// Verify artifact data is present.
+	if !strings.Contains(s, "dra-controller-abc12") {
+		t.Error("evidence should contain artifact data")
+	}
+	if !strings.Contains(s, "Total ResourceSlices: 8") {
+		t.Error("evidence should contain ResourceSlice count data")
+	}
+
+	// Verify the reason is also present (artifacts don't replace reason).
+	if !strings.Contains(s, "DRA controller healthy") {
+		t.Error("evidence should still contain the reason text")
+	}
+}
+
+func TestRenderWithoutArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	r := New(WithOutputDir(dir))
+
+	result := &validator.ValidationResult{
+		RunID: "test-no-artifacts",
+		Phases: map[string]*validator.PhaseResult{
+			"conformance": {
+				Checks: []validator.CheckResult{
+					{
+						Name:     "dra-support",
+						Status:   validator.ValidationStatusPass,
+						Reason:   "all healthy",
+						Duration: 3 * time.Second,
+					},
+				},
+			},
+		},
+	}
+
+	if err := r.Render(context.Background(), result); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "dra-support.md"))
+	if err != nil {
+		t.Fatalf("failed to read dra-support.md: %v", err)
+	}
+
+	s := string(content)
+
+	// Verify basic content is present.
+	if !strings.Contains(s, "dra-support") {
+		t.Error("evidence should contain check name")
+	}
+	if !strings.Contains(s, "all healthy") {
+		t.Error("evidence should contain reason")
+	}
+
+	// Verify no artifact headers appear.
+	if strings.Contains(s, "####") {
+		t.Error("evidence without artifacts should not contain #### headers")
 	}
 }

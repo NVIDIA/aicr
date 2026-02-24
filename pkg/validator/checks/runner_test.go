@@ -16,6 +16,7 @@ package checks
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -486,7 +487,7 @@ func (m *mockTestingT) Fatalf(format string, args ...interface{}) {
 }
 
 func (m *mockTestingT) Logf(format string, args ...interface{}) {
-	m.logMessages = append(m.logMessages, format)
+	m.logMessages = append(m.logMessages, fmt.Sprintf(format, args...))
 }
 
 func (m *mockTestingT) Helper() {}

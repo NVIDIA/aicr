@@ -33,7 +33,7 @@ runs:
     - name: Run aicr snapshot
       shell: bash
       run: |
-        ./aicr snapshot --deploy-agent \
+        ./aicr snapshot \
           --kubeconfig="${HOME}/.kube/config" \
           --namespace=default \
           --image=ko.local:smoke-test \

@@ -54,5 +54,13 @@ const evidenceTemplate = `# {{ .Title }}
 {{ .Reason }}
 ` + "```" + `
 {{- end }}
+{{- range .Artifacts }}
+
+#### {{ .Label }}
+
+` + "```" + `
+{{ .Data }}
+` + "```" + `
+{{- end }}
 {{ end }}
 `

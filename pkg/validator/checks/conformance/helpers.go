@@ -18,11 +18,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -91,40 +94,82 @@ func checkCondition(obj *unstructured.Unstructured, condType, expectedStatus str
 
 // verifyDeploymentAvailable checks that a Deployment has at least one available replica.
 func verifyDeploymentAvailable(ctx *checks.ValidationContext, namespace, name string) error {
+	_, err := getDeploymentIfAvailable(ctx, namespace, name)
+	return err
+}
+
+// getDeploymentIfAvailable fetches a Deployment and verifies it has at least one available replica.
+// Returns the Deployment object so callers can capture diagnostic artifacts from it.
+func getDeploymentIfAvailable(ctx *checks.ValidationContext, namespace, name string) (*appsv1.Deployment, error) {
 	deploy, err := ctx.Clientset.AppsV1().Deployments(namespace).Get(
 		ctx.Context, name, metav1.GetOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("deployment %s/%s not found", namespace, name), err)
+		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("deployment %s/%s not found", namespace, name), err)
 	}
 	if deploy.Status.AvailableReplicas < 1 {
 		expected := int32(1)
 		if deploy.Spec.Replicas != nil {
 			expected = *deploy.Spec.Replicas
 		}
-		return errors.New(errors.ErrCodeInternal,
+		return deploy, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("deployment %s/%s not available: %d/%d replicas",
 				namespace, name, deploy.Status.AvailableReplicas, expected))
 	}
-	return nil
+	return deploy, nil
 }
 
 // verifyDaemonSetReady checks that a DaemonSet has at least one ready pod.
 func verifyDaemonSetReady(ctx *checks.ValidationContext, namespace, name string) error {
+	_, err := getDaemonSetIfReady(ctx, namespace, name)
+	return err
+}
+
+// getDaemonSetIfReady fetches a DaemonSet and verifies it has at least one ready pod.
+// Returns the DaemonSet object so callers can capture diagnostic artifacts from it.
+func getDaemonSetIfReady(ctx *checks.ValidationContext, namespace, name string) (*appsv1.DaemonSet, error) {
 	ds, err := ctx.Clientset.AppsV1().DaemonSets(namespace).Get(
 		ctx.Context, name, metav1.GetOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("daemonset %s/%s not found", namespace, name), err)
+		return nil, errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("daemonset %s/%s not found", namespace, name), err)
 	}
 	if ds.Status.NumberReady < 1 {
-		return errors.New(errors.ErrCodeInternal,
+		return ds, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("daemonset %s/%s not ready: %d/%d pods",
 				namespace, name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled))
 	}
-	return nil
+	return ds, nil
 }
 
 // int32Ptr returns a pointer to the given int32 value.
 func int32Ptr(i int32) *int32 { return &i }
+
+// recordArtifact records diagnostic evidence if the artifact collector is active.
+// Safe to call when ctx.Artifacts is nil (no-op).
+func recordArtifact(ctx *checks.ValidationContext, label, data string) {
+	if ctx.Artifacts == nil {
+		return
+	}
+	if err := ctx.Artifacts.Record(label, data); err != nil {
+		slog.Debug("artifact recording skipped", "label", label, "error", err)
+	}
+}
+
+// firstContainerImage returns the image of the first container, or "unknown" if empty.
+func firstContainerImage(containers []corev1.Container) string {
+	if len(containers) > 0 {
+		return containers[0].Image
+	}
+	return "unknown"
+}
+
+// truncateLines limits text to at most n lines, appending a truncation marker if needed.
+func truncateLines(text string, n int) string {
+	lines := strings.SplitN(text, "\n", n+1)
+	if len(lines) <= n {
+		return text
+	}
+	return strings.Join(lines[:n], "\n") + "\n... [truncated]"
+}
 
 // containsAllMetrics checks that all required metric names appear in the given text.
 // Returns the list of missing metrics.

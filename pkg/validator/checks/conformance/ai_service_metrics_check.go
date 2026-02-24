@@ -67,6 +67,10 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 	if err := json.Unmarshal(body, &promResp); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse Prometheus response", err)
 	}
+
+	recordArtifact(ctx, "Prometheus Query: DCGM_FI_DEV_GPU_UTIL",
+		fmt.Sprintf("Endpoint: %s\nTime series count: %d", queryURL, len(promResp.Data.Result)))
+
 	if len(promResp.Data.Result) == 0 {
 		return errors.New(errors.ErrCodeNotFound,
 			"no DCGM_FI_DEV_GPU_UTIL time series in Prometheus")
@@ -79,10 +83,12 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 		return errors.New(errors.ErrCodeInternal, "discovery REST client is not available")
 	}
 	result := restClient.Get().AbsPath(rawURL).Do(ctx.Context)
-	if err := result.Error(); err != nil {
+	if cmErr := result.Error(); cmErr != nil {
+		recordArtifact(ctx, "Custom Metrics API", fmt.Sprintf("Status: unavailable\nError: %v", cmErr))
 		return errors.Wrap(errors.ErrCodeNotFound,
-			"custom metrics API not available", err)
+			"custom metrics API not available", cmErr)
 	}
+	recordArtifact(ctx, "Custom Metrics API", "Status: available\nEndpoint: /apis/custom.metrics.k8s.io/v1beta1")
 
 	return nil
 }

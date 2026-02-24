@@ -60,8 +60,20 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 
 	// 1. Dynamo operator controller-manager deployment running
 	// Name from: tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml:29
-	if err := verifyDeploymentAvailable(ctx, "dynamo-system", "dynamo-platform-dynamo-operator-controller-manager"); err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "Dynamo operator controller-manager check failed", err)
+	deploy, deployErr := getDeploymentIfAvailable(ctx, "dynamo-system", "dynamo-platform-dynamo-operator-controller-manager")
+	if deploy != nil {
+		expected := int32(1)
+		if deploy.Spec.Replicas != nil {
+			expected = *deploy.Spec.Replicas
+		}
+		recordArtifact(ctx, "Dynamo Operator Deployment",
+			fmt.Sprintf("Name:      %s/%s\nReplicas:  %d/%d available\nImage:     %s",
+				deploy.Namespace, deploy.Name,
+				deploy.Status.AvailableReplicas, expected,
+				firstContainerImage(deploy.Spec.Template.Spec.Containers)))
+	}
+	if deployErr != nil {
+		return errors.Wrap(errors.ErrCodeNotFound, "Dynamo operator controller-manager check failed", deployErr)
 	}
 
 	// 2. Validating webhook operational
@@ -72,9 +84,11 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 			"failed to list validating webhook configurations", err)
 	}
 	var foundDynamoWebhook bool
+	var webhookName string
 	for _, wh := range webhooks.Items {
 		if strings.Contains(wh.Name, "dynamo") {
 			foundDynamoWebhook = true
+			webhookName = wh.Name
 			// Verify webhook service endpoint exists via EndpointSlice
 			for _, w := range wh.Webhooks {
 				if w.ClientConfig.Service != nil {
@@ -101,6 +115,8 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 		return errors.New(errors.ErrCodeNotFound,
 			"Dynamo validating webhook configuration not found")
 	}
+	recordArtifact(ctx, "Validating Webhook",
+		fmt.Sprintf("Name:      %s\nEndpoint:  reachable", webhookName))
 
 	// 3. DynamoGraphDeployment CRD exists (proves operator manages CRs)
 	// API group: nvidia.com (v1alpha1) — from tests/manifests/dynamo-vllm-smoke-test.yaml:28
@@ -120,7 +136,12 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 	}
 
 	// 4. Validating webhook actively rejects invalid resources (behavioral test).
-	return validateWebhookRejects(ctx)
+	if err := validateWebhookRejects(ctx); err != nil {
+		return err
+	}
+	recordArtifact(ctx, "Webhook Rejection Test",
+		"Result:    PASS — webhook rejected invalid DynamoGraphDeployment")
+	return nil
 }
 
 // validateWebhookRejects verifies that the Dynamo validating webhook actively rejects

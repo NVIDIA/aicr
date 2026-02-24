@@ -211,6 +211,17 @@ const (
 	PodReadyTimeout = 2 * time.Minute
 )
 
+// Artifact limits for conformance evidence capture.
+const (
+	// ArtifactMaxDataSize is the maximum size in bytes of a single artifact's Data field.
+	// Ensures each base64-encoded ARTIFACT: line stays well under the bufio.Scanner
+	// default 64KB limit (base64 expands ~4/3, so 8KB → ~11KB encoded).
+	ArtifactMaxDataSize = 8 * 1024
+
+	// ArtifactMaxPerCheck is the maximum number of artifacts a single check can record.
+	ArtifactMaxPerCheck = 20
+)
+
 // Job configuration constants.
 const (
 	// JobTTLAfterFinished is the time-to-live for completed Jobs.
