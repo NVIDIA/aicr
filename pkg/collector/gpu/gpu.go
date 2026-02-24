@@ -69,11 +69,15 @@ func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 
 	data, err := executeCommand(ctx, nvidiaSMICommand, "-q", "-x")
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to execute nvidia-smi command", err)
+		slog.Warn("nvidia-smi execution failed - no GPU data will be collected",
+			slog.String("error", err.Error()))
+		return noGPUMeasurement(), nil
 	}
 	smiReadings, err := getSMIReadings(data)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse nvidia-smi output", err)
+		slog.Warn("nvidia-smi output parsing failed - no GPU data will be collected",
+			slog.String("error", err.Error()))
+		return noGPUMeasurement(), nil
 	}
 
 	res := &measurement.Measurement{

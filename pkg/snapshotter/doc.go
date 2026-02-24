@@ -119,6 +119,20 @@
 //	        data:
 //	          provider: eks
 //	          kernel-version: 6.8.0
+//	      - subtype: image
+//	        data:
+//	          kube-apiserver: v1.33.5
+//	      - subtype: policy
+//	        data:
+//	          driver.version: 570.86.16
+//	      - subtype: helm
+//	        data:
+//	          gpu-operator.chart: gpu-operator
+//	          gpu-operator.version: 25.3.0
+//	      - subtype: argocd
+//	        data:
+//	          gpu-operator.source.chart: gpu-operator
+//	          gpu-operator.syncStatus: Synced
 //	  - type: GPU
 //	    subtypes:
 //	      - subtype: device

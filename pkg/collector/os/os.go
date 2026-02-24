@@ -31,47 +31,46 @@ type Collector struct {
 }
 
 // Collect gathers all OS-level configurations and returns them as a single measurement
-// with three subtypes: grub, kmod, and sysctl.
+// with subtypes: grub, sysctl, kmod, and release.
+// Individual sub-collectors degrade gracefully — if any sub-collector fails,
+// a warning is logged and that subtype is skipped.
 func (c *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting OS configuration")
 
 	ctx, cancel := context.WithTimeout(ctx, defaults.CollectorTimeout)
 	defer cancel()
 
-	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "OS collector context cancelled", err)
 	}
 
-	grub, err := c.collectGRUB(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect GRUB configuration", err)
+	type subCollector struct {
+		name string
+		fn   func(context.Context) (*measurement.Subtype, error)
 	}
 
-	sysctl, err := c.collectSysctl(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect sysctl configuration", err)
+	collectors := []subCollector{
+		{"grub", c.collectGRUB},
+		{"sysctl", c.collectSysctl},
+		{"kmod", c.collectKMod},
+		{"release", c.collectRelease},
 	}
 
-	kmod, err := c.collectKMod(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect kernel modules", err)
+	subtypes := make([]measurement.Subtype, 0, len(collectors))
+
+	for _, sc := range collectors {
+		result, err := sc.fn(ctx)
+		if err != nil {
+			slog.Warn("failed to collect "+sc.name+" - skipping",
+				slog.String("collector", sc.name),
+				slog.String("error", err.Error()))
+			continue
+		}
+		subtypes = append(subtypes, *result)
 	}
 
-	release, err := c.collectRelease(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to collect OS release", err)
-	}
-
-	res := &measurement.Measurement{
-		Type: measurement.TypeOS,
-		Subtypes: []measurement.Subtype{
-			*grub,
-			*sysctl,
-			*kmod,
-			*release,
-		},
-	}
-
-	return res, nil
+	return &measurement.Measurement{
+		Type:     measurement.TypeOS,
+		Subtypes: subtypes,
+	}, nil
 }

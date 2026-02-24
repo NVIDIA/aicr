@@ -41,9 +41,6 @@ func logWriter() io.Writer {
 
 // AgentConfig contains configuration for Kubernetes agent deployment.
 type AgentConfig struct {
-	// Enabled determines whether to deploy agent or run locally
-	Enabled bool
-
 	// Kubeconfig path (optional override)
 	Kubeconfig string
 
