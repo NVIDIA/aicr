@@ -52,15 +52,14 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 		ctx := context.Background()
 		err := snapshotter.Measure(ctx)
 
-		// This will fail because default factory requires actual system resources
-		// But we verify that Factory is set
 		if snapshotter.Factory == nil {
 			t.Error("Factory should be set to default when nil")
 		}
 
-		// Error is expected since we don't have real collectors
-		if err == nil {
-			t.Log("Measure succeeded (unexpected in test environment)")
+		// With graceful degradation, snapshot should succeed even without
+		// real system resources — failed collectors are skipped.
+		if err != nil {
+			t.Errorf("Measure() should succeed with graceful degradation, got: %v", err)
 		}
 	})
 
@@ -92,21 +91,101 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 		}
 	})
 
-	t.Run("handles collector errors", func(t *testing.T) {
+	t.Run("degrades gracefully on collector errors", func(t *testing.T) {
+		ser := &mockSerializer{}
 		factory := &mockFactory{
 			k8sError: fmt.Errorf("k8s error"),
+			osError:  fmt.Errorf("os error"),
 		}
 		snapshotter := &NodeSnapshotter{
 			Version:    "1.0.0",
 			Factory:    factory,
-			Serializer: &mockSerializer{},
+			Serializer: ser,
 		}
 
 		ctx := context.Background()
 		err := snapshotter.Measure(ctx)
 
+		if err != nil {
+			t.Errorf("Measure() should succeed even when collectors fail, got: %v", err)
+		}
+
+		// Verify that successful collectors still contributed measurements
+		snap, ok := ser.data.(*Snapshot)
+		if !ok {
+			t.Fatal("serialized data is not a *Snapshot")
+		}
+		// k8s and os failed, systemd and gpu succeeded = 2 measurements
+		if len(snap.Measurements) != 2 {
+			t.Errorf("expected 2 measurements (from working collectors), got %d", len(snap.Measurements))
+		}
+	})
+}
+
+func TestNodeSnapshotter_RequireGPU(t *testing.T) {
+	t.Run("fails when require-gpu set and no GPU found", func(t *testing.T) {
+		// Mock GPU collector returns gpu-count=0
+		factory := &mockFactory{
+			gpuMeasurement: &measurement.Measurement{
+				Type: measurement.TypeGPU,
+				Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{
+						measurement.KeyGPUCount: measurement.Int(0),
+					},
+				}},
+			},
+		}
+		snapshotter := &NodeSnapshotter{
+			Version:    "1.0.0",
+			Factory:    factory,
+			Serializer: &mockSerializer{},
+			RequireGPU: true,
+		}
+
+		err := snapshotter.Measure(context.Background())
 		if err == nil {
-			t.Error("Measure() should return error when collector fails")
+			t.Error("expected error when require-gpu is set and no GPU found")
+		}
+	})
+
+	t.Run("succeeds when require-gpu set and GPU found", func(t *testing.T) {
+		factory := &mockFactory{
+			gpuMeasurement: &measurement.Measurement{
+				Type: measurement.TypeGPU,
+				Subtypes: []measurement.Subtype{{
+					Name: "smi",
+					Data: map[string]measurement.Reading{
+						measurement.KeyGPUCount: measurement.Int(2),
+					},
+				}},
+			},
+		}
+		snapshotter := &NodeSnapshotter{
+			Version:    "1.0.0",
+			Factory:    factory,
+			Serializer: &mockSerializer{},
+			RequireGPU: true,
+		}
+
+		err := snapshotter.Measure(context.Background())
+		if err != nil {
+			t.Errorf("expected no error when GPU is present, got: %v", err)
+		}
+	})
+
+	t.Run("succeeds without require-gpu even when no GPU", func(t *testing.T) {
+		factory := &mockFactory{}
+		snapshotter := &NodeSnapshotter{
+			Version:    "1.0.0",
+			Factory:    factory,
+			Serializer: &mockSerializer{},
+			RequireGPU: false,
+		}
+
+		err := snapshotter.Measure(context.Background())
+		if err != nil {
+			t.Errorf("expected no error without require-gpu, got: %v", err)
 		}
 	})
 }
@@ -147,6 +226,9 @@ type mockFactory struct {
 	systemdError error
 	osError      error
 	gpuError     error
+
+	// gpuMeasurement overrides the default mock measurement for the GPU collector.
+	gpuMeasurement *measurement.Measurement
 }
 
 func (m *mockFactory) CreateKubernetesCollector() collector.Collector {
@@ -166,16 +248,20 @@ func (m *mockFactory) CreateOSCollector() collector.Collector {
 
 func (m *mockFactory) CreateGPUCollector() collector.Collector {
 	m.gpuCalled = true
-	return &mockCollector{err: m.gpuError}
+	return &mockCollector{err: m.gpuError, result: m.gpuMeasurement}
 }
 
 type mockCollector struct {
-	err error
+	err    error
+	result *measurement.Measurement
 }
 
 func (m *mockCollector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	if m.err != nil {
 		return nil, m.err
+	}
+	if m.result != nil {
+		return m.result, nil
 	}
 	return &measurement.Measurement{
 		Type:     measurement.TypeK8s,

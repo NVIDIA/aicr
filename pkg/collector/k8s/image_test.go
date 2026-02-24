@@ -87,8 +87,8 @@ func TestImageCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// Should have 4 subtypes: server, image, policy, and provider
-	assert.Len(t, m.Subtypes, 4)
+	// Should have 6 subtypes: server, image, policy, node, helm, and argocd
+	assert.Len(t, m.Subtypes, 6)
 
 	// Find the image subtype
 	var imageSubtype *measurement.Subtype

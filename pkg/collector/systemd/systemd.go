@@ -16,11 +16,9 @@ package systemd
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/coreos/go-systemd/v22/dbus"
 )
@@ -71,7 +69,10 @@ func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	for _, service := range services {
 		data, err := conn.GetAllPropertiesContext(ctx, service)
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to get unit properties for %s", service), err)
+			slog.Warn("failed to collect systemd service - skipping",
+				slog.String("service", service),
+				slog.String("error", err.Error()))
+			continue
 		}
 
 		readings := make(map[string]measurement.Reading)

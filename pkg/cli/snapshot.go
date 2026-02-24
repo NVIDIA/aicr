@@ -70,19 +70,17 @@ func snapshotCmd() *cli.Command {
 		Description: `Generate a comprehensive snapshot of cluster measurements including:
   - CPU and GPU settings
   - GRUB boot parameters
-  - Kubernetes cluster configuration
+  - Kubernetes cluster configuration (server, nodes, images, policies)
+  - Helm releases installed via helm install/upgrade
+  - ArgoCD Application CRDs (if ArgoCD is installed)
   - Loaded kernel modules
   - Sysctl kernel parameters
   - SystemD service configurations
 
-Note: All collection is done locally and no data is egressed out of the cluster.
+Deploys a Kubernetes Job on a GPU node to capture the snapshot. All collection
+is done inside the cluster and no data is egressed out.
 
-Output can be in JSON or YAML format. 
-For a more complete snapshot use --deploy-agent to deploy a Kubernetes Job that captures the snapshot on a GPU node:
-
-  aicr snapshot --deploy-agent --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
-
-The agent mode will:
+The snapshot process:
   1. Deploy RBAC resources (ServiceAccount, Role, RoleBinding, ClusterRole, ClusterRoleBinding)
   2. Deploy a Job on GPU nodes to capture the snapshot
   3. Wait for the Job to complete
@@ -92,18 +90,17 @@ The agent mode will:
 
 Examples:
 
-Basic agent deployment:
-  aicr snapshot --deploy-agent
+Basic snapshot:
+  aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
 
 Target specific GPU nodes with node selector:
-  aicr snapshot --deploy-agent --node-selector nodeGroup=customer-gpu
+  aicr snapshot --node-selector nodeGroup=customer-gpu
 
 Override default tolerations (by default, all taints are tolerated):
-  aicr snapshot --deploy-agent \
-    --toleration dedicated=user-workload:NoSchedule
+  aicr snapshot --toleration dedicated=user-workload:NoSchedule
 
 Combined node selector and custom tolerations:
-  aicr snapshot --deploy-agent \
+  aicr snapshot \
     --node-selector nodeGroup=customer-gpu \
     --toleration dedicated=user-workload:NoSchedule \
     --output cm://gpu-operator/aicr-snapshot
@@ -111,7 +108,7 @@ Combined node selector and custom tolerations:
 Custom output formatting with Go templates:
   aicr snapshot --template my-template.tmpl --output report.md
 
-  aicr snapshot --deploy-agent \
+  aicr snapshot \
     --node-selector nodeGroup=customer-gpu \
     --template my-template.tmpl \
     --output report.md
@@ -121,11 +118,6 @@ and Measurements array. Sprig template functions are available for rich formatti
 See examples/templates/snapshot-template.md.tmpl for a sample template.
 `,
 		Flags: []cli.Flag{
-			// Agent deployment flags
-			&cli.BoolFlag{
-				Name:  "deploy-agent",
-				Usage: "Deploy Kubernetes Job to capture snapshot on GPU nodes",
-			},
 			&cli.StringFlag{
 				Name:    "namespace",
 				Usage:   "Kubernetes namespace for agent deployment",
@@ -178,7 +170,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			&cli.BoolFlag{
 				Name:    "require-gpu",
 				Sources: cli.EnvVars("AICR_REQUIRE_GPU"),
-				Usage:   "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
+				Usage:   "Require GPU detection. Fails the snapshot if no GPU is found. In agent mode, also requests nvidia.com/gpu resource for the pod (required in CDI environments).",
 			},
 			&cli.StringFlag{
 				Name:  "template",
@@ -230,44 +222,40 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Version:    version,
 				Factory:    factory,
 				Serializer: ser,
+				RequireGPU: cmd.Bool("require-gpu"),
 			}
 
-			// Check if agent deployment mode is enabled
-			if cmd.Bool("deploy-agent") {
-				// Parse node selectors
-				nodeSelector, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
-				if err != nil {
-					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
-				}
-
-				// Parse tolerations
-				tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
-				if err != nil {
-					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
-				}
-
-				// Configure agent deployment
-				ns.AgentConfig = &snapshotter.AgentConfig{
-					Enabled:            true,
-					Kubeconfig:         cmd.String("kubeconfig"),
-					Namespace:          cmd.String("namespace"),
-					Image:              cmd.String("image"),
-					ImagePullSecrets:   cmd.StringSlice("image-pull-secret"),
-					JobName:            cmd.String("job-name"),
-					ServiceAccountName: cmd.String("service-account-name"),
-					NodeSelector:       nodeSelector,
-					Tolerations:        tolerations,
-					Timeout:            cmd.Duration("timeout"),
-					Cleanup:            cmd.Bool("cleanup"),
-					Output:             tmplOpts.outputPath,
-					Debug:              cmd.Bool("debug"),
-					Privileged:         cmd.Bool("privileged"),
-					RequireGPU:         cmd.Bool("require-gpu"),
-					TemplatePath:       tmplOpts.templatePath,
-				}
+			// Parse node selectors
+			nodeSelector, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
+			if err != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 			}
 
-			// Execute snapshot (routes to local or agent based on config)
+			// Parse tolerations
+			tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
+			if err != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+			}
+
+			// Configure agent deployment
+			ns.AgentConfig = &snapshotter.AgentConfig{
+				Kubeconfig:         cmd.String("kubeconfig"),
+				Namespace:          cmd.String("namespace"),
+				Image:              cmd.String("image"),
+				ImagePullSecrets:   cmd.StringSlice("image-pull-secret"),
+				JobName:            cmd.String("job-name"),
+				ServiceAccountName: cmd.String("service-account-name"),
+				NodeSelector:       nodeSelector,
+				Tolerations:        tolerations,
+				Timeout:            cmd.Duration("timeout"),
+				Cleanup:            cmd.Bool("cleanup"),
+				Output:             tmplOpts.outputPath,
+				Debug:              cmd.Bool("debug"),
+				Privileged:         cmd.Bool("privileged"),
+				RequireGPU:         cmd.Bool("require-gpu"),
+				TemplatePath:       tmplOpts.templatePath,
+			}
+
 			return ns.Measure(ctx)
 		},
 	}
