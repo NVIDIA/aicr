@@ -177,7 +177,7 @@ func TestValidateHPABehavior(t *testing.T) {
 				defer cancel()
 			}
 
-			err := validateHPABehavior(ctx, clientset)
+			report, err := validateHPABehavior(ctx, clientset)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateHPABehavior() error = %v, wantErr %v", err, tt.wantErr)
@@ -187,6 +187,24 @@ func TestValidateHPABehavior(t *testing.T) {
 			if tt.wantErr && err != nil && tt.errContains != "" {
 				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("validateHPABehavior() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+
+			if !tt.wantErr {
+				if report == nil {
+					t.Fatal("validateHPABehavior() report = nil, want non-nil")
+				}
+				if report.ScaleUpDesiredReplicas != tt.desiredReplicas || report.ScaleUpCurrentReplicas != tt.currentReplicas {
+					t.Errorf("report scale-up desired/current = %d/%d, want %d/%d",
+						report.ScaleUpDesiredReplicas, report.ScaleUpCurrentReplicas, tt.desiredReplicas, tt.currentReplicas)
+				}
+				if report.ScaleUpDeployReplicas != tt.deployReplicas {
+					t.Errorf("report scale-up deployment replicas = %d, want %d",
+						report.ScaleUpDeployReplicas, tt.deployReplicas)
+				}
+				if report.ScaleDownDeployReplicas != 1 {
+					t.Errorf("report scale-down deployment replicas = %d, want 1",
+						report.ScaleDownDeployReplicas)
 				}
 			}
 		})

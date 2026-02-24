@@ -397,7 +397,7 @@ func TestValidateClusterAutoscaling(t *testing.T) {
 				defer cancel()
 			}
 
-			err := validateClusterAutoscaling(ctx, clientset, testNodePool)
+			report, err := validateClusterAutoscaling(ctx, clientset, testNodePool)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateClusterAutoscaling() error = %v, wantErr %v", err, tt.wantErr)
@@ -407,6 +407,22 @@ func TestValidateClusterAutoscaling(t *testing.T) {
 			if tt.wantErr && err != nil && tt.errContains != "" {
 				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("validateClusterAutoscaling() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+
+			if !tt.wantErr {
+				if report == nil {
+					t.Fatal("validateClusterAutoscaling() report = nil, want non-nil")
+				}
+				if report.HPADesired != tt.hpaDesired || report.HPACurrent != tt.hpaCurrent {
+					t.Errorf("report HPA desired/current = %d/%d, want %d/%d",
+						report.HPADesired, report.HPACurrent, tt.hpaDesired, tt.hpaCurrent)
+				}
+				if report.ObservedNodes != tt.kwokNodes {
+					t.Errorf("report observed nodes = %d, want %d", report.ObservedNodes, tt.kwokNodes)
+				}
+				if report.TotalPods != tt.podCount {
+					t.Errorf("report total pods = %d, want %d", report.TotalPods, tt.podCount)
 				}
 			}
 		})

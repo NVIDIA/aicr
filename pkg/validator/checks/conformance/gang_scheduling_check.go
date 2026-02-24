@@ -67,6 +67,12 @@ type gangTestRun struct {
 	claims    [gangMinMembers]string
 }
 
+type gangSchedulingReport struct {
+	EarliestScheduled time.Time
+	LatestScheduled   time.Time
+	CoScheduleSpan    time.Duration
+}
+
 func newGangTestRun() (*gangTestRun, error) {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
@@ -111,11 +117,18 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 	// 1. All KAI scheduler deployments available.
 	var schedulerSummary strings.Builder
 	for _, name := range kaiSchedulerDeployments {
-		if err := verifyDeploymentAvailable(ctx, "kai-scheduler", name); err != nil {
+		deploy, err := getDeploymentIfAvailable(ctx, "kai-scheduler", name)
+		if err != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("KAI scheduler component %s check failed", name), err)
 		}
-		fmt.Fprintf(&schedulerSummary, "  %-25s available\n", name)
+		expected := int32(1)
+		if deploy.Spec.Replicas != nil {
+			expected = *deploy.Spec.Replicas
+		}
+		fmt.Fprintf(&schedulerSummary, "  %-25s available=%d/%d image=%s\n",
+			name, deploy.Status.AvailableReplicas, expected,
+			firstContainerImage(deploy.Spec.Template.Spec.Containers))
 	}
 	recordArtifact(ctx, "KAI Scheduler Components", schedulerSummary.String())
 
@@ -131,12 +144,15 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		"queues.scheduling.run.ai",
 		"podgroups.scheduling.run.ai",
 	}
+	var crdSummary strings.Builder
 	for _, crd := range requiredCRDs {
 		if _, crdErr := dynClient.Resource(crdGVR).Get(ctx.Context, crd, metav1.GetOptions{}); crdErr != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("gang scheduling CRD %s not found", crd), crdErr)
 		}
+		fmt.Fprintf(&crdSummary, "  %s: present\n", crd)
 	}
+	recordArtifact(ctx, "Gang Scheduling CRDs", crdSummary.String())
 
 	// 3. Pre-flight: ensure enough free GPUs for the gang test.
 	total, free, gpuErr := countAvailableGPUs(ctx.Context, dynClient)
@@ -167,7 +183,8 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		return err
 	}
 
-	if err := validateGangPatterns(pods, run); err != nil {
+	gangReport, err := validateGangPatterns(pods, run)
+	if err != nil {
 		return err
 	}
 
@@ -187,6 +204,11 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		fmt.Fprintf(&gangResults, "Pod %d: %s  phase=%s  scheduler=%s  scheduled=%s\n",
 			i, pod.Name, pod.Status.Phase, pod.Spec.SchedulerName, schedTime)
 	}
+	fmt.Fprintf(&gangResults, "Co-schedule span: %s\n", gangReport.CoScheduleSpan)
+	fmt.Fprintf(&gangResults, "Allowed window:   %s\n", defaults.CoScheduleWindow)
+	fmt.Fprintf(&gangResults, "Earliest/Latest:  %s / %s\n",
+		gangReport.EarliestScheduled.Format(time.RFC3339),
+		gangReport.LatestScheduled.Format(time.RFC3339))
 	recordArtifact(ctx, "Gang Scheduling Test Results", gangResults.String())
 
 	return nil
@@ -269,37 +291,37 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 }
 
 // validateGangPatterns verifies all pods completed successfully and were scheduled by kai-scheduler.
-func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) error {
+func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*gangSchedulingReport, error) {
 	for i, pod := range pods {
 		if pod == nil {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s result is nil", run.pods[i]))
 		}
 
 		// Pod must have succeeded.
 		if pod.Status.Phase != corev1.PodSucceeded {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s phase=%s (want Succeeded), gang scheduling may have failed",
 					run.pods[i], pod.Status.Phase))
 		}
 
 		// Pod must use kai-scheduler.
 		if pod.Spec.SchedulerName != "kai-scheduler" {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s schedulerName=%s (want kai-scheduler)",
 					run.pods[i], pod.Spec.SchedulerName))
 		}
 
 		// Pod must have PodGroup label.
 		if pod.Labels["pod-group.scheduling.run.ai/name"] != run.groupName {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s missing PodGroup label (want %s)",
 					run.pods[i], run.groupName))
 		}
 
 		// Pod must use DRA (resourceClaims, not device plugin).
 		if len(pod.Spec.ResourceClaims) == 0 {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s does not use DRA resourceClaims", run.pods[i]))
 		}
 	}
@@ -317,7 +339,7 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) er
 			}
 		}
 		if !found {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("gang test pod %s missing PodScheduled=True condition", run.pods[i]))
 		}
 	}
@@ -332,13 +354,18 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) er
 			latest = t
 		}
 	}
-	if latest.Sub(earliest) > defaults.CoScheduleWindow {
-		return errors.New(errors.ErrCodeInternal,
+	span := latest.Sub(earliest)
+	if span > defaults.CoScheduleWindow {
+		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("gang scheduling pods not co-scheduled: schedule times span %s (max %s)",
-				latest.Sub(earliest), defaults.CoScheduleWindow))
+				span, defaults.CoScheduleWindow))
 	}
 
-	return nil
+	return &gangSchedulingReport{
+		EarliestScheduled: earliest,
+		LatestScheduled:   latest,
+		CoScheduleSpan:    span,
+	}, nil
 }
 
 // cleanupGangTestResources removes test resources. Best-effort: errors are ignored.

@@ -35,6 +35,13 @@ var dgdGVR = schema.GroupVersionResource{
 	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamographdeployments",
 }
 
+type webhookRejectionReport struct {
+	ResourceName string
+	StatusCode   int32
+	Reason       metav1.StatusReason
+	Message      string
+}
+
 func init() {
 	checks.RegisterCheck(&checks.Check{
 		Name:                  "robust-controller",
@@ -136,27 +143,29 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 	}
 
 	// 4. Validating webhook actively rejects invalid resources (behavioral test).
-	if err := validateWebhookRejects(ctx); err != nil {
+	report, err := validateWebhookRejects(ctx)
+	if err != nil {
 		return err
 	}
 	recordArtifact(ctx, "Webhook Rejection Test",
-		"Result:    PASS — webhook rejected invalid DynamoGraphDeployment")
+		fmt.Sprintf("Resource:   %s\nHTTP Code:  %d\nReason:     %s\nMessage:    %s",
+			report.ResourceName, report.StatusCode, report.Reason, report.Message))
 	return nil
 }
 
 // validateWebhookRejects verifies that the Dynamo validating webhook actively rejects
 // invalid DynamoGraphDeployment resources. This proves the webhook is not just present
 // but functionally operational.
-func validateWebhookRejects(ctx *checks.ValidationContext) error {
+func validateWebhookRejects(ctx *checks.ValidationContext) (*webhookRejectionReport, error) {
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Generate unique test resource name.
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
 	}
 	name := robustTestPrefix + hex.EncodeToString(b)
 
@@ -183,7 +192,7 @@ func validateWebhookRejects(ctx *checks.ValidationContext) error {
 		// Webhook did not reject — clean up the accidentally created resource.
 		_ = dynClient.Resource(dgdGVR).Namespace("dynamo-system").Delete(
 			ctx.Context, name, metav1.DeleteOptions{})
-		return errors.New(errors.ErrCodeInternal,
+		return nil, errors.New(errors.ErrCodeInternal,
 			"validating webhook did not reject invalid DynamoGraphDeployment")
 	}
 
@@ -192,18 +201,27 @@ func validateWebhookRejects(ctx *checks.ValidationContext) error {
 	// IsForbidden can also match RBAC denials, so we explicitly exclude those
 	// by checking the structured status message for RBAC patterns.
 	if k8serrors.IsForbidden(createErr) || k8serrors.IsInvalid(createErr) {
+		report := &webhookRejectionReport{
+			ResourceName: name,
+			Message:      createErr.Error(),
+		}
+
 		var statusErr *k8serrors.StatusError
 		if stderrors.As(createErr, &statusErr) {
-			msg := statusErr.Status().Message
+			status := statusErr.Status()
+			msg := status.Message
 			if strings.Contains(msg, "cannot create resource") {
-				return errors.Wrap(errors.ErrCodeInternal,
+				return nil, errors.Wrap(errors.ErrCodeInternal,
 					"RBAC denied the request, not an admission webhook rejection", createErr)
 			}
+			report.StatusCode = status.Code
+			report.Reason = status.Reason
+			report.Message = msg
 		}
-		return nil // PASS — webhook rejected the invalid resource
+		return report, nil // PASS — webhook rejected the invalid resource
 	}
 
 	// Non-admission error (network, CRD not installed, server error, etc).
-	return errors.Wrap(errors.ErrCodeInternal,
+	return nil, errors.Wrap(errors.ErrCodeInternal,
 		"unexpected error testing webhook rejection", createErr)
 }

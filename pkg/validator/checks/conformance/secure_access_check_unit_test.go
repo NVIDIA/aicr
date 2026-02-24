@@ -117,7 +117,7 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 								Name:      ga.GetName(),
 								Namespace: draTestNamespace,
 							},
-							Spec: *buildNoClaimTestPod(&draTestRun{noClaimPodName: ga.GetName()}).Spec.DeepCopy(),
+							Spec: *buildNoClaimTestPod(&draTestRun{noClaimPodName: ga.GetName()}, "test-node").Spec.DeepCopy(),
 							Status: corev1.PodStatus{
 								Phase: corev1.PodSucceeded,
 							},

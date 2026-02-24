@@ -49,6 +49,14 @@ type draTestRun struct {
 	noClaimPodName string
 }
 
+type draIsolationReport struct {
+	PodName             string
+	PodPhase            corev1.PodPhase
+	ExitCode            int32
+	HostPathGPUMounts   int
+	ResourceClaimsCount int
+}
+
 func newDRATestRun() (*draTestRun, error) {
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
@@ -124,11 +132,16 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 			len(pod.Spec.ResourceClaims)))
 
 	// Validate isolation: a pod without DRA claims cannot access GPU devices.
-	if err := validateDRAIsolation(ctx.Context, ctx.Clientset, run); err != nil {
+	// Target the same node as the DRA test pod — isolation must be proven on the
+	// GPU node, not a control-plane node that has no GPUs in the first place.
+	report, err := validateDRAIsolation(ctx.Context, ctx.Clientset, run, pod.Spec.NodeName)
+	if err != nil {
 		return err
 	}
 	recordArtifact(ctx, "DRA Isolation Test",
-		"Result:    PASS — pod without DRA claims cannot see GPU devices")
+		fmt.Sprintf("Pod:                %s/%s\nPhase:              %s\nExit Code:          %d\nResourceClaims:     %d\nHostPath GPU mounts:%d",
+			draTestNamespace, report.PodName, report.PodPhase, report.ExitCode,
+			report.ResourceClaimsCount, report.HostPathGPUMounts))
 	return nil
 }
 
@@ -167,13 +180,22 @@ func waitForDRATestPod(ctx context.Context, clientset kubernetes.Interface, run 
 
 	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
 		func(ctx context.Context) (bool, error) {
-			pod, err := clientset.CoreV1().Pods(draTestNamespace).Get(
+			pod, getErr := clientset.CoreV1().Pods(draTestNamespace).Get(
 				ctx, run.podName, metav1.GetOptions{})
-			if err != nil {
-				if k8serrors.IsNotFound(err) {
+			if getErr != nil {
+				if k8serrors.IsNotFound(getErr) {
 					return false, nil // pod not yet visible after create, keep polling
 				}
-				return false, errors.Wrap(errors.ErrCodeInternal, "failed to get DRA test pod", err)
+				// K8s client rate limiter fires near context deadline — retry gracefully.
+				if strings.Contains(getErr.Error(), "rate limiter") {
+					return false, nil
+				}
+				return false, errors.Wrap(errors.ErrCodeInternal, "failed to get DRA test pod", getErr)
+			}
+			// Fail fast if pod is stuck in a non-recoverable state (e.g. ImagePullBackOff).
+			if reason := podStuckReason(pod); reason != "" {
+				return false, errors.New(errors.ErrCodeInternal,
+					fmt.Sprintf("DRA test pod stuck: %s", reason))
 			}
 			switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
 			case corev1.PodSucceeded, corev1.PodFailed:
@@ -240,12 +262,14 @@ func validateDRAPatterns(ctx context.Context, dynClient dynamic.Interface, pod *
 
 // validateDRAIsolation verifies that a pod WITHOUT DRA ResourceClaims cannot see GPU devices.
 // This proves GPU access is truly mediated by DRA — the scheduler does not expose devices
-// to pods that lack claims.
-func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, run *draTestRun) error {
-	// Create no-claim pod.
-	pod := buildNoClaimTestPod(run)
+// to pods that lack claims. gpuNodeName pins the pod to the same GPU node where the DRA
+// test ran, ensuring isolation is proven on a node that actually has GPUs and bypassing
+// scheduler-level delays.
+func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, run *draTestRun, gpuNodeName string) (*draIsolationReport, error) {
+	// Create no-claim pod pinned to the GPU node.
+	pod := buildNoClaimTestPod(run, gpuNodeName)
 	if _, err := clientset.CoreV1().Pods(draTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create no-claim isolation test pod", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create no-claim isolation test pod", err)
 	}
 	defer func() {
 		_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(draTestNamespace).Delete(
@@ -259,19 +283,33 @@ func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, r
 
 	// Wait for no-claim pod to reach terminal state.
 	var resultPod *corev1.Pod
+	var lastPhase corev1.PodPhase
+	var lastContainerStatus string
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.DRATestPodTimeout)
 	defer cancel()
 
 	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
 		func(ctx context.Context) (bool, error) {
-			p, err := clientset.CoreV1().Pods(draTestNamespace).Get(
+			p, getErr := clientset.CoreV1().Pods(draTestNamespace).Get(
 				ctx, run.noClaimPodName, metav1.GetOptions{})
-			if err != nil {
-				if k8serrors.IsNotFound(err) {
+			if getErr != nil {
+				if k8serrors.IsNotFound(getErr) {
 					return false, nil // pod not yet visible after create, keep polling
 				}
+				// K8s client rate limiter fires near context deadline — retry gracefully.
+				if strings.Contains(getErr.Error(), "rate limiter") {
+					return false, nil
+				}
 				return false, errors.Wrap(errors.ErrCodeInternal,
-					"failed to get no-claim isolation test pod", err)
+					"failed to get no-claim isolation test pod", getErr)
+			}
+			// Track last known state for diagnostics on timeout.
+			lastPhase = p.Status.Phase
+			lastContainerStatus = podWaitingStatus(p)
+			// Fail fast if pod is stuck in a non-recoverable state (e.g. ImagePullBackOff).
+			if reason := podStuckReason(p); reason != "" {
+				return false, errors.New(errors.ErrCodeInternal,
+					fmt.Sprintf("no-claim isolation test pod stuck: %s", reason))
 			}
 			switch p.Status.Phase { //nolint:exhaustive // only terminal states matter
 			case corev1.PodSucceeded, corev1.PodFailed:
@@ -284,28 +322,30 @@ func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, r
 	)
 	if err != nil {
 		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"no-claim isolation test pod did not complete in time", err)
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				fmt.Sprintf("no-claim isolation test pod did not complete in time (last phase=%s, status=%s, node=%s)",
+					lastPhase, lastContainerStatus, gpuNodeName), err)
 		}
-		return errors.Wrap(errors.ErrCodeInternal,
+		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"no-claim isolation test pod polling failed", err)
+	}
+
+	report := &draIsolationReport{
+		PodName:             resultPod.Name,
+		PodPhase:            resultPod.Status.Phase,
+		ExitCode:            podExitCode(resultPod),
+		ResourceClaimsCount: len(resultPod.Spec.ResourceClaims),
 	}
 
 	// Strict success criteria: require Succeeded (exit 0 = script confirmed no GPU visible).
 	// Failed means either GPU was visible (exit 1) or the container failed for other reasons.
 	if resultPod.Status.Phase != corev1.PodSucceeded {
-		exitCode := int32(-1)
-		if len(resultPod.Status.ContainerStatuses) > 0 {
-			cs := resultPod.Status.ContainerStatuses[0]
-			if cs.State.Terminated != nil {
-				exitCode = cs.State.Terminated.ExitCode
-			}
-		}
+		exitCode := report.ExitCode
 		if exitCode == 1 {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				"GPU devices visible without DRA claim — isolation broken (container exit code 1)")
 		}
-		return errors.New(errors.ErrCodeInternal,
+		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("no-claim isolation test pod failed with exit code %d — cannot verify isolation",
 				exitCode))
 	}
@@ -313,13 +353,13 @@ func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, r
 	// Verify no hostPath to GPU devices on the no-claim pod.
 	for _, vol := range resultPod.Spec.Volumes {
 		if vol.HostPath != nil && strings.Contains(vol.HostPath.Path, "/dev/nvidia") {
-			return errors.New(errors.ErrCodeInternal,
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("no-claim pod has hostPath volume to %s — isolation broken",
 					vol.HostPath.Path))
 		}
 	}
 
-	return nil
+	return report, nil
 }
 
 // cleanupDRATestResources removes test resources. Best-effort: errors are ignored
@@ -394,13 +434,16 @@ func buildDRATestPod(run *draTestRun) *corev1.Pod {
 // If the cluster properly mediates GPU access through DRA, this pod will not see GPU devices.
 // Uses a lightweight image (busybox) since no CUDA libraries are needed — only checking
 // whether /dev/nvidia* device files are visible.
-func buildNoClaimTestPod(run *draTestRun) *corev1.Pod {
+// gpuNodeName pins the pod to the GPU node via NodeName, bypassing the scheduler to ensure
+// the isolation test runs on a node that actually has GPUs and avoiding scheduler delays.
+func buildNoClaimTestPod(run *draTestRun, gpuNodeName string) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.noClaimPodName,
 			Namespace: draTestNamespace,
 		},
 		Spec: corev1.PodSpec{
+			NodeName:      gpuNodeName,
 			RestartPolicy: corev1.RestartPolicyNever,
 			Tolerations: []corev1.Toleration{
 				{Operator: corev1.TolerationOpExists},
@@ -408,7 +451,7 @@ func buildNoClaimTestPod(run *draTestRun) *corev1.Pod {
 			Containers: []corev1.Container{
 				{
 					Name:  "isolation-test",
-					Image: "busybox:stable",
+					Image: "busybox:1.37",
 					Command: []string{
 						"sh", "-c",
 						"if ls /dev/nvidia* 2>/dev/null; then echo 'FAIL: GPU visible without DRA claim' && exit 1; else echo 'PASS: GPU isolated' && exit 0; fi",
@@ -449,4 +492,15 @@ func buildResourceClaim(run *draTestRun) *unstructured.Unstructured {
 
 func strPtr(s string) *string {
 	return &s
+}
+
+func podExitCode(pod *corev1.Pod) int32 {
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return -1
+	}
+	terminated := pod.Status.ContainerStatuses[0].State.Terminated
+	if terminated == nil {
+		return -1
+	}
+	return terminated.ExitCode
 }
