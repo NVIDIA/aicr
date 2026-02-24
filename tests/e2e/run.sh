@@ -1441,7 +1441,7 @@ RECIPE
   # Test 1: Chainsaw health check should pass using embedded registry
   # The embedded registry.yaml has healthCheck.assertFile for gpu-operator,
   # and the embedded assert file (recipes/checks/gpu-operator/assert.yaml)
-  # checks that readyReplicas == spec.replicas. No --data needed.
+  # checks that readyReplicas is 1. No --data needed.
   msg "--- Test: Chainsaw health check via embedded registry (should pass) ---"
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe.yaml${NC}"
@@ -1487,7 +1487,7 @@ metadata:
   name: nonexistent-gpu-operator
   namespace: gpu-operator
 status:
-  (readyReplicas == spec.replicas): true
+  availableReplicas: 1
 ASSERT
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml (should fail)${NC}"

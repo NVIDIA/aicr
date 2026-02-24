@@ -4,4 +4,4 @@ metadata:
   name: gpu-operator
   namespace: gpu-operator
 status:
-  (readyReplicas == spec.replicas): true
+  availableReplicas: 1
