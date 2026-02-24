@@ -42,6 +42,45 @@ type componentDiscovery struct {
 	resources []recipe.ExpectedResource
 }
 
+// resolveHealthCheckAsserts loads Chainsaw-style assert file content for components
+// that have healthCheck.assertFile configured in the component registry.
+// The loaded content is set on ComponentRef.HealthCheckAsserts so the
+// expected-resources check can use Chainsaw CLI instead of the default typed checks.
+// Load failures are logged as warnings and do not block other components.
+func resolveHealthCheckAsserts(recipeResult *recipe.RecipeResult) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		slog.Warn("failed to load component registry for health check assert resolution", "error", err)
+		return
+	}
+
+	provider := recipe.GetDataProvider()
+
+	for i := range recipeResult.ComponentRefs {
+		ref := &recipeResult.ComponentRefs[i]
+
+		config := registry.Get(ref.Name)
+		if config == nil || config.HealthCheck.AssertFile == "" {
+			continue
+		}
+
+		data, readErr := provider.ReadFile(config.HealthCheck.AssertFile)
+		if readErr != nil {
+			slog.Warn("failed to load health check assert file, skipping chainsaw check",
+				"component", ref.Name,
+				"assertFile", config.HealthCheck.AssertFile,
+				"error", readErr)
+			continue
+		}
+
+		ref.HealthCheckAsserts = string(data)
+		slog.Debug("loaded health check assert file",
+			"component", ref.Name,
+			"assertFile", config.HealthCheck.AssertFile,
+			"bytes", len(data))
+	}
+}
+
 // resolveExpectedResources discovers expected workload resources from two sources
 // and merges them with any manually declared expectedResources:
 //
@@ -69,6 +108,14 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 		}
 
 		ref := &recipeResult.ComponentRefs[i]
+
+		// Skip auto-discovery for components with Chainsaw health check asserts.
+		// These components use Chainsaw CLI assertions instead of typed replica checks.
+		if ref.HealthCheckAsserts != "" {
+			slog.Debug("skipping auto-discovery for component with chainsaw health check",
+				"component", ref.Name)
+			continue
+		}
 
 		// Load values once — needed for both chart rendering and manifestFile rendering.
 		values, valErr := recipeResult.GetValuesForComponent(ref.Name)

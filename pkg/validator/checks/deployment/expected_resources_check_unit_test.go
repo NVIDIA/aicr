@@ -433,6 +433,123 @@ func TestValidateExpectedResources(t *testing.T) {
 	}
 }
 
+func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func() *checks.ValidationContext
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "component with HealthCheckAsserts skips typed client checks",
+			setup: func() *checks.ValidationContext {
+				// No K8s objects — if the typed client path ran, it would fail.
+				// But since HealthCheckAsserts is set, it should go to chainsaw path.
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset()
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "gpu-operator",
+								Type:               "Helm",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: gpu-operator\n  namespace: gpu-operator\n",
+								// These expectedResources should NOT be checked (chainsaw path)
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			// Chainsaw binary not available in unit tests → failure expected
+			wantErr:     true,
+			errContains: "chainsaw health check failed",
+		},
+		{
+			name: "mixed components — chainsaw and typed client paths",
+			setup: func() *checks.ValidationContext {
+				objects := []runtime.Object{
+					createDeployment("network-operator", "nvidia-network-operator", 1, 1),
+				}
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(objects...)
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "gpu-operator",
+								Type:               "Helm",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\n",
+							},
+							{
+								Name: "network-operator",
+								Type: "Helm",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "network-operator", Namespace: "nvidia-network-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			// gpu-operator goes to chainsaw (fails — no binary), network-operator typed (passes)
+			wantErr:     true,
+			errContains: "chainsaw health check failed",
+		},
+		{
+			name: "component with empty HealthCheckAsserts uses typed client",
+			setup: func() *checks.ValidationContext {
+				objects := []runtime.Object{
+					createDeployment("gpu-operator", "gpu-operator", 1, 1),
+				}
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(objects...)
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "gpu-operator",
+								Type:               "Helm",
+								HealthCheckAsserts: "", // empty → typed client path
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := tt.setup()
+			err := validateExpectedResources(ctx)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateExpectedResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && err != nil && tt.errContains != "" {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("validateExpectedResources() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateExpectedResourcesRegistration(t *testing.T) {
 	// Verify the check is registered
 	check, ok := checks.GetCheck("expected-resources")

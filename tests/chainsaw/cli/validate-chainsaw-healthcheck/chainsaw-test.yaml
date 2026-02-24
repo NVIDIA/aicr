@@ -1,0 +1,148 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-validate-chainsaw-healthcheck
+spec:
+  description: |
+    Validates that --data flag with healthCheck.assertFile in registry.yaml
+    is accepted by the validate command and correctly wires through to the
+    deployment phase. Uses --no-cluster mode so checks are skipped but the
+    data loading and resolution logic is exercised.
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup-fixtures
+      description: Create --data directory with registry.yaml + healthCheck assert file.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-chainsaw-hc"
+              rm -rf "${WORK}" && mkdir -p "${WORK}/data/checks/gpu-operator"
+
+              # Create a registry.yaml with healthCheck.assertFile for gpu-operator
+              cat > "${WORK}/data/registry.yaml" << 'EOF'
+              apiVersion: aicr.nvidia.com/v1alpha1
+              kind: ComponentRegistry
+              components:
+                - name: gpu-operator
+                  displayName: GPU Operator
+                  healthCheck:
+                    assertFile: checks/gpu-operator/assert.yaml
+                  helm:
+                    defaultRepository: https://helm.ngc.nvidia.com/nvidia
+                    defaultChart: nvidia/gpu-operator
+                    defaultNamespace: gpu-operator
+              EOF
+
+              # Create a Chainsaw-style assert file for gpu-operator
+              cat > "${WORK}/data/checks/gpu-operator/assert.yaml" << 'EOF'
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: gpu-operator
+                namespace: gpu-operator
+              status:
+                readyReplicas: 1
+              EOF
+
+              # Generate a recipe that includes gpu-operator
+              ${AICR_BIN} recipe --service eks --accelerator h100 --intent training \
+                -o "${WORK}/recipe.yaml"
+
+              # Create a minimal snapshot
+              cat > "${WORK}/snapshot.yaml" << 'SNAP'
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - name: server
+                      data:
+                        version: v1.33.0
+                - type: OS
+                  subtypes:
+                    - name: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+              SNAP
+
+    - name: validate-with-chainsaw-healthcheck
+      description: Validate with --data pointing to registry with healthCheck.assertFile (no-cluster mode).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-chainsaw-hc"
+              output=$(${AICR_BIN} validate \
+                -r "${WORK}/recipe.yaml" \
+                -s "${WORK}/snapshot.yaml" \
+                --data "${WORK}/data" \
+                --phase deployment \
+                --no-cluster \
+                -o "${WORK}/result.yaml" 2>&1) || true
+
+              # In no-cluster mode, deployment checks are skipped but the phase should run
+              echo "$output" | grep -qi "deployment" || {
+                echo "deployment phase not mentioned in output" >&2
+                echo "output: $output" >&2
+                exit 1
+              }
+
+              # The result file should be created
+              test -f "${WORK}/result.yaml" || {
+                echo "result file not created" >&2
+                exit 1
+              }
+
+              # Verify the result contains the deployment phase
+              grep -q "deployment" "${WORK}/result.yaml" || {
+                echo "deployment phase not in result file" >&2
+                exit 1
+              }
+            check:
+              ($error == null): true
+
+    - name: validate-data-provider-loaded-assert
+      description: Verify external data provider discovered the assert file (visible in debug logs).
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-validate-chainsaw-hc"
+              # Run with verbose logging to verify external data provider picks up the assert file
+              output=$(AICR_DEBUG=true ${AICR_BIN} validate \
+                -r "${WORK}/recipe.yaml" \
+                -s "${WORK}/snapshot.yaml" \
+                --data "${WORK}/data" \
+                --phase deployment \
+                --no-cluster \
+                -o /dev/null 2>&1) || true
+
+              # The external data provider should discover and register the assert file
+              echo "$output" | grep -q "checks/gpu-operator/assert.yaml" || {
+                echo "assert file not discovered by external data provider" >&2
+                echo "output: $output" >&2
+                exit 1
+              }
+            check:
+              ($error == null): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-validate-chainsaw-hc

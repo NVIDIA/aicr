@@ -17,11 +17,13 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -40,6 +42,8 @@ func init() {
 
 // validateExpectedResources verifies that all expected Kubernetes resources declared
 // in the recipe's componentRefs exist and are healthy in the live cluster.
+// Components with HealthCheckAsserts use Chainsaw CLI assertions; others use
+// the default auto-discovery + typed client replica checks.
 func validateExpectedResources(ctx *checks.ValidationContext) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -48,13 +52,40 @@ func validateExpectedResources(ctx *checks.ValidationContext) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
 	}
 
+	var chainsawAsserts []chainsaw.ComponentAssert
 	var failures []string
 
 	for _, ref := range ctx.Recipe.ComponentRefs {
+		if ref.HealthCheckAsserts != "" {
+			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
+				Name:       ref.Name,
+				AssertYAML: ref.HealthCheckAsserts,
+			})
+			continue
+		}
+
 		for _, er := range ref.ExpectedResources {
 			if err := verifyResource(ctx.Context, ctx.Clientset, er); err != nil {
 				failures = append(failures, fmt.Sprintf("%s %s/%s (%s): %s",
 					er.Kind, er.Namespace, er.Name, ref.Name, err.Error()))
+			}
+		}
+	}
+
+	// Run Chainsaw assertions for components that have them.
+	if len(chainsawAsserts) > 0 {
+		slog.Info("running chainsaw health checks", "components", len(chainsawAsserts))
+		results := chainsaw.Run(ctx.Context, chainsawAsserts, defaults.ChainsawAssertTimeout)
+		for _, r := range results {
+			if !r.Passed {
+				msg := fmt.Sprintf("%s: chainsaw health check failed", r.Component)
+				if r.Output != "" {
+					msg += fmt.Sprintf(":\n%s", r.Output)
+				}
+				if r.Error != nil {
+					msg += fmt.Sprintf("\nerror: %v", r.Error)
+				}
+				failures = append(failures, msg)
 			}
 		}
 	}

@@ -1369,6 +1369,181 @@ RECIPE
   kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
 }
 
+test_validate_chainsaw_healthcheck() {
+  msg "=========================================="
+  msg "Testing Chainsaw health check via --data"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "validate/chainsaw-healthcheck" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local validate_dir="${OUTPUT_DIR}/validate-chainsaw-hc"
+  mkdir -p "$validate_dir"
+
+  # Setup: Create fake GPU operator deployment
+  msg "--- Setup: Create fake GPU operator deployment ---"
+  kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
+
+  cat <<YAML | kubectl apply -f - 2>&1 || true
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+  labels:
+    app.kubernetes.io/name: gpu-operator
+    app.kubernetes.io/version: v24.6.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-operator
+  template:
+    metadata:
+      labels:
+        app: gpu-operator
+    spec:
+      containers:
+      - name: gpu-operator
+        image: nvcr.io/nvidia/gpu-operator:v24.6.0
+        imagePullPolicy: IfNotPresent
+YAML
+
+  if [ $? -eq 0 ]; then
+    detail "Created fake GPU operator deployment (v24.6.0)"
+  else
+    skip "validate/chainsaw-healthcheck" "Could not create GPU operator deployment"
+    return 0
+  fi
+
+  # Wait for deployment to be available
+  kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
+
+  # Setup: Create --data directory with registry + healthCheck assert file
+  msg "--- Setup: Create --data directory with Chainsaw assert ---"
+  local data_dir="${validate_dir}/data"
+  mkdir -p "${data_dir}/checks/gpu-operator"
+
+  cat > "${data_dir}/registry.yaml" <<'REGISTRY'
+apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    healthCheck:
+      assertFile: checks/gpu-operator/assert.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
+      defaultChart: nvidia/gpu-operator
+      defaultNamespace: gpu-operator
+REGISTRY
+
+  # Test 1: Chainsaw health check should pass (gpu-operator Deployment exists and is available)
+  msg "--- Test: Chainsaw health check (should pass) ---"
+  cat > "${data_dir}/checks/gpu-operator/assert.yaml" <<'ASSERT'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1
+ASSERT
+
+  local recipe_file="${validate_dir}/recipe-chainsaw-pass.yaml"
+  cat > "$recipe_file" <<RECIPE
+kind: RecipeResult
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  version: dev
+componentRefs:
+  - name: gpu-operator
+    type: Helm
+    namespace: gpu-operator
+validation:
+  deployment:
+    checks:
+      - expected-resources
+RECIPE
+
+  echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml${NC}"
+  local result_file="${validate_dir}/result-chainsaw-pass.yaml"
+  local result_output
+  result_output=$("${AICR_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment \
+    --data "${data_dir}" \
+    --image "${AICR_VALIDATOR_IMAGE}" \
+    --output "$result_file" 2>&1) || true
+
+  detail "Captured validation output:"
+  echo "$result_output" | sed 's/^/    /'
+
+  if [ -f "$result_file" ] && \
+     grep -q "TestCheckExpectedResources" "$result_file"; then
+    if grep -A1 "name: TestCheckExpectedResources" "$result_file" | grep -q "status: pass"; then
+      detail "Chainsaw health check: PASS (gpu-operator deployment found via assert)"
+      pass "validate/chainsaw-healthcheck-pass"
+    elif grep -q "summary:" "$result_file" && grep -q "status: pass" "$result_file"; then
+      detail "Chainsaw health check: PASS (from summary status)"
+      pass "validate/chainsaw-healthcheck-pass"
+    else
+      detail "Check found but status unclear. Showing check section:"
+      grep -A5 "TestCheckExpectedResources" "$result_file" | sed 's/^/    /' || true
+      fail "validate/chainsaw-healthcheck-pass" "Check did not pass"
+    fi
+  else
+    fail "validate/chainsaw-healthcheck-pass" "TestCheckExpectedResources not found in output"
+  fi
+
+  # Test 2: Chainsaw health check should fail (assert file checks for nonexistent resource)
+  msg "--- Test: Chainsaw health check (should fail - nonexistent resource) ---"
+  cat > "${data_dir}/checks/gpu-operator/assert.yaml" <<'ASSERT'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nonexistent-gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1
+ASSERT
+
+  echo -e "${DIM}  \$ aicr validate --phase deployment --data <dir> --recipe recipe.yaml (should fail)${NC}"
+  local result_file_fail="${validate_dir}/result-chainsaw-fail.yaml"
+  local result_fail_output
+  result_fail_output=$("${AICR_BIN}" validate \
+    --recipe "$recipe_file" \
+    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+    --phase deployment \
+    --data "${data_dir}" \
+    --image "${AICR_VALIDATOR_IMAGE}" \
+    --output "$result_file_fail" 2>&1) || true
+
+  detail "Captured validation output:"
+  echo "$result_fail_output" | sed 's/^/    /'
+
+  if [ -f "$result_file_fail" ] && \
+     grep -q "TestCheckExpectedResources" "$result_file_fail"; then
+    if grep -A1 "name: TestCheckExpectedResources" "$result_file_fail" | grep -q "status: fail"; then
+      detail "Chainsaw health check: FAIL (nonexistent resource not found) - as expected"
+      pass "validate/chainsaw-healthcheck-fail"
+    elif grep -q "summary:" "$result_file_fail" && grep -q "status: fail" "$result_file_fail"; then
+      detail "Chainsaw health check: FAIL (from summary status) - as expected"
+      pass "validate/chainsaw-healthcheck-fail"
+    else
+      fail "validate/chainsaw-healthcheck-fail" "Check did not fail for nonexistent resource"
+    fi
+  else
+    fail "validate/chainsaw-healthcheck-fail" "TestCheckExpectedResources not found in output"
+  fi
+
+  # Cleanup
+  kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
+}
+
 test_validate_job_deployment() {
   msg "=========================================="
   msg "Testing validation Job deployment"
@@ -1974,6 +2149,7 @@ main() {
     test_validate_multiphase
     test_validate_deployment_constraints
     test_validate_expected_resources
+    test_validate_chainsaw_healthcheck
     test_validate_job_deployment
     test_oci_bundle
     cleanup_e2e
