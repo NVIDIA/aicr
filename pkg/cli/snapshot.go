@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"os"
 
 	"github.com/urfave/cli/v3"
 
@@ -235,6 +236,12 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+			}
+
+			// When running inside an agent Job, collect locally instead of
+			// deploying another agent (prevents infinite nesting).
+			if os.Getenv("AICR_AGENT_MODE") == "true" {
+				return ns.Measure(ctx)
 			}
 
 			// Configure agent deployment

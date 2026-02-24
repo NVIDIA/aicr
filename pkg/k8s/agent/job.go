@@ -119,6 +119,10 @@ func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 				Args:    args,
 				Env: []corev1.EnvVar{
 					{
+						Name:  "AICR_AGENT_MODE",
+						Value: "true",
+					},
+					{
 						Name:  "AICR_LOG_PREFIX",
 						Value: "agent",
 					},
