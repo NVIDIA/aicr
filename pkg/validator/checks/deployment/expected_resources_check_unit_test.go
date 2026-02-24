@@ -445,6 +445,8 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 			setup: func() *checks.ValidationContext {
 				// No K8s objects — if the typed client path ran, it would fail.
 				// But since HealthCheckAsserts is set, it should go to chainsaw path.
+				// Use a nonexistent deployment name so chainsaw always fails even if
+				// the binary is installed and a local cluster is accessible.
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 				clientset := fake.NewSimpleClientset()
 				return &checks.ValidationContext{
@@ -453,9 +455,9 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 					Recipe: &recipe.RecipeResult{
 						ComponentRefs: []recipe.ComponentRef{
 							{
-								Name:               "gpu-operator",
+								Name:               "test-chainsaw-component",
 								Type:               "Helm",
-								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: gpu-operator\n  namespace: gpu-operator\n",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nonexistent-chainsaw-test\n  namespace: nonexistent-ns\n",
 								// These expectedResources should NOT be checked (chainsaw path)
 								ExpectedResources: []recipe.ExpectedResource{
 									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
@@ -465,7 +467,7 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 					},
 				}
 			},
-			// Chainsaw binary not available in unit tests → failure expected
+			// Chainsaw fails: either binary not available or assertion doesn't match
 			wantErr:     true,
 			errContains: "chainsaw health check failed",
 		},
@@ -483,9 +485,9 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 					Recipe: &recipe.RecipeResult{
 						ComponentRefs: []recipe.ComponentRef{
 							{
-								Name:               "gpu-operator",
+								Name:               "test-chainsaw-mixed",
 								Type:               "Helm",
-								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\n",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nonexistent-mixed-test\n  namespace: nonexistent-ns\n",
 							},
 							{
 								Name: "network-operator",

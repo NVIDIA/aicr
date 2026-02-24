@@ -1124,8 +1124,9 @@ apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
   version: dev
 componentRefs:
-  - name: gpu-operator
+  - name: fake-gpu-operator
     type: Helm
+    namespace: gpu-operator
     expectedResources:
       - kind: Deployment
         name: gpu-operator
@@ -1184,8 +1185,9 @@ apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
   version: dev
 componentRefs:
-  - name: gpu-operator
+  - name: nonexistent-component
     type: Helm
+    namespace: gpu-operator
     expectedResources:
       - kind: Deployment
         name: nonexistent-deployment
