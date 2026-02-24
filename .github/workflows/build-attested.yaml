@@ -20,7 +20,7 @@
 ## if you need something attested by ci. This does not run tests or security scans.
 ## The only complete/valid way to attest that passes all validation is via on-tag.yaml.
 ## Validate attestations requires to pass the following certificate identity regexp:
-##  --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' 
+##  --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*'
 ## so this attestation is not the same as a production release.
 
 name: Build Attested Binaries
