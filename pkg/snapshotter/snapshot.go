@@ -26,8 +26,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // NodeSnapshotter collects system configuration measurements from the current node.
@@ -46,20 +44,22 @@ type NodeSnapshotter struct {
 
 	// AgentConfig contains configuration for agent deployment mode. If nil or Enabled=false, runs locally.
 	AgentConfig *AgentConfig
+
+	// RequireGPU when true causes the snapshot to fail if no GPU is detected.
+	RequireGPU bool
 }
 
 // Measure collects configuration measurements and serializes the snapshot.
-// If AgentConfig is enabled, it deploys a Kubernetes Job to capture the snapshot.
-// Otherwise, it runs collectors locally in parallel using errgroup.
-// If any collector fails, the entire operation returns an error.
-// The resulting snapshot is serialized using the configured Serializer.
+// When AgentConfig is set, it deploys a Kubernetes Job to capture the snapshot
+// on a GPU node. Otherwise, it runs collectors locally in parallel.
+// Individual collector failures are logged and skipped — the snapshot
+// contains all measurements that could be successfully collected.
 func (n *NodeSnapshotter) Measure(ctx context.Context) error {
-	// Check if agent deployment is requested
-	if n.AgentConfig != nil && n.AgentConfig.Enabled {
+	if n.AgentConfig != nil {
 		return n.measureWithAgent(ctx)
 	}
 
-	// Local measurement mode
+	// Local measurement mode (used in tests and in-cluster execution)
 	return n.measure(ctx)
 }
 
@@ -77,115 +77,61 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 		snapshotCollectionDuration.Observe(time.Since(start).Seconds())
 	}()
 
-	// Pre-allocate with estimated capacity
-	var mu sync.Mutex
-
-	// Using the gctx for errgroup goroutines and keeping original ctx for serialization.
-	// The errgroup context is canceled when any goroutine returns an error or
-	// when all goroutines complete, which causes issues with subsequent
-	// operations that use rate-limited K8s clients.
-	g, gctx := errgroup.WithContext(ctx)
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
 
 	// Initialize snapshot structure
 	snap := NewSnapshot()
-	// Pre-allocate measurements slice with capacity for 5 collectors
 	snap.Measurements = make([]*measurement.Measurement, 0, 5)
 
-	// Collect metadata
-	g.Go(func() error {
-		collectorStart := time.Now()
-		defer func() {
-			snapshotCollectorDuration.WithLabelValues("metadata").Observe(time.Since(collectorStart).Seconds())
-		}()
-		nodeName := k8s.GetNodeName()
-		mu.Lock()
-		snap.Init(header.KindSnapshot, FullAPIVersion, n.Version)
-		snap.Metadata["source-node"] = nodeName
-		mu.Unlock()
-		slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
-		return nil
-	})
+	// collectSafe runs a named collector, appending its measurement on success
+	// and logging a warning on failure. Snapshot collection never fails due to
+	// an individual collector error.
+	collectSafe := func(name string, c collector.Collector) {
+		defer wg.Done()
 
-	// Collect Kubernetes configuration
-	g.Go(func() error {
 		collectorStart := time.Now()
 		defer func() {
-			snapshotCollectorDuration.WithLabelValues("k8s").Observe(time.Since(collectorStart).Seconds())
+			snapshotCollectorDuration.WithLabelValues(name).Observe(time.Since(collectorStart).Seconds())
 		}()
-		slog.Debug("collecting kubernetes resources")
-		kc := n.Factory.CreateKubernetesCollector()
-		k8sResources, err := kc.Collect(gctx)
+
+		m, err := c.Collect(ctx)
 		if err != nil {
-			slog.Error("failed to collect kubernetes resources", slog.String("error", err.Error()))
-			return errors.Wrap(errors.ErrCodeInternal, "failed to collect kubernetes resources", err)
+			slog.Warn("failed to collect "+name+" - skipping",
+				slog.String("collector", name),
+				slog.String("error", err.Error()))
+			return
 		}
-		mu.Lock()
-		snap.Measurements = append(snap.Measurements, k8sResources)
-		mu.Unlock()
-		return nil
-	})
 
-	// Collect SystemD services
-	g.Go(func() error {
-		collectorStart := time.Now()
-		defer func() {
-			snapshotCollectorDuration.WithLabelValues("systemd").Observe(time.Since(collectorStart).Seconds())
-		}()
-		slog.Debug("collecting systemd services")
-		sd := n.Factory.CreateSystemDCollector()
-		systemd, err := sd.Collect(gctx)
-		if err != nil {
-			slog.Error("failed to collect systemd", slog.String("error", err.Error()))
-			return errors.Wrap(errors.ErrCodeInternal, "failed to collect systemd info", err)
+		mu.Lock()
+		snap.Measurements = append(snap.Measurements, m)
+		mu.Unlock()
+	}
+
+	// Collect metadata (synchronous — needed before parallel collectors)
+	metadataStart := time.Now()
+	nodeName := k8s.GetNodeName()
+	snap.Init(header.KindSnapshot, FullAPIVersion, n.Version)
+	snap.Metadata["source-node"] = nodeName
+	snapshotCollectorDuration.WithLabelValues("metadata").Observe(time.Since(metadataStart).Seconds())
+	slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
+
+	// Launch all collectors in parallel — each degrades gracefully on error
+	wg.Add(4)
+	go collectSafe("k8s", n.Factory.CreateKubernetesCollector())
+	go collectSafe("systemd", n.Factory.CreateSystemDCollector())
+	go collectSafe("os", n.Factory.CreateOSCollector())
+	go collectSafe("gpu", n.Factory.CreateGPUCollector())
+
+	wg.Wait()
+
+	// Enforce GPU requirement if requested
+	if n.RequireGPU {
+		if err := verifyGPUCollected(snap); err != nil {
+			return err
 		}
-		mu.Lock()
-		snap.Measurements = append(snap.Measurements, systemd)
-		mu.Unlock()
-		return nil
-	})
-
-	// Collect OS
-	g.Go(func() error {
-		collectorStart := time.Now()
-		defer func() {
-			snapshotCollectorDuration.WithLabelValues("os").Observe(time.Since(collectorStart).Seconds())
-		}()
-		slog.Debug("collecting OS configuration")
-		oc := n.Factory.CreateOSCollector()
-		grub, err := oc.Collect(gctx)
-		if err != nil {
-			slog.Error("failed to collect OS", slog.String("error", err.Error()))
-			return errors.Wrap(errors.ErrCodeInternal, "failed to collect OS info", err)
-		}
-		mu.Lock()
-		snap.Measurements = append(snap.Measurements, grub)
-		mu.Unlock()
-		return nil
-	})
-
-	// Collect GPU
-	g.Go(func() error {
-		collectorStart := time.Now()
-		defer func() {
-			snapshotCollectorDuration.WithLabelValues("gpu").Observe(time.Since(collectorStart).Seconds())
-		}()
-		slog.Debug("collecting GPU configuration")
-		smi := n.Factory.CreateGPUCollector()
-		smiConfigs, err := smi.Collect(gctx)
-		if err != nil {
-			slog.Error("failed to collect GPU", slog.String("error", err.Error()))
-			return errors.Wrap(errors.ErrCodeInternal, "failed to collect GPU info", err)
-		}
-		mu.Lock()
-		snap.Measurements = append(snap.Measurements, smiConfigs)
-		mu.Unlock()
-		return nil
-	})
-
-	// Wait for all collectors to complete
-	if err := g.Wait(); err != nil {
-		snapshotCollectionTotal.WithLabelValues("error").Inc()
-		return errors.Wrap(errors.ErrCodeInternal, "snapshot collection failed", err)
 	}
 
 	snapshotCollectionTotal.WithLabelValues("success").Inc()
@@ -204,4 +150,23 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// verifyGPUCollected checks that the snapshot contains a GPU measurement with
+// gpu-count > 0. Returns an error if no GPU was detected.
+func verifyGPUCollected(snap *Snapshot) error {
+	for _, m := range snap.Measurements {
+		if m.Type != measurement.TypeGPU {
+			continue
+		}
+		for _, st := range m.Subtypes {
+			if r, ok := st.Data[measurement.KeyGPUCount]; ok {
+				if v, ok := r.Any().(int); ok && v > 0 {
+					return nil
+				}
+			}
+		}
+	}
+	return errors.New(errors.ErrCodeNotFound,
+		"--require-gpu was set but no GPU was detected (nvidia-smi not found or returned 0 GPUs)")
 }

@@ -168,7 +168,7 @@ kubectl apply -f https://raw.githubusercontent.com/nvidia/aicr/main/deployments/
 - **ServiceAccount**: `aicr` in `gpu-operator` namespace
 - **Role**: `aicr` - Permissions to create/update ConfigMaps and list pods in `gpu-operator` namespace
 - **RoleBinding**: `aicr` - Binds Role to ServiceAccount in `gpu-operator` namespace
-- **ClusterRole**: `aicr-node-reader` - Permissions to read nodes, pods, services, and ClusterPolicy (nvidia.com)
+- **ClusterRole**: `aicr-node-reader` - Permissions to read nodes, pods, secrets (Helm releases), services, ClusterPolicy (nvidia.com), and Application (argoproj.io)
 - **ClusterRoleBinding**: `aicr-node-reader` - Binds ClusterRole to ServiceAccount
 
 ### 2. Deploy the Agent Job
@@ -820,7 +820,7 @@ kubectl create secret docker-registry regcred \
 ### RBAC Permissions
 
 The agent requires these permissions:
-- **ClusterRole** (`aicr-node-reader`): Read access to nodes, pods, services, and ClusterPolicy CRDs (nvidia.com)
+- **ClusterRole** (`aicr-node-reader`): Read access to nodes, pods, secrets (Helm releases), services, ClusterPolicy CRDs (nvidia.com), and Application CRDs (argoproj.io)
 - **Role** (`aicr`): Create/update ConfigMaps and list pods in the deployment namespace
 
 ### Network Policies

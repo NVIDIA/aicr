@@ -26,11 +26,11 @@
 //
 //	aicr snapshot [--output FILE] [--format yaml|json|table]
 //	aicr snapshot --output cm://namespace/configmap-name  # ConfigMap output
-//	aicr snapshot --deploy-agent --namespace gpu-operator  # Agent deployment
+//	aicr snapshot --namespace gpu-operator                 # Custom namespace
 //
 // Captures a comprehensive snapshot of the current system including CPU/GPU settings,
-// kernel parameters, systemd services, and Kubernetes configuration. Supports file,
-// stdout, and Kubernetes ConfigMap output.
+// kernel parameters, systemd services, Kubernetes configuration, Helm releases, and
+// ArgoCD applications. Supports file, stdout, and Kubernetes ConfigMap output.
 //
 // recipe - Generate configuration recipes (Step 2):
 //
