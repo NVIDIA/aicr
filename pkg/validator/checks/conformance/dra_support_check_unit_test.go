@@ -20,11 +20,16 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	discoveryfake "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestCheckDRASupport(t *testing.T) {
@@ -104,11 +109,65 @@ func TestCheckDRASupport(t *testing.T) {
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 				clientset := fake.NewSimpleClientset(tt.k8sObjects...)
 
+				// Discovery API resources for resource.k8s.io/v1.
+				if fd, ok := clientset.Discovery().(*discoveryfake.FakeDiscovery); ok {
+					fd.Resources = []*metav1.APIResourceList{
+						{
+							GroupVersion: "resource.k8s.io/v1",
+							APIResources: []metav1.APIResource{
+								{Name: "deviceclasses", Kind: "DeviceClass", Namespaced: false},
+								{Name: "resourceclaims", Kind: "ResourceClaim", Namespaced: true},
+								{Name: "resourceclaimtemplates", Kind: "ResourceClaimTemplate", Namespaced: true},
+								{Name: "resourceslices", Kind: "ResourceSlice", Namespaced: false},
+							},
+						},
+					}
+				}
+
+				// Behavioral test pod status stub: pods created with dra test prefix
+				// immediately appear completed to avoid poll timeouts in unit tests.
+				podDeleted := false
+				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					ga, ok := action.(k8stesting.GetAction)
+					if !ok {
+						// Let non-standard pod gets (for example log subresource plumbing)
+						// fall back to the default fake behavior.
+						return false, nil, nil
+					}
+					if strings.HasPrefix(ga.GetName(), draTestPrefix) && ga.GetNamespace() == draTestNamespace {
+						if podDeleted {
+							return true, nil, k8serrors.NewNotFound(
+								schema.GroupResource{Resource: "pods"}, ga.GetName())
+						}
+						run := &draTestRun{podName: ga.GetName(), claimName: draClaimPrefix + ga.GetName()[len(draTestPrefix):]}
+						return true, &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      run.podName,
+								Namespace: draTestNamespace,
+							},
+							Spec: *buildDRATestPod(run).Spec.DeepCopy(),
+							Status: corev1.PodStatus{
+								Phase: corev1.PodSucceeded,
+							},
+						}, nil
+					}
+					return false, nil, nil
+				})
+				clientset.PrependReactor("delete", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+					da := action.(k8stesting.DeleteAction)
+					if strings.HasPrefix(da.GetName(), draTestPrefix) && da.GetNamespace() == draTestNamespace {
+						podDeleted = true
+						return true, nil, nil
+					}
+					return false, nil, nil
+				})
+
 				scheme := runtime.NewScheme()
 				// Always register custom list kinds so List() works even with 0 objects.
 				dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 					map[schema.GroupVersionResource]string{
 						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}: "ResourceSliceList",
+						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims"}: "ResourceClaimList",
 					},
 					tt.dynamicObjects...)
 

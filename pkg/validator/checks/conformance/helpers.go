@@ -16,6 +16,7 @@ package conformance
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -33,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/yaml"
 )
 
 // phaseConformance is the phase identifier for conformance checks.
@@ -174,6 +176,82 @@ func recordArtifact(ctx *checks.ValidationContext, label, data string) {
 	if err := ctx.Artifacts.Record(label, data); err != nil {
 		slog.Debug("artifact recording skipped", "label", label, "error", err)
 	}
+}
+
+func formatArtifactBody(equivalent, data string) string {
+	equivalent = strings.TrimSpace(equivalent)
+	data = strings.TrimSpace(data)
+	switch {
+	case equivalent == "" && data == "":
+		return ""
+	case equivalent == "":
+		return data
+	case data == "":
+		return fmt.Sprintf("Equivalent: %s", equivalent)
+	default:
+		return fmt.Sprintf("Equivalent: %s\n\n%s", equivalent, data)
+	}
+}
+
+// recordRawTextArtifact records plain text evidence with an optional command equivalent.
+func recordRawTextArtifact(ctx *checks.ValidationContext, label, equivalent, data string) {
+	recordArtifact(ctx, label, formatArtifactBody(equivalent, data))
+}
+
+// recordChunkedTextArtifact records text evidence across multiple artifacts when needed.
+// This avoids collector-side truncation for large YAML/JSON/metrics payloads.
+func recordChunkedTextArtifact(ctx *checks.ValidationContext, label, equivalent, data string) {
+	if strings.TrimSpace(data) == "" {
+		recordRawTextArtifact(ctx, label, equivalent, data)
+		return
+	}
+
+	prefix := ""
+	if strings.TrimSpace(equivalent) != "" {
+		prefix = fmt.Sprintf("Equivalent: %s\n\n", strings.TrimSpace(equivalent))
+	}
+
+	chunkSize := defaults.ArtifactMaxDataSize - len(prefix) - 256
+	if chunkSize < 512 {
+		chunkSize = 512
+	}
+	if len(data) <= chunkSize {
+		recordArtifact(ctx, label, prefix+strings.TrimSpace(data))
+		return
+	}
+
+	total := (len(data) + chunkSize - 1) / chunkSize
+	for i := 0; i < total; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		part := strings.TrimSpace(data[start:end])
+		partLabel := fmt.Sprintf("%s (part %d/%d)", label, i+1, total)
+		partBody := fmt.Sprintf("%sPart: %d/%d\n\n%s", prefix, i+1, total, part)
+		recordArtifact(ctx, partLabel, partBody)
+	}
+}
+
+// recordObjectJSONArtifact records a structured object as pretty JSON.
+func recordObjectJSONArtifact(ctx *checks.ValidationContext, label, equivalent string, obj any) {
+	payload, err := json.MarshalIndent(obj, "", "  ")
+	if err != nil {
+		recordRawTextArtifact(ctx, label, equivalent, fmt.Sprintf("failed to marshal JSON: %v", err))
+		return
+	}
+	recordChunkedTextArtifact(ctx, label, equivalent, string(payload))
+}
+
+// recordObjectYAMLArtifact records a structured object as YAML.
+func recordObjectYAMLArtifact(ctx *checks.ValidationContext, label, equivalent string, obj any) {
+	payload, err := yaml.Marshal(obj)
+	if err != nil {
+		recordRawTextArtifact(ctx, label, equivalent, fmt.Sprintf("failed to marshal YAML: %v", err))
+		return
+	}
+	recordChunkedTextArtifact(ctx, label, equivalent, string(payload))
 }
 
 // firstContainerImage returns the image of the first container, or "unknown" if empty.

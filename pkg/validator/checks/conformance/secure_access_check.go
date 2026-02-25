@@ -49,12 +49,23 @@ type draTestRun struct {
 	noClaimPodName string
 }
 
-type draIsolationReport struct {
+type draPatternReport struct {
 	PodName             string
 	PodPhase            corev1.PodPhase
-	ExitCode            int32
+	ResourceClaimCount  int
+	GPULimitsCount      int
 	HostPathGPUMounts   int
-	ResourceClaimsCount int
+	ClaimState          string
+	ClaimAllocationInfo string
+}
+
+type draIsolationReport struct {
+	PodName           string
+	PodPhase          corev1.PodPhase
+	ExitCode          int32
+	ResourceClaims    int
+	HostPathGPUMounts int
+	Logs              string
 }
 
 func newDRATestRun() (*draTestRun, error) {
@@ -72,6 +83,10 @@ func newDRATestRun() (*draTestRun, error) {
 
 var claimGVR = schema.GroupVersionResource{
 	Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims",
+}
+
+var resourceSliceGVR = schema.GroupVersionResource{
+	Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices",
 }
 
 func init() {
@@ -103,6 +118,8 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 		return err
 	}
 
+	collectSecureAccessBaselineArtifacts(ctx, dynClient)
+
 	run, err := newDRATestRun()
 	if err != nil {
 		return err
@@ -119,30 +136,117 @@ func CheckSecureAcceleratorAccess(ctx *checks.ValidationContext) error {
 	if err != nil {
 		return err
 	}
-	recordArtifact(ctx, "DRA Test Pod",
-		fmt.Sprintf("Name:      %s/%s\nPhase:     %s\nClaims:    %d resource claims",
-			pod.Namespace, pod.Name, pod.Status.Phase, len(pod.Spec.ResourceClaims)))
+	recordRawTextArtifact(ctx, "Pod status",
+		"kubectl get pod isolation-test -n dra-test -o wide",
+		fmt.Sprintf("Name:      %s/%s\nPhase:     %s\nNode:      %s\nClaims:    %d resource claims",
+			pod.Namespace, pod.Name, pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName), len(pod.Spec.ResourceClaims)))
 
 	// Validate DRA access patterns on the completed pod.
-	if err = validateDRAPatterns(ctx.Context, dynClient, pod, run); err != nil {
+	patternReport, err := validateDRAPatterns(ctx.Context, dynClient, pod, run)
+	if err != nil {
 		return err
 	}
-	recordArtifact(ctx, "DRA Access Patterns",
-		fmt.Sprintf("ResourceClaims:  present (%d)\nDevice Plugin:   absent (no nvidia.com/gpu in limits)\nHostPath GPU:    absent (no /dev/nvidia* mounts)\nClaim Status:    allocated",
-			len(pod.Spec.ResourceClaims)))
+	recordRawTextArtifact(ctx, "Pod resourceClaims",
+		"kubectl get pod isolation-test -n dra-test -o jsonpath='{.spec.resourceClaims}'",
+		fmt.Sprintf("Pod:             %s/%s\nResourceClaims:  %d\nGPULimits:       %d",
+			draTestNamespace, patternReport.PodName, patternReport.ResourceClaimCount, patternReport.GPULimitsCount))
+	recordRawTextArtifact(ctx, "Pod volumes (no hostPath)",
+		"kubectl get pod isolation-test -n dra-test -o jsonpath='{.spec.volumes}'",
+		fmt.Sprintf("Pod:               %s/%s\nHostPathGPUMounts: %d",
+			draTestNamespace, patternReport.PodName, patternReport.HostPathGPUMounts))
+	recordRawTextArtifact(ctx, "ResourceClaim allocation",
+		"kubectl get resourceclaim isolated-gpu -n dra-test -o wide",
+		fmt.Sprintf("Name:             %s/%s\nState:            %s\nAllocationStatus: %s",
+			draTestNamespace, run.claimName, patternReport.ClaimState, patternReport.ClaimAllocationInfo))
+
+	logBytes, logErr := ctx.Clientset.CoreV1().Pods(draTestNamespace).GetLogs(
+		run.podName, &corev1.PodLogOptions{}).DoRaw(ctx.Context)
+	if logErr != nil {
+		recordRawTextArtifact(ctx, "Isolation test logs",
+			"kubectl logs isolation-test -n dra-test",
+			fmt.Sprintf("failed to read isolation test logs: %v", logErr))
+	} else {
+		recordChunkedTextArtifact(ctx, "Isolation test logs",
+			"kubectl logs isolation-test -n dra-test", string(logBytes))
+	}
 
 	// Validate isolation: a pod without DRA claims cannot access GPU devices.
 	// Target the same node as the DRA test pod — isolation must be proven on the
 	// GPU node, not a control-plane node that has no GPUs in the first place.
-	report, err := validateDRAIsolation(ctx.Context, ctx.Clientset, run, pod.Spec.NodeName)
+	isolationReport, err := validateDRAIsolation(ctx.Context, ctx.Clientset, run, pod.Spec.NodeName)
 	if err != nil {
 		return err
 	}
-	recordArtifact(ctx, "DRA Isolation Test",
-		fmt.Sprintf("Pod:                %s/%s\nPhase:              %s\nExit Code:          %d\nResourceClaims:     %d\nHostPath GPU mounts:%d",
-			draTestNamespace, report.PodName, report.PodPhase, report.ExitCode,
-			report.ResourceClaimsCount, report.HostPathGPUMounts))
+	recordRawTextArtifact(ctx, "DRA Isolation Test",
+		"kubectl logs dra-no-claim-<id> -n dra-test",
+		fmt.Sprintf("Pod:               %s/%s\nPhase:             %s\nExitCode:          %d\nResourceClaims:    %d\nHostPathGPUMounts: %d",
+			draTestNamespace, isolationReport.PodName, isolationReport.PodPhase,
+			isolationReport.ExitCode, isolationReport.ResourceClaims, isolationReport.HostPathGPUMounts))
+	recordChunkedTextArtifact(ctx, "No-claim pod logs",
+		"kubectl logs dra-no-claim-<id> -n dra-test", isolationReport.Logs)
 	return nil
+}
+
+func collectSecureAccessBaselineArtifacts(ctx *checks.ValidationContext, dynClient dynamic.Interface) {
+	// ClusterPolicy status.
+	clusterPolicyGVR := schema.GroupVersionResource{
+		Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies",
+	}
+	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Context, "cluster-policy", metav1.GetOptions{})
+	if err != nil {
+		recordRawTextArtifact(ctx, "ClusterPolicy status", "kubectl get clusterpolicy -o wide",
+			fmt.Sprintf("failed to read ClusterPolicy: %v", err))
+	} else {
+		state, _, _ := unstructured.NestedString(cp.Object, "status", "state")
+		recordRawTextArtifact(ctx, "ClusterPolicy status", "kubectl get clusterpolicy -o wide",
+			fmt.Sprintf("Name:   %s\nState:  %s", cp.GetName(), valueOrUnknown(state)))
+	}
+
+	// GPU operator pods.
+	operatorPods, err := ctx.Clientset.CoreV1().Pods("gpu-operator").List(ctx.Context, metav1.ListOptions{})
+	if err != nil {
+		recordRawTextArtifact(ctx, "GPU operator pods", "kubectl get pods -n gpu-operator -o wide",
+			fmt.Sprintf("failed to list gpu-operator pods: %v", err))
+	} else {
+		var podSummary strings.Builder
+		for _, pod := range operatorPods.Items {
+			fmt.Fprintf(&podSummary, "%-46s ready=%s phase=%s node=%s\n",
+				pod.Name, podReadyCount(pod), pod.Status.Phase, pod.Spec.NodeName)
+		}
+		recordRawTextArtifact(ctx, "GPU operator pods", "kubectl get pods -n gpu-operator -o wide", podSummary.String())
+	}
+
+	// GPU operator DaemonSets.
+	daemonSets, err := ctx.Clientset.AppsV1().DaemonSets("gpu-operator").List(ctx.Context, metav1.ListOptions{})
+	if err != nil {
+		recordRawTextArtifact(ctx, "GPU operator DaemonSets", "kubectl get ds -n gpu-operator",
+			fmt.Sprintf("failed to list gpu-operator DaemonSets: %v", err))
+	} else {
+		var dsSummary strings.Builder
+		for _, ds := range daemonSets.Items {
+			fmt.Fprintf(&dsSummary, "%-38s ready=%d/%d\n",
+				ds.Name, ds.Status.NumberReady, ds.Status.DesiredNumberScheduled)
+		}
+		recordRawTextArtifact(ctx, "GPU operator DaemonSets", "kubectl get ds -n gpu-operator", dsSummary.String())
+	}
+
+	// ResourceSlices summary + details.
+	slices, err := dynClient.Resource(resourceSliceGVR).List(ctx.Context, metav1.ListOptions{})
+	if err != nil {
+		recordRawTextArtifact(ctx, "ResourceSlices", "kubectl get resourceslices -o wide",
+			fmt.Sprintf("failed to list ResourceSlices: %v", err))
+		recordRawTextArtifact(ctx, "GPU devices in ResourceSlice", "kubectl get resourceslices -o yaml",
+			fmt.Sprintf("failed to list ResourceSlices: %v", err))
+		return
+	}
+	var sliceSummary strings.Builder
+	for _, s := range slices.Items {
+		driver, _, _ := unstructured.NestedString(s.Object, "spec", "driver")
+		nodeName, _, _ := unstructured.NestedString(s.Object, "spec", "nodeName")
+		fmt.Fprintf(&sliceSummary, "%-50s node=%s driver=%s\n", s.GetName(), nodeName, driver)
+	}
+	recordRawTextArtifact(ctx, "ResourceSlices", "kubectl get resourceslices -o wide", sliceSummary.String())
+	recordObjectYAMLArtifact(ctx, "GPU devices in ResourceSlice", "kubectl get resourceslices -o yaml", slices.Object)
 }
 
 // deployDRATestResources creates the namespace, ResourceClaim, and Pod for the DRA test.
@@ -218,18 +322,24 @@ func waitForDRATestPod(ctx context.Context, clientset kubernetes.Interface, run 
 }
 
 // validateDRAPatterns verifies the completed pod uses proper DRA access patterns.
-func validateDRAPatterns(ctx context.Context, dynClient dynamic.Interface, pod *corev1.Pod, run *draTestRun) error {
+func validateDRAPatterns(ctx context.Context, dynClient dynamic.Interface, pod *corev1.Pod, run *draTestRun) (*draPatternReport, error) {
+	report := &draPatternReport{
+		PodName:            pod.Name,
+		PodPhase:           pod.Status.Phase,
+		ResourceClaimCount: len(pod.Spec.ResourceClaims),
+	}
+
 	// 1. Pod uses resourceClaims (DRA pattern).
 	if len(pod.Spec.ResourceClaims) == 0 {
-		return errors.New(errors.ErrCodeInternal,
-			"pod does not use DRA resourceClaims")
+		return nil, errors.New(errors.ErrCodeInternal, "pod does not use DRA resourceClaims")
 	}
 
 	// 2. No nvidia.com/gpu in resources.limits (device plugin pattern).
 	for _, c := range pod.Spec.Containers {
 		if c.Resources.Limits != nil {
 			if _, hasGPU := c.Resources.Limits["nvidia.com/gpu"]; hasGPU {
-				return errors.New(errors.ErrCodeInternal,
+				report.GPULimitsCount++
+				return nil, errors.New(errors.ErrCodeInternal,
 					"pod uses device plugin (nvidia.com/gpu in limits) instead of DRA")
 			}
 		}
@@ -238,26 +348,35 @@ func validateDRAPatterns(ctx context.Context, dynClient dynamic.Interface, pod *
 	// 3. No hostPath volumes to /dev/nvidia*.
 	for _, vol := range pod.Spec.Volumes {
 		if vol.HostPath != nil && strings.Contains(vol.HostPath.Path, "/dev/nvidia") {
-			return errors.New(errors.ErrCodeInternal,
+			report.HostPathGPUMounts++
+			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("pod has hostPath volume to %s", vol.HostPath.Path))
 		}
 	}
 
 	// 4. ResourceClaim exists.
-	if _, err := dynClient.Resource(claimGVR).Namespace(draTestNamespace).Get(
-		ctx, run.claimName, metav1.GetOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound,
+	claim, err := dynClient.Resource(claimGVR).Namespace(draTestNamespace).Get(
+		ctx, run.claimName, metav1.GetOptions{})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeNotFound,
 			fmt.Sprintf("ResourceClaim %s not found", run.claimName), err)
+	}
+	report.ClaimState, _, _ = unstructured.NestedString(claim.Object, "status", "state")
+	results, found, _ := unstructured.NestedSlice(claim.Object, "status", "allocation", "devices", "results")
+	if found {
+		report.ClaimAllocationInfo = fmt.Sprintf("%d allocated device result(s)", len(results))
+	} else {
+		report.ClaimAllocationInfo = "no allocation results reported"
 	}
 
 	// 5. Pod completed successfully — proves DRA allocation worked.
 	if pod.Status.Phase != corev1.PodSucceeded {
-		return errors.New(errors.ErrCodeInternal,
+		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("DRA test pod phase=%s (want Succeeded), GPU allocation may have failed",
 				pod.Status.Phase))
 	}
 
-	return nil
+	return report, nil
 }
 
 // validateDRAIsolation verifies that a pod WITHOUT DRA ResourceClaims cannot see GPU devices.
@@ -331,10 +450,10 @@ func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, r
 	}
 
 	report := &draIsolationReport{
-		PodName:             resultPod.Name,
-		PodPhase:            resultPod.Status.Phase,
-		ExitCode:            podExitCode(resultPod),
-		ResourceClaimsCount: len(resultPod.Spec.ResourceClaims),
+		PodName:        resultPod.Name,
+		PodPhase:       resultPod.Status.Phase,
+		ExitCode:       podExitCode(resultPod),
+		ResourceClaims: len(resultPod.Spec.ResourceClaims),
 	}
 
 	// Strict success criteria: require Succeeded (exit 0 = script confirmed no GPU visible).
@@ -349,14 +468,30 @@ func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, r
 			fmt.Sprintf("no-claim isolation test pod failed with exit code %d — cannot verify isolation",
 				exitCode))
 	}
+	if len(resultPod.Status.ContainerStatuses) > 0 {
+		cs := resultPod.Status.ContainerStatuses[0]
+		if cs.State.Terminated != nil {
+			report.ExitCode = cs.State.Terminated.ExitCode
+		}
+	}
 
 	// Verify no hostPath to GPU devices on the no-claim pod.
 	for _, vol := range resultPod.Spec.Volumes {
 		if vol.HostPath != nil && strings.Contains(vol.HostPath.Path, "/dev/nvidia") {
+			report.HostPathGPUMounts++
 			return nil, errors.New(errors.ErrCodeInternal,
 				fmt.Sprintf("no-claim pod has hostPath volume to %s — isolation broken",
 					vol.HostPath.Path))
 		}
+	}
+	report.HostPathGPUMounts = 0
+
+	logBytes, logErr := clientset.CoreV1().Pods(draTestNamespace).GetLogs(
+		run.noClaimPodName, &corev1.PodLogOptions{}).DoRaw(ctx)
+	if logErr != nil {
+		report.Logs = fmt.Sprintf("failed to read logs: %v", logErr)
+	} else {
+		report.Logs = string(logBytes)
 	}
 
 	return report, nil
