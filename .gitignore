@@ -120,6 +120,12 @@ tags
 \#*\#
 .\#*
 
+# Hugo documentation site
+site/public/
+site/resources/
+site/node_modules/
+site/.hugo_build.lock
+
 # Claude
 .claude/settings.local.json
 docs/plans

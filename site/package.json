@@ -1,0 +1,11 @@
+{
+  "name": "aicr-docs",
+  "version": "0.1.0",
+  "private": true,
+  "description": "NVIDIA AI Cluster Runtime documentation site",
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "postcss-cli": "^11.0.1"
+  }
+}

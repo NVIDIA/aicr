@@ -139,7 +139,10 @@ LICENSE_IGNORES = \
 	-ignore '**/*pb2*' \
 	-ignore 'bundles/**' \
 	-ignore 'dist/**' \
-	-ignore 'vendor/**'
+	-ignore 'vendor/**' \
+	-ignore 'site/public/**' \
+	-ignore 'site/resources/**' \
+	-ignore 'site/node_modules/**'
 
 .PHONY: license
 license: ## Add/verify license headers in source files
@@ -209,6 +212,28 @@ docs: ## Serves Go documentation on http://localhost:6060
 	command -v pkgsite >/dev/null 2>&1 && pkgsite -http=:6060 || \
 	(command -v godoc >/dev/null 2>&1 && godoc -http=:6060 || \
 	(echo "Installing pkgsite..." && go install golang.org/x/pkgsite/cmd/pkgsite@latest && pkgsite -http=:6060))
+
+# =============================================================================
+# Documentation Site
+# =============================================================================
+
+.PHONY: site-serve
+site-serve: ## Serve documentation site locally
+	@set -e; \
+	echo "Starting documentation site on http://localhost:1313..."; \
+	cd site && npm install && hugo serve --baseURL http://localhost:1313/
+
+.PHONY: site-build
+site-build: ## Build documentation site
+	@set -e; \
+	echo "Building documentation site..."; \
+	cd site && npm install && hugo --minify; \
+	echo "Site built in site/public/"
+
+.PHONY: site-clean
+site-clean: ## Clean documentation build artifacts
+	@rm -rf site/public site/resources
+	@echo "Cleaned documentation build artifacts"
 
 .PHONY: build
 build: tidy ## Builds binaries for the current OS and architecture
