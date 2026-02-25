@@ -41,25 +41,7 @@ jobs:
       actions: read
       contents: read
       id-token: write
-
-  security-scan:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Security Scan
-        uses: ./.github/actions/security-scan
-        with:
-          severity: 'MEDIUM'
-          category: 'trivy-fs'
+      security-events: write
 
   # =============================================================================
   # Build Job: GoReleaser (binaries, ko images, draft GitHub release)
@@ -68,7 +50,7 @@ jobs:
   build:
     name: Build and Release (Draft)
     runs-on: ubuntu-latest
-    needs: [tests, security-scan]
+    needs: [tests]
     timeout-minutes: 30
     outputs:
       release_outcome: ${{ steps.release.outputs.release_outcome }}
@@ -124,7 +106,7 @@ jobs:
   docker-validator:
     name: Docker Validator (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
-    needs: [tests, security-scan]
+    needs: [tests]
     timeout-minutes: 15
     permissions:
       contents: read
@@ -365,44 +347,11 @@ jobs:
   # =============================================================================
 
   deploy:
-    name: Deploy API Server
-    runs-on: ubuntu-latest
     needs: [publish, release-check]
-    timeout-minutes: 10
+    uses: ./.github/workflows/deploy.yaml
     permissions:
       contents: read
       packages: read
       id-token: write
-    env:
-      IDENTITY_PROVIDER: 'projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
-      SERVICE_ACCOUNT: 'github-actions'
-      PROJECT_ID: 'eidosx'
-      RUN_REGION: 'us-west1'
-      RUN_SERVICE: 'api'
-      # Source: GHCR image built by GoReleaser
-      SOURCE_IMAGE: 'ghcr.io/nvidia/aicrd'
-      # Target: Artifact Registry demo repository
-      TARGET_REGISTRY: 'us-docker.pkg.dev/eidosx/demo'
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Deploy Demo API Server
-        uses: ./.github/actions/cloud-run-deploy
-        with:
-          project_id: ${{ env.PROJECT_ID }}
-          workload_identity_provider: ${{ env.IDENTITY_PROVIDER }}
-          service_account: "${{ env.SERVICE_ACCOUNT }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
-          region: ${{ env.RUN_REGION }}
-          service: ${{ env.RUN_SERVICE }}
-          source_image: "${{ env.SOURCE_IMAGE }}:${{ github.ref_name }}"
-          target_registry: ${{ env.TARGET_REGISTRY }}
-          image_name: 'aicrd'
-          ghcr_token: ${{ github.token }}
-          crane_version: ${{ steps.versions.outputs.crane }}
+    with:
+      image_tag: ${{ github.ref_name }}

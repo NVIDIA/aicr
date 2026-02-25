@@ -1,0 +1,67 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Deploy API Server
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g., v0.1.4)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy API Server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    env:
+      IDENTITY_PROVIDER: 'projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider'
+      SERVICE_ACCOUNT: 'github-actions'
+      PROJECT_ID: 'eidosx'
+      RUN_REGION: 'us-west1'
+      RUN_SERVICE: 'api'
+      SOURCE_IMAGE: 'ghcr.io/nvidia/aicrd'
+      TARGET_REGISTRY: 'us-docker.pkg.dev/eidosx/demo'
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Deploy Demo API Server
+        uses: ./.github/actions/cloud-run-deploy
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+          workload_identity_provider: ${{ env.IDENTITY_PROVIDER }}
+          service_account: "${{ env.SERVICE_ACCOUNT }}@${{ env.PROJECT_ID }}.iam.gserviceaccount.com"
+          region: ${{ env.RUN_REGION }}
+          service: ${{ env.RUN_SERVICE }}
+          source_image: "${{ env.SOURCE_IMAGE }}:${{ inputs.image_tag }}"
+          target_registry: ${{ env.TARGET_REGISTRY }}
+          image_name: 'aicrd'
+          ghcr_token: ${{ github.token }}
+          crane_version: ${{ steps.versions.outputs.crane }}

@@ -36,21 +36,11 @@ runs:
           vendor/modules.txt
         check-latest: true
 
-    - name: Install Chainsaw
-      shell: bash
-      run: |
-        set -euo pipefail
-        VERSION="${{ inputs.chainsaw_version }}"
-        VERSION="${VERSION#v}"
-        TAR="chainsaw_linux_amd64.tar.gz"
-        URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
-        TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${URL}"
-        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
-        sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
-        sudo chmod +x /usr/local/bin/chainsaw
-        rm -rf "${TMP}"
-        chainsaw version
+    - name: Setup build tools
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_chainsaw: 'true'
+        chainsaw_version: '${{ inputs.chainsaw_version }}'
 
     - name: Build aicr binary
       shell: bash
