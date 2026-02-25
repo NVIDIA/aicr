@@ -192,21 +192,3 @@ func CheckDRASupport(ctx *checks.ValidationContext) error {
 
 	return nil
 }
-
-func valueOrUnknown(v string) string {
-	if strings.TrimSpace(v) == "" {
-		return "unknown"
-	}
-	return v
-}
-
-func podReadyCount(pod corev1.Pod) string {
-	var ready, total int
-	for _, cs := range pod.Status.ContainerStatuses {
-		total++
-		if cs.Ready {
-			ready++
-		}
-	}
-	return fmt.Sprintf("%d/%d", ready, total)
-}

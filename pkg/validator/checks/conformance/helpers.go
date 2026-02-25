@@ -74,7 +74,21 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
+// checkCondition verifies a status condition on an unstructured object.
+func checkCondition(obj *unstructured.Unstructured, condType, expectedStatus string) error {
+	obs, err := getConditionObservation(obj, condType)
+	if err != nil {
+		return err
+	}
+	if obs.Status == expectedStatus {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInternal,
+		fmt.Sprintf("condition %s=%v (want %s)", condType, obs.Status, expectedStatus))
+}
+
 type conditionObservation struct {
+	Type    string
 	Status  string
 	Reason  string
 	Message string
@@ -91,29 +105,29 @@ func getConditionObservation(obj *unstructured.Unstructured, condType string) (*
 		if !ok {
 			continue
 		}
-		condName, _ := cond["type"].(string)
-		if condName != condType {
+
+		kind, _, _ := unstructured.NestedString(cond, "type")
+		if kind != condType {
 			continue
 		}
 
-		status, _ := cond["status"].(string)
+		status, foundStatus, _ := unstructured.NestedString(cond, "status")
+		if !foundStatus {
+			if v, ok := cond["status"]; ok {
+				status = fmt.Sprintf("%v", v)
+			}
+		}
+		reason, _, _ := unstructured.NestedString(cond, "reason")
+		message, _, _ := unstructured.NestedString(cond, "message")
 		return &conditionObservation{
-			Status:  status,
-			Reason:  stringFieldOrDefault(cond, "reason", "not-reported"),
-			Message: stringFieldOrDefault(cond, "message", "not-reported"),
+			Type:    condType,
+			Status:  valueOrUnknown(status),
+			Reason:  valueOrUnknown(reason),
+			Message: valueOrUnknown(message),
 		}, nil
 	}
 
-	return nil, errors.New(errors.ErrCodeNotFound,
-		fmt.Sprintf("condition %s not found", condType))
-}
-
-func stringFieldOrDefault(obj map[string]interface{}, key, fallback string) string {
-	v, _ := obj[key].(string)
-	if v == "" {
-		return fallback
-	}
-	return v
+	return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("condition %s not found", condType))
 }
 
 // verifyDeploymentAvailable checks that a Deployment has at least one available replica.
@@ -260,6 +274,24 @@ func firstContainerImage(containers []corev1.Container) string {
 		return containers[0].Image
 	}
 	return "unknown"
+}
+
+func valueOrUnknown(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "unknown"
+	}
+	return v
+}
+
+func podReadyCount(pod corev1.Pod) string {
+	var ready, total int
+	for _, cs := range pod.Status.ContainerStatuses {
+		total++
+		if cs.Ready {
+			ready++
+		}
+	}
+	return fmt.Sprintf("%d/%d", ready, total)
 }
 
 // truncateLines limits text to at most n lines, appending a truncation marker if needed.
