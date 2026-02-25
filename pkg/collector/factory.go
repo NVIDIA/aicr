@@ -41,10 +41,19 @@ func WithSystemDServices(services []string) Option {
 	}
 }
 
+// WithHelmNamespaces configures the namespaces for Helm release collection.
+// nil/empty = skip, ["*"] = all namespaces, ["ns1","ns2"] = scoped.
+func WithHelmNamespaces(namespaces []string) Option {
+	return func(f *DefaultFactory) {
+		f.HelmNamespaces = namespaces
+	}
+}
+
 // DefaultFactory is the standard implementation of Factory that creates collectors
 // with production dependencies. It configures default systemd services to monitor.
 type DefaultFactory struct {
 	SystemDServices []string
+	HelmNamespaces  []string
 }
 
 // NewDefaultFactory creates a new DefaultFactory with default configuration.
@@ -86,5 +95,7 @@ func (f *DefaultFactory) CreateOSCollector() Collector {
 
 // CreateKubernetesCollector creates a Kubernetes API collector.
 func (f *DefaultFactory) CreateKubernetesCollector() Collector {
-	return &k8s.Collector{}
+	return &k8s.Collector{
+		HelmNamespaces: f.HelmNamespaces,
+	}
 }

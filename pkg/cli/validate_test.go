@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
@@ -210,6 +211,84 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 		if !found {
 			t.Errorf("missing agent flag: %s", flagName)
 		}
+	}
+}
+
+func TestHelmNamespacesFromRecipe(t *testing.T) {
+	tests := []struct {
+		name     string
+		rec      *recipe.RecipeResult
+		expected []string
+	}{
+		{
+			name:     "nil recipe",
+			rec:      &recipe.RecipeResult{},
+			expected: nil,
+		},
+		{
+			name: "no helm components",
+			rec: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "app", Type: recipe.ComponentTypeKustomize, Namespace: "default"},
+				},
+			},
+			expected: nil,
+		},
+		{
+			name: "helm components with namespaces",
+			rec: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
+					{Name: "network-operator", Type: recipe.ComponentTypeHelm, Namespace: "network-operator"},
+				},
+			},
+			expected: []string{"gpu-operator", "network-operator"},
+		},
+		{
+			name: "deduplicates namespaces",
+			rec: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
+					{Name: "gpu-feature-discovery", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
+				},
+			},
+			expected: []string{"gpu-operator"},
+		},
+		{
+			name: "skips helm without namespace",
+			rec: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
+					{Name: "orphan", Type: recipe.ComponentTypeHelm, Namespace: ""},
+				},
+			},
+			expected: []string{"gpu-operator"},
+		},
+		{
+			name: "mixed helm and kustomize",
+			rec: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
+					{Name: "kustomize-app", Type: recipe.ComponentTypeKustomize, Namespace: "default"},
+					{Name: "network-operator", Type: recipe.ComponentTypeHelm, Namespace: "network-operator"},
+				},
+			},
+			expected: []string{"gpu-operator", "network-operator"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := helmNamespacesFromRecipe(tt.rec)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("got %d namespaces, want %d: %v", len(got), len(tt.expected), got)
+			}
+			for i, ns := range got {
+				if ns != tt.expected[i] {
+					t.Errorf("namespace[%d] = %q, want %q", i, ns, tt.expected[i])
+				}
+			}
+		})
 	}
 }
 

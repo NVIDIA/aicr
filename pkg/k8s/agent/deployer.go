@@ -54,6 +54,12 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
 	}
 
+	if len(d.config.HelmNamespaces) > 0 {
+		if err := d.ensureHelmSecretRoles(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Helm secrets RBAC", err)
+		}
+	}
+
 	// Step 2: Ensure Job (delete existing + recreate)
 	if err := d.ensureJob(ctx); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Job", err)
@@ -122,6 +128,14 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 		errs = append(errs, fmt.Sprintf("ClusterRoleBinding %q: %v", clusterRoleName, err))
 	} else {
 		deleted = append(deleted, fmt.Sprintf("ClusterRoleBinding %q", clusterRoleName))
+	}
+
+	if len(d.config.HelmNamespaces) > 0 {
+		if err := d.deleteHelmSecretRoles(ctx); err != nil {
+			errs = append(errs, fmt.Sprintf("Helm secrets RBAC: %v", err))
+		} else {
+			deleted = append(deleted, fmt.Sprintf("Helm secrets RBAC (%d namespaces)", len(d.config.HelmNamespaces)))
+		}
 	}
 
 	// Log successful deletions

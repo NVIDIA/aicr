@@ -62,6 +62,14 @@ func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format)
 	}, nil
 }
 
+// createSnapshotSerializer creates the output serializer based on template options.
+func createSnapshotSerializer(tmplOpts *snapshotTemplateOptions) (serializer.Serializer, error) {
+	if tmplOpts.templatePath != "" {
+		return serializer.NewTemplateFileWriter(tmplOpts.templatePath, tmplOpts.outputPath)
+	}
+	return serializer.NewFileWriterOrStdout(tmplOpts.format, tmplOpts.outputPath)
+}
+
 func snapshotCmd() *cli.Command {
 	return &cli.Command{
 		Name:                  "snapshot",
@@ -177,6 +185,14 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Name:  "template",
 				Usage: "Path to Go template file for custom output formatting (requires YAML format)",
 			},
+			&cli.StringSliceFlag{
+				Name:  "helm-namespaces",
+				Usage: "Namespaces for Helm release collection (creates scoped RBAC for secrets access). Mutually exclusive with --helm-all-namespaces.",
+			},
+			&cli.BoolFlag{
+				Name:  "helm-all-namespaces",
+				Usage: "Grant cluster-wide secrets access for Helm release collection. Mutually exclusive with --helm-namespaces.",
+			},
 			outputFlag,
 			formatFlag,
 			kubeconfigFlag,
@@ -203,19 +219,9 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			factory := collector.NewDefaultFactory()
 
 			// Create output serializer
-			var ser serializer.Serializer
-			if tmplOpts.templatePath != "" {
-				// Use template writer
-				ser, err = serializer.NewTemplateFileWriter(tmplOpts.templatePath, tmplOpts.outputPath)
-				if err != nil {
-					return errors.Wrap(errors.ErrCodeInternal, "failed to create template writer", err)
-				}
-			} else {
-				// Use standard format writer
-				ser, err = serializer.NewFileWriterOrStdout(tmplOpts.format, tmplOpts.outputPath)
-				if err != nil {
-					return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
-				}
+			ser, err := createSnapshotSerializer(tmplOpts)
+			if err != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", err)
 			}
 
 			// Build snapshotter configuration
@@ -236,6 +242,13 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+			}
+
+			// Validate mutual exclusivity of helm flags
+			helmNamespaces := cmd.StringSlice("helm-namespaces")
+			helmAllNamespaces := cmd.Bool("helm-all-namespaces")
+			if len(helmNamespaces) > 0 && helmAllNamespaces {
+				return errors.New(errors.ErrCodeInvalidRequest, "--helm-namespaces and --helm-all-namespaces are mutually exclusive")
 			}
 
 			// When running inside an agent Job, collect locally instead of
@@ -261,6 +274,8 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Privileged:         cmd.Bool("privileged"),
 				RequireGPU:         cmd.Bool("require-gpu"),
 				TemplatePath:       tmplOpts.templatePath,
+				HelmNamespaces:     helmNamespaces,
+				HelmAllNamespaces:  helmAllNamespaces,
 			}
 
 			return ns.Measure(ctx)
