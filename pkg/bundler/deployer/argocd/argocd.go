@@ -40,12 +40,15 @@ var readmeTemplate string
 
 // ApplicationData contains data for rendering an ArgoCD Application.
 type ApplicationData struct {
-	Name       string
-	Namespace  string
-	Repository string
-	Chart      string
-	Version    string
-	SyncWave   int
+	Name        string
+	Namespace   string
+	Repository  string
+	Chart       string
+	Version     string
+	SyncWave    int
+	IsKustomize bool   // True when the component uses Kustomize instead of Helm
+	Tag         string // Git ref for Kustomize components (tag, branch, or commit)
+	Path        string // Path within the repository to the kustomization
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -138,18 +141,24 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", comp.Name))
 		}
+
+		isKustomize := comp.Type == recipe.ComponentTypeKustomize
+
 		chartName := comp.Chart
 		if chartName == "" {
 			chartName = comp.Name
 		}
 
 		appData := ApplicationData{
-			Name:       comp.Name,
-			Namespace:  comp.Namespace,
-			Repository: comp.Source,
-			Chart:      chartName,
-			Version:    shared.NormalizeVersion(comp.Version),
-			SyncWave:   i, // Use index as sync wave
+			Name:        comp.Name,
+			Namespace:   comp.Namespace,
+			Repository:  comp.Source,
+			Chart:       chartName,
+			Version:     shared.NormalizeVersion(comp.Version),
+			SyncWave:    i, // Use index as sync wave
+			IsKustomize: isKustomize,
+			Tag:         comp.Tag,
+			Path:        comp.Path,
 		}
 		appDataList = append(appDataList, appData)
 	}
@@ -180,18 +189,20 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		output.Files = append(output.Files, appPath)
 		output.TotalSize += appSize
 
-		// Generate values.yaml
-		values := input.ComponentValues[appData.Name]
-		if values == nil {
-			values = make(map[string]any)
+		// Generate values.yaml only for Helm components (kustomize uses source directly)
+		if !appData.IsKustomize {
+			values := input.ComponentValues[appData.Name]
+			if values == nil {
+				values = make(map[string]any)
+			}
+			valuesPath, valuesSize, err := shared.WriteValuesFile(values, componentDir, "values.yaml")
+			if err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("failed to generate values.yaml for %s", appData.Name), err)
+			}
+			output.Files = append(output.Files, valuesPath)
+			output.TotalSize += valuesSize
 		}
-		valuesPath, valuesSize, err := shared.WriteValuesFile(values, componentDir, "values.yaml")
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to generate values.yaml for %s", appData.Name), err)
-		}
-		output.Files = append(output.Files, valuesPath)
-		output.TotalSize += valuesSize
 	}
 
 	// Generate app-of-apps.yaml

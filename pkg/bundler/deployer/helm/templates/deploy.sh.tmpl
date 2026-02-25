@@ -45,7 +45,13 @@ echo "Deploying Cloud Native Stack components..."
 
 # Install components in order
 {{ range .Components -}}
-{{ if .HasChart -}}
+{{ if .IsKustomize -}}
+echo "Installing {{ .Name }} ({{ .Namespace }}) via kustomize..."
+kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f -
+kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
+  | kubectl apply -n {{ .Namespace }} -f - \
+  || helm_failed "{{ .Name }}"
+{{ else if .HasChart -}}
 echo "Installing {{ .Name }} ({{ .Namespace }})..."
 COMPONENT_WAIT_ARGS="${WAIT_ARGS}"
 if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then

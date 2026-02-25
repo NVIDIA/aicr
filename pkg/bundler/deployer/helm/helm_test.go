@@ -660,7 +660,332 @@ func TestBuildComponentDataList_NamespaceAndChart(t *testing.T) {
 	}
 }
 
+func TestGenerate_KustomizeOnly(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createKustomizeRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"my-kustomize-app": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	output, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Verify root files exist
+	for _, f := range []string{"README.md", "deploy.sh", "undeploy.sh"} {
+		path := filepath.Join(outputDir, f)
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			t.Errorf("expected root file %s does not exist", f)
+		}
+	}
+
+	// Verify component directory exists with README
+	readmePath := filepath.Join(outputDir, "my-kustomize-app", "README.md")
+	if _, statErr := os.Stat(readmePath); os.IsNotExist(statErr) {
+		t.Error("expected my-kustomize-app/README.md does not exist")
+	}
+
+	// deploy.sh should contain kustomize build, NOT helm upgrade
+	deployContent, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	deployScript := string(deployContent)
+
+	if !strings.Contains(deployScript, "kustomize build") {
+		t.Error("deploy.sh missing kustomize build command")
+	}
+	if strings.Contains(deployScript, "helm upgrade") {
+		t.Error("deploy.sh should not contain helm upgrade for kustomize-only bundle")
+	}
+	if !strings.Contains(deployScript, "via kustomize") {
+		t.Error("deploy.sh should indicate kustomize deployment")
+	}
+	if !strings.Contains(deployScript, "ref=v1.0.0") {
+		t.Error("deploy.sh should contain kustomize tag ref")
+	}
+	if !strings.Contains(deployScript, "deploy/production") {
+		t.Error("deploy.sh should contain kustomize path")
+	}
+
+	// undeploy.sh should contain kustomize build for deletion
+	undeployContent, err := os.ReadFile(filepath.Join(outputDir, "undeploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read undeploy.sh: %v", err)
+	}
+	undeployScript := string(undeployContent)
+
+	if !strings.Contains(undeployScript, "kustomize build") {
+		t.Error("undeploy.sh missing kustomize build command")
+	}
+	if strings.Contains(undeployScript, "helm uninstall") {
+		t.Error("undeploy.sh should not contain helm uninstall for kustomize-only bundle")
+	}
+
+	// Component README should show kustomize instructions
+	compReadme, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("failed to read component README: %v", err)
+	}
+	compReadmeStr := string(compReadme)
+	if !strings.Contains(compReadmeStr, "kustomize build") {
+		t.Error("component README should contain kustomize build instructions")
+	}
+	if strings.Contains(compReadmeStr, "helm upgrade") {
+		t.Error("component README should not contain helm commands for kustomize component")
+	}
+
+	if len(output.Files) < 4 {
+		t.Errorf("expected at least 4 files, got %d", len(output.Files))
+	}
+}
+
+func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createMixedRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager":     {"installCRDs": true},
+			"my-kustomize-app": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	output, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Verify both component directories exist
+	for _, comp := range []string{"cert-manager", "my-kustomize-app"} {
+		readmePath := filepath.Join(outputDir, comp, "README.md")
+		if _, statErr := os.Stat(readmePath); os.IsNotExist(statErr) {
+			t.Errorf("expected %s/README.md does not exist", comp)
+		}
+	}
+
+	// deploy.sh should contain BOTH helm and kustomize commands
+	deployContent, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	deployScript := string(deployContent)
+
+	if !strings.Contains(deployScript, "helm upgrade") {
+		t.Error("deploy.sh missing helm upgrade for Helm component")
+	}
+	if !strings.Contains(deployScript, "kustomize build") {
+		t.Error("deploy.sh missing kustomize build for Kustomize component")
+	}
+
+	// undeploy.sh should contain BOTH helm and kustomize commands
+	undeployContent, err := os.ReadFile(filepath.Join(outputDir, "undeploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read undeploy.sh: %v", err)
+	}
+	undeployScript := string(undeployContent)
+
+	if !strings.Contains(undeployScript, "helm uninstall") {
+		t.Error("undeploy.sh missing helm uninstall for Helm component")
+	}
+	if !strings.Contains(undeployScript, "kustomize build") {
+		t.Error("undeploy.sh missing kustomize build for Kustomize component")
+	}
+
+	// Root README should show both types
+	rootReadme, err := os.ReadFile(filepath.Join(outputDir, "README.md"))
+	if err != nil {
+		t.Fatalf("failed to read README.md: %v", err)
+	}
+	rootReadmeStr := string(rootReadme)
+	if !strings.Contains(rootReadmeStr, "Helm") {
+		t.Error("root README should indicate Helm type")
+	}
+	if !strings.Contains(rootReadmeStr, "Kustomize") {
+		t.Error("root README should indicate Kustomize type")
+	}
+
+	if len(output.Files) < 7 {
+		t.Errorf("expected at least 7 files, got %d", len(output.Files))
+	}
+}
+
+func TestBuildComponentDataList_Kustomize(t *testing.T) {
+	g := NewGenerator()
+
+	input := &GeneratorInput{
+		RecipeResult: &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:      "my-kustomize-app",
+					Namespace: "my-app",
+					Type:      recipe.ComponentTypeKustomize,
+					Source:    "https://github.com/example/repo",
+					Tag:       "v2.0.0",
+					Path:      "deploy/production",
+				},
+			},
+		},
+	}
+
+	components, err := g.buildComponentDataList(input)
+	if err != nil {
+		t.Fatalf("buildComponentDataList failed: %v", err)
+	}
+
+	if len(components) != 1 {
+		t.Fatalf("expected 1 component, got %d", len(components))
+	}
+
+	comp := components[0]
+	if !comp.IsKustomize {
+		t.Error("expected IsKustomize to be true")
+	}
+	if comp.HasChart {
+		t.Error("expected HasChart to be false for kustomize component")
+	}
+	if comp.Tag != "v2.0.0" {
+		t.Errorf("expected Tag v2.0.0, got %s", comp.Tag)
+	}
+	if comp.Path != "deploy/production" {
+		t.Errorf("expected Path deploy/production, got %s", comp.Path)
+	}
+	if comp.Repository != "https://github.com/example/repo" {
+		t.Errorf("expected Repository https://github.com/example/repo, got %s", comp.Repository)
+	}
+}
+
+func TestBuildComponentDataList_MixedTypes(t *testing.T) {
+	g := NewGenerator()
+
+	input := &GeneratorInput{
+		RecipeResult: &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:      "cert-manager",
+					Namespace: "cert-manager",
+					Chart:     "cert-manager",
+					Type:      recipe.ComponentTypeHelm,
+					Version:   "v1.17.2",
+					Source:    "https://charts.jetstack.io",
+				},
+				{
+					Name:      "my-kustomize-app",
+					Namespace: "my-app",
+					Type:      recipe.ComponentTypeKustomize,
+					Source:    "https://github.com/example/repo",
+					Tag:       "v2.0.0",
+					Path:      "deploy/production",
+				},
+			},
+		},
+	}
+
+	components, err := g.buildComponentDataList(input)
+	if err != nil {
+		t.Fatalf("buildComponentDataList failed: %v", err)
+	}
+
+	if len(components) != 2 {
+		t.Fatalf("expected 2 components, got %d", len(components))
+	}
+
+	for _, comp := range components {
+		switch comp.Name {
+		case "cert-manager":
+			if comp.IsKustomize {
+				t.Error("cert-manager should not be kustomize")
+			}
+			if !comp.HasChart {
+				t.Error("cert-manager should have HasChart=true")
+			}
+		case "my-kustomize-app":
+			if !comp.IsKustomize {
+				t.Error("my-kustomize-app should be kustomize")
+			}
+			if comp.HasChart {
+				t.Error("my-kustomize-app should have HasChart=false")
+			}
+		}
+	}
+}
+
 // Helper functions
+
+func createKustomizeRecipeResult() *recipe.RecipeResult {
+	return &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Metadata: struct {
+			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
+			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
+			ExcludedOverlays   []string                   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
+		}{
+			Version: "v0.1.0",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "my-kustomize-app",
+				Namespace: "my-app",
+				Type:      recipe.ComponentTypeKustomize,
+				Source:    "https://github.com/example/repo",
+				Tag:       "v1.0.0",
+				Path:      "deploy/production",
+			},
+		},
+		DeploymentOrder: []string{"my-kustomize-app"},
+	}
+}
+
+func createMixedRecipeResult() *recipe.RecipeResult {
+	return &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Metadata: struct {
+			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
+			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
+			ExcludedOverlays   []string                   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
+		}{
+			Version: "v0.1.0",
+		},
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "cert-manager",
+				Namespace: "cert-manager",
+				Chart:     "cert-manager",
+				Type:      recipe.ComponentTypeHelm,
+				Version:   "v1.17.2",
+				Source:    "https://charts.jetstack.io",
+			},
+			{
+				Name:      "my-kustomize-app",
+				Namespace: "my-app",
+				Type:      recipe.ComponentTypeKustomize,
+				Source:    "https://github.com/example/repo",
+				Tag:       "v1.0.0",
+				Path:      "deploy/production",
+			},
+		},
+		DeploymentOrder: []string{"cert-manager", "my-kustomize-app"},
+	}
+}
 
 func createTestRecipeResult() *recipe.RecipeResult {
 	return &recipe.RecipeResult{

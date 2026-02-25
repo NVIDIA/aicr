@@ -1,5 +1,39 @@
 # {{ .Name }}
 
+{{ if .IsKustomize -}}
+Source: {{ .Repository }}
+Path: {{ .Path }}
+{{ if .Tag -}}Tag: {{ .Tag }}{{ end }}
+Namespace: {{ .Namespace }}
+
+## Install
+
+```bash
+kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f -
+kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
+  | kubectl apply -n {{ .Namespace }} -f -
+```
+{{ if .HasManifests }}
+After the kustomization is applied, apply additional manifests:
+
+```bash
+kubectl apply -f manifests/
+```
+{{ end }}
+## Upgrade
+
+```bash
+kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
+  | kubectl apply -n {{ .Namespace }} -f -
+```
+
+## Uninstall
+
+```bash
+kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
+  | kubectl delete -n {{ .Namespace }} --ignore-not-found -f -
+```
+{{ else -}}
 Chart: {{ .Repository }}/{{ .ChartName }}
 Version: {{ .Version }}
 Namespace: {{ .Namespace }}
@@ -53,3 +87,4 @@ helm upgrade {{ .Name }} {{ .ChartName }} \
 ```bash
 helm uninstall {{ .Name }} -n {{ .Namespace }}
 ```
+{{ end -}}

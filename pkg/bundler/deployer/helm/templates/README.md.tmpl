@@ -3,7 +3,7 @@
 Recipe Version: {{ .RecipeVersion }}
 Bundler Version: {{ .BundlerVersion }}
 
-Per-component Helm bundle for deploying NVIDIA Cloud Native Stack components
+Per-component bundle for deploying NVIDIA Cloud Native Stack components
 for GPU-accelerated Kubernetes workloads.
 
 ## Configuration
@@ -19,10 +19,14 @@ for GPU-accelerated Kubernetes workloads.
 
 The following components are included (deployed in order):
 
-| Component | Version | Namespace | Chart |
-|-----------|---------|-----------|-------|
+| Component | Type | Version | Namespace | Source |
+|-----------|------|---------|-----------|--------|
 {{ range .Components -}}
-| {{ .Name }} | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
+{{ if .IsKustomize -}}
+| {{ .Name }} | Kustomize | {{ .Tag }} | {{ .Namespace }} | {{ .Repository }} ({{ .Path }}) |
+{{ else -}}
+| {{ .Name }} | Helm | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
+{{ end -}}
 {{ end }}
 
 {{ if .Constraints }}
@@ -59,6 +63,13 @@ Install components individually in order:
 {{ range .Components }}
 ### {{ .Name }}
 
+{{ if .IsKustomize -}}
+```bash
+kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f -
+kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
+  | kubectl apply -n {{ .Namespace }} -f -
+```
+{{ else -}}
 ```bash
 {{ if .IsOCI -}}
 helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
@@ -75,6 +86,7 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --wait --timeout 10m
 {{ end -}}
 ```
+{{ end -}}
 {{ if .HasManifests }}
 ```bash
 kubectl apply -f {{ .Name }}/manifests/
@@ -84,7 +96,7 @@ kubectl apply -f {{ .Name }}/manifests/
 
 ## Customization
 
-Each component has its own `values.yaml` in its directory.
+Each Helm component has its own `values.yaml` in its directory.
 Edit the file before deploying to customize component configuration:
 
 ```bash
@@ -93,7 +105,7 @@ vim gpu-operator/values.yaml
 
 ## Upgrade
 
-To upgrade a specific component:
+To upgrade a specific Helm component:
 
 ```bash
 helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml --wait --timeout 10m
@@ -104,9 +116,16 @@ helm upgrade <component> <chart> --version <version> -n <namespace> -f <componen
 To remove components (reverse order):
 
 {{ range .ComponentsReversed -}}
+{{ if .IsKustomize -}}
+```bash
+kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
+  | kubectl delete -n {{ .Namespace }} --ignore-not-found -f -
+```
+{{ else -}}
 ```bash
 helm uninstall {{ .Name }} -n {{ .Namespace }}
 ```
+{{ end -}}
 {{ end }}
 
 ## Troubleshooting

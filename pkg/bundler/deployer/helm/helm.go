@@ -58,6 +58,9 @@ type ComponentData struct {
 	HasManifests bool
 	HasChart     bool
 	IsOCI        bool
+	IsKustomize  bool   // True when the component uses Kustomize instead of Helm
+	Tag          string // Git ref for Kustomize components (tag, branch, or commit)
+	Path         string // Path within the repository to the kustomization
 }
 
 // GeneratorInput contains all data needed to generate a per-component Helm bundle.
@@ -223,6 +226,8 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 			}
 		}
 
+		isKustomize := ref.Type == recipe.ComponentTypeKustomize
+
 		chartName := ref.Chart
 		if chartName == "" {
 			chartName = ref.Name
@@ -241,8 +246,11 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 			Version:      version,
 			ChartVersion: shared.NormalizeVersionWithDefault(ref.Version),
 			HasManifests: hasManifests,
-			HasChart:     ref.Source != "",
+			HasChart:     !isKustomize && ref.Source != "",
 			IsOCI:        isOCI,
+			IsKustomize:  isKustomize,
+			Tag:          ref.Tag,
+			Path:         ref.Path,
 		})
 	}
 
