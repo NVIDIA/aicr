@@ -46,10 +46,10 @@ This script:
 
 Visit the [releases page](https://github.com/nvidia/aicr/releases/latest) and download the appropriate binary for your platform:
 
-- **macOS ARM64** (M1/M2/M3): `aicr_v0.22.0_darwin_arm64`
-- **macOS Intel**: `aicr_v0.22.0_darwin_amd64`
-- **Linux ARM64**: `aicr_v0.22.0_linux_arm64`
-- **Linux x86_64**: `aicr_v0.22.0_linux_amd64`
+- **macOS ARM64** (M1/M2/M3): `aicr_<version>_darwin_arm64.tar.gz`
+- **macOS Intel**: `aicr_<version>_darwin_amd64.tar.gz`
+- **Linux ARM64**: `aicr_<version>_linux_arm64.tar.gz`
+- **Linux x86_64**: `aicr_<version>_linux_amd64.tar.gz`
 
 1. **Extract and install**
 

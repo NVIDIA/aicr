@@ -70,11 +70,13 @@ get_os() {
 }
 
 get_binary_name() {
-  echo "${BIN_NAME}_${1}_${2}_${3}"  # version, os, arch
+  local ver="${1#v}"  # strip leading 'v'
+  echo "${BIN_NAME}_${ver}_${2}_${3}"  # version, os, arch
 }
 
 get_archive_name() {
-  echo "${BIN_NAME}_${1}_${2}_${3}.tar.gz"  # version, os, arch
+  local ver="${1#v}"  # strip leading 'v'
+  echo "${BIN_NAME}_${ver}_${2}_${3}.tar.gz"  # version, os, arch
 }
 
 # ==============================================================================
