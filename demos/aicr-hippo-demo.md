@@ -252,7 +252,7 @@ aicr bundle --recipe recipe.yaml \
 ### CNCF AI Conformance Evidence Collection
 ```
 # List available features
-  $ aicr evidence --list
+  $ aicr validate conformance --cncf-submission --evidence-dir --feature --timeout
 
   Available evidence features:
 
@@ -267,23 +267,19 @@ aicr bundle --recipe recipe.yaml \
     hpa                      HPA pod autoscaling (scale-up + scale-down)
     cluster-autoscaling      Cluster autoscaling (ASG configuration)
 
-  # Collect all evidence
-  $ aicr evidence -o ./evidence
-
-  # Collect specific features
-  $ aicr evidence -o ./evidence -f dra
-  $ aicr evidence -o ./evidence -f dra -f hpa -f gang
-
-  # Custom timeout (default 20m)
-  $ aicr evidence -o ./evidence --timeout 30m
-
-  # Skip cleanup for debugging
-  $ aicr evidence -o ./evidence -f hpa --no-cleanup
-
-  # Help
-  $ aicr evidence --help
 ```
 ### CNCF AI Conformance Program Submission
 
 - [Evidence Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf)
 - [Submission Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf/submission)
+
+## Upstream PRs
+
+| # | Date | Repo | PR | Title | Status |
+|---|------|------|----|-------|--------|
+| 1 | 2026-02-18 | [NVIDIA/KAI-Scheduler](https://github.com/NVIDIA/KAI-Scheduler) | [#1035](https://github.com/NVIDIA/KAI-Scheduler/pull/1035) | fix: skip runtimeClassName injection when gpuPodRuntimeClassName is empty | Closed |
+| 2 | 2026-02-11 | [Mellanox/network-operator](https://github.com/Mellanox/network-operator) | [#2167](https://github.com/Mellanox/network-operator/pull/2167) | fix: relax kubeVersion constraint to support pre-release suffixes | Merged |
+| 3 | 2026-02-06 | [jmcgrath207/k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) | [#181](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics/pull/181) | chore: add nameOverride and fullnameOverride values | Open |
+| 4 | 2026-02-04 | [NVIDIA/NVSentinel](https://github.com/NVIDIA/NVSentinel) | [#789](https://github.com/NVIDIA/NVSentinel/pull/789) | Make metrics-access network policy configurable | Closed |
+| 5 | 2026-02-02 | [prometheus-community/helm-charts](https://github.com/prometheus-community/helm-charts) | [#6584](https://github.com/prometheus-community/helm-charts/pull/6584) | chore(prometheus-adapter): add nameOverride and fullnameOverride values | Merged |
+| 6 | 2025-02-24 | [NVIDIA/k8s-dra-driver-gpu](https://github.com/NVIDIA/k8s-dra-driver-gpu) | [#254](https://github.com/NVIDIA/k8s-dra-driver-gpu/pull/254) | Update the DRA driver tag for GKE | Closed |
