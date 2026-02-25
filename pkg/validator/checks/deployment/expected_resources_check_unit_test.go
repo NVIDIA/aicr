@@ -433,6 +433,147 @@ func TestValidateExpectedResources(t *testing.T) {
 	}
 }
 
+func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func() *checks.ValidationContext
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "manual expectedResources take precedence over HealthCheckAsserts",
+			setup: func() *checks.ValidationContext {
+				// No K8s objects — typed client check will fail for the missing Deployment.
+				// Even though HealthCheckAsserts is set, manual expectedResources take precedence.
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset()
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "test-component",
+								Type:               "Helm",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: something\n",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			// Typed client fails because the Deployment doesn't exist in the fake clientset
+			wantErr:     true,
+			errContains: "not found",
+		},
+		{
+			name: "HealthCheckAsserts used when no manual expectedResources",
+			setup: func() *checks.ValidationContext {
+				// No manual expectedResources → Chainsaw assertion path activates.
+				// Without RESTConfig, fetcher creation fails.
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset()
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "test-chainsaw-component",
+								Type:               "Helm",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nonexistent-chainsaw-test\n  namespace: nonexistent-ns\n",
+							},
+						},
+					},
+				}
+			},
+			// Chainsaw assertion path fails: no RESTConfig for building resource fetcher
+			wantErr:     true,
+			errContains: "no kubernetes client configuration available",
+		},
+		{
+			name: "mixed components — chainsaw and typed client paths",
+			setup: func() *checks.ValidationContext {
+				objects := []runtime.Object{
+					createDeployment("network-operator", "nvidia-network-operator", 1, 1),
+				}
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(objects...)
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "test-chainsaw-mixed",
+								Type:               "Helm",
+								HealthCheckAsserts: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: nonexistent-mixed-test\n  namespace: nonexistent-ns\n",
+							},
+							{
+								Name: "network-operator",
+								Type: "Helm",
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "network-operator", Namespace: "nvidia-network-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			// Chainsaw assertion path fails: no RESTConfig for building resource fetcher
+			wantErr:     true,
+			errContains: "no kubernetes client configuration available",
+		},
+		{
+			name: "component with empty HealthCheckAsserts uses typed client",
+			setup: func() *checks.ValidationContext {
+				objects := []runtime.Object{
+					createDeployment("gpu-operator", "gpu-operator", 1, 1),
+				}
+				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+				clientset := fake.NewSimpleClientset(objects...)
+				return &checks.ValidationContext{
+					Context:   context.Background(),
+					Clientset: clientset,
+					Recipe: &recipe.RecipeResult{
+						ComponentRefs: []recipe.ComponentRef{
+							{
+								Name:               "gpu-operator",
+								Type:               "Helm",
+								HealthCheckAsserts: "", // empty → typed client path
+								ExpectedResources: []recipe.ExpectedResource{
+									{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+								},
+							},
+						},
+					},
+				}
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := tt.setup()
+			err := validateExpectedResources(ctx)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateExpectedResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr && err != nil && tt.errContains != "" {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("validateExpectedResources() error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateExpectedResourcesRegistration(t *testing.T) {
 	// Verify the check is registered
 	check, ok := checks.GetCheck("expected-resources")

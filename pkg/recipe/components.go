@@ -60,6 +60,17 @@ type ComponentConfig struct {
 
 	// Validations defines component-specific validation checks.
 	Validations []ComponentValidationConfig `yaml:"validations,omitempty"`
+
+	// HealthCheck defines custom health check configuration for this component.
+	HealthCheck HealthCheckConfig `yaml:"healthCheck,omitempty"`
+}
+
+// HealthCheckConfig defines custom health check settings for a component.
+type HealthCheckConfig struct {
+	// AssertFile is the path to a Chainsaw-style assert YAML file (relative to data directory).
+	// When set, the expected-resources check uses Chainsaw CLI to evaluate assertions
+	// instead of the default auto-discovery + typed replica checks.
+	AssertFile string `yaml:"assertFile,omitempty"`
 }
 
 // HelmConfig contains default Helm chart settings for a component.
@@ -159,6 +170,15 @@ func GetComponentRegistry() (*ComponentRegistry, error) {
 		globalRegistry, globalRegistryErr = loadComponentRegistry()
 	})
 	return globalRegistry, globalRegistryErr
+}
+
+// ResetComponentRegistryForTesting resets the singleton registry so it will be
+// reloaded from the current DataProvider on the next call to GetComponentRegistry.
+// This must only be called from tests.
+func ResetComponentRegistryForTesting() {
+	globalRegistry = nil
+	globalRegistryErr = nil
+	globalRegistryOnce = sync.Once{}
 }
 
 // MustGetComponentRegistry returns the global component registry or panics.

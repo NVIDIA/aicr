@@ -111,6 +111,12 @@ type ComponentRef struct {
 	// ExpectedResources lists Kubernetes resources that should exist after deployment.
 	// Used by deployment phase validation to verify component health.
 	ExpectedResources []ExpectedResource `json:"expectedResources,omitempty" yaml:"expectedResources,omitempty"`
+
+	// HealthCheckAsserts contains raw Chainsaw-style assert YAML loaded from the
+	// registry's healthCheck.assertFile via the DataProvider. When non-empty, the
+	// expected-resources check runs Chainsaw CLI to evaluate assertions instead of
+	// the default auto-discovery + typed replica checks.
+	HealthCheckAsserts string `json:"healthCheckAsserts,omitempty" yaml:"healthCheckAsserts,omitempty"`
 }
 
 // ExpectedResource represents a Kubernetes resource that should exist after deployment.
@@ -477,6 +483,11 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 	// ExpectedResources: overlay replaces if set
 	if len(overlay.ExpectedResources) > 0 {
 		result.ExpectedResources = overlay.ExpectedResources
+	}
+
+	// HealthCheckAsserts: overlay takes precedence if set
+	if overlay.HealthCheckAsserts != "" {
+		result.HealthCheckAsserts = overlay.HealthCheckAsserts
 	}
 
 	return result

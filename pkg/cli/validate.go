@@ -405,6 +405,7 @@ func validateCmdFlags() []cli.Flag {
 			Name:  "helm-all-namespaces",
 			Usage: "Grant cluster-wide secrets access for Helm release collection. Mutually exclusive with --helm-namespaces.",
 		},
+		dataFlag,
 		outputFlag,
 		formatFlag,
 		kubeconfigFlag,
@@ -472,7 +473,12 @@ Use a saved result file for evidence instead of the live run:
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			// Note: --phase allows multiple values so it's not included here
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "resume", "result"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "resume", "result", "data"); err != nil {
+				return err
+			}
+
+			// Initialize external data provider if --data flag is set
+			if err := initDataProvider(cmd); err != nil {
 				return err
 			}
 

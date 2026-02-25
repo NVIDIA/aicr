@@ -76,6 +76,11 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 
 			filename := filepath.Base(path)
 
+			// Skip health check assert files (not recipe metadata)
+			if strings.Contains(path, "checks/") {
+				return nil
+			}
+
 			// Handle component files (files in the components/ directory)
 			if strings.Contains(path, "components/") {
 				content, readErr := provider.ReadFile(path)

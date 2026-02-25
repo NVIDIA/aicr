@@ -28,11 +28,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/registry"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/chart/common"
+	"helm.sh/helm/v4/pkg/chart/loader"
+	"helm.sh/helm/v4/pkg/cli"
+	"helm.sh/helm/v4/pkg/registry"
+	"helm.sh/helm/v4/pkg/release"
 	"sigs.k8s.io/yaml"
 )
 
@@ -40,6 +41,50 @@ import (
 type componentDiscovery struct {
 	name      string
 	resources []recipe.ExpectedResource
+}
+
+// resolveHealthCheckAsserts loads Chainsaw-style assert file content for components
+// that have healthCheck.assertFile configured in the component registry.
+// The loaded content is set on ComponentRef.HealthCheckAsserts so the
+// expected-resources check can use Chainsaw CLI instead of the default typed checks.
+// Load failures are logged as warnings and do not block other components.
+func resolveHealthCheckAsserts(ctx context.Context, recipeResult *recipe.RecipeResult) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		slog.Warn("failed to load component registry for health check assert resolution", "error", err)
+		return
+	}
+
+	provider := recipe.GetDataProvider()
+
+	for i := range recipeResult.ComponentRefs {
+		if ctx.Err() != nil {
+			slog.Warn("context canceled during health check assert resolution", "error", ctx.Err())
+			return
+		}
+
+		ref := &recipeResult.ComponentRefs[i]
+
+		config := registry.Get(ref.Name)
+		if config == nil || config.HealthCheck.AssertFile == "" {
+			continue
+		}
+
+		data, readErr := provider.ReadFile(config.HealthCheck.AssertFile)
+		if readErr != nil {
+			slog.Warn("failed to load health check assert file, skipping chainsaw check",
+				"component", ref.Name,
+				"assertFile", config.HealthCheck.AssertFile,
+				"error", readErr)
+			continue
+		}
+
+		ref.HealthCheckAsserts = string(data)
+		slog.Debug("loaded health check assert file",
+			"component", ref.Name,
+			"assertFile", config.HealthCheck.AssertFile,
+			"bytes", len(data))
+	}
 }
 
 // resolveExpectedResources discovers expected workload resources from two sources
@@ -69,6 +114,14 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 		}
 
 		ref := &recipeResult.ComponentRefs[i]
+
+		// Skip auto-discovery for components with Chainsaw health check asserts,
+		// unless the recipe already has manual expectedResources (which take precedence).
+		if ref.HealthCheckAsserts != "" && len(ref.ExpectedResources) == 0 {
+			slog.Debug("skipping auto-discovery for component with chainsaw health check",
+				"component", ref.Name)
+			continue
+		}
 
 		// Load values once — needed for both chart rendering and manifestFile rendering.
 		values, valErr := recipeResult.GetValuesForComponent(ref.Name)
@@ -176,16 +229,11 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create helm registry client", err)
 	}
 
-	actionCfg := &action.Configuration{
-		RegistryClient: regClient,
-		Log: func(format string, v ...interface{}) {
-			slog.Debug(fmt.Sprintf(format, v...))
-		},
-	}
+	actionCfg := action.NewConfiguration()
+	actionCfg.RegistryClient = regClient
 
 	install := action.NewInstall(actionCfg)
-	install.DryRun = true
-	install.ClientOnly = true
+	install.DryRunStrategy = action.DryRunClient
 	install.ReleaseName = ref.Name
 	install.Namespace = ref.Namespace
 	install.Replace = true
@@ -194,7 +242,7 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 	}
 
 	if kubeVersion != "" {
-		kv, parseErr := chartutil.ParseKubeVersion(kubeVersion)
+		kv, parseErr := common.ParseKubeVersion(kubeVersion)
 		if parseErr == nil {
 			install.KubeVersion = kv
 		}
@@ -216,7 +264,12 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 		return nil, errors.Wrap(errors.ErrCodeInternal, "helm template rendering failed", err)
 	}
 
-	return extractWorkloadResources(rel.Manifest, ref.Namespace), nil
+	accessor, err := release.NewAccessor(rel)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to access rendered release", err)
+	}
+
+	return extractWorkloadResources(accessor.Manifest(), ref.Namespace), nil
 }
 
 // locateChart resolves a chart reference to a local path by downloading it.

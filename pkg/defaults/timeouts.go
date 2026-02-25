@@ -137,6 +137,22 @@ const (
 	ComponentRenderTimeout = 60 * time.Second
 )
 
+// Chainsaw assertion configuration for component health checks.
+const (
+	// ChainsawAssertTimeout is the timeout for health check assertions
+	// when evaluating component assert files against live cluster resources.
+	ChainsawAssertTimeout = 2 * time.Minute
+
+	// ChainsawMaxParallel is the maximum number of concurrent assertion
+	// runs during component health checks.
+	ChainsawMaxParallel = 4
+
+	// AssertRetryInterval is the polling interval between health check
+	// assertion retries. Assertions are retried at this interval until
+	// they pass or the ChainsawAssertTimeout expires.
+	AssertRetryInterval = 5 * time.Second
+)
+
 // Conformance test timeouts for DRA and gang scheduling validation.
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running

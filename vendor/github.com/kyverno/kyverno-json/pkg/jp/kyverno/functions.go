@@ -1,0 +1,1206 @@
+package jmespath
+
+import (
+	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/asn1"
+	"encoding/base64"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"math"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+
+	trunc "github.com/aquilax/truncate"
+	"github.com/blang/semver/v4"
+	gojmespath "github.com/jmespath-community/go-jmespath/pkg/functions"
+	"github.com/kyverno/pkg/ext/wildcard"
+	regen "github.com/zach-klippenstein/goregen"
+	"golang.org/x/crypto/cryptobyte"
+	cryptobyte_asn1 "golang.org/x/crypto/cryptobyte/asn1"
+	"k8s.io/apimachinery/pkg/util/json"
+	"sigs.k8s.io/yaml"
+)
+
+type PublicKey struct {
+	N string
+	E int
+}
+
+// function names
+var (
+	compare                = "compare"
+	equalFold              = "equal_fold"
+	replace                = "replace"
+	replaceAll             = "replace_all"
+	toUpper                = "to_upper"
+	toLower                = "to_lower"
+	trim                   = "trim"
+	trimPrefix             = "trim_prefix"
+	split                  = "split"
+	regexReplaceAll        = "regex_replace_all"
+	regexReplaceAllLiteral = "regex_replace_all_literal"
+	regexMatch             = "regex_match"
+	patternMatch           = "pattern_match"
+	labelMatch             = "label_match"
+	toBoolean              = "to_boolean"
+	add                    = "add"
+	sum                    = "sum"
+	subtract               = "subtract"
+	multiply               = "multiply"
+	divide                 = "divide"
+	modulo                 = "modulo"
+	round                  = "round"
+	base64Decode           = "base64_decode"
+	base64Encode           = "base64_encode"
+	pathCanonicalize       = "path_canonicalize"
+	truncate               = "truncate"
+	semverCompare          = "semver_compare"
+	parseJson              = "parse_json"
+	parseYAML              = "parse_yaml"
+	lookup                 = "lookup"
+	items                  = "items"
+	objectFromLists        = "object_from_lists"
+	random                 = "random"
+	x509_decode            = "x509_decode"
+)
+
+func GetBareFunctions() []gojmespath.FunctionEntry {
+	var funcs []gojmespath.FunctionEntry
+	for _, f := range GetFunctions() {
+		funcs = append(funcs, f.FunctionEntry)
+	}
+	return funcs
+}
+
+func GetFunctions() []FunctionEntry {
+	return []FunctionEntry{{
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: compare,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfCompare,
+			Description: "compares two strings lexicographically",
+		},
+		ReturnType: []jpType{jpNumber},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: equalFold,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfEqualFold,
+			Description: "allows comparing two strings for equivalency where the only differences are letter cases",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: replace,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpNumber}},
+			},
+			Handler:     jpfReplace,
+			Description: "replaces a specified number of instances of the source string with the replacement string in a parent ",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: replaceAll,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfReplaceAll,
+			Description: "replace all instances of one string with another in an overall parent string",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: toUpper,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfToUpper,
+			Description: "takes in a string and outputs the same string with all upper-case letters",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: toLower,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfToLower,
+			Description: "takes in a string and outputs the same string with all lower-case letters",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: trim,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfTrim,
+			Description: "trims both ends of the source string by characters appearing in the second string",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: trimPrefix,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfTrimPrefix,
+			Description: "trims the second string prefix from the first string if the first string starts with the prefix",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: split,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpfSplit,
+			Description: "splits the first string when the second string is found and converts it into an array ",
+		},
+		ReturnType: []jpType{jpArrayString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: regexReplaceAll,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString, jpNumber}},
+				{Types: []jpType{jpString, jpNumber}},
+			},
+			Handler:     jpRegexReplaceAll,
+			Description: "converts all parameters to string",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: regexReplaceAllLiteral,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString, jpNumber}},
+				{Types: []jpType{jpString, jpNumber}},
+			},
+			Handler:     jpRegexReplaceAllLiteral,
+			Description: "converts all parameters to string",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: regexMatch,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString, jpNumber}},
+			},
+			Handler:     jpRegexMatch,
+			Description: "first string is the regular exression which is compared with second input which can be a number or string",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: patternMatch,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString, jpNumber}},
+			},
+			Handler:     jpPatternMatch,
+			Description: "'*' matches zero or more alphanumeric characters, '?' matches a single alphanumeric character",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		// Validates if label (param1) would match pod/host/etc labels (param2)
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: labelMatch,
+			Arguments: []argSpec{
+				{Types: []jpType{jpObject}},
+				{Types: []jpType{jpObject}},
+			},
+			Handler:     jpLabelMatch,
+			Description: "object arguments must be enclosed in backticks; ex. `{{request.object.spec.template.metadata.labels}}`",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: toBoolean,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpToBoolean,
+			Description: "It returns true or false for any string, such as 'True', 'TruE', 'False', 'FAlse', 'faLSE', etc.",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: add,
+			Arguments: []argSpec{
+				{Types: []jpType{jpAny}},
+				{Types: []jpType{jpAny}},
+			},
+			Handler:     jpAdd,
+			Description: "does arithmetic addition of two specified values of numbers, quantities, and durations",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: sum,
+			Arguments: []argSpec{
+				{Types: []jpType{jpArray}},
+			},
+			Handler:     jpSum,
+			Description: "does arithmetic addition of specified array of values of numbers, quantities, and durations",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: subtract,
+			Arguments: []argSpec{
+				{Types: []jpType{jpAny}},
+				{Types: []jpType{jpAny}},
+			},
+			Handler:     jpSubtract,
+			Description: "does arithmetic subtraction of two specified values of numbers, quantities, and durations",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: multiply,
+			Arguments: []argSpec{
+				{Types: []jpType{jpAny}},
+				{Types: []jpType{jpAny}},
+			},
+			Handler:     jpMultiply,
+			Description: "does arithmetic multiplication of two specified values of numbers, quantities, and durations",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: divide,
+			Arguments: []argSpec{
+				{Types: []jpType{jpAny}},
+				{Types: []jpType{jpAny}},
+			},
+			Handler:     jpDivide,
+			Description: "divisor must be non zero",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: modulo,
+			Arguments: []argSpec{
+				{Types: []jpType{jpAny}},
+				{Types: []jpType{jpAny}},
+			},
+			Handler:     jpModulo,
+			Description: "divisor must be non-zero, arguments must be integers",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: round,
+			Arguments: []argSpec{
+				{Types: []jpType{jpNumber}},
+				{Types: []jpType{jpNumber}},
+			},
+			Handler:     jpRound,
+			Description: "does roundoff to upto the given decimal places",
+		},
+		ReturnType: []jpType{jpNumber},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: base64Decode,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpBase64Decode,
+			Description: "decodes a base 64 string",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: base64Encode,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpBase64Encode,
+			Description: "encodes a regular, plaintext and unencoded string to base64",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeSince,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeSince,
+			Description: "calculate the difference between a start and end period of time where the end may either be a static definition or the then-current time",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name:        timeNow,
+			Handler:     jpTimeNow,
+			Description: "returns current time in RFC 3339 format",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name:        timeNowUtc,
+			Handler:     jpTimeNowUtc,
+			Description: "returns current UTC time in RFC 3339 format",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: pathCanonicalize,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpPathCanonicalize,
+			Description: "normalizes or canonicalizes a given path by removing excess slashes",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: truncate,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpNumber}},
+			},
+			Handler:     jpTruncate,
+			Description: "length argument must be enclosed in backticks; ex. \"{{request.object.metadata.name | truncate(@, `9`)}}\"",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: semverCompare,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpSemverCompare,
+			Description: "compares two strings which comply with the semantic versioning schema and outputs a boolean response as to the position of the second relative to the first",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: parseJson,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpParseJson,
+			Description: "decodes a valid JSON encoded string to the appropriate type. Opposite of `to_string` function",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: parseYAML,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpParseYAML,
+			Description: "decodes a valid YAML encoded string to the appropriate type provided it can be represented as JSON",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: lookup,
+			Arguments: []argSpec{
+				{Types: []jpType{jpObject, jpArray}},
+				{Types: []jpType{jpString, jpNumber}},
+			},
+			Handler:     jpLookup,
+			Description: "returns the value corresponding to the given key/index in the given object/array",
+		},
+		ReturnType: []jpType{jpAny},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: items,
+			Arguments: []argSpec{
+				{Types: []jpType{jpObject, jpArray}},
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpItems,
+			Description: "converts a map or array to an array of objects where each key:value is an item in the array",
+		},
+		ReturnType: []jpType{jpArray},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: objectFromLists,
+			Arguments: []argSpec{
+				{Types: []jpType{jpArray}},
+				{Types: []jpType{jpArray}},
+			},
+			Handler:     jpObjectFromLists,
+			Description: "converts a pair of lists containing keys and values to an object",
+		},
+		ReturnType: []jpType{jpObject},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: random,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpRandom,
+			Description: "Generates a random sequence of characters",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: x509_decode,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpX509Decode,
+			Description: "decodes an x.509 certificate to an object. you may also use this in conjunction with `base64_decode` jmespath function to decode a base64-encoded certificate",
+		},
+		ReturnType: []jpType{jpObject},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeToCron,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeToCron,
+			Description: "converts a time (RFC 3339) to a cron expression (string).",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeAdd,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeAdd,
+			Description: "adds duration (second string) to a time value (first string)",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeParse,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeParse,
+			Description: "changes a time value of a given layout to RFC 3339",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeUtc,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeUtc,
+			Description: "calcutes time in UTC from a given time in RFC 3339 format",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeDiff,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeDiff,
+			Description: "calculate the difference between a start and end date in RFC3339 format",
+		},
+		ReturnType: []jpType{jpString},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeBefore,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeBefore,
+			Description: "checks if a time is before another time, both in RFC3339 format",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeAfter,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeAfter,
+			Description: "checks if a time is after another time, both in RFC3339 format",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeBetween,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeBetween,
+			Description: "checks if a time is between a start and end time, all in RFC3339 format",
+		},
+		ReturnType: []jpType{jpBool},
+	}, {
+		FunctionEntry: gojmespath.FunctionEntry{
+			Name: timeTruncate,
+			Arguments: []argSpec{
+				{Types: []jpType{jpString}},
+				{Types: []jpType{jpString}},
+			},
+			Handler:     jpTimeTruncate,
+			Description: "returns the result of rounding time down to a multiple of duration",
+		},
+		ReturnType: []jpType{jpString},
+	}}
+}
+
+func jpfCompare(arguments []any) (any, error) {
+	if a, err := validateArg(compare, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else if b, err := validateArg(compare, arguments, 1, reflect.String); err != nil {
+		return nil, err
+	} else {
+		return strings.Compare(a.String(), b.String()), nil
+	}
+}
+
+func jpfEqualFold(arguments []any) (any, error) {
+	if a, err := validateArg(equalFold, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else if b, err := validateArg(equalFold, arguments, 1, reflect.String); err != nil {
+		return nil, err
+	} else {
+		return strings.EqualFold(a.String(), b.String()), nil
+	}
+}
+
+func jpfReplace(arguments []any) (any, error) {
+	if str, err := validateArg(replace, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else if old, err := validateArg(replace, arguments, 1, reflect.String); err != nil {
+		return nil, err
+	} else if new, err := validateArg(replace, arguments, 2, reflect.String); err != nil {
+		return nil, err
+	} else if n, err := validateArg(replace, arguments, 3, reflect.Float64); err != nil {
+		return nil, err
+	} else {
+		return strings.Replace(str.String(), old.String(), new.String(), int(n.Float())), nil
+	}
+}
+
+func jpfReplaceAll(arguments []any) (any, error) {
+	if str, err := validateArg(replaceAll, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else if old, err := validateArg(replaceAll, arguments, 1, reflect.String); err != nil {
+		return nil, err
+	} else if new, err := validateArg(replaceAll, arguments, 2, reflect.String); err != nil {
+		return nil, err
+	} else {
+		return strings.ReplaceAll(str.String(), old.String(), new.String()), nil
+	}
+}
+
+func jpfToUpper(arguments []any) (any, error) {
+	if str, err := validateArg(toUpper, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else {
+		return strings.ToUpper(str.String()), nil
+	}
+}
+
+func jpfToLower(arguments []any) (any, error) {
+	if str, err := validateArg(toLower, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else {
+		return strings.ToLower(str.String()), nil
+	}
+}
+
+func jpfTrim(arguments []any) (any, error) {
+	var err error
+	str, err := validateArg(trim, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	cutset, err := validateArg(trim, arguments, 1, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.Trim(str.String(), cutset.String()), nil
+}
+
+func jpfTrimPrefix(arguments []any) (any, error) {
+	var err error
+	str, err := validateArg(trimPrefix, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	prefix, err := validateArg(trimPrefix, arguments, 1, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	return strings.TrimPrefix(str.String(), prefix.String()), nil
+}
+
+func jpfSplit(arguments []any) (any, error) {
+	var err error
+	str, err := validateArg(split, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	sep, err := validateArg(split, arguments, 1, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	split := strings.Split(str.String(), sep.String())
+	arr := make([]any, len(split))
+
+	for i, v := range split {
+		arr[i] = v
+	}
+
+	return arr, nil
+}
+
+func jpRegexReplaceAll(arguments []any) (any, error) {
+	var err error
+	regex, err := validateArg(regexReplaceAll, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := ifaceToString(arguments[1])
+	if err != nil {
+		return nil, formatError(invalidArgumentTypeError, regexReplaceAll, 2, "String or Real")
+	}
+
+	repl, err := ifaceToString(arguments[2])
+	if err != nil {
+		return nil, formatError(invalidArgumentTypeError, regexReplaceAll, 3, "String or Real")
+	}
+
+	reg, err := regexp.Compile(regex.String())
+	if err != nil {
+		return nil, formatError(genericError, regexReplaceAll, err.Error())
+	}
+	return string(reg.ReplaceAll([]byte(src), []byte(repl))), nil
+}
+
+func jpRegexReplaceAllLiteral(arguments []any) (any, error) {
+	var err error
+	regex, err := validateArg(regexReplaceAllLiteral, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := ifaceToString(arguments[1])
+	if err != nil {
+		return nil, formatError(invalidArgumentTypeError, regexReplaceAllLiteral, 2, "String or Real")
+	}
+
+	repl, err := ifaceToString(arguments[2])
+	if err != nil {
+		return nil, formatError(invalidArgumentTypeError, regexReplaceAllLiteral, 3, "String or Real")
+	}
+
+	reg, err := regexp.Compile(regex.String())
+	if err != nil {
+		return nil, formatError(genericError, regexReplaceAllLiteral, err.Error())
+	}
+	return string(reg.ReplaceAllLiteral([]byte(src), []byte(repl))), nil
+}
+
+func jpRegexMatch(arguments []any) (any, error) {
+	var err error
+	regex, err := validateArg(regexMatch, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := ifaceToString(arguments[1])
+	if err != nil {
+		return nil, formatError(invalidArgumentTypeError, regexMatch, 2, "String or Real")
+	}
+
+	return regexp.Match(regex.String(), []byte(src))
+}
+
+func jpPatternMatch(arguments []any) (any, error) {
+	pattern, err := validateArg(regexMatch, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := ifaceToString(arguments[1])
+	if err != nil {
+		return nil, formatError(invalidArgumentTypeError, regexMatch, 2, "String or Real")
+	}
+
+	return wildcard.Match(pattern.String(), src), nil
+}
+
+func jpLabelMatch(arguments []any) (any, error) {
+	labelMap, ok := arguments[0].(map[string]any)
+
+	if !ok {
+		return nil, formatError(invalidArgumentTypeError, labelMatch, 0, "Object")
+	}
+
+	matchMap, ok := arguments[1].(map[string]any)
+
+	if !ok {
+		return nil, formatError(invalidArgumentTypeError, labelMatch, 1, "Object")
+	}
+
+	for key, value := range labelMap {
+		if val, ok := matchMap[key]; !ok || val != value {
+			return false, nil
+		}
+	}
+
+	return true, nil
+}
+
+func jpToBoolean(arguments []any) (any, error) {
+	if input, err := validateArg(toBoolean, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else {
+		switch strings.ToLower(input.String()) {
+		case "true":
+			return true, nil
+		case "false":
+			return false, nil
+		default:
+			return nil, formatError(genericError, toBoolean, fmt.Sprintf("lowercase argument must be 'true' or 'false' (provided: '%s')", input.String()))
+		}
+	}
+}
+
+func _jpAdd(arguments []any, operator string) (any, error) {
+	op1, op2, err := parseArithemticOperands(arguments, operator)
+	if err != nil {
+		return nil, err
+	}
+	return op1.Add(op2, operator)
+}
+
+func jpAdd(arguments []any) (any, error) {
+	return _jpAdd(arguments, add)
+}
+
+func jpSum(arguments []any) (any, error) {
+	items, ok := arguments[0].([]any)
+	if !ok {
+		return nil, formatError(typeMismatchError, sum)
+	}
+	if len(items) == 0 {
+		return nil, formatError(genericError, sum, "at least one element in the array is required")
+	}
+	var err error
+	result := items[0]
+	for _, item := range items[1:] {
+		result, err = _jpAdd([]any{result, item}, sum)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func jpSubtract(arguments []any) (any, error) {
+	op1, op2, err := parseArithemticOperands(arguments, subtract)
+	if err != nil {
+		return nil, err
+	}
+
+	return op1.Subtract(op2)
+}
+
+func jpMultiply(arguments []any) (any, error) {
+	op1, op2, err := parseArithemticOperands(arguments, multiply)
+	if err != nil {
+		return nil, err
+	}
+
+	return op1.Multiply(op2)
+}
+
+func jpDivide(arguments []any) (any, error) {
+	op1, op2, err := parseArithemticOperands(arguments, divide)
+	if err != nil {
+		return nil, err
+	}
+
+	return op1.Divide(op2)
+}
+
+func jpModulo(arguments []any) (any, error) {
+	op1, op2, err := parseArithemticOperands(arguments, modulo)
+	if err != nil {
+		return nil, err
+	}
+
+	return op1.Modulo(op2)
+}
+
+func jpRound(arguments []any) (any, error) {
+	op, err := validateArg(round, arguments, 0, reflect.Float64)
+	if err != nil {
+		return nil, err
+	}
+	length, err := validateArg(round, arguments, 1, reflect.Float64)
+	if err != nil {
+		return nil, err
+	}
+	intLength, err := intNumber(length.Float())
+	if err != nil {
+		return nil, formatError(nonIntRoundError, round)
+	}
+	if intLength < 0 {
+		return nil, formatError(argOutOfBoundsError, round)
+	}
+	shift := math.Pow(10, float64(intLength))
+	rounded := math.Round(op.Float()*shift) / shift
+	return rounded, nil
+}
+
+func jpBase64Decode(arguments []any) (any, error) {
+	var err error
+	str, err := validateArg("", arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	decodedStr, err := base64.StdEncoding.DecodeString(str.String())
+	if err != nil {
+		return nil, err
+	}
+
+	return string(decodedStr), nil
+}
+
+func jpBase64Encode(arguments []any) (any, error) {
+	var err error
+	str, err := validateArg("", arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	return base64.StdEncoding.EncodeToString([]byte(str.String())), nil
+}
+
+func jpPathCanonicalize(arguments []any) (any, error) {
+	var err error
+	str, err := validateArg(pathCanonicalize, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	return filepath.Join(str.String()), nil
+}
+
+func jpTruncate(arguments []any) (any, error) {
+	var err error
+	var normalizedLength float64
+	str, err := validateArg(truncate, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+	length, err := validateArg(truncate, arguments, 1, reflect.Float64)
+	if err != nil {
+		return nil, err
+	}
+
+	if length.Float() < 0 {
+		normalizedLength = float64(0)
+	} else {
+		normalizedLength = length.Float()
+	}
+
+	return trunc.Truncator(str.String(), int(normalizedLength), trunc.CutStrategy{}), nil
+}
+
+func jpSemverCompare(arguments []any) (any, error) {
+	var err error
+	v, err := validateArg(semverCompare, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	r, err := validateArg(semverCompare, arguments, 1, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+
+	version, _ := semver.Parse(v.String())
+	expectedRange, err := semver.ParseRange(r.String())
+	if err != nil {
+		return nil, err
+	}
+
+	if expectedRange(version) {
+		return true, nil
+	}
+	return false, nil
+}
+
+func jpParseJson(arguments []any) (any, error) {
+	input, err := validateArg(parseJson, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+	var output any
+	err = json.Unmarshal([]byte(input.String()), &output)
+	return output, err
+}
+
+func jpParseYAML(arguments []any) (any, error) {
+	input, err := validateArg(parseYAML, arguments, 0, reflect.String)
+	if err != nil {
+		return nil, err
+	}
+	jsonData, err := yaml.YAMLToJSON([]byte(input.String()))
+	if err != nil {
+		return nil, err
+	}
+	var output any
+	err = json.Unmarshal(jsonData, &output)
+	return output, err
+}
+
+func jpLookup(arguments []any) (any, error) {
+	switch input := arguments[0].(type) {
+	case map[string]any:
+		key, ok := arguments[1].(string)
+		if !ok {
+			return nil, formatError(invalidArgumentTypeError, lookup, 2, "String")
+		}
+		return input[key], nil
+	case []any:
+		key, ok := arguments[1].(float64)
+		if !ok {
+			return nil, formatError(invalidArgumentTypeError, lookup, 2, "Number")
+		}
+		keyInt, err := intNumber(key)
+		if err != nil {
+			return nil, fmt.Errorf(
+				"JMESPath function '%s': argument #2: %s",
+				lookup, err.Error(),
+			)
+		}
+		if keyInt < 0 || keyInt > len(input)-1 {
+			return nil, nil
+		}
+		return input[keyInt], nil
+	default:
+		return nil, formatError(invalidArgumentTypeError, lookup, 1, "Object or Array")
+	}
+}
+
+func jpItems(arguments []any) (any, error) {
+	keyName, ok := arguments[1].(string)
+	if !ok {
+		return nil, formatError(invalidArgumentTypeError, items, 2, "String")
+	}
+	valName, ok := arguments[2].(string)
+	if !ok {
+		return nil, formatError(invalidArgumentTypeError, items, 3, "String")
+	}
+	switch input := arguments[0].(type) {
+	case map[string]any:
+		keys := make([]string, 0, len(input))
+		// Sort the keys so that the output is deterministic
+		for key := range input {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		arrayOfObj := make([]map[string]any, 0, len(input))
+		for _, key := range keys {
+			arrayOfObj = append(arrayOfObj, map[string]any{
+				keyName: key,
+				valName: input[key],
+			})
+		}
+		return arrayOfObj, nil
+	case []any:
+		arrayOfObj := make([]map[string]any, 0, len(input))
+		for index, value := range input {
+			arrayOfObj = append(arrayOfObj, map[string]any{
+				keyName: float64(index),
+				valName: value,
+			})
+		}
+		return arrayOfObj, nil
+	default:
+		return nil, formatError(invalidArgumentTypeError, items, 1, "Object or Array")
+	}
+}
+
+func jpObjectFromLists(arguments []any) (any, error) {
+	keys, ok := arguments[0].([]any)
+	if !ok {
+		return nil, formatError(invalidArgumentTypeError, objectFromLists, 1, "Array")
+	}
+	values, ok := arguments[1].([]any)
+	if !ok {
+		return nil, formatError(invalidArgumentTypeError, objectFromLists, 2, "Array")
+	}
+
+	output := map[string]any{}
+
+	for i, ikey := range keys {
+		key, err := ifaceToString(ikey)
+		if err != nil {
+			return nil, formatError(invalidArgumentTypeError, objectFromLists, 1, "StringArray")
+		}
+		if i < len(values) {
+			output[key] = values[i]
+		} else {
+			output[key] = nil
+		}
+	}
+
+	return output, nil
+}
+
+// InterfaceToString casts an interface to a string type
+func ifaceToString(iface any) (string, error) {
+	switch i := iface.(type) {
+	case int:
+		return strconv.Itoa(i), nil
+	case float64:
+		return strconv.FormatFloat(i, 'f', -1, 32), nil
+	case float32:
+		return strconv.FormatFloat(float64(i), 'f', -1, 32), nil
+	case string:
+		return i, nil
+	case bool:
+		return strconv.FormatBool(i), nil
+	default:
+		return "", errors.New("error, undefined type cast")
+	}
+}
+
+func jpRandom(arguments []any) (any, error) {
+	pattern := arguments[0].(string)
+	if pattern == "" {
+		return "", errors.New("no pattern provided")
+	}
+
+	b := make([]byte, 8)
+	_, err := rand.Read(b)
+	if err != nil {
+		return nil, err
+	}
+
+	ans, err := regen.Generate(pattern)
+	if err != nil {
+		return nil, err
+	}
+	return ans, nil
+}
+
+func encode[T any](in T) (any, error) {
+	buf := new(bytes.Buffer)
+	enc := json.NewEncoder(buf)
+	if err := enc.Encode(in); err != nil {
+		return nil, err
+	}
+	res := map[string]any{}
+	if err := json.Unmarshal(buf.Bytes(), &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func jpX509Decode(arguments []any) (any, error) {
+	parseSubjectPublicKeyInfo := func(data []byte) (*rsa.PublicKey, error) {
+		spki := cryptobyte.String(data)
+		if !spki.ReadASN1(&spki, cryptobyte_asn1.SEQUENCE) {
+			return nil, errors.New("writing asn.1 element to 'spki' failed")
+		}
+		var pkAISeq cryptobyte.String
+		if !spki.ReadASN1(&pkAISeq, cryptobyte_asn1.SEQUENCE) {
+			return nil, errors.New("writing asn.1 element to 'pkAISeq' failed")
+		}
+		var spk asn1.BitString
+		if !spki.ReadASN1BitString(&spk) {
+			return nil, errors.New("writing asn.1 bit string to 'spk' failed")
+		}
+		if kk, err := x509.ParsePKCS1PublicKey(spk.Bytes); err != nil {
+			return nil, err
+		} else {
+			return kk, nil
+		}
+	}
+	if input, err := validateArg(x509_decode, arguments, 0, reflect.String); err != nil {
+		return nil, err
+	} else if block, _ := pem.Decode([]byte(input.String())); block == nil {
+		return nil, errors.New("failed to decode PEM block")
+	} else {
+		switch block.Type {
+		case "CERTIFICATE":
+			var cert *x509.Certificate
+			if cert, err = x509.ParseCertificate(block.Bytes); err != nil {
+				return nil, err
+			} else if cert.PublicKeyAlgorithm != x509.RSA {
+				return nil, errors.New("certificate should use rsa algorithm")
+			} else if pk, err := parseSubjectPublicKeyInfo(cert.RawSubjectPublicKeyInfo); err != nil {
+				return nil, errors.New("failed to parse subject public key info")
+			} else {
+				cert.PublicKey = PublicKey{
+					N: pk.N.String(),
+					E: pk.E,
+				}
+				return encode(cert)
+			}
+		case "CERTIFICATE REQUEST":
+			var csr *x509.CertificateRequest
+			if csr, err = x509.ParseCertificateRequest(block.Bytes); err != nil {
+				return nil, err
+			} else if csr.PublicKeyAlgorithm != x509.RSA {
+				return nil, errors.New("certificate should use rsa algorithm")
+			} else if pk, err := parseSubjectPublicKeyInfo(csr.RawSubjectPublicKeyInfo); err != nil {
+				return nil, errors.New("failed to parse subject public key info")
+			} else {
+				csr.PublicKey = PublicKey{
+					N: pk.N.String(),
+					E: pk.E,
+				}
+				return encode(csr)
+			}
+		default:
+			return nil, errors.New("PEM block neither contains a CERTIFICATE or CERTIFICATE REQUEST")
+		}
+	}
+}

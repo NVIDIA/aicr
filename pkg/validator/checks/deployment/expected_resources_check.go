@@ -17,14 +17,19 @@ package deployment
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/chainsaw"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/restmapper"
 )
 
 func init() {
@@ -40,6 +45,8 @@ func init() {
 
 // validateExpectedResources verifies that all expected Kubernetes resources declared
 // in the recipe's componentRefs exist and are healthy in the live cluster.
+// Components with HealthCheckAsserts use Chainsaw CLI assertions; others use
+// the default auto-discovery + typed client replica checks.
 func validateExpectedResources(ctx *checks.ValidationContext) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -48,13 +55,47 @@ func validateExpectedResources(ctx *checks.ValidationContext) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
 	}
 
+	var chainsawAsserts []chainsaw.ComponentAssert
 	var failures []string
 
 	for _, ref := range ctx.Recipe.ComponentRefs {
+		// Manual expectedResources take precedence over Chainsaw health check asserts.
+		// This allows users to override the registry's healthCheck.assertFile by
+		// declaring expectedResources explicitly in the recipe.
+		if ref.HealthCheckAsserts != "" && len(ref.ExpectedResources) == 0 {
+			chainsawAsserts = append(chainsawAsserts, chainsaw.ComponentAssert{
+				Name:       ref.Name,
+				AssertYAML: ref.HealthCheckAsserts,
+			})
+			continue
+		}
+
 		for _, er := range ref.ExpectedResources {
 			if err := verifyResource(ctx.Context, ctx.Clientset, er); err != nil {
 				failures = append(failures, fmt.Sprintf("%s %s/%s (%s): %s",
 					er.Kind, er.Namespace, er.Name, ref.Name, err.Error()))
+			}
+		}
+	}
+
+	// Run Chainsaw assertions for components that have them.
+	if len(chainsawAsserts) > 0 {
+		slog.Info("running health check assertions", "components", len(chainsawAsserts))
+		fetcher, fetcherErr := buildHealthCheckFetcher(ctx)
+		if fetcherErr != nil {
+			return fetcherErr
+		}
+		results := chainsaw.Run(ctx.Context, chainsawAsserts, defaults.ChainsawAssertTimeout, fetcher)
+		for _, r := range results {
+			if !r.Passed {
+				msg := fmt.Sprintf("%s: chainsaw health check failed", r.Component)
+				if r.Output != "" {
+					msg += fmt.Sprintf(":\n%s", r.Output)
+				}
+				if r.Error != nil {
+					msg += fmt.Sprintf("\nerror: %v", r.Error)
+				}
+				failures = append(failures, msg)
 			}
 		}
 	}
@@ -64,6 +105,37 @@ func validateExpectedResources(ctx *checks.ValidationContext) error {
 			fmt.Sprintf("expected resource check failed:\n  %s", strings.Join(failures, "\n  ")))
 	}
 	return nil
+}
+
+// buildHealthCheckFetcher creates a ResourceFetcher from the ValidationContext
+// for use by chainsaw assertions.
+func buildHealthCheckFetcher(ctx *checks.ValidationContext) (chainsaw.ResourceFetcher, error) {
+	if ctx.RESTConfig == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "no kubernetes client configuration available")
+	}
+
+	var dc dynamic.Interface
+	switch {
+	case ctx.DynamicClient != nil:
+		dc = ctx.DynamicClient
+	default:
+		var err error
+		dc, err = dynamic.NewForConfig(ctx.RESTConfig)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create dynamic client", err)
+		}
+	}
+
+	discoveryClient, err := kubernetes.NewForConfig(ctx.RESTConfig)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create discovery client", err)
+	}
+
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(
+		memory.NewMemCacheClient(discoveryClient.Discovery()),
+	)
+
+	return chainsaw.NewClusterFetcher(dc, mapper), nil
 }
 
 // verifyResource checks that a single expected resource exists and is healthy.

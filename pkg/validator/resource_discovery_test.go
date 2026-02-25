@@ -933,6 +933,196 @@ spec:
 	}
 }
 
+func TestResolveHealthCheckAsserts(t *testing.T) {
+	assertContent := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: gpu-operator\n  namespace: gpu-operator\nstatus:\n  readyReplicas: 1\n"
+
+	tests := []struct {
+		name              string
+		registryYAML      string
+		files             map[string][]byte
+		componentRefs     []recipe.ComponentRef
+		wantHealthAsserts map[string]string // component name -> expected HealthCheckAsserts
+	}{
+		{
+			name: "loads assert file for component with healthCheck.assertFile",
+			registryYAML: `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    healthCheck:
+      assertFile: checks/gpu-operator/assert.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
+      defaultChart: nvidia/gpu-operator
+`,
+			files: map[string][]byte{
+				"checks/gpu-operator/assert.yaml": []byte(assertContent),
+			},
+			componentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
+			},
+			wantHealthAsserts: map[string]string{
+				"gpu-operator": assertContent,
+			},
+		},
+		{
+			name: "skips component not in registry",
+			registryYAML: `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    helm:
+      defaultChart: nvidia/gpu-operator
+`,
+			files: map[string][]byte{},
+			componentRefs: []recipe.ComponentRef{
+				{Name: "unknown-component", Type: recipe.ComponentTypeHelm},
+			},
+			wantHealthAsserts: map[string]string{
+				"unknown-component": "",
+			},
+		},
+		{
+			name: "skips component without healthCheck.assertFile",
+			registryYAML: `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    helm:
+      defaultChart: nvidia/gpu-operator
+`,
+			files: map[string][]byte{},
+			componentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
+			},
+			wantHealthAsserts: map[string]string{
+				"gpu-operator": "",
+			},
+		},
+		{
+			name: "warns and skips when assert file not found",
+			registryYAML: `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    healthCheck:
+      assertFile: checks/missing/assert.yaml
+    helm:
+      defaultChart: nvidia/gpu-operator
+`,
+			files: map[string][]byte{}, // assert file missing
+			componentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
+			},
+			wantHealthAsserts: map[string]string{
+				"gpu-operator": "", // should remain empty
+			},
+		},
+		{
+			name: "mixed components — only loads for those with assertFile",
+			registryYAML: `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    healthCheck:
+      assertFile: checks/gpu-operator/assert.yaml
+    helm:
+      defaultChart: nvidia/gpu-operator
+  - name: network-operator
+    displayName: Network Operator
+    helm:
+      defaultChart: nvidia/network-operator
+`,
+			files: map[string][]byte{
+				"checks/gpu-operator/assert.yaml": []byte(assertContent),
+			},
+			componentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
+				{Name: "network-operator", Type: recipe.ComponentTypeHelm},
+			},
+			wantHealthAsserts: map[string]string{
+				"gpu-operator":     assertContent,
+				"network-operator": "",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Include registry.yaml in the data provider files
+			allFiles := make(map[string][]byte, len(tt.files)+1)
+			allFiles["registry.yaml"] = []byte(tt.registryYAML)
+			for k, v := range tt.files {
+				allFiles[k] = v
+			}
+
+			origProvider := recipe.GetDataProvider()
+			recipe.SetDataProvider(&testDataProvider{files: allFiles})
+			recipe.ResetComponentRegistryForTesting()
+			t.Cleanup(func() {
+				recipe.SetDataProvider(origProvider)
+				recipe.ResetComponentRegistryForTesting()
+			})
+
+			recipeResult := &recipe.RecipeResult{
+				ComponentRefs: tt.componentRefs,
+			}
+
+			resolveHealthCheckAsserts(t.Context(), recipeResult)
+
+			for _, ref := range recipeResult.ComponentRefs {
+				want, ok := tt.wantHealthAsserts[ref.Name]
+				if !ok {
+					continue
+				}
+				if ref.HealthCheckAsserts != want {
+					t.Errorf("component %s: HealthCheckAsserts = %q, want %q",
+						ref.Name, ref.HealthCheckAsserts, want)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveExpectedResources_SkipsChainsawComponents(t *testing.T) {
+	// Components with HealthCheckAsserts should skip auto-discovery entirely.
+	orig := recipe.GetDataProvider()
+	recipe.SetDataProvider(&testDataProvider{
+		files: map[string][]byte{
+			"manifests/deploy.yaml": []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: should-not-appear\n  namespace: ns1\n"),
+		},
+	})
+	t.Cleanup(func() { recipe.SetDataProvider(orig) })
+
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:               "chainsaw-comp",
+				Namespace:          "ns1",
+				Type:               recipe.ComponentTypeHelm,
+				ManifestFiles:      []string{"manifests/deploy.yaml"},
+				HealthCheckAsserts: "apiVersion: v1\nkind: Namespace\n",
+			},
+		},
+	}
+
+	err := resolveExpectedResources(t.Context(), recipeResult, "")
+	if err != nil {
+		t.Fatalf("resolveExpectedResources() error = %v", err)
+	}
+
+	// Component with HealthCheckAsserts should NOT have auto-discovered resources.
+	if len(recipeResult.ComponentRefs[0].ExpectedResources) != 0 {
+		t.Errorf("expected 0 auto-discovered resources for chainsaw component, got %d",
+			len(recipeResult.ComponentRefs[0].ExpectedResources))
+	}
+}
+
 func TestResolveExpectedResources_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately

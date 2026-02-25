@@ -1438,6 +1438,11 @@ func (v *Validator) ensureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
 	}
 
+	// Resolve Chainsaw health check assert files from the component registry.
+	// This must run before resolveExpectedResources so that components with
+	// assert files skip auto-discovery (Chainsaw replaces typed replica checks).
+	resolveHealthCheckAsserts(ctx, recipeResult)
+
 	// Auto-discover expected resources from component manifests.
 	// NOTE: This intentionally mutates recipeResult.ComponentRefs[].ExpectedResources
 	// in place *before* serialization below, so the check pod sees the full
