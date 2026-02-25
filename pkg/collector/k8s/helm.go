@@ -21,9 +21,10 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
 
-	"helm.sh/helm/v3/pkg/release"
-	"helm.sh/helm/v3/pkg/storage"
-	"helm.sh/helm/v3/pkg/storage/driver"
+	"helm.sh/helm/v4/pkg/release"
+	v1release "helm.sh/helm/v4/pkg/release/v1"
+	"helm.sh/helm/v4/pkg/storage"
+	"helm.sh/helm/v4/pkg/storage/driver"
 )
 
 // collectHelmReleasesScoped collects Helm releases based on HelmNamespaces config.
@@ -94,22 +95,23 @@ func (k *Collector) collectHelmReleasesInNamespace(ctx context.Context, namespac
 // mapRelease extracts metadata and flattened config values from a single
 // Helm release into the provided readings map. Keys are prefixed with
 // the release name (e.g., "gpu-operator.chart", "gpu-operator.values.driver.version").
-func mapRelease(rel *release.Release, data map[string]measurement.Reading) {
-	if rel == nil {
+func mapRelease(rel release.Releaser, data map[string]measurement.Reading) {
+	r, ok := rel.(*v1release.Release)
+	if !ok || r == nil {
 		return
 	}
 
-	prefix := rel.Name
+	prefix := r.Name
 
-	data[prefix+".namespace"] = measurement.Str(rel.Namespace)
-	data[prefix+".revision"] = measurement.Str(fmt.Sprintf("%d", rel.Version))
+	data[prefix+".namespace"] = measurement.Str(r.Namespace)
+	data[prefix+".revision"] = measurement.Str(fmt.Sprintf("%d", r.Version))
 
-	if rel.Info != nil {
-		data[prefix+".status"] = measurement.Str(string(rel.Info.Status))
+	if r.Info != nil {
+		data[prefix+".status"] = measurement.Str(string(r.Info.Status))
 	}
 
-	if rel.Chart != nil && rel.Chart.Metadata != nil {
-		md := rel.Chart.Metadata
+	if r.Chart != nil && r.Chart.Metadata != nil {
+		md := r.Chart.Metadata
 		if md.Name != "" {
 			data[prefix+".chart"] = measurement.Str(md.Name)
 		}
@@ -121,14 +123,14 @@ func mapRelease(rel *release.Release, data map[string]measurement.Reading) {
 		}
 	}
 
-	if len(rel.Config) > 0 {
-		flattenSpec(rel.Config, prefix+".values", data)
+	if len(r.Config) > 0 {
+		flattenSpec(r.Config, prefix+".values", data)
 	}
 }
 
 // latestReleases deduplicates releases by keeping only the highest revision
 // per release name+namespace pair.
-func latestReleases(releases []*release.Release) []*release.Release {
+func latestReleases(releases []release.Releaser) []release.Releaser {
 	if len(releases) == 0 {
 		return releases
 	}
@@ -138,17 +140,26 @@ func latestReleases(releases []*release.Release) []*release.Release {
 		namespace string
 	}
 
-	latest := make(map[key]*release.Release, len(releases))
+	type entry struct {
+		rel     release.Releaser
+		version int
+	}
+
+	latest := make(map[key]entry, len(releases))
 	for _, rel := range releases {
-		k := key{name: rel.Name, namespace: rel.Namespace}
-		if existing, ok := latest[k]; !ok || rel.Version > existing.Version {
-			latest[k] = rel
+		r, ok := rel.(*v1release.Release)
+		if !ok {
+			continue
+		}
+		k := key{name: r.Name, namespace: r.Namespace}
+		if existing, ok := latest[k]; !ok || r.Version > existing.version {
+			latest[k] = entry{rel: rel, version: r.Version}
 		}
 	}
 
-	result := make([]*release.Release, 0, len(latest))
-	for _, rel := range latest {
-		result = append(result, rel)
+	result := make([]release.Releaser, 0, len(latest))
+	for _, e := range latest {
+		result = append(result, e.rel)
 	}
 
 	return result

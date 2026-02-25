@@ -16,110 +16,209 @@ package chainsaw
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestGenerateTestManifest(t *testing.T) {
-	tests := []struct {
-		name          string
-		componentName string
-		timeout       time.Duration
-		wantContains  []string
-	}{
-		{
-			name:          "generates valid chainsaw test YAML",
-			componentName: "gpu-operator",
-			timeout:       2 * time.Minute,
-			wantContains: []string{
-				"apiVersion: chainsaw.kyverno.io/v1alpha1",
-				"kind: Test",
-				"name: gpu-operator",
-				"assert: 120s",
-				"file: assert.yaml",
-			},
-		},
-		{
-			name:          "handles short timeout",
-			componentName: "network-operator",
-			timeout:       30 * time.Second,
-			wantContains: []string{
-				"name: network-operator",
-				"assert: 30s",
-			},
-		},
+// fakeFetcher implements ResourceFetcher for testing.
+type fakeFetcher struct {
+	resources map[string]map[string]interface{}
+}
+
+func (f *fakeFetcher) Fetch(_ context.Context, apiVersion, kind, namespace, name string) (map[string]interface{}, error) {
+	key := fmt.Sprintf("%s/%s/%s/%s", apiVersion, kind, namespace, name)
+	obj, ok := f.resources[key]
+	if !ok {
+		return nil, fmt.Errorf("resource not found: %s", key)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			path := filepath.Join(tmpDir, "chainsaw-test.yaml")
-
-			err := generateTestManifest(path, tt.componentName, tt.timeout)
-			if err != nil {
-				t.Fatalf("generateTestManifest() error = %v", err)
-			}
-
-			content, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("failed to read generated file: %v", err)
-			}
-
-			for _, want := range tt.wantContains {
-				if !strings.Contains(string(content), want) {
-					t.Errorf("generated YAML missing expected content %q, got:\n%s", want, string(content))
-				}
-			}
-		})
-	}
+	return obj, nil
 }
 
 func TestRunEmpty(t *testing.T) {
-	results := Run(t.Context(), nil, 2*time.Minute)
+	results := Run(t.Context(), nil, 2*time.Minute, &fakeFetcher{})
 	if results != nil {
 		t.Errorf("Run(nil) = %v, want nil", results)
 	}
 }
 
-func TestRunSingleMissingChainsaw(t *testing.T) {
-	// When chainsaw binary is not in PATH, runSingle should return an error.
-	// Save and clear PATH to ensure chainsaw is not found.
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", "")
-	defer func() {
-		// t.Setenv already handles restore, but be explicit
-		_ = os.Setenv("PATH", origPath)
-	}()
-
-	asserts := []ComponentAssert{
-		{
-			Name:       "test-component",
-			AssertYAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n",
+func TestRunSinglePass(t *testing.T) {
+	fetcher := &fakeFetcher{
+		resources: map[string]map[string]interface{}{
+			"apps/v1/Deployment/gpu-operator/gpu-operator": {
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name":      "gpu-operator",
+					"namespace": "gpu-operator",
+				},
+				"status": map[string]interface{}{
+					"availableReplicas": int64(1),
+					"readyReplicas":     int64(1),
+				},
+			},
 		},
 	}
 
-	results := Run(t.Context(), asserts, 30*time.Second)
+	asserts := []ComponentAssert{
+		{
+			Name: "gpu-operator",
+			AssertYAML: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1`,
+		},
+	}
+
+	results := Run(t.Context(), asserts, 10*time.Second, fetcher)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	if !results[0].Passed {
+		t.Errorf("expected pass, got fail: output=%q error=%v", results[0].Output, results[0].Error)
+	}
+}
+
+func TestRunSingleFieldMismatch(t *testing.T) {
+	fetcher := &fakeFetcher{
+		resources: map[string]map[string]interface{}{
+			"apps/v1/Deployment/gpu-operator/gpu-operator": {
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name":      "gpu-operator",
+					"namespace": "gpu-operator",
+				},
+				"status": map[string]interface{}{
+					"availableReplicas": int64(0),
+				},
+			},
+		},
+	}
+
+	asserts := []ComponentAssert{
+		{
+			Name: "gpu-operator",
+			AssertYAML: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1`,
+		},
+	}
+
+	// Use minimal timeout so the retry loop exits quickly.
+	results := Run(t.Context(), asserts, 1*time.Millisecond, fetcher)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
 
 	r := results[0]
-	if r.Component != "test-component" {
-		t.Errorf("Component = %q, want %q", r.Component, "test-component")
-	}
 	if r.Passed {
-		t.Errorf("expected Passed=false when chainsaw is not in PATH")
+		t.Error("expected fail, got pass")
 	}
 	if r.Error == nil {
-		t.Errorf("expected non-nil Error when chainsaw is not in PATH")
+		t.Error("expected non-nil error")
 	}
 }
 
-func TestRunSingleContextCancelled(t *testing.T) {
-	// When context is canceled, chainsaw exec should fail promptly.
+func TestRunSingleResourceNotFound(t *testing.T) {
+	fetcher := &fakeFetcher{resources: map[string]map[string]interface{}{}}
+
+	asserts := []ComponentAssert{
+		{
+			Name: "gpu-operator",
+			AssertYAML: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1`,
+		},
+	}
+
+	results := Run(t.Context(), asserts, 1*time.Millisecond, fetcher)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+
+	r := results[0]
+	if r.Passed {
+		t.Error("expected fail, got pass")
+	}
+	if r.Error == nil {
+		t.Fatal("expected non-nil error")
+	}
+	if !strings.Contains(r.Error.Error(), "failed to fetch") {
+		t.Errorf("error %q should contain 'failed to fetch'", r.Error.Error())
+	}
+}
+
+func TestRunMultipleComponents(t *testing.T) {
+	fetcher := &fakeFetcher{
+		resources: map[string]map[string]interface{}{
+			"apps/v1/Deployment/gpu-operator/gpu-operator": {
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]interface{}{"name": "gpu-operator", "namespace": "gpu-operator"},
+				"status":     map[string]interface{}{"availableReplicas": int64(1)},
+			},
+			"apps/v1/Deployment/network-operator/network-operator": {
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]interface{}{"name": "network-operator", "namespace": "network-operator"},
+				"status":     map[string]interface{}{"availableReplicas": int64(1)},
+			},
+		},
+	}
+
+	asserts := []ComponentAssert{
+		{
+			Name: "gpu-operator",
+			AssertYAML: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1`,
+		},
+		{
+			Name: "network-operator",
+			AssertYAML: `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: network-operator
+  namespace: network-operator
+status:
+  availableReplicas: 1`,
+		},
+	}
+
+	results := Run(t.Context(), asserts, 10*time.Second, fetcher)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	for i, r := range results {
+		if r.Component != asserts[i].Name {
+			t.Errorf("results[%d].Component = %q, want %q", i, r.Component, asserts[i].Name)
+		}
+		if !r.Passed {
+			t.Errorf("results[%d].Passed = false, want true: %v", i, r.Error)
+		}
+	}
+}
+
+func TestRunContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
 
@@ -130,7 +229,7 @@ func TestRunSingleContextCancelled(t *testing.T) {
 		},
 	}
 
-	results := Run(ctx, asserts, 30*time.Second)
+	results := Run(ctx, asserts, 30*time.Second, &fakeFetcher{})
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -147,101 +246,129 @@ func TestRunSingleContextCancelled(t *testing.T) {
 	}
 }
 
-func TestRunMultipleComponents(t *testing.T) {
-	// Verify that Run handles multiple components concurrently.
-	// Chainsaw not in PATH during unit tests, so all should fail,
-	// but we verify the results are correctly attributed to each component.
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", "")
-	defer func() { _ = os.Setenv("PATH", origPath) }()
+func TestRunMultiDocumentYAML(t *testing.T) {
+	fetcher := &fakeFetcher{
+		resources: map[string]map[string]interface{}{
+			"apps/v1/Deployment/gpu-operator/gpu-operator": {
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]interface{}{"name": "gpu-operator", "namespace": "gpu-operator"},
+				"status":     map[string]interface{}{"availableReplicas": int64(1)},
+			},
+			"v1/Service/gpu-operator/gpu-operator": {
+				"apiVersion": "v1",
+				"kind":       "Service",
+				"metadata":   map[string]interface{}{"name": "gpu-operator", "namespace": "gpu-operator"},
+			},
+		},
+	}
+
+	multiDoc := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  availableReplicas: 1
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator`
 
 	asserts := []ComponentAssert{
-		{Name: "comp-a", AssertYAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n"},
-		{Name: "comp-b", AssertYAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: b\n"},
-		{Name: "comp-c", AssertYAML: "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: c\n"},
+		{Name: "gpu-operator", AssertYAML: multiDoc},
 	}
 
-	results := Run(t.Context(), asserts, 30*time.Second)
-	if len(results) != 3 {
-		t.Fatalf("expected 3 results, got %d", len(results))
+	results := Run(t.Context(), asserts, 10*time.Second, fetcher)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-
-	// Verify each result matches its component (order preserved since results[i] = runSingle(asserts[i]))
-	for i, r := range results {
-		if r.Component != asserts[i].Name {
-			t.Errorf("results[%d].Component = %q, want %q", i, r.Component, asserts[i].Name)
-		}
-		if r.Passed {
-			t.Errorf("results[%d].Passed = true, want false (chainsaw not in PATH)", i)
-		}
-		if r.Error == nil {
-			t.Errorf("results[%d].Error = nil, want non-nil", i)
-		}
+	if !results[0].Passed {
+		t.Errorf("expected pass for multi-doc: %v", results[0].Error)
 	}
 }
 
-func TestGenerateTestManifestInvalidName(t *testing.T) {
+func TestSplitYAMLDocuments(t *testing.T) {
 	tests := []struct {
-		name          string
-		componentName string
+		name    string
+		raw     string
+		wantLen int
+		wantErr bool
 	}{
-		{"uppercase letters", "GPU-Operator"},
-		{"spaces", "gpu operator"},
-		{"special chars", "gpu_operator!"},
-		{"template injection", "x\ninjected: true"},
-		{"starts with hyphen", "-gpu-operator"},
-		{"ends with hyphen", "gpu-operator-"},
-		{"empty string", ""},
+		{
+			name:    "single document",
+			raw:     "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n",
+			wantLen: 1,
+		},
+		{
+			name:    "two documents",
+			raw:     "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: b\n",
+			wantLen: 2,
+		},
+		{
+			name:    "empty string",
+			raw:     "",
+			wantLen: 0,
+		},
+		{
+			name:    "only separators",
+			raw:     "---\n---\n",
+			wantLen: 0,
+		},
+		{
+			name:    "invalid YAML",
+			raw:     ":\n  bad:\n    - [invalid",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			path := filepath.Join(tmpDir, "chainsaw-test.yaml")
-
-			err := generateTestManifest(path, tt.componentName, 2*time.Minute)
-			if err == nil {
-				t.Errorf("generateTestManifest(%q) expected error for invalid name, got nil", tt.componentName)
+			docs, err := splitYAMLDocuments(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("splitYAMLDocuments() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && len(docs) != tt.wantLen {
+				t.Errorf("got %d docs, want %d", len(docs), tt.wantLen)
 			}
 		})
 	}
 }
 
-func TestRunSingleWritesFiles(t *testing.T) {
-	// Verify that runSingle creates the expected directory structure
-	// even if chainsaw is not available (it will fail at exec).
-	assertYAML := "apiVersion: v1\nkind: Namespace\nmetadata:\n  name: test-ns\n"
-
-	// Create a temp dir and verify structure would be created
-	baseDir := t.TempDir()
-	testDir := filepath.Join(baseDir, "my-component")
-	if err := os.MkdirAll(testDir, 0o750); err != nil {
-		t.Fatalf("failed to create test dir: %v", err)
+func TestAssertSingleDocumentMissingFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		doc         map[string]interface{}
+		errContains string
+	}{
+		{
+			name:        "missing apiVersion",
+			doc:         map[string]interface{}{"kind": "Deployment", "metadata": map[string]interface{}{"name": "x"}},
+			errContains: "missing required fields",
+		},
+		{
+			name:        "missing kind",
+			doc:         map[string]interface{}{"apiVersion": "v1", "metadata": map[string]interface{}{"name": "x"}},
+			errContains: "missing required fields",
+		},
+		{
+			name:        "missing name",
+			doc:         map[string]interface{}{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]interface{}{}},
+			errContains: "missing required fields",
+		},
 	}
 
-	// Write assert.yaml
-	assertPath := filepath.Join(testDir, "assert.yaml")
-	if err := os.WriteFile(assertPath, []byte(assertYAML), 0o600); err != nil {
-		t.Fatalf("failed to write assert.yaml: %v", err)
-	}
-
-	// Generate test manifest
-	testYAMLPath := filepath.Join(testDir, "chainsaw-test.yaml")
-	if err := generateTestManifest(testYAMLPath, "my-component", 2*time.Minute); err != nil {
-		t.Fatalf("generateTestManifest() error = %v", err)
-	}
-
-	// Verify assert.yaml exists
-	if _, err := os.Stat(assertPath); os.IsNotExist(err) {
-		t.Error("assert.yaml was not created")
-	}
-
-	// Verify chainsaw-test.yaml exists and references assert.yaml
-	content, err := os.ReadFile(testYAMLPath)
-	if err != nil {
-		t.Fatalf("failed to read chainsaw-test.yaml: %v", err)
-	}
-	if !strings.Contains(string(content), "file: assert.yaml") {
-		t.Error("chainsaw-test.yaml does not reference assert.yaml")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := assertSingleDocument(t.Context(), tt.doc, &fakeFetcher{})
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("error %q should contain %q", err.Error(), tt.errContains)
+			}
+		})
 	}
 }

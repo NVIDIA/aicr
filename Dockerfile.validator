@@ -57,22 +57,6 @@ RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/depl
 # test2json (e.g. readiness.test -test.v | test2json).
 RUN CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
-# Install Chainsaw CLI for component health check assertions.
-# Version and checksums from .settings.yaml and upstream checksums.txt.
-ARG CHAINSAW_VERSION=v0.2.14
-RUN set -e; \
-    ARCH=$(go env GOARCH); \
-    case "${ARCH}" in \
-      amd64) CHECKSUM="f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e" ;; \
-      arm64) CHECKSUM="b6494b71e490ab825890fc12cc575de7f59bfa637d5cfe73c66987e4454e397c" ;; \
-      *) echo "unsupported architecture: ${ARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL -o /tmp/chainsaw.tar.gz \
-      "https://github.com/kyverno/chainsaw/releases/download/${CHAINSAW_VERSION}/chainsaw_linux_${ARCH}.tar.gz"; \
-    echo "${CHECKSUM}  /tmp/chainsaw.tar.gz" | sha256sum -c -; \
-    tar xz -C /out chainsaw -f /tmp/chainsaw.tar.gz; \
-    rm -f /tmp/chainsaw.tar.gz
-
 # ---------------------------------------------------------------------------
 # Final stage: CUDA runtime provides nvidia-smi for GPU validation
 # ---------------------------------------------------------------------------
@@ -87,7 +71,6 @@ COPY --from=builder /out/aicr /usr/local/bin/aicr
 COPY --from=builder /out/deployment.test /usr/local/bin/deployment.test
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 COPY --from=builder /out/test2json /usr/local/bin/test2json
-COPY --from=builder /out/chainsaw /usr/local/bin/chainsaw
 
 # Copy testdata needed by deployment tests at runtime (loaded via os.ReadFile
 # relative to CWD, e.g. testdata/nvidia-smi-verify-pod.yaml)

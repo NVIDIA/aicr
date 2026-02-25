@@ -471,7 +471,8 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 		{
 			name: "HealthCheckAsserts used when no manual expectedResources",
 			setup: func() *checks.ValidationContext {
-				// No manual expectedResources → Chainsaw path activates.
+				// No manual expectedResources → Chainsaw assertion path activates.
+				// Without RESTConfig, fetcher creation fails.
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 				clientset := fake.NewSimpleClientset()
 				return &checks.ValidationContext{
@@ -488,9 +489,9 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 					},
 				}
 			},
-			// Chainsaw fails: either binary not available or assertion doesn't match
+			// Chainsaw assertion path fails: no RESTConfig for building resource fetcher
 			wantErr:     true,
-			errContains: "chainsaw health check failed",
+			errContains: "no kubernetes client configuration available",
 		},
 		{
 			name: "mixed components — chainsaw and typed client paths",
@@ -521,9 +522,9 @@ func TestValidateExpectedResources_ChainsawBranch(t *testing.T) {
 					},
 				}
 			},
-			// gpu-operator goes to chainsaw (fails — no binary), network-operator typed (passes)
+			// Chainsaw assertion path fails: no RESTConfig for building resource fetcher
 			wantErr:     true,
-			errContains: "chainsaw health check failed",
+			errContains: "no kubernetes client configuration available",
 		},
 		{
 			name: "component with empty HealthCheckAsserts uses typed client",

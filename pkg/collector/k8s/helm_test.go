@@ -18,14 +18,16 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
-	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/release"
+	v2 "helm.sh/helm/v4/pkg/chart/v2"
+	"helm.sh/helm/v4/pkg/release"
+	"helm.sh/helm/v4/pkg/release/common"
+	v1release "helm.sh/helm/v4/pkg/release/v1"
 )
 
 func TestMapRelease(t *testing.T) {
 	tests := []struct {
 		name     string
-		release  *release.Release
+		release  release.Releaser
 		expected map[string]string
 	}{
 		{
@@ -35,15 +37,15 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "full release with metadata and values",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "gpu-operator",
 				Namespace: "gpu-operator",
 				Version:   3,
-				Info: &release.Info{
-					Status: release.StatusDeployed,
+				Info: &v1release.Info{
+					Status: common.StatusDeployed,
 				},
-				Chart: &chart.Chart{
-					Metadata: &chart.Metadata{
+				Chart: &v2.Chart{
+					Metadata: &v2.Metadata{
 						Name:       "gpu-operator",
 						Version:    "25.3.0",
 						AppVersion: "25.3.0",
@@ -71,12 +73,12 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "release with nil chart",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "my-release",
 				Namespace: "default",
 				Version:   1,
-				Info: &release.Info{
-					Status: release.StatusDeployed,
+				Info: &v1release.Info{
+					Status: common.StatusDeployed,
 				},
 			},
 			expected: map[string]string{
@@ -87,14 +89,14 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "release with nil chart metadata",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "my-release",
 				Namespace: "default",
 				Version:   1,
-				Info: &release.Info{
-					Status: release.StatusDeployed,
+				Info: &v1release.Info{
+					Status: common.StatusDeployed,
 				},
-				Chart: &chart.Chart{},
+				Chart: &v2.Chart{},
 			},
 			expected: map[string]string{
 				"my-release.namespace": "default",
@@ -104,7 +106,7 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "release with nil info",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "my-release",
 				Namespace: "default",
 				Version:   1,
@@ -116,12 +118,12 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "release with empty config",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "my-release",
 				Namespace: "default",
 				Version:   1,
-				Info: &release.Info{
-					Status: release.StatusDeployed,
+				Info: &v1release.Info{
+					Status: common.StatusDeployed,
 				},
 				Config: map[string]any{},
 			},
@@ -133,15 +135,15 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "release with deeply nested values",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "network-operator",
 				Namespace: "network-operator",
 				Version:   2,
-				Info: &release.Info{
-					Status: release.StatusDeployed,
+				Info: &v1release.Info{
+					Status: common.StatusDeployed,
 				},
-				Chart: &chart.Chart{
-					Metadata: &chart.Metadata{
+				Chart: &v2.Chart{
+					Metadata: &v2.Metadata{
 						Name:    "network-operator",
 						Version: "24.7.0",
 					},
@@ -169,15 +171,15 @@ func TestMapRelease(t *testing.T) {
 		},
 		{
 			name: "release with array values",
-			release: &release.Release{
+			release: &v1release.Release{
 				Name:      "prometheus",
 				Namespace: "monitoring",
 				Version:   1,
-				Info: &release.Info{
-					Status: release.StatusDeployed,
+				Info: &v1release.Info{
+					Status: common.StatusDeployed,
 				},
-				Chart: &chart.Chart{
-					Metadata: &chart.Metadata{
+				Chart: &v2.Chart{
+					Metadata: &v2.Metadata{
 						Name:    "prometheus",
 						Version: "2.0.0",
 					},
@@ -229,7 +231,7 @@ func TestMapRelease(t *testing.T) {
 func TestLatestReleases(t *testing.T) {
 	tests := []struct {
 		name     string
-		releases []*release.Release
+		releases []release.Releaser
 		wantLen  int
 		wantName string
 		wantVer  int
@@ -241,13 +243,13 @@ func TestLatestReleases(t *testing.T) {
 		},
 		{
 			name:     "empty releases",
-			releases: []*release.Release{},
+			releases: []release.Releaser{},
 			wantLen:  0,
 		},
 		{
 			name: "single release",
-			releases: []*release.Release{
-				{Name: "gpu-operator", Namespace: "gpu-operator", Version: 1},
+			releases: []release.Releaser{
+				&v1release.Release{Name: "gpu-operator", Namespace: "gpu-operator", Version: 1},
 			},
 			wantLen:  1,
 			wantName: "gpu-operator",
@@ -255,10 +257,10 @@ func TestLatestReleases(t *testing.T) {
 		},
 		{
 			name: "deduplicates same release different versions",
-			releases: []*release.Release{
-				{Name: "gpu-operator", Namespace: "gpu-operator", Version: 1},
-				{Name: "gpu-operator", Namespace: "gpu-operator", Version: 3},
-				{Name: "gpu-operator", Namespace: "gpu-operator", Version: 2},
+			releases: []release.Releaser{
+				&v1release.Release{Name: "gpu-operator", Namespace: "gpu-operator", Version: 1},
+				&v1release.Release{Name: "gpu-operator", Namespace: "gpu-operator", Version: 3},
+				&v1release.Release{Name: "gpu-operator", Namespace: "gpu-operator", Version: 2},
 			},
 			wantLen:  1,
 			wantName: "gpu-operator",
@@ -266,18 +268,18 @@ func TestLatestReleases(t *testing.T) {
 		},
 		{
 			name: "same name different namespaces kept separate",
-			releases: []*release.Release{
-				{Name: "app", Namespace: "staging", Version: 1},
-				{Name: "app", Namespace: "production", Version: 1},
+			releases: []release.Releaser{
+				&v1release.Release{Name: "app", Namespace: "staging", Version: 1},
+				&v1release.Release{Name: "app", Namespace: "production", Version: 1},
 			},
 			wantLen: 2,
 		},
 		{
 			name: "multiple distinct releases",
-			releases: []*release.Release{
-				{Name: "gpu-operator", Namespace: "gpu-operator", Version: 5},
-				{Name: "network-operator", Namespace: "network-operator", Version: 2},
-				{Name: "prometheus", Namespace: "monitoring", Version: 1},
+			releases: []release.Releaser{
+				&v1release.Release{Name: "gpu-operator", Namespace: "gpu-operator", Version: 5},
+				&v1release.Release{Name: "network-operator", Namespace: "network-operator", Version: 2},
+				&v1release.Release{Name: "prometheus", Namespace: "monitoring", Version: 1},
 			},
 			wantLen: 3,
 		},
@@ -292,11 +294,15 @@ func TestLatestReleases(t *testing.T) {
 			}
 
 			if tt.wantName != "" && tt.wantLen == 1 {
-				if result[0].Name != tt.wantName {
-					t.Errorf("got name %q, want %q", result[0].Name, tt.wantName)
+				r, ok := result[0].(*v1release.Release)
+				if !ok {
+					t.Fatal("expected *v1release.Release type")
 				}
-				if result[0].Version != tt.wantVer {
-					t.Errorf("got version %d, want %d", result[0].Version, tt.wantVer)
+				if r.Name != tt.wantName {
+					t.Errorf("got name %q, want %q", r.Name, tt.wantName)
+				}
+				if r.Version != tt.wantVer {
+					t.Errorf("got version %d, want %d", r.Version, tt.wantVer)
 				}
 			}
 		})

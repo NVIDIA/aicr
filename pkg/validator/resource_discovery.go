@@ -28,11 +28,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/registry"
+	"helm.sh/helm/v4/pkg/action"
+	"helm.sh/helm/v4/pkg/chart/common"
+	"helm.sh/helm/v4/pkg/chart/loader"
+	"helm.sh/helm/v4/pkg/cli"
+	"helm.sh/helm/v4/pkg/registry"
+	"helm.sh/helm/v4/pkg/release"
 	"sigs.k8s.io/yaml"
 )
 
@@ -228,16 +229,11 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create helm registry client", err)
 	}
 
-	actionCfg := &action.Configuration{
-		RegistryClient: regClient,
-		Log: func(format string, v ...interface{}) {
-			slog.Debug(fmt.Sprintf(format, v...))
-		},
-	}
+	actionCfg := action.NewConfiguration()
+	actionCfg.RegistryClient = regClient
 
 	install := action.NewInstall(actionCfg)
-	install.DryRun = true
-	install.ClientOnly = true
+	install.DryRunStrategy = action.DryRunClient
 	install.ReleaseName = ref.Name
 	install.Namespace = ref.Namespace
 	install.Replace = true
@@ -246,7 +242,7 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 	}
 
 	if kubeVersion != "" {
-		kv, parseErr := chartutil.ParseKubeVersion(kubeVersion)
+		kv, parseErr := common.ParseKubeVersion(kubeVersion)
 		if parseErr == nil {
 			install.KubeVersion = kv
 		}
@@ -268,7 +264,12 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 		return nil, errors.Wrap(errors.ErrCodeInternal, "helm template rendering failed", err)
 	}
 
-	return extractWorkloadResources(rel.Manifest, ref.Namespace), nil
+	accessor, err := release.NewAccessor(rel)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to access rendered release", err)
+	}
+
+	return extractWorkloadResources(accessor.Manifest(), ref.Namespace), nil
 }
 
 // locateChart resolves a chart reference to a local path by downloading it.
