@@ -484,7 +484,8 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply estimated node count (e.g. skyhook-operator estimatedNodeCount)
+	// Apply estimated node count to paths in nodeScheduling.nodeCountPaths.
+	// ApplyMapOverrides uses convertMapValue, so numeric strings become ints in the values map; Helm gets integer type.
 	if n := b.Config.EstimatedNodeCount(); n > 0 {
 		if paths := comp.GetNodeCountPaths(); len(paths) > 0 {
 			valStr := strconv.Itoa(n)

@@ -339,7 +339,7 @@ Components are configured in `recipes/registry.yaml`. Here's an example entry:
         - node-feature-discovery.worker.tolerations
 ```
 
-### Node Selector and Toleration Handling and Count
+### Node Scheduling Configuration
 
 The bundle command supports `--system-node-selector`, `--system-node-toleration`, `--accelerated-node-selector`, `--accelerated-node-toleration`, and `--nodes` flags.
 
