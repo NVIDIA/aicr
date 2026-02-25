@@ -56,6 +56,11 @@ quality:
 build:
   image_registry: 'ghcr.io/nvidia'
 
+# Documentation Tools
+docs_tools:
+  hugo: '0.155.3'
+  node: '22'
+
 # Testing Configuration
 testing:
   kind_node_image: 'kindest/node:v1.32.0'

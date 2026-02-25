@@ -21,6 +21,7 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - 'site/**'
       - 'LICENSE'
   pull_request:
     branches:
@@ -28,6 +29,7 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - 'site/**'
       - 'LICENSE'
   workflow_dispatch: {}  # Allow manual runs
 
