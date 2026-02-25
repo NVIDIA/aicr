@@ -83,12 +83,34 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 		return errors.New(errors.ErrCodeInternal, "discovery REST client is not available")
 	}
 	result := restClient.Get().AbsPath(rawURL).Do(ctx.Context)
+	var statusCode int
+	result.StatusCode(&statusCode)
 	if cmErr := result.Error(); cmErr != nil {
-		recordArtifact(ctx, "Custom Metrics API", fmt.Sprintf("Status: unavailable\nError: %v", cmErr))
+		recordArtifact(ctx, "Custom Metrics API",
+			fmt.Sprintf("Endpoint:    %s\nHTTP Status: %d\nStatus:      unavailable\nError:       %v",
+				rawURL, statusCode, cmErr))
 		return errors.Wrap(errors.ErrCodeNotFound,
 			"custom metrics API not available", cmErr)
 	}
-	recordArtifact(ctx, "Custom Metrics API", "Status: available\nEndpoint: /apis/custom.metrics.k8s.io/v1beta1")
+
+	groupVersion := "unknown"
+	resourceCount := 0
+	discoveryBody, rawErr := result.Raw()
+	if rawErr == nil {
+		var discovery struct {
+			GroupVersion string            `json:"groupVersion"`
+			Resources    []json.RawMessage `json:"resources"`
+		}
+		if json.Unmarshal(discoveryBody, &discovery) == nil {
+			if discovery.GroupVersion != "" {
+				groupVersion = discovery.GroupVersion
+			}
+			resourceCount = len(discovery.Resources)
+		}
+	}
+	recordArtifact(ctx, "Custom Metrics API",
+		fmt.Sprintf("Endpoint:      %s\nHTTP Status:   %d\nGroupVersion:  %s\nAPI Resources: %d\nStatus:        available",
+			rawURL, statusCode, groupVersion, resourceCount))
 
 	return nil
 }

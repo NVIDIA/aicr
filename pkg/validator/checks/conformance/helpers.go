@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 	appsv1 "k8s.io/api/apps/v1"
@@ -29,7 +30,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 // phaseConformance is the phase identifier for conformance checks.
@@ -69,27 +72,46 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// checkCondition verifies a status condition on an unstructured object.
-func checkCondition(obj *unstructured.Unstructured, condType, expectedStatus string) error {
+type conditionObservation struct {
+	Status  string
+	Reason  string
+	Message string
+}
+
+func getConditionObservation(obj *unstructured.Unstructured, condType string) (*conditionObservation, error) {
 	conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
 	if err != nil || !found {
-		return errors.New(errors.ErrCodeInternal, "status.conditions not found")
+		return nil, errors.New(errors.ErrCodeInternal, "status.conditions not found")
 	}
+
 	for _, c := range conditions {
 		cond, ok := c.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		if cond["type"] == condType {
-			if cond["status"] == expectedStatus {
-				return nil
-			}
-			return errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("condition %s=%v (want %s)", condType, cond["status"], expectedStatus))
+		condName, _ := cond["type"].(string)
+		if condName != condType {
+			continue
 		}
+
+		status, _ := cond["status"].(string)
+		return &conditionObservation{
+			Status:  status,
+			Reason:  stringFieldOrDefault(cond, "reason", "not-reported"),
+			Message: stringFieldOrDefault(cond, "message", "not-reported"),
+		}, nil
 	}
-	return errors.New(errors.ErrCodeNotFound,
+
+	return nil, errors.New(errors.ErrCodeNotFound,
 		fmt.Sprintf("condition %s not found", condType))
+}
+
+func stringFieldOrDefault(obj map[string]interface{}, key, fallback string) string {
+	v, _ := obj[key].(string)
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 // verifyDeploymentAvailable checks that a Deployment has at least one available replica.
@@ -181,6 +203,87 @@ func containsAllMetrics(text string, required []string) []string {
 		}
 	}
 	return missing
+}
+
+// podStuckReason inspects a Pod for non-recoverable stuck states and returns a
+// human-readable reason. Returns empty string if the pod is not stuck.
+// Follows the pattern from pkg/validator/agent/wait.go:getJobFailureReasonFromPod.
+func podStuckReason(pod *corev1.Pod) string {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if w := cs.State.Waiting; w != nil {
+			switch w.Reason {
+			case "ImagePullBackOff", "ErrImagePull", "InvalidImageName", "CrashLoopBackOff":
+				return fmt.Sprintf("%s: %s (image: %s)", w.Reason, w.Message, cs.Image)
+			}
+		}
+	}
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if w := cs.State.Waiting; w != nil {
+			switch w.Reason {
+			case "ImagePullBackOff", "ErrImagePull", "InvalidImageName", "CrashLoopBackOff":
+				return fmt.Sprintf("%s: %s (init container, image: %s)", w.Reason, w.Message, cs.Image)
+			}
+		}
+	}
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionFalse &&
+			cond.Reason == string(corev1.PodReasonUnschedulable) {
+
+			return fmt.Sprintf("Unschedulable: %s", cond.Message)
+		}
+	}
+	return ""
+}
+
+// podWaitingStatus returns the first container's waiting reason and message, or "none"
+// if no container is in a waiting state. Used for diagnostic output on timeout.
+func podWaitingStatus(pod *corev1.Pod) string {
+	for _, cs := range pod.Status.ContainerStatuses {
+		if w := cs.State.Waiting; w != nil {
+			return fmt.Sprintf("%s: %s", w.Reason, w.Message)
+		}
+	}
+	return "none"
+}
+
+// waitForHPAScaleUp polls the HPA until desiredReplicas > currentReplicas.
+// This proves the HPA read metrics and computed a scale-up intent. The logPrefix
+// is prepended to log messages to distinguish callers (e.g. "pod-autoscaling", "cluster-autoscaling").
+func waitForHPAScaleUp(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName, logPrefix string) (int32, int32, error) {
+	var observedDesired int32
+	var observedCurrent int32
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
+		func(ctx context.Context) (bool, error) {
+			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
+				ctx, hpaName, metav1.GetOptions{})
+			if getErr != nil {
+				slog.Debug("HPA not ready yet", "context", logPrefix, "error", getErr)
+				return false, nil
+			}
+
+			observedDesired = hpa.Status.DesiredReplicas
+			observedCurrent = hpa.Status.CurrentReplicas
+			slog.Debug(logPrefix+" HPA status", "desired", observedDesired, "current", observedCurrent)
+
+			if observedDesired > observedCurrent {
+				slog.Info(logPrefix+" HPA scaling intent detected",
+					"desiredReplicas", observedDesired, "currentReplicas", observedCurrent)
+				return true, nil
+			}
+			return false, nil
+		},
+	)
+	if err != nil {
+		if ctx.Err() != nil || waitCtx.Err() != nil {
+			return 0, 0, errors.Wrap(errors.ErrCodeTimeout,
+				logPrefix+": HPA did not report scaling intent within timeout", err)
+		}
+		return 0, 0, errors.Wrap(errors.ErrCodeInternal, logPrefix+": HPA scaling intent polling failed", err)
+	}
+	return observedDesired, observedCurrent, nil
 }
 
 // gpuDriverName is the DRA driver name for NVIDIA GPUs.

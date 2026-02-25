@@ -40,6 +40,13 @@ const (
 	hpaTestPrefix = "hpa-test-"
 )
 
+type hpaBehaviorReport struct {
+	ScaleUpDesiredReplicas  int32
+	ScaleUpCurrentReplicas  int32
+	ScaleUpDeployReplicas   int32
+	ScaleDownDeployReplicas int32
+}
+
 func init() {
 	checks.RegisterCheck(&checks.Check{
 		Name:                  "pod-autoscaling",
@@ -147,11 +154,14 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 			extPath, len(extResp.Items)))
 
 	// 4. HPA behavioral validation: prove HPA reads external metrics and computes scale-up.
-	if err := validateHPABehavior(ctx.Context, ctx.Clientset); err != nil {
+	report, err := validateHPABehavior(ctx.Context, ctx.Clientset)
+	if err != nil {
 		return err
 	}
 	recordArtifact(ctx, "HPA Behavioral Test",
-		"Scale-up:   PASS — HPA computed desiredReplicas > currentReplicas, deployment scaled\nScale-down: PASS — HPA reduced replicas after target increased")
+		fmt.Sprintf("Scale-up HPA desired/current: %d/%d\nScale-up deployment replicas: %d\nScale-down deployment replicas: %d",
+			report.ScaleUpDesiredReplicas, report.ScaleUpCurrentReplicas,
+			report.ScaleUpDeployReplicas, report.ScaleDownDeployReplicas))
 	return nil
 }
 
@@ -159,11 +169,13 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 // then verifies the HPA computes desiredReplicas > currentReplicas and the Deployment
 // actually scales. This proves the full metrics pipeline (DCGM → Prometheus → adapter → HPA)
 // is functional end-to-end.
-func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) error {
+func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) (*hpaBehaviorReport, error) {
+	report := &hpaBehaviorReport{}
+
 	// Generate unique test resource names and namespace (prevents cross-run interference).
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
 	}
 	suffix := hex.EncodeToString(b)
 	nsName := hpaTestPrefix + suffix
@@ -175,7 +187,7 @@ func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) er
 		ObjectMeta: metav1.ObjectMeta{Name: nsName},
 	}
 	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test namespace", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test namespace", err)
 	}
 
 	// Cleanup: delete namespace (cascades all resources).
@@ -194,25 +206,30 @@ func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) er
 	deploy := buildHPATestDeployment(deployName, nsName)
 	if _, err := clientset.AppsV1().Deployments(nsName).Create(
 		ctx, deploy, metav1.CreateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test deployment", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test deployment", err)
 	}
 
 	// Create HPA targeting external metric dcgm_gpu_power_usage with very low threshold.
 	hpa := buildHPATestHPA(hpaName, deployName, nsName)
 	if _, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Create(
 		ctx, hpa, metav1.CreateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test resource", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create HPA test resource", err)
 	}
 
 	// Wait for HPA to report scaling intent: desiredReplicas > currentReplicas.
-	if err := waitForHPAScalingIntent(ctx, clientset, nsName, hpaName); err != nil {
-		return err
+	desiredReplicas, currentReplicas, err := waitForHPAScaleUp(ctx, clientset, nsName, hpaName, "pod-autoscaling")
+	if err != nil {
+		return nil, err
 	}
+	report.ScaleUpDesiredReplicas = desiredReplicas
+	report.ScaleUpCurrentReplicas = currentReplicas
 
 	// Wait for Deployment to actually scale up (proves HPA → Deployment controller chain).
-	if err := waitForDeploymentScale(ctx, clientset, nsName, deployName); err != nil {
-		return err
+	scaleUpReplicas, err := waitForDeploymentScale(ctx, clientset, nsName, deployName)
+	if err != nil {
+		return nil, err
 	}
+	report.ScaleUpDeployReplicas = scaleUpReplicas
 
 	// Scale-down: patch HPA with high target so metric reads well below threshold.
 	// This triggers the HPA to compute desiredReplicas = minReplicas (scale-down).
@@ -221,16 +238,22 @@ func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) er
 	currentHPA, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Get(
 		ctx, hpaName, metav1.GetOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to get HPA for scale-down test", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get HPA for scale-down test", err)
 	}
 	currentHPA.Spec.Metrics[0].External.Target.AverageValue = resourceQuantityPtr("999999")
-	if _, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Update(
-		ctx, currentHPA, metav1.UpdateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to update HPA target for scale-down", err)
+	_, updateErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Update(
+		ctx, currentHPA, metav1.UpdateOptions{})
+	if updateErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to update HPA target for scale-down", updateErr)
 	}
 
 	// Wait for Deployment to scale down (proves HPA scale-down path works).
-	return waitForDeploymentScaleDown(ctx, clientset, nsName, deployName)
+	scaleDownReplicas, err := waitForDeploymentScaleDown(ctx, clientset, nsName, deployName)
+	if err != nil {
+		return nil, err
+	}
+	report.ScaleDownDeployReplicas = scaleDownReplicas
+	return report, nil
 }
 
 // buildHPATestDeployment creates a minimal Deployment for the HPA behavioral test.
@@ -320,48 +343,10 @@ func resourceQuantityPtr(val string) *resource.Quantity {
 	return &q
 }
 
-// waitForHPAScalingIntent polls the HPA until desiredReplicas > currentReplicas.
-// This is the strict criterion: it proves the HPA read metrics and computed a scale-up.
-// We do NOT accept ScalingActive=True alone as that can be true even without scale intent.
-func waitForHPAScalingIntent(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName string) error {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
-				ctx, hpaName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("HPA not ready yet", "error", getErr)
-				return false, nil // retry
-			}
-
-			desired := hpa.Status.DesiredReplicas
-			current := hpa.Status.CurrentReplicas
-			slog.Debug("HPA status", "desired", desired, "current", current)
-
-			if desired > current {
-				slog.Info("HPA scaling intent detected",
-					"desiredReplicas", desired, "currentReplicas", current)
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"HPA did not report scaling intent within timeout — metrics pipeline may be broken", err)
-		}
-		return errors.Wrap(errors.ErrCodeInternal, "HPA scaling intent polling failed", err)
-	}
-
-	return nil
-}
-
 // waitForDeploymentScale polls the Deployment until status.replicas > 1, proving
 // that the Deployment controller acted on the HPA's scaling recommendation.
-func waitForDeploymentScale(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) error {
+func waitForDeploymentScale(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) (int32, error) {
+	var observedReplicas int32
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.DeploymentScaleTimeout)
 	defer cancel()
 
@@ -374,11 +359,11 @@ func waitForDeploymentScale(ctx context.Context, clientset kubernetes.Interface,
 				return false, nil
 			}
 
-			replicas := deploy.Status.Replicas
-			slog.Debug("deployment replica status", "name", deployName, "replicas", replicas)
+			observedReplicas = deploy.Status.Replicas
+			slog.Debug("deployment replica status", "name", deployName, "replicas", observedReplicas)
 
-			if replicas > 1 {
-				slog.Info("deployment scaled up", "name", deployName, "replicas", replicas)
+			if observedReplicas > 1 {
+				slog.Info("deployment scaled up", "name", deployName, "replicas", observedReplicas)
 				return true, nil
 			}
 			return false, nil
@@ -386,18 +371,19 @@ func waitForDeploymentScale(ctx context.Context, clientset kubernetes.Interface,
 	)
 	if err != nil {
 		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
+			return 0, errors.Wrap(errors.ErrCodeTimeout,
 				"deployment did not scale up within timeout — HPA may not be effective", err)
 		}
-		return errors.Wrap(errors.ErrCodeInternal, "deployment scale verification failed", err)
+		return 0, errors.Wrap(errors.ErrCodeInternal, "deployment scale verification failed", err)
 	}
 
-	return nil
+	return observedReplicas, nil
 }
 
 // waitForDeploymentScaleDown polls the Deployment until status.replicas <= 1, proving
 // that the HPA's scale-down recommendation was enacted by the Deployment controller.
-func waitForDeploymentScaleDown(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) error {
+func waitForDeploymentScaleDown(ctx context.Context, clientset kubernetes.Interface, namespace, deployName string) (int32, error) {
+	var observedReplicas int32
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.DeploymentScaleTimeout)
 	defer cancel()
 
@@ -410,11 +396,11 @@ func waitForDeploymentScaleDown(ctx context.Context, clientset kubernetes.Interf
 				return false, nil
 			}
 
-			replicas := deploy.Status.Replicas
-			slog.Debug("deployment replica status (scale-down)", "name", deployName, "replicas", replicas)
+			observedReplicas = deploy.Status.Replicas
+			slog.Debug("deployment replica status (scale-down)", "name", deployName, "replicas", observedReplicas)
 
-			if replicas <= 1 {
-				slog.Info("deployment scaled down", "name", deployName, "replicas", replicas)
+			if observedReplicas <= 1 {
+				slog.Info("deployment scaled down", "name", deployName, "replicas", observedReplicas)
 				return true, nil
 			}
 			return false, nil
@@ -422,11 +408,11 @@ func waitForDeploymentScaleDown(ctx context.Context, clientset kubernetes.Interf
 	)
 	if err != nil {
 		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
+			return 0, errors.Wrap(errors.ErrCodeTimeout,
 				"deployment did not scale down within timeout — HPA scale-down may not be effective", err)
 		}
-		return errors.Wrap(errors.ErrCodeInternal, "deployment scale-down verification failed", err)
+		return 0, errors.Wrap(errors.ErrCodeInternal, "deployment scale-down verification failed", err)
 	}
 
-	return nil
+	return observedReplicas, nil
 }
