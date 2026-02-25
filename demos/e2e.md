@@ -66,13 +66,13 @@ aicr recipe --criteria /tmp/criteria.yaml --service gke | yq .
 Recipe from API (GET):
 
 ```shell
-curl -s "https://aicr.dgxc.io/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
+curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
 ```
 
 Recipe from API (POST with criteria body):
 
 ```shell
-curl -s -X POST "https://aicr.dgxc.io/v1/recipe" \
+curl -s -X POST "https://aicr-demo.dgxc.io/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
   -d 'kind: RecipeCriteria
 apiVersion: aicr.nvidia.com/v1alpha1
@@ -87,7 +87,7 @@ spec:
 Allowed list support in self-hosted API:
 
 ```shell
-curl -s "https://aicr.dgxc.io/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
+curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
 ```
 
 # Snapshot
@@ -147,8 +147,8 @@ aicr bundle \
 Bundle from Recipe using API: 
 
 ```shell
-curl -s "https://aicr.dgxc.io/v1/recipe?service=eks&accelerator=h100&intent=training" | \
-  curl -X POST "https://aicr.dgxc.io/v1/bundle?deployer=argocd" \
+curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=h100&intent=training" | \
+  curl -X POST "https://aicr-demo.dgxc.io/v1/bundle?deployer=argocd" \
     -H "Content-Type: application/json" -d @- -o bundle.zip
 ```
 
