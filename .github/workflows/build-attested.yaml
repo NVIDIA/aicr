@@ -32,9 +32,12 @@ permissions:
   contents: read
   id-token: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-attest:
-    needs: [tests, security-scan]
     name: Build and Attest Binaries
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -45,10 +48,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
       - name: Setup Go
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
         with:
-          go-version-file: go.mod
+          go-version: ${{ steps.versions.outputs.go }}
           cache: true
 
       - name: Install Cosign

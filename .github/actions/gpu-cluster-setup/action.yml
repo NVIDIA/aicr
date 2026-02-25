@@ -40,30 +40,15 @@ runs:
           go.sum
           vendor/modules.txt
 
-    - name: Install kind
-      shell: bash
-      run: |
-        KIND_VERSION="${{ steps.versions.outputs.kind }}"
-        sudo curl -fsSL -o /usr/local/bin/kind \
-          "https://github.com/kubernetes-sigs/kind/releases/download/v${KIND_VERSION}/kind-linux-amd64"
-        sudo chmod +x /usr/local/bin/kind
-        kind version
-
-    - name: Install kubectl
-      shell: bash
-      run: |
-        KUBECTL_VERSION="${{ steps.versions.outputs.kubectl }}"
-        sudo curl -fsSL -o /usr/local/bin/kubectl \
-          "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-        sudo chmod +x /usr/local/bin/kubectl
-        kubectl version --client
-
-    - name: Install Helm
-      shell: bash
-      run: |
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | \
-          DESIRED_VERSION=${{ steps.versions.outputs.helm }} bash
-        helm version
+    - name: Setup build tools
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_kind: 'true'
+        kind_version: '${{ steps.versions.outputs.kind }}'
+        install_kubectl: 'true'
+        kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+        install_helm: 'true'
+        helm_version: '${{ steps.versions.outputs.helm }}'
 
     - name: Install nvkind
       shell: bash

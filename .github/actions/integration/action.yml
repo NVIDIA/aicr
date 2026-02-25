@@ -22,7 +22,7 @@ inputs:
   helm_version:
     description: 'Helm version to install (e.g., v4.1.0)'
     required: false
-    default: 'v4.1.0'
+    default: 'v4.1.1'
   chainsaw_version:
     description: 'Chainsaw version to install (e.g., v0.2.14)'
     required: false
@@ -45,45 +45,10 @@ runs:
       uses: ./.github/actions/setup-build-tools
       with:
         install_goreleaser: 'true'
-
-    - name: Install Helm
-      shell: bash
-      run: |
-        set -euo pipefail
-        HELM_VERSION="${{ inputs.helm_version }}"
-        HELM_VERSION="${HELM_VERSION#v}"
-        HELM_BASE="https://get.helm.sh"
-        HELM_TAR="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
-        HELM_TMP="$(mktemp -d)"
-        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}" "${HELM_BASE}/${HELM_TAR}"
-        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}.sha256sum" "${HELM_BASE}/${HELM_TAR}.sha256sum"
-        EXPECTED=$(awk '{print $1}' "${HELM_TMP}/${HELM_TAR}.sha256sum")
-        ACTUAL=$(sha256sum "${HELM_TMP}/${HELM_TAR}" | awk '{print $1}')
-        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
-          echo "::error::helm checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
-          exit 1
-        fi
-        tar -xzf "${HELM_TMP}/${HELM_TAR}" -C "${HELM_TMP}"
-        sudo mv "${HELM_TMP}/linux-amd64/helm" /usr/local/bin/helm
-        sudo chmod +x /usr/local/bin/helm
-        rm -rf "${HELM_TMP}"
-        helm version
-
-    - name: Install Chainsaw
-      shell: bash
-      run: |
-        set -euo pipefail
-        VERSION="${{ inputs.chainsaw_version }}"
-        VERSION="${VERSION#v}"
-        TAR="chainsaw_linux_amd64.tar.gz"
-        URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
-        TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${URL}"
-        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
-        sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
-        sudo chmod +x /usr/local/bin/chainsaw
-        rm -rf "${TMP}"
-        chainsaw version
+        install_helm: 'true'
+        helm_version: '${{ inputs.helm_version }}'
+        install_chainsaw: 'true'
+        chainsaw_version: '${{ inputs.chainsaw_version }}'
 
     - name: Run Integration Tests
       shell: bash

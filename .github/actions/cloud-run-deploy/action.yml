@@ -47,7 +47,7 @@ inputs:
   crane_version:
     description: 'crane version (e.g. v0.20.6)'
     required: false
-    default: 'v0.20.6'
+    default: 'v0.21.0'
 
 runs:
   using: 'composite'
