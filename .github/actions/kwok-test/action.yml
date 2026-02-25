@@ -29,7 +29,7 @@ inputs:
   helm_version:
     description: 'Helm version to install'
     required: false
-    default: 'v4.1.0'
+    default: 'v4.1.1'
   kwok_version:
     description: 'KWOK version to install'
     required: false
@@ -82,58 +82,18 @@ runs:
         sudo rm -rf /opt/ghc
         docker system prune -f
 
-    - name: Install Kind
-      shell: bash
-      run: |
-        if [[ -x /usr/local/bin/kind ]]; then echo "kind already installed"; kind version; exit 0; fi
-        curl -Lo ./kind https://kind.sigs.k8s.io/dl/v${{ inputs.kind_version }}/kind-linux-amd64
-        chmod +x ./kind
-        sudo mv ./kind /usr/local/bin/kind
-        kind version
-
-    - name: Install Helm
-      shell: bash
-      run: |
-        if [[ -x /usr/local/bin/helm ]]; then echo "helm already installed"; helm version; exit 0; fi
-        set -euo pipefail
-        HELM_VERSION="${{ inputs.helm_version }}"
-        HELM_VERSION="${HELM_VERSION#v}"
-        HELM_BASE="https://get.helm.sh"
-        HELM_TAR="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
-        HELM_TMP="$(mktemp -d)"
-        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}" "${HELM_BASE}/${HELM_TAR}"
-        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}.sha256sum" "${HELM_BASE}/${HELM_TAR}.sha256sum"
-        EXPECTED=$(awk '{print $1}' "${HELM_TMP}/${HELM_TAR}.sha256sum")
-        ACTUAL=$(sha256sum "${HELM_TMP}/${HELM_TAR}" | awk '{print $1}')
-        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
-          echo "::error::helm checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
-          exit 1
-        fi
-        tar -xzf "${HELM_TMP}/${HELM_TAR}" -C "${HELM_TMP}"
-        sudo mv "${HELM_TMP}/linux-amd64/helm" /usr/local/bin/helm
-        sudo chmod +x /usr/local/bin/helm
-        rm -rf "${HELM_TMP}"
-        helm version
-
-    - name: Install kubectl
-      shell: bash
-      run: |
-        if [[ -x /usr/local/bin/kubectl ]]; then echo "kubectl already installed"; kubectl version --client; exit 0; fi
-        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-        curl -fsSL -o kubectl "https://dl.k8s.io/release/${{ inputs.kubectl_version }}/bin/linux/${ARCH}/kubectl"
-        chmod +x kubectl
-        sudo mv kubectl /usr/local/bin/kubectl
-        kubectl version --client
-
-    - name: Install yq
-      shell: bash
-      run: |
-        if [[ -x /usr/local/bin/yq ]]; then echo "yq already installed"; yq --version; exit 0; fi
-        YQ_VERSION="${{ inputs.yq_version }}"
-        sudo wget -qO /usr/local/bin/yq \
-          "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
-        sudo chmod +x /usr/local/bin/yq
-        yq --version
+    - name: Setup build tools
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_kind: 'true'
+        kind_version: '${{ inputs.kind_version }}'
+        install_helm: 'true'
+        helm_version: '${{ inputs.helm_version }}'
+        install_kubectl: 'true'
+        kubectl_version: '${{ inputs.kubectl_version }}'
+        install_yq: 'true'
+        yq_version: '${{ inputs.yq_version }}'
+        install_goreleaser: 'true'
 
     - name: Prep system for Kind cluster
       shell: bash
@@ -141,11 +101,6 @@ runs:
         sudo sysctl -w net.ipv4.ip_forward=1
         sudo sysctl -w fs.inotify.max_user_watches=524288
         sudo sysctl -w fs.inotify.max_user_instances=1024
-
-    - name: Install GoReleaser
-      uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6.4.0
-      with:
-        install-only: true
 
     - name: Build aicr binary
       shell: bash

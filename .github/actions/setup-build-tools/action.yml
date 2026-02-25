@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Setup Build Tools'
-description: 'Install container build and release tools (ko, syft, crane, goreleaser)'
+description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, kubectl, kind, yq)'
 
 inputs:
   install_ko:
@@ -33,13 +33,53 @@ inputs:
     required: false
     default: 'false'
   crane_version:
-    description: 'crane version (e.g. v0.20.6)'
+    description: 'crane version (e.g. v0.21.0)'
     required: false
-    default: 'v0.20.6'
+    default: 'v0.21.0'
   install_goreleaser:
     description: 'Install goreleaser (true/false)'
     required: false
     default: 'false'
+  install_chainsaw:
+    description: 'Install chainsaw (true/false)'
+    required: false
+    default: 'false'
+  chainsaw_version:
+    description: 'Chainsaw version (e.g. v0.2.14)'
+    required: false
+    default: 'v0.2.14'
+  install_helm:
+    description: 'Install helm (true/false)'
+    required: false
+    default: 'false'
+  helm_version:
+    description: 'Helm version (e.g. v4.1.1)'
+    required: false
+    default: 'v4.1.1'
+  install_kubectl:
+    description: 'Install kubectl (true/false)'
+    required: false
+    default: 'false'
+  kubectl_version:
+    description: 'kubectl version (e.g. v1.35.0)'
+    required: false
+    default: 'v1.35.0'
+  install_kind:
+    description: 'Install kind (true/false)'
+    required: false
+    default: 'false'
+  kind_version:
+    description: 'Kind version (e.g. 0.31.0)'
+    required: false
+    default: '0.31.0'
+  install_yq:
+    description: 'Install yq (true/false)'
+    required: false
+    default: 'false'
+  yq_version:
+    description: 'yq version (e.g. v4.52.4)'
+    required: false
+    default: 'v4.52.4'
 
 runs:
   using: 'composite'
@@ -105,3 +145,81 @@ runs:
       uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6.4.0
       with:
         install-only: true
+
+    - name: Install Chainsaw
+      if: inputs.install_chainsaw == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/chainsaw ]]; then echo "chainsaw already installed"; chainsaw version; exit 0; fi
+        VERSION="${{ inputs.chainsaw_version }}"
+        VERSION="${VERSION#v}"
+        TAR="chainsaw_linux_amd64.tar.gz"
+        URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
+        TMP="$(mktemp -d)"
+        curl -fsSL -o "${TMP}/${TAR}" "${URL}"
+        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
+        sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
+        sudo chmod +x /usr/local/bin/chainsaw
+        rm -rf "${TMP}"
+        chainsaw version
+
+    - name: Install Helm
+      if: inputs.install_helm == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/helm ]]; then echo "helm already installed"; helm version; exit 0; fi
+        HELM_VERSION="${{ inputs.helm_version }}"
+        HELM_VERSION="${HELM_VERSION#v}"
+        HELM_BASE="https://get.helm.sh"
+        HELM_TAR="helm-v${HELM_VERSION}-linux-amd64.tar.gz"
+        HELM_TMP="$(mktemp -d)"
+        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}" "${HELM_BASE}/${HELM_TAR}"
+        curl -fsSL -o "${HELM_TMP}/${HELM_TAR}.sha256sum" "${HELM_BASE}/${HELM_TAR}.sha256sum"
+        EXPECTED=$(awk '{print $1}' "${HELM_TMP}/${HELM_TAR}.sha256sum")
+        ACTUAL=$(sha256sum "${HELM_TMP}/${HELM_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::helm checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${HELM_TMP}/${HELM_TAR}" -C "${HELM_TMP}"
+        sudo mv "${HELM_TMP}/linux-amd64/helm" /usr/local/bin/helm
+        sudo chmod +x /usr/local/bin/helm
+        rm -rf "${HELM_TMP}"
+        helm version
+
+    - name: Install kubectl
+      if: inputs.install_kubectl == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/kubectl ]]; then echo "kubectl already installed"; kubectl version --client; exit 0; fi
+        ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+        curl -fsSL -o kubectl "https://dl.k8s.io/release/${{ inputs.kubectl_version }}/bin/linux/${ARCH}/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/kubectl
+        kubectl version --client
+
+    - name: Install Kind
+      if: inputs.install_kind == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/kind ]]; then echo "kind already installed"; kind version; exit 0; fi
+        curl -fsSL -o kind "https://kind.sigs.k8s.io/dl/v${{ inputs.kind_version }}/kind-linux-amd64"
+        chmod +x kind
+        sudo mv kind /usr/local/bin/kind
+        kind version
+
+    - name: Install yq
+      if: inputs.install_yq == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [[ -x /usr/local/bin/yq ]]; then echo "yq already installed"; yq --version; exit 0; fi
+        YQ_VERSION="${{ inputs.yq_version }}"
+        sudo curl -fsSL -o /usr/local/bin/yq \
+          "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+        sudo chmod +x /usr/local/bin/yq
+        yq --version
