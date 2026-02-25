@@ -130,6 +130,8 @@ components:
       defaultChart: skyhook-operator
       defaultNamespace: skyhook
     nodeScheduling:
+      nodeCountPaths:
+        - estimatedNodeCount
       system:
         nodeSelectorPaths:
           - controllerManager.selectors

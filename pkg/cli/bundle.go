@@ -49,6 +49,7 @@ type bundleCmdOptions struct {
 	acceleratedNodeTolerations []corev1.Toleration
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
+	estimatedNodeCount         int
 
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
@@ -168,6 +169,12 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-selector", err)
 	}
 
+	// Parse --nodes (estimated node count for bundle; 0 = unset)
+	if n := cmd.Int("nodes"); n < 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
+	}
+	opts.estimatedNodeCount = cmd.Int("nodes")
+
 	return opts, nil
 }
 
@@ -263,6 +270,11 @@ Package with explicit tag (overrides CLI version):
 				Name:  "workload-selector",
 				Usage: "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
 			},
+			&cli.IntFlag{
+				Name:  "nodes",
+				Value: 0,
+				Usage: "Estimated number of GPU nodes (sets estimatedNodeCount in skyhook-operator Helm values). 0 = unset.",
+			},
 			&cli.StringFlag{
 				Name:    "deployer",
 				Aliases: []string{"d"},
@@ -290,91 +302,76 @@ Package with explicit tag (overrides CLI version):
 				Usage: "Path to file where the published image reference will be written (only used with OCI output)",
 			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo"); err != nil {
-				return err
-			}
-
-			// Initialize external data provider if --data flag is set
-			if err := initDataProvider(cmd); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
-			}
-
-			opts, err := parseBundleCmdOptions(cmd)
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid bundle command options", err)
-			}
-
-			outputType := "Helm per-component bundle"
-			if opts.deployer == config.DeployerArgoCD {
-				outputType = "ArgoCD applications"
-			}
-			slog.Info("generating bundle",
-				slog.String("deployer", opts.deployer.String()),
-				slog.String("type", outputType),
-				slog.String("recipe", opts.recipeFilePath),
-				slog.String("output", opts.outputDir),
-				slog.Bool("oci", opts.ociRef != nil),
-			)
-
-			// Load recipe from file/URL/ConfigMap
-			rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](opts.recipeFilePath, opts.kubeconfig)
-			if err != nil {
-				slog.Error("failed to load recipe file", "error", err, "path", opts.recipeFilePath)
-				return errors.Wrap(errors.ErrCodeInternal, "failed to load recipe file", err)
-			}
-
-			// Create bundler with config
-			cfg := config.NewConfig(
-				config.WithVersion(version),
-				config.WithDeployer(opts.deployer),
-				config.WithRepoURL(opts.repoURL),
-				config.WithValueOverrides(opts.valueOverrides),
-				config.WithSystemNodeSelector(opts.systemNodeSelector),
-				config.WithSystemNodeTolerations(opts.systemNodeTolerations),
-				config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
-				config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
-				config.WithWorkloadGateTaint(opts.workloadGateTaint),
-				config.WithWorkloadSelector(opts.workloadSelector),
-			)
-
-			b, err := bundler.NewWithConfig(cfg)
-			if err != nil {
-				slog.Error("failed to create bundler", "error", err)
-				return err
-			}
-
-			// Generate bundle
-			out, err := b.Make(ctx, rec, opts.outputDir)
-			if err != nil {
-				slog.Error("bundle generation failed", "error", err)
-				return err
-			}
-
-			slog.Info("bundle generated",
-				"type", outputType,
-				"files", out.TotalFiles,
-				"size_bytes", out.TotalSize,
-				"duration_sec", out.TotalDuration.Seconds(),
-				"output_dir", out.OutputDir,
-			)
-
-			// Print deployment instructions (only for dir output)
-			if opts.ociRef == nil && out.Deployment != nil {
-				printDeploymentInstructions(out)
-			}
-
-			// Package and push as OCI artifact when output is oci://
-			if opts.ociRef != nil {
-				if err := pushOCIBundle(ctx, opts, out); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		},
+		Action: runBundleAction,
 	}
+}
+
+func runBundleAction(ctx context.Context, cmd *cli.Command) error {
+	if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo"); err != nil {
+		return err
+	}
+	if err := initDataProvider(cmd); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+	}
+	opts, err := parseBundleCmdOptions(cmd)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid bundle command options", err)
+	}
+	outputType := "Helm per-component bundle"
+	if opts.deployer == config.DeployerArgoCD {
+		outputType = "ArgoCD applications"
+	}
+	slog.Info("generating bundle",
+		slog.String("deployer", opts.deployer.String()),
+		slog.String("type", outputType),
+		slog.String("recipe", opts.recipeFilePath),
+		slog.String("output", opts.outputDir),
+		slog.Bool("oci", opts.ociRef != nil),
+	)
+	rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](opts.recipeFilePath, opts.kubeconfig)
+	if err != nil {
+		slog.Error("failed to load recipe file", "error", err, "path", opts.recipeFilePath)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to load recipe file", err)
+	}
+	cfg := config.NewConfig(
+		config.WithVersion(version),
+		config.WithDeployer(opts.deployer),
+		config.WithRepoURL(opts.repoURL),
+		config.WithValueOverrides(opts.valueOverrides),
+		config.WithSystemNodeSelector(opts.systemNodeSelector),
+		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
+		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
+		config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
+		config.WithWorkloadGateTaint(opts.workloadGateTaint),
+		config.WithWorkloadSelector(opts.workloadSelector),
+		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
+	)
+	b, err := bundler.NewWithConfig(cfg)
+	if err != nil {
+		slog.Error("failed to create bundler", "error", err)
+		return err
+	}
+	out, err := b.Make(ctx, rec, opts.outputDir)
+	if err != nil {
+		slog.Error("bundle generation failed", "error", err)
+		return err
+	}
+	slog.Info("bundle generated",
+		"type", outputType,
+		"files", out.TotalFiles,
+		"size_bytes", out.TotalSize,
+		"duration_sec", out.TotalDuration.Seconds(),
+		"output_dir", out.OutputDir,
+	)
+	if opts.ociRef == nil && out.Deployment != nil {
+		printDeploymentInstructions(out)
+	}
+	if opts.ociRef != nil {
+		if err := pushOCIBundle(ctx, opts, out); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // pushOCIBundle packages and pushes the bundle to an OCI registry.

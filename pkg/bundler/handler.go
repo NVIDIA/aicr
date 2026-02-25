@@ -50,6 +50,7 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 //   - accelerated-node-toleration: Tolerations for GPU nodes in format "key=value:effect" (can be repeated)
 //   - workload-gate: Taint for skyhook-operator runtime required in format "key=value:effect" or "key:effect"
 //   - workload-selector: Label selector for skyhook-customizations in format "key=value" (can be repeated)
+//   - nodes: Estimated number of GPU nodes (sets estimatedNodeCount in skyhook-operator; 0 = unset)
 //
 // The response is a zip archive containing the Helm per-component bundle:
 //   - README.md: Root deployment guide
@@ -137,6 +138,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 			config.WithAcceleratedNodeTolerations(params.acceleratedNodeTolerations),
 			config.WithWorkloadGateTaint(params.workloadGateTaint),
 			config.WithWorkloadSelector(params.workloadSelector),
+			config.WithEstimatedNodeCount(params.estimatedNodeCount),
 			config.WithDeployer(params.deployer),
 			config.WithRepoURL(params.repoURL),
 		)),
@@ -257,6 +259,7 @@ type bundleParams struct {
 	acceleratedNodeTolerations []corev1.Toleration
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
+	estimatedNodeCount         int
 	deployer                   config.DeployerType
 	repoURL                    string
 }
@@ -325,6 +328,15 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	params.workloadSelector, err = snapshotter.ParseNodeSelectors(query["workload-selector"])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid workload-selector parameter", err)
+	}
+
+	// Parse nodes (estimated node count; 0 = unset)
+	if nodesStr := query.Get("nodes"); nodesStr != "" {
+		n, parseErr := strconv.Atoi(nodesStr)
+		if parseErr != nil || n < 0 {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "nodes must be a non-negative integer")
+		}
+		params.estimatedNodeCount = n
 	}
 
 	return params, nil

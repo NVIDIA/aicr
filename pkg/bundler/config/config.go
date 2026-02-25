@@ -106,6 +106,9 @@ type Config struct {
 
 	// workloadSelector contains label selector for skyhook-customizations to prevent eviction of running training jobs.
 	workloadSelector map[string]string
+
+	// estimatedNodeCount is the estimated number of GPU nodes (0 = unset). Used by skyhook-operator for estimatedNodeCount Helm value.
+	estimatedNodeCount int
 }
 
 // Getter methods for read-only access
@@ -219,6 +222,11 @@ func (c *Config) WorkloadSelector() map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+// EstimatedNodeCount returns the estimated number of GPU nodes (0 means unset).
+func (c *Config) EstimatedNodeCount() int {
+	return c.estimatedNodeCount
 }
 
 // Validate checks if the Config has valid settings.
@@ -358,6 +366,13 @@ func WithWorkloadSelector(selector map[string]string) Option {
 		for k, v := range selector {
 			c.workloadSelector[k] = v
 		}
+	}
+}
+
+// WithEstimatedNodeCount sets the estimated number of GPU nodes (e.g. for skyhook-operator estimatedNodeCount). 0 means unset.
+func WithEstimatedNodeCount(n int) Option {
+	return func(c *Config) {
+		c.estimatedNodeCount = n
 	}
 }
 
