@@ -15,5 +15,4 @@
 | 5 | `ai_inference` | Inference API Gateway (kgateway) | PASS | [inference-gateway.md](inference-gateway.md) |
 | 6 | `robust_controller` | Robust AI Operator (Dynamo) | PASS | [robust-operator.md](robust-operator.md) |
 | 7 | `pod_autoscaling` | Pod Autoscaling (HPA + GPU metrics) | PASS | [pod-autoscaling.md](pod-autoscaling.md) |
-
 | 8 | `cluster_autoscaling` | Cluster Autoscaling (EKS ASG) | PASS | [cluster-autoscaling.md](cluster-autoscaling.md) |

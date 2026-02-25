@@ -1,6 +1,7 @@
 # Inference API Gateway (kgateway)
 
-**Generated:** 2026-02-19 19:33:55 UTC
+**Recipe:** `h100-eks-ubuntu-inference-dynamo`
+**Generated:** 2026-02-24 20:22:48 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -26,16 +27,16 @@ with an implementation for advanced traffic management for inference services.
 ```
 $ kubectl get deploy -n kgateway-system
 NAME                READY   UP-TO-DATE   AVAILABLE   AGE
-inference-gateway   1/1     1            1           6d23h
-kgateway            1/1     1            1           6d23h
+inference-gateway   1/1     1            1           11d
+kgateway            1/1     1            1           11d
 ```
 
 **kgateway pods**
 ```
 $ kubectl get pods -n kgateway-system
 NAME                                 READY   STATUS    RESTARTS   AGE
-inference-gateway-7cc77867db-pcvd6   1/1     Running   0          19h
-kgateway-754f8c47b-m8jbk             1/1     Running   0          19h
+inference-gateway-7cc77867db-pcvd6   1/1     Running   0          5d20h
+kgateway-754f8c47b-m8jbk             1/1     Running   0          5d20h
 ```
 
 ## GatewayClass
@@ -44,8 +45,8 @@ kgateway-754f8c47b-m8jbk             1/1     Running   0          19h
 ```
 $ kubectl get gatewayclass
 NAME                CONTROLLER              ACCEPTED   AGE
-kgateway            kgateway.dev/kgateway   True       6d23h
-kgateway-waypoint   kgateway.dev/kgateway   True       6d23h
+kgateway            kgateway.dev/kgateway   True       11d
+kgateway-waypoint   kgateway.dev/kgateway   True       11d
 ```
 
 ## Gateway API CRDs
@@ -82,7 +83,7 @@ inferencepools.inference.networking.x-k8s.io           2026-02-13T04:02:06Z
 ```
 $ kubectl get gateways -A
 NAMESPACE         NAME                CLASS      ADDRESS                                                                 PROGRAMMED   AGE
-kgateway-system   inference-gateway   kgateway   a54ce9a4a35c046319fe83adf42874ea-40675078.us-east-1.elb.amazonaws.com   True         6d23h
+kgateway-system   inference-gateway   kgateway   a54ce9a4a35c046319fe83adf42874ea-40675078.us-east-1.elb.amazonaws.com   True         11d
 ```
 
 **Gateway details**
@@ -162,6 +163,22 @@ status:
       kind: HTTPRoute
 ```
 
+### Gateway Conditions
+
+Verify GatewayClass is Accepted and Gateway is Programmed (not just created).
+
+**GatewayClass conditions**
+```
+Accepted: True (Accepted)
+SupportedVersion: True (SupportedVersion)
+```
+
+**Gateway conditions**
+```
+Accepted: True (Accepted)
+Programmed: True (Programmed)
+```
+
 ## Inference Resources
 
 **InferencePools**
@@ -176,4 +193,4 @@ $ kubectl get httproutes -A
 No resources found
 ```
 
-**Result: PASS** — kgateway controller running, Gateway API and inference extension CRDs installed, active Gateway programmed with external address.
+**Result: PASS** — kgateway controller running, GatewayClass Accepted, Gateway Programmed, inference CRDs installed.

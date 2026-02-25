@@ -30,6 +30,13 @@ var httpRouteGVR = schema.GroupVersionResource{
 	Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes",
 }
 
+type gatewayDataPlaneReport struct {
+	ListenerAttachedRoutes []string
+	AttachedHTTPRoutes     int
+	MatchingEndpointSlices int
+	ReadyEndpoints         int
+}
+
 func init() {
 	checks.RegisterCheck(&checks.Check{
 		Name:                  "inference-gateway",
@@ -62,11 +69,18 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "GatewayClass 'kgateway' not found", err)
 	}
-	if condErr := checkCondition(gc, "Accepted", "True"); condErr != nil {
+	gcCond, condErr := getConditionObservation(gc, "Accepted")
+	if condErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "GatewayClass not accepted", condErr)
 	}
+	if gcCond.Status != "True" {
+		return errors.Wrap(errors.ErrCodeInternal, "GatewayClass not accepted",
+			errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("condition Accepted=%s (want True)", gcCond.Status)))
+	}
 	recordArtifact(ctx, "GatewayClass Status",
-		"Name:     kgateway\nAccepted: True")
+		fmt.Sprintf("Name:      %s\nAccepted:  %s\nReason:    %s\nMessage:   %s",
+			gc.GetName(), gcCond.Status, gcCond.Reason, gcCond.Message))
 
 	// 2. Gateway "inference-gateway" programmed
 	gwGVR := schema.GroupVersionResource{
@@ -77,11 +91,18 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "Gateway 'inference-gateway' not found", err)
 	}
-	if condErr := checkCondition(gw, "Programmed", "True"); condErr != nil {
+	gwCond, condErr := getConditionObservation(gw, "Programmed")
+	if condErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "Gateway not programmed", condErr)
 	}
+	if gwCond.Status != "True" {
+		return errors.Wrap(errors.ErrCodeInternal, "Gateway not programmed",
+			errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("condition Programmed=%s (want True)", gwCond.Status)))
+	}
 	recordArtifact(ctx, "Gateway Status",
-		"Name:       inference-gateway\nNamespace:  kgateway-system\nProgrammed: True")
+		fmt.Sprintf("Name:       %s\nNamespace:  %s\nProgrammed: %s\nReason:     %s\nMessage:    %s",
+			gw.GetName(), gw.GetNamespace(), gwCond.Status, gwCond.Reason, gwCond.Message))
 
 	// 3. Required CRDs exist
 	crdGVR := schema.GroupVersionResource{
@@ -94,30 +115,44 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	}
 	var crdSummary strings.Builder
 	for _, crdName := range requiredCRDs {
-		_, err := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{})
-		if err != nil {
+		_, crdErr := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{})
+		if crdErr != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
-				fmt.Sprintf("CRD %s not found", crdName), err)
+				fmt.Sprintf("CRD %s not found", crdName), crdErr)
 		}
 		fmt.Fprintf(&crdSummary, "  %s: present\n", crdName)
 	}
 	recordArtifact(ctx, "Required CRDs", crdSummary.String())
 
 	// 4. Gateway data-plane readiness (behavioral validation).
-	return validateGatewayDataPlane(ctx)
+	dpReport, err := validateGatewayDataPlane(ctx)
+	if err != nil {
+		return err
+	}
+
+	listenerSummary := "none"
+	if len(dpReport.ListenerAttachedRoutes) > 0 {
+		listenerSummary = strings.Join(dpReport.ListenerAttachedRoutes, ", ")
+	}
+	recordArtifact(ctx, "Gateway Data Plane",
+		fmt.Sprintf("Listeners: %s\nAttached HTTPRoutes: %d\nMatching EndpointSlices: %d\nReady Endpoints: %d",
+			listenerSummary, dpReport.AttachedHTTPRoutes, dpReport.MatchingEndpointSlices, dpReport.ReadyEndpoints))
+	return nil
 }
 
 // validateGatewayDataPlane verifies the gateway data plane is operational by checking
 // listener status, discovering attached HTTPRoutes, and confirming ready proxy endpoints.
-func validateGatewayDataPlane(ctx *checks.ValidationContext) error {
+func validateGatewayDataPlane(ctx *checks.ValidationContext) (*gatewayDataPlaneReport, error) {
+	report := &gatewayDataPlaneReport{}
+
 	if ctx.Clientset == nil {
-		return errors.New(errors.ErrCodeInvalidRequest,
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"kubernetes client is not available for endpoint validation")
 	}
 
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// 1. Listener status (informational): log attached routes count.
@@ -133,6 +168,8 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) error {
 				if lMap, ok := l.(map[string]interface{}); ok {
 					name, _, _ := unstructured.NestedString(lMap, "name")
 					attached, _, _ := unstructured.NestedInt64(lMap, "attachedRoutes")
+					report.ListenerAttachedRoutes = append(report.ListenerAttachedRoutes,
+						fmt.Sprintf("%s=%d", name, attached))
 					slog.Info("gateway listener status", "listener", name, "attachedRoutes", attached)
 				}
 			}
@@ -159,6 +196,7 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) error {
 				}
 			}
 		}
+		report.AttachedHTTPRoutes = attached
 		slog.Info("HTTPRoutes attached to inference-gateway", "count", attached)
 	}
 
@@ -168,34 +206,27 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) error {
 	slices, err := ctx.Clientset.DiscoveryV1().EndpointSlices("kgateway-system").List(
 		ctx.Context, metav1.ListOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
+		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to list EndpointSlices in kgateway-system", err)
 	}
 
-	var hasReadyEndpoint bool
 	for _, slice := range slices.Items {
 		svcName := slice.Labels["kubernetes.io/service-name"]
 		if !strings.Contains(svcName, "inference-gateway") {
 			continue
 		}
+		report.MatchingEndpointSlices++
 		for _, ep := range slice.Endpoints {
 			if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
-				hasReadyEndpoint = true
-				break
+				report.ReadyEndpoints++
 			}
-		}
-		if hasReadyEndpoint {
-			break
 		}
 	}
 
-	if !hasReadyEndpoint {
-		return errors.New(errors.ErrCodeInternal,
+	if report.ReadyEndpoints == 0 {
+		return nil, errors.New(errors.ErrCodeInternal,
 			"no ready endpoints for inference-gateway proxy in kgateway-system")
 	}
 
-	recordArtifact(ctx, "Gateway Data Plane",
-		"Endpoint readiness: ready endpoints found for inference-gateway proxy")
-
-	return nil
+	return report, nil
 }

@@ -42,6 +42,16 @@ const (
 	karpenterNodePoolLabel = "karpenter.sh/nodepool"
 )
 
+type clusterAutoscalingReport struct {
+	NodePool      string
+	HPADesired    int32
+	HPACurrent    int32
+	BaselineNodes int
+	ObservedNodes int
+	TotalPods     int
+	ScheduledPods int
+}
+
 func init() {
 	checks.RegisterCheck(&checks.Check{
 		Name:                  "cluster-autoscaling",
@@ -122,14 +132,19 @@ func CheckClusterAutoscaling(ctx *checks.ValidationContext) error {
 	var lastErr error
 	for _, poolName := range gpuNodePoolNames {
 		slog.Info("attempting behavioral validation with NodePool", "nodePool", poolName)
-		lastErr = validateClusterAutoscaling(ctx.Context, ctx.Clientset, poolName)
-		if lastErr == nil {
+		report, runErr := validateClusterAutoscaling(ctx.Context, ctx.Clientset, poolName)
+		if runErr == nil {
 			recordArtifact(ctx, "Cluster Autoscaling Behavioral Test",
-				fmt.Sprintf("NodePool:    %s\nHPA:         scaling intent detected\nKarpenter:   new node(s) provisioned\nPods:        scheduled on new nodes", poolName))
+				fmt.Sprintf("NodePool:          %s\nHPA desired/current: %d/%d\nKarpenter nodes:   baseline=%d observed=%d new=%d\nPods scheduled:    %d/%d",
+					report.NodePool,
+					report.HPADesired, report.HPACurrent,
+					report.BaselineNodes, report.ObservedNodes, report.ObservedNodes-report.BaselineNodes,
+					report.ScheduledPods, report.TotalPods))
 			return nil
 		}
+		lastErr = runErr
 		slog.Debug("behavioral validation failed for NodePool",
-			"nodePool", poolName, "error", lastErr)
+			"nodePool", poolName, "error", runErr)
 	}
 	return lastErr
 }
@@ -138,11 +153,15 @@ func CheckClusterAutoscaling(ctx *checks.ValidationContext) error {
 // Deployment + HPA (external metric) → HPA computes scale-up → Karpenter provisions
 // KWOK nodes → pods are scheduled. This proves the chain works end-to-end.
 // nodePoolName is the discovered GPU NodePool name from the precheck.
-func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interface, nodePoolName string) error {
+func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interface, nodePoolName string) (*clusterAutoscalingReport, error) {
+	report := &clusterAutoscalingReport{
+		NodePool: nodePoolName,
+	}
+
 	// Generate unique test resource names and namespace (prevents cross-run interference).
 	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate random suffix", err)
 	}
 	suffix := hex.EncodeToString(b)
 	nsName := clusterAutoTestPrefix + suffix
@@ -154,7 +173,7 @@ func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interf
 		ObjectMeta: metav1.ObjectMeta{Name: nsName},
 	}
 	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test namespace", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test namespace", err)
 	}
 
 	// Cleanup: delete namespace (cascades all resources, triggers Karpenter consolidation).
@@ -175,37 +194,51 @@ func validateClusterAutoscaling(ctx context.Context, clientset kubernetes.Interf
 		LabelSelector: fmt.Sprintf("%s=%s", karpenterNodePoolLabel, nodePoolName),
 	})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to count baseline Karpenter nodes", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to count baseline Karpenter nodes", err)
 	}
 	baselineNodeCount := len(baselineNodes.Items)
+	report.BaselineNodes = baselineNodeCount
 	slog.Info("baseline Karpenter node count", "pool", nodePoolName, "count", baselineNodeCount)
 
 	// Create Deployment: GPU-requesting pods with Karpenter nodeSelector.
 	deploy := buildClusterAutoTestDeployment(deployName, nsName, nodePoolName)
-	if _, err := clientset.AppsV1().Deployments(nsName).Create(
-		ctx, deploy, metav1.CreateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test deployment", err)
+	_, createErr := clientset.AppsV1().Deployments(nsName).Create(
+		ctx, deploy, metav1.CreateOptions{})
+	if createErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test deployment", createErr)
 	}
 
 	// Create HPA targeting external metric dcgm_gpu_power_usage.
 	hpa := buildClusterAutoTestHPA(hpaName, deployName, nsName)
-	if _, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Create(
-		ctx, hpa, metav1.CreateOptions{}); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test HPA", err)
+	_, createErr = clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Create(
+		ctx, hpa, metav1.CreateOptions{})
+	if createErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create cluster autoscaling test HPA", createErr)
 	}
 
 	// Wait for HPA to report scaling intent.
-	if err := waitForClusterAutoHPAScale(ctx, clientset, nsName, hpaName); err != nil {
-		return err
+	desired, current, err := waitForHPAScaleUp(ctx, clientset, nsName, hpaName, "cluster autoscaling")
+	if err != nil {
+		return nil, err
 	}
+	report.HPADesired = desired
+	report.HPACurrent = current
 
 	// Wait for Karpenter to provision KWOK nodes (above baseline count).
-	if err := waitForKarpenterNodes(ctx, clientset, nodePoolName, baselineNodeCount); err != nil {
-		return err
+	observedNodes, err := waitForKarpenterNodes(ctx, clientset, nodePoolName, baselineNodeCount)
+	if err != nil {
+		return nil, err
 	}
+	report.ObservedNodes = observedNodes
 
 	// Verify pods are scheduled (not Pending) with poll loop.
-	return verifyPodsScheduled(ctx, clientset, nsName)
+	totalPods, scheduledPods, err := verifyPodsScheduled(ctx, clientset, nsName)
+	if err != nil {
+		return nil, err
+	}
+	report.TotalPods = totalPods
+	report.ScheduledPods = scheduledPods
+	return report, nil
 }
 
 // buildClusterAutoTestDeployment creates a Deployment that requests GPU resources
@@ -317,45 +350,10 @@ func buildClusterAutoTestHPA(name, deployName, namespace string) *autoscalingv2.
 	}
 }
 
-// waitForClusterAutoHPAScale polls the HPA until desiredReplicas > currentReplicas.
-func waitForClusterAutoHPAScale(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName string) error {
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
-				ctx, hpaName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("HPA not ready yet", "error", getErr)
-				return false, nil
-			}
-
-			desired := hpa.Status.DesiredReplicas
-			current := hpa.Status.CurrentReplicas
-			slog.Debug("cluster autoscaling HPA status", "desired", desired, "current", current)
-
-			if desired > current {
-				slog.Info("cluster autoscaling HPA scaling intent detected",
-					"desiredReplicas", desired, "currentReplicas", current)
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"HPA did not report scaling intent — external metrics pipeline may be broken", err)
-		}
-		return errors.Wrap(errors.ErrCodeInternal, "HPA scaling intent polling failed", err)
-	}
-	return nil
-}
-
 // waitForKarpenterNodes polls until nodes with the discovered NodePool label exceed the
 // baseline count. This proves Karpenter provisioned NEW nodes, not just pre-existing ones.
-func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, nodePoolName string, baselineNodeCount int) error {
+func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, nodePoolName string, baselineNodeCount int) (int, error) {
+	var observedNodeCount int
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.KarpenterNodeTimeout)
 	defer cancel()
 
@@ -369,10 +367,11 @@ func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, 
 				return false, nil
 			}
 
-			if len(nodes.Items) > baselineNodeCount {
+			observedNodeCount = len(nodes.Items)
+			if observedNodeCount > baselineNodeCount {
 				slog.Info("Karpenter provisioned new KWOK GPU node(s)",
-					"total", len(nodes.Items), "baseline", baselineNodeCount,
-					"new", len(nodes.Items)-baselineNodeCount)
+					"total", observedNodeCount, "baseline", baselineNodeCount,
+					"new", observedNodeCount-baselineNodeCount)
 				return true, nil
 			}
 			return false, nil
@@ -380,18 +379,20 @@ func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, 
 	)
 	if err != nil {
 		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
+			return 0, errors.Wrap(errors.ErrCodeTimeout,
 				"Karpenter did not provision GPU nodes within timeout", err)
 		}
-		return errors.Wrap(errors.ErrCodeInternal, "Karpenter node polling failed", err)
+		return 0, errors.Wrap(errors.ErrCodeInternal, "Karpenter node polling failed", err)
 	}
-	return nil
+	return observedNodeCount, nil
 }
 
 // verifyPodsScheduled polls until pods in the unique test namespace are scheduled (not Pending).
 // This proves the full chain: HPA → scale → Karpenter → nodes → pods scheduled.
 // The namespace is unique per run, so all pods belong to this test — no stale pod interference.
-func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, namespace string) (int, int, error) {
+	var observedTotal int
+	var observedScheduled int
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.PodScheduleTimeout)
 	defer cancel()
 
@@ -403,8 +404,9 @@ func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, na
 				return false, nil
 			}
 
-			if len(pods.Items) < 2 {
-				slog.Debug("waiting for HPA-scaled pods", "count", len(pods.Items))
+			observedTotal = len(pods.Items)
+			if observedTotal < 2 {
+				slog.Debug("waiting for HPA-scaled pods", "count", observedTotal)
 				return false, nil
 			}
 
@@ -415,12 +417,13 @@ func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, na
 				}
 			}
 
+			observedScheduled = scheduled
 			slog.Debug("cluster autoscaling pod status",
-				"total", len(pods.Items), "scheduled", scheduled)
+				"total", observedTotal, "scheduled", observedScheduled)
 
-			if scheduled >= 2 {
+			if observedScheduled >= 2 {
 				slog.Info("cluster autoscaling pods verified",
-					"total", len(pods.Items), "scheduled", scheduled)
+					"total", observedTotal, "scheduled", observedScheduled)
 				return true, nil
 			}
 			return false, nil
@@ -428,10 +431,10 @@ func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, na
 	)
 	if err != nil {
 		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
+			return 0, 0, errors.Wrap(errors.ErrCodeTimeout,
 				"test pods not scheduled within timeout — Karpenter nodes may not be ready", err)
 		}
-		return errors.Wrap(errors.ErrCodeInternal, "pod scheduling verification failed", err)
+		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "pod scheduling verification failed", err)
 	}
-	return nil
+	return observedTotal, observedScheduled, nil
 }

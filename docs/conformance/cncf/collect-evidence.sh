@@ -137,6 +137,9 @@ Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device acce
 
 **Test manifest:** `docs/conformance/cncf/manifests/dra-gpu-test.yaml`
 EOF
+    echo '```yaml' >> "${EVIDENCE_FILE}"
+    cat "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
     kubectl delete namespace dra-test --ignore-not-found --wait=false 2>/dev/null || true
@@ -202,6 +205,9 @@ pods are scheduled atomically.
 
 **Test manifest:** `docs/conformance/cncf/manifests/gang-scheduling-test.yaml`
 EOF
+    echo '```yaml' >> "${EVIDENCE_FILE}"
+    cat "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
     kubectl delete namespace gang-scheduling-test --ignore-not-found --wait=false 2>/dev/null || true
@@ -606,17 +612,38 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
+### Gateway Conditions
+
+Verify GatewayClass is Accepted and Gateway is Programmed (not just created).
+EOF
+    # Check GatewayClass Accepted condition
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**GatewayClass conditions**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl get gatewayclass kgateway -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Check Gateway Programmed condition
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Gateway conditions**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl get gateway inference-gateway -n kgateway-system -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
 ## Inference Resources
 EOF
     capture "InferencePools" kubectl get inferencepools -A
     capture "HTTPRoutes" kubectl get httproutes -A
 
-    # Verdict
+    # Verdict — check both GatewayClass Accepted and Gateway Programmed
     echo "" >> "${EVIDENCE_FILE}"
-    local gw_count
-    gw_count=$(kubectl get gateways -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    if [ "${gw_count}" -gt 0 ]; then
-        echo "**Result: PASS** — kgateway controller running, Gateway API and inference extension CRDs installed, active Gateway programmed with external address." >> "${EVIDENCE_FILE}"
+    local gw_accepted gw_programmed
+    gw_accepted=$(kubectl get gatewayclass kgateway -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
+    gw_programmed=$(kubectl get gateway inference-gateway -n kgateway-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
+    if [ "${gw_accepted}" = "True" ] && [ "${gw_programmed}" = "True" ]; then
+        echo "**Result: PASS** — kgateway controller running, GatewayClass Accepted, Gateway Programmed, inference CRDs installed." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — No active Gateway found." >> "${EVIDENCE_FILE}"
     fi
@@ -695,12 +722,48 @@ EOF
 EOF
     capture "DynamoComponentDeployments" kubectl get dynamocomponentdeployments -n dynamo-workload
 
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Webhook Rejection Test
+
+Submit an invalid DynamoGraphDeployment to verify the validating webhook
+actively rejects malformed resources.
+EOF
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Invalid CR rejection**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    # Submit an invalid DynamoGraphDeployment (empty spec) — webhook should reject it
+    local webhook_result
+    webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: webhook-test-invalid
+  namespace: default
+spec: {}
+INVALID_CR
+)
+    echo "${webhook_result}" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Check if webhook rejected it
+    echo "" >> "${EVIDENCE_FILE}"
+    if echo "${webhook_result}" | grep -qi "denied\|forbidden\|invalid\|error"; then
+        echo "Webhook correctly rejected the invalid resource." >> "${EVIDENCE_FILE}"
+    else
+        echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
+    fi
+
     # Verdict
     echo "" >> "${EVIDENCE_FILE}"
     local dgd_count
     dgd_count=$(kubectl get dynamographdeployments -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    if [ "${dgd_count}" -gt 0 ]; then
-        echo "**Result: PASS** — Dynamo operator running, webhooks operational, CRDs registered, DynamoGraphDeployment reconciled with workload pods." >> "${EVIDENCE_FILE}"
+    local webhook_ok
+    webhook_ok=$(echo "${webhook_result}" | grep -ci "denied\|forbidden\|invalid\|error" || true)
+    if [ "${dgd_count}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
+        echo "**Result: PASS** — Dynamo operator running, webhooks operational (rejection verified), CRDs registered, DynamoGraphDeployment reconciled with workload pods." >> "${EVIDENCE_FILE}"
+    elif [ "${dgd_count}" -gt 0 ]; then
+        echo "**Result: PASS** — Dynamo operator running, CRDs registered, DynamoGraphDeployment reconciled with workload pods." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — No DynamoGraphDeployment found." >> "${EVIDENCE_FILE}"
     fi
@@ -722,10 +785,11 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 
 1. **Prometheus Adapter** — Exposes GPU metrics via Kubernetes custom metrics API
 2. **Custom Metrics API** — `gpu_utilization`, `gpu_memory_used`, `gpu_power_usage` available
-3. **GPU Stress Workload** — Deployment running gpu-burn to generate GPU load
+3. **GPU Stress Workload** — Deployment running CUDA N-Body Simulation to generate GPU load
 4. **HPA Configuration** — Targets `gpu_utilization` with threshold of 50%
-5. **HPA Scaling** — Successfully reads GPU metrics and scales replicas when utilization exceeds target
-6. **Result: PASS**
+5. **HPA Scale-Up** — Successfully scales replicas when GPU utilization exceeds target
+6. **HPA Scale-Down** — Successfully scales back down when GPU load is removed
+7. **Result: PASS**
 
 ---
 
@@ -750,11 +814,14 @@ EOF
 
 ## GPU Stress Test Deployment
 
-Deploy a GPU workload running gpu-burn to generate sustained GPU utilization,
+Deploy a GPU workload running CUDA N-Body Simulation to generate sustained GPU utilization,
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
 **Test manifest:** `docs/conformance/cncf/manifests/hpa-gpu-test.yaml`
 EOF
+    echo '```yaml' >> "${EVIDENCE_FILE}"
+    cat "${SCRIPT_DIR}/manifests/hpa-gpu-test.yaml" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
     kubectl delete namespace hpa-test --ignore-not-found 2>/dev/null || true
@@ -814,14 +881,86 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Pods After Scaling
+## Pods After Scale-Up
 EOF
-    capture "Pods" kubectl get pods -n hpa-test -o wide
+    capture "Pods after scale-up" kubectl get pods -n hpa-test -o wide
+
+    # Scale-down test: delete the deployment to remove GPU load, verify HPA scales down
+    local hpa_scaled_down=false
+    if [ "${hpa_scaled}" = "true" ]; then
+        cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Scale-Down Verification
+
+Scale the deployment to 0, replace GPU workload with an idle container, then
+scale back to 1. Verify HPA detects reduced utilization and scales down.
+EOF
+        log_info "Stopping GPU workload for scale-down test..."
+        # Delete the GPU-intensive deployment and replace with an idle one.
+        # This cleanly stops GPU load without rollout errors or Error status.
+        kubectl delete deployment gpu-workload -n hpa-test --wait=true --timeout=30s 2>/dev/null || true
+        kubectl wait --for=delete pod -n hpa-test -l app=gpu-workload --timeout=60s 2>/dev/null || true
+
+        # Create idle deployment (no GPU, just sleep) targeting the same HPA
+        kubectl apply -n hpa-test -f - 2>/dev/null <<'IDLE_DEPLOY'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-workload
+  namespace: hpa-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gpu-workload
+  template:
+    metadata:
+      labels:
+        app: gpu-workload
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: gpu-worker
+          image: ubuntu:22.04
+          command: ["sleep", "600"]
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+IDLE_DEPLOY
+        kubectl wait --for=condition=Ready pod -n hpa-test -l app=gpu-workload --timeout=60s 2>/dev/null || true
+
+        log_info "Waiting for HPA scale-down (up to 5 minutes)..."
+        for i in $(seq 1 20); do
+            sleep 15
+            replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
+            targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
+            log_info "  Scale-down check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-?}"
+            if [ "${replicas}" = "1" ] && [ -n "${targets}" ]; then
+                hpa_scaled_down=true
+                break
+            fi
+        done
+
+        capture "HPA after scale-down" kubectl get hpa -n hpa-test
+        capture "Pods after scale-down" kubectl get pods -n hpa-test -o wide
+        capture "HPA events" kubectl describe hpa gpu-workload-hpa -n hpa-test
+    fi
 
     # Verdict — require actual scaling for PASS
     echo "" >> "${EVIDENCE_FILE}"
-    if [ "${hpa_scaled}" = "true" ]; then
-        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold." >> "${EVIDENCE_FILE}"
+    if [ "${hpa_scaled}" = "true" ] && [ "${hpa_scaled_down}" = "true" ]; then
+        echo "**Result: PASS** — HPA successfully scaled up when GPU utilization exceeded target, and scaled back down when load was removed." >> "${EVIDENCE_FILE}"
+    elif [ "${hpa_scaled}" = "true" ]; then
+        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold. Scale-down not verified within timeout." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — HPA did not scale replicas within the timeout. Check GPU workload, DCGM exporter, and prometheus-adapter configuration." >> "${EVIDENCE_FILE}"
     fi

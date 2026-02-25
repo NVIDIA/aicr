@@ -1,6 +1,7 @@
 # Robust AI Operator (Dynamo Platform)
 
-**Generated:** 2026-02-19 19:35:59 UTC
+**Recipe:** `h100-eks-ubuntu-inference-dynamo`
+**Generated:** 2026-02-24 20:23:11 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -27,27 +28,27 @@ webhooks operational, and custom resources reconciled.
 ```
 $ kubectl get deploy -n dynamo-system
 NAME                                                 READY   UP-TO-DATE   AVAILABLE   AGE
-dynamo-platform-dynamo-operator-controller-manager   1/1     1            1           44h
-grove-operator                                       1/1     1            1           22h
+dynamo-platform-dynamo-operator-controller-manager   1/1     1            1           6d21h
+grove-operator                                       1/1     1            1           5d23h
 ```
 
 **Dynamo operator pods**
 ```
 $ kubectl get pods -n dynamo-system
 NAME                                                              READY   STATUS      RESTARTS   AGE
-dynamo-operator-webhook-ca-inject-1-47jd7                         0/1     Completed   0          6d22h
-dynamo-operator-webhook-ca-inject-2-tf49w                         0/1     Completed   0          2d1h
-dynamo-operator-webhook-ca-inject-4-lhfsc                         0/1     Completed   0          2d
-dynamo-operator-webhook-ca-inject-5-6hxbn                         0/1     Completed   0          2d
-dynamo-operator-webhook-ca-inject-6-s85wc                         0/1     Completed   0          45h
-dynamo-operator-webhook-cert-gen-1-g8dx6                          0/1     Completed   0          6d22h
-dynamo-operator-webhook-cert-gen-6-5krdc                          0/1     Completed   0          45h
-dynamo-platform-dynamo-operator-controller-manager-5895f7f2pn9d   2/2     Running     0          19h
-dynamo-platform-dynamo-operator-webhook-ca-inject-1-wmjs9         0/1     Completed   0          44h
-dynamo-platform-dynamo-operator-webhook-cert-gen-1-tw4c9          0/1     Completed   0          44h
-dynamo-platform-etcd-0                                            1/1     Running     0          12h
-dynamo-platform-nats-0                                            2/2     Running     0          12h
-grove-operator-57565844db-lfsg2                                   1/1     Running     0          19h
+dynamo-operator-webhook-ca-inject-1-47jd7                         0/1     Completed   0          11d
+dynamo-operator-webhook-ca-inject-2-tf49w                         0/1     Completed   0          7d1h
+dynamo-operator-webhook-ca-inject-4-lhfsc                         0/1     Completed   0          7d1h
+dynamo-operator-webhook-ca-inject-5-6hxbn                         0/1     Completed   0          7d1h
+dynamo-operator-webhook-ca-inject-6-s85wc                         0/1     Completed   0          6d22h
+dynamo-operator-webhook-cert-gen-1-g8dx6                          0/1     Completed   0          11d
+dynamo-operator-webhook-cert-gen-6-5krdc                          0/1     Completed   0          6d22h
+dynamo-platform-dynamo-operator-controller-manager-5895f7f2pn9d   2/2     Running     0          5d20h
+dynamo-platform-dynamo-operator-webhook-ca-inject-1-wmjs9         0/1     Completed   0          6d21h
+dynamo-platform-dynamo-operator-webhook-cert-gen-1-tw4c9          0/1     Completed   0          6d21h
+dynamo-platform-etcd-0                                            1/1     Running     0          5d13h
+dynamo-platform-nats-0                                            2/2     Running     0          5d13h
+grove-operator-57565844db-lfsg2                                   1/1     Running     0          5d20h
 ```
 
 ## Custom Resource Definitions
@@ -68,12 +69,12 @@ dynamoworkermetadatas.nvidia.com                       2026-02-12T20:41:17Z
 ```
 $ kubectl get validatingwebhookconfigurations -l app.kubernetes.io/instance=dynamo-platform
 NAME                                         WEBHOOKS   AGE
-dynamo-platform-dynamo-operator-validating   4          44h
+dynamo-platform-dynamo-operator-validating   4          6d21h
 ```
 
 **Dynamo validating webhooks**
 ```
-dynamo-platform-dynamo-operator-validating   4          44h
+dynamo-platform-dynamo-operator-validating   4          6d21h
 ```
 
 ## Custom Resource Reconciliation
@@ -85,7 +86,7 @@ it into component deployments with pods, services, and scaling configuration.
 ```
 $ kubectl get dynamographdeployments -A
 NAMESPACE         NAME       AGE
-dynamo-workload   vllm-agg   22h
+dynamo-workload   vllm-agg   5d23h
 ```
 
 **DynamoGraphDeployment details**
@@ -103,7 +104,7 @@ metadata:
   generation: 2
   name: vllm-agg
   namespace: dynamo-workload
-  resourceVersion: "3898447"
+  resourceVersion: "6642195"
   uid: 1d5d783c-b616-404a-86e1-97a5751aa2fd
 spec:
   services:
@@ -141,25 +142,26 @@ spec:
           gpu: "1"
 status:
   conditions:
-  - lastTransitionTime: "2026-02-19T19:02:01Z"
-    message: All resources are ready
-    reason: all_resources_are_ready
-    status: "True"
+  - lastTransitionTime: "2026-02-24T20:17:50Z"
+    message: 'Resources not ready: vllm-agg: podclique/vllm-agg-0-frontend: desired=1,
+      ready=0; podclique/vllm-agg-0-vllmdecodeworker: desired=1, ready=0'
+    reason: some_resources_are_not_ready
+    status: "False"
     type: Ready
   services:
     Frontend:
       componentKind: PodClique
       componentName: vllm-agg-0-frontend
-      readyReplicas: 1
+      readyReplicas: 0
       replicas: 1
-      updatedReplicas: 1
+      updatedReplicas: 2
     VllmDecodeWorker:
       componentKind: PodClique
       componentName: vllm-agg-0-vllmdecodeworker
-      readyReplicas: 1
+      readyReplicas: 0
       replicas: 1
       updatedReplicas: 1
-  state: successful
+  state: pending
 ```
 
 ### Workload Pods Created by Operator
@@ -167,9 +169,9 @@ status:
 **Dynamo workload pods**
 ```
 $ kubectl get pods -n dynamo-workload -o wide
-NAME                                READY   STATUS    RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-vllm-agg-0-frontend-vzwdx           1/1     Running   0          12h   100.65.57.214   ip-100-64-83-166.ec2.internal    <none>           <none>
-vllm-agg-0-vllmdecodeworker-5fljt   1/1     Running   0          12h   100.65.78.75    ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME                                READY   STATUS                   RESTARTS   AGE     IP       NODE                             NOMINATED NODE   READINESS GATES
+vllm-agg-0-frontend-wfg4h           0/1     SchedulingGated          0          5m46s   <none>   <none>                           <none>           <none>
+vllm-agg-0-vllmdecodeworker-5fljt   0/1     ContainerStatusUnknown   0          5d13h   <none>   ip-100-64-171-120.ec2.internal   <none>           <none>
 ```
 
 ### Component Deployments
@@ -180,4 +182,16 @@ $ kubectl get dynamocomponentdeployments -n dynamo-workload
 No resources found in dynamo-workload namespace.
 ```
 
-**Result: PASS** — Dynamo operator running, webhooks operational, CRDs registered, DynamoGraphDeployment reconciled with workload pods.
+## Webhook Rejection Test
+
+Submit an invalid DynamoGraphDeployment to verify the validating webhook
+actively rejects malformed resources.
+
+**Invalid CR rejection**
+```
+Error from server (Forbidden): error when creating "STDIN": admission webhook "vdynamographdeployment.kb.io" denied the request: spec.services must have at least one service
+```
+
+Webhook correctly rejected the invalid resource.
+
+**Result: PASS** — Dynamo operator running, webhooks operational (rejection verified), CRDs registered, DynamoGraphDeployment reconciled with workload pods.

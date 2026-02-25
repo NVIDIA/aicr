@@ -32,7 +32,8 @@ docs/conformance/cncf/
     ├── accelerator-metrics.md
     ├── inference-gateway.md
     ├── robust-operator.md
-    └── pod-autoscaling.md
+    ├── pod-autoscaling.md
+    └── cluster-autoscaling.md
 ```
 
 ## Usage
@@ -73,11 +74,12 @@ running actual GPU workloads on the cluster:
 ./docs/conformance/cncf/collect-evidence.sh gateway
 ./docs/conformance/cncf/collect-evidence.sh operator
 ./docs/conformance/cncf/collect-evidence.sh hpa
+./docs/conformance/cncf/collect-evidence.sh cluster-autoscaling
 ```
 
-> **Note:** The HPA test (`hpa`) deploys gpu-burn to stress the GPU and waits for
-> HPA to scale up. This takes ~5 minutes due to metric propagation through the
-> DCGM → Prometheus → prometheus-adapter → HPA pipeline.
+> **Note:** The HPA test (`hpa`) deploys a GPU stress workload (nbody) and waits
+> for HPA to scale up, then verifies scale-down. This takes ~5 minutes due to
+> metric propagation through the DCGM → Prometheus → prometheus-adapter → HPA pipeline.
 
 ### Why Two Steps?
 
@@ -88,15 +90,18 @@ running actual GPU workloads on the cluster:
 | DRA GPU allocation test | No | Yes |
 | Gang scheduling test | No | Yes |
 | Device isolation verification | No | Yes |
-| HPA scaling with GPU load | No | Yes |
+| Gateway condition checks (Accepted, Programmed) | No | Yes |
+| Webhook rejection test | No | Yes |
+| HPA scale-up and scale-down with GPU load | No | Yes |
 | Prometheus query results | No | Yes |
+| Cluster autoscaling (ASG config) | No | Yes |
 
 `aicr validate` checks that components are deployed correctly. `collect-evidence.sh`
 verifies they work correctly by running actual workloads. Both are needed for
 complete conformance evidence.
 
 > **Future:** Behavioral tests are inherently long-running (e.g., HPA test deploys
-> gpu-burn and waits ~5 minutes for metric propagation and scaling) and are better
+> CUDA N-Body Simulation and waits ~5 minutes for metric propagation and scaling) and are better
 > suited as a separate step than blocking `aicr validate`. A follow-up integration
 > is tracked in [#192](https://github.com/NVIDIA/aicr/issues/192).
 

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 // Package evidence renders CNCF AI Conformance evidence markdown from validation results.
+// Evidence includes both structural validation and behavioral test outputs.
 package evidence
 
 import (
