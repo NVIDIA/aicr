@@ -35,7 +35,7 @@ Check constraints against actual cluster state to ensure compatibility.
 
 {{< /blocks/section >}}
 
-{{< blocks/section >}}
+{{< blocks/section type="row" >}}
 
 {{% blocks/feature icon="fa-box" title="Bundle" %}}
 Create deployment-ready Helm values and manifests for your target environment.
