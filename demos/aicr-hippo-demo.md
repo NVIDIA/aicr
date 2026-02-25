@@ -1,4 +1,4 @@
-# AICR Deployment Flow
+## AICR Deployment Flow
 
 ```
   ┌────────────┐      ┌────────────┐      ┌────────────┐      ┌────────────┐
