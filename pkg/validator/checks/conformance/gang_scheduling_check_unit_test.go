@@ -195,7 +195,12 @@ func TestCheckGangScheduling(t *testing.T) {
 				// Returns a pod with the desired phase, correct gang labels,
 				// and PodScheduled condition with co-scheduling timestamp.
 				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-					ga := action.(k8stesting.GetAction)
+					ga, ok := action.(k8stesting.GetAction)
+					if !ok {
+						// Non-standard pod gets (for example log subresource plumbing)
+						// should use default fake behavior.
+						return false, nil, nil
+					}
 					if strings.HasPrefix(ga.GetName(), gangPodPrefix) && ga.GetNamespace() == gangTestNamespace {
 						mu.Lock()
 						deleted := deletedPods[ga.GetName()]
