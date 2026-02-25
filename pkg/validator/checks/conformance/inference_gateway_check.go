@@ -128,10 +128,9 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	}
 	var crdSummary strings.Builder
 	for _, crdName := range requiredCRDs {
-		_, err := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{})
-		if err != nil {
+		if _, crdErr := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{}); crdErr != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
-				fmt.Sprintf("CRD %s not found", crdName), err)
+				fmt.Sprintf("CRD %s not found", crdName), crdErr)
 		}
 		fmt.Fprintf(&crdSummary, "  %s: present\n", crdName)
 	}

@@ -214,6 +214,13 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		return err
 	}
 
+	collectGangTestArtifacts(ctx, dynClient, pods, gangReport, run)
+	return nil
+}
+
+func collectGangTestArtifacts(ctx *checks.ValidationContext, dynClient dynamic.Interface,
+	pods [gangMinMembers]*corev1.Pod, gangReport *gangSchedulingReport, run *gangTestRun) {
+
 	// PodGroup status.
 	pgList, listErr := dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).List(
 		ctx.Context, metav1.ListOptions{})
@@ -270,8 +277,6 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 			fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
 			string(logBytes))
 	}
-
-	return nil
 }
 
 // deployGangTestResources creates the namespace, PodGroup, ResourceClaims, and Pods.

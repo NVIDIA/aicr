@@ -24,6 +24,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 )
 
 func init() {
@@ -130,6 +131,10 @@ func CheckDRASupport(ctx *checks.ValidationContext) error {
 	}
 
 	// 6. Behavioral DRA allocation validation (create claim+pod, wait, capture observed state).
+	return validateDRAAllocation(ctx, dynClient)
+}
+
+func validateDRAAllocation(ctx *checks.ValidationContext, dynClient dynamic.Interface) error {
 	run, err := newDRATestRun()
 	if err != nil {
 		return err
@@ -139,7 +144,7 @@ func CheckDRASupport(ctx *checks.ValidationContext) error {
 		fmt.Sprintf("Created Namespace=%s ResourceClaim=%s Pod=%s via Kubernetes API",
 			draTestNamespace, run.claimName, run.podName))
 
-	if err := deployDRATestResources(ctx.Context, ctx.Clientset, dynClient, run); err != nil {
+	if err = deployDRATestResources(ctx.Context, ctx.Clientset, dynClient, run); err != nil {
 		return err
 	}
 	defer func() {

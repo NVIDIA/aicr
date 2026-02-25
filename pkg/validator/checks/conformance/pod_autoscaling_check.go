@@ -97,8 +97,8 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 			Name string `json:"name"`
 		} `json:"resources"`
 	}
-	if err := json.Unmarshal(rawAPI, &customMetricsResp); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse custom metrics API response", err)
+	if unmarshalErr := json.Unmarshal(rawAPI, &customMetricsResp); unmarshalErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to parse custom metrics API response", unmarshalErr)
 	}
 	recordRawTextArtifact(ctx, "Custom Metrics API",
 		"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1",
@@ -119,8 +119,8 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 				path := fmt.Sprintf(
 					"/apis/custom.metrics.k8s.io/v1beta1/namespaces/%s/pods/*/%s",
 					ns, metric)
-				raw, err := restClient.Get().AbsPath(path).DoRaw(ctx.Context)
-				if err != nil {
+				raw, rawErr := restClient.Get().AbsPath(path).DoRaw(ctx.Context)
+				if rawErr != nil {
 					continue
 				}
 
@@ -162,20 +162,20 @@ func CheckPodAutoscaling(ctx *checks.ValidationContext) error {
 	// 3. External metrics API has GPU metrics
 	extPath := "/apis/external.metrics.k8s.io/v1beta1/namespaces/default/dcgm_gpu_power_usage"
 	extResult := restClient.Get().AbsPath(extPath).Do(ctx.Context)
-	if err := extResult.Error(); err != nil {
+	if extErr := extResult.Error(); extErr != nil {
 		return errors.Wrap(errors.ErrCodeNotFound,
-			"external metric dcgm_gpu_power_usage not available", err)
+			"external metric dcgm_gpu_power_usage not available", extErr)
 	}
 	var extStatusCode int
 	extResult.StatusCode(&extStatusCode)
-	raw, err := extResult.Raw()
+	extRaw, err := extResult.Raw()
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed reading external metric response", err)
 	}
 	var extResp struct {
 		Items []json.RawMessage `json:"items"`
 	}
-	if json.Unmarshal(raw, &extResp) == nil && len(extResp.Items) == 0 {
+	if json.Unmarshal(extRaw, &extResp) == nil && len(extResp.Items) == 0 {
 		return errors.New(errors.ErrCodeNotFound,
 			"external metric dcgm_gpu_power_usage has no data")
 	}
@@ -284,9 +284,9 @@ func validateHPABehavior(ctx context.Context, clientset kubernetes.Interface) (*
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get HPA for scale-down test", err)
 	}
 	currentHPA.Spec.Metrics[0].External.Target.AverageValue = resourceQuantityPtr("999999")
-	if _, err := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Update(
-		ctx, currentHPA, metav1.UpdateOptions{}); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to update HPA target for scale-down", err)
+	if _, updateErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(nsName).Update(
+		ctx, currentHPA, metav1.UpdateOptions{}); updateErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to update HPA target for scale-down", updateErr)
 	}
 
 	// Wait for Deployment to scale down (proves HPA scale-down path works).

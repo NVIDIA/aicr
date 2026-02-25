@@ -16,7 +16,6 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -31,9 +30,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
 )
 
@@ -71,20 +68,7 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("HTTP %d from %s", resp.StatusCode, url))
 	}
-	return io.ReadAll(resp.Body)
-}
-
-// checkCondition verifies a status condition on an unstructured object.
-func checkCondition(obj *unstructured.Unstructured, condType, expectedStatus string) error {
-	obs, err := getConditionObservation(obj, condType)
-	if err != nil {
-		return err
-	}
-	if obs.Status == expectedStatus {
-		return nil
-	}
-	return errors.New(errors.ErrCodeInternal,
-		fmt.Sprintf("condition %s=%v (want %s)", condType, obs.Status, expectedStatus))
+	return io.ReadAll(io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit))
 }
 
 type conditionObservation struct {
@@ -106,8 +90,12 @@ func getConditionObservation(obj *unstructured.Unstructured, condType string) (*
 			continue
 		}
 
-		kind, _, _ := unstructured.NestedString(cond, "type")
-		if kind != condType {
+		kind, kindFound, kindErr := unstructured.NestedString(cond, "type")
+		if kindErr != nil {
+			slog.Debug("condition has non-string type field", "error", kindErr)
+			continue
+		}
+		if !kindFound || kind != condType {
 			continue
 		}
 
@@ -214,6 +202,7 @@ func recordRawTextArtifact(ctx *checks.ValidationContext, label, equivalent, dat
 
 // recordChunkedTextArtifact records text evidence across multiple artifacts when needed.
 // This avoids collector-side truncation for large YAML/JSON/metrics payloads.
+// Splits on line boundaries to avoid producing malformed YAML/JSON chunks.
 func recordChunkedTextArtifact(ctx *checks.ValidationContext, label, equivalent, data string) {
 	if strings.TrimSpace(data) == "" {
 		recordRawTextArtifact(ctx, label, equivalent, data)
@@ -234,28 +223,31 @@ func recordChunkedTextArtifact(ctx *checks.ValidationContext, label, equivalent,
 		return
 	}
 
-	total := (len(data) + chunkSize - 1) / chunkSize
-	for i := 0; i < total; i++ {
-		start := i * chunkSize
-		end := start + chunkSize
-		if end > len(data) {
-			end = len(data)
+	// Split on line boundaries to avoid cutting mid-line or mid-multibyte-character.
+	lines := strings.Split(data, "\n")
+	var chunks []string
+	var current strings.Builder
+	for _, line := range lines {
+		// If adding this line would exceed the budget, flush current chunk.
+		if current.Len() > 0 && current.Len()+len(line)+1 > chunkSize {
+			chunks = append(chunks, current.String())
+			current.Reset()
 		}
-		part := strings.TrimSpace(data[start:end])
+		if current.Len() > 0 {
+			current.WriteByte('\n')
+		}
+		current.WriteString(line)
+	}
+	if current.Len() > 0 {
+		chunks = append(chunks, current.String())
+	}
+
+	total := len(chunks)
+	for i, chunk := range chunks {
 		partLabel := fmt.Sprintf("%s (part %d/%d)", label, i+1, total)
-		partBody := fmt.Sprintf("%sPart: %d/%d\n\n%s", prefix, i+1, total, part)
+		partBody := fmt.Sprintf("%sPart: %d/%d\n\n%s", prefix, i+1, total, strings.TrimSpace(chunk))
 		recordArtifact(ctx, partLabel, partBody)
 	}
-}
-
-// recordObjectJSONArtifact records a structured object as pretty JSON.
-func recordObjectJSONArtifact(ctx *checks.ValidationContext, label, equivalent string, obj any) {
-	payload, err := json.MarshalIndent(obj, "", "  ")
-	if err != nil {
-		recordRawTextArtifact(ctx, label, equivalent, fmt.Sprintf("failed to marshal JSON: %v", err))
-		return
-	}
-	recordChunkedTextArtifact(ctx, label, equivalent, string(payload))
 }
 
 // recordObjectYAMLArtifact records a structured object as YAML.
@@ -354,46 +346,6 @@ func podWaitingStatus(pod *corev1.Pod) string {
 		}
 	}
 	return "none"
-}
-
-// waitForHPAScaleUp polls the HPA until desiredReplicas > currentReplicas.
-// This proves the HPA read metrics and computed a scale-up intent. The logPrefix
-// is prepended to log messages to distinguish callers (e.g. "pod-autoscaling", "cluster-autoscaling").
-func waitForHPAScaleUp(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName, logPrefix string) (int32, int32, error) {
-	var observedDesired int32
-	var observedCurrent int32
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
-				ctx, hpaName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("HPA not ready yet", "context", logPrefix, "error", getErr)
-				return false, nil
-			}
-
-			observedDesired = hpa.Status.DesiredReplicas
-			observedCurrent = hpa.Status.CurrentReplicas
-			slog.Debug(logPrefix+" HPA status", "desired", observedDesired, "current", observedCurrent)
-
-			if observedDesired > observedCurrent {
-				slog.Info(logPrefix+" HPA scaling intent detected",
-					"desiredReplicas", observedDesired, "currentReplicas", observedCurrent)
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return 0, 0, errors.Wrap(errors.ErrCodeTimeout,
-				logPrefix+": HPA did not report scaling intent within timeout", err)
-		}
-		return 0, 0, errors.Wrap(errors.ErrCodeInternal, logPrefix+": HPA scaling intent polling failed", err)
-	}
-	return observedDesired, observedCurrent, nil
 }
 
 // gpuDriverName is the DRA driver name for NVIDIA GPUs.
