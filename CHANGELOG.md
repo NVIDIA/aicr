@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.9] - 2026-02-25
+
+### Bug Fixes
+
+- Strip v prefix from version in install script asset names by [@mchmarny](https://github.com/mchmarny)
+- *(bundler)* Add type-aware routing for kustomize components  by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.7.8] - 2026-02-25
 
 ### Bug Fixes
