@@ -18,10 +18,10 @@ on:
   workflow_call:
     inputs:
       coverage_report:
-        description: 'Whether to generate coverage report (true/false)'
-        type: string
+        description: 'Whether to generate coverage report'
+        type: boolean
         required: false
-        default: 'false'
+        default: false
 
 permissions:
   contents: read

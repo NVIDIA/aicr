@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-baseURL: https://nvidia.github.io/aicr/
+baseURL: https://aicr.dgxc.io/
 title: NVIDIA AI Cluster Runtime
 enableGitInfo: true
 enableRobotsTXT: true
