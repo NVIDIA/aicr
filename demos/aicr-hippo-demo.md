@@ -249,7 +249,41 @@ aicr bundle --recipe recipe.yaml \
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### CNCF AI Conformance Evidence Collection
+```
+# List available features
+  $ aicr evidence --list
+
+  Available evidence features:
+
+    Feature                  Description
+    ──────────────────────── ─────────────────────────────────────────────
+    dra                      DRA GPU allocation test
+    gang                     Gang scheduling co-scheduling test
+    secure                   Secure accelerator access verification
+    metrics                  Accelerator & AI service metrics
+    gateway                  Inference API gateway conditions
+    operator                 Robust AI operator + webhook test
+    hpa                      HPA pod autoscaling (scale-up + scale-down)
+    cluster-autoscaling      Cluster autoscaling (ASG configuration)
+
+  # Collect all evidence
+  $ aicr evidence -o ./evidence
+
+  # Collect specific features
+  $ aicr evidence -o ./evidence -f dra
+  $ aicr evidence -o ./evidence -f dra -f hpa -f gang
+
+  # Custom timeout (default 20m)
+  $ aicr evidence -o ./evidence --timeout 30m
+
+  # Skip cleanup for debugging
+  $ aicr evidence -o ./evidence -f hpa --no-cleanup
+
+  # Help
+  $ aicr evidence --help
+```
 ### CNCF AI Conformance Program Submission
 
-- [Evidence Collection](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf)
+- [Evidence Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf)
 - [Submission Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf/submission)
