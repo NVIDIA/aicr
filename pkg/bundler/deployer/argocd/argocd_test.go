@@ -540,6 +540,162 @@ func TestNormalizeVersion(t *testing.T) {
 	}
 }
 
+func TestGenerate_KustomizeOnly(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "my-kustomize-app",
+			Namespace: "my-app",
+			Type:      recipe.ComponentTypeKustomize,
+			Source:    "https://github.com/example/repo",
+			Tag:       "v2.0.0",
+			Path:      "deploy/production",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"my-kustomize-app"}
+
+	input := &GeneratorInput{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{},
+		Version:         "v0.9.0",
+	}
+
+	output, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify application.yaml uses source (not sources) with path
+	appPath := filepath.Join(outputDir, "my-kustomize-app", "application.yaml")
+	content, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("failed to read application.yaml: %v", err)
+	}
+	appContent := string(content)
+
+	if !strings.Contains(appContent, "path: deploy/production") {
+		t.Error("application.yaml should contain kustomize path")
+	}
+	if !strings.Contains(appContent, "targetRevision: v2.0.0") {
+		t.Error("application.yaml should contain kustomize tag as targetRevision")
+	}
+	if strings.Contains(appContent, "chart:") {
+		t.Error("application.yaml should not contain chart for kustomize component")
+	}
+	if strings.Contains(appContent, "helm:") {
+		t.Error("application.yaml should not contain helm section for kustomize component")
+	}
+	// Kustomize uses single source, not multi-source
+	if strings.Contains(appContent, "sources:") {
+		t.Error("application.yaml should use source (singular) for kustomize, not sources")
+	}
+	if !strings.Contains(appContent, "source:") {
+		t.Error("application.yaml should contain source for kustomize component")
+	}
+
+	// values.yaml should NOT exist for kustomize components
+	valuesPath := filepath.Join(outputDir, "my-kustomize-app", "values.yaml")
+	if _, statErr := os.Stat(valuesPath); !os.IsNotExist(statErr) {
+		t.Error("values.yaml should not exist for kustomize component")
+	}
+
+	// app-of-apps.yaml and README should still exist
+	for _, f := range []string{"app-of-apps.yaml", "README.md"} {
+		if _, statErr := os.Stat(filepath.Join(outputDir, f)); os.IsNotExist(statErr) {
+			t.Errorf("expected %s to exist", f)
+		}
+	}
+
+	if len(output.Files) == 0 {
+		t.Error("Generate() returned no files")
+	}
+}
+
+func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "my-kustomize-app",
+			Namespace: "my-app",
+			Type:      recipe.ComponentTypeKustomize,
+			Source:    "https://github.com/example/repo",
+			Tag:       "v2.0.0",
+			Path:      "deploy/production",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "my-kustomize-app"}
+
+	input := &GeneratorInput{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager":     {"installCRDs": true},
+			"my-kustomize-app": {},
+		},
+		Version: "v0.9.0",
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Helm component should have chart-based application.yaml
+	certApp, err := os.ReadFile(filepath.Join(outputDir, "cert-manager", "application.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read cert-manager application.yaml: %v", err)
+	}
+	certAppStr := string(certApp)
+	if !strings.Contains(certAppStr, "chart:") {
+		t.Error("cert-manager application.yaml should contain chart")
+	}
+	if !strings.Contains(certAppStr, "helm:") {
+		t.Error("cert-manager application.yaml should contain helm section")
+	}
+
+	// Helm component should have values.yaml
+	certValues := filepath.Join(outputDir, "cert-manager", "values.yaml")
+	if _, statErr := os.Stat(certValues); os.IsNotExist(statErr) {
+		t.Error("cert-manager should have values.yaml")
+	}
+
+	// Kustomize component should have path-based application.yaml
+	kustApp, err := os.ReadFile(filepath.Join(outputDir, "my-kustomize-app", "application.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read my-kustomize-app application.yaml: %v", err)
+	}
+	kustAppStr := string(kustApp)
+	if !strings.Contains(kustAppStr, "path: deploy/production") {
+		t.Error("kustomize application.yaml should contain path")
+	}
+	if strings.Contains(kustAppStr, "chart:") {
+		t.Error("kustomize application.yaml should not contain chart")
+	}
+
+	// Kustomize component should NOT have values.yaml
+	kustValues := filepath.Join(outputDir, "my-kustomize-app", "values.yaml")
+	if _, statErr := os.Stat(kustValues); !os.IsNotExist(statErr) {
+		t.Error("kustomize component should not have values.yaml")
+	}
+}
+
 // TestGenerate_Reproducible verifies that ArgoCD bundle generation is deterministic.
 // Running Generate() twice with the same input should produce identical output files.
 func TestGenerate_Reproducible(t *testing.T) {

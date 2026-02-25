@@ -11,10 +11,14 @@ This bundle contains ArgoCD Application manifests for deploying NVIDIA Cloud Nat
 
 The following components are included in deployment order:
 
-| Component | Version | Sync Wave | Namespace |
-|-----------|---------|-----------|-----------|
+| Component | Type | Version | Sync Wave | Namespace |
+|-----------|------|---------|-----------|-----------|
 {{- range .Components }}
-| {{ .Name }} | {{ .Version }} | {{ .SyncWave }} | {{ .Namespace }} |
+{{ if .IsKustomize -}}
+| {{ .Name }} | Kustomize | {{ .Tag }} | {{ .SyncWave }} | {{ .Namespace }} |
+{{- else -}}
+| {{ .Name }} | Helm | {{ .Version }} | {{ .SyncWave }} | {{ .Namespace }} |
+{{- end }}
 {{- end }}
 
 ## Prerequisites
@@ -76,7 +80,9 @@ argocd app sync nvidia-stack --watch
 {{- range .Components }}
 ├── {{ .Name }}/
 │   ├── application.yaml       # ArgoCD Application (sync-wave: {{ .SyncWave }})
+{{- if not .IsKustomize }}
 │   └── values.yaml            # Helm values
+{{- end }}
 {{- end }}
 ```
 
@@ -92,7 +98,7 @@ Components are deployed in order using ArgoCD sync-waves:
 
 ### Modifying Values
 
-Edit the `values.yaml` file in each component directory to customize the deployment.
+Edit the `values.yaml` file in each Helm component directory to customize the deployment.
 
 ### Changing Deployment Order
 
