@@ -667,6 +667,7 @@ aicr bundle [flags]
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
 | `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
+| `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 
 **Behavior:**
 - All components from the recipe are bundled automatically
@@ -757,6 +758,9 @@ aicr bundle -r recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   -o ./bundles
 
+# Set estimated GPU node count (writes to nodeCountPaths in registry)
+aicr bundle -r recipe.yaml --nodes 8 -o ./bundles
+
 # Day 2 options: workload-gate and workload-selector for skyhook
 aicr bundle -r recipe.yaml \
   --workload-gate skyhook.io/runtime-required=true:NoSchedule \
@@ -818,6 +822,14 @@ The `--workload-gate` and `--workload-selector` flags are day 2 operational opti
 - **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [skyhook documentation](https://github.com/NVIDIA/skyhook/blob/main/docs/runtime_required.md).
 
 - **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent skyhook from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
+
+**Estimated node count (`--nodes`):**
+
+The `--nodes` flag is a **bundle-time** option: it is applied when you run `aicr bundle`, not when you run `aicr recipe`. The value is written to each component's Helm values at the paths declared in the registry under `nodeScheduling.nodeCountPaths`.
+
+- **When to use**: Pass the expected or typical number of GPU nodes (e.g. size of your node pool). Use `0` (default) to leave the value unset.
+- **Where it goes**: Components that define `nodeCountPaths` in the registry receive the value at those paths in their generated `values.yaml`.
+- **Example**: `aicr bundle -r recipe.yaml --nodes 8 -o ./bundles` writes `8` to every path listed in each component's `nodeScheduling.nodeCountPaths`.
 
 **Component Validation System:**
 
