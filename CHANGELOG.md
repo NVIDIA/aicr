@@ -2,6 +2,39 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.8] - 2026-02-25
+
+### Bug Fixes
+
+- *(conformance)* Wrap PRODUCT.yaml lines for yamllint  by [@dims](https://github.com/dims)
+- *(agent)* Scope secrets RBAC and robust helm-values check  by [@mchmarny](https://github.com/mchmarny)
+- Enforce error handling, polling, and deletion policy patterns  by [@mchmarny](https://github.com/mchmarny)
+- *(ci)* Deduplicate tool installs and fix broken workflows  by [@mchmarny](https://github.com/mchmarny)
+- *(docs)* Enterprise CI, custom domain, NVIDIA brand theme by [@mchmarny](https://github.com/mchmarny)
+
+### CI/CD
+
+- Add GPU conformance test workflow to main  by [@dims](https://github.com/dims)
+
+### Features
+
+- *(evidence)* Add artifact capture for conformance evidence  by [@dims](https://github.com/dims)
+- *(docs)* Add CNCF AI conformance submission for v1.34  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(skyhook)* Update to nvidia-tuned 0.2.1 and set h100 overlays back  by [@ayuskauskas](https://github.com/ayuskauskas)
+- *(validator)* Add helm-values deployment check  by [@mchmarny](https://github.com/mchmarny)
+- *(conformance)* Capture observed state in evidence artifacts  by [@dims](https://github.com/dims)
+- Enhance conformance evidence with gateway conditions, webhook test, and HPA scale-down  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(conformance)* Enrich evidence with observed cluster state  by [@dims](https://github.com/dims)
+- *(validator)* Add Chainsaw-style health check assertions via --data flag  by [@xdu31](https://github.com/xdu31)
+- *(docs)* Add Hugo + Docsy documentation site  by [@mchmarny](https://github.com/mchmarny)
+
+### Tasks
+
+- Clean up CUJs by [@mchmarny](https://github.com/mchmarny)
+- Clean up change log by [@mchmarny](https://github.com/mchmarny)
+- Add uat-aws workflow for dispatch registration by [@mchmarny](https://github.com/mchmarny)
+- Change demo api url change by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.7.7] - 2026-02-24
 
 ### Bug Fixes
