@@ -16,6 +16,8 @@ baseURL: https://nvidia.github.io/aicr/
 title: NVIDIA AI Cluster Runtime
 enableGitInfo: true
 enableRobotsTXT: true
+defaultContentLanguage: en
+defaultContentLanguageInSubdir: false
 
 module:
   hugoVersion:
@@ -29,6 +31,7 @@ languages:
   en:
     languageName: English
     weight: 1
+    contentDir: content
 
 markup:
   goldmark:
