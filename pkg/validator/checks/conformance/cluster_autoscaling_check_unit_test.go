@@ -202,27 +202,60 @@ func addClusterAutoReactors(clientset *fake.Clientset, nodePoolName string) {
 	// Node List reactor: return empty on first call (baseline), then KWOK node.
 	// This matches the production flow: baseline is captured before test resources,
 	// then waitForKarpenterNodes sees new nodes provisioned above baseline.
-	var nodeListCalls int
+	var nodePoolListCalls int
 	clientset.PrependReactor("list", "nodes",
 		func(action k8stesting.Action) (bool, runtime.Object, error) {
-			nodeListCalls++
-			if nodeListCalls == 1 {
-				// First call: baseline (no pre-existing Karpenter nodes)
-				return true, &corev1.NodeList{}, nil
+			la, ok := action.(k8stesting.ListAction)
+			if !ok {
+				return false, nil, nil
 			}
-			// Subsequent calls: Karpenter provisioned a new KWOK node
-			return true, &corev1.NodeList{
-				Items: []corev1.Node{
-					{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: "kwok-gpu-node-1",
-							Labels: map[string]string{
-								karpenterNodePoolLabel: nodePoolName,
+			selector := ""
+			if la.GetListRestrictions().Labels != nil {
+				selector = la.GetListRestrictions().Labels.String()
+			}
+
+			if strings.Contains(selector, "nvidia.com/gpu.present=true") {
+				return true, &corev1.NodeList{
+					Items: []corev1.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "gpu-inventory-node-1",
+								Labels: map[string]string{
+									"nvidia.com/gpu.present": "true",
+								},
 							},
 						},
 					},
-				},
-			}, nil
+				}, nil
+			}
+
+			if strings.Contains(selector, fmt.Sprintf("%s=%s", karpenterNodePoolLabel, nodePoolName)) {
+				nodePoolListCalls++
+				if nodePoolListCalls == 1 {
+					// First call: baseline (no pre-existing Karpenter nodes)
+					return true, &corev1.NodeList{}, nil
+				}
+				// Subsequent calls: Karpenter provisioned a new KWOK node
+				return true, &corev1.NodeList{
+					Items: []corev1.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "kwok-gpu-node-1",
+								Labels: map[string]string{
+									karpenterNodePoolLabel:   nodePoolName,
+									"nvidia.com/gpu.present": "true",
+								},
+							},
+						},
+					},
+				}, nil
+			}
+
+			// Unfiltered/other selectors: return no nodes.
+			if selector == "" {
+				return true, &corev1.NodeList{}, nil
+			}
+			return false, nil, nil
 		})
 
 	// Pod List reactor: return 3 Running pods (match unique namespace by prefix).
@@ -412,17 +445,25 @@ func TestValidateClusterAutoscaling(t *testing.T) {
 
 			if !tt.wantErr {
 				if report == nil {
-					t.Fatal("validateClusterAutoscaling() report = nil, want non-nil")
+					t.Fatal("validateClusterAutoscaling() report is nil")
 				}
-				if report.HPADesired != tt.hpaDesired || report.HPACurrent != tt.hpaCurrent {
-					t.Errorf("report HPA desired/current = %d/%d, want %d/%d",
-						report.HPADesired, report.HPACurrent, tt.hpaDesired, tt.hpaCurrent)
+				if report.NodePoolName != testNodePool {
+					t.Errorf("NodePoolName = %q, want %q", report.NodePoolName, testNodePool)
 				}
-				if report.ObservedNodes != tt.kwokNodes {
-					t.Errorf("report observed nodes = %d, want %d", report.ObservedNodes, tt.kwokNodes)
+				if report.HPADesiredReplicas != tt.hpaDesired {
+					t.Errorf("HPADesiredReplicas = %d, want %d", report.HPADesiredReplicas, tt.hpaDesired)
 				}
-				if report.TotalPods != tt.podCount {
-					t.Errorf("report total pods = %d, want %d", report.TotalPods, tt.podCount)
+				if report.HPACurrentReplicas != tt.hpaCurrent {
+					t.Errorf("HPACurrentReplicas = %d, want %d", report.HPACurrentReplicas, tt.hpaCurrent)
+				}
+				if report.ObservedNodeCount != tt.kwokNodes {
+					t.Errorf("ObservedNodeCount = %d, want %d", report.ObservedNodeCount, tt.kwokNodes)
+				}
+				if report.ObservedPodCount != tt.podCount {
+					t.Errorf("ObservedPodCount = %d, want %d", report.ObservedPodCount, tt.podCount)
+				}
+				if report.ScheduledPodCount != tt.podCount {
+					t.Errorf("ScheduledPodCount = %d, want %d", report.ScheduledPodCount, tt.podCount)
 				}
 			}
 		})

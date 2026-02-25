@@ -115,7 +115,7 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 	}
 
 	// 1. All KAI scheduler deployments available.
-	var schedulerSummary strings.Builder
+	var deploymentsSummary strings.Builder
 	for _, name := range kaiSchedulerDeployments {
 		deploy, err := getDeploymentIfAvailable(ctx, "kai-scheduler", name)
 		if err != nil {
@@ -126,11 +126,24 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		if deploy.Spec.Replicas != nil {
 			expected = *deploy.Spec.Replicas
 		}
-		fmt.Fprintf(&schedulerSummary, "  %-25s available=%d/%d image=%s\n",
+		fmt.Fprintf(&deploymentsSummary, "%-25s available=%d/%d image=%s\n",
 			name, deploy.Status.AvailableReplicas, expected,
 			firstContainerImage(deploy.Spec.Template.Spec.Containers))
 	}
-	recordArtifact(ctx, "KAI Scheduler Components", schedulerSummary.String())
+	recordRawTextArtifact(ctx, "KAI scheduler deployments",
+		"kubectl get deploy -n kai-scheduler", deploymentsSummary.String())
+
+	// KAI scheduler pods.
+	kaiPods, err := ctx.Clientset.CoreV1().Pods("kai-scheduler").List(ctx.Context, metav1.ListOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to list KAI scheduler pods", err)
+	}
+	var podsSummary strings.Builder
+	for _, p := range kaiPods.Items {
+		fmt.Fprintf(&podsSummary, "%-44s ready=%s phase=%s\n", p.Name, podReadyCount(p), p.Status.Phase)
+	}
+	recordRawTextArtifact(ctx, "KAI scheduler pods",
+		"kubectl get pods -n kai-scheduler", podsSummary.String())
 
 	// 2. Required CRDs for gang scheduling.
 	dynClient, err := getDynamicClient(ctx)
@@ -152,7 +165,9 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		}
 		fmt.Fprintf(&crdSummary, "  %s: present\n", crd)
 	}
-	recordArtifact(ctx, "Gang Scheduling CRDs", crdSummary.String())
+	recordRawTextArtifact(ctx, "Gang Scheduling CRDs",
+		"kubectl get crd queues.scheduling.run.ai podgroups.scheduling.run.ai",
+		crdSummary.String())
 
 	// 3. Pre-flight: ensure enough free GPUs for the gang test.
 	total, free, gpuErr := countAvailableGPUs(ctx.Context, dynClient)
@@ -173,7 +188,18 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		return err
 	}
 
-	defer cleanupGangTestResources(ctx.Context, ctx.Clientset, dynClient, run)
+	defer func() {
+		cleanupGangTestResources(ctx.Context, ctx.Clientset, dynClient, run)
+		recordRawTextArtifact(ctx, "Delete test namespace",
+			"kubectl delete namespace gang-scheduling-test --ignore-not-found",
+			"Deleted gang test pods, claims, and PodGroup; namespace retained intentionally to avoid DRA finalizer stalls.")
+	}()
+
+	recordRawTextArtifact(ctx, "Apply test manifest",
+		"kubectl apply -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml",
+		fmt.Sprintf("Created PodGroup=%s ResourceClaims=%s,%s Pods=%s,%s in namespace=%s",
+			run.groupName, run.claims[0], run.claims[1], run.pods[0], run.pods[1], gangTestNamespace))
+
 	if err = deployGangTestResources(ctx.Context, ctx.Clientset, dynClient, run); err != nil {
 		return err
 	}
@@ -188,7 +214,31 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 		return err
 	}
 
-	// Record gang test results with scheduling timestamps.
+	collectGangTestArtifacts(ctx, dynClient, pods, gangReport, run)
+	return nil
+}
+
+func collectGangTestArtifacts(ctx *checks.ValidationContext, dynClient dynamic.Interface,
+	pods [gangMinMembers]*corev1.Pod, gangReport *gangSchedulingReport, run *gangTestRun) {
+
+	// PodGroup status.
+	pgList, listErr := dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).List(
+		ctx.Context, metav1.ListOptions{})
+	if listErr != nil {
+		recordRawTextArtifact(ctx, "PodGroup status",
+			"kubectl get podgroups -n gang-scheduling-test -o wide",
+			fmt.Sprintf("failed to list PodGroups: %v", listErr))
+	} else {
+		var pgSummary strings.Builder
+		for _, item := range pgList.Items {
+			minMember, _, _ := unstructured.NestedInt64(item.Object, "spec", "minMember")
+			fmt.Fprintf(&pgSummary, "%-36s minMember=%d\n", item.GetName(), minMember)
+		}
+		recordRawTextArtifact(ctx, "PodGroup status",
+			"kubectl get podgroups -n gang-scheduling-test -o wide", pgSummary.String())
+	}
+
+	// Pod status and scheduling timestamps.
 	var gangResults strings.Builder
 	for i, pod := range pods {
 		if pod == nil {
@@ -209,9 +259,24 @@ func CheckGangScheduling(ctx *checks.ValidationContext) error {
 	fmt.Fprintf(&gangResults, "Earliest/Latest:  %s / %s\n",
 		gangReport.EarliestScheduled.Format(time.RFC3339),
 		gangReport.LatestScheduled.Format(time.RFC3339))
-	recordArtifact(ctx, "Gang Scheduling Test Results", gangResults.String())
+	recordRawTextArtifact(ctx, "Pod status",
+		"kubectl get pods -n gang-scheduling-test -o wide", gangResults.String())
 
-	return nil
+	// Worker logs.
+	for i := range gangMinMembers {
+		logBytes, logErr := ctx.Clientset.CoreV1().Pods(gangTestNamespace).GetLogs(
+			run.pods[i], &corev1.PodLogOptions{}).DoRaw(ctx.Context)
+		label := fmt.Sprintf("gang-worker-%d logs", i)
+		if logErr != nil {
+			recordRawTextArtifact(ctx, label,
+				fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
+				fmt.Sprintf("failed to read logs: %v", logErr))
+			continue
+		}
+		recordChunkedTextArtifact(ctx, label,
+			fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
+			string(logBytes))
+	}
 }
 
 // deployGangTestResources creates the namespace, PodGroup, ResourceClaims, and Pods.

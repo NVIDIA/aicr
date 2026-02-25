@@ -31,10 +31,11 @@ var httpRouteGVR = schema.GroupVersionResource{
 }
 
 type gatewayDataPlaneReport struct {
-	ListenerAttachedRoutes []string
-	AttachedHTTPRoutes     int
-	MatchingEndpointSlices int
-	ReadyEndpoints         int
+	ListenerCount         int
+	AttachedHTTPRoutes    int
+	TotalHTTPRoutes       int
+	MatchingEndpointSlice int
+	ReadyEndpoints        int
 }
 
 func init() {
@@ -61,6 +62,8 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 		return err
 	}
 
+	collectGatewayControlPlaneArtifacts(ctx)
+
 	// 1. GatewayClass "kgateway" accepted
 	gcGVR := schema.GroupVersionResource{
 		Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses",
@@ -74,13 +77,15 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 		return errors.Wrap(errors.ErrCodeInternal, "GatewayClass not accepted", condErr)
 	}
 	if gcCond.Status != "True" {
-		return errors.Wrap(errors.ErrCodeInternal, "GatewayClass not accepted",
-			errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("condition Accepted=%s (want True)", gcCond.Status)))
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("GatewayClass not accepted: status=%s reason=%s message=%s",
+				gcCond.Status, gcCond.Reason, gcCond.Message))
 	}
-	recordArtifact(ctx, "GatewayClass Status",
-		fmt.Sprintf("Name:      %s\nAccepted:  %s\nReason:    %s\nMessage:   %s",
-			gc.GetName(), gcCond.Status, gcCond.Reason, gcCond.Message))
+	controllerName, _, _ := unstructured.NestedString(gc.Object, "spec", "controllerName")
+	recordRawTextArtifact(ctx, "GatewayClass",
+		"kubectl get gatewayclass kgateway -o yaml",
+		fmt.Sprintf("Name:            %s\nControllerName:  %s\nAccepted:        %s\nReason:          %s\nMessage:         %s",
+			gc.GetName(), valueOrUnknown(controllerName), gcCond.Status, gcCond.Reason, gcCond.Message))
 
 	// 2. Gateway "inference-gateway" programmed
 	gwGVR := schema.GroupVersionResource{
@@ -96,13 +101,21 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 		return errors.Wrap(errors.ErrCodeInternal, "Gateway not programmed", condErr)
 	}
 	if gwCond.Status != "True" {
-		return errors.Wrap(errors.ErrCodeInternal, "Gateway not programmed",
-			errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("condition Programmed=%s (want True)", gwCond.Status)))
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("Gateway not programmed: status=%s reason=%s message=%s",
+				gwCond.Status, gwCond.Reason, gwCond.Message))
 	}
-	recordArtifact(ctx, "Gateway Status",
-		fmt.Sprintf("Name:       %s\nNamespace:  %s\nProgrammed: %s\nReason:     %s\nMessage:    %s",
-			gw.GetName(), gw.GetNamespace(), gwCond.Status, gwCond.Reason, gwCond.Message))
+	addresses, found, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
+	addressCount := 0
+	if found {
+		addressCount = len(addresses)
+	}
+	recordRawTextArtifact(ctx, "Gateways",
+		"kubectl get gateways -A",
+		fmt.Sprintf("Name:            %s/%s\nProgrammed:      %s\nReason:          %s\nMessage:         %s\nAddressCount:    %d",
+			gw.GetNamespace(), gw.GetName(), gwCond.Status, gwCond.Reason, gwCond.Message, addressCount))
+	recordObjectYAMLArtifact(ctx, "Gateway details",
+		"kubectl get gateway inference-gateway -n kgateway-system -o yaml", gw.Object)
 
 	// 3. Required CRDs exist
 	crdGVR := schema.GroupVersionResource{
@@ -115,28 +128,24 @@ func CheckInferenceGateway(ctx *checks.ValidationContext) error {
 	}
 	var crdSummary strings.Builder
 	for _, crdName := range requiredCRDs {
-		_, crdErr := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{})
-		if crdErr != nil {
+		if _, crdErr := dynClient.Resource(crdGVR).Get(ctx.Context, crdName, metav1.GetOptions{}); crdErr != nil {
 			return errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("CRD %s not found", crdName), crdErr)
 		}
 		fmt.Fprintf(&crdSummary, "  %s: present\n", crdName)
 	}
-	recordArtifact(ctx, "Required CRDs", crdSummary.String())
+	recordRawTextArtifact(ctx, "Required CRDs", "", crdSummary.String())
 
 	// 4. Gateway data-plane readiness (behavioral validation).
-	dpReport, err := validateGatewayDataPlane(ctx)
+	report, err := validateGatewayDataPlane(ctx)
 	if err != nil {
 		return err
 	}
-
-	listenerSummary := "none"
-	if len(dpReport.ListenerAttachedRoutes) > 0 {
-		listenerSummary = strings.Join(dpReport.ListenerAttachedRoutes, ", ")
-	}
-	recordArtifact(ctx, "Gateway Data Plane",
-		fmt.Sprintf("Listeners: %s\nAttached HTTPRoutes: %d\nMatching EndpointSlices: %d\nReady Endpoints: %d",
-			listenerSummary, dpReport.AttachedHTTPRoutes, dpReport.MatchingEndpointSlices, dpReport.ReadyEndpoints))
+	recordRawTextArtifact(ctx, "Gateway Data Plane",
+		"kubectl get endpointslices -n kgateway-system",
+		fmt.Sprintf("Listeners:               %d\nAttached HTTPRoutes:     %d\nHTTPRoutes (all):        %d\nMatching EndpointSlices: %d\nReady endpoints:         %d",
+			report.ListenerCount, report.AttachedHTTPRoutes, report.TotalHTTPRoutes,
+			report.MatchingEndpointSlice, report.ReadyEndpoints))
 	return nil
 }
 
@@ -164,12 +173,12 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) (*gatewayDataPlaneR
 	if gwErr == nil {
 		listeners, found, _ := unstructured.NestedSlice(gw.Object, "status", "listeners")
 		if found {
+			report.ListenerCount = len(listeners)
 			for _, l := range listeners {
 				if lMap, ok := l.(map[string]interface{}); ok {
 					name, _, _ := unstructured.NestedString(lMap, "name")
 					attached, _, _ := unstructured.NestedInt64(lMap, "attachedRoutes")
-					report.ListenerAttachedRoutes = append(report.ListenerAttachedRoutes,
-						fmt.Sprintf("%s=%d", name, attached))
+					report.AttachedHTTPRoutes += int(attached)
 					slog.Info("gateway listener status", "listener", name, "attachedRoutes", attached)
 				}
 			}
@@ -180,6 +189,7 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) (*gatewayDataPlaneR
 	httpRouteList, listErr := dynClient.Resource(httpRouteGVR).Namespace("").List(
 		ctx.Context, metav1.ListOptions{})
 	if listErr == nil {
+		report.TotalHTTPRoutes = len(httpRouteList.Items)
 		var attached int
 		for _, route := range httpRouteList.Items {
 			parentRefs, found, _ := unstructured.NestedSlice(route.Object, "spec", "parentRefs")
@@ -215,7 +225,7 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) (*gatewayDataPlaneR
 		if !strings.Contains(svcName, "inference-gateway") {
 			continue
 		}
-		report.MatchingEndpointSlices++
+		report.MatchingEndpointSlice++
 		for _, ep := range slice.Endpoints {
 			if ep.Conditions.Ready != nil && *ep.Conditions.Ready {
 				report.ReadyEndpoints++
@@ -229,4 +239,41 @@ func validateGatewayDataPlane(ctx *checks.ValidationContext) (*gatewayDataPlaneR
 	}
 
 	return report, nil
+}
+
+func collectGatewayControlPlaneArtifacts(ctx *checks.ValidationContext) {
+	if ctx.Clientset == nil {
+		return
+	}
+
+	deploys, deployErr := ctx.Clientset.AppsV1().Deployments("kgateway-system").List(
+		ctx.Context, metav1.ListOptions{})
+	if deployErr != nil {
+		recordRawTextArtifact(ctx, "kgateway deployments", "kubectl get deploy -n kgateway-system",
+			fmt.Sprintf("failed to list deployments: %v", deployErr))
+	} else {
+		var deploymentSummary strings.Builder
+		for _, d := range deploys.Items {
+			expected := int32(1)
+			if d.Spec.Replicas != nil {
+				expected = *d.Spec.Replicas
+			}
+			fmt.Fprintf(&deploymentSummary, "%-40s available=%d/%d image=%s\n",
+				d.Name, d.Status.AvailableReplicas, expected, firstContainerImage(d.Spec.Template.Spec.Containers))
+		}
+		recordRawTextArtifact(ctx, "kgateway deployments", "kubectl get deploy -n kgateway-system", deploymentSummary.String())
+	}
+
+	pods, podErr := ctx.Clientset.CoreV1().Pods("kgateway-system").List(ctx.Context, metav1.ListOptions{})
+	if podErr != nil {
+		recordRawTextArtifact(ctx, "kgateway pods", "kubectl get pods -n kgateway-system",
+			fmt.Sprintf("failed to list pods: %v", podErr))
+		return
+	}
+	var podSummary strings.Builder
+	for _, pod := range pods.Items {
+		fmt.Fprintf(&podSummary, "%-48s ready=%s phase=%s node=%s\n",
+			pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
+	}
+	recordRawTextArtifact(ctx, "kgateway pods", "kubectl get pods -n kgateway-system", podSummary.String())
 }

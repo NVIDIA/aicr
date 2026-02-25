@@ -53,7 +53,7 @@ func (d *Deployer) ensureJob(ctx context.Context) error {
 
 // deleteJob deletes the validation Job if it exists.
 func (d *Deployer) deleteJob(ctx context.Context) error {
-	propagationPolicy := metav1.DeletePropagationBackground
+	propagationPolicy := metav1.DeletePropagationForeground
 	err := d.clientset.BatchV1().Jobs(d.config.Namespace).Delete(ctx, d.config.JobName, metav1.DeleteOptions{
 		PropagationPolicy: &propagationPolicy,
 	})

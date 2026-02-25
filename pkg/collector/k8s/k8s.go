@@ -28,8 +28,9 @@ import (
 
 // Collector collects information about the Kubernetes cluster.
 type Collector struct {
-	ClientSet  kubernetes.Interface
-	RestConfig *rest.Config
+	ClientSet      kubernetes.Interface
+	RestConfig     *rest.Config
+	HelmNamespaces []string // nil/empty=skip, ["*"]=all, ["ns1","ns2"]=scoped
 }
 
 // Collect retrieves Kubernetes cluster information from the API server.
@@ -68,7 +69,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		return k.collectNode(ctx)
 	})
 
-	helm := k.collectHelmReleases(ctx)
+	helm := k.collectHelmReleasesScoped(ctx)
 
 	argocd := k.collectArgocdApplications(ctx)
 

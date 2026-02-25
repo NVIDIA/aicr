@@ -175,6 +175,7 @@ func TestCheckRobustController(t *testing.T) {
 				gvrMap := map[schema.GroupVersionResource]string{
 					{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
 					dgdGVR: "DynamoGraphDeploymentList",
+					dcdGVR: "DynamoComponentDeploymentList",
 				}
 				var dynClient *dynamicfake.FakeDynamicClient
 				if len(tt.dynamicObjects) > 0 {

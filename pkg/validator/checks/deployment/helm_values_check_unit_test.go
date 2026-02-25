@@ -26,7 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
-func TestCheckHelmValues(t *testing.T) {
+func TestValidateHelmValues(t *testing.T) {
 	tests := []struct {
 		name        string
 		setup       func() *checks.ValidationContext
@@ -247,6 +247,38 @@ func TestCheckHelmValues(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "float vs int normalization - 1.0 equals 1",
+			setup: func() *checks.ValidationContext {
+				return &checks.ValidationContext{
+					Context: context.Background(),
+					Snapshot: snapshotWithHelm(map[string]string{
+						"gpu-operator.chart":           "gpu-operator",
+						"gpu-operator.values.replicas": "1.0",
+					}),
+					Recipe: recipeWithOverrides(map[string]any{
+						"replicas": 1,
+					}),
+				}
+			},
+			wantErr: false,
+		},
+		{
+			name: "boolean case normalization - True equals true",
+			setup: func() *checks.ValidationContext {
+				return &checks.ValidationContext{
+					Context: context.Background(),
+					Snapshot: snapshotWithHelm(map[string]string{
+						"gpu-operator.chart":                 "gpu-operator",
+						"gpu-operator.values.driver.enabled": "True",
+					}),
+					Recipe: recipeWithOverrides(map[string]any{
+						"driver": map[string]any{"enabled": true},
+					}),
+				}
+			},
+			wantErr: false,
+		},
+		{
 			name: "snapshot key not present for recipe key - skip that key",
 			setup: func() *checks.ValidationContext {
 				return &checks.ValidationContext{
@@ -397,6 +429,38 @@ func TestFlattenValues(t *testing.T) {
 				if got != want {
 					t.Errorf("key %q = %q, want %q", k, got, want)
 				}
+			}
+		})
+	}
+}
+
+func TestValuesEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		expected string
+		actual   string
+		want     bool
+	}{
+		{"exact match", "foo", "foo", true},
+		{"whitespace trim", " foo ", "foo", true},
+		{"different strings", "foo", "bar", false},
+		{"int vs float same value", "1", "1.0", true},
+		{"float vs int same value", "3.0", "3", true},
+		{"different numbers", "1", "2", false},
+		{"float precision", "3.14", "3.14", true},
+		{"float mismatch", "3.14", "3.15", false},
+		{"bool true case insensitive", "true", "True", true},
+		{"bool false case insensitive", "false", "FALSE", true},
+		{"bool mismatch", "true", "false", false},
+		{"bool vs string", "true", "yes", false},
+		{"numeric string vs non-numeric", "1", "one", false},
+		{"empty strings", "", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := valuesEqual(tt.expected, tt.actual); got != tt.want {
+				t.Errorf("valuesEqual(%q, %q) = %v, want %v", tt.expected, tt.actual, got, tt.want)
 			}
 		})
 	}

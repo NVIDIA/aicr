@@ -192,19 +192,19 @@ func TestValidateHPABehavior(t *testing.T) {
 
 			if !tt.wantErr {
 				if report == nil {
-					t.Fatal("validateHPABehavior() report = nil, want non-nil")
+					t.Fatal("validateHPABehavior() report is nil")
 				}
-				if report.ScaleUpDesiredReplicas != tt.desiredReplicas || report.ScaleUpCurrentReplicas != tt.currentReplicas {
-					t.Errorf("report scale-up desired/current = %d/%d, want %d/%d",
-						report.ScaleUpDesiredReplicas, report.ScaleUpCurrentReplicas, tt.desiredReplicas, tt.currentReplicas)
+				if report.ScaleUpDesiredReplicas != tt.desiredReplicas {
+					t.Errorf("ScaleUpDesiredReplicas = %d, want %d", report.ScaleUpDesiredReplicas, tt.desiredReplicas)
 				}
-				if report.ScaleUpDeployReplicas != tt.deployReplicas {
-					t.Errorf("report scale-up deployment replicas = %d, want %d",
-						report.ScaleUpDeployReplicas, tt.deployReplicas)
+				if report.ScaleUpCurrentReplicas != tt.currentReplicas {
+					t.Errorf("ScaleUpCurrentReplicas = %d, want %d", report.ScaleUpCurrentReplicas, tt.currentReplicas)
 				}
-				if report.ScaleDownDeployReplicas != 1 {
-					t.Errorf("report scale-down deployment replicas = %d, want 1",
-						report.ScaleDownDeployReplicas)
+				if report.ScaleUpDeploymentReplica != tt.deployReplicas {
+					t.Errorf("ScaleUpDeploymentReplica = %d, want %d", report.ScaleUpDeploymentReplica, tt.deployReplicas)
+				}
+				if report.ScaleDownReplica != 1 {
+					t.Errorf("ScaleDownReplica = %d, want 1", report.ScaleDownReplica)
 				}
 			}
 		})

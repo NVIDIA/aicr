@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -117,24 +118,7 @@ func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 				Image:   d.config.Image,
 				Command: []string{"aicr"},
 				Args:    args,
-				Env: []corev1.EnvVar{
-					{
-						Name:  "AICR_AGENT_MODE",
-						Value: "true",
-					},
-					{
-						Name:  "AICR_LOG_PREFIX",
-						Value: "agent",
-					},
-					{
-						Name: "NODE_NAME",
-						ValueFrom: &corev1.EnvVarSource{
-							FieldRef: &corev1.ObjectFieldSelector{
-								FieldPath: "spec.nodeName",
-							},
-						},
-					},
-				},
+				Env:     d.buildEnvVars(),
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:      "tmp",
@@ -274,6 +258,50 @@ func (d *Deployer) applyRestrictedSettings(spec *corev1.PodSpec) {
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
 	}
+}
+
+// buildEnvVars constructs the environment variables for the agent container.
+func (d *Deployer) buildEnvVars() []corev1.EnvVar {
+	envVars := []corev1.EnvVar{
+		{
+			Name:  "AICR_AGENT_MODE",
+			Value: "true",
+		},
+		{
+			Name:  "AICR_LOG_PREFIX",
+			Value: "agent",
+		},
+		{
+			Name: "NODE_NAME",
+			ValueFrom: &corev1.EnvVarSource{
+				FieldRef: &corev1.ObjectFieldSelector{
+					FieldPath: "spec.nodeName",
+				},
+			},
+		},
+	}
+
+	helmNS := d.helmNamespacesEnvValue()
+	if helmNS != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AICR_HELM_NAMESPACES",
+			Value: helmNS,
+		})
+	}
+
+	return envVars
+}
+
+// helmNamespacesEnvValue returns the value for AICR_HELM_NAMESPACES env var.
+// Returns "*" for all-namespaces, comma-joined for scoped, or "" for none.
+func (d *Deployer) helmNamespacesEnvValue() string {
+	if d.config.HelmAllNamespaces {
+		return "*"
+	}
+	if len(d.config.HelmNamespaces) > 0 {
+		return strings.Join(d.config.HelmNamespaces, ",")
+	}
+	return ""
 }
 
 // deleteJob deletes the Job.

@@ -17,6 +17,7 @@ package conformance
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
@@ -60,7 +61,8 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 	}
 
 	var promResp struct {
-		Data struct {
+		Status string `json:"status"`
+		Data   struct {
 			Result []json.RawMessage `json:"result"`
 		} `json:"data"`
 	}
@@ -68,8 +70,11 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse Prometheus response", err)
 	}
 
-	recordArtifact(ctx, "Prometheus Query: DCGM_FI_DEV_GPU_UTIL",
-		fmt.Sprintf("Endpoint: %s\nTime series count: %d", queryURL, len(promResp.Data.Result)))
+	recordRawTextArtifact(ctx, "Prometheus Query: DCGM_FI_DEV_GPU_UTIL",
+		fmt.Sprintf("curl -sf '%s'", queryURL),
+		fmt.Sprintf("Status:            %s\nTime series count: %d", valueOrUnknown(promResp.Status), len(promResp.Data.Result)))
+	recordChunkedTextArtifact(ctx, "Prometheus query response (GPU util)",
+		fmt.Sprintf("curl -sf '%s'", queryURL), string(body))
 
 	if len(promResp.Data.Result) == 0 {
 		return errors.New(errors.ErrCodeNotFound,
@@ -83,34 +88,42 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 		return errors.New(errors.ErrCodeInternal, "discovery REST client is not available")
 	}
 	result := restClient.Get().AbsPath(rawURL).Do(ctx.Context)
-	var statusCode int
-	result.StatusCode(&statusCode)
 	if cmErr := result.Error(); cmErr != nil {
-		recordArtifact(ctx, "Custom Metrics API",
-			fmt.Sprintf("Endpoint:    %s\nHTTP Status: %d\nStatus:      unavailable\nError:       %v",
-				rawURL, statusCode, cmErr))
+		recordRawTextArtifact(ctx, "Custom Metrics API",
+			"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1",
+			fmt.Sprintf("Status: unavailable\nError: %v", cmErr))
 		return errors.Wrap(errors.ErrCodeNotFound,
 			"custom metrics API not available", cmErr)
 	}
-
-	groupVersion := "unknown"
-	resourceCount := 0
-	discoveryBody, rawErr := result.Raw()
-	if rawErr == nil {
-		var discovery struct {
-			GroupVersion string            `json:"groupVersion"`
-			Resources    []json.RawMessage `json:"resources"`
-		}
-		if json.Unmarshal(discoveryBody, &discovery) == nil {
-			if discovery.GroupVersion != "" {
-				groupVersion = discovery.GroupVersion
-			}
-			resourceCount = len(discovery.Resources)
-		}
+	var statusCode int
+	result.StatusCode(&statusCode)
+	rawBody, rawErr := result.Raw()
+	if rawErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to read custom metrics API response", rawErr)
 	}
-	recordArtifact(ctx, "Custom Metrics API",
-		fmt.Sprintf("Endpoint:      %s\nHTTP Status:   %d\nGroupVersion:  %s\nAPI Resources: %d\nStatus:        available",
-			rawURL, statusCode, groupVersion, resourceCount))
+	var customMetricsResp struct {
+		GroupVersion string `json:"groupVersion"`
+		Resources    []struct {
+			Name       string `json:"name"`
+			Namespaced bool   `json:"namespaced"`
+		} `json:"resources"`
+	}
+	if err := json.Unmarshal(rawBody, &customMetricsResp); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to parse custom metrics API response", err)
+	}
+	var resources strings.Builder
+	limit := len(customMetricsResp.Resources)
+	if limit > 20 {
+		limit = 20
+	}
+	for i := 0; i < limit; i++ {
+		r := customMetricsResp.Resources[i]
+		fmt.Fprintf(&resources, "- %s (namespaced=%t)\n", r.Name, r.Namespaced)
+	}
+	recordRawTextArtifact(ctx, "Custom Metrics API",
+		"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1",
+		fmt.Sprintf("HTTP Status:    %d\nGroupVersion:   %s\nResource count: %d\n\nResources:\n%s",
+			statusCode, valueOrUnknown(customMetricsResp.GroupVersion), len(customMetricsResp.Resources), resources.String()))
 
 	return nil
 }

@@ -228,6 +228,14 @@ const (
 	ArtifactMaxPerCheck = 20
 )
 
+// HTTP response limits for conformance checks.
+const (
+	// HTTPResponseBodyLimit is the maximum size in bytes for HTTP response bodies
+	// read by conformance checks (e.g., Prometheus metric scrapes). Prevents
+	// unbounded reads from in-cluster services.
+	HTTPResponseBodyLimit = 1 * 1024 * 1024 // 1 MiB
+)
+
 // Job configuration constants.
 const (
 	// JobTTLAfterFinished is the time-to-live for completed Jobs.

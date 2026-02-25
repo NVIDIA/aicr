@@ -72,7 +72,11 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 				// Reactor: match any pod with the DRA test prefix.
 				// Returns the pod with desired phase, or NotFound after deletion.
 				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-					ga := action.(k8stesting.GetAction)
+					ga, ok := action.(k8stesting.GetAction)
+					if !ok {
+						// Let log subresource plumbing use default fake behavior.
+						return false, nil, nil
+					}
 					if strings.HasPrefix(ga.GetName(), draTestPrefix) && ga.GetNamespace() == draTestNamespace {
 						if podDeleted {
 							return true, nil, k8serrors.NewNotFound(
@@ -106,7 +110,11 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 				// Reactor: return no-claim pod with Succeeded phase for isolation test.
 				noClaimPodDeleted := false
 				clientset.PrependReactor("get", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
-					ga := action.(k8stesting.GetAction)
+					ga, ok := action.(k8stesting.GetAction)
+					if !ok {
+						// Let log subresource plumbing use default fake behavior.
+						return false, nil, nil
+					}
 					if strings.HasPrefix(ga.GetName(), draNoClaimPrefix) && ga.GetNamespace() == draTestNamespace {
 						if noClaimPodDeleted {
 							return true, nil, k8serrors.NewNotFound(
@@ -140,6 +148,7 @@ func TestCheckSecureAcceleratorAccess(t *testing.T) {
 				dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
 					map[schema.GroupVersionResource]string{
 						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims"}: "ResourceClaimList",
+						{Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices"}: "ResourceSliceList",
 					})
 
 				// Reactor: match any ResourceClaim with the DRA claim prefix.

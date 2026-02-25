@@ -124,9 +124,9 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 			t.Fatalf("ClusterRole not found: %v", err)
 		}
 
-		// Verify policy rules (nodes, pods, secrets, clusterpolicies, services)
-		if len(cr.Rules) != 5 {
-			t.Errorf("expected 5 rules, got %d", len(cr.Rules))
+		// Default: 4 rules (nodes, pods, clusterpolicies, services) - no secrets
+		if len(cr.Rules) != 4 {
+			t.Errorf("expected 4 rules (no secrets by default), got %d", len(cr.Rules))
 		}
 	})
 
@@ -841,6 +841,235 @@ func TestDeployer_StreamLogs_NoPod(t *testing.T) {
 	err := deployer.StreamLogs(ctx, &buf, "[agent]")
 	if err == nil {
 		t.Error("StreamLogs() should fail when no Pod exists")
+	}
+}
+
+func TestDeployer_EnsureClusterRole_AllNamespaces(t *testing.T) {
+	clientset := fake.NewClientset()
+	config := Config{
+		Namespace:          "test-namespace",
+		ServiceAccountName: testName,
+		JobName:            testName,
+		Image:              "ghcr.io/nvidia/aicr-validator:latest",
+		Output:             "cm://test-namespace/aicr-snapshot",
+		HelmAllNamespaces:  true,
+	}
+	deployer := NewDeployer(clientset, config)
+	ctx := context.Background()
+
+	if err := deployer.ensureClusterRole(ctx); err != nil {
+		t.Fatalf("failed to create ClusterRole: %v", err)
+	}
+
+	cr, err := clientset.RbacV1().ClusterRoles().
+		Get(ctx, "aicr-node-reader", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("ClusterRole not found: %v", err)
+	}
+
+	// HelmAllNamespaces: 5 rules (nodes, pods, clusterpolicies, services, secrets)
+	if len(cr.Rules) != 5 {
+		t.Errorf("expected 5 rules with HelmAllNamespaces, got %d", len(cr.Rules))
+	}
+
+	// Verify secrets rule is present
+	hasSecrets := false
+	for _, rule := range cr.Rules {
+		if len(rule.Resources) == 1 && rule.Resources[0] == "secrets" {
+			hasSecrets = true
+			break
+		}
+	}
+	if !hasSecrets {
+		t.Error("expected secrets rule in ClusterRole when HelmAllNamespaces=true")
+	}
+}
+
+func TestDeployer_EnsureHelmSecretRoles(t *testing.T) {
+	clientset := fake.NewClientset()
+	config := Config{
+		Namespace:          "test-namespace",
+		ServiceAccountName: testName,
+		JobName:            testName,
+		Image:              "ghcr.io/nvidia/aicr-validator:latest",
+		Output:             "cm://test-namespace/aicr-snapshot",
+		HelmNamespaces:     []string{"gpu-operator", "network-operator"},
+	}
+	deployer := NewDeployer(clientset, config)
+	ctx := context.Background()
+
+	if err := deployer.ensureHelmSecretRoles(ctx); err != nil {
+		t.Fatalf("failed to create Helm secret roles: %v", err)
+	}
+
+	for _, ns := range config.HelmNamespaces {
+		// Verify Role
+		role, err := clientset.RbacV1().Roles(ns).
+			Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Role not found in namespace %q: %v", ns, err)
+		}
+		if len(role.Rules) != 1 || role.Rules[0].Resources[0] != "secrets" {
+			t.Errorf("expected secrets rule in Role for namespace %q", ns)
+		}
+		if role.Labels["app.kubernetes.io/component"] != "helm-secrets" {
+			t.Errorf("expected helm-secrets component label on Role in namespace %q", ns)
+		}
+
+		// Verify RoleBinding
+		rb, err := clientset.RbacV1().RoleBindings(ns).
+			Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("RoleBinding not found in namespace %q: %v", ns, err)
+		}
+		if rb.Subjects[0].Name != testName {
+			t.Errorf("expected subject %q, got %q in namespace %q", testName, rb.Subjects[0].Name, ns)
+		}
+		if rb.Subjects[0].Namespace != "test-namespace" {
+			t.Errorf("expected subject namespace %q, got %q", "test-namespace", rb.Subjects[0].Namespace)
+		}
+	}
+}
+
+func TestDeployer_EnsureHelmSecretRoles_Idempotent(t *testing.T) {
+	clientset := fake.NewClientset()
+	config := Config{
+		Namespace:          "test-namespace",
+		ServiceAccountName: testName,
+		JobName:            testName,
+		Image:              "ghcr.io/nvidia/aicr-validator:latest",
+		Output:             "cm://test-namespace/aicr-snapshot",
+		HelmNamespaces:     []string{"gpu-operator"},
+	}
+	deployer := NewDeployer(clientset, config)
+	ctx := context.Background()
+
+	if err := deployer.ensureHelmSecretRoles(ctx); err != nil {
+		t.Fatalf("first create failed: %v", err)
+	}
+
+	if err := deployer.ensureHelmSecretRoles(ctx); err != nil {
+		t.Fatalf("second create failed (not idempotent): %v", err)
+	}
+}
+
+func TestDeployer_Cleanup_WithHelmNamespaces(t *testing.T) {
+	clientset := fake.NewClientset()
+
+	clientset.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SelfSubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{
+				Allowed: true,
+				Reason:  "test permissions allowed",
+			},
+		}, nil
+	})
+
+	config := Config{
+		Namespace:          "test-namespace",
+		ServiceAccountName: testName,
+		JobName:            testName,
+		Image:              "ghcr.io/nvidia/aicr-validator:latest",
+		Output:             "cm://test-namespace/aicr-snapshot",
+		HelmNamespaces:     []string{"gpu-operator", "network-operator"},
+	}
+	deployer := NewDeployer(clientset, config)
+	ctx := context.Background()
+
+	if err := deployer.Deploy(ctx); err != nil {
+		t.Fatalf("Deploy() failed: %v", err)
+	}
+
+	// Verify Helm secret roles were created
+	for _, ns := range config.HelmNamespaces {
+		_, err := clientset.RbacV1().Roles(ns).Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Helm Role not found in namespace %q: %v", ns, err)
+		}
+	}
+
+	// Cleanup
+	if err := deployer.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() failed: %v", err)
+	}
+
+	// Verify Helm secret roles were deleted
+	for _, ns := range config.HelmNamespaces {
+		_, err := clientset.RbacV1().Roles(ns).Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+		if err == nil {
+			t.Errorf("Helm Role should be deleted in namespace %q", ns)
+		}
+		_, err = clientset.RbacV1().RoleBindings(ns).Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+		if err == nil {
+			t.Errorf("Helm RoleBinding should be deleted in namespace %q", ns)
+		}
+	}
+}
+
+func TestBuildJob_HelmNamespacesEnvVar(t *testing.T) {
+	tests := []struct {
+		name              string
+		helmNamespaces    []string
+		helmAllNamespaces bool
+		wantEnvValue      string
+		wantEnvPresent    bool
+	}{
+		{
+			name:           "no helm config",
+			wantEnvPresent: false,
+		},
+		{
+			name:              "all namespaces",
+			helmAllNamespaces: true,
+			wantEnvValue:      "*",
+			wantEnvPresent:    true,
+		},
+		{
+			name:           "scoped namespaces",
+			helmNamespaces: []string{"gpu-operator", "network-operator"},
+			wantEnvValue:   "gpu-operator,network-operator",
+			wantEnvPresent: true,
+		},
+		{
+			name:           "single namespace",
+			helmNamespaces: []string{"gpu-operator"},
+			wantEnvValue:   "gpu-operator",
+			wantEnvPresent: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := Config{
+				Namespace:          "test-namespace",
+				ServiceAccountName: testName,
+				JobName:            testName,
+				Image:              "ghcr.io/nvidia/aicr-validator:latest",
+				Output:             "cm://test-namespace/aicr-snapshot",
+				HelmNamespaces:     tt.helmNamespaces,
+				HelmAllNamespaces:  tt.helmAllNamespaces,
+			}
+			deployer := NewDeployer(fake.NewClientset(), config)
+			job := deployer.buildJob()
+
+			container := job.Spec.Template.Spec.Containers[0]
+			var found bool
+			var gotValue string
+			for _, env := range container.Env {
+				if env.Name == "AICR_HELM_NAMESPACES" {
+					found = true
+					gotValue = env.Value
+					break
+				}
+			}
+
+			if found != tt.wantEnvPresent {
+				t.Errorf("AICR_HELM_NAMESPACES present=%v, want=%v", found, tt.wantEnvPresent)
+			}
+			if found && gotValue != tt.wantEnvValue {
+				t.Errorf("AICR_HELM_NAMESPACES=%q, want=%q", gotValue, tt.wantEnvValue)
+			}
+		})
 	}
 }
 

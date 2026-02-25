@@ -108,15 +108,15 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 		if severity == "error" {
 			// Convert all check results to errors
 			for _, warning := range checkWarnings {
+				msg := warning
 				if validation.Message != "" {
-					errors = append(errors, fmt.Errorf("%s. %s", warning, validation.Message))
-				} else {
-					errors = append(errors, fmt.Errorf("%s", warning))
+					msg = warning + ". " + validation.Message
 				}
+				errors = append(errors, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, msg))
 			}
 			for _, err := range checkErrors {
 				if validation.Message != "" {
-					errors = append(errors, fmt.Errorf("%w. %s", err, validation.Message))
+					errors = append(errors, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, validation.Message, err))
 				} else {
 					errors = append(errors, err)
 				}
@@ -133,7 +133,7 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 			// Even if severity is warning, checkErrors should still be errors
 			for _, err := range checkErrors {
 				if validation.Message != "" {
-					errors = append(errors, fmt.Errorf("%w. %s", err, validation.Message))
+					errors = append(errors, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, validation.Message, err))
 				} else {
 					errors = append(errors, err)
 				}

@@ -26,41 +26,67 @@ import (
 	"helm.sh/helm/v3/pkg/storage/driver"
 )
 
-// collectHelmReleases discovers all deployed Helm releases across all namespaces
-// and returns their metadata and user-supplied values as measurement readings.
+// collectHelmReleasesScoped collects Helm releases based on HelmNamespaces config.
+// nil/empty = skip collection, ["*"] = all namespaces, ["ns1","ns2"] = scoped.
+func (k *Collector) collectHelmReleasesScoped(ctx context.Context) map[string]measurement.Reading {
+	if len(k.HelmNamespaces) == 0 {
+		slog.Debug("helm collection skipped - no namespaces configured")
+		return make(map[string]measurement.Reading)
+	}
+
+	if len(k.HelmNamespaces) == 1 && k.HelmNamespaces[0] == "*" {
+		return k.collectHelmReleasesInNamespace(ctx, "")
+	}
+
+	data := make(map[string]measurement.Reading)
+	for _, ns := range k.HelmNamespaces {
+		if err := ctx.Err(); err != nil {
+			slog.Debug("helm collector context cancelled", slog.String("error", err.Error()))
+			return data
+		}
+		nsData := k.collectHelmReleasesInNamespace(ctx, ns)
+		for key, val := range nsData {
+			data[key] = val
+		}
+	}
+	return data
+}
+
+// collectHelmReleasesInNamespace discovers deployed Helm releases in a single namespace
+// (or all namespaces when namespace is "").
 // On any error, it degrades gracefully by returning an empty map.
-func (k *Collector) collectHelmReleases(ctx context.Context) map[string]measurement.Reading {
+func (k *Collector) collectHelmReleasesInNamespace(ctx context.Context, namespace string) map[string]measurement.Reading {
 	if err := ctx.Err(); err != nil {
 		slog.Debug("helm collector context cancelled", slog.String("error", err.Error()))
 		return make(map[string]measurement.Reading)
 	}
 
-	// Create a Helm secrets storage driver using all-namespaces ("").
-	d := driver.NewSecrets(k.ClientSet.CoreV1().Secrets(""))
+	d := driver.NewSecrets(k.ClientSet.CoreV1().Secrets(namespace))
 	store := storage.Init(d)
 
 	releases, err := store.ListDeployed()
 	if err != nil {
-		slog.Warn("failed to list helm releases", slog.String("error", err.Error()))
+		slog.Warn("failed to list helm releases",
+			slog.String("namespace", namespace),
+			slog.String("error", err.Error()))
 		return make(map[string]measurement.Reading)
 	}
 
-	// Deduplicate: keep only the highest revision per release name+namespace.
 	releases = latestReleases(releases)
 
 	data := make(map[string]measurement.Reading)
-
 	for _, rel := range releases {
 		if err := ctx.Err(); err != nil {
 			slog.Debug("helm collector context cancelled during iteration",
 				slog.String("error", err.Error()))
 			return data
 		}
-
 		mapRelease(rel, data)
 	}
 
-	slog.Debug("collected helm releases", slog.Int("count", len(releases)))
+	slog.Debug("collected helm releases",
+		slog.String("namespace", namespace),
+		slog.Int("count", len(releases)))
 
 	return data
 }

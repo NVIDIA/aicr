@@ -89,6 +89,12 @@ type AgentConfig struct {
 	// TemplatePath is the path to a Go template file for custom output formatting.
 	// When set, the snapshot output will be processed through this template.
 	TemplatePath string
+
+	// HelmNamespaces lists namespaces for scoped Helm release collection.
+	HelmNamespaces []string
+
+	// HelmAllNamespaces enables cluster-wide Helm secrets access.
+	HelmAllNamespaces bool
 }
 
 // DeployAndGetSnapshot deploys an agent to capture a snapshot and returns the Snapshot struct.
@@ -130,6 +136,8 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		Debug:              config.Debug,
 		Privileged:         config.Privileged,
 		RequireGPU:         config.RequireGPU,
+		HelmNamespaces:     config.HelmNamespaces,
+		HelmAllNamespaces:  config.HelmAllNamespaces,
 	}
 
 	// Create deployer
@@ -392,6 +400,8 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		Debug:              n.AgentConfig.Debug,
 		Privileged:         n.AgentConfig.Privileged,
 		RequireGPU:         n.AgentConfig.RequireGPU,
+		HelmNamespaces:     n.AgentConfig.HelmNamespaces,
+		HelmAllNamespaces:  n.AgentConfig.HelmAllNamespaces,
 	}
 
 	// Create deployer

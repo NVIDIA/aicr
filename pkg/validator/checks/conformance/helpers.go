@@ -30,9 +30,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/yaml"
 )
 
 // phaseConformance is the phase identifier for conformance checks.
@@ -69,10 +68,11 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 		return nil, errors.New(errors.ErrCodeInternal,
 			fmt.Sprintf("HTTP %d from %s", resp.StatusCode, url))
 	}
-	return io.ReadAll(resp.Body)
+	return io.ReadAll(io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit))
 }
 
 type conditionObservation struct {
+	Type    string
 	Status  string
 	Reason  string
 	Message string
@@ -89,29 +89,33 @@ func getConditionObservation(obj *unstructured.Unstructured, condType string) (*
 		if !ok {
 			continue
 		}
-		condName, _ := cond["type"].(string)
-		if condName != condType {
+
+		kind, kindFound, kindErr := unstructured.NestedString(cond, "type")
+		if kindErr != nil {
+			slog.Debug("condition has non-string type field", "error", kindErr)
+			continue
+		}
+		if !kindFound || kind != condType {
 			continue
 		}
 
-		status, _ := cond["status"].(string)
+		status, foundStatus, _ := unstructured.NestedString(cond, "status")
+		if !foundStatus {
+			if v, ok := cond["status"]; ok {
+				status = fmt.Sprintf("%v", v)
+			}
+		}
+		reason, _, _ := unstructured.NestedString(cond, "reason")
+		message, _, _ := unstructured.NestedString(cond, "message")
 		return &conditionObservation{
-			Status:  status,
-			Reason:  stringFieldOrDefault(cond, "reason", "not-reported"),
-			Message: stringFieldOrDefault(cond, "message", "not-reported"),
+			Type:    condType,
+			Status:  valueOrUnknown(status),
+			Reason:  valueOrUnknown(reason),
+			Message: valueOrUnknown(message),
 		}, nil
 	}
 
-	return nil, errors.New(errors.ErrCodeNotFound,
-		fmt.Sprintf("condition %s not found", condType))
-}
-
-func stringFieldOrDefault(obj map[string]interface{}, key, fallback string) string {
-	v, _ := obj[key].(string)
-	if v == "" {
-		return fallback
-	}
-	return v
+	return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("condition %s not found", condType))
 }
 
 // verifyDeploymentAvailable checks that a Deployment has at least one available replica.
@@ -176,12 +180,110 @@ func recordArtifact(ctx *checks.ValidationContext, label, data string) {
 	}
 }
 
+func formatArtifactBody(equivalent, data string) string {
+	equivalent = strings.TrimSpace(equivalent)
+	data = strings.TrimSpace(data)
+	switch {
+	case equivalent == "" && data == "":
+		return ""
+	case equivalent == "":
+		return data
+	case data == "":
+		return fmt.Sprintf("Equivalent: %s", equivalent)
+	default:
+		return fmt.Sprintf("Equivalent: %s\n\n%s", equivalent, data)
+	}
+}
+
+// recordRawTextArtifact records plain text evidence with an optional command equivalent.
+func recordRawTextArtifact(ctx *checks.ValidationContext, label, equivalent, data string) {
+	recordArtifact(ctx, label, formatArtifactBody(equivalent, data))
+}
+
+// recordChunkedTextArtifact records text evidence across multiple artifacts when needed.
+// This avoids collector-side truncation for large YAML/JSON/metrics payloads.
+// Splits on line boundaries to avoid producing malformed YAML/JSON chunks.
+func recordChunkedTextArtifact(ctx *checks.ValidationContext, label, equivalent, data string) {
+	if strings.TrimSpace(data) == "" {
+		recordRawTextArtifact(ctx, label, equivalent, data)
+		return
+	}
+
+	prefix := ""
+	if strings.TrimSpace(equivalent) != "" {
+		prefix = fmt.Sprintf("Equivalent: %s\n\n", strings.TrimSpace(equivalent))
+	}
+
+	chunkSize := defaults.ArtifactMaxDataSize - len(prefix) - 256
+	if chunkSize < 512 {
+		chunkSize = 512
+	}
+	if len(data) <= chunkSize {
+		recordArtifact(ctx, label, prefix+strings.TrimSpace(data))
+		return
+	}
+
+	// Split on line boundaries to avoid cutting mid-line or mid-multibyte-character.
+	lines := strings.Split(data, "\n")
+	var chunks []string
+	var current strings.Builder
+	for _, line := range lines {
+		// If adding this line would exceed the budget, flush current chunk.
+		if current.Len() > 0 && current.Len()+len(line)+1 > chunkSize {
+			chunks = append(chunks, current.String())
+			current.Reset()
+		}
+		if current.Len() > 0 {
+			current.WriteByte('\n')
+		}
+		current.WriteString(line)
+	}
+	if current.Len() > 0 {
+		chunks = append(chunks, current.String())
+	}
+
+	total := len(chunks)
+	for i, chunk := range chunks {
+		partLabel := fmt.Sprintf("%s (part %d/%d)", label, i+1, total)
+		partBody := fmt.Sprintf("%sPart: %d/%d\n\n%s", prefix, i+1, total, strings.TrimSpace(chunk))
+		recordArtifact(ctx, partLabel, partBody)
+	}
+}
+
+// recordObjectYAMLArtifact records a structured object as YAML.
+func recordObjectYAMLArtifact(ctx *checks.ValidationContext, label, equivalent string, obj any) {
+	payload, err := yaml.Marshal(obj)
+	if err != nil {
+		recordRawTextArtifact(ctx, label, equivalent, fmt.Sprintf("failed to marshal YAML: %v", err))
+		return
+	}
+	recordChunkedTextArtifact(ctx, label, equivalent, string(payload))
+}
+
 // firstContainerImage returns the image of the first container, or "unknown" if empty.
 func firstContainerImage(containers []corev1.Container) string {
 	if len(containers) > 0 {
 		return containers[0].Image
 	}
 	return "unknown"
+}
+
+func valueOrUnknown(v string) string {
+	if strings.TrimSpace(v) == "" {
+		return "unknown"
+	}
+	return v
+}
+
+func podReadyCount(pod corev1.Pod) string {
+	var ready, total int
+	for _, cs := range pod.Status.ContainerStatuses {
+		total++
+		if cs.Ready {
+			ready++
+		}
+	}
+	return fmt.Sprintf("%d/%d", ready, total)
 }
 
 // truncateLines limits text to at most n lines, appending a truncation marker if needed.
@@ -244,46 +346,6 @@ func podWaitingStatus(pod *corev1.Pod) string {
 		}
 	}
 	return "none"
-}
-
-// waitForHPAScaleUp polls the HPA until desiredReplicas > currentReplicas.
-// This proves the HPA read metrics and computed a scale-up intent. The logPrefix
-// is prepended to log messages to distinguish callers (e.g. "pod-autoscaling", "cluster-autoscaling").
-func waitForHPAScaleUp(ctx context.Context, clientset kubernetes.Interface, namespace, hpaName, logPrefix string) (int32, int32, error) {
-	var observedDesired int32
-	var observedCurrent int32
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.HPAScaleTimeout)
-	defer cancel()
-
-	err := wait.PollUntilContextCancel(waitCtx, defaults.HPAPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			hpa, getErr := clientset.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(
-				ctx, hpaName, metav1.GetOptions{})
-			if getErr != nil {
-				slog.Debug("HPA not ready yet", "context", logPrefix, "error", getErr)
-				return false, nil
-			}
-
-			observedDesired = hpa.Status.DesiredReplicas
-			observedCurrent = hpa.Status.CurrentReplicas
-			slog.Debug(logPrefix+" HPA status", "desired", observedDesired, "current", observedCurrent)
-
-			if observedDesired > observedCurrent {
-				slog.Info(logPrefix+" HPA scaling intent detected",
-					"desiredReplicas", observedDesired, "currentReplicas", observedCurrent)
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
-			return 0, 0, errors.Wrap(errors.ErrCodeTimeout,
-				logPrefix+": HPA did not report scaling intent within timeout", err)
-		}
-		return 0, 0, errors.Wrap(errors.ErrCodeInternal, logPrefix+": HPA scaling intent polling failed", err)
-	}
-	return observedDesired, observedCurrent, nil
 }
 
 // gpuDriverName is the DRA driver name for NVIDIA GPUs.

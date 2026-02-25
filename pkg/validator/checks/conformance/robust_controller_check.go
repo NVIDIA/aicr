@@ -35,10 +35,15 @@ var dgdGVR = schema.GroupVersionResource{
 	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamographdeployments",
 }
 
+var dcdGVR = schema.GroupVersionResource{
+	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamocomponentdeployments",
+}
+
 type webhookRejectionReport struct {
 	ResourceName string
+	Namespace    string
 	StatusCode   int32
-	Reason       metav1.StatusReason
+	Reason       string
 	Message      string
 }
 
@@ -73,7 +78,8 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 		if deploy.Spec.Replicas != nil {
 			expected = *deploy.Spec.Replicas
 		}
-		recordArtifact(ctx, "Dynamo Operator Deployment",
+		recordRawTextArtifact(ctx, "Dynamo Operator Deployment",
+			"kubectl get deploy -n dynamo-system",
 			fmt.Sprintf("Name:      %s/%s\nReplicas:  %d/%d available\nImage:     %s",
 				deploy.Namespace, deploy.Name,
 				deploy.Status.AvailableReplicas, expected,
@@ -81,6 +87,18 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 	}
 	if deployErr != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "Dynamo operator controller-manager check failed", deployErr)
+	}
+	operatorPods, podErr := ctx.Clientset.CoreV1().Pods("dynamo-system").List(ctx.Context, metav1.ListOptions{})
+	if podErr != nil {
+		recordRawTextArtifact(ctx, "Dynamo operator pods", "kubectl get pods -n dynamo-system",
+			fmt.Sprintf("failed to list pods: %v", podErr))
+	} else {
+		var podSummary strings.Builder
+		for _, p := range operatorPods.Items {
+			fmt.Fprintf(&podSummary, "%-46s ready=%s phase=%s node=%s\n",
+				p.Name, podReadyCount(p), p.Status.Phase, valueOrUnknown(p.Spec.NodeName))
+		}
+		recordRawTextArtifact(ctx, "Dynamo operator pods", "kubectl get pods -n dynamo-system", podSummary.String())
 	}
 
 	// 2. Validating webhook operational
@@ -92,10 +110,12 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 	}
 	var foundDynamoWebhook bool
 	var webhookName string
+	var webhookSummary strings.Builder
 	for _, wh := range webhooks.Items {
 		if strings.Contains(wh.Name, "dynamo") {
 			foundDynamoWebhook = true
 			webhookName = wh.Name
+			fmt.Fprintf(&webhookSummary, "WebhookConfig: %s\n", wh.Name)
 			// Verify webhook service endpoint exists via EndpointSlice
 			for _, w := range wh.Webhooks {
 				if w.ClientConfig.Service != nil {
@@ -113,6 +133,7 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 						return errors.New(errors.ErrCodeNotFound,
 							fmt.Sprintf("no EndpointSlice for webhook service %s/%s", svcNs, svcName))
 					}
+					fmt.Fprintf(&webhookSummary, "  service=%s/%s endpointSlices=%d\n", svcNs, svcName, len(slices.Items))
 				}
 			}
 			break
@@ -122,7 +143,11 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 		return errors.New(errors.ErrCodeNotFound,
 			"Dynamo validating webhook configuration not found")
 	}
-	recordArtifact(ctx, "Validating Webhook",
+	recordRawTextArtifact(ctx, "Validating webhooks",
+		"kubectl get validatingwebhookconfigurations | grep dynamo",
+		strings.TrimSpace(webhookSummary.String()))
+	recordRawTextArtifact(ctx, "Validating Webhook",
+		"kubectl get validatingwebhookconfigurations",
 		fmt.Sprintf("Name:      %s\nEndpoint:  reachable", webhookName))
 
 	// 3. DynamoGraphDeployment CRD exists (proves operator manages CRs)
@@ -135,21 +160,68 @@ func CheckRobustController(ctx *checks.ValidationContext) error {
 	crdGVR := schema.GroupVersionResource{
 		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
 	}
-	_, err = dynClient.Resource(crdGVR).Get(ctx.Context,
+	crdObj, err := dynClient.Resource(crdGVR).Get(ctx.Context,
 		"dynamographdeployments.nvidia.com", metav1.GetOptions{})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound,
 			"DynamoGraphDeployment CRD not found", err)
 	}
+	recordRawTextArtifact(ctx, "Dynamo CRDs",
+		"kubectl get crds | grep -i dynamo",
+		fmt.Sprintf("Required CRD present: %s", crdObj.GetName()))
+
+	// Optional evidence: capture DynamoGraphDeployment and component inventories if available.
+	dgdList, dgdListErr := dynClient.Resource(dgdGVR).Namespace("").List(ctx.Context, metav1.ListOptions{})
+	if dgdListErr != nil {
+		recordRawTextArtifact(ctx, "DynamoGraphDeployments", "kubectl get dynamographdeployments -A",
+			fmt.Sprintf("unable to list DynamoGraphDeployments: %v", dgdListErr))
+	} else {
+		var dgdSummary strings.Builder
+		fmt.Fprintf(&dgdSummary, "Count: %d\n", len(dgdList.Items))
+		for _, item := range dgdList.Items {
+			fmt.Fprintf(&dgdSummary, "- %s/%s\n", item.GetNamespace(), item.GetName())
+		}
+		recordRawTextArtifact(ctx, "DynamoGraphDeployments", "kubectl get dynamographdeployments -A", dgdSummary.String())
+	}
+
+	workloadPods, workloadPodErr := ctx.Clientset.CoreV1().Pods("dynamo-workload").List(ctx.Context, metav1.ListOptions{})
+	if workloadPodErr != nil {
+		recordRawTextArtifact(ctx, "Dynamo workload pods", "kubectl get pods -n dynamo-workload -o wide",
+			fmt.Sprintf("unable to list workload pods: %v", workloadPodErr))
+	} else {
+		var workloadSummary strings.Builder
+		for _, p := range workloadPods.Items {
+			fmt.Fprintf(&workloadSummary, "%-46s ready=%s phase=%s node=%s\n",
+				p.Name, podReadyCount(p), p.Status.Phase, valueOrUnknown(p.Spec.NodeName))
+		}
+		recordRawTextArtifact(ctx, "Dynamo workload pods", "kubectl get pods -n dynamo-workload -o wide", workloadSummary.String())
+	}
+
+	componentList, componentErr := dynClient.Resource(dcdGVR).Namespace("dynamo-workload").List(ctx.Context, metav1.ListOptions{})
+	if componentErr != nil {
+		recordRawTextArtifact(ctx, "DynamoComponentDeployments",
+			"kubectl get dynamocomponentdeployments -n dynamo-workload",
+			fmt.Sprintf("unable to list DynamoComponentDeployments: %v", componentErr))
+	} else {
+		var componentSummary strings.Builder
+		fmt.Fprintf(&componentSummary, "Count: %d\n", len(componentList.Items))
+		for _, item := range componentList.Items {
+			fmt.Fprintf(&componentSummary, "- %s/%s\n", item.GetNamespace(), item.GetName())
+		}
+		recordRawTextArtifact(ctx, "DynamoComponentDeployments",
+			"kubectl get dynamocomponentdeployments -n dynamo-workload", componentSummary.String())
+	}
 
 	// 4. Validating webhook actively rejects invalid resources (behavioral test).
-	report, err := validateWebhookRejects(ctx)
+	rejectionReport, err := validateWebhookRejects(ctx)
 	if err != nil {
 		return err
 	}
-	recordArtifact(ctx, "Webhook Rejection Test",
-		fmt.Sprintf("Resource:   %s\nHTTP Code:  %d\nReason:     %s\nMessage:    %s",
-			report.ResourceName, report.StatusCode, report.Reason, report.Message))
+	recordRawTextArtifact(ctx, "Webhook Rejection Test",
+		"kubectl apply -f <invalid dynamographdeployment>",
+		fmt.Sprintf("Resource:    %s/%s\nHTTPStatus:  %d\nReason:      %s\nMessage:     %s",
+			rejectionReport.Namespace, rejectionReport.ResourceName,
+			rejectionReport.StatusCode, rejectionReport.Reason, rejectionReport.Message))
 	return nil
 }
 
@@ -196,27 +268,29 @@ func validateWebhookRejects(ctx *checks.ValidationContext) (*webhookRejectionRep
 			"validating webhook did not reject invalid DynamoGraphDeployment")
 	}
 
+	report := &webhookRejectionReport{
+		ResourceName: name,
+		Namespace:    "dynamo-system",
+		Reason:       "unknown",
+		Message:      createErr.Error(),
+	}
+
 	// Webhook rejections produce Forbidden (403) or Invalid (422) API errors.
 	// Use k8serrors type predicates instead of brittle string matching.
 	// IsForbidden can also match RBAC denials, so we explicitly exclude those
 	// by checking the structured status message for RBAC patterns.
 	if k8serrors.IsForbidden(createErr) || k8serrors.IsInvalid(createErr) {
-		report := &webhookRejectionReport{
-			ResourceName: name,
-			Message:      createErr.Error(),
-		}
-
 		var statusErr *k8serrors.StatusError
 		if stderrors.As(createErr, &statusErr) {
 			status := statusErr.Status()
+			report.StatusCode = status.Code
+			report.Reason = string(status.Reason)
+			report.Message = status.Message
 			msg := status.Message
 			if strings.Contains(msg, "cannot create resource") {
 				return nil, errors.Wrap(errors.ErrCodeInternal,
 					"RBAC denied the request, not an admission webhook rejection", createErr)
 			}
-			report.StatusCode = status.Code
-			report.Reason = status.Reason
-			report.Message = msg
 		}
 		return report, nil // PASS — webhook rejected the invalid resource
 	}

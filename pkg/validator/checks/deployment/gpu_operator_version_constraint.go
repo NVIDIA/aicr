@@ -99,7 +99,7 @@ func getVersionFromDeployment(ctx context.Context, clientset kubernetes.Interfac
 		metav1.GetOptions{},
 	)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(errors.ErrCodeNotFound, fmt.Sprintf("failed to get deployment %s/%s", namespace, name), err)
 	}
 
 	// Strategy 1: Check standard version label

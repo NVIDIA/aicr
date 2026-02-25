@@ -17,6 +17,8 @@ package snapshotter
 import (
 	"context"
 	"log/slog"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -63,10 +65,27 @@ func (n *NodeSnapshotter) Measure(ctx context.Context) error {
 	return n.measure(ctx)
 }
 
+// parseHelmNamespacesEnv reads the AICR_HELM_NAMESPACES env var set by the agent Job.
+// Returns nil for empty (skip), ["*"] for all, or split namespaces for scoped.
+func parseHelmNamespacesEnv() []string {
+	val := os.Getenv("AICR_HELM_NAMESPACES")
+	if val == "" {
+		return nil
+	}
+	if val == "*" {
+		return []string{"*"}
+	}
+	return strings.Split(val, ",")
+}
+
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	if n.Factory == nil {
-		n.Factory = collector.NewDefaultFactory()
+		var opts []collector.Option
+		if helmNS := parseHelmNamespacesEnv(); len(helmNS) > 0 {
+			opts = append(opts, collector.WithHelmNamespaces(helmNS))
+		}
+		n.Factory = collector.NewDefaultFactory(opts...)
 	}
 
 	slog.Debug("starting node snapshot")
