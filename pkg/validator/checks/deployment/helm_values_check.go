@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -163,7 +164,32 @@ func flattenValuesRecursive(data map[string]any, prefix string, result map[strin
 }
 
 // valuesEqual compares two string representations of values, normalizing
-// common type differences (e.g., "true"/"true", "1"/"1").
+// common type differences between YAML parsing and Helm's JSON storage.
+// For example, YAML parses 1 as int while JSON parses it as float64;
+// both flatten to "1" but edge cases like "1.0" vs "1" need handling.
 func valuesEqual(expected, actual string) bool {
-	return strings.TrimSpace(expected) == strings.TrimSpace(actual)
+	expected = strings.TrimSpace(expected)
+	actual = strings.TrimSpace(actual)
+
+	if expected == actual {
+		return true
+	}
+
+	// Numeric normalization: parse both as float64 to handle
+	// int vs float differences (YAML int 1 vs JSON float64 1.0).
+	if ef, ee := strconv.ParseFloat(expected, 64); ee == nil {
+		if af, ae := strconv.ParseFloat(actual, 64); ae == nil {
+			return ef == af
+		}
+	}
+
+	// Boolean normalization: case-insensitive comparison
+	// handles "True"/"true", "FALSE"/"false".
+	if eb, ee := strconv.ParseBool(expected); ee == nil {
+		if ab, ae := strconv.ParseBool(actual); ae == nil {
+			return eb == ab
+		}
+	}
+
+	return false
 }
