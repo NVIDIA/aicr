@@ -38,29 +38,29 @@ spec:
 
               # Create a registry.yaml with healthCheck.assertFile for gpu-operator
               cat > "${WORK}/data/registry.yaml" <<'EOF'
-              apiVersion: aicr.nvidia.com/v1alpha1
-              kind: ComponentRegistry
-              components:
-                - name: gpu-operator
-                  displayName: GPU Operator
-                  healthCheck:
-                    assertFile: checks/gpu-operator/assert.yaml
-                  helm:
-                    defaultRepository: https://helm.ngc.nvidia.com/nvidia
-                    defaultChart: nvidia/gpu-operator
-                    defaultNamespace: gpu-operator
-              EOF
+apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components:
+  - name: gpu-operator
+    displayName: GPU Operator
+    healthCheck:
+      assertFile: checks/gpu-operator/assert.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
+      defaultChart: nvidia/gpu-operator
+      defaultNamespace: gpu-operator
+EOF
 
               # Create a Chainsaw-style assert file for gpu-operator
               cat > "${WORK}/data/checks/gpu-operator/assert.yaml" <<'EOF'
-              apiVersion: apps/v1
-              kind: Deployment
-              metadata:
-                name: gpu-operator
-                namespace: gpu-operator
-              status:
-                readyReplicas: 1
-              EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gpu-operator
+  namespace: gpu-operator
+status:
+  readyReplicas: 1
+EOF
 
               # Generate a recipe that includes gpu-operator
               ${AICR_BIN} recipe --service eks --accelerator h100 --intent training \
@@ -68,19 +68,19 @@ spec:
 
               # Create a minimal snapshot
               cat > "${WORK}/snapshot.yaml" <<'SNAP'
-              measurements:
-                - type: K8s
-                  subtypes:
-                    - name: server
-                      data:
-                        version: v1.33.0
-                - type: OS
-                  subtypes:
-                    - name: release
-                      data:
-                        ID: ubuntu
-                        VERSION_ID: "24.04"
-              SNAP
+measurements:
+  - type: K8s
+    subtypes:
+      - name: server
+        data:
+          version: v1.33.0
+  - type: OS
+    subtypes:
+      - name: release
+        data:
+          ID: ubuntu
+          VERSION_ID: "24.04"
+SNAP
 
     - name: validate-with-chainsaw-healthcheck
       description: Validate with --data pointing to registry with healthCheck.assertFile (no-cluster mode).

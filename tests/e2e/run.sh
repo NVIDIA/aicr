@@ -918,7 +918,7 @@ test_validate_deployment_constraints() {
   msg "--- Setup: Create fake GPU operator deployment ---"
   kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
   
-  cat <<YAML | kubectl apply -f - 2>&1 || true
+  cat <<YAML | kubectl apply -f - 2>&1
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -942,8 +942,9 @@ spec:
         image: nvcr.io/nvidia/gpu-operator:v24.6.0
         imagePullPolicy: IfNotPresent
 YAML
+  apply_rc=$?
 
-  if [ $? -eq 0 ]; then
+  if [ $apply_rc -eq 0 ]; then
     detail "Created fake GPU operator deployment (v24.6.0)"
   else
     skip "validate/deployment-constraints" "Could not create GPU operator deployment"
@@ -1080,7 +1081,7 @@ test_validate_expected_resources() {
   msg "--- Setup: Create fake GPU operator deployment ---"
   kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
 
-  cat <<YAML | kubectl apply -f - 2>&1 || true
+  cat <<YAML | kubectl apply -f - 2>&1
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1104,8 +1105,9 @@ spec:
         image: nvcr.io/nvidia/gpu-operator:v24.6.0
         imagePullPolicy: IfNotPresent
 YAML
+  apply_rc=$?
 
-  if [ $? -eq 0 ]; then
+  if [ $apply_rc -eq 0 ]; then
     detail "Created fake GPU operator deployment (v24.6.0)"
   else
     skip "validate/expected-resources" "Could not create GPU operator deployment"
@@ -1327,7 +1329,7 @@ test_validate_chainsaw_healthcheck() {
   msg "--- Setup: Create fake GPU operator deployment ---"
   kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
 
-  cat <<YAML | kubectl apply -f - 2>&1 || true
+  cat <<YAML | kubectl apply -f - 2>&1
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -1351,8 +1353,9 @@ spec:
         image: nvcr.io/nvidia/gpu-operator:v24.6.0
         imagePullPolicy: IfNotPresent
 YAML
+  apply_rc=$?
 
-  if [ $? -eq 0 ]; then
+  if [ $apply_rc -eq 0 ]; then
     detail "Created fake GPU operator deployment (v24.6.0)"
   else
     skip "validate/chainsaw-healthcheck" "Could not create GPU operator deployment"
