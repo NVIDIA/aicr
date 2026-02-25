@@ -13,6 +13,10 @@ INSTALL_DIR="${1:-/usr/local/bin}"
 
 # Colors
 COLOR_RED='\033[0;31m'
+COLOR_GREEN='\033[0;32m'
+COLOR_YELLOW='\033[0;33m'
+COLOR_CYAN='\033[0;36m'
+COLOR_DIM='\033[2m'
 COLOR_RESET='\033[0m'
 
 # ==============================================================================
@@ -37,12 +41,28 @@ EOF
 }
 
 err() {
-  printf "${COLOR_RED}%s${COLOR_RESET}\n" "$1" >&2
+  printf "${COLOR_RED}  ✗ %s${COLOR_RESET}\n" "$1" >&2
   exit 1
 }
 
+ok() {
+  printf "${COLOR_GREEN}  ✓ %s${COLOR_RESET}\n" "$1" >&2
+}
+
+warn() {
+  printf "${COLOR_YELLOW}  ! %s${COLOR_RESET}\n" "$1" >&2
+}
+
+step() {
+  printf "${COLOR_CYAN}  → %s${COLOR_RESET}\n" "$1" >&2
+}
+
+info() {
+  printf "${COLOR_DIM}    %s${COLOR_RESET}\n" "$1" >&2
+}
+
 msg() {
-  printf "%s\n" "$1" >&2
+  printf "  %s\n" "$1" >&2
 }
 
 has_tools() {
@@ -105,7 +125,7 @@ download_release_asset() {
     curl_opts+=(-H "Accept: application/octet-stream")
   fi
 
-  msg "Downloading $desc..."
+  step "Downloading $desc..."
   http_code=$(curl "${curl_opts[@]}" "$url" | tail -c 3)
 
   [[ "$http_code" == "200" ]] || err "Failed to download $desc (HTTP $http_code): $url"
@@ -115,7 +135,7 @@ fetch_latest_release() {
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
   local response
 
-  msg "Fetching latest release from GitHub..."
+  step "Fetching latest release from GitHub..."
   response=$(github_api_curl "$api_url")
 
   [[ -z "$response" ]] && err "Failed to fetch release information from GitHub API"
@@ -206,8 +226,10 @@ main() {
   version=$(extract_version "$release_json")
   archive_name=$(get_archive_name "$version" "$os" "$arch")
 
+  msg ""
   msg "Platform: $os/$arch"
-  msg "Version: $version"
+  msg "Version:  $version"
+  msg ""
 
   # Download archive and checksums
   temp_dir=$(mktemp -d)
@@ -221,34 +243,39 @@ main() {
   download_release_asset "$checksum_url" "${temp_dir}/checksums.txt" "checksums"
 
   # Verify archive checksum
-  msg "Verifying checksum..."
+  step "Verifying checksum (SHA-256)..."
+  info "Ensures archive integrity — detects tampering or corruption in transit"
   (cd "$temp_dir" && grep "$archive_name" checksums.txt | shasum -a 256 --check --strict) \
-    || err "Checksum verification failed"
+    || err "Checksum verification failed — archive may have been tampered with"
+  ok "Checksum verified — archive integrity confirmed"
 
   # Extract archive
-  msg "Extracting archive..."
+  step "Extracting archive..."
   tar -xzf "${temp_dir}/${archive_name}" -C "$temp_dir"
 
   # Optional: verify attestation if cosign is available
   if command -v cosign &>/dev/null && [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
-    msg "Verifying attestation with cosign..."
+    step "Verifying provenance attestation (Sigstore cosign)..."
+    info "Confirms this binary was built by NVIDIA/aicr CI — not a third-party rebuild"
     if cosign verify-blob-attestation \
       --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
       --type https://slsa.dev/provenance/v1 \
       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
       --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
       "${temp_dir}/${BIN_NAME}" 2>/dev/null; then
-      msg "Attestation verified: binary built by github.com/NVIDIA/aicr"
+      ok "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
     else
-      msg "Warning: attestation verification failed — cannot confirm this binary was built by the official CI pipeline"
+      warn "Attestation verification failed — cannot confirm binary provenance"
+      info "The binary may still be valid, but its build origin could not be cryptographically verified"
     fi
   elif [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
-    msg "Tip: install cosign to verify binary attestation (https://docs.sigstore.dev/cosign/system_config/installation/)"
+    warn "cosign not found — skipping provenance verification"
+    info "Install cosign to verify binary provenance: https://docs.sigstore.dev/cosign/system_config/installation/"
   fi
 
   # Install binary and attestation
   chmod +x "${temp_dir}/${BIN_NAME}"
-  msg "Installing $BIN_NAME to $INSTALL_DIR"
+  step "Installing $BIN_NAME to $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
   if [[ -w "$INSTALL_DIR" ]]; then
     mv "${temp_dir}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
