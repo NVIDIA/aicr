@@ -5,7 +5,7 @@ linkTitle: "AICR"
 
 {{< blocks/cover title="NVIDIA AI Cluster Runtime" image_anchor="top" height="med" >}}
 <p class="lead mt-4">Generate validated GPU-accelerated Kubernetes configurations</p>
-<a class="btn btn-lg btn-primary me-3 mb-4" href="/aicr/docs/">
+<a class="btn btn-lg btn-primary me-3 mb-4" href="docs/">
 Documentation
 </a>
 <a class="btn btn-lg btn-secondary me-3 mb-4" href="https://github.com/NVIDIA/aicr">

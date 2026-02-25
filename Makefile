@@ -216,7 +216,7 @@ docs: ## Serves Go documentation on http://localhost:6060
 site-serve: ## Serve documentation site locally
 	@set -e; \
 	echo "Starting documentation site on http://localhost:1313..."; \
-	cd site && npm install && hugo serve
+	cd site && npm install && hugo serve --baseURL http://localhost:1313/
 
 .PHONY: site-build
 site-build: ## Build documentation site
