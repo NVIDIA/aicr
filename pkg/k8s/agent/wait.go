@@ -20,9 +20,11 @@ import (
 	"io"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // waitForJobCompletion waits for the Job to complete successfully or fail.
@@ -60,7 +62,7 @@ func (d *Deployer) StreamLogs(ctx context.Context, w io.Writer, prefix string) e
 	// Find Pod for this Job
 	podName, err := d.findPodName(ctx)
 	if err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInternal, "failed to find pod for log streaming", err)
 	}
 
 	// Stream logs using shared function
@@ -77,7 +79,7 @@ func (d *Deployer) GetPodLogs(ctx context.Context) (string, error) {
 	// Find Pod for this Job
 	podName, err := d.findPodName(ctx)
 	if err != nil {
-		return "", err
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to find pod for log retrieval", err)
 	}
 
 	return pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, podName)
@@ -86,37 +88,30 @@ func (d *Deployer) GetPodLogs(ctx context.Context) (string, error) {
 // WaitForPodReady waits for the Job's Pod to be in Running state.
 // This is useful for streaming logs before Job completes.
 func (d *Deployer) WaitForPodReady(ctx context.Context, timeout time.Duration) error {
-	// First, wait for pod to be created (poll until we find it)
-	var podName string
-	pollCtx, cancel := context.WithTimeout(ctx, timeout)
+	watchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Poll for pod creation with label selector
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-pollCtx.Done():
-			return errors.New(errors.ErrCodeTimeout, fmt.Sprintf("timeout waiting for Pod creation after %v", timeout))
-		case <-ticker.C:
-			pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(pollCtx, metav1.ListOptions{
-				LabelSelector: "app.kubernetes.io/name=aicr",
-			})
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
-			}
-
-			if len(pods.Items) > 0 {
-				podName = pods.Items[0].Name
-				goto foundPod
-			}
+	// Discover pod name by polling with K8s standard utility
+	var podName string
+	err := wait.PollUntilContextCancel(watchCtx, defaults.PodPollInterval, true, func(ctx context.Context) (bool, error) {
+		pods, listErr := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: "app.kubernetes.io/name=aicr",
+		})
+		if listErr != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", listErr)
 		}
+		if len(pods.Items) > 0 {
+			podName = pods.Items[0].Name
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		return errors.New(errors.ErrCodeTimeout, fmt.Sprintf("timeout waiting for Pod creation after %v", timeout))
 	}
 
-foundPod:
 	// Calculate remaining timeout
-	deadline, ok := pollCtx.Deadline()
+	deadline, ok := watchCtx.Deadline()
 	if !ok {
 		return errors.New(errors.ErrCodeInternal, "context deadline not set")
 	}
@@ -155,7 +150,7 @@ func (pw *prefixWriter) Write(p []byte) (n int, err error) {
 	line := fmt.Sprintf("%s %s", pw.prefix, string(p))
 	_, err = pw.writer.Write([]byte(line))
 	if err != nil {
-		return 0, err
+		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write prefixed log line", err)
 	}
 	return len(p), nil
 }

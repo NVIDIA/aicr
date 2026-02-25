@@ -573,10 +573,10 @@ func TestRecordRawTextArtifact_NilCollector(t *testing.T) {
 
 func TestTruncateLines(t *testing.T) {
 	tests := []struct {
-		name  string
-		text  string
-		n     int
-		want  string
+		name string
+		text string
+		n    int
+		want string
 	}{
 		{name: "fewer lines than limit", text: "a\nb", n: 5, want: "a\nb"},
 		{name: "exact limit", text: "a\nb\nc", n: 3, want: "a\nb\nc"},

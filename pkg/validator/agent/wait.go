@@ -205,7 +205,7 @@ func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 		LabelSelector: fmt.Sprintf("aicr.nvidia.com/job=%s", d.config.JobName),
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list pods for job", err)
 	}
 
 	if len(pods.Items) == 0 {
