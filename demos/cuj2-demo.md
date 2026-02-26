@@ -76,10 +76,10 @@
   │  ┌──────────────────────────────────────────────────────────────┐      │
   │  │ CNCF AI Conformance — All 9 Requirements PASS                │      │
   │  │                                                              │      │
-  │  │  ✅ DRA Support          ✅ Gang Scheduling                  │       │
-  │  │  ✅ Secure GPU Access    ✅ Accelerator Metrics              │       │
-  │  │  ✅ AI Service Metrics   ✅ Inference Gateway                │       │
-  │  │  ✅ Robust Controller    ✅ Pod Autoscaling (HPA)            │       │
+  │  │  ✅ DRA Support          ✅ Gang Scheduling                  │      │
+  │  │  ✅ Secure GPU Access    ✅ Accelerator Metrics              │      │
+  │  │  ✅ AI Service Metrics   ✅ Inference Gateway                │      │
+  │  │  ✅ Robust Controller    ✅ Pod Autoscaling (HPA)            │      │
   │  │  ✅ Cluster Autoscaling                                      │      │
   │  └──────────────────────────────────────────────────────────────┘      │
   └────────────────────────────────────────────────────────────────────────┘
@@ -120,9 +120,9 @@
 │  (Ubuntu constraints)               │      │                              │
 │      │                              │  h100-eks-ubuntu-inference-dynamo   │
 │  h100-eks-ubuntu-training-kubeflow  │  ├── gpu-operator (v25.3.4, CDI)    │
-│  └── kubeflow-trainer       ◀── NEW │  ├── nvidia-dra-driver (gpuRes)  NEW│
-│                                     │  ├── dynamo-crds             ◀── NEW│
-│                                     │  └── dynamo-platform         ◀── NEW│
+│  └── kubeflow-trainer       ◀── NEW │  ├── nvidia-dra-driver (gpuRes)◀─NEW│
+│                                     │  ├── dynamo-crds             ◀─ NEW │
+│                                     │  └── dynamo-platform         ◀─ NEW │
 │                                     │                                     │
 ├─────────────────────────────────────┼─────────────────────────────────────┤
 │  Unique: kubeflow-trainer           │  Unique: kgateway-crds, kgateway,   │
@@ -134,7 +134,7 @@
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Demo
+### Recipe and Bundle Generation 
 ```
  aicr recipe --service eks --accelerator h100 \
       --intent inference --os ubuntu --platform dynamo \
@@ -215,6 +215,12 @@ aicr bundle --recipe recipe.yaml \
 │    4. Response: Worker → NATS → Frontend → Client               │
 └─────────────────────────────────────────────────────────────────┘
 ```
+### ChatBot
+```
+kubectl apply -f vllm-agg.yaml
+chat-server.sh
+http://127.0.0.1:9090/chat.html
+```
 
 ## CNCF AI Conformance 
 
@@ -251,26 +257,29 @@ aicr bundle --recipe recipe.yaml \
 
 ### CNCF AI Conformance Evidence Collection
 ```
-# List available features
-  $ aicr validate --phase conformance --cncf-submission --evidence-dir --feature --timeout
+ aicr validate --phase conformance --cncf-submission --evidence-dir <dir> [--feature <name>] [--timeout <duration>]
 
   Available evidence features:
 
     Feature                  Description
     ──────────────────────── ─────────────────────────────────────────────
-    dra                      DRA GPU allocation test
-    gang                     Gang scheduling co-scheduling test
-    secure                   Secure accelerator access verification
-    metrics                  Accelerator & AI service metrics
-    gateway                  Inference API gateway conditions
-    operator                 Robust AI operator + webhook test
-    hpa                      HPA pod autoscaling (scale-up + scale-down)
+    dra-support              DRA GPU allocation test
+    gang-scheduling          Gang scheduling co-scheduling test
+    secure-access            Secure accelerator access verification
+    accelerator-metrics      Accelerator & AI service metrics
+    inference-gateway        Inference API gateway conditions
+    robust-operator          Robust AI operator + webhook test
+    pod-autoscaling          HPA pod autoscaling (scale-up + scale-down)
     cluster-autoscaling      Cluster autoscaling (ASG configuration)
 
+    Short aliases: dra, gang, secure, metrics, gateway, operator, hpa
+
 ```
-  aicr validate --phase conformance --cncf-submission --evidence-dir /tmp \
-      --feature gang-scheduling --timeout 30s
+
 ```
+  aicr validate --phase conformance --cncf-submission --evidence-dir /tmp --feature gang-scheduling
+```
+
 ### CNCF AI Conformance Program Submission
 
 - [Evidence Docs](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf)
