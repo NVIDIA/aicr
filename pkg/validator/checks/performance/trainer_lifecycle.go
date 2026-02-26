@@ -346,9 +346,12 @@ func extractTarGz(r io.Reader, targetDir string) error {
 				return fmt.Errorf("failed to create file %s: %w", path, err)
 			}
 			_, copyErr := io.Copy(f, io.LimitReader(tr, maxExtractedFileSize))
-			f.Close()
+			closeErr := f.Close()
 			if copyErr != nil {
 				return fmt.Errorf("failed to write file %s: %w", path, copyErr)
+			}
+			if closeErr != nil {
+				return fmt.Errorf("failed to close file %s: %w", path, closeErr)
 			}
 		}
 	}
