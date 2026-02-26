@@ -369,9 +369,12 @@ func WithWorkloadSelector(selector map[string]string) Option {
 	}
 }
 
-// WithEstimatedNodeCount sets the estimated number of GPU nodes (e.g. for skyhook-operator estimatedNodeCount). 0 means unset.
+// WithEstimatedNodeCount sets the estimated number of GPU nodes. 0 means unset. Negative values are clamped to 0 for defense-in-depth.
 func WithEstimatedNodeCount(n int) Option {
 	return func(c *Config) {
+		if n < 0 {
+			n = 0
+		}
 		c.estimatedNodeCount = n
 	}
 }

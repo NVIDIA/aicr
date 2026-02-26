@@ -296,6 +296,13 @@ func TestNodeSelectorOptions(t *testing.T) {
 			t.Errorf("EstimatedNodeCount() = %d, want 8", got)
 		}
 	})
+
+	t.Run("EstimatedNodeCount negative clamped to zero", func(t *testing.T) {
+		cfg := NewConfig(WithEstimatedNodeCount(-1))
+		if got := cfg.EstimatedNodeCount(); got != 0 {
+			t.Errorf("EstimatedNodeCount() = %d, want 0 (negative clamped)", got)
+		}
+	})
 }
 
 func TestNodeTolerationOptions(t *testing.T) {

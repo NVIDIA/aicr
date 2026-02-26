@@ -494,6 +494,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 				overrides[path] = valStr
 			}
 			if err := component.ApplyMapOverrides(values, overrides); err != nil {
+				// Failure is logged only; consider surfacing in bundle output in a future iteration.
 				slog.Warn("failed to apply estimated node count",
 					"component", componentName,
 					"error", err,
