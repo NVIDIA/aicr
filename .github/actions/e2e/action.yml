@@ -81,8 +81,8 @@ runs:
         KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
         pid_aicr=$!
         (docker buildx build \
-         --cache-from type=gha,scope=validator \
-         --cache-to type=gha,scope=validator,mode=max \
+         --cache-from type=gha,scope=validator,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
+         --cache-to type=gha,scope=validator,mode=max,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
          -f Dockerfile.validator \
          -t localhost:5001/aicr-validator:local \
          --load \
