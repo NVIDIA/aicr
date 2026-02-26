@@ -23,9 +23,10 @@
 # This script collects behavioral test evidence (HPA scaling, DRA allocation, etc.)
 # that requires deploying test workloads. Both are needed for full conformance evidence.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-EVIDENCE_DIR="${SCRIPT_DIR}/evidence"
+# Support invocation from aicr CLI (env vars) or standalone (defaults).
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+EVIDENCE_DIR="${EVIDENCE_DIR:-${SCRIPT_DIR}/evidence}"
 SECTION="${1:-all}"
 
 # Current output file — set per section
@@ -52,9 +53,12 @@ capture() {
     echo "" >> "${EVIDENCE_FILE}"
     echo "**${label}**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
-    # Strip absolute repo path from command display to avoid leaking local paths
+    # Strip absolute paths from command display to avoid leaking local/temp paths
     local cmd_display="$*"
+    cmd_display="${cmd_display//${SCRIPT_DIR}\//}"
     cmd_display="${cmd_display//${REPO_ROOT}\//}"
+    # Strip any remaining absolute paths to manifests (e.g., temp dirs from aicr evidence)
+    cmd_display=$(echo "${cmd_display}" | sed 's|[^ ]*/manifests/|manifests/|g')
     echo "\$ ${cmd_display}" >> "${EVIDENCE_FILE}"
     if output=$("$@" 2>&1); then
         echo "${output}" >> "${EVIDENCE_FILE}"
@@ -79,6 +83,21 @@ wait_for_pod() {
     done
     echo "Timeout"
     return 1
+}
+
+# Clean up a test namespace properly: pods → resourceclaims → namespace
+# This order prevents stale DRA kubelet checkpoint issues caused by
+# orphaned ResourceClaims with delete-protection finalizers.
+cleanup_ns() {
+    local ns="$1"
+    # Skip if namespace doesn't exist
+    if ! kubectl get namespace "$ns" &>/dev/null; then return 0; fi
+    # Delete pods first so DRA driver can call NodeUnprepareResources
+    kubectl delete pods --all -n "$ns" --ignore-not-found --wait=true --timeout=30s &>/dev/null || true
+    # Delete resourceclaims (finalizer removed after pod deletion)
+    kubectl delete resourceclaims --all -n "$ns" --ignore-not-found --wait=true --timeout=30s &>/dev/null || true
+    # Now namespace can terminate cleanly
+    kubectl delete namespace "$ns" --ignore-not-found --timeout=60s &>/dev/null || true
 }
 
 # Write a per-section evidence file header
@@ -135,15 +154,14 @@ EOF
 
 Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device access.
 
-**Test manifest:** `docs/conformance/cncf/manifests/dra-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/dra-gpu-test.yaml`
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
-    kubectl delete namespace dra-test --ignore-not-found --wait=false 2>/dev/null || true
-    sleep 5
+    cleanup_ns dra-test
 
     # Deploy test
     log_info "Deploying DRA GPU test..."
@@ -170,7 +188,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace dra-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns dra-test
 
     log_info "DRA evidence collection complete."
 }
@@ -203,15 +221,14 @@ EOF
 Deploy a PodGroup with minMember=2 and two GPU pods. KAI scheduler ensures both
 pods are scheduled atomically.
 
-**Test manifest:** `docs/conformance/cncf/manifests/gang-scheduling-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/gang-scheduling-test.yaml`
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
-    kubectl delete namespace gang-scheduling-test --ignore-not-found --wait=false 2>/dev/null || true
-    sleep 5
+    cleanup_ns gang-scheduling-test
 
     # Deploy test
     log_info "Deploying gang scheduling test..."
@@ -243,7 +260,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace gang-scheduling-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns gang-scheduling-test
 
     log_info "Gang scheduling evidence collection complete."
 }
@@ -306,8 +323,7 @@ Deploy a test pod requesting 1 GPU via ResourceClaim and verify:
 EOF
 
     # Clean up any previous run
-    kubectl delete namespace secure-access-test --ignore-not-found --wait=false 2>/dev/null || true
-    sleep 5
+    cleanup_ns secure-access-test
 
     # Deploy DRA test for isolation verification
     cat <<'MANIFEST' | kubectl apply -f -
@@ -364,8 +380,8 @@ spec:
           - name: gpu
 MANIFEST
 
-    log_info "Waiting for isolation test pod (up to ${POD_TIMEOUT}s)..."
-    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" "${POD_TIMEOUT}")
+    log_info "Waiting for isolation test pod (up to 60s)..."
+    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" 60)
     log_info "Pod phase: ${pod_phase}"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
@@ -394,7 +410,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace secure-access-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns secure-access-test
 
     log_info "Secure accelerator access evidence collection complete."
 }
@@ -817,15 +833,14 @@ EOF
 Deploy a GPU workload running CUDA N-Body Simulation to generate sustained GPU utilization,
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
-**Test manifest:** `docs/conformance/cncf/manifests/hpa-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
 EOF
     echo '```yaml' >> "${EVIDENCE_FILE}"
     cat "${SCRIPT_DIR}/manifests/hpa-gpu-test.yaml" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
-    kubectl delete namespace hpa-test --ignore-not-found 2>/dev/null || true
-    kubectl wait --for=delete namespace/hpa-test --timeout=60s 2>/dev/null || true
+    cleanup_ns hpa-test
 
     # Deploy test
     log_info "Deploying HPA GPU test..."
@@ -856,7 +871,7 @@ EOF
         targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
         replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
         log_info "  Check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-1}"
-        if [ -n "$targets" ] && [ "${replicas:-1}" -gt 1 ]; then
+        if [ "${replicas:-1}" -gt 1 ] && [ -n "$targets" ]; then
             hpa_scaled=true
             break
         fi
@@ -885,58 +900,18 @@ EOF
 EOF
     capture "Pods after scale-up" kubectl get pods -n hpa-test -o wide
 
-    # Scale-down test: delete the deployment to remove GPU load, verify HPA scales down
+    # Scale-down test: wait for N-Body to finish, verify HPA scales back to 1
     local hpa_scaled_down=false
     if [ "${hpa_scaled}" = "true" ]; then
         cat >> "${EVIDENCE_FILE}" <<'EOF'
 
 ## Scale-Down Verification
 
-Scale the deployment to 0, replace GPU workload with an idle container, then
-scale back to 1. Verify HPA detects reduced utilization and scales down.
+The N-Body simulation runs a fixed number of iterations and then exits.
+Once the workload completes, GPU utilization drops to 0 and HPA scales
+back to minReplicas (1).
 EOF
-        log_info "Stopping GPU workload for scale-down test..."
-        # Delete the GPU-intensive deployment and replace with an idle one.
-        # This cleanly stops GPU load without rollout errors or Error status.
-        kubectl delete deployment gpu-workload -n hpa-test --wait=true --timeout=30s 2>/dev/null || true
-        kubectl wait --for=delete pod -n hpa-test -l app=gpu-workload --timeout=60s 2>/dev/null || true
-
-        # Create idle deployment (no GPU, just sleep) targeting the same HPA
-        kubectl apply -n hpa-test -f - 2>/dev/null <<'IDLE_DEPLOY'
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: gpu-workload
-  namespace: hpa-test
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: gpu-workload
-  template:
-    metadata:
-      labels:
-        app: gpu-workload
-    spec:
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        seccompProfile:
-          type: RuntimeDefault
-      tolerations:
-        - operator: Exists
-      containers:
-        - name: gpu-worker
-          image: ubuntu:22.04
-          command: ["sleep", "600"]
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-          resources:
-            limits:
-              nvidia.com/gpu: 1
-IDLE_DEPLOY
-        kubectl wait --for=condition=Ready pod -n hpa-test -l app=gpu-workload --timeout=60s 2>/dev/null || true
+        log_info "Waiting for GPU workload to finish and HPA to scale down..."
 
         log_info "Waiting for HPA scale-down (up to 5 minutes)..."
         for i in $(seq 1 20); do
@@ -944,7 +919,7 @@ IDLE_DEPLOY
             replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
             targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
             log_info "  Scale-down check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-?}"
-            if [ "${replicas}" = "1" ] && [ -n "${targets}" ]; then
+            if [ "${replicas}" = "1" ] && [ "${targets:-unknown}" = "0" ]; then
                 hpa_scaled_down=true
                 break
             fi
@@ -969,7 +944,7 @@ IDLE_DEPLOY
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace hpa-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns hpa-test
 
     log_info "Pod autoscaling evidence collection complete."
 }

@@ -17,23 +17,35 @@ GitHub <i class="fab fa-github ms-2"></i>
 Spend Less Time Troubleshooting Your Cluster and More Time Building AI.
 {{% /blocks/lead %}}
 
-{{< blocks/section color="dark" type="row" >}}
+{{< blocks/section color="secondary" type="row" >}}
 
-{{% blocks/feature icon="fa-camera" title="Snapshot" %}}
-Capture your cluster's actual state: OS, kernel, GPU hardware, drivers, Kubernetes version, and installed operators.
-{{% /blocks/feature %}}
+<div class="col-lg-3 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1"><i class="fas fa-layer-group"></i></div>
+<h4 class="h3">Recipe</h4>
+<p>Generate optimized and validated recipe for your environment</p>
+</div>
 
-{{% blocks/feature icon="fa-layer-group" title="Recipe" %}}
-Match your environment against a library of validated overlays to produce a single recipe with exact component versions and settings.
-{{% /blocks/feature %}}
+<div class="col-lg-3 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1"><i class="fas fa-cubes"></i></div>
+<h4 class="h3">Bundle</h4>
+<p>Output deployment-ready, reproducible artifacts for that recipe</p>
+</div>
 
-{{% blocks/feature icon="fa-check-circle" title="Validate" %}}
-Compare recipe constraints against your snapshot — Kubernetes version, OS, kernel, GPU hardware — before deploying anything.
-{{% /blocks/feature %}}
+<div class="col-lg-3 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1"><i class="fas fa-rocket"></i></div>
+<h4 class="h3">Deploy</h4>
+<p>Apply the resulting bundle to your cluster</p>
+</div>
+
+<div class="col-lg-3 mb-5 mb-lg-0 text-center">
+<div class="mb-4 h1"><i class="fas fa-check-circle"></i></div>
+<h4 class="h3">Validate</h4>
+<p>Verify recipe was reconciled and the components are healthy</p>
+</div>
 
 {{< /blocks/section >}}
 
-{{< blocks/section color="secondary" type="row" >}}
+{{< blocks/section color="dark" type="row" >}}
 
 {{% blocks/feature icon="fa-user" title="Users" url="/docs/user/" %}}
 Install, configure, and operate AICR in your environment.

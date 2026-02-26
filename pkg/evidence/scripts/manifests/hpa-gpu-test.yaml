@@ -14,7 +14,7 @@
 
 # HPA Pod Autoscaling test with custom GPU metrics
 # Demonstrates HPA scaling based on gpu_utilization from prometheus-adapter
-# Usage: kubectl apply -f docs/conformance/cncf/manifests/hpa-gpu-test.yaml
+# Usage: kubectl apply -f pkg/evidence/scripts/manifests/hpa-gpu-test.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -48,7 +48,7 @@ spec:
         - name: gpu-worker
           image: nvcr.io/nvidia/k8s/cuda-sample:nbody-cuda11.7.1-ubuntu18.04
           command: ["bash", "-c"]
-          args: ["while true; do /cuda-samples/nbody -benchmark -numbodies=16777216 -iterations=10000; done"]
+          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=30 || true; exec sleep infinity"]
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -67,7 +67,10 @@ spec:
     kind: Deployment
     name: gpu-workload
   minReplicas: 1
-  maxReplicas: 4
+  maxReplicas: 2
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 30
   metrics:
     - type: Pods
       pods:

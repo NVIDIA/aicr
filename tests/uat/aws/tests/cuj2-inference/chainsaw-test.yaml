@@ -1,0 +1,173 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: uat-cuj2-inference
+spec:
+  description: |
+    UAT CUJ2: Inference workload on live EKS cluster with GPU nodes.
+    Tests the aicr workflow from demos/cuj2.md against a real cluster:
+      Step 1: Snapshot the live cluster
+      Step 2: Generate recipe (EKS/H100/inference/dynamo)
+      Step 3: Validate readiness against live snapshot
+      Step 4: Generate bundle with node scheduling
+      Step 5: Validate bundle structure
+      Step 6: Multi-phase validation
+  timeouts:
+    exec: 300s
+  steps:
+
+    # ── Step 1: Snapshot the live cluster ──────────────────────────────
+    - name: snapshot-cluster
+      description: Capture live cluster state for validation.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              kubectl create namespace gpu-operator 2>/dev/null || true
+              ${AICR_BIN} snapshot --output "${WORK}/snapshot.yaml"
+              test -f "${WORK}/snapshot.yaml"
+
+    # ── Step 2: Generate recipe ────────────────────────────────────────
+    - name: generate-recipe
+      description: Generate an EKS H100 inference recipe with dynamo platform.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference"
+              ${AICR_BIN} recipe \
+                --service eks \
+                --accelerator h100 \
+                --intent inference \
+                --os ubuntu \
+                --platform dynamo \
+                --output "${WORK}/recipe.yaml"
+              test -f "${WORK}/recipe.yaml"
+
+    - name: assert-recipe
+      description: Verify recipe has correct criteria and components.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference"
+              chainsaw assert \
+                --resource "${WORK}/recipe.yaml" \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 10s
+
+    # ── Step 3: Validate readiness against live snapshot ───────────────
+    - name: validate-readiness
+      description: Run readiness validation with live cluster snapshot.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference"
+              ${AICR_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot "${WORK}/snapshot.yaml" \
+                --phase readiness \
+                --no-cluster \
+                --output "${WORK}/validate-readiness-raw.yaml" || true
+              printf 'apiVersion: aicr.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/validate-readiness.yaml"
+              sed '/^---$/d' "${WORK}/validate-readiness-raw.yaml" >> "${WORK}/validate-readiness.yaml"
+
+    - name: assert-validate-readiness
+      description: Verify readiness validation result is present.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference"
+              chainsaw assert \
+                --resource "${WORK}/validate-readiness.yaml" \
+                --file ./assert-validate-readiness.yaml \
+                --no-color --timeout 10s
+
+    # ── Step 4: Generate bundle with node scheduling ───────────────────
+    - name: generate-bundle
+      description: Generate bundle with system and GPU node scheduling.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
+                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+
+    - name: assert-bundle-structure
+      description: Verify bundle contains expected files.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference"
+              test -f "${WORK}/bundle/README.md"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -x "${WORK}/bundle/deploy.sh"
+              test -f "${WORK}/bundle/recipe.yaml"
+              ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
+            check:
+              ($error == null): true
+
+    # ── Step 5: Multi-phase validation ─────────────────────────────────
+    - name: validate-multiphase
+      description: Run all three validation phases.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference"
+              ${AICR_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot "${WORK}/snapshot.yaml" \
+                --phase readiness \
+                --phase deployment \
+                --phase conformance \
+                --no-cluster \
+                --output "${WORK}/validate-multiphase-raw.yaml" || true
+              printf 'apiVersion: aicr.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/validate-multiphase.yaml"
+              sed '/^---$/d' "${WORK}/validate-multiphase-raw.yaml" >> "${WORK}/validate-multiphase.yaml"
+
+    - name: assert-validate-multiphase
+      description: Verify all phases present in validation result.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference"
+              chainsaw assert \
+                --resource "${WORK}/validate-multiphase.yaml" \
+                --file ./assert-validate-multiphase.yaml \
+                --no-color --timeout 10s
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/uat-cuj2-inference

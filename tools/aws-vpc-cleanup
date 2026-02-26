@@ -1,0 +1,250 @@
+#!/bin/bash
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Deletes AWS VPCs and all their dependent resources.
+#
+# Usage:
+#   tools/aws-vpc-cleanup --vpc-id vpc-01234567890abcdef
+#   tools/aws-vpc-cleanup --vpc-prefix eksctl-nvs
+#   tools/aws-vpc-cleanup --vpc-prefix eksctl-nvs --region us-west-2
+#   tools/aws-vpc-cleanup --vpc-prefix eksctl-nvs --dry-run
+
+set -euo pipefail
+
+REGION="${AWS_REGION:-us-east-1}"
+VPC_ID=""
+VPC_PREFIX=""
+DRY_RUN=false
+
+usage() {
+  echo "Usage: $0 [--vpc-id ID | --vpc-prefix PREFIX] [--region REGION] [--dry-run]"
+  echo ""
+  echo "Options:"
+  echo "  --vpc-id ID        Delete a specific VPC by ID"
+  echo "  --vpc-prefix PREFIX Delete all VPCs whose Name tag starts with PREFIX"
+  echo "  --region REGION    AWS region (default: \$AWS_REGION or us-east-1)"
+  echo "  --dry-run          List VPCs that would be deleted without deleting"
+  exit 1
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --vpc-id) VPC_ID="$2"; shift 2 ;;
+    --vpc-prefix) VPC_PREFIX="$2"; shift 2 ;;
+    --region) REGION="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=true; shift ;;
+    *) usage ;;
+  esac
+done
+
+if [[ -z "$VPC_ID" && -z "$VPC_PREFIX" ]]; then
+  usage
+fi
+
+# Resolve VPC IDs
+if [[ -n "$VPC_ID" ]]; then
+  VPCS="$VPC_ID"
+else
+  VPCS=$(aws ec2 describe-vpcs --region "$REGION" \
+    --query "Vpcs[?starts_with(Tags[?Key==\`Name\`].Value|[0], \`${VPC_PREFIX}\`)].VpcId" \
+    --output text)
+fi
+
+if [[ -z "$VPCS" ]]; then
+  echo "No VPCs found."
+  exit 0
+fi
+
+# Count
+count=$(echo "$VPCS" | wc -w | tr -d ' ')
+echo "Found ${count} VPC(s) to delete in ${REGION}:"
+for v in $VPCS; do
+  name=$(aws ec2 describe-vpcs --region "$REGION" --vpc-ids "$v" \
+    --query 'Vpcs[0].Tags[?Key==`Name`].Value|[0]' --output text 2>/dev/null || echo "unnamed")
+  echo "  $v ($name)"
+done
+
+if $DRY_RUN; then
+  echo ""
+  echo "Dry run — no resources deleted."
+  exit 0
+fi
+
+echo ""
+echo "Deleting in 5 seconds... (Ctrl+C to cancel)"
+sleep 5
+
+delete_vpc() {
+  local vpc="$1"
+  local name
+  name=$(aws ec2 describe-vpcs --region "$REGION" --vpc-ids "$vpc" \
+    --query 'Vpcs[0].Tags[?Key==`Name`].Value|[0]' --output text 2>/dev/null || echo "unnamed")
+  echo "=== Deleting VPC: $vpc ($name) ==="
+
+  # Delete EKS clusters in this VPC
+  for cluster in $(aws eks list-clusters --region "$REGION" --query 'clusters[]' --output text 2>/dev/null); do
+    cluster_vpc=$(aws eks describe-cluster --region "$REGION" --name "$cluster" \
+      --query 'cluster.resourcesVpcConfig.vpcId' --output text 2>/dev/null || echo "")
+    if [[ "$cluster_vpc" == "$vpc" ]]; then
+      echo "  Deleting EKS cluster: $cluster"
+      # Delete node groups first
+      for ng in $(aws eks list-nodegroups --region "$REGION" --cluster-name "$cluster" \
+        --query 'nodegroups[]' --output text 2>/dev/null); do
+        echo "    Deleting node group: $ng"
+        aws eks delete-nodegroup --region "$REGION" --cluster-name "$cluster" --nodegroup-name "$ng" 2>/dev/null || true
+      done
+      # Wait for node groups
+      for ng in $(aws eks list-nodegroups --region "$REGION" --cluster-name "$cluster" \
+        --query 'nodegroups[]' --output text 2>/dev/null); do
+        echo "    Waiting for node group $ng to delete..."
+        aws eks wait nodegroup-deleted --region "$REGION" --cluster-name "$cluster" --nodegroup-name "$ng" 2>/dev/null || true
+      done
+      aws eks delete-cluster --region "$REGION" --name "$cluster" 2>/dev/null || true
+      echo "    Waiting for cluster to delete..."
+      aws eks wait cluster-deleted --region "$REGION" --name "$cluster" 2>/dev/null || true
+    fi
+  done
+
+  # Delete NAT Gateways
+  for nat in $(aws ec2 describe-nat-gateways --region "$REGION" \
+    --filter "Name=vpc-id,Values=$vpc" "Name=state,Values=available,pending" \
+    --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null); do
+    echo "  Deleting NAT Gateway: $nat"
+    aws ec2 delete-nat-gateway --region "$REGION" --nat-gateway-id "$nat" 2>/dev/null || true
+  done
+
+  # Wait for NAT gateways to delete
+  for nat in $(aws ec2 describe-nat-gateways --region "$REGION" \
+    --filter "Name=vpc-id,Values=$vpc" "Name=state,Values=deleting" \
+    --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null); do
+    echo "  Waiting for NAT Gateway $nat..."
+    aws ec2 wait nat-gateway-available --region "$REGION" --nat-gateway-ids "$nat" 2>/dev/null || sleep 30
+  done
+
+  # Delete VPC Endpoints
+  local endpoints
+  endpoints=$(aws ec2 describe-vpc-endpoints --region "$REGION" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'VpcEndpoints[].VpcEndpointId' --output text 2>/dev/null)
+  if [[ -n "$endpoints" ]]; then
+    echo "  Deleting VPC Endpoints: $endpoints"
+    aws ec2 delete-vpc-endpoints --region "$REGION" --vpc-endpoint-ids $endpoints 2>/dev/null || true
+  fi
+
+  # Release Elastic IPs
+  for eni in $(aws ec2 describe-network-interfaces --region "$REGION" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'NetworkInterfaces[].NetworkInterfaceId' --output text 2>/dev/null); do
+    for alloc in $(aws ec2 describe-addresses --region "$REGION" \
+      --filters "Name=network-interface-id,Values=$eni" \
+      --query 'Addresses[].AllocationId' --output text 2>/dev/null); do
+      echo "  Releasing EIP: $alloc"
+      aws ec2 disassociate-address --region "$REGION" --association-id \
+        "$(aws ec2 describe-addresses --region "$REGION" --allocation-ids "$alloc" \
+        --query 'Addresses[0].AssociationId' --output text 2>/dev/null)" 2>/dev/null || true
+      aws ec2 release-address --region "$REGION" --allocation-id "$alloc" 2>/dev/null || true
+    done
+  done
+
+  # Detach and delete Internet Gateways
+  for igw in $(aws ec2 describe-internet-gateways --region "$REGION" \
+    --filters "Name=attachment.vpc-id,Values=$vpc" \
+    --query 'InternetGateways[].InternetGatewayId' --output text 2>/dev/null); do
+    echo "  Detaching/deleting IGW: $igw"
+    aws ec2 detach-internet-gateway --region "$REGION" --internet-gateway-id "$igw" --vpc-id "$vpc" 2>/dev/null || true
+    aws ec2 delete-internet-gateway --region "$REGION" --internet-gateway-id "$igw" 2>/dev/null || true
+  done
+
+  # Delete Network Interfaces
+  for eni in $(aws ec2 describe-network-interfaces --region "$REGION" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'NetworkInterfaces[].NetworkInterfaceId' --output text 2>/dev/null); do
+    echo "  Deleting ENI: $eni"
+    local attach
+    attach=$(aws ec2 describe-network-interfaces --region "$REGION" \
+      --network-interface-ids "$eni" \
+      --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text 2>/dev/null)
+    if [[ "$attach" != "None" && -n "$attach" ]]; then
+      aws ec2 detach-network-interface --region "$REGION" --attachment-id "$attach" --force 2>/dev/null || true
+      sleep 3
+    fi
+    aws ec2 delete-network-interface --region "$REGION" --network-interface-id "$eni" 2>/dev/null || true
+  done
+
+  # Delete Subnets
+  for subnet in $(aws ec2 describe-subnets --region "$REGION" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'Subnets[].SubnetId' --output text 2>/dev/null); do
+    echo "  Deleting Subnet: $subnet"
+    aws ec2 delete-subnet --region "$REGION" --subnet-id "$subnet" 2>/dev/null || true
+  done
+
+  # Delete Route Tables (skip main)
+  for rt in $(aws ec2 describe-route-tables --region "$REGION" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'RouteTables[?Associations[0].Main != `true`].RouteTableId' --output text 2>/dev/null); do
+    echo "  Deleting Route Table: $rt"
+    for assoc in $(aws ec2 describe-route-tables --region "$REGION" \
+      --route-table-ids "$rt" \
+      --query 'RouteTables[0].Associations[?!Main].RouteTableAssociationId' --output text 2>/dev/null); do
+      aws ec2 disassociate-route-table --region "$REGION" --association-id "$assoc" 2>/dev/null || true
+    done
+    aws ec2 delete-route-table --region "$REGION" --route-table-id "$rt" 2>/dev/null || true
+  done
+
+  # Delete Security Groups (skip default)
+  for sg in $(aws ec2 describe-security-groups --region "$REGION" \
+    --filters "Name=vpc-id,Values=$vpc" \
+    --query 'SecurityGroups[?GroupName != `default`].GroupId' --output text 2>/dev/null); do
+    echo "  Deleting Security Group: $sg"
+    # Remove ingress/egress rules referencing other SGs first
+    aws ec2 revoke-security-group-ingress --region "$REGION" --group-id "$sg" \
+      --security-group-rule-ids $(aws ec2 describe-security-group-rules --region "$REGION" \
+      --filters "Name=group-id,Values=$sg" \
+      --query 'SecurityGroupRules[?!IsEgress].SecurityGroupRuleId' --output text 2>/dev/null) 2>/dev/null || true
+    aws ec2 revoke-security-group-egress --region "$REGION" --group-id "$sg" \
+      --security-group-rule-ids $(aws ec2 describe-security-group-rules --region "$REGION" \
+      --filters "Name=group-id,Values=$sg" \
+      --query 'SecurityGroupRules[?IsEgress].SecurityGroupRuleId' --output text 2>/dev/null) 2>/dev/null || true
+    aws ec2 delete-security-group --region "$REGION" --group-id "$sg" 2>/dev/null || true
+  done
+
+  # Delete VPC (retry — API may return error while deletion is processing)
+  echo "  Deleting VPC: $vpc"
+  for attempt in 1 2 3; do
+    if aws ec2 delete-vpc --region "$REGION" --vpc-id "$vpc" 2>/dev/null; then
+      echo "  VPC $vpc deleted."
+      break
+    fi
+    # Check if VPC is actually gone
+    if ! aws ec2 describe-vpcs --region "$REGION" --vpc-ids "$vpc" >/dev/null 2>&1; then
+      echo "  VPC $vpc deleted."
+      break
+    fi
+    if [[ $attempt -eq 3 ]]; then
+      echo "  FAILED: $vpc still has dependencies. Run again after remaining resources drain."
+    else
+      echo "  Retry $attempt — waiting 10s..."
+      sleep 10
+    fi
+  done
+  echo ""
+}
+
+for vpc in $VPCS; do
+  delete_vpc "$vpc"
+done
+
+echo "Done."
