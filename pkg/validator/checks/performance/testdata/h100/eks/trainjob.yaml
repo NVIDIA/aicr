@@ -27,4 +27,3 @@ spec:
   trainer:
     # Override node replica count (maps to replicatedJobs[node].replicas in the JobSet)
     numNodes: ${WORKER_COUNT}
-        
