@@ -68,7 +68,8 @@ runs:
         # Build and push aicrd image (replaces Tilt custom_build)
         KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
-        # Apply K8s manifests (same YAMLs Tilt applies)
+        # Apply namespace first (must exist before deployment references it)
+        kubectl apply -f tilt/k8s/namespace.yaml
         kubectl apply -f tilt/k8s/
 
         # Build images + CLI binary in parallel while deployment starts
