@@ -46,13 +46,11 @@ jobs:
   # Build Job: GoReleaser (binaries, ko images, draft GitHub release)
   # =============================================================================
 
-  build:
+  build-ko:
     name: Build and Release (Draft)
     runs-on: ubuntu-latest
     needs: [tests]
     timeout-minutes: 30
-    outputs:
-      release_outcome: ${{ steps.release.outputs.release_outcome }}
     permissions:
       actions: read
       contents: write
@@ -102,7 +100,7 @@ jobs:
   # Docker Jobs: Native per-arch validator builds (parallel with GoReleaser)
   # =============================================================================
 
-  docker-validator:
+  build-docker:
     name: Docker Validator (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     needs: [tests]
@@ -160,7 +158,7 @@ jobs:
   docker-manifest:
     name: Docker Manifest
     runs-on: ubuntu-latest
-    needs: [docker-validator]
+    needs: [build-docker]
     timeout-minutes: 5
     permissions:
       contents: read
@@ -187,7 +185,7 @@ jobs:
   image-vuln-scan:
     name: Image Vuln Scan (${{ matrix.image }})
     runs-on: ubuntu-latest
-    needs: [build, docker-manifest]
+    needs: [build-ko, docker-manifest]
     timeout-minutes: 15
     permissions:
       actions: read
@@ -211,6 +209,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Scan container image
+        id: trivy
         uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518  # v0.34.1
         with:
           scan-type: 'image'
@@ -223,24 +222,24 @@ jobs:
           limit-severities-for-sarif: true
         continue-on-error: true
 
-      - name: Check SARIF file exists
-        id: check_sarif
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f "image-scan-results.sarif" ]]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Upload SARIF to GitHub Security
-        if: steps.check_sarif.outputs.exists == 'true'
+        if: hashFiles('image-scan-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
         with:
           sarif_file: image-scan-results.sarif
           category: 'trivy-image-${{ matrix.image }}'
         continue-on-error: true
+
+      - name: Fail on vulnerabilities
+        if: steps.trivy.outcome == 'failure'
+        shell: bash
+        env:
+          IMAGE_REF: '${{ matrix.image }}:${{ github.ref_name }}'
+        run: |
+          set -euo pipefail
+          echo "::error::Vulnerability scan found issues in ${IMAGE_REF}"
+          echo "Check the Security tab for details."
+          exit 1
 
   # =============================================================================
   # Attestation Job (runs after all images are pushed and scanned)
@@ -249,8 +248,7 @@ jobs:
   attest:
     name: Attest Images
     runs-on: ubuntu-latest
-    needs: [build, docker-manifest]
-    if: needs.build.outputs.release_outcome == 'success'
+    needs: [image-vuln-scan]
     timeout-minutes: 10
     permissions:
       contents: read
@@ -288,26 +286,6 @@ jobs:
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
-  # =============================================================================
-  # Publish: Flip draft release to public after attestation succeeds
-  # =============================================================================
-
-  publish:
-    name: Publish Release
-    runs-on: ubuntu-latest
-    needs: [attest, image-vuln-scan]
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    steps:
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh release edit "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --draft=false
 
   # =============================================================================
   # Cleanup: Warn if attestation failed (images exist without attestation)
@@ -316,27 +294,26 @@ jobs:
   release-check:
     name: Release Integrity Check
     runs-on: ubuntu-latest
-    needs: [build, attest, image-vuln-scan]
-    if: always() && needs.build.outputs.release_outcome == 'success'
+    needs: [attest]
+    if: always()
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
       - name: Check attestation status
+        env:
+          ATTEST_RESULT: ${{ needs.attest.result }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          if [[ "${{ needs.attest.result }}" != "success" ]]; then
+          if [[ "${ATTEST_RESULT}" != "success" ]]; then
             echo "::error::Attestation failed or was skipped. Images exist on GHCR without attestation."
-            echo "::error::Manual action required: verify attestation for ${{ github.ref_name }} or delete the draft release."
+            echo "::error::Manual action required: verify attestation for ${TAG} or delete the draft release."
             echo ""
             echo "Recovery steps:"
             echo "  1. Re-run the 'Attest Images' job from the Actions tab"
             echo "  2. Or delete the draft release and re-tag"
             exit 1
-          fi
-
-          if [[ "${{ needs.image-vuln-scan.result }}" == "failure" ]]; then
-            echo "::warning::Image vulnerability scan reported findings. Check the Security tab for details."
           fi
 
           echo "Release integrity check passed."
@@ -346,7 +323,7 @@ jobs:
   # =============================================================================
 
   deploy:
-    needs: [publish, release-check]
+    needs: [release-check]
     uses: ./.github/workflows/deploy.yaml
     permissions:
       contents: read
@@ -354,3 +331,72 @@ jobs:
       id-token: write
     with:
       image_tag: ${{ github.ref_name }}
+
+  # =============================================================================
+  # Publish: Flip draft release to public after attestation succeeds
+  # =============================================================================
+
+  publish:
+    name: Publish Release
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release edit "${TAG}" \
+            --repo "${REPO}" \
+            --draft=false
+
+  # =============================================================================
+  # Summary: Release pipeline report (always runs, even on failure)
+  # =============================================================================
+
+  summary:
+    name: Release Summary
+    runs-on: ubuntu-latest
+    needs: [tests, build-ko, build-docker, docker-manifest, image-vuln-scan, attest, release-check, deploy, publish]
+    if: always()
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Release Summary
+        env:
+          TESTS: ${{ needs.tests.result }}
+          BUILD_KO: ${{ needs.build-ko.result }}
+          BUILD_DOCKER: ${{ needs.build-docker.result }}
+          MANIFEST: ${{ needs.docker-manifest.result }}
+          VULN_SCAN: ${{ needs.image-vuln-scan.result }}
+          ATTEST: ${{ needs.attest.result }}
+          RELEASE_CHECK: ${{ needs.release-check.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Release Summary"
+            echo ""
+            echo "**Tag:** \`${TAG}\`  **Commit:** \`${COMMIT}\`"
+            echo ""
+            echo "| Phase | Result |"
+            echo "|-------|--------|"
+            echo "| Tests | ${TESTS} |"
+            echo "| Build (Ko) | ${BUILD_KO} |"
+            echo "| Build (Docker) | ${BUILD_DOCKER} |"
+            echo "| Docker Manifest | ${MANIFEST} |"
+            echo "| Vulnerability Scan | ${VULN_SCAN} |"
+            echo "| Attestation | ${ATTEST} |"
+            echo "| Release Check | ${RELEASE_CHECK} |"
+            echo "| Deploy | ${DEPLOY} |"
+            echo "| Publish | ${PUBLISH} |"
+          } >> "$GITHUB_STEP_SUMMARY"
