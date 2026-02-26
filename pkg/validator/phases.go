@@ -324,7 +324,7 @@ func (v *Validator) validateReadiness(
 // validateDeployment validates deployment phase.
 // Compares recipe components against snapshot (materialization), then runs checks as Kubernetes Jobs.
 //
-//nolint:dupl // Phase validation methods have similar structure by design
+//nolint:unparam,dupl // error always nil; phase validation methods have similar structure by design
 func (v *Validator) validateDeployment(
 	ctx context.Context,
 	recipeResult *recipe.RecipeResult,
@@ -440,8 +440,8 @@ func (v *Validator) validateDeployment(
 			failedCount++
 		case ValidationStatusPass:
 			passedCount++
-		case ValidationStatusSkipped, ValidationStatusWarning:
-			// Don't count skipped/warning toward pass/fail
+		case ValidationStatusPartial, ValidationStatusSkipped, ValidationStatusWarning:
+			// Don't count these toward pass/fail
 		}
 	}
 
