@@ -216,4 +216,7 @@ type ComponentActual struct {
 
 	// Namespace is the namespace where the component was found.
 	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+
+	// Source is the repository URL found in the snapshot (for ArgoCD/Kustomize).
+	Source string `json:"source,omitempty" yaml:"source,omitempty"`
 }
