@@ -55,11 +55,11 @@ pods/gpu_memory_used
 Deploy a GPU workload running gpu-burn to generate sustained GPU utilization,
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
-**Test manifest:** `docs/conformance/cncf/manifests/hpa-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
 
 **Apply test manifest**
 ```
-$ kubectl apply -f docs/conformance/cncf/manifests/hpa-gpu-test.yaml
+$ kubectl apply -f pkg/evidence/scripts/manifests/hpa-gpu-test.yaml
 namespace/hpa-test created
 deployment.apps/gpu-workload created
 horizontalpodautoscaler.autoscaling/gpu-workload-hpa created

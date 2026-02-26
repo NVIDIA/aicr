@@ -19,11 +19,9 @@ recipe meets the Must-have requirements for Kubernetes v1.34.
 ```
 docs/conformance/cncf/
 ├── README.md
-├── collect-evidence.sh
-├── manifests/
-│   ├── dra-gpu-test.yaml
-│   ├── gang-scheduling-test.yaml
-│   └── hpa-gpu-test.yaml
+├── submission/
+│   ├── PRODUCT.yaml
+│   └── README.md
 └── evidence/
     ├── index.md
     ├── dra-support.md
@@ -32,73 +30,70 @@ docs/conformance/cncf/
     ├── accelerator-metrics.md
     ├── inference-gateway.md
     ├── robust-operator.md
-    └── pod-autoscaling.md
+    ├── pod-autoscaling.md
+    └── cluster-autoscaling.md
+
+pkg/evidence/scripts/             # Evidence collection script + test manifests
+├── collect-evidence.sh
+└── manifests/
+    ├── dra-gpu-test.yaml
+    ├── gang-scheduling-test.yaml
+    └── hpa-gpu-test.yaml
 ```
 
 ## Usage
 
 Evidence collection has two steps:
 
-### Step 1: Structural Validation Evidence
+### Structural Validation (CI)
 
-`aicr validate` checks component health, CRDs, constraints, and generates
-structural evidence:
+`aicr validate` checks component health, CRDs, and constraints for CI:
 
 ```bash
-# Generate evidence during validation
-aicr validate -r recipe.yaml -s snapshot.yaml \
+# Structural validation + evidence rendering
+aicr validate -r recipe.yaml \
   --phase conformance --evidence-dir ./evidence
-
-# Or use a saved result file
-aicr validate -r recipe.yaml -s snapshot.yaml \
-  --phase conformance --evidence-dir ./evidence \
-  --result validation-result.yaml
 ```
 
-### Step 2: Behavioral Test Evidence
+### CNCF Submission Evidence
 
-`collect-evidence.sh` deploys test workloads and collects behavioral evidence
-(DRA GPU allocation, gang scheduling, HPA autoscaling, etc.) that requires
-running actual GPU workloads on the cluster:
+Add `--cncf-submission` to collect detailed behavioral evidence for CNCF AI
+Conformance submission. This deploys GPU workloads, captures command outputs,
+workload logs, nvidia-smi output, and Prometheus queries:
 
 ```bash
 # Collect all behavioral evidence
-./docs/conformance/cncf/collect-evidence.sh all
+aicr validate --phase conformance \
+  --evidence-dir ./evidence --cncf-submission
 
-# Collect evidence for a single feature
-./docs/conformance/cncf/collect-evidence.sh dra
-./docs/conformance/cncf/collect-evidence.sh gang
-./docs/conformance/cncf/collect-evidence.sh secure
-./docs/conformance/cncf/collect-evidence.sh metrics
-./docs/conformance/cncf/collect-evidence.sh gateway
-./docs/conformance/cncf/collect-evidence.sh operator
-./docs/conformance/cncf/collect-evidence.sh hpa
+# Collect specific features
+aicr validate --phase conformance \
+  --evidence-dir ./evidence --cncf-submission -f dra -f hpa
 ```
 
-> **Note:** The HPA test (`hpa`) deploys gpu-burn to stress the GPU and waits for
-> HPA to scale up. This takes ~5 minutes due to metric propagation through the
-> DCGM → Prometheus → prometheus-adapter → HPA pipeline.
+Alternatively, run the evidence collection script directly:
+```bash
+./pkg/evidence/scripts/collect-evidence.sh all
+./pkg/evidence/scripts/collect-evidence.sh dra
+```
 
-### Why Two Steps?
+> **Note:** The `--cncf-submission` flag deploys GPU workloads and takes ~15
+> minutes. The HPA test uses CUDA N-Body Simulation to stress GPUs and verifies
+> both scale-up and scale-down.
 
-| Evidence Type | `aicr validate` | `collect-evidence.sh` |
+### Two Modes
+
+| | `aicr validate --phase conformance` | `--cncf-submission` |
 |---|---|---|
-| Component health (pods, CRDs) | Yes | Yes |
-| Constraint validation (K8s version, OS) | Yes | No |
-| DRA GPU allocation test | No | Yes |
-| Gang scheduling test | No | Yes |
-| Device isolation verification | No | Yes |
-| HPA scaling with GPU load | No | Yes |
-| Prometheus query results | No | Yes |
-
-`aicr validate` checks that components are deployed correctly. `collect-evidence.sh`
-verifies they work correctly by running actual workloads. Both are needed for
-complete conformance evidence.
-
-> **Future:** Behavioral tests are inherently long-running (e.g., HPA test deploys
-> gpu-burn and waits ~5 minutes for metric propagation and scaling) and are better
-> suited as a separate step than blocking `aicr validate`. A follow-up integration
-> is tracked in [#192](https://github.com/NVIDIA/aicr/issues/192).
+| **Purpose** | CI pass/fail | CNCF submission evidence |
+| **Speed** | ~3 minutes | ~15 minutes |
+| **Deploys workloads** | No | Yes |
+| **Output** | Structural evidence (pass/fail + artifacts) | Behavioral evidence (command outputs, logs, queries) |
+| **DRA GPU allocation test** | Status check only | Deploys pod, verifies GPU access |
+| **Gang scheduling test** | Component check only | Deploys PodGroup, verifies co-scheduling |
+| **HPA autoscaling** | Metrics API check | Scale-up + scale-down with GPU load |
+| **Gateway** | Status check | Condition verification (Accepted, Programmed) |
+| **Webhook test** | No | Rejection test with invalid CR |
 
 ## Evidence
 

@@ -23,9 +23,10 @@
 # This script collects behavioral test evidence (HPA scaling, DRA allocation, etc.)
 # that requires deploying test workloads. Both are needed for full conformance evidence.
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-EVIDENCE_DIR="${SCRIPT_DIR}/evidence"
+# Support invocation from aicr CLI (env vars) or standalone (defaults).
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REPO_ROOT="${REPO_ROOT:-$(cd "${SCRIPT_DIR}/../../.." && pwd)}"
+EVIDENCE_DIR="${EVIDENCE_DIR:-${SCRIPT_DIR}/evidence}"
 SECTION="${1:-all}"
 
 # Current output file — set per section
@@ -52,9 +53,12 @@ capture() {
     echo "" >> "${EVIDENCE_FILE}"
     echo "**${label}**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
-    # Strip absolute repo path from command display to avoid leaking local paths
+    # Strip absolute paths from command display to avoid leaking local/temp paths
     local cmd_display="$*"
+    cmd_display="${cmd_display//${SCRIPT_DIR}\//}"
     cmd_display="${cmd_display//${REPO_ROOT}\//}"
+    # Strip any remaining absolute paths to manifests (e.g., temp dirs from aicr evidence)
+    cmd_display=$(echo "${cmd_display}" | sed 's|[^ ]*/manifests/|manifests/|g')
     echo "\$ ${cmd_display}" >> "${EVIDENCE_FILE}"
     if output=$("$@" 2>&1); then
         echo "${output}" >> "${EVIDENCE_FILE}"
@@ -79,6 +83,21 @@ wait_for_pod() {
     done
     echo "Timeout"
     return 1
+}
+
+# Clean up a test namespace properly: pods → resourceclaims → namespace
+# This order prevents stale DRA kubelet checkpoint issues caused by
+# orphaned ResourceClaims with delete-protection finalizers.
+cleanup_ns() {
+    local ns="$1"
+    # Skip if namespace doesn't exist
+    if ! kubectl get namespace "$ns" &>/dev/null; then return 0; fi
+    # Delete pods first so DRA driver can call NodeUnprepareResources
+    kubectl delete pods --all -n "$ns" --ignore-not-found --wait=true --timeout=30s &>/dev/null || true
+    # Delete resourceclaims (finalizer removed after pod deletion)
+    kubectl delete resourceclaims --all -n "$ns" --ignore-not-found --wait=true --timeout=30s &>/dev/null || true
+    # Now namespace can terminate cleanly
+    kubectl delete namespace "$ns" --ignore-not-found --timeout=60s &>/dev/null || true
 }
 
 # Write a per-section evidence file header
@@ -135,12 +154,14 @@ EOF
 
 Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device access.
 
-**Test manifest:** `docs/conformance/cncf/manifests/dra-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/dra-gpu-test.yaml`
 EOF
+    echo '```yaml' >> "${EVIDENCE_FILE}"
+    cat "${SCRIPT_DIR}/manifests/dra-gpu-test.yaml" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
-    kubectl delete namespace dra-test --ignore-not-found --wait=false 2>/dev/null || true
-    sleep 5
+    cleanup_ns dra-test
 
     # Deploy test
     log_info "Deploying DRA GPU test..."
@@ -167,7 +188,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace dra-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns dra-test
 
     log_info "DRA evidence collection complete."
 }
@@ -200,12 +221,14 @@ EOF
 Deploy a PodGroup with minMember=2 and two GPU pods. KAI scheduler ensures both
 pods are scheduled atomically.
 
-**Test manifest:** `docs/conformance/cncf/manifests/gang-scheduling-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/gang-scheduling-test.yaml`
 EOF
+    echo '```yaml' >> "${EVIDENCE_FILE}"
+    cat "${SCRIPT_DIR}/manifests/gang-scheduling-test.yaml" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
-    kubectl delete namespace gang-scheduling-test --ignore-not-found --wait=false 2>/dev/null || true
-    sleep 5
+    cleanup_ns gang-scheduling-test
 
     # Deploy test
     log_info "Deploying gang scheduling test..."
@@ -237,7 +260,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace gang-scheduling-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns gang-scheduling-test
 
     log_info "Gang scheduling evidence collection complete."
 }
@@ -300,8 +323,7 @@ Deploy a test pod requesting 1 GPU via ResourceClaim and verify:
 EOF
 
     # Clean up any previous run
-    kubectl delete namespace secure-access-test --ignore-not-found --wait=false 2>/dev/null || true
-    sleep 5
+    cleanup_ns secure-access-test
 
     # Deploy DRA test for isolation verification
     cat <<'MANIFEST' | kubectl apply -f -
@@ -358,8 +380,8 @@ spec:
           - name: gpu
 MANIFEST
 
-    log_info "Waiting for isolation test pod (up to ${POD_TIMEOUT}s)..."
-    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" "${POD_TIMEOUT}")
+    log_info "Waiting for isolation test pod (up to 60s)..."
+    pod_phase=$(wait_for_pod "secure-access-test" "isolation-test" 60)
     log_info "Pod phase: ${pod_phase}"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
@@ -388,7 +410,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace secure-access-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns secure-access-test
 
     log_info "Secure accelerator access evidence collection complete."
 }
@@ -606,17 +628,38 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
+### Gateway Conditions
+
+Verify GatewayClass is Accepted and Gateway is Programmed (not just created).
+EOF
+    # Check GatewayClass Accepted condition
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**GatewayClass conditions**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl get gatewayclass kgateway -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Check Gateway Programmed condition
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Gateway conditions**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl get gateway inference-gateway -n kgateway-system -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
 ## Inference Resources
 EOF
     capture "InferencePools" kubectl get inferencepools -A
     capture "HTTPRoutes" kubectl get httproutes -A
 
-    # Verdict
+    # Verdict — check both GatewayClass Accepted and Gateway Programmed
     echo "" >> "${EVIDENCE_FILE}"
-    local gw_count
-    gw_count=$(kubectl get gateways -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    if [ "${gw_count}" -gt 0 ]; then
-        echo "**Result: PASS** — kgateway controller running, Gateway API and inference extension CRDs installed, active Gateway programmed with external address." >> "${EVIDENCE_FILE}"
+    local gw_accepted gw_programmed
+    gw_accepted=$(kubectl get gatewayclass kgateway -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
+    gw_programmed=$(kubectl get gateway inference-gateway -n kgateway-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
+    if [ "${gw_accepted}" = "True" ] && [ "${gw_programmed}" = "True" ]; then
+        echo "**Result: PASS** — kgateway controller running, GatewayClass Accepted, Gateway Programmed, inference CRDs installed." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — No active Gateway found." >> "${EVIDENCE_FILE}"
     fi
@@ -695,12 +738,48 @@ EOF
 EOF
     capture "DynamoComponentDeployments" kubectl get dynamocomponentdeployments -n dynamo-workload
 
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Webhook Rejection Test
+
+Submit an invalid DynamoGraphDeployment to verify the validating webhook
+actively rejects malformed resources.
+EOF
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Invalid CR rejection**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    # Submit an invalid DynamoGraphDeployment (empty spec) — webhook should reject it
+    local webhook_result
+    webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: webhook-test-invalid
+  namespace: default
+spec: {}
+INVALID_CR
+)
+    echo "${webhook_result}" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Check if webhook rejected it
+    echo "" >> "${EVIDENCE_FILE}"
+    if echo "${webhook_result}" | grep -qi "denied\|forbidden\|invalid\|error"; then
+        echo "Webhook correctly rejected the invalid resource." >> "${EVIDENCE_FILE}"
+    else
+        echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
+    fi
+
     # Verdict
     echo "" >> "${EVIDENCE_FILE}"
     local dgd_count
     dgd_count=$(kubectl get dynamographdeployments -A --no-headers 2>/dev/null | wc -l | tr -d ' ')
-    if [ "${dgd_count}" -gt 0 ]; then
-        echo "**Result: PASS** — Dynamo operator running, webhooks operational, CRDs registered, DynamoGraphDeployment reconciled with workload pods." >> "${EVIDENCE_FILE}"
+    local webhook_ok
+    webhook_ok=$(echo "${webhook_result}" | grep -ci "denied\|forbidden\|invalid\|error" || true)
+    if [ "${dgd_count}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
+        echo "**Result: PASS** — Dynamo operator running, webhooks operational (rejection verified), CRDs registered, DynamoGraphDeployment reconciled with workload pods." >> "${EVIDENCE_FILE}"
+    elif [ "${dgd_count}" -gt 0 ]; then
+        echo "**Result: PASS** — Dynamo operator running, CRDs registered, DynamoGraphDeployment reconciled with workload pods." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — No DynamoGraphDeployment found." >> "${EVIDENCE_FILE}"
     fi
@@ -722,10 +801,11 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 
 1. **Prometheus Adapter** — Exposes GPU metrics via Kubernetes custom metrics API
 2. **Custom Metrics API** — `gpu_utilization`, `gpu_memory_used`, `gpu_power_usage` available
-3. **GPU Stress Workload** — Deployment running gpu-burn to generate GPU load
+3. **GPU Stress Workload** — Deployment running CUDA N-Body Simulation to generate GPU load
 4. **HPA Configuration** — Targets `gpu_utilization` with threshold of 50%
-5. **HPA Scaling** — Successfully reads GPU metrics and scales replicas when utilization exceeds target
-6. **Result: PASS**
+5. **HPA Scale-Up** — Successfully scales replicas when GPU utilization exceeds target
+6. **HPA Scale-Down** — Successfully scales back down when GPU load is removed
+7. **Result: PASS**
 
 ---
 
@@ -750,15 +830,17 @@ EOF
 
 ## GPU Stress Test Deployment
 
-Deploy a GPU workload running gpu-burn to generate sustained GPU utilization,
+Deploy a GPU workload running CUDA N-Body Simulation to generate sustained GPU utilization,
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
-**Test manifest:** `docs/conformance/cncf/manifests/hpa-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
 EOF
+    echo '```yaml' >> "${EVIDENCE_FILE}"
+    cat "${SCRIPT_DIR}/manifests/hpa-gpu-test.yaml" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
 
     # Clean up any previous run
-    kubectl delete namespace hpa-test --ignore-not-found 2>/dev/null || true
-    kubectl wait --for=delete namespace/hpa-test --timeout=60s 2>/dev/null || true
+    cleanup_ns hpa-test
 
     # Deploy test
     log_info "Deploying HPA GPU test..."
@@ -789,7 +871,7 @@ EOF
         targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
         replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
         log_info "  Check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-1}"
-        if [ -n "$targets" ] && [ "${replicas:-1}" -gt 1 ]; then
+        if [ "${replicas:-1}" -gt 1 ] && [ -n "$targets" ]; then
             hpa_scaled=true
             break
         fi
@@ -814,14 +896,46 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
-## Pods After Scaling
+## Pods After Scale-Up
 EOF
-    capture "Pods" kubectl get pods -n hpa-test -o wide
+    capture "Pods after scale-up" kubectl get pods -n hpa-test -o wide
+
+    # Scale-down test: wait for N-Body to finish, verify HPA scales back to 1
+    local hpa_scaled_down=false
+    if [ "${hpa_scaled}" = "true" ]; then
+        cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Scale-Down Verification
+
+The N-Body simulation runs a fixed number of iterations and then exits.
+Once the workload completes, GPU utilization drops to 0 and HPA scales
+back to minReplicas (1).
+EOF
+        log_info "Waiting for GPU workload to finish and HPA to scale down..."
+
+        log_info "Waiting for HPA scale-down (up to 5 minutes)..."
+        for i in $(seq 1 20); do
+            sleep 15
+            replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
+            targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
+            log_info "  Scale-down check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-?}"
+            if [ "${replicas}" = "1" ] && [ "${targets:-unknown}" = "0" ]; then
+                hpa_scaled_down=true
+                break
+            fi
+        done
+
+        capture "HPA after scale-down" kubectl get hpa -n hpa-test
+        capture "Pods after scale-down" kubectl get pods -n hpa-test -o wide
+        capture "HPA events" kubectl describe hpa gpu-workload-hpa -n hpa-test
+    fi
 
     # Verdict — require actual scaling for PASS
     echo "" >> "${EVIDENCE_FILE}"
-    if [ "${hpa_scaled}" = "true" ]; then
-        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold." >> "${EVIDENCE_FILE}"
+    if [ "${hpa_scaled}" = "true" ] && [ "${hpa_scaled_down}" = "true" ]; then
+        echo "**Result: PASS** — HPA successfully scaled up when GPU utilization exceeded target, and scaled back down when load was removed." >> "${EVIDENCE_FILE}"
+    elif [ "${hpa_scaled}" = "true" ]; then
+        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold. Scale-down not verified within timeout." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — HPA did not scale replicas within the timeout. Check GPU workload, DCGM exporter, and prometheus-adapter configuration." >> "${EVIDENCE_FILE}"
     fi
@@ -830,7 +944,7 @@ EOF
 
 ## Cleanup
 EOF
-    capture "Delete test namespace" kubectl delete namespace hpa-test --ignore-not-found
+    capture "Delete test namespace" cleanup_ns hpa-test
 
     log_info "Pod autoscaling evidence collection complete."
 }

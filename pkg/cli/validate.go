@@ -363,6 +363,15 @@ func validateCmdFlags() []cli.Flag {
 			Name:  "evidence-dir",
 			Usage: "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
 		},
+		&cli.BoolFlag{
+			Name:  "cncf-submission",
+			Usage: "Collect detailed behavioral evidence for CNCF AI Conformance submission. Deploys GPU workloads, captures nvidia-smi output, Prometheus queries, and HPA scaling tests. Requires --evidence-dir. Takes ~15 minutes.",
+		},
+		&cli.StringSliceFlag{
+			Name:    "feature",
+			Aliases: []string{"f"},
+			Usage:   "Evidence feature to collect (repeatable, default: all). Use -f all to run all features (cannot be combined with other features). Only used with --cncf-submission.",
+		},
 		&cli.StringFlag{
 			Name:  "result",
 			Usage: "Use a saved validation result file as the source for evidence rendering (live validation still runs). Note: saved results do not include diagnostic artifacts captured during live runs. Requires --phase conformance and --evidence-dir.",
@@ -460,6 +469,40 @@ Use a saved result file for evidence instead of the live run:
 			}
 			if resultPath != "" && evidenceDir == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--result requires --evidence-dir")
+			}
+
+			cncfSubmission := cmd.Bool("cncf-submission")
+			if cncfSubmission && evidenceDir == "" {
+				return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
+			}
+			features := cmd.StringSlice("feature")
+			if len(features) > 0 && !cncfSubmission {
+				return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
+			}
+
+			// When --cncf-submission is set, run behavioral evidence collection
+			// instead of structural Go checks. This deploys GPU workloads and
+			// captures detailed outputs for CNCF submission.
+			if cncfSubmission {
+				slog.Info("collecting behavioral conformance evidence",
+					"dir", evidenceDir, "features", features)
+
+				// Use a longer timeout for behavioral evidence (default 5m is too short).
+				evidenceTimeout := cmd.Duration("timeout")
+				if evidenceTimeout <= 5*time.Minute {
+					evidenceTimeout = 20 * time.Minute
+				}
+				evidenceCtx, evidenceCancel := context.WithTimeout(ctx, evidenceTimeout)
+				defer evidenceCancel()
+
+				collector := evidence.NewCollector(evidenceDir,
+					evidence.WithFeatures(features),
+				)
+				if runErr := collector.Run(evidenceCtx); runErr != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "evidence collection failed", runErr)
+				}
+				slog.Info("conformance evidence written", "dir", evidenceDir)
+				return nil
 			}
 
 			recipeFilePath := cmd.String("recipe")
