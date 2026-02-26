@@ -252,7 +252,7 @@ aicr bundle --recipe recipe.yaml \
 ### CNCF AI Conformance Evidence Collection
 ```
 # List available features
-  $ aicr validate conformance --cncf-submission --evidence-dir --feature --timeout
+  $ aicr validate --phase conformance --cncf-submission --evidence-dir --feature --timeout
 
   Available evidence features:
 
@@ -267,6 +267,9 @@ aicr bundle --recipe recipe.yaml \
     hpa                      HPA pod autoscaling (scale-up + scale-down)
     cluster-autoscaling      Cluster autoscaling (ASG configuration)
 
+```
+  aicr validate --phase conformance --cncf-submission --evidence-dir /tmp \
+      --feature gang-scheduling --timeout 30s
 ```
 ### CNCF AI Conformance Program Submission
 
