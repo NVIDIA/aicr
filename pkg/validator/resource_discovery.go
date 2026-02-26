@@ -39,6 +39,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// Workload resource kinds used for auto-discovery and summary reporting.
+const (
+	kindDeployment  = "Deployment"
+	kindDaemonSet   = "DaemonSet"
+	kindStatefulSet = "StatefulSet"
+)
+
 // componentDiscovery tracks the discovery results for a single component.
 type componentDiscovery struct {
 	name      string
@@ -213,7 +220,7 @@ func countByKind(resources []recipe.ExpectedResource) string {
 	}
 
 	var parts []string
-	for _, kind := range []string{"Deployment", "DaemonSet", "StatefulSet"} { //nolint:goconst // workload kinds are clearer as literals in switch/range
+	for _, kind := range []string{kindDeployment, kindDaemonSet, kindStatefulSet} {
 		if n, ok := counts[kind]; ok {
 			label := kind + "s"
 			if n == 1 {
@@ -335,6 +342,9 @@ func renderKustomizeTemplate(ctx context.Context, ref recipe.ComponentRef) ([]re
 
 	select {
 	case <-ctx.Done():
+		// On timeout the goroutine above keeps running but is bounded:
+		// krusty's internal git clone has a hard 27s timeout, after which
+		// the goroutine writes to the buffered channel and exits.
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "kustomize build timed out", ctx.Err())
 	case r := <-ch:
 		return r.resources, r.err
@@ -346,7 +356,7 @@ func renderKustomizeTemplate(ctx context.Context, ref recipe.ComponentRef) ([]re
 // The double-slash separates the repo root from the kustomization root path,
 // and ?ref= sets the git ref (tag, branch, or commit).
 func buildKustomizeURL(source, path, tag string) string {
-	url := source
+	url := strings.TrimSuffix(source, "/")
 	if path != "" {
 		url += "//" + path
 	}
@@ -452,7 +462,7 @@ func extractWorkloadResources(manifestContent string, defaultNamespace string) [
 
 		// Only extract workload resources
 		switch meta.Kind {
-		case "Deployment", "DaemonSet", "StatefulSet": //nolint:goconst // workload kinds are clearer as literals in switch/range
+		case kindDeployment, kindDaemonSet, kindStatefulSet:
 			ns := meta.Metadata.Namespace
 			if ns == "" {
 				ns = defaultNamespace

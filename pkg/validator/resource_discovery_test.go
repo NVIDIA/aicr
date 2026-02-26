@@ -58,7 +58,7 @@ metadata:
 `,
 			defaultNamespace: "default",
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "my-deploy", Namespace: "gpu-operator"},
+				{Kind: kindDeployment, Name: "my-deploy", Namespace: "gpu-operator"},
 			},
 		},
 		{
@@ -84,9 +84,9 @@ metadata:
 `,
 			defaultNamespace: "default",
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "controller", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "agent", Namespace: "ns1"},
-				{Kind: "StatefulSet", Name: "db", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "controller", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "agent", Namespace: "ns1"},
+				{Kind: kindStatefulSet, Name: "db", Namespace: "ns1"},
 			},
 		},
 		{
@@ -117,7 +117,7 @@ metadata:
 `,
 			defaultNamespace: "default",
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "my-deploy", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "my-deploy", Namespace: "ns1"},
 			},
 		},
 		{
@@ -130,7 +130,7 @@ metadata:
 `,
 			defaultNamespace: "gpu-operator",
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "no-ns-deploy", Namespace: "gpu-operator"},
+				{Kind: kindDeployment, Name: "no-ns-deploy", Namespace: "gpu-operator"},
 			},
 		},
 		{
@@ -156,7 +156,7 @@ metadata:
 `,
 			defaultNamespace: "default",
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "good-deploy", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "good-deploy", Namespace: "ns1"},
 			},
 		},
 		{
@@ -169,7 +169,7 @@ metadata:
 `,
 			defaultNamespace: "default",
 			want: []recipe.ExpectedResource{
-				{Kind: "DaemonSet", Name: "my-ds", Namespace: "kube-system"},
+				{Kind: kindDaemonSet, Name: "my-ds", Namespace: "kube-system"},
 			},
 		},
 	}
@@ -201,49 +201,49 @@ func TestMergeExpectedResources(t *testing.T) {
 			name:   "no manual, only discovered",
 			manual: nil,
 			discovered: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "b", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "a", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "b", Namespace: "ns1"},
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "b", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "a", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "b", Namespace: "ns1"},
 			},
 		},
 		{
 			name: "only manual, no discovered",
 			manual: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "a", Namespace: "ns1"},
 			},
 			discovered: nil,
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "a", Namespace: "ns1"},
 			},
 		},
 		{
 			name: "manual takes precedence on conflict",
 			manual: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "overlap", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "overlap", Namespace: "ns1"},
 			},
 			discovered: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "overlap", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "new", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "overlap", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "new", Namespace: "ns1"},
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "overlap", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "new", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "overlap", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "new", Namespace: "ns1"},
 			},
 		},
 		{
 			name: "different namespaces are not conflicts",
 			manual: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "app", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "app", Namespace: "ns1"},
 			},
 			discovered: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "app", Namespace: "ns2"},
+				{Kind: kindDeployment, Name: "app", Namespace: "ns2"},
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "app", Namespace: "ns1"},
-				{Kind: "Deployment", Name: "app", Namespace: "ns2"},
+				{Kind: kindDeployment, Name: "app", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "app", Namespace: "ns2"},
 			},
 		},
 		{
@@ -337,26 +337,26 @@ func TestCountByKind(t *testing.T) {
 		{
 			name: "single deployment",
 			resources: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a"},
+				{Kind: kindDeployment, Name: "a"},
 			},
 			want: "1 Deployment",
 		},
 		{
 			name: "multiple types",
 			resources: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a"},
-				{Kind: "Deployment", Name: "b"},
-				{Kind: "DaemonSet", Name: "c"},
+				{Kind: kindDeployment, Name: "a"},
+				{Kind: kindDeployment, Name: "b"},
+				{Kind: kindDaemonSet, Name: "c"},
 			},
 			want: "2 Deployments, 1 DaemonSet",
 		},
 		{
 			name: "all three types",
 			resources: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "a"},
-				{Kind: "DaemonSet", Name: "b"},
-				{Kind: "StatefulSet", Name: "c"},
-				{Kind: "StatefulSet", Name: "d"},
+				{Kind: kindDeployment, Name: "a"},
+				{Kind: kindDaemonSet, Name: "b"},
+				{Kind: kindStatefulSet, Name: "c"},
+				{Kind: kindStatefulSet, Name: "d"},
 			},
 			want: "1 Deployment, 1 DaemonSet, 2 StatefulSets",
 		},
@@ -402,7 +402,7 @@ func TestResolveExpectedResources_ManualOnly(t *testing.T) {
 				Namespace: "ns1",
 				Type:      recipe.ComponentTypeHelm,
 				ExpectedResources: []recipe.ExpectedResource{
-					{Kind: "Deployment", Name: "manual-deploy", Namespace: "ns1"},
+					{Kind: kindDeployment, Name: "manual-deploy", Namespace: "ns1"},
 				},
 			},
 		},
@@ -447,7 +447,7 @@ func TestResolveExpectedResources_MultipleComponents(t *testing.T) {
 				Namespace: "ns3",
 				Type:      recipe.ComponentTypeHelm,
 				ExpectedResources: []recipe.ExpectedResource{
-					{Kind: "Deployment", Name: "manual-only", Namespace: "ns3"},
+					{Kind: kindDeployment, Name: "manual-only", Namespace: "ns3"},
 				},
 			},
 		},
@@ -494,7 +494,7 @@ func TestRenderManifestFiles(t *testing.T) {
 				"manifests/deploy.yaml": []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: my-deploy\n  namespace: test-ns\n"),
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "my-deploy", Namespace: "test-ns"},
+				{Kind: kindDeployment, Name: "my-deploy", Namespace: "test-ns"},
 			},
 		},
 		{
@@ -509,8 +509,8 @@ func TestRenderManifestFiles(t *testing.T) {
 				"manifests/multi.yaml": []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: controller\n  namespace: ns1\n---\napiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: agent\n  namespace: ns1\n"),
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "controller", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "agent", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "controller", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "agent", Namespace: "ns1"},
 			},
 		},
 		{
@@ -527,7 +527,7 @@ func TestRenderManifestFiles(t *testing.T) {
 				"manifests/templated.yaml": []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{ index .Values \"mycomp\" \"appName\" }}\n  namespace: {{ .Release.Namespace }}\n"),
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "web-server", Namespace: "prod-ns"},
+				{Kind: kindDeployment, Name: "web-server", Namespace: "prod-ns"},
 			},
 		},
 		{
@@ -579,7 +579,7 @@ func TestRenderManifestFiles(t *testing.T) {
 				"manifests/no-ns.yaml": []byte("apiVersion: apps/v1\nkind: StatefulSet\nmetadata:\n  name: my-db\n"),
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "StatefulSet", Name: "my-db", Namespace: "fallback-ns"},
+				{Kind: kindStatefulSet, Name: "my-db", Namespace: "fallback-ns"},
 			},
 		},
 		{
@@ -595,8 +595,8 @@ func TestRenderManifestFiles(t *testing.T) {
 				"manifests/b.yaml": []byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: ds-b\n  namespace: ns1\n"),
 			},
 			want: []recipe.ExpectedResource{
-				{Kind: "Deployment", Name: "deploy-a", Namespace: "ns1"},
-				{Kind: "DaemonSet", Name: "ds-b", Namespace: "ns1"},
+				{Kind: kindDeployment, Name: "deploy-a", Namespace: "ns1"},
+				{Kind: kindDaemonSet, Name: "ds-b", Namespace: "ns1"},
 			},
 		},
 	}
@@ -644,7 +644,7 @@ func TestResolveExpectedResources_ManifestFileAutoDetect(t *testing.T) {
 
 	got := recipeResult.ComponentRefs[0].ExpectedResources
 	want := []recipe.ExpectedResource{
-		{Kind: "Deployment", Name: "auto-detected", Namespace: "test-ns"},
+		{Kind: kindDeployment, Name: "auto-detected", Namespace: "test-ns"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d resources, got %d: %+v", len(want), len(got), got)
@@ -671,7 +671,7 @@ func TestResolveExpectedResources_ManualOverridesManifestFile(t *testing.T) {
 				Type:          recipe.ComponentTypeHelm,
 				ManifestFiles: []string{"manifests/workloads.yaml"},
 				ExpectedResources: []recipe.ExpectedResource{
-					{Kind: "Deployment", Name: "overlap", Namespace: "ns1"},
+					{Kind: kindDeployment, Name: "overlap", Namespace: "ns1"},
 				},
 			},
 		},
@@ -681,8 +681,8 @@ func TestResolveExpectedResources_ManualOverridesManifestFile(t *testing.T) {
 
 	got := recipeResult.ComponentRefs[0].ExpectedResources
 	want := []recipe.ExpectedResource{
-		{Kind: "Deployment", Name: "overlap", Namespace: "ns1"},
-		{Kind: "DaemonSet", Name: "discovered-only", Namespace: "ns1"},
+		{Kind: kindDeployment, Name: "overlap", Namespace: "ns1"},
+		{Kind: kindDaemonSet, Name: "discovered-only", Namespace: "ns1"},
 	}
 	if len(got) != len(want) {
 		t.Fatalf("expected %d resources, got %d: %+v", len(want), len(got), got)
@@ -807,9 +807,9 @@ spec:
 	foundDaemonSet := false
 	for _, r := range resources {
 		switch {
-		case r.Kind == "Deployment" && r.Name == "my-release-server" && r.Namespace == "test-ns":
+		case r.Kind == kindDeployment && r.Name == "my-release-server" && r.Namespace == "test-ns":
 			foundDeployment = true
-		case r.Kind == "DaemonSet" && r.Name == "my-release-agent" && r.Namespace == "test-ns":
+		case r.Kind == kindDaemonSet && r.Name == "my-release-agent" && r.Namespace == "test-ns":
 			foundDaemonSet = true
 		}
 	}
@@ -890,7 +890,7 @@ spec:
 		t.Fatalf("expected 1 resource, got %d: %v", len(resources), resources)
 	}
 
-	if resources[0].Kind != "StatefulSet" || resources[0].Name != "my-database" || resources[0].Namespace != "db-ns" {
+	if resources[0].Kind != kindStatefulSet || resources[0].Name != "my-database" || resources[0].Namespace != "db-ns" {
 		t.Errorf("expected StatefulSet my-database in db-ns, got %v", resources[0])
 	}
 
@@ -1166,6 +1166,13 @@ func TestBuildKustomizeURL(t *testing.T) {
 			tag:    "main",
 			want:   "git@github.com:org/repo.git//overlays/prod?ref=main",
 		},
+		{
+			name:   "trailing slash in source is trimmed",
+			source: "https://github.com/org/repo/",
+			path:   "deploy/production",
+			tag:    "v1.0.0",
+			want:   "https://github.com/org/repo//deploy/production?ref=v1.0.0",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1259,9 +1266,9 @@ spec:
 	foundDaemonSet := false
 	for _, r := range resources {
 		switch {
-		case r.Kind == "Deployment" && r.Name == "controller" && r.Namespace == "my-ns":
+		case r.Kind == kindDeployment && r.Name == "controller" && r.Namespace == "my-ns":
 			foundDeployment = true
-		case r.Kind == "DaemonSet" && r.Name == "agent" && r.Namespace == "my-ns":
+		case r.Kind == kindDaemonSet && r.Name == "agent" && r.Namespace == "my-ns":
 			foundDaemonSet = true
 		}
 	}
@@ -1342,7 +1349,7 @@ spec:
 	if len(resources) != 1 {
 		t.Fatalf("expected 1 workload resource, got %d: %v", len(resources), resources)
 	}
-	if resources[0].Kind != "Deployment" || resources[0].Name != "only-workload" {
+	if resources[0].Kind != kindDeployment || resources[0].Name != "only-workload" {
 		t.Errorf("expected Deployment only-workload, got %v", resources[0])
 	}
 }
@@ -1403,7 +1410,7 @@ spec:
 	if len(got) != 1 {
 		t.Fatalf("expected 1 resource, got %d: %v", len(got), got)
 	}
-	if got[0].Kind != "Deployment" || got[0].Name != "kust-deploy" || got[0].Namespace != "kust-ns" {
+	if got[0].Kind != kindDeployment || got[0].Name != "kust-deploy" || got[0].Namespace != "kust-ns" {
 		t.Errorf("expected Deployment kust-deploy in kust-ns, got %v", got[0])
 	}
 }
@@ -1427,6 +1434,40 @@ func TestRenderKustomizeTemplate_InvalidSource(t *testing.T) {
 }
 
 func TestRenderKustomizeTemplate_CancelledContext(t *testing.T) {
+	// Use a valid temp kustomization directory so the only failure path
+	// is the canceled context, not a missing filesystem path.
+	kustDir := t.TempDir()
+	kustomizationYAML := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustomizationYAML), 0o644); err != nil {
+		t.Fatalf("failed to write kustomization.yaml: %v", err)
+	}
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test
+  namespace: ns1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+        - name: test
+          image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "deployment.yaml"), []byte(deploymentYAML), 0o644); err != nil {
+		t.Fatalf("failed to write deployment.yaml: %v", err)
+	}
+
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
 
@@ -1434,7 +1475,7 @@ func TestRenderKustomizeTemplate_CancelledContext(t *testing.T) {
 		Name:      "cancelled-comp",
 		Namespace: "ns1",
 		Type:      recipe.ComponentTypeKustomize,
-		Source:    "/some/path",
+		Source:    kustDir,
 	}
 
 	_, err := renderKustomizeTemplate(ctx, ref)
