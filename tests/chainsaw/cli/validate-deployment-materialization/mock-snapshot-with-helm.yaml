@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Mock snapshot for CUJ1 testing.
-# Provides minimal K8s and OS measurements so aicr validate can run
-# without a real cluster or GPU hardware.
+# Mock snapshot with helm release data for materialization testing.
 measurements:
   - type: K8s
     subtypes:
@@ -27,6 +25,10 @@ measurements:
           gpu-operator.version: v25.10.1
           gpu-operator.namespace: gpu-operator
           gpu-operator.status: deployed
+          cert-manager.chart: cert-manager
+          cert-manager.version: v1.17.2
+          cert-manager.namespace: cert-manager
+          cert-manager.status: deployed
   - type: OS
     subtypes:
       - subtype: release

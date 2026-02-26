@@ -12,24 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Mock snapshot for CUJ1 testing.
-# Provides minimal K8s and OS measurements so aicr validate can run
-# without a real cluster or GPU hardware.
-measurements:
-  - type: K8s
-    subtypes:
-      - subtype: server
-        data:
-          version: v1.33.0
-      - subtype: helm
-        data:
-          gpu-operator.chart: gpu-operator
-          gpu-operator.version: v25.10.1
-          gpu-operator.namespace: gpu-operator
-          gpu-operator.status: deployed
-  - type: OS
-    subtypes:
-      - subtype: release
-        data:
-          ID: ubuntu
-          VERSION_ID: "24.04"
+# Assert deployment materialization skips when no helm data in snapshot.
+kind: ValidationResult
+apiVersion: aicr.nvidia.com/v1alpha1
+phases:
+  deployment:
+    (components[?name == 'gpu-operator'] | [0].status): skipped
+    (components[?name == 'gpu-operator'] | [0].message): no helm data in snapshot
