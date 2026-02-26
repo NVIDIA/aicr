@@ -85,4 +85,6 @@ COPY --from=builder /workspace/pkg/validator/checks/deployment/testdata /app/tes
 
 WORKDIR /app
 
+USER nobody
+
 CMD ["/bin/bash"]
