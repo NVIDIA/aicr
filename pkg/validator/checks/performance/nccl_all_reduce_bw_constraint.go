@@ -39,11 +39,9 @@ import (
 )
 
 const (
-	trainJobTimeout    = 30 * time.Minute
-	launcherPodTimeout = 5 * time.Minute
-	testType           = "all_reduce_perf"
-	minMessageSize     = "1K"
-	maxMessageSize     = "16G"
+	testType       = "all_reduce_perf"
+	minMessageSize = "1K"
+	maxMessageSize = "16G"
 )
 
 // templatePath returns the path to a testdata template file for the given
@@ -207,7 +205,7 @@ func parseThreshold(value string) (float64, error) {
 
 	threshold, err := strconv.ParseFloat(numStr, 64)
 	if err != nil {
-		return 0, fmt.Errorf("invalid threshold format: %w", err)
+		return 0, aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest, "invalid threshold format", err)
 	}
 
 	return threshold, nil
@@ -333,7 +331,7 @@ func waitForLauncherPodAndGetLogs(ctx *checks.ValidationContext, podHelper *help
 		ctx.Clientset,
 		ctx.Namespace,
 		"jobset.sigs.k8s.io/jobset-name=nccl-all-reduce-tj,jobset.sigs.k8s.io/replicatedjob-name=launcher",
-		launcherPodTimeout,
+		defaults.NCCLLauncherPodTimeout,
 	)
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "failed to find launcher pod", err)
@@ -342,7 +340,7 @@ func waitForLauncherPodAndGetLogs(ctx *checks.ValidationContext, podHelper *help
 	slog.Info("Found launcher pod", "name", launcherPod.Name)
 
 	// Wait for pod to complete using helper method
-	err = podHelper.WaitForPodSuccess(ctx.Context, launcherPod, trainJobTimeout)
+	err = podHelper.WaitForPodSuccess(ctx.Context, launcherPod, defaults.NCCLTrainJobTimeout)
 	if err != nil {
 		// Get logs even if pod failed for debugging
 		slog.Info("Pod did not succeed, retrieving logs for debugging...")
@@ -402,12 +400,12 @@ func parseBandwidthFromLogs(logs string) (float64, error) {
 	matches := re.FindStringSubmatch(logs)
 
 	if len(matches) < 2 {
-		return 0, fmt.Errorf("could not find bandwidth value in logs")
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal, "could not find bandwidth value in logs")
 	}
 
 	bandwidth, err := strconv.ParseFloat(matches[1], 64)
 	if err != nil {
-		return 0, fmt.Errorf("failed to parse bandwidth value: %w", err)
+		return 0, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse bandwidth value", err)
 	}
 
 	return bandwidth, nil

@@ -52,7 +52,6 @@ RUN set -e; \
 RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/deployment && \
     CGO_ENABLED=0 go test -c -o /out/performance.test ./pkg/validator/checks/performance && \
     CGO_ENABLED=0 go test -c -o /out/conformance.test ./pkg/validator/checks/conformance
-    
 
 # Build test2json tool — converts verbose test output to JSON event stream.
 # Compiled test binaries don't support -test.json; they require piping through

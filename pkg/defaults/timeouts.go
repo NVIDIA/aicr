@@ -213,6 +213,12 @@ const (
 	// TrainerCRDEstablishedTimeout is the time to wait for Kubeflow Trainer CRDs
 	// to reach the Established condition after installation.
 	TrainerCRDEstablishedTimeout = 2 * time.Minute
+
+	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
+	NCCLTrainJobTimeout = 30 * time.Minute
+
+	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
+	NCCLLauncherPodTimeout = 5 * time.Minute
 )
 
 // Deployment and pod scheduling test timeouts for conformance validation.
