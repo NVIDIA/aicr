@@ -2,6 +2,34 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.10] - 2026-02-26
+
+### Bug Fixes
+
+- *(ci)* Add missing contents:read permission to PR comment job by [@mchmarny](https://github.com/mchmarny)
+- *(install)* Improve UX with supply chain security messaging by [@mchmarny](https://github.com/mchmarny)
+- *(validator)* Address lint issues in deployment materialization by [@mchmarny](https://github.com/mchmarny)
+
+### Features
+
+- Integrate CNCF submission evidence collection into aicr validate  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(site)* Landing page refresh, dark mode, and version dropdown by [@mchmarny](https://github.com/mchmarny)
+- *(uat)* AWS UAT pipeline with Chainsaw CUJ tests  by [@mchmarny](https://github.com/mchmarny)
+- *(validator)* Add ComponentResult types for deployment materialization by [@mchmarny](https://github.com/mchmarny)
+- *(validator)* Add ComponentResult types for deployment materialization by [@mchmarny](https://github.com/mchmarny)
+- *(validator)* Implement component materialization with tests by [@mchmarny](https://github.com/mchmarny)
+- *(validator)* Integrate component materialization into deployment phase by [@mchmarny](https://github.com/mchmarny)
+
+### Other
+
+- *(chainsaw)* Add deployment materialization e2e tests by [@mchmarny](https://github.com/mchmarny)
+- *(chainsaw)* Update CUJ1 mock snapshot with full helm data by [@mchmarny](https://github.com/mchmarny)
+- *(kwok)* Add deployment materialization verification step by [@mchmarny](https://github.com/mchmarny)
+
+### Tasks
+
+- Fix gofmt alignment and add missing license headers by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.7.9] - 2026-02-25
 
 ### Bug Fixes
