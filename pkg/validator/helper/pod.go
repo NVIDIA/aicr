@@ -18,10 +18,10 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
-	"testing"
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -42,7 +42,6 @@ type PodLifecycle struct {
 	ClientSet  kubernetes.Interface
 	RESTConfig *rest.Config
 	Namespace  string
-	T          *testing.T
 }
 
 // CreatePodFromTemplate creates a pod from a YAML template file
@@ -60,14 +59,14 @@ func (p *PodLifecycle) CreatePodFromTemplate(ctx context.Context, templatePath s
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create pod", err)
 	}
 
-	p.T.Logf("Successfully created pod %s/%s", createdPod.Namespace, createdPod.Name)
+	slog.Info("Successfully created pod", "namespace", createdPod.Namespace, "name", createdPod.Name)
 	return createdPod, nil
 }
 
 // WaitForPodByName waits for a pod with the given name to be created in the namespace
 // and returns the pod object when found or an error if the timeout is reached
 func (p *PodLifecycle) WaitForPodByName(ctx context.Context, podName string, timeout time.Duration) (*v1.Pod, error) {
-	p.T.Logf("Waiting for pod %s to be created...", podName)
+	slog.Info("Waiting for pod to be created", "name", podName)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -86,7 +85,7 @@ func (p *PodLifecycle) WaitForPodByName(ctx context.Context, podName string, tim
 		case <-ticker.C:
 			foundPod, err = p.ClientSet.CoreV1().Pods(p.Namespace).Get(ctx, podName, metav1.GetOptions{})
 			if err == nil {
-				p.T.Logf("Found pod %s (status: %s)", podName, foundPod.Status.Phase)
+				slog.Info("Found pod", "name", podName, "status", foundPod.Status.Phase)
 				return foundPod, nil
 			}
 			// Continue polling only if pod not found; fail fast on other errors
@@ -102,7 +101,7 @@ func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, pod *v1.Pod, timeo
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	p.T.Logf("Waiting for pod %s to reach Succeeded state...", pod.Name)
+	slog.Info("Waiting for pod to reach Succeeded state", "name", pod.Name)
 
 	// Use watch API for efficient monitoring
 	watcher, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Watch(
@@ -130,11 +129,11 @@ func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, pod *v1.Pod, timeo
 				continue
 			}
 
-			p.T.Logf("Pod %s current phase: %s", watchedPod.Name, watchedPod.Status.Phase)
+			slog.Info("Pod current phase", "name", watchedPod.Name, "status", watchedPod.Status.Phase)
 
 			// Check for success
 			if watchedPod.Status.Phase == v1.PodSucceeded {
-				p.T.Logf("Pod %s successfully completed", watchedPod.Name)
+				slog.Info("Pod successfully completed", "name", watchedPod.Name)
 				return nil
 			}
 
@@ -168,7 +167,7 @@ func (p *PodLifecycle) GetPodLogs(ctx context.Context, pod *v1.Pod) (string, err
 	}
 	defer func() {
 		if closeErr := logsReader.Close(); closeErr != nil {
-			p.T.Logf("Error closing logs reader: %v", closeErr)
+			slog.Error("Error closing logs reader", "error", closeErr)
 		}
 	}()
 
@@ -185,7 +184,7 @@ func (p *PodLifecycle) CleanupPod(ctx context.Context, pod *v1.Pod) error {
 	cleanupCtx, cancel := context.WithTimeout(ctx, defaults.K8sJobCompletionTimeout)
 	defer cancel()
 
-	p.T.Logf("Cleaning up pod %s/%s", pod.Namespace, pod.Name)
+	slog.Info("Cleaning up pod", "namespace", pod.Namespace, "name", pod.Name)
 	return p.ClientSet.CoreV1().Pods(p.Namespace).Delete(cleanupCtx, pod.Name, metav1.DeleteOptions{})
 }
 
@@ -233,7 +232,7 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	p.T.Logf("Waiting for pod %s to reach Running state...", pod.Name)
+	slog.Info("Waiting for pod to reach Running state", "name", pod.Name)
 
 	ticker := time.NewTicker(defaults.PodPollInterval)
 	defer ticker.Stop()
@@ -250,7 +249,7 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 
 			switch foundPod.Status.Phase {
 			case v1.PodRunning:
-				p.T.Logf("Pod %s is now in Running state", pod.Name)
+				slog.Info("Pod is now in Running state", "name", pod.Name)
 				return nil
 			case v1.PodFailed:
 				return aicrErrors.New(aicrErrors.ErrCodeInternal, "pod entered Failed phase while waiting for Running")

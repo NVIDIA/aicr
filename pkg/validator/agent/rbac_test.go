@@ -120,8 +120,8 @@ func TestEnsureRole(t *testing.T) {
 		}
 
 		// Verify policy rules
-		if len(role.Rules) != 5 {
-			t.Errorf("expected 5 rules, got %d", len(role.Rules))
+		if len(role.Rules) != 6 {
+			t.Errorf("expected 6 rules, got %d", len(role.Rules))
 		}
 
 		// Rule 0: namespaces, events, services, endpoints, nodes (get, list)
@@ -178,6 +178,21 @@ func TestEnsureRole(t *testing.T) {
 		}
 		if !containsResource(rule4.Resources, "jobs") {
 			t.Errorf("expected jobs in fifth rule, got %v", rule4.Resources)
+		}
+
+		// Rule 5: trainer.kubeflow.org trainingruntimes/trainjobs (get, list, create, update, delete)
+		rule5 := role.Rules[5]
+		if rule5.APIGroups[0] != "trainer.kubeflow.org" {
+			t.Errorf("expected trainer.kubeflow.org API group in sixth rule, got %v", rule5.APIGroups)
+		}
+		if !containsResource(rule5.Resources, "trainingruntimes") || !containsResource(rule5.Resources, "trainjobs") {
+			t.Errorf("expected trainingruntimes and trainjobs in sixth rule, got %v", rule5.Resources)
+		}
+		if !containsVerb(rule5.Verbs, "get") || !containsVerb(rule5.Verbs, "list") ||
+			!containsVerb(rule5.Verbs, "create") || !containsVerb(rule5.Verbs, "update") ||
+			!containsVerb(rule5.Verbs, "delete") {
+
+			t.Errorf("expected get/list/create/update/delete verbs for Trainer resources, got %v", rule5.Verbs)
 		}
 	})
 

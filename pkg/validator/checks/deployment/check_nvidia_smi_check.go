@@ -122,7 +122,6 @@ func verifySingleNode(ctx *checks.ValidationContext, t *testing.T, nodeName stri
 		ClientSet:  ctx.Clientset,
 		RESTConfig: ctx.RESTConfig,
 		Namespace:  ctx.Namespace,
-		T:          t,
 	}
 
 	// Create verification pod

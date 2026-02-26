@@ -81,6 +81,11 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 				Resources: []string{"jobs"},
 				Verbs:     []string{"get", "list"},
 			},
+			{
+				APIGroups: []string{"trainer.kubeflow.org"},
+				Resources: []string{"trainingruntimes", "trainjobs"},
+				Verbs:     []string{"get", "list", "create", "update", "delete"},
+			},
 		},
 	}
 
@@ -132,10 +137,11 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Verbs:     []string{"get", "list"},
 			},
 			// Conformance: CRD discovery (inference-gateway, dra-support, gang-scheduling, robust-controller)
+			// Performance: Kubeflow Trainer install/uninstall creates and watches CRDs.
 			{
 				APIGroups: []string{"apiextensions.k8s.io"},
 				Resources: []string{"customresourcedefinitions"},
-				Verbs:     []string{"get", "list"},
+				Verbs:     []string{"get", "list", "watch", "create", "delete"},
 			},
 			// Conformance: DRA support validation (resource.k8s.io/v1 — GA)
 			{
@@ -229,6 +235,18 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				APIGroups: []string{"apps"},
 				Resources: []string{"deployments"},
 				Verbs:     []string{"create", "delete"},
+			},
+			// Performance: Kubeflow Trainer install/uninstall lifecycle.
+			// installTrainer creates Namespace, ServiceAccount, RBAC, Deployment, Service, ConfigMap.
+			{
+				APIGroups: []string{""},
+				Resources: []string{"namespaces", "serviceaccounts", "services", "configmaps"},
+				Verbs:     []string{"create", "delete"},
+			},
+			{
+				APIGroups: []string{"rbac.authorization.k8s.io"},
+				Resources: []string{"clusterroles", "clusterrolebindings", "roles", "rolebindings"},
+				Verbs:     []string{"get", "list", "create", "delete"},
 			},
 		},
 	}

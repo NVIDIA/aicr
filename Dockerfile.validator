@@ -50,7 +50,9 @@ RUN set -e; \
 
 # Pre-compile test binaries for in-cluster validation Jobs
 RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/deployment && \
+    CGO_ENABLED=0 go test -c -o /out/performance.test ./pkg/validator/checks/performance && \
     CGO_ENABLED=0 go test -c -o /out/conformance.test ./pkg/validator/checks/conformance
+    
 
 # Build test2json tool — converts verbose test output to JSON event stream.
 # Compiled test binaries don't support -test.json; they require piping through
@@ -69,12 +71,14 @@ LABEL org.opencontainers.image.title="aicr-validator" \
 # Copy compiled binaries
 COPY --from=builder /out/aicr /usr/local/bin/aicr
 COPY --from=builder /out/deployment.test /usr/local/bin/deployment.test
+COPY --from=builder /out/performance.test /usr/local/bin/performance.test
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 COPY --from=builder /out/test2json /usr/local/bin/test2json
 
 # Copy testdata needed by deployment tests at runtime (loaded via os.ReadFile
 # relative to CWD, e.g. testdata/nvidia-smi-verify-pod.yaml)
 COPY --from=builder /workspace/pkg/validator/checks/deployment/testdata /app/testdata
+COPY --from=builder /workspace/pkg/validator/checks/performance/testdata /app/testdata
 
 WORKDIR /app
 

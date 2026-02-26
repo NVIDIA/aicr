@@ -25,11 +25,10 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 // testingT is a minimal interface that matches the testing.T methods we use.
@@ -197,52 +196,35 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 	return false
 }
 
-// LoadValidationContext loads the validation context from the Job environment.
-// This function is called inside Kubernetes Jobs to reconstruct the context needed for validation.
+// LoadValidationContext loads the validation context for running checks.
+// Works both inside Kubernetes Jobs (in-cluster config) and locally (KUBECONFIG).
 //
-// Context loading process:
-//  1. Creates in-cluster Kubernetes client using rest.InClusterConfig()
-//  2. Loads snapshot from mounted file (auto-detects YAML/JSON format)
-//  3. Parses optional recipe metadata from environment variable
-//  4. Returns fully initialized ValidationContext
+// Kubernetes client discovery: KUBECONFIG env → ~/.kube/config → in-cluster service account.
+// Namespace resolution: service account file → AICR_VALIDATION_NAMESPACE env → "default".
 //
-// Environment variables used:
+// Environment variables:
+//   - KUBECONFIG: Path to kubeconfig file (for local development)
+//   - AICR_VALIDATION_NAMESPACE: Validation namespace (for local development)
 //   - AICR_SNAPSHOT_PATH: Path to snapshot file (default: /data/snapshot/snapshot.yaml)
+//   - AICR_RECIPE_PATH: Path to recipe file (default: /data/recipe/recipe.yaml)
 //   - AICR_RECIPE_DATA: Optional JSON-encoded recipe metadata
-//
-// Mounted volumes expected:
-//   - /data/snapshot/snapshot.yaml: Snapshot ConfigMap
-//   - /data/recipe/recipe.yaml: Recipe ConfigMap (not currently used)
-//
-// Returns error if:
-//   - In-cluster config cannot be created (not running in Kubernetes)
-//   - Kubernetes client creation fails
-//   - Snapshot file cannot be read or parsed
 //
 // IMPORTANT: The caller is responsible for calling the returned cancel function
 // when the validation context is no longer needed.
 func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaults.CheckExecutionTimeout)
 
-	// Create in-cluster Kubernetes client
-	config, err := rest.InClusterConfig()
+	// Create Kubernetes client using the standard fallback chain:
+	// KUBECONFIG env → ~/.kube/config → in-cluster service account.
+	// This allows running checks locally (go test with KUBECONFIG) or in-cluster (Jobs).
+	clientset, config, err := k8sclient.BuildKubeClient("")
 	if err != nil {
 		cancel()
-		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create in-cluster config", err)
+		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		cancel()
-		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes clientset", err)
-	}
-
-	// Get the validation namespace
-	namespace, err := getNamespaceFromServiceAccount()
-	if err != nil {
-		cancel()
-		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to get namespace from service account", err)
-	}
+	// Resolve namespace: in-cluster service account file → AICR_VALIDATION_NAMESPACE env → "default".
+	namespace := resolveNamespace()
 
 	// Load snapshot from mounted file using serializer (auto-detects YAML/JSON format)
 	snapshotPath := os.Getenv("AICR_SNAPSHOT_PATH")
@@ -291,11 +273,18 @@ func LoadValidationContext() (*ValidationContext, context.CancelFunc, error) {
 	}, cancel, nil
 }
 
-// getNamespaceFromServiceAccount gets the namespace from the service account
-func getNamespaceFromServiceAccount() (string, error) {
-	namespaceBytes, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to read namespace from service account", err)
+// resolveNamespace returns the validation namespace using a fallback chain:
+//  1. In-cluster service account file (when running as a Kubernetes Pod)
+//  2. AICR_VALIDATION_NAMESPACE environment variable (for local development)
+//  3. "default" as a last resort
+func resolveNamespace() string {
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		if ns := strings.TrimSpace(string(data)); ns != "" {
+			return ns
+		}
 	}
-	return strings.TrimSpace(string(namespaceBytes)), nil
+	if ns := os.Getenv("AICR_VALIDATION_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return "default"
 }

@@ -42,23 +42,21 @@ func mockCheckFailure(ctx *ValidationContext) error {
 	return testCheckError
 }
 
-func TestNewTestRunner_FailsOutsideKubernetes(t *testing.T) {
-	// This test verifies that NewTestRunner fails gracefully when not in Kubernetes
-	// (which is the expected behavior during local testing)
+func TestNewTestRunner_FailsWithoutSnapshot(t *testing.T) {
+	// This test verifies that NewTestRunner fails gracefully when snapshot is missing
+	// (which is the expected behavior during local testing without env setup)
 
 	runner, err := NewTestRunner(t)
 
 	if err == nil {
-		t.Error("NewTestRunner() should fail when not in Kubernetes cluster")
+		if runner != nil {
+			defer runner.Cancel()
+		}
+		t.Skip("NewTestRunner() succeeded — likely running with KUBECONFIG and snapshot available")
 	}
 
 	if runner != nil {
 		t.Error("NewTestRunner() should return nil runner on error")
-	}
-
-	// Error should mention in-cluster config
-	if err != nil && !strings.Contains(err.Error(), "in-cluster") {
-		t.Errorf("Error should mention in-cluster config, got: %v", err)
 	}
 }
 
@@ -241,25 +239,26 @@ measurements:
 
 	os.Setenv("AICR_SNAPSHOT_PATH", snapshotPath)
 
-	// Attempt to load context
-	// This will still fail on in-cluster config, but we can verify it tries to load the snapshot
+	// Attempt to load context — succeeds if KUBECONFIG is available, fails otherwise
 	ctx, cancel, err := LoadValidationContext()
 	if cancel != nil {
 		defer cancel()
 	}
 
-	// Should fail on in-cluster config (not on snapshot loading)
-	if err == nil {
-		t.Error("LoadValidationContext should fail when not in Kubernetes")
+	if err != nil {
+		// If it failed, it should NOT be about the snapshot file (we provided a valid one)
+		if strings.Contains(err.Error(), "no such file") && strings.Contains(err.Error(), "snapshot") {
+			t.Errorf("Should not fail on snapshot file, got: %v", err)
+		}
+		return
 	}
 
-	// Error should be about in-cluster config, not snapshot file
-	if err != nil && strings.Contains(err.Error(), "no such file") {
-		t.Errorf("Should fail on in-cluster config, not snapshot file, got: %v", err)
+	// If it succeeded (KUBECONFIG available), verify context is populated
+	if ctx == nil {
+		t.Error("LoadValidationContext should return non-nil context on success")
 	}
-
-	if ctx != nil {
-		t.Error("LoadValidationContext should return nil context on error")
+	if ctx != nil && ctx.Snapshot == nil {
+		t.Error("LoadValidationContext should populate snapshot")
 	}
 }
 
@@ -276,23 +275,18 @@ func TestLoadValidationContext_DefaultSnapshotPath(t *testing.T) {
 
 	os.Unsetenv("AICR_SNAPSHOT_PATH")
 
-	// Should use default path /data/snapshot/snapshot.yaml
+	// Should fail because /data/snapshot/snapshot.yaml doesn't exist locally
 	ctx, cancel, err := LoadValidationContext()
 	if cancel != nil {
 		defer cancel()
 	}
 
 	if err == nil {
-		t.Error("LoadValidationContext should fail when not in Kubernetes")
+		t.Skip("LoadValidationContext succeeded — default snapshot path exists")
 	}
 
 	if ctx != nil {
 		t.Error("LoadValidationContext should return nil context on error")
-	}
-
-	// Error should be about in-cluster config or default snapshot path
-	if err != nil && !strings.Contains(err.Error(), "in-cluster") && !strings.Contains(err.Error(), "/data/snapshot") {
-		t.Logf("Error: %v", err)
 	}
 }
 
@@ -310,31 +304,53 @@ func TestLoadValidationContext_WithRecipeData(t *testing.T) {
 	recipeJSON := `{"key":"value","number":42}`
 	os.Setenv("AICR_RECIPE_DATA", recipeJSON)
 
-	// Will fail on in-cluster config, but that's expected
-	// This test verifies the recipe data parsing logic
+	// Will fail on snapshot (not available locally), but that's expected.
+	// This test verifies that recipe data parsing itself doesn't cause the error.
 	ctx, cancel, err := LoadValidationContext()
 	if cancel != nil {
 		defer cancel()
 	}
 
 	if err == nil {
-		t.Error("LoadValidationContext should fail when not in Kubernetes")
+		if ctx != nil {
+			t.Log("LoadValidationContext succeeded with recipe data")
+		}
+		return
 	}
 
-	if ctx != nil {
-		t.Error("LoadValidationContext should return nil context on error")
-	}
-
-	// The error should be about in-cluster config, not recipe parsing
-	if err != nil && strings.Contains(err.Error(), "recipe") && strings.Contains(err.Error(), "unmarshal") {
+	// The error should NOT be about recipe parsing
+	if strings.Contains(err.Error(), "recipe") && strings.Contains(err.Error(), "unmarshal") {
 		t.Errorf("Recipe data parsing failed, got: %v", err)
 	}
 }
 
 func TestLoadValidationContext_InvalidRecipeData(t *testing.T) {
-	// Set invalid recipe data
+	// Set invalid recipe data and a valid snapshot so parsing reaches the recipe step
+	tmpDir := t.TempDir()
+	snapshotPath := filepath.Join(tmpDir, "snapshot.yaml")
+	snapshotYAML := `apiVersion: aicr.nvidia.com/v1alpha1
+kind: Snapshot
+metadata:
+  version: test
+measurements:
+  - type: OS
+    subtypes:
+      - name: release
+        data:
+          ID: ubuntu
+`
+	if err := os.WriteFile(snapshotPath, []byte(snapshotYAML), 0644); err != nil {
+		t.Fatalf("Failed to create test snapshot file: %v", err)
+	}
+
+	originalSnapshot := os.Getenv("AICR_SNAPSHOT_PATH")
 	originalRecipe := os.Getenv("AICR_RECIPE_DATA")
 	defer func() {
+		if originalSnapshot != "" {
+			os.Setenv("AICR_SNAPSHOT_PATH", originalSnapshot)
+		} else {
+			os.Unsetenv("AICR_SNAPSHOT_PATH")
+		}
 		if originalRecipe != "" {
 			os.Setenv("AICR_RECIPE_DATA", originalRecipe)
 		} else {
@@ -342,14 +358,15 @@ func TestLoadValidationContext_InvalidRecipeData(t *testing.T) {
 		}
 	}()
 
+	os.Setenv("AICR_SNAPSHOT_PATH", snapshotPath)
 	os.Setenv("AICR_RECIPE_DATA", "invalid json{")
 
-	// Will fail on in-cluster config first, but we're testing recipe parsing
 	ctx, cancel, err := LoadValidationContext()
 	if cancel != nil {
 		defer cancel()
 	}
 
+	// May fail on K8s client (no KUBECONFIG) before reaching recipe parsing
 	if err == nil {
 		t.Error("LoadValidationContext should fail with invalid recipe JSON")
 	}
