@@ -15,7 +15,7 @@
 # Gang scheduling test with PodGroup and KAI scheduler
 # Demonstrates all-or-nothing scheduling: both pods must be scheduled together
 # Requires: KAI scheduler with PodGroup CRD
-# Usage: kubectl apply -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml
+# Usage: kubectl apply -f pkg/evidence/scripts/manifests/gang-scheduling-test.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -55,11 +55,8 @@ spec:
       securityContext:
         allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-0
+        limits:
+          nvidia.com/gpu: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -85,36 +82,5 @@ spec:
       securityContext:
         allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-0
-  namespace: gang-scheduling-test
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-1
-  namespace: gang-scheduling-test
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
+        limits:
+          nvidia.com/gpu: 1
