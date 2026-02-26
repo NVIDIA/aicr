@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.11] - 2026-02-26
+
+### CI/CD
+
+- *(release)* Restructure on-tag pipeline for strict gating by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.7.10] - 2026-02-26
 
 ### Bug Fixes
