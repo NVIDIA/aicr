@@ -138,6 +138,9 @@ type PhaseResult struct {
 	// Checks contains results of named validation checks.
 	Checks []CheckResult `json:"checks,omitempty" yaml:"checks,omitempty"`
 
+	// Components contains per-component materialization results for this phase.
+	Components []ComponentResult `json:"components,omitempty" yaml:"components,omitempty"`
+
 	// Reason explains why the phase was skipped or failed.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
 
@@ -165,4 +168,55 @@ type CheckResult struct {
 	// Artifacts contains diagnostic evidence captured during live check execution.
 	// Ephemeral: only populated during live validation runs, never persisted.
 	Artifacts []checks.Artifact `json:"-" yaml:"-"`
+}
+
+// ComponentResult represents the materialization status of a single recipe component.
+type ComponentResult struct {
+	// Name is the component identifier (e.g., "gpu-operator").
+	Name string `json:"name" yaml:"name"`
+
+	// Type is the component type (e.g., "helm", "kustomize").
+	Type string `json:"type" yaml:"type"`
+
+	// Status is the materialization outcome.
+	Status ValidationStatus `json:"status" yaml:"status"`
+
+	// Expected captures the recipe's intended deployment configuration.
+	Expected ComponentExpected `json:"expected" yaml:"expected"`
+
+	// Actual captures the deployed configuration found in the snapshot.
+	Actual ComponentActual `json:"actual,omitempty" yaml:"actual,omitempty"`
+
+	// Message provides additional context, especially for mismatches or skipped components.
+	Message string `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+// ComponentExpected captures the recipe's intended deployment configuration.
+type ComponentExpected struct {
+	// Chart is the Helm chart reference (e.g., "nvidia/gpu-operator").
+	Chart string `json:"chart,omitempty" yaml:"chart,omitempty"`
+
+	// Version is the expected chart or app version.
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+
+	// Namespace is the target deployment namespace.
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+
+	// Source is the Kustomize source URI.
+	Source string `json:"source,omitempty" yaml:"source,omitempty"`
+}
+
+// ComponentActual captures the deployed configuration found in the snapshot.
+type ComponentActual struct {
+	// Chart is the Helm chart reference found in the snapshot.
+	Chart string `json:"chart,omitempty" yaml:"chart,omitempty"`
+
+	// Version is the chart or app version found in the snapshot.
+	Version string `json:"version,omitempty" yaml:"version,omitempty"`
+
+	// Namespace is the namespace where the component was found.
+	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
+
+	// Source is the repository URL found in the snapshot (for ArgoCD/Kustomize).
+	Source string `json:"source,omitempty" yaml:"source,omitempty"`
 }

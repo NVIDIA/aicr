@@ -12,4 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ui_read_more: More
+# Assert deployment materialization skips when no helm data in snapshot.
+kind: ValidationResult
+apiVersion: aicr.nvidia.com/v1alpha1
+phases:
+  deployment:
+    (components[?name == 'gpu-operator'] | [0].status): skipped
+    (components[?name == 'gpu-operator'] | [0].message): no helm data in snapshot

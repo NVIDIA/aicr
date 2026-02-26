@@ -1,0 +1,110 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-validate-deployment-materialization
+spec:
+  description: |
+    Tests deployment phase component materialization.
+    Verifies that recipe components are compared against snapshot helm data.
+    Tests: pass (helm data matches), skipped (no helm data).
+    No cluster needed.
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup
+      description: Generate recipe for testing.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-deploy-materialization"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --intent training \
+                -o "${WORK}/recipe.yaml"
+
+    - name: materialization-with-helm-data
+      description: Verify components pass when helm releases match recipe.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-deploy-materialization"
+              ${AICR_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot ./mock-snapshot-with-helm.yaml \
+                --phase deployment \
+                --no-cluster \
+                --fail-on-error=false \
+                --output "${WORK}/result-with-helm-raw.yaml"
+              printf 'apiVersion: aicr.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/result-with-helm.yaml"
+              sed '/^---$/d' "${WORK}/result-with-helm-raw.yaml" >> "${WORK}/result-with-helm.yaml"
+
+    - name: assert-materialization-pass
+      description: Assert gpu-operator and cert-manager are found and pass.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-deploy-materialization/result-with-helm.yaml \
+                --file ./assert-materialization-pass.yaml \
+                --no-color --timeout 5s
+
+    - name: materialization-without-helm-data
+      description: Verify components are skipped when snapshot has no helm data.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-deploy-materialization"
+              cat > "${WORK}/snapshot-no-helm.yaml" << 'SNAP'
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - subtype: server
+                      data:
+                        version: v1.33.0
+                - type: OS
+                  subtypes:
+                    - subtype: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+              SNAP
+              ${AICR_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot "${WORK}/snapshot-no-helm.yaml" \
+                --phase deployment \
+                --no-cluster \
+                --fail-on-error=false \
+                --output "${WORK}/result-no-helm-raw.yaml"
+              printf 'apiVersion: aicr.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/result-no-helm.yaml"
+              sed '/^---$/d' "${WORK}/result-no-helm-raw.yaml" >> "${WORK}/result-no-helm.yaml"
+
+    - name: assert-materialization-skipped
+      description: Assert components are skipped when no helm data.
+      try:
+        - script:
+            content: |
+              chainsaw assert \
+                --resource /tmp/chainsaw-deploy-materialization/result-no-helm.yaml \
+                --file ./assert-materialization-skipped.yaml \
+                --no-color --timeout 5s
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-deploy-materialization
