@@ -15,7 +15,7 @@
  */
 
 // NVIDIA-themed style overrides
-// Palette: #ffffff, #333333, #000000, #6ab900, #76b900
+// Palette: #ffffff, #333333, #000000, #76b900
 
 // Navbar: black background
 .td-navbar {
@@ -50,10 +50,12 @@
   background: #333333 !important;
 }
 
-// Lead section: NVIDIA green with black text
+// Lead section: NVIDIA green with black text, reduced height
 .td-box--primary {
-  background-color: #6ab900 !important;
-  color: #000000 !important;
+  background-color: #76b900 !important;
+  color: #333333 !important;
+  padding-top: 1.5rem !important;
+  padding-bottom: 1.5rem !important;
 }
 
 // Feature sections: dark gray
@@ -105,8 +107,8 @@
   color: #ffffff !important;
 
   &:hover {
-    background-color: #6ab900 !important;
-    border-color: #6ab900 !important;
+    background-color: #76b900 !important;
+    border-color: #76b900 !important;
   }
 }
 
@@ -121,8 +123,34 @@
   }
 }
 
-// Sidebar active link
+// Sidebar: fixed column prevents layout shift on navigation
+.td-sidebar {
+  flex: 0 0 auto;
+  overflow-x: hidden;
+}
+
 .td-sidebar-nav .td-sidebar-link.active {
   color: #76b900 !important;
-  font-weight: 700;
+}
+
+// Syntax highlighting: Docsy ships tango (light) and onedark (dark) chroma
+// stylesheets but doesn't auto-import them. With noClasses:false in Hugo
+// config, we need these for class-based highlighting to render colors.
+@import 'td/chroma/light';
+
+// Dark mode: documentation pages
+[data-bs-theme="dark"] {
+  @import 'td/chroma/dark';
+
+  .td-sidebar-nav .td-sidebar-link.active {
+    color: $nvidia-green !important;
+  }
+
+  .td-toc a {
+    color: inherit;
+  }
+
+  .td-content a {
+    color: $nvidia-green;
+  }
 }

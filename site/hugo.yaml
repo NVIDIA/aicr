@@ -41,7 +41,7 @@ markup:
     renderer:
       unsafe: true
   highlight:
-    style: tango
+    noClasses: false
 
 outputs:
   home:
@@ -62,6 +62,7 @@ params:
     sidebar_menu_foldable: true
     sidebar_search_disable: false
     breadcrumb_disable: false
+    showLightDarkModeMenu: true
     feedback:
       enable: false
     readingtime:
@@ -73,6 +74,11 @@ params:
   github_repo: https://github.com/NVIDIA/aicr
   github_project_repo: https://github.com/NVIDIA/aicr
   github_branch: main
+  version_menu: "Versions"
+  version_menu_pagelinks: true
+  versions:
+    - version: "Latest (main)"
+      url: "https://aicr.dgxc.io"
 
 menu:
   main:
