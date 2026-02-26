@@ -26,5 +26,7 @@ phases:
     checks:
       - name: expected-resources
         status: skipped
+    (components[?name == 'gpu-operator'] | [0].status): pass
+    (components[?name == 'cert-manager'] | [0].status): pass
   conformance:
     status: pass

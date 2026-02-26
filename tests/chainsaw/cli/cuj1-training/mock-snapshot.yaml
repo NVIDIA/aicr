@@ -13,8 +13,9 @@
 # limitations under the License.
 
 # Mock snapshot for CUJ1 testing.
-# Provides minimal K8s and OS measurements so aicr validate can run
-# without a real cluster or GPU hardware.
+# Provides minimal K8s, OS, and Helm measurements so aicr validate can run
+# without a real cluster or GPU hardware. Helm data covers all components
+# in the EKS H100 training recipe with kubeflow platform.
 measurements:
   - type: K8s
     subtypes:
@@ -23,10 +24,44 @@ measurements:
           version: v1.33.0
       - subtype: helm
         data:
+          aws-ebs-csi-driver.chart: aws-ebs-csi-driver
+          aws-ebs-csi-driver.version: 2.55.0
+          aws-ebs-csi-driver.namespace: kube-system
+          aws-efa.chart: aws-efa-k8s-device-plugin
+          aws-efa.version: v0.5.3
+          aws-efa.namespace: kube-system
+          cert-manager.chart: cert-manager
+          cert-manager.version: v1.17.2
+          cert-manager.namespace: cert-manager
           gpu-operator.chart: gpu-operator
           gpu-operator.version: v25.10.1
           gpu-operator.namespace: gpu-operator
-          gpu-operator.status: deployed
+          k8s-ephemeral-storage-metrics.chart: k8s-ephemeral-storage-metrics
+          k8s-ephemeral-storage-metrics.version: 1.19.2
+          k8s-ephemeral-storage-metrics.namespace: monitoring
+          kai-scheduler.chart: kai-scheduler
+          kai-scheduler.version: v0.12.14
+          kai-scheduler.namespace: kai-scheduler
+          kube-prometheus-stack.chart: kube-prometheus-stack
+          kube-prometheus-stack.version: 81.2.2
+          kube-prometheus-stack.namespace: monitoring
+          kubeflow-trainer.chart: kubeflow-trainer
+          kubeflow-trainer.version: 2.1.0
+          kubeflow-trainer.namespace: kubeflow
+          nvidia-dra-driver-gpu.chart: nvidia-dra-driver-gpu
+          nvidia-dra-driver-gpu.version: 25.12.0
+          nvidia-dra-driver-gpu.namespace: nvidia-dra-driver
+          nvsentinel.chart: nvsentinel
+          nvsentinel.version: v0.8.0
+          nvsentinel.namespace: nvsentinel
+          prometheus-adapter.chart: prometheus-adapter
+          prometheus-adapter.version: 4.14.0
+          prometheus-adapter.namespace: monitoring
+          skyhook-customizations.chart: skyhook-customizations
+          skyhook-customizations.namespace: skyhook
+          skyhook-operator.chart: skyhook-operator
+          skyhook-operator.version: v0.12.0
+          skyhook-operator.namespace: skyhook
   - type: OS
     subtypes:
       - subtype: release
