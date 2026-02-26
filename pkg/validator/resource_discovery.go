@@ -34,7 +34,16 @@ import (
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/registry"
 	"helm.sh/helm/v4/pkg/release"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 	"sigs.k8s.io/yaml"
+)
+
+// Workload resource kinds used for auto-discovery and summary reporting.
+const (
+	kindDeployment  = "Deployment"
+	kindDaemonSet   = "DaemonSet"
+	kindStatefulSet = "StatefulSet"
 )
 
 // componentDiscovery tracks the discovery results for a single component.
@@ -87,19 +96,20 @@ func resolveHealthCheckAsserts(ctx context.Context, recipeResult *recipe.RecipeR
 	}
 }
 
-// resolveExpectedResources discovers expected workload resources from two sources
+// resolveExpectedResources discovers expected workload resources from three sources
 // and merges them with any manually declared expectedResources:
 //
 //  1. Helm chart rendering via the Helm Go SDK (equivalent to `helm template`)
-//  2. Manifest file rendering via shared pkg/manifest.Render() — same logic as the bundler
+//  2. Kustomize build via the krusty Go SDK (equivalent to `kustomize build`)
+//  3. Manifest file rendering via shared pkg/manifest.Render() — same logic as the bundler
 //
 // Manual expectedResources take precedence over auto-discovered ones.
 // Rendering failures for individual components are logged as warnings and do not
 // block other components.
 //
-// Note: Phase 1 (helm template) requires network access for chart downloads
-// (HTTP repos and OCI registries). Offline/air-gapped environments will see
-// warnings for components with chart coordinates but can still use manually
+// Note: Phases 1 and 2 require network access — Helm for chart downloads
+// (HTTP repos and OCI registries), Kustomize for git clones (requires system git).
+// Offline/air-gapped environments will see warnings but can still use manually
 // declared expectedResources.
 func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeResult, kubeVersion string) error {
 	summaries := make([]componentDiscovery, 0, len(recipeResult.ComponentRefs))
@@ -145,9 +155,21 @@ func resolveExpectedResources(ctx context.Context, recipeResult *recipe.RecipeRe
 			} else {
 				discovered = append(discovered, chartResources...)
 			}
+		} else if ref.Type == recipe.ComponentTypeKustomize && ref.Source != "" {
+			// Phase 2: Build kustomization from remote source (equivalent to `kustomize build`).
+			slog.Debug("auto-discovering expected resources via kustomize build",
+				"component", ref.Name, "source", ref.Source, "path", ref.Path)
+
+			kustomizeResources, err := renderKustomizeTemplate(ctx, *ref)
+			if err != nil {
+				slog.Warn("failed to build kustomization for expected resource discovery",
+					"component", ref.Name, "error", err)
+			} else {
+				discovered = append(discovered, kustomizeResources...)
+			}
 		}
 
-		// Phase 2: Render manifestFiles (Go templates bundled alongside the chart).
+		// Phase 3: Render manifestFiles (Go templates bundled alongside the chart).
 		// Uses the same rendering logic as the bundler (pkg/manifest.Render).
 		if len(ref.ManifestFiles) > 0 {
 			manifestResources := renderManifestFiles(ctx, *ref, values)
@@ -198,7 +220,7 @@ func countByKind(resources []recipe.ExpectedResource) string {
 	}
 
 	var parts []string
-	for _, kind := range []string{"Deployment", "DaemonSet", "StatefulSet"} {
+	for _, kind := range []string{kindDeployment, kindDaemonSet, kindStatefulSet} {
 		if n, ok := counts[kind]; ok {
 			label := kind + "s"
 			if n == 1 {
@@ -270,6 +292,78 @@ func renderHelmTemplate(ctx context.Context, ref recipe.ComponentRef, values map
 	}
 
 	return extractWorkloadResources(accessor.Manifest(), ref.Namespace), nil
+}
+
+// renderKustomizeTemplate uses the krusty Go SDK to build a kustomization
+// (equivalent to `kustomize build`), then extracts workload resources from the output.
+// Supports remote git sources (cloned via system git) and local directories.
+//
+// The kustomize URL is constructed from ComponentRef fields:
+//
+//	{Source}//{Path}?ref={Tag}
+//
+// For example: "https://github.com/org/repo//deploy/prod?ref=v1.0.0"
+//
+// Note: krusty.Run is not context-aware, so the timeout bounds only the
+// goroutine wrapper. The internal git clone has its own 27s default timeout.
+func renderKustomizeTemplate(ctx context.Context, ref recipe.ComponentRef) ([]recipe.ExpectedResource, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaults.ComponentRenderTimeout)
+	defer cancel()
+
+	kustomizeURL := buildKustomizeURL(ref.Source, ref.Path, ref.Tag)
+
+	// krusty.Run is synchronous and not context-aware, so run it in a
+	// goroutine and select on context cancellation.
+	type result struct {
+		resources []recipe.ExpectedResource
+		err       error
+	}
+	ch := make(chan result, 1)
+
+	go func() {
+		opts := krusty.MakeDefaultOptions()
+		k := krusty.MakeKustomizer(opts)
+		fSys := filesys.MakeFsOnDisk()
+
+		resMap, err := k.Run(fSys, kustomizeURL)
+		if err != nil {
+			ch <- result{err: errors.Wrap(errors.ErrCodeInternal, "kustomize build failed", err)}
+			return
+		}
+
+		yamlBytes, err := resMap.AsYaml()
+		if err != nil {
+			ch <- result{err: errors.Wrap(errors.ErrCodeInternal, "failed to convert kustomize output to YAML", err)}
+			return
+		}
+
+		ch <- result{resources: extractWorkloadResources(string(yamlBytes), ref.Namespace)}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// On timeout the goroutine above keeps running but is bounded:
+		// krusty's internal git clone has a hard 27s timeout, after which
+		// the goroutine writes to the buffered channel and exits.
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "kustomize build timed out", ctx.Err())
+	case r := <-ch:
+		return r.resources, r.err
+	}
+}
+
+// buildKustomizeURL constructs a kustomize-style URL from source, path, and tag.
+// Format: {source}//{path}?ref={tag}
+// The double-slash separates the repo root from the kustomization root path,
+// and ?ref= sets the git ref (tag, branch, or commit).
+func buildKustomizeURL(source, path, tag string) string {
+	url := strings.TrimSuffix(source, "/")
+	if path != "" {
+		url += "//" + path
+	}
+	if tag != "" {
+		url += "?ref=" + tag
+	}
+	return url
 }
 
 // locateChart resolves a chart reference to a local path by downloading it.
@@ -368,7 +462,7 @@ func extractWorkloadResources(manifestContent string, defaultNamespace string) [
 
 		// Only extract workload resources
 		switch meta.Kind {
-		case "Deployment", "DaemonSet", "StatefulSet":
+		case kindDeployment, kindDaemonSet, kindStatefulSet:
 			ns := meta.Metadata.Namespace
 			if ns == "" {
 				ns = defaultNamespace
