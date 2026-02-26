@@ -47,7 +47,7 @@ ip-100-64-171-120.ec2.internal-gpu.nvidia.com-75xvv              ip-100-64-171-1
 
 Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device access.
 
-**Test manifest:** `docs/conformance/cncf/manifests/dra-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/dra-gpu-test.yaml`
 
 ```yaml
 ---
@@ -99,7 +99,7 @@ spec:
 
 **Apply test manifest**
 ```
-$ kubectl apply -f docs/conformance/cncf/manifests/dra-gpu-test.yaml
+$ kubectl apply -f pkg/evidence/scripts/manifests/dra-gpu-test.yaml
 namespace/dra-test created
 resourceclaim.resource.k8s.io/gpu-claim created
 pod/dra-gpu-test created
