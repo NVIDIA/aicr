@@ -56,11 +56,6 @@ runs:
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
 
-    - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
-      with:
-        driver-opts: network=host
-
     - name: Create Kind cluster
       shell: bash
       run: make cluster-create
@@ -80,14 +75,30 @@ runs:
         # Build images + CLI binary in parallel while deployment starts
         KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
         pid_aicr=$!
-        (docker buildx build \
-         --cache-from type=gha,scope=validator,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
-         --cache-to type=gha,scope=validator,mode=max,url=$ACTIONS_CACHE_URL,token=$ACTIONS_RUNTIME_TOKEN \
-         -f Dockerfile.validator \
-         -t localhost:5001/aicr-validator:local \
-         --load \
-         . && \
-         docker push localhost:5001/aicr-validator:local) &
+        # Validator: compile on host (Go build cache hit), then COPY-only image
+        (
+          mkdir -p dist/validator
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-w -s -extldflags '-static'" \
+            -o dist/validator/aicr ./cmd/aicr &
+          CGO_ENABLED=0 go test -c -o dist/validator/deployment.test \
+            ./pkg/validator/checks/deployment &
+          CGO_ENABLED=0 go test -c -o dist/validator/conformance.test \
+            ./pkg/validator/checks/conformance &
+          CGO_ENABLED=0 go build -o dist/validator/test2json cmd/test2json &
+          wait
+          docker build -t localhost:5001/aicr-validator:local -f - . <<'DOCKERFILE'
+        FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
+        COPY dist/validator/aicr /usr/local/bin/aicr
+        COPY dist/validator/deployment.test /usr/local/bin/deployment.test
+        COPY dist/validator/conformance.test /usr/local/bin/conformance.test
+        COPY dist/validator/test2json /usr/local/bin/test2json
+        COPY pkg/validator/checks/deployment/testdata /app/testdata
+        WORKDIR /app
+        CMD ["/bin/bash"]
+        DOCKERFILE
+          docker push localhost:5001/aicr-validator:local
+        ) &
         pid_validator=$!
         go build -o dist/e2e/aicr ./cmd/aicr &
         pid_cli=$!

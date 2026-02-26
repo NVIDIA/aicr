@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -39,9 +38,7 @@ COPY . .
 ARG VERSION
 ARG COMMIT
 ARG DATE
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    set -e; \
+RUN set -e; \
     CGO_ENABLED=0 go build \
         -trimpath \
         -ldflags="-w -s -extldflags '-static' \
@@ -52,17 +49,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         ./cmd/aicr
 
 # Pre-compile test binaries for in-cluster validation Jobs
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/deployment && \
+RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/deployment && \
     CGO_ENABLED=0 go test -c -o /out/conformance.test ./pkg/validator/checks/conformance
 
 # Build test2json tool — converts verbose test output to JSON event stream.
 # Compiled test binaries don't support -test.json; they require piping through
 # test2json (e.g. readiness.test -test.v | test2json).
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
+RUN CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
 # ---------------------------------------------------------------------------
 # Final stage: CUDA runtime provides nvidia-smi for GPU validation
