@@ -358,32 +358,36 @@ func waitForLauncherPodAndGetLogs(ctx *checks.ValidationContext, podHelper *help
 	return logs, nil
 }
 
-// waitForPodByLabelSelector waits for a pod matching the label selector to be created
+// waitForPodByLabelSelector waits for a pod matching the label selector to be created.
+// Uses the Watch API for efficiency instead of polling.
 func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interface, namespace, labelSelector string, timeout time.Duration) (*v1.Pod, error) {
-	slog.Info("Polling for pod with selector", "selector", labelSelector)
+	slog.Info("Watching for pod with selector", "selector", labelSelector)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	ticker := time.NewTicker(defaults.PodPollInterval)
-	defer ticker.Stop()
+	watcher, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector: labelSelector,
+	})
+	if err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch pods", err)
+	}
+	defer watcher.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod", ctx.Err())
-		case <-ticker.C:
-			pods, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-				LabelSelector: labelSelector,
-			})
-			if err != nil {
-				slog.Error("Error listing pods, retrying...", "error", err)
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return nil, aicrErrors.New(aicrErrors.ErrCodeInternal, "pod watch channel closed unexpectedly")
+			}
+			pod, ok := event.Object.(*v1.Pod)
+			if !ok {
 				continue
 			}
-			if len(pods.Items) > 0 {
-				return &pods.Items[0], nil
-			}
-			slog.Info("Pod not found yet, continuing to poll...")
+			slog.Info("Found launcher pod", "name", pod.Name)
+			return pod, nil
 		}
 	}
 }
