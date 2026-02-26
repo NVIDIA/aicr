@@ -35,7 +35,7 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: ${{ inputs.go_version }}
-        cache: false  # vendor/ provides deps; disable to save disk on constrained runners
+        cache: true
 
     - name: Free up disk space
       shell: bash
@@ -56,6 +56,11 @@ runs:
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
 
+    - name: Setup Docker Buildx
+      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
+      with:
+        driver-opts: network=host
+
     - name: Create Kind cluster
       shell: bash
       run: make cluster-create
@@ -75,7 +80,13 @@ runs:
         # Build images + CLI binary in parallel while deployment starts
         KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
         pid_aicr=$!
-        (docker build -f Dockerfile.validator -t localhost:5001/aicr-validator:local . && \
+        (docker buildx build \
+         --cache-from type=gha,scope=validator \
+         --cache-to type=gha,scope=validator,mode=max \
+         -f Dockerfile.validator \
+         -t localhost:5001/aicr-validator:local \
+         --load \
+         . && \
          docker push localhost:5001/aicr-validator:local) &
         pid_validator=$!
         go build -o dist/e2e/aicr ./cmd/aicr &
