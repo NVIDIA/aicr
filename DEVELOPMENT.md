@@ -560,6 +560,17 @@ To produce attested binaries without a release tag, use the **Build Attested Bin
 workflow (`.github/workflows/build-attested.yaml`) from the Actions tab. It runs
 `goreleaser release --snapshot` with cosign and uploads tar.gz archives as artifacts.
 
+#### Bundle Attestation
+
+`aicr bundle` attests bundles by default using Sigstore keyless OIDC signing:
+
+- **GitHub Actions**: Uses the ambient OIDC token automatically (requires `id-token: write`)
+- **Local**: Opens a browser for Sigstore OIDC authentication (GitHub, Google, or Microsoft)
+- **Opt-in**: Use `--attest` to enable signing (not required for local development)
+
+Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
+`aicr trust update` (run automatically by the install script).
+
 ### Local Development
 
 | Target | Description |

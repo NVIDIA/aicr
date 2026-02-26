@@ -19,6 +19,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -82,4 +83,105 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 // in the given bundle directory.
 func GetChecksumFilePath(bundleDir string) string {
 	return filepath.Join(bundleDir, ChecksumFileName)
+}
+
+// VerifyChecksums reads a checksums.txt file and verifies each file's SHA256 digest.
+// Returns a list of error descriptions for any mismatches or read failures.
+// An empty return means all checksums are valid.
+func VerifyChecksums(bundleDir string) []string {
+	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
+	data, err := os.ReadFile(checksumPath)
+	if err != nil {
+		return []string{fmt.Sprintf("failed to read %s: %v", ChecksumFileName, err)}
+	}
+	return VerifyChecksumsFromData(bundleDir, data)
+}
+
+// VerifyChecksumsFromData verifies checksums using pre-read checksums.txt content.
+// This avoids re-reading the file, preventing TOCTOU races when the same data
+// is also used for digest computation.
+func VerifyChecksumsFromData(bundleDir string, data []byte) []string {
+	var errs []string
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Format: <hex-digest>  <relative-path> (two spaces, sha256sum compatible)
+		parts := strings.SplitN(line, "  ", 2)
+		if len(parts) != 2 {
+			errs = append(errs, fmt.Sprintf("invalid checksum line: %s", line))
+			continue
+		}
+
+		expectedDigest := parts[0]
+		relativePath := parts[1]
+		filePath := filepath.Join(bundleDir, relativePath)
+
+		// Prevent path traversal — resolved path must stay within bundleDir
+		absBundle, absErr := filepath.Abs(bundleDir)
+		if absErr != nil {
+			errs = append(errs, fmt.Sprintf("failed to resolve bundle directory: %v", absErr))
+			continue
+		}
+		absFile, absErr := filepath.Abs(filePath)
+		if absErr != nil {
+			errs = append(errs, fmt.Sprintf("failed to resolve path %s: %v", relativePath, absErr))
+			continue
+		}
+		if !strings.HasPrefix(absFile, absBundle+string(filepath.Separator)) {
+			errs = append(errs, fmt.Sprintf("path traversal detected in checksum entry: %s", relativePath))
+			continue
+		}
+
+		fileData, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			errs = append(errs, fmt.Sprintf("failed to read %s: %v", relativePath, readErr))
+			continue
+		}
+
+		hash := sha256.Sum256(fileData)
+		actualDigest := hex.EncodeToString(hash[:])
+		if actualDigest != expectedDigest {
+			errs = append(errs, fmt.Sprintf("checksum mismatch: %s (expected %s, got %s)", relativePath, expectedDigest, actualDigest))
+		}
+	}
+
+	return errs
+}
+
+// CountEntries returns the number of entries in a checksums.txt file.
+func CountEntries(bundleDir string) int {
+	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
+	data, err := os.ReadFile(checksumPath)
+	if err != nil {
+		return 0
+	}
+
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count
+}
+
+// SHA256Raw computes a file's SHA256 digest using streaming I/O and returns
+// the raw bytes. Does not load the entire file into memory.
+func SHA256Raw(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to open file for digest: %s", path), err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to read file for digest: %s", path), err)
+	}
+	return h.Sum(nil), nil
 }

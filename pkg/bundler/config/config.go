@@ -106,6 +106,13 @@ type Config struct {
 
 	// workloadSelector contains label selector for skyhook-customizations to prevent eviction of running training jobs.
 	workloadSelector map[string]string
+
+	// attest enables bundle attestation and binary verification.
+	attest bool
+
+	// certificateIdentityRegexp overrides the default identity pinning pattern
+	// for binary attestation verification during bundle creation.
+	certificateIdentityRegexp string
 }
 
 // Getter methods for read-only access
@@ -219,6 +226,17 @@ func (c *Config) WorkloadSelector() map[string]string {
 		result[k] = v
 	}
 	return result
+}
+
+// Attest returns whether bundle attestation is enabled.
+func (c *Config) Attest() bool {
+	return c.attest
+}
+
+// CertificateIdentityRegexp returns the custom identity pinning pattern for
+// binary attestation verification, or empty string for the default.
+func (c *Config) CertificateIdentityRegexp() string {
+	return c.certificateIdentityRegexp
 }
 
 // Validate checks if the Config has valid settings.
@@ -358,6 +376,23 @@ func WithWorkloadSelector(selector map[string]string) Option {
 		for k, v := range selector {
 			c.workloadSelector[k] = v
 		}
+	}
+}
+
+// WithAttest enables bundle attestation and binary verification.
+func WithAttest(attest bool) Option {
+	return func(c *Config) {
+		c.attest = attest
+	}
+}
+
+// WithCertificateIdentityRegexp overrides the default identity pinning pattern
+// for binary attestation verification during bundle creation. The pattern must
+// contain "github.com/NVIDIA/aicr/". This is intended for testing with binaries
+// attested by non-release workflows (e.g., build-attested.yaml).
+func WithCertificateIdentityRegexp(pattern string) Option {
+	return func(c *Config) {
+		c.certificateIdentityRegexp = pattern
 	}
 }
 
