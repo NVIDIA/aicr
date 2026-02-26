@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # DRA GPU allocation test
-# Usage: kubectl apply -f docs/conformance/cncf/manifests/dra-gpu-test.yaml
+# Usage: kubectl apply -f pkg/evidence/scripts/manifests/dra-gpu-test.yaml
 ---
 apiVersion: v1
 kind: Namespace

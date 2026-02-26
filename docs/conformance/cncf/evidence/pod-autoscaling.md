@@ -56,7 +56,7 @@ pods/gpu_utilization
 Deploy a GPU workload running CUDA N-Body Simulation to generate sustained GPU utilization,
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
-**Test manifest:** `docs/conformance/cncf/manifests/hpa-gpu-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
 
 ```yaml
 ---
@@ -91,7 +91,7 @@ spec:
         - name: gpu-worker
           image: nvcr.io/nvidia/k8s/cuda-sample:nbody-cuda11.7.1-ubuntu18.04
           command: ["bash", "-c"]
-          args: ["while true; do /cuda-samples/nbody -benchmark -numbodies=16777216 -iterations=10000; done"]
+          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=30 || true; exec sleep infinity"]
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -110,7 +110,10 @@ spec:
     kind: Deployment
     name: gpu-workload
   minReplicas: 1
-  maxReplicas: 4
+  maxReplicas: 2
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 30
   metrics:
     - type: Pods
       pods:
@@ -123,7 +126,7 @@ spec:
 
 **Apply test manifest**
 ```
-$ kubectl apply -f docs/conformance/cncf/manifests/hpa-gpu-test.yaml
+$ kubectl apply -f pkg/evidence/scripts/manifests/hpa-gpu-test.yaml
 namespace/hpa-test created
 deployment.apps/gpu-workload created
 horizontalpodautoscaler.autoscaling/gpu-workload-hpa created

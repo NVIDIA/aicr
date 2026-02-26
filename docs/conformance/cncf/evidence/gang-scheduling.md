@@ -52,7 +52,7 @@ podgroups.scheduling.run.ai   2026-02-12T20:42:05Z
 Deploy a PodGroup with minMember=2 and two GPU pods. KAI scheduler ensures both
 pods are scheduled atomically.
 
-**Test manifest:** `docs/conformance/cncf/manifests/gang-scheduling-test.yaml`
+**Test manifest:** `pkg/evidence/scripts/manifests/gang-scheduling-test.yaml`
 
 ```yaml
 ---
@@ -81,18 +81,21 @@ metadata:
 spec:
   schedulerName: kai-scheduler
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
   tolerations:
     - operator: Exists
   containers:
     - name: worker
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "nvidia-smi && echo 'Gang worker 0 completed successfully'"]
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-0
+        limits:
+          nvidia.com/gpu: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -105,38 +108,21 @@ metadata:
 spec:
   schedulerName: kai-scheduler
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
   tolerations:
     - operator: Exists
   containers:
     - name: worker
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "nvidia-smi && echo 'Gang worker 1 completed successfully'"]
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-0
-  namespace: gang-scheduling-test
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-1
-  namespace: gang-scheduling-test
+        limits:
+          nvidia.com/gpu: 1
 spec:
   devices:
     requests:
@@ -149,7 +135,7 @@ spec:
 
 **Apply test manifest**
 ```
-$ kubectl apply -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml
+$ kubectl apply -f pkg/evidence/scripts/manifests/gang-scheduling-test.yaml
 namespace/gang-scheduling-test created
 podgroup.scheduling.run.ai/gang-test-group created
 pod/gang-worker-0 created
