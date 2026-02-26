@@ -47,14 +47,14 @@ var ValidFeatures = []string{
 
 // featureToScript maps user-facing feature names to script section names.
 var featureToScript = map[string]string{
-	"dra-support":          "dra",
-	"gang-scheduling":      "gang",
-	"secure-access":        "secure",
-	"accelerator-metrics":  "metrics",
-	"inference-gateway":    "gateway",
-	"robust-operator":      "operator",
-	"pod-autoscaling":      "hpa",
-	"cluster-autoscaling":  "cluster-autoscaling",
+	"dra-support":         "dra",
+	"gang-scheduling":     "gang",
+	"secure-access":       "secure",
+	"accelerator-metrics": "metrics",
+	"inference-gateway":   "gateway",
+	"robust-operator":     "operator",
+	"pod-autoscaling":     "hpa",
+	"cluster-autoscaling": "cluster-autoscaling",
 }
 
 // featureAliases maps short names to canonical feature names for convenience.
@@ -100,14 +100,14 @@ func ScriptSection(feature string) string {
 
 // FeatureDescriptions maps feature names to human-readable descriptions.
 var FeatureDescriptions = map[string]string{
-	"dra-support":          "DRA GPU allocation test",
-	"gang-scheduling":      "Gang scheduling co-scheduling test",
-	"secure-access":        "Secure accelerator access verification",
-	"accelerator-metrics":  "Accelerator & AI service metrics",
-	"inference-gateway":    "Inference API gateway conditions",
-	"robust-operator":      "Robust AI operator + webhook test",
-	"pod-autoscaling":      "HPA pod autoscaling (scale-up + scale-down)",
-	"cluster-autoscaling":  "Cluster autoscaling (ASG configuration)",
+	"dra-support":         "DRA GPU allocation test",
+	"gang-scheduling":     "Gang scheduling co-scheduling test",
+	"secure-access":       "Secure accelerator access verification",
+	"accelerator-metrics": "Accelerator & AI service metrics",
+	"inference-gateway":   "Inference API gateway conditions",
+	"robust-operator":     "Robust AI operator + webhook test",
+	"pod-autoscaling":     "HPA pod autoscaling (scale-up + scale-down)",
+	"cluster-autoscaling": "Cluster autoscaling (ASG configuration)",
 }
 
 // CollectorOption configures the Collector.
