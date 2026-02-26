@@ -141,6 +141,14 @@ func validateNcclAllReduceBw(ctx *checks.ValidationContext, constraint recipe.Co
 	}
 	slog.Info("GPU Configuration", "nodes", gpuConfig.WorkerCount, ", GPUs/node", gpuConfig.GPUCountPerNode, ", total GPUs", gpuConfig.TotalGPUCount)
 
+	// NCCL all-reduce tests EW (East-West) fabric between nodes and requires at least
+	// two GPU nodes. Skip gracefully rather than fail when only one node is available.
+	if gpuConfig.WorkerCount < 2 {
+		slog.Info("Skipping NCCL All Reduce bandwidth validation: requires at least 2 GPU nodes for EW fabric test",
+			"nodes", gpuConfig.WorkerCount)
+		return "skipped - requires at least 2 GPU nodes for EW fabric test", true, nil
+	}
+
 	// Apply runtime and trainjob resources
 	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service); applyErr != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL resources", applyErr)

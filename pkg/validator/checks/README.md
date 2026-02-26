@@ -92,6 +92,13 @@ pkg/validator/checks/
 │   ├── gpu_operator_version_constraint_test.go      # Integration test
 │   └── gpu_operator_version_constraint_unit_test.go # Unit test
 ├── performance/                 # Performance phase checks + constraints
+│   ├── nccl_all_reduce_bw_constraint.go           # NCCL all-reduce BW constraint + registration
+│   ├── nccl_all_reduce_bw_constraint_test.go      # Integration test (TestNcclAllReduceBw — runs in Jobs)
+│   ├── nccl_all_reduce_bw_constraint_unit_test.go # Unit test (runs locally without cluster)
+│   ├── trainer_lifecycle.go                       # Kubeflow Trainer install/uninstall lifecycle
+│   └── testdata/h100/eks/                         # EKS+H100 TrainingRuntime/TrainJob templates
+│       ├── runtime.yaml
+│       └── trainjob.yaml
 └── conformance/                 # Conformance phase checks + constraints
 ```
 

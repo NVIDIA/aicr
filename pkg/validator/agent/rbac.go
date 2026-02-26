@@ -46,8 +46,9 @@ func (d *Deployer) deleteServiceAccount(ctx context.Context) error {
 	return k8s.IgnoreNotFound(err)
 }
 
-// ensureRole creates the Role if it doesn't exist.
-// The Role grants permissions to read cluster state and write result ConfigMaps.
+// ensureRole creates or updates the Role so the current policy rules are always applied.
+// Using create-or-update ensures that RBAC changes in new releases take effect even when
+// the Role already exists in the cluster from a previous run.
 // Note: This is namespace-scoped. For cluster-wide resources, see ensureClusterRole.
 func (d *Deployer) ensureRole(ctx context.Context) error {
 	role := &rbacv1.Role{
@@ -69,12 +70,12 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 			{
 				APIGroups: []string{""},
 				Resources: []string{"pods"},
-				Verbs:     []string{"get", "list", "create", "update", "patch", "delete"},
+				Verbs:     []string{"get", "list", "create", "update", "patch", "delete", "watch"},
 			},
 			{
 				APIGroups: []string{""},
 				Resources: []string{"pods/log", "pods/status"},
-				Verbs:     []string{"get", "list"},
+				Verbs:     []string{"get", "list", "watch"},
 			},
 			{
 				APIGroups: []string{"batch"},
@@ -84,7 +85,7 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 			{
 				APIGroups: []string{"trainer.kubeflow.org"},
 				Resources: []string{"trainingruntimes", "trainjobs"},
-				Verbs:     []string{"get", "list", "create", "update", "delete"},
+				Verbs:     []string{"get", "list", "create", "update", "delete", "watch"},
 			},
 		},
 	}
@@ -253,12 +254,19 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 
 	slog.Debug("creating ClusterRole", "name", clusterRoleName)
 	_, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, clusterRole, metav1.CreateOptions{})
-	if err != nil && !errors.IsAlreadyExists(err) {
-		slog.Error("failed to create ClusterRole", "name", clusterRoleName, "error", err)
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRole", err)
-	}
-	if errors.IsAlreadyExists(err) {
-		slog.Debug("ClusterRole already exists", "name", clusterRoleName)
+	if err != nil {
+		if !errors.IsAlreadyExists(err) {
+			slog.Error("failed to create ClusterRole", "name", clusterRoleName, "error", err)
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRole", err)
+		}
+		// Update: enforce the latest rules even when the ClusterRole already exists from a prior run.
+		slog.Debug("ClusterRole already exists, updating", "name", clusterRoleName)
+		_, err = d.clientset.RbacV1().ClusterRoles().Update(ctx, clusterRole, metav1.UpdateOptions{})
+		if err != nil {
+			slog.Error("failed to update ClusterRole", "name", clusterRoleName, "error", err)
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to update ClusterRole", err)
+		}
+		slog.Info("ClusterRole updated successfully", "name", clusterRoleName)
 	} else {
 		slog.Info("ClusterRole created successfully", "name", clusterRoleName)
 	}

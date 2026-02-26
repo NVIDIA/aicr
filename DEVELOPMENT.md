@@ -236,12 +236,12 @@ aicr/
 - **Phases**:
   - **Readiness**: Evaluates constraints inline against snapshot (K8s version, OS, kernel) — no checks or Jobs
   - **Deployment**: Validates component deployment health and expected resources
-  - **Performance**: Validates system performance and network fabric health
+  - **Performance**: Validates system performance and network fabric health (e.g. NCCL all-reduce bus bandwidth via Kubeflow Trainer)
   - **Conformance**: Validates workload-specific requirements and conformance
 - **Features**:
   - Phase-based validation with dependency logic (fail → skip subsequent)
   - Constraint evaluation against snapshots using version comparison operators
-  - Check execution framework (skeleton implementation)
+  - Check execution framework with in-cluster Job dispatch and result collection
   - Structured validation results with per-phase status
 - **CLI**: `aicr validate --phase <phase>` (default: readiness)
 - **Implementation**: `pkg/validator/phases.go` contains phase validation logic

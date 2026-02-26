@@ -20,6 +20,11 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestValidateNcclAllReduceBw(t *testing.T) {
@@ -161,6 +166,103 @@ func TestSupportedNCCLCombinations(t *testing.T) {
 			}
 			if found != tt.wantFound {
 				t.Errorf("combination %s+%s: found=%v, want %v", tt.service, tt.accelerator, found, tt.wantFound)
+			}
+		})
+	}
+}
+
+func TestDetermineGPUConfig(t *testing.T) {
+	tests := []struct {
+		name            string
+		nodes           []v1.Node
+		wantWorkerCount int
+		wantGPUPerNode  int
+		wantTotalGPU    int
+		wantErr         bool
+	}{
+		{
+			name: "single GPU node yields WorkerCount=1 (triggers < 2 node skip)",
+			nodes: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "gpu-node-1"},
+					Status: v1.NodeStatus{
+						Allocatable: v1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("8"),
+						},
+					},
+				},
+			},
+			wantWorkerCount: 1,
+			wantGPUPerNode:  8,
+			wantTotalGPU:    8,
+			wantErr:         false,
+		},
+		{
+			name: "two GPU nodes yields WorkerCount=2",
+			nodes: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "gpu-node-1"},
+					Status: v1.NodeStatus{
+						Allocatable: v1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("8"),
+						},
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "gpu-node-2"},
+					Status: v1.NodeStatus{
+						Allocatable: v1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("8"),
+						},
+					},
+				},
+			},
+			wantWorkerCount: 2,
+			wantGPUPerNode:  8,
+			wantTotalGPU:    16,
+			wantErr:         false,
+		},
+		{
+			name:    "no GPU nodes returns error",
+			nodes:   []v1.Node{},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objects := make([]runtime.Object, 0, len(tt.nodes))
+			for i := range tt.nodes {
+				objects = append(objects, &tt.nodes[i])
+			}
+
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			clientset := fake.NewSimpleClientset(objects...)
+
+			ctx := &checks.ValidationContext{
+				Context:   context.Background(),
+				Clientset: clientset,
+				Namespace: "default",
+			}
+
+			gpuConfig, err := determineGPUConfig(ctx)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("determineGPUConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr {
+				return
+			}
+
+			if gpuConfig.WorkerCount != tt.wantWorkerCount {
+				t.Errorf("WorkerCount = %d, want %d", gpuConfig.WorkerCount, tt.wantWorkerCount)
+			}
+			if gpuConfig.GPUCountPerNode != tt.wantGPUPerNode {
+				t.Errorf("GPUCountPerNode = %d, want %d", gpuConfig.GPUCountPerNode, tt.wantGPUPerNode)
+			}
+			if gpuConfig.TotalGPUCount != tt.wantTotalGPU {
+				t.Errorf("TotalGPUCount = %d, want %d", gpuConfig.TotalGPUCount, tt.wantTotalGPU)
 			}
 		})
 	}

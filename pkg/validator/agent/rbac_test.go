@@ -150,16 +150,18 @@ func TestEnsureRole(t *testing.T) {
 			t.Errorf("expected get/list/create/update/patch verbs for configmaps, got %v", rule1.Verbs)
 		}
 
-		// Rule 2: pods (get, list, create, update, patch, delete)
+		// Rule 2: pods (get, list, watch, create, update, patch, delete)
+		// watch is required by WaitForPodSuccess which uses the Kubernetes Watch API.
 		rule2 := role.Rules[2]
 		if len(rule2.Resources) != 1 || rule2.Resources[0] != "pods" {
 			t.Errorf("expected pods in third rule, got %v", rule2.Resources)
 		}
 		if !containsVerb(rule2.Verbs, "get") || !containsVerb(rule2.Verbs, "list") ||
-			!containsVerb(rule2.Verbs, "create") || !containsVerb(rule2.Verbs, "update") ||
-			!containsVerb(rule2.Verbs, "patch") || !containsVerb(rule2.Verbs, "delete") {
+			!containsVerb(rule2.Verbs, "watch") || !containsVerb(rule2.Verbs, "create") ||
+			!containsVerb(rule2.Verbs, "update") || !containsVerb(rule2.Verbs, "patch") ||
+			!containsVerb(rule2.Verbs, "delete") {
 
-			t.Errorf("expected get/list/create/update/patch/delete verbs for pods, got %v", rule2.Verbs)
+			t.Errorf("expected get/list/watch/create/update/patch/delete verbs for pods, got %v", rule2.Verbs)
 		}
 
 		// Rule 3: pods/log, pods/status (get, list)
