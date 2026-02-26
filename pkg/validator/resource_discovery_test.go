@@ -1123,6 +1123,349 @@ func TestResolveExpectedResources_SkipsChainsawComponents(t *testing.T) {
 	}
 }
 
+func TestBuildKustomizeURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		path   string
+		tag    string
+		want   string
+	}{
+		{
+			name:   "full URL with source, path, and tag",
+			source: "https://github.com/org/repo",
+			path:   "deploy/production",
+			tag:    "v1.0.0",
+			want:   "https://github.com/org/repo//deploy/production?ref=v1.0.0",
+		},
+		{
+			name:   "source and tag, no path",
+			source: "https://github.com/org/repo",
+			path:   "",
+			tag:    "v2.0.0",
+			want:   "https://github.com/org/repo?ref=v2.0.0",
+		},
+		{
+			name:   "source and path, no tag",
+			source: "https://github.com/org/repo",
+			path:   "config/base",
+			tag:    "",
+			want:   "https://github.com/org/repo//config/base",
+		},
+		{
+			name:   "source only",
+			source: "https://github.com/org/repo",
+			path:   "",
+			tag:    "",
+			want:   "https://github.com/org/repo",
+		},
+		{
+			name:   "ssh-style source",
+			source: "git@github.com:org/repo.git",
+			path:   "overlays/prod",
+			tag:    "main",
+			want:   "git@github.com:org/repo.git//overlays/prod?ref=main",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildKustomizeURL(tt.source, tt.path, tt.tag)
+			if got != tt.want {
+				t.Errorf("buildKustomizeURL(%q, %q, %q) = %q, want %q",
+					tt.source, tt.path, tt.tag, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderKustomizeTemplate_LocalDirectory(t *testing.T) {
+	// Build a minimal kustomization in a temp directory to test the krusty
+	// rendering path without network access.
+	kustDir := t.TempDir()
+
+	kustomizationYAML := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - daemonset.yaml
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustomizationYAML), 0o644); err != nil {
+		t.Fatalf("failed to write kustomization.yaml: %v", err)
+	}
+
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller
+  namespace: my-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: controller
+  template:
+    metadata:
+      labels:
+        app: controller
+    spec:
+      containers:
+        - name: controller
+          image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "deployment.yaml"), []byte(deploymentYAML), 0o644); err != nil {
+		t.Fatalf("failed to write deployment.yaml: %v", err)
+	}
+
+	daemonsetYAML := `apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: agent
+  namespace: my-ns
+spec:
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+    spec:
+      containers:
+        - name: agent
+          image: busybox:latest
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "daemonset.yaml"), []byte(daemonsetYAML), 0o644); err != nil {
+		t.Fatalf("failed to write daemonset.yaml: %v", err)
+	}
+
+	ref := recipe.ComponentRef{
+		Name:      "kust-comp",
+		Namespace: "my-ns",
+		Type:      recipe.ComponentTypeKustomize,
+		Source:    kustDir,
+	}
+
+	resources, err := renderKustomizeTemplate(t.Context(), ref)
+	if err != nil {
+		t.Fatalf("renderKustomizeTemplate() error = %v", err)
+	}
+
+	if len(resources) != 2 {
+		t.Fatalf("expected 2 resources, got %d: %v", len(resources), resources)
+	}
+
+	foundDeployment := false
+	foundDaemonSet := false
+	for _, r := range resources {
+		switch {
+		case r.Kind == "Deployment" && r.Name == "controller" && r.Namespace == "my-ns":
+			foundDeployment = true
+		case r.Kind == "DaemonSet" && r.Name == "agent" && r.Namespace == "my-ns":
+			foundDaemonSet = true
+		}
+	}
+
+	if !foundDeployment {
+		t.Errorf("expected Deployment controller in my-ns, got %v", resources)
+	}
+	if !foundDaemonSet {
+		t.Errorf("expected DaemonSet agent in my-ns, got %v", resources)
+	}
+}
+
+func TestRenderKustomizeTemplate_NonWorkloadFiltered(t *testing.T) {
+	// Verify that non-workload resources (Service, ConfigMap) are filtered out.
+	kustDir := t.TempDir()
+
+	kustomizationYAML := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - resources.yaml
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustomizationYAML), 0o644); err != nil {
+		t.Fatalf("failed to write kustomization.yaml: %v", err)
+	}
+
+	resourcesYAML := `apiVersion: v1
+kind: Service
+metadata:
+  name: my-svc
+  namespace: ns1
+spec:
+  ports:
+    - port: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+  namespace: ns1
+data:
+  key: value
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: only-workload
+  namespace: ns1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+        - name: test
+          image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "resources.yaml"), []byte(resourcesYAML), 0o644); err != nil {
+		t.Fatalf("failed to write resources.yaml: %v", err)
+	}
+
+	ref := recipe.ComponentRef{
+		Name:      "filtered-comp",
+		Namespace: "ns1",
+		Type:      recipe.ComponentTypeKustomize,
+		Source:    kustDir,
+	}
+
+	resources, err := renderKustomizeTemplate(t.Context(), ref)
+	if err != nil {
+		t.Fatalf("renderKustomizeTemplate() error = %v", err)
+	}
+
+	if len(resources) != 1 {
+		t.Fatalf("expected 1 workload resource, got %d: %v", len(resources), resources)
+	}
+	if resources[0].Kind != "Deployment" || resources[0].Name != "only-workload" {
+		t.Errorf("expected Deployment only-workload, got %v", resources[0])
+	}
+}
+
+func TestResolveExpectedResources_KustomizeComponent(t *testing.T) {
+	// Verify that kustomize components get auto-discovered resources.
+	kustDir := t.TempDir()
+
+	kustomizationYAML := `apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "kustomization.yaml"), []byte(kustomizationYAML), 0o644); err != nil {
+		t.Fatalf("failed to write kustomization.yaml: %v", err)
+	}
+
+	deploymentYAML := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kust-deploy
+  namespace: kust-ns
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+        - name: test
+          image: nginx:latest
+`
+	if err := os.WriteFile(filepath.Join(kustDir, "deployment.yaml"), []byte(deploymentYAML), 0o644); err != nil {
+		t.Fatalf("failed to write deployment.yaml: %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "kust-comp",
+				Namespace: "kust-ns",
+				Type:      recipe.ComponentTypeKustomize,
+				Source:    kustDir,
+			},
+		},
+	}
+
+	err := resolveExpectedResources(t.Context(), recipeResult, "")
+	if err != nil {
+		t.Fatalf("resolveExpectedResources() error = %v", err)
+	}
+
+	got := recipeResult.ComponentRefs[0].ExpectedResources
+	if len(got) != 1 {
+		t.Fatalf("expected 1 resource, got %d: %v", len(got), got)
+	}
+	if got[0].Kind != "Deployment" || got[0].Name != "kust-deploy" || got[0].Namespace != "kust-ns" {
+		t.Errorf("expected Deployment kust-deploy in kust-ns, got %v", got[0])
+	}
+}
+
+func TestRenderKustomizeTemplate_InvalidSource(t *testing.T) {
+	// Verify that an invalid source produces a wrapped error, not a panic.
+	ref := recipe.ComponentRef{
+		Name:      "bad-comp",
+		Namespace: "ns1",
+		Type:      recipe.ComponentTypeKustomize,
+		Source:    "/nonexistent/path/to/kustomization",
+	}
+
+	resources, err := renderKustomizeTemplate(t.Context(), ref)
+	if err == nil {
+		t.Fatalf("expected error for invalid source, got %d resources", len(resources))
+	}
+	if resources != nil {
+		t.Errorf("expected nil resources on error, got %v", resources)
+	}
+}
+
+func TestRenderKustomizeTemplate_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // cancel immediately
+
+	ref := recipe.ComponentRef{
+		Name:      "cancelled-comp",
+		Namespace: "ns1",
+		Type:      recipe.ComponentTypeKustomize,
+		Source:    "/some/path",
+	}
+
+	_, err := renderKustomizeTemplate(ctx, ref)
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
+	}
+}
+
+func TestResolveExpectedResources_KustomizeSkipsEmptySource(t *testing.T) {
+	// Kustomize components without Source should skip discovery without error.
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name: "no-source",
+				Type: recipe.ComponentTypeKustomize,
+				// Source is empty — skips kustomize build
+			},
+		},
+	}
+
+	err := resolveExpectedResources(t.Context(), recipeResult, "")
+	if err != nil {
+		t.Errorf("resolveExpectedResources() error = %v", err)
+	}
+
+	if len(recipeResult.ComponentRefs[0].ExpectedResources) != 0 {
+		t.Errorf("expected no resources for kustomize component without source, got %d",
+			len(recipeResult.ComponentRefs[0].ExpectedResources))
+	}
+}
+
 func TestResolveExpectedResources_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // cancel immediately
