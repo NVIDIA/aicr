@@ -35,7 +35,7 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: ${{ inputs.go_version }}
-        cache: false  # vendor/ provides deps; disable to save disk on constrained runners
+        cache: true
 
     - name: Free up disk space
       shell: bash
@@ -60,27 +60,55 @@ runs:
       shell: bash
       run: make cluster-create
 
-    - name: Run Tilt CI
-      shell: bash
-      run: make tilt-ci
-
-    - name: Build and push AICR image to local registry
+    - name: Deploy aicrd to Kind
       shell: bash
       env:
         GOFLAGS: -mod=vendor
       run: |
-        # Build and push aicr image for snapshot agent
-        KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr
-        # Verify image is available
-        curl -sf http://localhost:5001/v2/aicr/tags/list
+        # Build and push aicrd image (replaces Tilt custom_build)
+        KO_DOCKER_REPO=localhost:5001/aicrd ko build --bare --tags=tilt ./cmd/aicrd
 
-    - name: Build and push validator image to local registry
-      shell: bash
-      run: |
-        # Build validator image with Go toolchain for running validation tests
-        docker build -f Dockerfile.validator -t localhost:5001/aicr-validator:local .
-        docker push localhost:5001/aicr-validator:local
-        # Verify image is available
+        # Apply namespace first (must exist before deployment references it)
+        kubectl apply -f tilt/k8s/namespace.yaml
+        kubectl apply -f tilt/k8s/
+
+        # Build images + CLI binary in parallel while deployment starts
+        KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
+        pid_aicr=$!
+        # Validator: compile on host (Go build cache hit), then COPY-only image
+        (
+          mkdir -p dist/validator
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags="-w -s -extldflags '-static'" \
+            -o dist/validator/aicr ./cmd/aicr &
+          CGO_ENABLED=0 go test -c -o dist/validator/deployment.test \
+            ./pkg/validator/checks/deployment &
+          CGO_ENABLED=0 go test -c -o dist/validator/conformance.test \
+            ./pkg/validator/checks/conformance &
+          CGO_ENABLED=0 go build -o dist/validator/test2json cmd/test2json &
+          wait
+          docker build -t localhost:5001/aicr-validator:local -f - . <<'DOCKERFILE'
+        FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
+        COPY dist/validator/aicr /usr/local/bin/aicr
+        COPY dist/validator/deployment.test /usr/local/bin/deployment.test
+        COPY dist/validator/conformance.test /usr/local/bin/conformance.test
+        COPY dist/validator/test2json /usr/local/bin/test2json
+        COPY pkg/validator/checks/deployment/testdata /app/testdata
+        WORKDIR /app
+        CMD ["/bin/bash"]
+        DOCKERFILE
+          docker push localhost:5001/aicr-validator:local
+        ) &
+        pid_validator=$!
+        go build -o dist/e2e/aicr ./cmd/aicr &
+        pid_cli=$!
+        wait $pid_aicr $pid_validator $pid_cli
+
+        # Wait for deployment rollout (may already be ready)
+        kubectl rollout status deployment/aicrd -n aicr --timeout=120s
+
+        # Verify images are available
+        curl -sf http://localhost:5001/v2/aicr/tags/list
         curl -sf http://localhost:5001/v2/aicr-validator/tags/list
 
     - name: Set up fake GPU environment
@@ -110,6 +138,7 @@ runs:
       shell: bash
       env:
         GOFLAGS: -mod=vendor
+        AICR_BIN: ${{ github.workspace }}/dist/e2e/aicr
         AICR_IMAGE: localhost:5001/aicr:local
         AICR_VALIDATOR_IMAGE: localhost:5001/aicr-validator:local
         FAKE_GPU_ENABLED: "true"
