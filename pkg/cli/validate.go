@@ -289,6 +289,37 @@ func helmNamespacesFromRecipe(rec *recipe.RecipeResult) []string {
 	return namespaces
 }
 
+// runCNCFSubmission handles --cncf-submission: validates feature names and
+// runs behavioral evidence collection.
+func runCNCFSubmission(ctx context.Context, cmd *cli.Command, evidenceDir string, features []string) error {
+	for _, f := range features {
+		if !evidence.IsValidFeature(f) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unknown feature %q; valid features: %v", f, evidence.ValidFeatures))
+		}
+	}
+
+	slog.Info("collecting behavioral conformance evidence",
+		"dir", evidenceDir, "features", features)
+
+	// Use a longer timeout for behavioral evidence (default 5m is too short).
+	evidenceTimeout := cmd.Duration("timeout")
+	if evidenceTimeout <= 5*time.Minute {
+		evidenceTimeout = 20 * time.Minute
+	}
+	evidenceCtx, evidenceCancel := context.WithTimeout(ctx, evidenceTimeout)
+	defer evidenceCancel()
+
+	collector := evidence.NewCollector(evidenceDir,
+		evidence.WithFeatures(features),
+	)
+	if runErr := collector.Run(evidenceCtx); runErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "evidence collection failed", runErr)
+	}
+	slog.Info("conformance evidence written", "dir", evidenceDir)
+	return nil
+}
+
 func validateCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
@@ -388,6 +419,18 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:  "evidence-dir",
 			Usage: "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
+		},
+		&cli.BoolFlag{
+			Name:  "cncf-submission",
+			Usage: "Collect detailed behavioral evidence for CNCF AI Conformance submission. Deploys GPU workloads, captures nvidia-smi output, Prometheus queries, and HPA scaling tests. Requires --evidence-dir. Takes ~15 minutes.",
+		},
+		&cli.StringSliceFlag{
+			Name:    "feature",
+			Aliases: []string{"f"},
+			Usage: "Evidence feature to collect (repeatable, default: all). Only used with --cncf-submission.\n" +
+				"Available features: dra-support, gang-scheduling, secure-access, accelerator-metrics,\n" +
+				"inference-gateway, robust-operator, pod-autoscaling, cluster-autoscaling.\n" +
+				"Short aliases also accepted: dra, gang, secure, metrics, gateway, operator, hpa.",
 		},
 		&cli.StringFlag{
 			Name:  "result",
@@ -504,6 +547,18 @@ Use a saved result file for evidence instead of the live run:
 			}
 			if resultPath != "" && evidenceDir == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--result requires --evidence-dir")
+			}
+
+			cncfSubmission := cmd.Bool("cncf-submission")
+			if cncfSubmission && evidenceDir == "" {
+				return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
+			}
+			features := cmd.StringSlice("feature")
+			if len(features) > 0 && !cncfSubmission {
+				return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
+			}
+			if cncfSubmission {
+				return runCNCFSubmission(ctx, cmd, evidenceDir, features)
 			}
 
 			recipeFilePath := cmd.String("recipe")
