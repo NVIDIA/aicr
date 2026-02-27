@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-02-27
+
+### Bug Fixes
+
+- *(recipes)* Unpin gpu-operator and add KAI runtimeClassName workaround  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(recipes)* Exclude NFD worker nodeSelector from accelerated scheduling  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Enforce established patterns across codebase by [@mchmarny](https://github.com/mchmarny)
+- Correct namespace check, stale comments, and dead test code in k8s/agent by [@mchmarny](https://github.com/mchmarny)
+
+### CI/CD
+
+- *(e2e)* Replace Tilt with direct ko+kubectl and host-side validator compilation  by [@mchmarny](https://github.com/mchmarny)
+- Consolidate qualification jobs and remove duplicate tests  by [@mchmarny](https://github.com/mchmarny)
+
+### Features
+
+- *(validator)* Auto-discover expected resources from kustomize sources via krusty SDK  by [@xdu31](https://github.com/xdu31)
+- Bundle time --nodes flag to let components know about expected cluster size  by [@ayuskauskas](https://github.com/ayuskauskas)
+- *(attestation)* Bundle attestation and verification of provenance  by [@lockwobr](https://github.com/lockwobr)
+
+### Tasks
+
+- Upgrade deps by [@mchmarny](https://github.com/mchmarny)
+- Remove dead code, fix best practices, add CLI flag categories by [@mchmarny](https://github.com/mchmarny)
+- Remove dead code, update deps, fix license-check for Go 1.26 by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.7.11] - 2026-02-26
 
 ### CI/CD
