@@ -364,9 +364,10 @@ func validateCmdFlags() []cli.Flag {
 		// Agent deployment flags (used when --snapshot is not provided)
 		&cli.StringFlag{
 			Name:     "namespace",
+			Aliases:  []string{"n"},
 			Usage:    "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
-			Value:    "gpu-operator",
+			Value:    "default",
 			Category: "Agent Deployment",
 		},
 		&cli.StringFlag{
@@ -501,14 +502,14 @@ Validate using an existing snapshot file:
   aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 Load snapshot from ConfigMap:
-  aicr validate --recipe recipe.yaml --snapshot cm://gpu-operator/aicr-snapshot
+  aicr validate --recipe recipe.yaml --snapshot cm://default/aicr-snapshot
 
 Deploy agent to capture and validate in one step:
-  aicr validate --recipe recipe.yaml --namespace gpu-operator
+  aicr validate --recipe recipe.yaml --namespace default
 
 Target specific GPU nodes with node selector:
   aicr validate --recipe recipe.yaml \
-    --namespace gpu-operator \
+    --namespace default \
     --node-selector nodeGroup=customer-gpu
 
 Run multiple validation phases:

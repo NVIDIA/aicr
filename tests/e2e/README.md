@@ -90,7 +90,7 @@ brew install kind tilt-dev/tap/tilt tilt-dev/tap/ctlptl ko
 | `OUTPUT_DIR` | temp dir | Test artifacts directory |
 | `AICR_IMAGE` | `localhost:5001/aicr:local` | AICR image for snapshot agent |
 | `FAKE_GPU_ENABLED` | `false` | Enable fake GPU tests |
-| `SNAPSHOT_NAMESPACE` | `gpu-operator` | Namespace for snapshot tests |
+| `SNAPSHOT_NAMESPACE` | `default` | Namespace for snapshot tests |
 | `SNAPSHOT_CM` | `aicr-e2e-snapshot` | ConfigMap name for snapshot |
 
 ## Manual Run
@@ -130,7 +130,7 @@ brew install kind tilt-dev/tap/tilt tilt-dev/tap/ctlptl ko
 [PASS] api/metrics
 
 [INFO] --- Test: Validate recipe ---
-  $ aicr validate --recipe recipe.yaml --snapshot cm://gpu-operator/aicr-e2e-snapshot
+  $ aicr validate --recipe recipe.yaml --snapshot cm://default/aicr-e2e-snapshot
      → Validation: PASS (1 constraints checked)
 [PASS] validate/recipe
 ```

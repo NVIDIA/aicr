@@ -26,7 +26,7 @@
 //
 //	aicr snapshot [--output FILE] [--format yaml|json|table]
 //	aicr snapshot --output cm://namespace/configmap-name  # ConfigMap output
-//	aicr snapshot --namespace gpu-operator                 # Custom namespace
+//	aicr snapshot --namespace my-namespace                  # Custom namespace
 //
 // Captures a comprehensive snapshot of the current system including CPU/GPU settings,
 // kernel parameters, systemd services, Kubernetes configuration, Helm releases, and
@@ -71,7 +71,7 @@
 // validate - Validate recipe constraints (Step 3):
 //
 //	aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
-//	aicr validate -r recipe.yaml -s cm://gpu-operator/aicr-snapshot
+//	aicr validate -r recipe.yaml -s cm://default/aicr-snapshot
 //	aicr validate -r recipe.yaml -s cm://ns/snapshot --fail-on-error
 //
 // Validates recipe constraints against actual measurements from a snapshot.
@@ -122,10 +122,10 @@
 //
 // ConfigMap-based workflow:
 //
-//	aicr snapshot -o cm://gpu-operator/aicr-snapshot
-//	aicr recipe -s cm://gpu-operator/aicr-snapshot -o cm://gpu-operator/aicr-recipe
-//	aicr validate -r cm://gpu-operator/aicr-recipe -s cm://gpu-operator/aicr-snapshot
-//	aicr bundle -r cm://gpu-operator/aicr-recipe -o ./bundles
+//	aicr snapshot -o cm://default/aicr-snapshot
+//	aicr recipe -s cm://default/aicr-snapshot -o cm://default/aicr-recipe
+//	aicr validate -r cm://default/aicr-recipe -s cm://default/aicr-snapshot
+//	aicr bundle -r cm://default/aicr-recipe -o ./bundles
 //
 // Generate recipe for Ubuntu 24.04 on EKS with H100 GPUs:
 //

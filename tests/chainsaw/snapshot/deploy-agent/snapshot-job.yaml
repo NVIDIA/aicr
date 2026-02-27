@@ -23,7 +23,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: aicr-e2e-snapshot
-  namespace: gpu-operator
+  namespace: default
 spec:
   completions: 1
   backoffLimit: 0
@@ -40,7 +40,7 @@ spec:
         - name: aicr
           image: localhost:5001/aicr:local
           command: ["aicr"]
-          args: ["snapshot", "-o", "cm://gpu-operator/aicr-e2e-snapshot"]
+          args: ["snapshot", "-o", "cm://default/aicr-e2e-snapshot"]
           env:
             - name: AICR_LOG_PREFIX
               value: agent

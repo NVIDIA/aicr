@@ -436,28 +436,28 @@ func TestAgentOutputURILogic(t *testing.T) {
 	}{
 		{
 			name:               "file output uses default ConfigMap with agent namespace",
-			agentNamespace:     "gpu-operator",
+			agentNamespace:     "default",
 			userOutput:         "snapshot.yaml",
-			wantAgentOutputHas: "cm://gpu-operator/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-snapshot",
 			wantUsesUserOutput: false,
 		},
 		{
 			name:               "stdout uses default ConfigMap with agent namespace",
-			agentNamespace:     "gpu-operator",
+			agentNamespace:     "default",
 			userOutput:         "",
-			wantAgentOutputHas: "cm://gpu-operator/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-snapshot",
 			wantUsesUserOutput: false,
 		},
 		{
 			name:               "dash stdout uses default ConfigMap with agent namespace",
-			agentNamespace:     "gpu-operator",
+			agentNamespace:     "default",
 			userOutput:         "-",
-			wantAgentOutputHas: "cm://gpu-operator/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-snapshot",
 			wantUsesUserOutput: false,
 		},
 		{
 			name:               "ConfigMap URI uses user's URI",
-			agentNamespace:     "gpu-operator",
+			agentNamespace:     "default",
 			userOutput:         "cm://custom-ns/my-snapshot",
 			wantAgentOutputHas: "cm://custom-ns/my-snapshot",
 			wantUsesUserOutput: true,
@@ -501,7 +501,7 @@ func TestAgentOutputURILogic(t *testing.T) {
 func TestAgentConfigWithTemplatePath(t *testing.T) {
 	// Test that AgentConfig can hold TemplatePath
 	cfg := AgentConfig{
-		Namespace:    "gpu-operator",
+		Namespace:    "default",
 		TemplatePath: "/path/to/template.tmpl",
 		Output:       "output.yaml",
 	}

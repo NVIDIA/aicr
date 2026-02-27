@@ -74,9 +74,10 @@ func snapshotCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:     "namespace",
+			Aliases:  []string{"n"},
 			Usage:    "Kubernetes namespace for agent deployment",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
-			Value:    "gpu-operator",
+			Value:    "default",
 			Category: "Agent Deployment",
 		},
 		&cli.StringFlag{
@@ -188,7 +189,7 @@ The snapshot process:
 Examples:
 
 Basic snapshot:
-  aicr snapshot --namespace gpu-operator --output cm://gpu-operator/aicr-snapshot
+  aicr snapshot --output cm://default/aicr-snapshot
 
 Target specific GPU nodes with node selector:
   aicr snapshot --node-selector nodeGroup=customer-gpu
@@ -200,7 +201,7 @@ Combined node selector and custom tolerations:
   aicr snapshot \
     --node-selector nodeGroup=customer-gpu \
     --toleration dedicated=user-workload:NoSchedule \
-    --output cm://gpu-operator/aicr-snapshot
+    --output cm://default/aicr-snapshot
 
 Custom output formatting with Go templates:
   aicr snapshot --template my-template.tmpl --output report.md

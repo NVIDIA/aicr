@@ -41,7 +41,6 @@ spec:
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/uat-cuj1-training"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
-              kubectl create namespace gpu-operator 2>/dev/null || true
               ${AICR_BIN} snapshot --output "${WORK}/snapshot.yaml"
               test -f "${WORK}/snapshot.yaml"
 
