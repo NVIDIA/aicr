@@ -42,6 +42,10 @@ const (
 	testType       = "all_reduce_perf"
 	minMessageSize = "1K"
 	maxMessageSize = "16G"
+
+	// ncclTrainJobName is the name used for both the TrainJob resource and the label
+	// selector when waiting for the launcher pod. Must stay in sync with trainjob.yaml.
+	ncclTrainJobName = "nccl-all-reduce-tj"
 )
 
 // templatePath returns the path to a testdata template file for the given
@@ -330,7 +334,7 @@ func waitForLauncherPodAndGetLogs(ctx *checks.ValidationContext, podHelper *help
 		ctx.Context,
 		ctx.Clientset,
 		ctx.Namespace,
-		"jobset.sigs.k8s.io/jobset-name=nccl-all-reduce-tj,jobset.sigs.k8s.io/replicatedjob-name=launcher",
+		fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=launcher", ncclTrainJobName),
 		defaults.NCCLLauncherPodTimeout,
 	)
 	if err != nil {
@@ -399,7 +403,9 @@ func parseBandwidthFromLogs(logs string) (float64, error) {
 	// #        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)
 	//  17179869184    4294967296     float     sum      -1   123456   139.2   450.3      0   123456   139.2   450.3      0
 
-	// Look for the line with the max message size (16G = 17179869184 bytes)
+	// Look for the row corresponding to maxMessageSize (16G = 17179869184 bytes).
+	// NCCL output has two measurement sets (in-place and out-of-place); we capture the
+	// first busbw column (in-place), which is the standard benchmark metric for NCCL.
 	re := regexp.MustCompile(`\s+17179869184\s+\d+\s+\w+\s+\w+\s+-?\d+\s+[\d.]+\s+[\d.]+\s+([\d.]+)`)
 	matches := re.FindStringSubmatch(logs)
 
@@ -436,7 +442,7 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, namespace string) {
 	}
 
 	// Delete trainjob
-	err := dynamicClient.Resource(trainJobGVR).Namespace(namespace).Delete(cleanupCtx, "nccl-all-reduce-tj", metav1.DeleteOptions{})
+	err := dynamicClient.Resource(trainJobGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainJobName, metav1.DeleteOptions{})
 	if err != nil {
 		slog.Error("Warning: Failed to delete TrainJob", "error", err)
 	} else {

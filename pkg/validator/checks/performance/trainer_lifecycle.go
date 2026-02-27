@@ -276,34 +276,36 @@ func isCRDEstablished(obj *unstructured.Unstructured) bool {
 func downloadAndExtractGitHubArchive(ctx context.Context, archiveURL string) (string, func(), error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, archiveURL, nil)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to build request: %w", err)
+		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to build request", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // archiveURL is a compile-time constant, not user input
+	// Use a bounded HTTP client — http.DefaultClient has no timeout.
+	client := &http.Client{Timeout: defaults.NCCLTrainerArchiveDownloadTimeout} //nolint:gosec // archiveURL is a compile-time constant, not user input
+	resp, err := client.Do(req)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to download archive from %s: %w", archiveURL, err)
+		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to download archive from %s", archiveURL), err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("unexpected HTTP %d downloading %s", resp.StatusCode, archiveURL)
+		return "", nil, aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("unexpected HTTP %d downloading %s", resp.StatusCode, archiveURL))
 	}
 
 	tmpDir, err := os.MkdirTemp("", "aicr-trainer-*")
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to create temp dir: %w", err)
+		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create temp dir", err)
 	}
 	cleanup := func() { os.RemoveAll(tmpDir) }
 
 	if extractErr := extractTarGz(resp.Body, tmpDir); extractErr != nil {
 		cleanup()
-		return "", nil, fmt.Errorf("failed to extract archive: %w", extractErr)
+		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to extract archive", extractErr)
 	}
 
 	entries, err := os.ReadDir(tmpDir)
 	if err != nil || len(entries) == 0 {
 		cleanup()
-		return "", nil, fmt.Errorf("extracted archive is empty or unreadable")
+		return "", nil, aicrErrors.New(aicrErrors.ErrCodeInternal, "extracted archive is empty or unreadable")
 	}
 
 	return filepath.Join(tmpDir, entries[0].Name()), cleanup, nil
@@ -313,7 +315,7 @@ func downloadAndExtractGitHubArchive(ctx context.Context, archiveURL string) (st
 func extractTarGz(r io.Reader, targetDir string) error {
 	gzr, err := gzip.NewReader(r)
 	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %w", err)
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create gzip reader", err)
 	}
 	defer gzr.Close()
 
@@ -324,7 +326,7 @@ func extractTarGz(r io.Reader, targetDir string) error {
 			break
 		}
 		if err != nil {
-			return fmt.Errorf("tar read error: %w", err)
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "tar read error", err)
 		}
 
 		path, err := sanitizeTarPath(targetDir, header.Name)
@@ -335,23 +337,23 @@ func extractTarGz(r io.Reader, targetDir string) error {
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(path, 0750); err != nil {
-				return fmt.Errorf("failed to create directory %s: %w", path, err)
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to create directory %s", path), err)
 			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-				return fmt.Errorf("failed to create parent dir for %s: %w", path, err)
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to create parent dir for %s", path), err)
 			}
 			f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0640)
 			if err != nil {
-				return fmt.Errorf("failed to create file %s: %w", path, err)
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to create file %s", path), err)
 			}
 			_, copyErr := io.Copy(f, io.LimitReader(tr, maxExtractedFileSize))
 			closeErr := f.Close()
 			if copyErr != nil {
-				return fmt.Errorf("failed to write file %s: %w", path, copyErr)
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to write file %s", path), copyErr)
 			}
 			if closeErr != nil {
-				return fmt.Errorf("failed to close file %s: %w", path, closeErr)
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to close file %s", path), closeErr)
 			}
 		}
 	}
@@ -363,7 +365,7 @@ func extractTarGz(r io.Reader, targetDir string) error {
 func sanitizeTarPath(targetDir, entryPath string) (string, error) {
 	cleanPath := filepath.Join(targetDir, filepath.FromSlash(entryPath))
 	if !strings.HasPrefix(cleanPath, filepath.Clean(targetDir)+string(os.PathSeparator)) {
-		return "", fmt.Errorf("invalid tar entry %q: potential path traversal", entryPath)
+		return "", aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, fmt.Sprintf("invalid tar entry %q: potential path traversal", entryPath))
 	}
 	return cleanPath, nil
 }

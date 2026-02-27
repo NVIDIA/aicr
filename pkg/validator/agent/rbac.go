@@ -27,7 +27,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// ensureServiceAccount creates the ServiceAccount if it doesn't exist.
+// ensureServiceAccount creates or updates the ServiceAccount so changes across
+// releases are always applied even when the resource already exists in the cluster.
 func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
@@ -37,7 +38,14 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if errors.IsAlreadyExists(err) {
+		_, err = d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Update(ctx, sa, metav1.UpdateOptions{})
+		if err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to update ServiceAccount", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // deleteServiceAccount deletes the ServiceAccount.
@@ -333,7 +341,10 @@ func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
 	return k8s.IgnoreNotFound(err)
 }
 
-// ensureRoleBinding creates the RoleBinding if it doesn't exist.
+// ensureRoleBinding creates or updates the RoleBinding so Subject changes across
+// releases are always applied even when the resource already exists in the cluster.
+// Note: RoleRef is immutable in Kubernetes — the RoleRef here is stable (always
+// references d.config.ServiceAccountName), so updates will never be rejected.
 func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
