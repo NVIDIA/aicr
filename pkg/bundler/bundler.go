@@ -729,13 +729,13 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	// Create attestation subdirectory
 	attestDir := filepath.Join(dir, attestation.AttestationDir)
-	if mkdirErr := os.MkdirAll(attestDir, 0755); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(attestDir, 0755); mkdirErr != nil { //nolint:gosec // dir is filepath.Clean'd on entry; attestDir uses constant subpath
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create attestation directory", mkdirErr)
 	}
 
 	// Write bundle attestation
 	bundleAttestPath := filepath.Join(dir, attestation.BundleAttestationFile)
-	if writeErr := os.WriteFile(bundleAttestPath, bundleJSON, 0600); writeErr != nil {
+	if writeErr := os.WriteFile(bundleAttestPath, bundleJSON, 0600); writeErr != nil { //nolint:gosec // path built from filepath.Clean'd dir + constant filename
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write bundle attestation", writeErr)
 	}
 	attestFiles = append(attestFiles, attestation.BundleAttestationFile)
@@ -790,7 +790,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	}
 
 	destPath := filepath.Join(dir, attestation.BinaryAttestationFile)
-	if copyErr := os.WriteFile(destPath, binaryAttestData, 0600); copyErr != nil {
+	if copyErr := os.WriteFile(destPath, binaryAttestData, 0600); copyErr != nil { //nolint:gosec // path built from filepath.Clean'd dir + constant filename
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to copy binary attestation into bundle", copyErr)
 	}
