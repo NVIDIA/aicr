@@ -89,6 +89,7 @@ github.com/chai2010/gettext-go/po
 ## explicit; go 1.18
 github.com/clipperhouse/uax29/v2/graphemes
 # github.com/cloudflare/circl v1.6.3
+# github.com/cloudflare/circl v1.6.3
 ## explicit; go 1.22.0
 github.com/cloudflare/circl/dh/x25519
 github.com/cloudflare/circl/dh/x448
@@ -127,7 +128,7 @@ github.com/digitorus/timestamp
 # github.com/distribution/reference v0.6.0
 ## explicit; go 1.20
 github.com/distribution/reference
-# github.com/dylibso/observe-sdk/go v0.0.0-20240819160327-2d926c5d788a
+# github.com/dylibso/observe-sdk/go v0.0.0-20240828172851-9145d8ad07e1
 ## explicit; go 1.21
 github.com/dylibso/observe-sdk/go
 # github.com/emicklei/go-restful/v3 v3.13.0
@@ -147,7 +148,7 @@ github.com/extism/go-sdk
 # github.com/fatih/color v1.18.0
 ## explicit; go 1.17
 github.com/fatih/color
-# github.com/fluxcd/cli-utils v0.37.0-flux.1
+# github.com/fluxcd/cli-utils v0.37.2-flux.1
 ## explicit; go 1.25.0
 github.com/fluxcd/cli-utils/pkg/kstatus/polling/aggregator
 github.com/fluxcd/cli-utils/pkg/kstatus/polling/clusterreader
@@ -280,8 +281,8 @@ github.com/godbus/dbus/v5
 # github.com/google/btree v1.1.3
 ## explicit; go 1.18
 github.com/google/btree
-# github.com/google/cel-go v0.26.1
-## explicit; go 1.22.0
+# github.com/google/cel-go v0.27.0
+## explicit; go 1.23.0
 github.com/google/cel-go/cel
 github.com/google/cel-go/checker
 github.com/google/cel-go/checker/decls
@@ -365,7 +366,7 @@ github.com/hashicorp/go-retryablehttp
 # github.com/huandu/xstrings v1.5.0
 ## explicit; go 1.12
 github.com/huandu/xstrings
-# github.com/ianlancetaylor/demangle v0.0.0-20240805132620-81f5be970eca
+# github.com/ianlancetaylor/demangle v0.0.0-20251118225945-96ee0021ea0f
 ## explicit; go 1.13
 github.com/ianlancetaylor/demangle
 # github.com/in-toto/attestation v1.1.2
@@ -528,8 +529,8 @@ github.com/prometheus/client_model/go
 ## explicit; go 1.24.0
 github.com/prometheus/common/expfmt
 github.com/prometheus/common/model
-# github.com/prometheus/procfs v0.19.2
-## explicit; go 1.24.0
+# github.com/prometheus/procfs v0.20.0
+## explicit; go 1.25.0
 github.com/prometheus/procfs
 github.com/prometheus/procfs/internal/fs
 github.com/prometheus/procfs/internal/util
@@ -639,9 +640,6 @@ github.com/spf13/cobra
 # github.com/spf13/pflag v1.0.10
 ## explicit; go 1.12
 github.com/spf13/pflag
-# github.com/stoewer/go-strcase v1.3.1
-## explicit; go 1.11
-github.com/stoewer/go-strcase
 # github.com/stretchr/testify v1.11.1
 ## explicit; go 1.17
 github.com/stretchr/testify/assert
@@ -723,6 +721,7 @@ github.com/xlab/treeprint
 # github.com/zach-klippenstein/goregen v0.0.0-20160303162051-795b5e3961ea
 ## explicit
 github.com/zach-klippenstein/goregen
+# go.opentelemetry.io/otel v1.40.0
 # go.mongodb.org/mongo-driver v1.17.6
 ## explicit; go 1.18
 go.mongodb.org/mongo-driver/bson
@@ -744,6 +743,7 @@ go.opentelemetry.io/otel/attribute/internal
 go.opentelemetry.io/otel/attribute/internal/xxhash
 go.opentelemetry.io/otel/baggage
 go.opentelemetry.io/otel/codes
+go.opentelemetry.io/otel/semconv/v1.39.0
 go.opentelemetry.io/otel/internal/baggage
 go.opentelemetry.io/otel/internal/global
 go.opentelemetry.io/otel/propagation
@@ -752,6 +752,7 @@ go.opentelemetry.io/otel/semconv/v1.37.0
 ## explicit; go 1.23.0
 # go.opentelemetry.io/otel/metric v1.39.0
 ## explicit; go 1.24.0
+# go.opentelemetry.io/otel/trace v1.40.0
 go.opentelemetry.io/otel/metric
 go.opentelemetry.io/otel/metric/embedded
 # go.opentelemetry.io/otel/trace v1.39.0
@@ -759,6 +760,7 @@ go.opentelemetry.io/otel/metric/embedded
 go.opentelemetry.io/otel/trace
 go.opentelemetry.io/otel/trace/embedded
 go.opentelemetry.io/otel/trace/internal/telemetry
+# go.opentelemetry.io/proto/otlp v1.9.0
 go.opentelemetry.io/otel/trace/noop
 # go.opentelemetry.io/proto/otlp v1.8.0
 ## explicit; go 1.23.0
@@ -797,6 +799,8 @@ golang.org/x/crypto/pbkdf2
 golang.org/x/crypto/salsa20/salsa
 golang.org/x/crypto/scrypt
 golang.org/x/crypto/sha3
+# golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa
+## explicit; go 1.25.0
 golang.org/x/crypto/ssh
 golang.org/x/crypto/ssh/internal/bcrypt_pbkdf
 golang.org/x/crypto/ssh/terminal
@@ -804,6 +808,8 @@ golang.org/x/crypto/ssh/terminal
 ## explicit; go 1.24.0
 golang.org/x/exp/constraints
 golang.org/x/exp/slices
+# golang.org/x/net v0.51.0
+## explicit; go 1.25.0
 # golang.org/x/mod v0.32.0
 ## explicit; go 1.24.0
 golang.org/x/mod/semver
@@ -868,11 +874,14 @@ golang.org/x/text/unicode/norm
 # golang.org/x/time v0.14.0
 ## explicit; go 1.24.0
 golang.org/x/time/rate
+# google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171
+## explicit; go 1.25.0
 # google.golang.org/genproto/googleapis/api v0.0.0-20251202230838-ff82c1b0f217
 ## explicit; go 1.24.0
 google.golang.org/genproto/googleapis/api
 google.golang.org/genproto/googleapis/api/annotations
 google.golang.org/genproto/googleapis/api/expr/v1alpha1
+# google.golang.org/genproto/googleapis/rpc v0.0.0-20260226221140-a57be14db171
 google.golang.org/genproto/googleapis/api/httpbody
 # google.golang.org/genproto/googleapis/rpc v0.0.0-20260223185530-2f722ef697dc
 ## explicit; go 1.25.0
@@ -1520,8 +1529,8 @@ oras.land/oras-go/v2/registry/remote/credentials/trace
 oras.land/oras-go/v2/registry/remote/errcode
 oras.land/oras-go/v2/registry/remote/internal/errutil
 oras.land/oras-go/v2/registry/remote/retry
-# sigs.k8s.io/controller-runtime v0.22.4
-## explicit; go 1.24.0
+# sigs.k8s.io/controller-runtime v0.23.1
+## explicit; go 1.25.0
 sigs.k8s.io/controller-runtime/pkg/client
 sigs.k8s.io/controller-runtime/pkg/client/apiutil
 sigs.k8s.io/controller-runtime/pkg/log
