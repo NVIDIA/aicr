@@ -886,7 +886,11 @@ func TestDeployer_EnsureClusterRole_AllNamespaces(t *testing.T) {
 }
 
 func TestDeployer_EnsureHelmSecretRoles(t *testing.T) {
-	clientset := fake.NewClientset()
+	// Namespaces must exist for ensureHelmSecretRoles to create Role/RoleBinding in them
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "gpu-operator"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "network-operator"}},
+	)
 	config := Config{
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
@@ -932,7 +936,9 @@ func TestDeployer_EnsureHelmSecretRoles(t *testing.T) {
 }
 
 func TestDeployer_EnsureHelmSecretRoles_Idempotent(t *testing.T) {
-	clientset := fake.NewClientset()
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "gpu-operator"}},
+	)
 	config := Config{
 		Namespace:          "test-namespace",
 		ServiceAccountName: testName,
@@ -953,8 +959,44 @@ func TestDeployer_EnsureHelmSecretRoles_Idempotent(t *testing.T) {
 	}
 }
 
+func TestDeployer_EnsureHelmSecretRoles_SkipsNonExistentNamespaces(t *testing.T) {
+	// Only gpu-operator exists; kai-scheduler and other-ns do not
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "gpu-operator"}},
+	)
+	config := Config{
+		Namespace:          "test-namespace",
+		ServiceAccountName: testName,
+		JobName:            testName,
+		Image:              "ghcr.io/nvidia/aicr-validator:latest",
+		Output:             "cm://test-namespace/aicr-snapshot",
+		HelmNamespaces:     []string{"kai-scheduler", "gpu-operator", "other-ns"},
+	}
+	deployer := NewDeployer(clientset, config)
+	ctx := context.Background()
+
+	if err := deployer.ensureHelmSecretRoles(ctx); err != nil {
+		t.Fatalf("ensureHelmSecretRoles should skip missing namespaces, got: %v", err)
+	}
+
+	// Role should exist only in gpu-operator
+	_, err := clientset.RbacV1().Roles("gpu-operator").Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("expected Role in gpu-operator: %v", err)
+	}
+	for _, ns := range []string{"kai-scheduler", "other-ns"} {
+		_, getErr := clientset.RbacV1().Roles(ns).Get(ctx, helmSecretRoleName, metav1.GetOptions{})
+		if getErr == nil {
+			t.Errorf("expected no Role in non-existent namespace %q", ns)
+		}
+	}
+}
+
 func TestDeployer_Cleanup_WithHelmNamespaces(t *testing.T) {
-	clientset := fake.NewClientset()
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "gpu-operator"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "network-operator"}},
+	)
 
 	clientset.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		return true, &authv1.SelfSubjectAccessReview{

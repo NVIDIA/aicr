@@ -16,10 +16,12 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -140,8 +142,17 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 
 // ensureHelmSecretRoles creates per-namespace Roles and RoleBindings for Helm secrets access.
 // Each namespace gets a Role with secrets get/list and a RoleBinding to the agent ServiceAccount.
+// Namespaces that do not exist are skipped so validation can run before all recipe components are installed.
 func (d *Deployer) ensureHelmSecretRoles(ctx context.Context) error {
 	for _, ns := range d.config.HelmNamespaces {
+		_, err := d.clientset.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				slog.Debug("skipping Helm secrets RBAC for non-existent namespace", "namespace", ns)
+				continue
+			}
+			return err
+		}
 		if err := d.ensureHelmSecretRole(ctx, ns); err != nil {
 			return err
 		}
