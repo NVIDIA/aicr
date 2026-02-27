@@ -157,9 +157,9 @@ components:
     nodeScheduling:
       accelerated:
         nodeSelectorPaths:
-          - nodeSelector
+          - acceleratedNodeSelector
         tolerationPaths:
-          - tolerations
+          - acceleratedTolerations
     podScheduling:
       workload:
         workloadSelectorPaths:
