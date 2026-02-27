@@ -1126,6 +1126,9 @@ test_validate_chainsaw_healthcheck() {
   # Setup: Create fake GPU operator deployment
   msg "--- Setup: Create fake GPU operator deployment ---"
   kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
+  # Clean up leftover validator pods from previous tests that ran in gpu-operator namespace.
+  # The chainsaw health check asserts no pods are in Failed/Pending/Unknown phase.
+  kubectl delete jobs,pods -n gpu-operator -l app=aicr-validator --ignore-not-found 2>&1 || true
 
   cat <<YAML | kubectl apply -f - 2>&1
 apiVersion: apps/v1
@@ -1160,8 +1163,11 @@ YAML
     return 0
   fi
 
-  # Wait for deployment to be available
-  kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
+  # Wait for deployment to be available (must succeed for pod phase health check)
+  if ! kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1; then
+    skip "validate/chainsaw-healthcheck" "GPU operator deployment not available"
+    return 0
+  fi
 
   # Create recipe that includes gpu-operator with deployment phase check
   local recipe_file="${validate_dir}/recipe-chainsaw.yaml"

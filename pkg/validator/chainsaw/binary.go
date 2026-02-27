@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
+	"fmt"
+	"log/slog"
 	"os/exec"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -45,6 +47,8 @@ func NewChainsawBinary() ChainsawBinary {
 }
 
 func (b *chainsawBinary) RunTest(ctx context.Context, testDir string) (bool, string, error) {
+	slog.Debug("executing chainsaw binary", "binPath", b.binPath, "testDir", testDir)
+
 	cmd := exec.CommandContext(ctx, b.binPath, "test", "--test-dir", testDir, "--no-color") //nolint:gosec // binPath is resolved from PATH or hardcoded, testDir is from os.MkdirTemp
 
 	var buf bytes.Buffer
@@ -58,6 +62,9 @@ func (b *chainsawBinary) RunTest(ctx context.Context, testDir string) (bool, str
 		// Exit code != 0 means tests failed (not an execution error).
 		var exitErr *exec.ExitError
 		if stderrors.As(err, &exitErr) {
+			if output == "" {
+				output = fmt.Sprintf("chainsaw exited with code %d (no output captured)", exitErr.ExitCode())
+			}
 			return false, output, nil
 		}
 		return false, output, errors.Wrap(errors.ErrCodeInternal, "failed to execute chainsaw", err)

@@ -151,6 +151,8 @@ func runChainsawBinary(ctx context.Context, component, yamlContent string, timeo
 		return result
 	}
 
+	slog.Debug("running chainsaw health check", "component", component, "yamlLength", len(yamlContent))
+
 	// Create temp directory with component subdirectory.
 	tmpDir, err := os.MkdirTemp("", "chainsaw-*")
 	if err != nil {
