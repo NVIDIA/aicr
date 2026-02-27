@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -476,6 +477,25 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			}
 			if err := component.ApplyMapOverrides(values, overrides); err != nil {
 				slog.Warn("failed to apply workload-gate taint",
+					"component", componentName,
+					"error", err,
+				)
+			}
+		}
+	}
+
+	// Apply estimated node count to paths in nodeScheduling.nodeCountPaths.
+	// ApplyMapOverrides uses convertMapValue, so numeric strings become ints in the values map; Helm gets integer type.
+	if n := b.Config.EstimatedNodeCount(); n > 0 {
+		if paths := comp.GetNodeCountPaths(); len(paths) > 0 {
+			valStr := strconv.Itoa(n)
+			overrides := make(map[string]string, len(paths))
+			for _, path := range paths {
+				overrides[path] = valStr
+			}
+			if err := component.ApplyMapOverrides(values, overrides); err != nil {
+				// Failure is logged only; consider surfacing in bundle output in a future iteration.
+				slog.Warn("failed to apply estimated node count",
 					"component", componentName,
 					"error", err,
 				)

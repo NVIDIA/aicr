@@ -339,14 +339,16 @@ Components are configured in `recipes/registry.yaml`. Here's an example entry:
         - node-feature-discovery.worker.tolerations
 ```
 
-### Node Selector and Toleration Handling
+### Node Scheduling Configuration
 
-The bundle command supports `--system-node-selector`, `--system-node-toleration`, `--accelerated-node-selector`, and `--accelerated-node-toleration` flags.
+The bundle command supports `--system-node-selector`, `--system-node-toleration`, `--accelerated-node-selector`, `--accelerated-node-toleration`, and `--nodes` flags.
 
 **How it works:**
-1. Paths are defined in `registry.yaml` under `nodeScheduling`
+1. Paths are defined in `registry.yaml` under `nodeScheduling` (e.g. `nodeSelectorPaths`, `tolerationPaths`, `nodeCountPaths`)
 2. The bundler automatically applies CLI flag values to those paths
 3. Values are written to the component's `values.yaml` in its per-component bundle directory
+
+The `--nodes` flag (bundle-time only) sets the estimated GPU node count. Components that declare `nodeCountPaths` in the registry receive this value at those paths in their generated Helm values.
 
 **Example CLI usage:**
 ```bash

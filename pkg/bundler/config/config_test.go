@@ -282,6 +282,27 @@ func TestNodeSelectorOptions(t *testing.T) {
 			t.Errorf("AcceleratedNodeSelector() = %v, want nil", got)
 		}
 	})
+
+	t.Run("EstimatedNodeCount default zero", func(t *testing.T) {
+		cfg := NewConfig()
+		if got := cfg.EstimatedNodeCount(); got != 0 {
+			t.Errorf("EstimatedNodeCount() = %d, want 0", got)
+		}
+	})
+
+	t.Run("EstimatedNodeCount with value", func(t *testing.T) {
+		cfg := NewConfig(WithEstimatedNodeCount(8))
+		if got := cfg.EstimatedNodeCount(); got != 8 {
+			t.Errorf("EstimatedNodeCount() = %d, want 8", got)
+		}
+	})
+
+	t.Run("EstimatedNodeCount negative clamped to zero", func(t *testing.T) {
+		cfg := NewConfig(WithEstimatedNodeCount(-1))
+		if got := cfg.EstimatedNodeCount(); got != 0 {
+			t.Errorf("EstimatedNodeCount() = %d, want 0 (negative clamped)", got)
+		}
+	})
 }
 
 func TestNodeTolerationOptions(t *testing.T) {

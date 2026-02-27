@@ -467,12 +467,14 @@ func TestZipResponseContainsExpectedFiles(t *testing.T) {
 
 // TestParseQueryParams tests the query parameter parsing function directly.
 func TestParseQueryParams(t *testing.T) {
+	wantNodes := func(n int) *int { return &n }
 	tests := []struct {
 		name         string
 		url          string
 		wantErr      bool
 		wantDeployer string
 		wantRepoURL  string
+		wantNodes    *int
 	}{
 		{
 			name:         "empty query defaults to helm",
@@ -510,6 +512,36 @@ func TestParseQueryParams(t *testing.T) {
 			url:          "/v1/bundle?system-node-selector=nodeGroup=system",
 			wantDeployer: "helm",
 		},
+		// nodes query parameter
+		{
+			name:         "nodes valid",
+			url:          "/v1/bundle?nodes=8",
+			wantDeployer: "helm",
+			wantNodes:    wantNodes(8),
+		},
+		{
+			name:         "nodes zero (unset)",
+			url:          "/v1/bundle?nodes=0",
+			wantDeployer: "helm",
+			wantNodes:    wantNodes(0),
+		},
+		{
+			name:      "nodes negative",
+			url:       "/v1/bundle?nodes=-1",
+			wantErr:   true,
+			wantNodes: nil,
+		},
+		{
+			name:    "nodes non-integer",
+			url:     "/v1/bundle?nodes=abc",
+			wantErr: true,
+		},
+		{
+			name:         "nodes omitted defaults to zero",
+			url:          "/v1/bundle",
+			wantDeployer: "helm",
+			wantNodes:    wantNodes(0),
+		},
 	}
 
 	for _, tt := range tests {
@@ -527,6 +559,9 @@ func TestParseQueryParams(t *testing.T) {
 			}
 			if tt.wantRepoURL != "" && params.repoURL != tt.wantRepoURL {
 				t.Errorf("repoURL = %q, want %q", params.repoURL, tt.wantRepoURL)
+			}
+			if tt.wantNodes != nil && params.estimatedNodeCount != *tt.wantNodes {
+				t.Errorf("estimatedNodeCount = %d, want %d", params.estimatedNodeCount, *tt.wantNodes)
 			}
 		})
 	}

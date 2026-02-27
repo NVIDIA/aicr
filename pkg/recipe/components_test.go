@@ -231,6 +231,15 @@ func TestComponentRegistry_TaintStrPaths(t *testing.T) {
 	if !slices.Contains(taintStrPaths, "controllerManager.manager.env.runtimeRequiredTaint") {
 		t.Error("skyhook-operator should have 'controllerManager.manager.env.runtimeRequiredTaint' in accelerated taint string paths")
 	}
+
+	// Test skyhook-operator has node count path (for --nodes bundle flag)
+	nodeCountPaths := skyhookOp.GetNodeCountPaths()
+	if len(nodeCountPaths) == 0 {
+		t.Error("skyhook-operator should have nodeCountPaths")
+	}
+	if !slices.Contains(nodeCountPaths, "estimatedNodeCount") {
+		t.Error("skyhook-operator should have 'estimatedNodeCount' in nodeCountPaths")
+	}
 }
 
 func TestComponentRegistry_WorkloadSelectorPaths(t *testing.T) {
@@ -340,11 +349,13 @@ func TestComponentRegistry_PathSyntax(t *testing.T) {
 			len(comp.GetSystemNodeSelectorPaths())+
 				len(comp.GetSystemTolerationPaths())+
 				len(comp.GetAcceleratedNodeSelectorPaths())+
-				len(comp.GetAcceleratedTolerationPaths()))
+				len(comp.GetAcceleratedTolerationPaths())+
+				len(comp.GetNodeCountPaths()))
 		allPaths = append(allPaths, comp.GetSystemNodeSelectorPaths()...)
 		allPaths = append(allPaths, comp.GetSystemTolerationPaths()...)
 		allPaths = append(allPaths, comp.GetAcceleratedNodeSelectorPaths()...)
 		allPaths = append(allPaths, comp.GetAcceleratedTolerationPaths()...)
+		allPaths = append(allPaths, comp.GetNodeCountPaths()...)
 
 		for _, path := range allPaths {
 			// Paths should not be empty

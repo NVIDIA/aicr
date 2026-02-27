@@ -49,6 +49,7 @@ type bundleCmdOptions struct {
 	acceleratedNodeTolerations []corev1.Toleration
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
+	estimatedNodeCount         int
 
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
@@ -168,9 +169,17 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-selector", err)
 	}
 
+	// Parse --nodes (estimated node count for bundle; 0 = unset)
+	n := cmd.Int("nodes")
+	if n < 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
+	}
+	opts.estimatedNodeCount = n
+
 	return opts, nil
 }
 
+//nolint:funlen // bundle command is inherently large (flags + description + action)
 func bundleCmd() *cli.Command {
 	return &cli.Command{
 		Name:                  "bundle",
@@ -263,6 +272,11 @@ Package with explicit tag (overrides CLI version):
 				Name:  "workload-selector",
 				Usage: "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
 			},
+			&cli.IntFlag{
+				Name:  "nodes",
+				Value: 0,
+				Usage: "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+			},
 			&cli.StringFlag{
 				Name:    "deployer",
 				Aliases: []string{"d"},
@@ -337,6 +351,7 @@ Package with explicit tag (overrides CLI version):
 				config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
 				config.WithWorkloadGateTaint(opts.workloadGateTaint),
 				config.WithWorkloadSelector(opts.workloadSelector),
+				config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 			)
 
 			b, err := bundler.NewWithConfig(cfg)
