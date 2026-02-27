@@ -485,8 +485,6 @@ func GetDataProvider() DataProvider {
 	return globalDataProvider
 }
 
-// GetDataProviderGeneration returns the current data provider generation.
-// This is used by caches to detect when they need to reload.
-func GetDataProviderGeneration() int {
+func getDataProviderGeneration() int {
 	return dataProviderGeneration
 }

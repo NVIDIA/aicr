@@ -70,6 +70,94 @@ func createSnapshotSerializer(tmplOpts *snapshotTemplateOptions) (serializer.Ser
 	return serializer.NewFileWriterOrStdout(tmplOpts.format, tmplOpts.outputPath)
 }
 
+func snapshotCmdFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:     "namespace",
+			Usage:    "Kubernetes namespace for agent deployment",
+			Sources:  cli.EnvVars("AICR_NAMESPACE"),
+			Value:    "gpu-operator",
+			Category: "Agent Deployment",
+		},
+		&cli.StringFlag{
+			Name:     "image",
+			Usage:    "Container image for agent Job",
+			Sources:  cli.EnvVars("AICR_IMAGE"),
+			Value:    "ghcr.io/nvidia/aicr-validator:latest",
+			Category: "Agent Deployment",
+		},
+		&cli.StringSliceFlag{
+			Name:     "image-pull-secret",
+			Usage:    "Secret name for pulling images from private registries (can be repeated)",
+			Category: "Agent Deployment",
+		},
+		&cli.StringFlag{
+			Name:     "job-name",
+			Usage:    "Override default Job name",
+			Value:    "aicr",
+			Category: "Agent Deployment",
+		},
+		&cli.StringFlag{
+			Name:     "service-account-name",
+			Usage:    "Override default ServiceAccount name",
+			Value:    "aicr",
+			Category: "Agent Deployment",
+		},
+		&cli.StringSliceFlag{
+			Name:     "node-selector",
+			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated)",
+			Category: "Agent Deployment",
+		},
+		&cli.StringSliceFlag{
+			Name:     "toleration",
+			Usage:    "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated. Specifying this flag overrides the defaults.",
+			Category: "Agent Deployment",
+		},
+		&cli.DurationFlag{
+			Name:     "timeout",
+			Usage:    "Timeout for waiting for Job completion",
+			Value:    defaults.CLISnapshotTimeout,
+			Category: "Agent Deployment",
+		},
+		&cli.BoolFlag{
+			Name:     "cleanup",
+			Value:    true,
+			Usage:    "Remove Job and RBAC resources on completion",
+			Category: "Agent Deployment",
+		},
+		&cli.BoolFlag{
+			Name:     "privileged",
+			Value:    true,
+			Usage:    "Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces.",
+			Category: "Agent Deployment",
+		},
+		&cli.BoolFlag{
+			Name:     "require-gpu",
+			Sources:  cli.EnvVars("AICR_REQUIRE_GPU"),
+			Usage:    "Require GPU detection. Fails the snapshot if no GPU is found. In agent mode, also requests nvidia.com/gpu resource for the pod (required in CDI environments).",
+			Category: "Agent Deployment",
+		},
+		&cli.StringFlag{
+			Name:     "template",
+			Usage:    "Path to Go template file for custom output formatting (requires YAML format)",
+			Category: "Output",
+		},
+		&cli.StringSliceFlag{
+			Name:     "helm-namespaces",
+			Usage:    "Namespaces for Helm release collection (creates scoped RBAC for secrets access). Mutually exclusive with --helm-all-namespaces.",
+			Category: "Helm Collection",
+		},
+		&cli.BoolFlag{
+			Name:     "helm-all-namespaces",
+			Usage:    "Grant cluster-wide secrets access for Helm release collection. Mutually exclusive with --helm-namespaces.",
+			Category: "Helm Collection",
+		},
+		outputFlag,
+		formatFlag,
+		kubeconfigFlag,
+	}
+}
+
 func snapshotCmd() *cli.Command {
 	return &cli.Command{
 		Name:                  "snapshot",
@@ -126,77 +214,7 @@ The template receives the full Snapshot struct with Header (Kind, APIVersion, Me
 and Measurements array. Sprig template functions are available for rich formatting.
 See examples/templates/snapshot-template.md.tmpl for a sample template.
 `,
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:    "namespace",
-				Usage:   "Kubernetes namespace for agent deployment",
-				Sources: cli.EnvVars("AICR_NAMESPACE"),
-				Value:   "gpu-operator",
-			},
-			&cli.StringFlag{
-				Name:    "image",
-				Usage:   "Container image for agent Job",
-				Sources: cli.EnvVars("AICR_IMAGE"),
-				Value:   "ghcr.io/nvidia/aicr-validator:latest",
-			},
-			&cli.StringSliceFlag{
-				Name:  "image-pull-secret",
-				Usage: "Secret name for pulling images from private registries (can be repeated)",
-			},
-			&cli.StringFlag{
-				Name:  "job-name",
-				Usage: "Override default Job name",
-				Value: "aicr",
-			},
-			&cli.StringFlag{
-				Name:  "service-account-name",
-				Usage: "Override default ServiceAccount name",
-				Value: "aicr",
-			},
-			&cli.StringSliceFlag{
-				Name:  "node-selector",
-				Usage: "Node selector for Job scheduling (format: key=value, can be repeated)",
-			},
-			&cli.StringSliceFlag{
-				Name:  "toleration",
-				Usage: "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated. Specifying this flag overrides the defaults.",
-			},
-			&cli.DurationFlag{
-				Name:  "timeout",
-				Usage: "Timeout for waiting for Job completion",
-				Value: defaults.CLISnapshotTimeout,
-			},
-			&cli.BoolFlag{
-				Name:  "cleanup",
-				Value: true,
-				Usage: "Remove Job and RBAC resources on completion",
-			},
-			&cli.BoolFlag{
-				Name:  "privileged",
-				Value: true,
-				Usage: "Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces.",
-			},
-			&cli.BoolFlag{
-				Name:    "require-gpu",
-				Sources: cli.EnvVars("AICR_REQUIRE_GPU"),
-				Usage:   "Require GPU detection. Fails the snapshot if no GPU is found. In agent mode, also requests nvidia.com/gpu resource for the pod (required in CDI environments).",
-			},
-			&cli.StringFlag{
-				Name:  "template",
-				Usage: "Path to Go template file for custom output formatting (requires YAML format)",
-			},
-			&cli.StringSliceFlag{
-				Name:  "helm-namespaces",
-				Usage: "Namespaces for Helm release collection (creates scoped RBAC for secrets access). Mutually exclusive with --helm-all-namespaces.",
-			},
-			&cli.BoolFlag{
-				Name:  "helm-all-namespaces",
-				Usage: "Grant cluster-wide secrets access for Helm release collection. Mutually exclusive with --helm-namespaces.",
-			},
-			outputFlag,
-			formatFlag,
-			kubeconfigFlag,
-		},
+		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "output", "format"); err != nil {

@@ -16,6 +16,8 @@ package server
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -123,7 +125,7 @@ func TestRateLimiting(t *testing.T) {
 	}
 
 	// Create a custom config with very restrictive rate limiting
-	cfg := NewConfig()
+	cfg := parseConfig()
 	cfg.RateLimit = 1      // 1 req/sec
 	cfg.RateLimitBurst = 1 // burst of 1
 	cfg.Handlers = routes
@@ -239,7 +241,7 @@ func TestGracefulShutdown(t *testing.T) {
 		},
 	}
 
-	cfg := NewConfig()
+	cfg := parseConfig()
 	cfg.Port = 18080 // Use a different port to avoid conflicts
 	cfg.ShutdownTimeout = 100 * time.Millisecond
 	cfg.Handlers = routes
@@ -255,8 +257,17 @@ func TestGracefulShutdown(t *testing.T) {
 		errChan <- s.Start(ctx)
 	}()
 
-	// Wait for server to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to start by polling the listen address
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Cancel context to trigger shutdown
 	cancel()
@@ -398,7 +409,7 @@ func TestWithHandler(t *testing.T) {
 }
 
 func TestWithConfig(t *testing.T) {
-	cfg := NewConfig()
+	cfg := parseConfig()
 	cfg.Name = "test-server"
 	cfg.Port = 9090
 	cfg.RateLimit = 500

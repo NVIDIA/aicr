@@ -77,7 +77,7 @@
 //
 // Creating a custom structured logger for API servers:
 //
-//	logger := logging.NewStructuredLogger("api-server", "v2.0.0", "debug")
+//	logging.SetDefaultStructuredLoggerWithLevel("api-server", "v2.0.0", "debug")
 //	logger.Debug("server starting", "port", 8080)
 //
 // Setting explicit log level:
@@ -86,7 +86,7 @@
 //
 // Converting standard library logger:
 //
-//	stdLogger := logging.NewLogLogger(slog.LevelInfo, false)
+//	logging.SetDefaultLoggerWithLevel("myapp", "v1.0.0", "info")
 //	stdLogger.Println("legacy log message")
 //
 // # Environment Configuration

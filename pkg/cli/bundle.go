@@ -243,6 +243,7 @@ Package with explicit tag (overrides CLI version):
 				Required: true,
 				Usage: `Path/URI to previously generated recipe from which to build the bundle.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).`,
+				Category: "Input",
 			},
 			&cli.StringFlag{
 				Name:    "output",
@@ -252,51 +253,62 @@ Package with explicit tag (overrides CLI version):
 	For local output: ./my-bundle or /tmp/bundle
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
 	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)`,
+				Category: "Output",
 			},
 			&cli.StringSliceFlag{
 				Name: "set",
-				Usage: `Override values in generated bundle files 
+				Usage: `Override values in generated bundle files
 	(format: bundler:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true)`,
+				Category: "Deployment",
 			},
 			&cli.StringSliceFlag{
-				Name:  "system-node-selector",
-				Usage: "Node selector for system components (format: key=value, can be repeated)",
+				Name:     "system-node-selector",
+				Usage:    "Node selector for system components (format: key=value, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "system-node-toleration",
-				Usage: "Toleration for system components (format: key=value:effect, can be repeated)",
+				Name:     "system-node-toleration",
+				Usage:    "Toleration for system components (format: key=value:effect, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "accelerated-node-selector",
-				Usage: "Node selector for accelerated/GPU nodes (format: key=value, can be repeated)",
+				Name:     "accelerated-node-selector",
+				Usage:    "Node selector for accelerated/GPU nodes (format: key=value, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "accelerated-node-toleration",
-				Usage: "Toleration for accelerated/GPU nodes (format: key=value:effect, can be repeated)",
+				Name:     "accelerated-node-toleration",
+				Usage:    "Toleration for accelerated/GPU nodes (format: key=value:effect, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringFlag{
-				Name:  "workload-gate",
-				Usage: "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Name:     "workload-gate",
+				Usage:    "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "workload-selector",
-				Usage: "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+				Name:     "workload-selector",
+				Usage:    "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+				Category: "Scheduling",
 			},
 			&cli.IntFlag{
-				Name:  "nodes",
-				Value: 0,
-				Usage: "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+				Name:     "nodes",
+				Value:    0,
+				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+				Category: "Scheduling",
 			},
 			&cli.StringFlag{
-				Name:    "deployer",
-				Aliases: []string{"d"},
-				Value:   string(config.DeployerHelm),
-				Usage:   fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
+				Name:     "deployer",
+				Aliases:  []string{"d"},
+				Value:    string(config.DeployerHelm),
+				Usage:    fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
+				Category: "Deployment",
 			},
 			&cli.StringFlag{
-				Name:  "repo",
-				Value: "",
-				Usage: "Git repository URL for ArgoCD applications (only used with --deployer argocd)",
+				Name:     "repo",
+				Value:    "",
+				Usage:    "Git repository URL for ArgoCD applications (only used with --deployer argocd)",
+				Category: "Deployment",
 			},
 			&cli.BoolFlag{
 				Name:  "attest",
@@ -323,16 +335,19 @@ Package with explicit tag (overrides CLI version):
 			dataFlag,
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
-				Name:  "insecure-tls",
-				Usage: "Skip TLS certificate verification for OCI registry",
+				Name:     "insecure-tls",
+				Usage:    "Skip TLS certificate verification for OCI registry",
+				Category: "OCI Registry",
 			},
 			&cli.BoolFlag{
-				Name:  "plain-http",
-				Usage: "Use HTTP instead of HTTPS for OCI registry (for local development)",
+				Name:     "plain-http",
+				Usage:    "Use HTTP instead of HTTPS for OCI registry (for local development)",
+				Category: "OCI Registry",
 			},
 			&cli.StringFlag{
-				Name:  "image-refs",
-				Usage: "Path to file where the published image reference will be written (only used with OCI output)",
+				Name:     "image-refs",
+				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
+				Category: "OCI Registry",
 			},
 		},
 		Action: runBundleCmd,

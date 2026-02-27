@@ -587,7 +587,9 @@ VERSION_ID="22.04"`,
 			if _, writeErr := tmpfile.WriteString(tt.releaseContent); writeErr != nil {
 				t.Fatalf("Failed to write temp file: %v", writeErr)
 			}
-			tmpfile.Close()
+			if closeErr := tmpfile.Close(); closeErr != nil {
+				t.Fatalf("Failed to close temp file: %v", closeErr)
+			}
 
 			// Temporarily override the file path variables
 			originalPrimary := filePathReleasePrimary

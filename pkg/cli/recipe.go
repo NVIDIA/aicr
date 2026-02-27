@@ -29,6 +29,61 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
+func recipeCmdFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:     "service",
+			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
+			Category: "Query Parameters",
+		},
+		&cli.StringFlag{
+			Name:     "accelerator",
+			Aliases:  []string{"gpu"},
+			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
+			Category: "Query Parameters",
+		},
+		&cli.StringFlag{
+			Name:     "intent",
+			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
+			Category: "Query Parameters",
+		},
+		&cli.StringFlag{
+			Name:     "os",
+			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
+			Category: "Query Parameters",
+		},
+		&cli.StringFlag{
+			Name:     "platform",
+			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
+			Category: "Query Parameters",
+		},
+		&cli.IntFlag{
+			Name:     "nodes",
+			Usage:    "Number of worker/GPU nodes in the cluster",
+			Category: "Query Parameters",
+		},
+		&cli.StringFlag{
+			Name:    "snapshot",
+			Aliases: []string{"s"},
+			Usage: `Path/URI to previously generated configuration snapshot.
+	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
+	If provided, criteria are extracted from the snapshot.`,
+			Category: "Input",
+		},
+		&cli.StringFlag{
+			Name:    "criteria",
+			Aliases: []string{"c"},
+			Usage: `Path to criteria file (YAML/JSON), alternative to individual flags.
+	Criteria file fields can be overridden by individual flags.`,
+			Category: "Input",
+		},
+		dataFlag,
+		outputFlag,
+		formatFlag,
+		kubeconfigFlag,
+	}
+}
+
 func recipeCmd() *cli.Command {
 	return &cli.Command{
 		Name:                  "recipe",
@@ -67,50 +122,7 @@ Override criteria file values with flags:
 
 Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
-		Flags: []cli.Flag{
-			&cli.StringFlag{
-				Name:  "service",
-				Usage: fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
-			},
-			&cli.StringFlag{
-				Name:    "accelerator",
-				Aliases: []string{"gpu"},
-				Usage:   fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
-			},
-			&cli.StringFlag{
-				Name:  "intent",
-				Usage: fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
-			},
-			&cli.StringFlag{
-				Name:  "os",
-				Usage: fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
-			},
-			&cli.StringFlag{
-				Name:  "platform",
-				Usage: fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
-			},
-			&cli.IntFlag{
-				Name:  "nodes",
-				Usage: "Number of worker/GPU nodes in the cluster",
-			},
-			&cli.StringFlag{
-				Name:    "snapshot",
-				Aliases: []string{"s"},
-				Usage: `Path/URI to previously generated configuration snapshot.
-	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
-	If provided, criteria are extracted from the snapshot.`,
-			},
-			&cli.StringFlag{
-				Name:    "criteria",
-				Aliases: []string{"c"},
-				Usage: `Path to criteria file (YAML/JSON), alternative to individual flags.
-	Criteria file fields can be overridden by individual flags.`,
-			},
-			dataFlag,
-			outputFlag,
-			formatFlag,
-			kubeconfigFlag,
-		},
+		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "output", "format"); err != nil {

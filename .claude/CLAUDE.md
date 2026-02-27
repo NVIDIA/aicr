@@ -23,7 +23,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
  state         config         vs actual     manifests
 ```
 
-**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10, Ko for images
+**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10.1, Ko for images
 
 ## Commands
 
@@ -79,7 +79,7 @@ make tools-check  # Verify versions match .settings.yaml
 - Commit to `main` branch (not `master`)
 - Do use `-S` to cryptographically sign the commit
 - Do NOT add `Co-Authored-By` lines (organization policy)
-- Do not sign-off commits (no `-s` flag) unless the commit can't be cryptographically signed
+- Do not sign-off commits (no `-s` flag); cryptographic signing (`-S`) satisfies DCO for AI-authored commits
 
 ## Key Packages
 

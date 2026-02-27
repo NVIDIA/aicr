@@ -44,22 +44,25 @@ var (
 	date    = "unknown"
 
 	outputFlag = &cli.StringFlag{
-		Name:    "output",
-		Aliases: []string{"o"},
-		Usage:   fmt.Sprintf("output destination: file path, ConfigMap URI (%snamespace/name), or stdout (default)", serializer.ConfigMapURIScheme),
+		Name:     "output",
+		Aliases:  []string{"o"},
+		Usage:    fmt.Sprintf("output destination: file path, ConfigMap URI (%snamespace/name), or stdout (default)", serializer.ConfigMapURIScheme),
+		Category: "Output",
 	}
 
 	formatFlag = &cli.StringFlag{
-		Name:    "format",
-		Aliases: []string{"t"},
-		Value:   string(serializer.FormatYAML),
-		Usage:   fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
+		Name:     "format",
+		Aliases:  []string{"t"},
+		Value:    string(serializer.FormatYAML),
+		Usage:    fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
+		Category: "Output",
 	}
 
 	kubeconfigFlag = &cli.StringFlag{
-		Name:    "kubeconfig",
-		Aliases: []string{"k"},
-		Usage:   "Path to kubeconfig file (overrides KUBECONFIG env and default ~/.kube/config)",
+		Name:     "kubeconfig",
+		Aliases:  []string{"k"},
+		Usage:    "Path to kubeconfig file (overrides KUBECONFIG env and default ~/.kube/config)",
+		Category: "Input",
 	}
 
 	dataFlag = &cli.StringFlag{
@@ -68,6 +71,7 @@ var (
 	The directory must contain registry.yaml (required). Registry components are merged
 	with embedded (external takes precedence by name). All other files (base.yaml,
 	overlays, component values) fully replace embedded files or add new ones.`,
+		Category: "Input",
 	}
 )
 

@@ -824,21 +824,21 @@ func TestDataProviderGeneration(t *testing.T) {
 		dataProviderGeneration = originalGen
 	}()
 
-	startGen := GetDataProviderGeneration()
+	startGen := getDataProviderGeneration()
 
 	// Setting a provider should increment generation
 	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
 	SetDataProvider(embedded)
 
-	newGen := GetDataProviderGeneration()
+	newGen := getDataProviderGeneration()
 	if newGen != startGen+1 {
 		t.Errorf("expected generation %d, got %d", startGen+1, newGen)
 	}
 
 	// Setting again should increment again
 	SetDataProvider(embedded)
-	if GetDataProviderGeneration() != startGen+2 {
-		t.Errorf("expected generation %d, got %d", startGen+2, GetDataProviderGeneration())
+	if getDataProviderGeneration() != startGen+2 {
+		t.Errorf("expected generation %d, got %d", startGen+2, getDataProviderGeneration())
 	}
 }
 
