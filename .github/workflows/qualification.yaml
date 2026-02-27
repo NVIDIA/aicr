@@ -28,8 +28,8 @@ permissions:
 
 jobs:
 
-  unit:
-    name: Unit
+  test:
+    name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -46,67 +46,42 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
-      - name: Run Go CI (setup, test, lint)
-        uses: ./.github/actions/go-ci
+      - name: Run Go Tests
+        uses: ./.github/actions/go-test
+        with:
+          go_version: ${{ steps.versions.outputs.go }}
+          coverage_report: ${{ inputs.coverage_report }}
+          coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run Linters
+        uses: ./.github/actions/go-lint
         with:
           go_version: ${{ steps.versions.outputs.go }}
           golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
           addlicense_version: ${{ steps.versions.outputs.addlicense }}
-          coverage_report: ${{ inputs.coverage_report }}
-          coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
           lint_timeout: ${{ steps.versions.outputs.lint_timeout }}
-
-  integration:
-    name: Integration
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run Integration Tests
-        uses: ./.github/actions/integration
-        with:
-          go_version: ${{ steps.versions.outputs.go }}
-          helm_version: ${{ steps.versions.outputs.helm }}
-          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
-
-  chainsaw:
-    name: Conformance
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Load versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Run Conformance Tests
-        uses: ./.github/actions/chainsaw
-        with:
-          go_version: ${{ steps.versions.outputs.go }}
-          chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
 
   cli-e2e:
     name: CLI E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write

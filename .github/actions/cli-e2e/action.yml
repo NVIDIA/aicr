@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'CLI E2E Tests'
-description: 'Build attested aicr binary and run CLI chainsaw tests'
+description: 'Build attested aicr binary and run CLI + conformance chainsaw tests'
 
 inputs:
   go_version:
@@ -105,3 +105,12 @@ runs:
           --no-cluster \
           --config tests/chainsaw/chainsaw-config.yaml \
           --test-dir tests/chainsaw/cli/
+
+    - name: Run AI-conformance offline tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        chainsaw test \
+          --no-cluster \
+          --config tests/chainsaw/chainsaw-config.yaml \
+          --test-dir tests/chainsaw/ai-conformance/offline/

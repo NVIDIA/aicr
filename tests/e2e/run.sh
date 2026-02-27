@@ -186,77 +186,6 @@ check_api_health() {
 # CLI Recipe Tests (from e2e.md)
 # =============================================================================
 
-test_cli_recipe() {
-  msg "=========================================="
-  msg "Testing CLI recipe generation"
-  msg "=========================================="
-
-  local recipe_dir="${OUTPUT_DIR}/recipes"
-  mkdir -p "$recipe_dir"
-
-  # Test 1: Basic recipe with query parameters
-  msg "--- Test: Recipe with query parameters ---"
-  local basic_recipe="${recipe_dir}/basic.yaml"
-  echo -e "${DIM}  \$ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training -o basic.yaml${NC}"
-  if "${AICR_BIN}" recipe \
-    --service eks \
-    --accelerator h100 \
-    --os ubuntu \
-    --intent training \
-    --output "$basic_recipe" 2>&1; then
-    if [ -f "$basic_recipe" ] && grep -q "kind: RecipeResult" "$basic_recipe"; then
-      # Show components from recipe
-      local components
-      components=$(grep "^  - name:" "$basic_recipe" 2>/dev/null | wc -l | tr -d ' ')
-      detail "Generated recipe with ${components} components"
-      pass "cli/recipe/query-params"
-    else
-      fail "cli/recipe/query-params" "Recipe file invalid"
-    fi
-  else
-    fail "cli/recipe/query-params" "Command failed"
-  fi
-
-  # Test 2: Recipe from criteria file
-  msg "--- Test: Recipe from criteria file ---"
-  local criteria_file="${recipe_dir}/criteria.yaml"
-  cat > "$criteria_file" << 'EOF'
-kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
-metadata:
-  name: h100-eks-ubuntu-training
-spec:
-  service: eks
-  accelerator: h100
-  os: ubuntu
-  intent: training
-EOF
-
-  local criteria_recipe="${recipe_dir}/from-criteria.yaml"
-  if "${AICR_BIN}" recipe --criteria "$criteria_file" --output "$criteria_recipe" 2>&1; then
-    if [ -f "$criteria_recipe" ]; then
-      pass "cli/recipe/criteria-file"
-    else
-      fail "cli/recipe/criteria-file" "Recipe file not created"
-    fi
-  else
-    fail "cli/recipe/criteria-file" "Command failed"
-  fi
-
-  # Test 3: CLI flags override criteria file
-  msg "--- Test: CLI flags override criteria file ---"
-  local override_recipe="${recipe_dir}/override.yaml"
-  if "${AICR_BIN}" recipe --criteria "$criteria_file" --service gke --output "$override_recipe" 2>&1; then
-    if grep -q "service: gke" "$override_recipe" 2>/dev/null; then
-      pass "cli/recipe/override"
-    else
-      fail "cli/recipe/override" "Override not applied"
-    fi
-  else
-    fail "cli/recipe/override" "Command failed"
-  fi
-}
-
 # =============================================================================
 # API Recipe Tests (from e2e.md)
 # =============================================================================
@@ -309,122 +238,6 @@ spec:
 # =============================================================================
 # CLI Bundle Tests (from e2e.md)
 # =============================================================================
-
-test_cli_bundle() {
-  msg "=========================================="
-  msg "Testing CLI bundle generation"
-  msg "=========================================="
-
-  # First generate a recipe to use
-  local recipe_file="${OUTPUT_DIR}/bundle-test-recipe.yaml"
-  "${AICR_BIN}" recipe \
-    --service eks \
-    --accelerator h100 \
-    --os ubuntu \
-    --intent training \
-    --output "$recipe_file" 2>&1 || true
-
-  if [ ! -f "$recipe_file" ]; then
-    fail "cli/bundle/prerequisite" "Could not generate recipe for bundle tests"
-    return 1
-  fi
-
-  # Test 1: Basic bundle generation
-  msg "--- Test: Basic bundle ---"
-  local basic_bundle="${OUTPUT_DIR}/bundles/basic"
-  mkdir -p "$basic_bundle"
-  echo -e "${DIM}  \$ aicr bundle --recipe recipe.yaml --output bundles/basic${NC}"
-  if "${AICR_BIN}" bundle \
-    --recipe "$recipe_file" \
-    --output "$basic_bundle" 2>&1; then
-    if [ -f "${basic_bundle}/deploy.sh" ] && [ -f "${basic_bundle}/README.md" ]; then
-      local file_count
-      file_count=$(find "$basic_bundle" -type f | wc -l | tr -d ' ')
-      detail "Generated ${file_count} files in bundle"
-      # Verify at least one component directory has values.yaml
-      local comp_count
-      comp_count=$(find "$basic_bundle" -mindepth 2 -name "values.yaml" | wc -l | tr -d ' ')
-      if [ "$comp_count" -gt 0 ]; then
-        detail "Found ${comp_count} component directories"
-        pass "cli/bundle/basic"
-      else
-        fail "cli/bundle/basic" "No component directories with values.yaml"
-      fi
-    else
-      fail "cli/bundle/basic" "Missing deploy.sh or README.md"
-    fi
-  else
-    fail "cli/bundle/basic" "Command failed"
-  fi
-
-  # Test 2: Bundle with node selectors and tolerations
-  msg "--- Test: Bundle with scheduling options ---"
-  local sched_bundle="${OUTPUT_DIR}/bundles/scheduling"
-  mkdir -p "$sched_bundle"
-  if "${AICR_BIN}" bundle \
-    --recipe "$recipe_file" \
-    --output "$sched_bundle" \
-    --system-node-selector nodeGroup=system-pool \
-    --accelerated-node-selector nodeGroup=customer-gpu \
-    --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule 2>&1; then
-    # Search across all component values files for the node selector
-    local found_selector=false
-    for vfile in "${sched_bundle}"/*/values.yaml; do
-      if [ -f "$vfile" ] && grep -q "system-pool" "$vfile" 2>/dev/null; then
-        found_selector=true
-        break
-      fi
-    done
-    if [ "$found_selector" = true ]; then
-      pass "cli/bundle/scheduling"
-    else
-      fail "cli/bundle/scheduling" "Node selector not found in component values"
-    fi
-  else
-    fail "cli/bundle/scheduling" "Command failed"
-  fi
-
-  # Test 3: Bundle with ArgoCD deployer
-  msg "--- Test: Bundle with ArgoCD deployer ---"
-  local argocd_bundle="${OUTPUT_DIR}/bundles/argocd"
-  mkdir -p "$argocd_bundle"
-  if "${AICR_BIN}" bundle \
-    --recipe "$recipe_file" \
-    --output "$argocd_bundle" \
-    --deployer argocd 2>&1; then
-    if [ -f "${argocd_bundle}/app-of-apps.yaml" ]; then
-      pass "cli/bundle/argocd"
-    else
-      fail "cli/bundle/argocd" "app-of-apps.yaml not found"
-    fi
-  else
-    fail "cli/bundle/argocd" "Command failed"
-  fi
-
-  # Test 4: Verify bundle integrity (checksums)
-  msg "--- Test: Bundle integrity ---"
-  if [ -f "${basic_bundle}/checksums.txt" ]; then
-    cd "$basic_bundle"
-    if shasum -a 256 -c checksums.txt > /dev/null 2>&1; then
-      pass "cli/bundle/integrity"
-    else
-      fail "cli/bundle/integrity" "Checksum verification failed"
-    fi
-    cd - > /dev/null
-  else
-    skip "cli/bundle/integrity" "No checksums.txt"
-  fi
-
-  # Test 5: deploy.sh is executable
-  msg "--- Test: deploy.sh executable ---"
-  if [ -x "${basic_bundle}/deploy.sh" ]; then
-    pass "cli/bundle/deploy-script"
-  elif [ -f "${basic_bundle}/deploy.sh" ]; then
-    fail "cli/bundle/deploy-script" "deploy.sh exists but is not executable"
-  else
-    fail "cli/bundle/deploy-script" "deploy.sh not found"
-  fi
-}
 
 # =============================================================================
 # API Bundle Tests (from e2e.md)
@@ -484,28 +297,6 @@ test_api_bundle() {
 # =============================================================================
 # CLI Help Test
 # =============================================================================
-
-test_cli_help() {
-  msg "=========================================="
-  msg "Testing CLI help"
-  msg "=========================================="
-
-  # Test: aicr -h
-  msg "--- Test: aicr -h ---"
-  if "${AICR_BIN}" -h > /dev/null 2>&1; then
-    pass "cli/help"
-  else
-    fail "cli/help" "aicr -h failed"
-  fi
-
-  # Test: aicr --version
-  msg "--- Test: aicr --version ---"
-  if "${AICR_BIN}" --version > /dev/null 2>&1; then
-    pass "cli/version"
-  else
-    fail "cli/version" "aicr --version failed"
-  fi
-}
 
 # =============================================================================
 # Fake GPU Setup (for snapshot tests)
@@ -1677,69 +1468,6 @@ test_validate_job_deployment() {
 }
 
 
-test_external_data() {
-  msg "=========================================="
-  msg "Testing external data directory (--data flag)"
-  msg "=========================================="
-
-  local data_dir="${ROOT_DIR}/examples/data"
-  local external_dir="${OUTPUT_DIR}/external-data"
-  mkdir -p "$external_dir"
-
-  # Check if examples/data exists
-  if [ ! -d "$data_dir" ]; then
-    skip "cli/external-data" "examples/data directory not found"
-    return 0
-  fi
-
-  # Test 1: Recipe with external data (should include dgxc-teleport)
-  msg "--- Test: Recipe with external data ---"
-  local recipe_file="${external_dir}/recipe-with-external.yaml"
-  echo -e "${DIM}  \$ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training --data ./examples/data${NC}"
-  if "${AICR_BIN}" recipe \
-    --service eks \
-    --accelerator h100 \
-    --os ubuntu \
-    --intent training \
-    --data "$data_dir" \
-    --output "$recipe_file" 2>&1; then
-    if [ -f "$recipe_file" ]; then
-      # Check if dgxc-teleport component is included (from external registry)
-      if grep -q "dgxc-teleport" "$recipe_file" 2>/dev/null; then
-        detail "External component 'dgxc-teleport' included in recipe"
-        pass "cli/external-data/recipe"
-      else
-        # May not be included if overlay doesn't match exactly
-        warn "dgxc-teleport not in recipe (overlay may not match)"
-        pass "cli/external-data/recipe"
-      fi
-    else
-      fail "cli/external-data/recipe" "Recipe file not created"
-    fi
-  else
-    fail "cli/external-data/recipe" "Command failed"
-  fi
-
-  # Test 2: Bundle with external data
-  msg "--- Test: Bundle with external data ---"
-  local bundle_dir="${external_dir}/bundle"
-  mkdir -p "$bundle_dir"
-  echo -e "${DIM}  \$ aicr bundle --recipe recipe.yaml --data ./examples/data --output ./bundle${NC}"
-  if "${AICR_BIN}" bundle \
-    --recipe "$recipe_file" \
-    --data "$data_dir" \
-    --output "$bundle_dir" 2>&1; then
-    if [ -f "${bundle_dir}/deploy.sh" ]; then
-      detail "Bundle generated with external data"
-      pass "cli/external-data/bundle"
-    else
-      fail "cli/external-data/bundle" "deploy.sh not found"
-    fi
-  else
-    fail "cli/external-data/bundle" "Command failed"
-  fi
-}
-
 # =============================================================================
 # API Metrics Tests
 # =============================================================================
@@ -1781,175 +1509,6 @@ test_api_metrics() {
 # =============================================================================
 # Output Format Tests (--format json/table)
 # =============================================================================
-
-test_output_formats() {
-  msg "=========================================="
-  msg "Testing output format variations"
-  msg "=========================================="
-
-  local format_dir="${OUTPUT_DIR}/formats"
-  mkdir -p "$format_dir"
-
-  # Test 1: Recipe with JSON format
-  msg "--- Test: Recipe with --format json ---"
-  local json_recipe="${format_dir}/recipe.json"
-  echo -e "${DIM}  \$ aicr recipe --service eks --accelerator h100 --intent inference --format json${NC}"
-  if "${AICR_BIN}" recipe \
-    --service eks \
-    --accelerator h100 \
-    --intent inference \
-    --format json \
-    --output "$json_recipe" 2>&1; then
-    if [ -f "$json_recipe" ]; then
-      # Verify it's valid JSON
-      if command -v jq &> /dev/null; then
-        if jq -e . "$json_recipe" > /dev/null 2>&1; then
-          local component_count
-          component_count=$(jq '.spec.components | length' "$json_recipe" 2>/dev/null || echo "?")
-          detail "Valid JSON with ${component_count} components"
-          pass "cli/format/json"
-        else
-          fail "cli/format/json" "Invalid JSON output"
-        fi
-      else
-        # No jq, just check it starts with { or [
-        if head -c1 "$json_recipe" | grep -q '[{[]'; then
-          detail "JSON format detected (jq not available for validation)"
-          pass "cli/format/json"
-        else
-          fail "cli/format/json" "Output doesn't look like JSON"
-        fi
-      fi
-    else
-      fail "cli/format/json" "Output file not created"
-    fi
-  else
-    fail "cli/format/json" "Command failed"
-  fi
-
-  # Test 2: Recipe with table format
-  msg "--- Test: Recipe with --format table ---"
-  local table_recipe="${format_dir}/recipe.txt"
-  echo -e "${DIM}  \$ aicr recipe --service eks --accelerator h100 --intent inference --format table${NC}"
-  if "${AICR_BIN}" recipe \
-    --service eks \
-    --accelerator h100 \
-    --intent inference \
-    --format table \
-    --output "$table_recipe" 2>&1; then
-    if [ -f "$table_recipe" ] && [ -s "$table_recipe" ]; then
-      # Table format should have human-readable output (not YAML/JSON)
-      # Check it doesn't start with typical YAML/JSON markers
-      if ! head -c1 "$table_recipe" | grep -q '[{[]' && ! head -1 "$table_recipe" | grep -q "^kind:"; then
-        local line_count
-        line_count=$(wc -l < "$table_recipe" | tr -d ' ')
-        detail "Table format output (${line_count} lines)"
-        pass "cli/format/table"
-      else
-        fail "cli/format/table" "Output appears to be YAML/JSON, not table"
-      fi
-    else
-      fail "cli/format/table" "Output file empty or not created"
-    fi
-  else
-    fail "cli/format/table" "Command failed"
-  fi
-
-  # Test 3: Snapshot format (if available)
-  if [ "$FAKE_GPU_ENABLED" = "true" ] && kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
-    msg "--- Test: Validate with --format json ---"
-    local json_validate="${format_dir}/validate.json"
-
-    # Generate recipe first
-    local recipe_for_validate="${format_dir}/recipe-for-validate.yaml"
-    "${AICR_BIN}" recipe \
-      --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-      --intent training \
-      --output "$recipe_for_validate" 2>&1 || true
-
-    if [ -f "$recipe_for_validate" ]; then
-      echo -e "${DIM}  \$ aicr validate --recipe recipe.yaml --snapshot cm://... --format json${NC}"
-      if "${AICR_BIN}" validate \
-        --recipe "$recipe_for_validate" \
-        --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-        --format json \
-        --output "$json_validate" 2>&1; then
-        if [ -f "$json_validate" ] && [ -s "$json_validate" ]; then
-          detail "Validation output in JSON format"
-          pass "cli/format/validate-json"
-        else
-          warn "Validation JSON output empty (may be expected)"
-          pass "cli/format/validate-json"
-        fi
-      else
-        warn "Validate with JSON format had issues"
-        pass "cli/format/validate-json"
-      fi
-    else
-      skip "cli/format/validate-json" "Could not generate recipe"
-    fi
-  else
-    skip "cli/format/validate-json" "Snapshot not available"
-  fi
-}
-
-# =============================================================================
-# Deploy Agent CLI Tests
-# =============================================================================
-
-test_deploy_agent_cli() {
-  msg "=========================================="
-  msg "Testing snapshot agent CLI flags"
-  msg "=========================================="
-
-  # The snapshot command always deploys an agent Job.
-  # This test verifies the agent-related CLI flags are present and accepted.
-
-  local help_output
-  help_output=$("${AICR_BIN}" snapshot --help 2>&1)
-
-  # Test 1: Help shows agent-related flags
-  msg "--- Test: snapshot --help shows agent flags ---"
-  local missing_flags=()
-  for flag in "--namespace" "--image" "--node-selector" "--toleration" "--timeout" "--cleanup"; do
-    if ! echo "$help_output" | grep -q -- "$flag"; then
-      missing_flags+=("$flag")
-    fi
-  done
-
-  if [ ${#missing_flags[@]} -eq 0 ]; then
-    detail "All agent flags documented"
-    pass "cli/agent-flags/help"
-  else
-    fail "cli/agent-flags/help" "Missing flags: ${missing_flags[*]}"
-  fi
-
-  # Test 2: Agent flags are accepted (should fail with cluster error, not parse error)
-  msg "--- Test: agent flags accepted ---"
-  echo -e "${DIM}  \$ aicr snapshot --namespace test-ns --image test:latest (dry-run check)${NC}"
-
-  local deploy_output
-  deploy_output=$("${AICR_BIN}" snapshot --namespace nonexistent-test-ns --image "test:latest" 2>&1) || true
-
-  if echo "$deploy_output" | grep -qi "not found\|connection refused\|forbidden\|unauthorized\|cannot\|failed"; then
-    detail "Flags accepted (expected cluster error)"
-    pass "cli/agent-flags/accepted"
-  elif echo "$deploy_output" | grep -qi "unknown flag\|invalid\|usage"; then
-    fail "cli/agent-flags/accepted" "Flag parsing error"
-  else
-    detail "Command executed (output: ${deploy_output:0:50}...)"
-    pass "cli/agent-flags/accepted"
-  fi
-
-  # Test 3: Verify --image flag is supported
-  msg "--- Test: --image flag ---"
-  if echo "$help_output" | grep -q -- "--image"; then
-    detail "--image flag documented"
-    pass "cli/agent-flags/image-flag"
-  else
-    fail "cli/agent-flags/image-flag" "--image not in help output"
-  fi
-}
 
 # =============================================================================
 # OCI Bundle Tests (from e2e.md)
@@ -2062,9 +1621,6 @@ main() {
   # Build binaries
   build_binaries
 
-  # Run CLI help tests (always works)
-  test_cli_help
-
   # Check API is available
   if ! check_api_health; then
     warn "API not available, skipping API tests"
@@ -2073,14 +1629,10 @@ main() {
     API_AVAILABLE=true
   fi
 
-  # Run CLI tests (always)
-  test_cli_recipe
-  test_cli_bundle
-  test_external_data
-  test_output_formats
-  test_deploy_agent_cli
-
   # Run API tests (if available)
+  # NOTE: Pure CLI tests (recipe, bundle, help, output formats, external data,
+  # deploy agent flags) are covered by chainsaw CLI tests in the CLI E2E job.
+  # This script focuses on cluster-dependent tests only.
   if [ "$API_AVAILABLE" = true ]; then
     test_api_recipe
     test_api_bundle
