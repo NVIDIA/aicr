@@ -29,6 +29,7 @@ kubectl delete -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" --ignore-not-found
 echo "Uninstalling {{ .Name }} ({{ .Namespace }}) via kustomize..."
 kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
   | kubectl delete -n {{ .Namespace }} --ignore-not-found -f - || true
+kubectl delete pvc --all -n {{ .Namespace }} --ignore-not-found || true
 if [[ "${KEEP_NS}" == "false" ]] && ! echo " ${PROTECTED_NS} " | grep -q " {{ .Namespace }} " && kubectl get namespace {{ .Namespace }} &>/dev/null; then
   echo "Deleting namespace {{ .Namespace }}..."
   kubectl delete namespace {{ .Namespace }} --ignore-not-found
@@ -36,6 +37,7 @@ fi
 {{ else if .HasChart -}}
 echo "Uninstalling {{ .Name }} ({{ .Namespace }})..."
 helm uninstall {{ .Name }} -n {{ .Namespace }} --ignore-not-found || true
+kubectl delete pvc --all -n {{ .Namespace }} --ignore-not-found || true
 if [[ "${KEEP_NS}" == "false" ]] && ! echo " ${PROTECTED_NS} " | grep -q " {{ .Namespace }} " && kubectl get namespace {{ .Namespace }} &>/dev/null; then
   echo "Deleting namespace {{ .Namespace }}..."
   kubectl delete namespace {{ .Namespace }} --ignore-not-found
