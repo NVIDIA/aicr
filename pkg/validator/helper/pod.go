@@ -151,6 +151,8 @@ func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, pod *v1.Pod, timeo
 }
 
 // GetPodLogs retrieves logs from a pod
+//
+//nolint:unparam // string return used by callers in performance and deployment packages
 func (p *PodLifecycle) GetPodLogs(ctx context.Context, pod *v1.Pod) (string, error) {
 	// Check if pod has containers
 	if len(pod.Spec.Containers) == 0 {

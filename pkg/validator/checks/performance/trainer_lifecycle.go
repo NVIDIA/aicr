@@ -149,7 +149,19 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 
 		if err != nil {
 			if k8serrors.IsAlreadyExists(err) {
-				slog.Info("Trainer resource already exists, skipping", "kind", gvk.Kind, "name", obj.GetName())
+				// Update: enforce current resource state even when left from a prior partial install.
+				updateCtx, updateCancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+				if mapping.Scope.Name() == apimeta.RESTScopeNameNamespace {
+					_, err = dynamicClient.Resource(mapping.Resource).Namespace(ref.Namespace).Update(updateCtx, obj, metav1.UpdateOptions{})
+				} else {
+					_, err = dynamicClient.Resource(mapping.Resource).Update(updateCtx, obj, metav1.UpdateOptions{})
+				}
+				updateCancel()
+				if err != nil {
+					slog.Warn("Failed to update existing Trainer resource, continuing", "kind", gvk.Kind, "name", obj.GetName(), "error", err)
+				} else {
+					slog.Info("Updated existing Trainer resource", "kind", gvk.Kind, "name", obj.GetName())
+				}
 				continue
 			}
 			return applied, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
@@ -336,14 +348,14 @@ func extractTarGz(r io.Reader, targetDir string) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(path, 0750); err != nil {
+			if err := os.MkdirAll(path, 0750); err != nil { //nolint:gosec // G703 -- path sanitized by sanitizeTarPath above
 				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to create directory %s", path), err)
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+			if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil { //nolint:gosec // G703 -- path sanitized by sanitizeTarPath above
 				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to create parent dir for %s", path), err)
 			}
-			f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0640)
+			f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0640) //nolint:gosec // G703 -- path sanitized by sanitizeTarPath above
 			if err != nil {
 				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to create file %s", path), err)
 			}

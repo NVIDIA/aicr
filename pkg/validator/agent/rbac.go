@@ -45,7 +45,10 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)
+	}
+	return nil
 }
 
 // deleteServiceAccount deletes the ServiceAccount.
@@ -83,7 +86,7 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 			{
 				APIGroups: []string{""},
 				Resources: []string{"pods/log", "pods/status"},
-				Verbs:     []string{"get", "list", "watch"},
+				Verbs:     []string{"get", "list"},
 			},
 			{
 				APIGroups: []string{"batch"},
@@ -106,7 +109,10 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Role", err)
+	}
+	return nil
 }
 
 // deleteRole deletes the Role.
@@ -373,7 +379,10 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create RoleBinding", err)
+	}
+	return nil
 }
 
 // deleteRoleBinding deletes the RoleBinding.

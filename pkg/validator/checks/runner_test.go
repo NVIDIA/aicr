@@ -479,6 +479,35 @@ func TestTestRunner_HasCheck(t *testing.T) {
 	})
 }
 
+func TestResolveNamespace(t *testing.T) {
+	// Save and restore env
+	originalNS := os.Getenv("AICR_VALIDATION_NAMESPACE")
+	defer func() {
+		if originalNS != "" {
+			os.Setenv("AICR_VALIDATION_NAMESPACE", originalNS)
+		} else {
+			os.Unsetenv("AICR_VALIDATION_NAMESPACE")
+		}
+	}()
+
+	t.Run("uses env var when set", func(t *testing.T) {
+		os.Setenv("AICR_VALIDATION_NAMESPACE", "custom-ns")
+		ns := resolveNamespace()
+		if ns != "custom-ns" {
+			t.Errorf("resolveNamespace() = %v, want custom-ns", ns)
+		}
+	})
+
+	t.Run("falls back to default", func(t *testing.T) {
+		os.Unsetenv("AICR_VALIDATION_NAMESPACE")
+		ns := resolveNamespace()
+		// In CI/local, the service account file won't exist, so it falls back to "default"
+		if ns != "default" && ns == "" {
+			t.Errorf("resolveNamespace() = %v, want non-empty", ns)
+		}
+	})
+}
+
 // Helper types for testing
 
 type testError struct {

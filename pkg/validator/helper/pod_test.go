@@ -15,9 +15,14 @@
 package helper
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestLoadPodFromTemplate(t *testing.T) {
@@ -109,6 +114,90 @@ invalid: [unclosed`,
 				}
 			}
 		})
+	}
+}
+
+func TestPodLifecycleCleanupPod(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "test-ns",
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{{Name: "test", Image: "test:latest"}},
+		},
+	}
+
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	clientset := fake.NewSimpleClientset(pod)
+
+	p := &PodLifecycle{
+		ClientSet: clientset,
+		Namespace: "test-ns",
+	}
+
+	err := p.CleanupPod(context.Background(), pod)
+	if err != nil {
+		t.Fatalf("CleanupPod() error = %v", err)
+	}
+
+	// Verify pod is deleted
+	_, err = clientset.CoreV1().Pods("test-ns").Get(context.Background(), "test-pod", metav1.GetOptions{})
+	if err == nil {
+		t.Error("Pod should be deleted after CleanupPod")
+	}
+}
+
+func TestPodLifecycleGetPodLogs(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "test-ns",
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{{Name: "test", Image: "test:latest"}},
+		},
+	}
+
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	clientset := fake.NewSimpleClientset(pod)
+
+	p := &PodLifecycle{
+		ClientSet: clientset,
+		Namespace: "test-ns",
+	}
+
+	// The fake clientset returns empty logs but no error
+	logs, err := p.GetPodLogs(context.Background(), pod)
+	if err != nil {
+		t.Fatalf("GetPodLogs() error = %v", err)
+	}
+	// Fake client returns empty logs
+	_ = logs
+}
+
+func TestPodLifecycleGetPodLogsNoContainers(t *testing.T) {
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "test-ns",
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{},
+		},
+	}
+
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	clientset := fake.NewSimpleClientset(pod)
+
+	p := &PodLifecycle{
+		ClientSet: clientset,
+		Namespace: "test-ns",
+	}
+
+	_, err := p.GetPodLogs(context.Background(), pod)
+	if err == nil {
+		t.Error("GetPodLogs() should error for pod with no containers")
 	}
 }
 

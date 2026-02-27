@@ -164,13 +164,16 @@ func TestEnsureRole(t *testing.T) {
 			t.Errorf("expected get/list/watch/create/update/patch/delete verbs for pods, got %v", rule2.Verbs)
 		}
 
-		// Rule 3: pods/log, pods/status (get, list)
+		// Rule 3: pods/log, pods/status (get, list — no watch needed for subresources)
 		rule3 := role.Rules[3]
 		if !containsResource(rule3.Resources, "pods/log") || !containsResource(rule3.Resources, "pods/status") {
 			t.Errorf("expected pods/log and pods/status in fourth rule, got %v", rule3.Resources)
 		}
 		if !containsVerb(rule3.Verbs, "get") || !containsVerb(rule3.Verbs, "list") {
 			t.Errorf("expected get/list verbs for pod subresources, got %v", rule3.Verbs)
+		}
+		if containsVerb(rule3.Verbs, "watch") {
+			t.Error("pods/log and pods/status should not have watch verb (least privilege)")
 		}
 
 		// Rule 4: batch/jobs (get, list)

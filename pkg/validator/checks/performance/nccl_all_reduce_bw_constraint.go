@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -46,12 +47,36 @@ const (
 	// ncclTrainJobName is the name used for both the TrainJob resource and the label
 	// selector when waiting for the launcher pod. Must stay in sync with trainjob.yaml.
 	ncclTrainJobName = "nccl-all-reduce-tj"
+
+	// ncclTrainingRuntimeName is the name of the TrainingRuntime resource.
+	// Must stay in sync with runtime.yaml.
+	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
 )
+
+// Package-level GVR definitions for Kubeflow Trainer CRDs used by both
+// applyNCCLResources and cleanupNCCLResources.
+var (
+	trainJobGVR = schema.GroupVersionResource{
+		Group:    "trainer.kubeflow.org",
+		Version:  "v1alpha1",
+		Resource: "trainjobs",
+	}
+
+	trainingRuntimeGVR = schema.GroupVersionResource{
+		Group:    "trainer.kubeflow.org",
+		Version:  "v1alpha1",
+		Resource: "trainingruntimes",
+	}
+)
+
+// ncclBandwidthRe matches the 16G (17179869184 bytes) row in NCCL all-reduce output
+// and captures the first busbw column (in-place measurement).
+var ncclBandwidthRe = regexp.MustCompile(`\s+17179869184\s+\d+\s+\w+\s+\w+\s+-?\d+\s+[\d.]+\s+[\d.]+\s+([\d.]+)`)
 
 // templatePath returns the path to a testdata template file for the given
 // accelerator and service combination: testdata/{accelerator}/{service}/{filename}
 func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, filename string) string {
-	return fmt.Sprintf("testdata/%s/%s/%s", accelerator, service, filename)
+	return filepath.Join("testdata", string(accelerator), string(service), filename)
 }
 
 func init() {
@@ -265,19 +290,6 @@ func applyNCCLResources(ctx *checks.ValidationContext, dynamicClient dynamic.Int
 		"MAX_MESSAGE_SIZE":   maxMessageSize,
 	}
 
-	// Define GVRs for TrainingRuntime and TrainJob
-	trainingRuntimeGVR := schema.GroupVersionResource{
-		Group:    "trainer.kubeflow.org",
-		Version:  "v1alpha1",
-		Resource: "trainingruntimes",
-	}
-
-	trainJobGVR := schema.GroupVersionResource{
-		Group:    "trainer.kubeflow.org",
-		Version:  "v1alpha1",
-		Resource: "trainjobs",
-	}
-
 	// Apply runtime first
 	if err := applyYAMLWithDynamicClient(ctx.Context, dynamicClient, trainingRuntimeGVR, config.Namespace, templatePath(accelerator, service, "runtime.yaml"), templateData); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
@@ -406,8 +418,7 @@ func parseBandwidthFromLogs(logs string) (float64, error) {
 	// Look for the row corresponding to maxMessageSize (16G = 17179869184 bytes).
 	// NCCL output has two measurement sets (in-place and out-of-place); we capture the
 	// first busbw column (in-place), which is the standard benchmark metric for NCCL.
-	re := regexp.MustCompile(`\s+17179869184\s+\d+\s+\w+\s+\w+\s+-?\d+\s+[\d.]+\s+[\d.]+\s+([\d.]+)`)
-	matches := re.FindStringSubmatch(logs)
+	matches := ncclBandwidthRe.FindStringSubmatch(logs)
 
 	if len(matches) < 2 {
 		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal, "could not find bandwidth value in logs")
@@ -428,19 +439,6 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, namespace string) {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
 	defer cancel()
 
-	// Define GVRs
-	trainJobGVR := schema.GroupVersionResource{
-		Group:    "trainer.kubeflow.org",
-		Version:  "v1alpha1",
-		Resource: "trainjobs",
-	}
-
-	trainingRuntimeGVR := schema.GroupVersionResource{
-		Group:    "trainer.kubeflow.org",
-		Version:  "v1alpha1",
-		Resource: "trainingruntimes",
-	}
-
 	// Delete trainjob
 	err := dynamicClient.Resource(trainJobGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainJobName, metav1.DeleteOptions{})
 	if err != nil {
@@ -450,7 +448,7 @@ func cleanupNCCLResources(dynamicClient dynamic.Interface, namespace string) {
 	}
 
 	// Delete runtime
-	err = dynamicClient.Resource(trainingRuntimeGVR).Namespace(namespace).Delete(cleanupCtx, "nccl-all-reduce-runtime", metav1.DeleteOptions{})
+	err = dynamicClient.Resource(trainingRuntimeGVR).Namespace(namespace).Delete(cleanupCtx, ncclTrainingRuntimeName, metav1.DeleteOptions{})
 	if err != nil {
 		slog.Error("Warning: Failed to delete TrainingRuntime", "error", err)
 	} else {
