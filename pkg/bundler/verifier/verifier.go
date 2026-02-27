@@ -249,27 +249,31 @@ func resolveExecutablePath() string {
 func parseDSSEPayload(bundlePath string) ([]byte, error) {
 	data, err := os.ReadFile(bundlePath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read bundle file", err)
 	}
 
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, err
+	if err = json.Unmarshal(data, &raw); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to unmarshal bundle", err)
 	}
 
 	envelopeJSON, ok := raw["dsseEnvelope"]
 	if !ok {
-		return nil, fmt.Errorf("missing dsseEnvelope")
+		return nil, errors.New(errors.ErrCodeInternal, "missing dsseEnvelope")
 	}
 
 	var envelope struct {
 		Payload string `json:"payload"`
 	}
-	if err := json.Unmarshal(envelopeJSON, &envelope); err != nil {
-		return nil, err
+	if err = json.Unmarshal(envelopeJSON, &envelope); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to unmarshal dsseEnvelope", err)
 	}
 
-	return base64.StdEncoding.DecodeString(envelope.Payload)
+	decoded, err := base64.StdEncoding.DecodeString(envelope.Payload)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to decode DSSE payload", err)
+	}
+	return decoded, nil
 }
 
 // extractToolVersion reads a sigstore bundle file and extracts the tool version

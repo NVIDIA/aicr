@@ -85,7 +85,14 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if errors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().Roles(d.config.Namespace).Update(ctx, role, metav1.UpdateOptions{})
+		if err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to update Role", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // deleteRole deletes the Role.
@@ -322,7 +329,14 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if errors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().RoleBindings(d.config.Namespace).Update(ctx, rb, metav1.UpdateOptions{})
+		if err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to update RoleBinding", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // deleteRoleBinding deletes the RoleBinding.

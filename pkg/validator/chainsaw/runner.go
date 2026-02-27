@@ -174,22 +174,26 @@ func assertSingleDocument(ctx context.Context, expected map[string]interface{}, 
 	namespace, _ := metadata["namespace"].(string)
 
 	if apiVersion == "" || kind == "" || name == "" {
-		return fmt.Errorf("assert document missing required fields (apiVersion=%q, kind=%q, name=%q)", apiVersion, kind, name)
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("assert document missing required fields (apiVersion=%q, kind=%q, name=%q)", apiVersion, kind, name))
 	}
 
 	actual, err := fetcher.Fetch(ctx, apiVersion, kind, namespace, name)
 	if err != nil {
-		return fmt.Errorf("failed to fetch %s %s/%s: %w", kind, namespace, name, err)
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to fetch %s %s/%s", kind, namespace, name), err)
 	}
 
 	// Use chainsaw's assertion engine for subset matching with JMESPath support.
 	check := v1alpha1.NewCheck(expected)
 	errs, err := checks.Check(ctx, apis.DefaultCompilers, actual, nil, &check)
 	if err != nil {
-		return fmt.Errorf("assertion error for %s %s/%s: %w", kind, namespace, name, err)
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("assertion error for %s %s/%s", kind, namespace, name), err)
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("%s %s/%s: %s", kind, namespace, name, formatFieldErrors(errs))
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("%s %s/%s: %s", kind, namespace, name, formatFieldErrors(errs)))
 	}
 
 	return nil
@@ -215,7 +219,7 @@ func splitYAMLDocuments(raw string) ([]map[string]interface{}, error) {
 		}
 		var doc map[string]interface{}
 		if err := yaml.Unmarshal([]byte(part), &doc); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal YAML document: %w", err)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to unmarshal YAML document", err)
 		}
 		if len(doc) > 0 {
 			docs = append(docs, doc)

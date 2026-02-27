@@ -173,7 +173,7 @@ func (r *Renderer) buildEntries(conformance *validator.PhaseResult) []EvidenceEn
 }
 
 // renderEvidence writes a single evidence markdown file.
-func (r *Renderer) renderEvidence(entry EvidenceEntry) error {
+func (r *Renderer) renderEvidence(entry EvidenceEntry) (err error) {
 	tmpl, err := template.New("evidence").Funcs(templateFuncs()).Parse(evidenceTemplate)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse evidence template", err)
@@ -184,7 +184,11 @@ func (r *Renderer) renderEvidence(entry EvidenceEntry) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence file", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close evidence file", closeErr)
+		}
+	}()
 
 	if err := tmpl.Execute(f, entry); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to render evidence template", err)
@@ -194,7 +198,7 @@ func (r *Renderer) renderEvidence(entry EvidenceEntry) error {
 }
 
 // renderIndex writes the index.md summary file.
-func (r *Renderer) renderIndex(entries []EvidenceEntry, runID string) error {
+func (r *Renderer) renderIndex(entries []EvidenceEntry, runID string) (err error) {
 	tmpl, err := template.New("index").Funcs(templateFuncs()).Parse(indexTemplate)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse index template", err)
@@ -205,7 +209,11 @@ func (r *Renderer) renderIndex(entries []EvidenceEntry, runID string) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create index file", err)
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil && err == nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close index file", closeErr)
+		}
+	}()
 
 	data := struct {
 		GeneratedAt time.Time

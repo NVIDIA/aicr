@@ -125,8 +125,8 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 		}
 
 		mu.Lock()
+		defer mu.Unlock()
 		snap.Measurements = append(snap.Measurements, m)
-		mu.Unlock()
 	}
 
 	// Collect metadata (synchronous — needed before parallel collectors)

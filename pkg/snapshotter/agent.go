@@ -516,10 +516,10 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 }
 
 // processWithTemplate processes snapshot data through a Go template.
-func (n *NodeSnapshotter) processWithTemplate(ctx context.Context, snapshotData []byte, output string) error {
+func (n *NodeSnapshotter) processWithTemplate(ctx context.Context, snapshotData []byte, output string) (err error) {
 	// Unmarshal YAML to Snapshot struct
 	var snap Snapshot
-	if err := yaml.Unmarshal(snapshotData, &snap); err != nil {
+	if err = yaml.Unmarshal(snapshotData, &snap); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to unmarshal snapshot for template processing", err)
 	}
 
@@ -528,7 +528,11 @@ func (n *NodeSnapshotter) processWithTemplate(ctx context.Context, snapshotData 
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create template writer", err)
 	}
-	defer tw.Close()
+	defer func() {
+		if closeErr := tw.Close(); closeErr != nil && err == nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close template writer", closeErr)
+		}
+	}()
 
 	// Execute template
 	if err := tw.Serialize(ctx, &snap); err != nil {

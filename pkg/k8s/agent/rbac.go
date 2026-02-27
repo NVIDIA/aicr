@@ -18,10 +18,11 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -62,7 +63,14 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().Roles(d.config.Namespace).Update(ctx, role, metav1.UpdateOptions{})
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update Role", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // ensureRoleBinding creates the RoleBinding to bind the Role to the ServiceAccount.
@@ -88,7 +96,14 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().RoleBindings(d.config.Namespace).Update(ctx, rb, metav1.UpdateOptions{})
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update RoleBinding", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // helmSecretRoleName is the name used for per-namespace Helm secrets Roles and RoleBindings.
@@ -137,7 +152,14 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().ClusterRoles().Update(ctx, cr, metav1.UpdateOptions{})
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update ClusterRole", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // ensureHelmSecretRoles creates per-namespace Roles and RoleBindings for Helm secrets access.
@@ -183,7 +205,14 @@ func (d *Deployer) ensureHelmSecretRole(ctx context.Context, namespace string) e
 	}
 
 	_, err := d.clientset.RbacV1().Roles(namespace).Create(ctx, role, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().Roles(namespace).Update(ctx, role, metav1.UpdateOptions{})
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update Helm secret Role", err)
+		}
+		return nil
+	}
+	return err
 }
 
 func (d *Deployer) ensureHelmSecretRoleBinding(ctx context.Context, namespace string) error {
@@ -211,7 +240,14 @@ func (d *Deployer) ensureHelmSecretRoleBinding(ctx context.Context, namespace st
 	}
 
 	_, err := d.clientset.RbacV1().RoleBindings(namespace).Create(ctx, rb, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().RoleBindings(namespace).Update(ctx, rb, metav1.UpdateOptions{})
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update Helm secret RoleBinding", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // deleteHelmSecretRoles removes per-namespace Roles and RoleBindings for Helm secrets.
@@ -249,7 +285,14 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 	}
 
 	_, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
+	if apierrors.IsAlreadyExists(err) {
+		_, err = d.clientset.RbacV1().ClusterRoleBindings().Update(ctx, crb, metav1.UpdateOptions{})
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to update ClusterRoleBinding", err)
+		}
+		return nil
+	}
+	return err
 }
 
 // deleteServiceAccount deletes the ServiceAccount.

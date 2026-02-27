@@ -648,13 +648,13 @@ func (b *DefaultBundler) copyDataFiles(dir string) ([]string, error) {
 // dataFiles is the list of external data file paths (relative to bundle dir) to include
 // in resolvedDependencies. Returns the list of attestation files added, or nil if skipped.
 func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles []string, recipeResult *recipe.RecipeResult) ([]string, error) {
+	dir = filepath.Clean(dir)
 	if b.Attester == nil || b.Config == nil || !b.Config.Attest() {
 		return nil, nil
 	}
 
 	// Read checksums.txt and compute its digest
-	checksumPath := fmt.Sprintf("%s/%s", dir, checksum.ChecksumFileName)
-	digest, err := attestation.ComputeFileDigest(checksumPath)
+	digest, err := attestation.ComputeFileDigest(filepath.Join(dir, checksum.ChecksumFileName))
 	if err != nil {
 		// If checksums don't exist (IncludeChecksums=false), attestation is not possible
 		slog.Debug("attestation not possible: checksums not available", "error", err)
