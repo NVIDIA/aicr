@@ -28,7 +28,9 @@
   │  $ aicr bundle --recipe recipe.yaml \                                  │
   │      --accelerated-node-selector nodeGroup=gpu-worker \                │
   │      --accelerated-node-toleration dedicated=worker-workload:NoSchedule│
+  │      --accelerated-node-toleration dedicated=worker-workload:NoExecute │
   │      --system-node-toleration dedicated=system-workload:NoSchedule     │
+  │      --system-node-toleration dedicated=system-workload:NoExecute      │
   │                                                                        │
   │  recipe.yaml ──▶ bundle/                                               │
   │    ├── deploy.sh                                                       │
@@ -143,11 +145,13 @@
       --output recipe.yaml
 ```
 ```
-aicr bundle --recipe recipe.yaml \
-       --accelerated-node-selector nodeGroup=gpu-worker \
-       --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
-       --system-node-toleration dedicated=system-workload:NoSchedule \
-       --output bundle
+   aicr bundle --recipe recipe.yaml \
+    --accelerated-node-selector nodeGroup=gpu-worker \
+    --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+    --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+    --system-node-toleration dedicated=system-workload:NoSchedule \
+    --system-node-toleration dedicated=system-workload:NoExecute \
+    --output bundle
 ```
 
 ## Dynamo Platform — Components & Deployment
