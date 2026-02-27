@@ -12,6 +12,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Prerequisites:
+#   kubectl create namespace dynamo-workload
+#   kubectl apply -f kai-scheduler-queue.yaml
+
+---
+# KAI Scheduler queue for Dynamo workloads
+apiVersion: scheduling.run.ai/v2
+kind: Queue
+metadata:
+  name: dynamo
+spec:
+  parentQueue: default-parent-queue
+  resources:
+    gpu:
+      limit: -1
+      overQuotaWeight: 1
+      quota: 0
+    cpu:
+      limit: -1
+      overQuotaWeight: 1
+      quota: 0
+    memory:
+      limit: -1
+      overQuotaWeight: 1
+      quota: 0
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dynamo-workload
+
+---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
@@ -22,21 +55,32 @@ spec:
     Frontend:
       componentType: frontend
       replicas: 1
-      envFromSecret: hf-token-secret
       envs:
         - name: SERVED_MODEL_NAME
           value: Qwen/Qwen3-0.6B
       extraPodSpec:
+        nodeSelector:
+          nodeGroup: cpu-worker
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
     VllmDecodeWorker:
       componentType: worker
       replicas: 1
-      envFromSecret: hf-token-secret
       resources:
         limits:
           gpu: "1"
       extraPodSpec:
+        nodeSelector:
+          nodeGroup: gpu-worker
+        tolerations:
+          - key: dedicated
+            operator: Equal
+            value: worker-workload
+            effect: NoSchedule
+          - key: dedicated
+            operator: Equal
+            value: worker-workload
+            effect: NoExecute
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
           workingDir: /workspace/examples/backends/vllm
