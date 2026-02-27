@@ -364,6 +364,7 @@ func validateCmdFlags() []cli.Flag {
 		// Agent deployment flags (used when --snapshot is not provided)
 		&cli.StringFlag{
 			Name:     "namespace",
+			Aliases:  []string{"n"},
 			Usage:    "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
 			Value:    "default",

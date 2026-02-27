@@ -74,6 +74,7 @@ func snapshotCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:     "namespace",
+			Aliases:  []string{"n"},
 			Usage:    "Kubernetes namespace for agent deployment",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
 			Value:    "default",
