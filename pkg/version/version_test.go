@@ -680,64 +680,6 @@ func TestCompare(t *testing.T) {
 	}
 }
 
-func TestIsValid(t *testing.T) {
-	tests := []struct {
-		name     string
-		version  Version
-		expected bool
-	}{
-		{
-			name:     "valid - full version",
-			version:  Version{Major: 1, Minor: 2, Patch: 3, Precision: 3},
-			expected: true,
-		},
-		{
-			name:     "valid - major only",
-			version:  Version{Major: 1, Minor: 0, Patch: 0, Precision: 1},
-			expected: true,
-		},
-		{
-			name:     "valid - major.minor",
-			version:  Version{Major: 1, Minor: 2, Patch: 0, Precision: 2},
-			expected: true,
-		},
-		{
-			name:     "invalid - negative major",
-			version:  Version{Major: -1, Minor: 2, Patch: 3, Precision: 3},
-			expected: false,
-		},
-		{
-			name:     "invalid - negative minor",
-			version:  Version{Major: 1, Minor: -2, Patch: 3, Precision: 3},
-			expected: false,
-		},
-		{
-			name:     "invalid - negative patch",
-			version:  Version{Major: 1, Minor: 2, Patch: -3, Precision: 3},
-			expected: false,
-		},
-		{
-			name:     "invalid - precision 0",
-			version:  Version{Major: 1, Minor: 2, Patch: 3, Precision: 0},
-			expected: false,
-		},
-		{
-			name:     "invalid - precision 4",
-			version:  Version{Major: 1, Minor: 2, Patch: 3, Precision: 4},
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := tt.version.IsValid()
-			if result != tt.expected {
-				t.Errorf("got %v, want %v", result, tt.expected)
-			}
-		})
-	}
-}
-
 func TestParseVersionErrors(t *testing.T) {
 	tests := []struct {
 		name        string

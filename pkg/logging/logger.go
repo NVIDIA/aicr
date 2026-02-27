@@ -45,6 +45,17 @@ func newTextLogger(module, version, level string) *slog.Logger {
 	})).With("module", module, "version", version)
 }
 
+// SetDefaultLoggerWithLevel initializes the text logger with the specified log level
+// and sets it as the default logger.
+// Defined module name and version are included in the logger's context.
+// Parameters:
+//   - module: The name of the module/application using the logger.
+//   - version: The version of the module/application (e.g., "v1.0.0").
+//   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
+func SetDefaultLoggerWithLevel(module, version, level string) {
+	slog.SetDefault(newTextLogger(module, version, level))
+}
+
 // SetDefaultStructuredLogger initializes the structured logger with the
 // appropriate log level and sets it as the default logger.
 // Defined module name and version are included in the logger's context.
@@ -65,29 +76,6 @@ func SetDefaultStructuredLogger(module, version string) {
 //   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
 func SetDefaultStructuredLoggerWithLevel(module, version, level string) {
 	slog.SetDefault(newStructuredLogger(module, version, level))
-}
-
-// SetDefaultLogger initializes the text logger with the
-// appropriate log level and sets it as the default logger.
-// Defined module name and version are included in the logger's context.
-// Parameters:
-//   - module: The name of the module/application using the logger.
-//   - version: The version of the module/application (e.g., "v1.0.0").
-//
-// Derives log level from the LOG_LEVEL environment variable.
-func SetDefaultLogger(module, version string) {
-	SetDefaultLoggerWithLevel(module, version, os.Getenv(EnvVarLogLevel))
-}
-
-// SetDefaultLoggerWithLevel initializes the text logger with the specified log level
-// and sets it as the default logger.
-// Defined module name and version are included in the logger's context.
-// Parameters:
-//   - module: The name of the module/application using the logger.
-//   - version: The version of the module/application (e.g., "v1.0.0").
-//   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
-func SetDefaultLoggerWithLevel(module, version, level string) {
-	slog.SetDefault(newTextLogger(module, version, level))
 }
 
 // ParseLogLevel converts a string representation of a log level into a slog.Level.

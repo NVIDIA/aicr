@@ -54,9 +54,14 @@ func FuzzParseVersion(f *testing.F) {
 
 		// If parsing succeeded, verify the version is valid
 		if err == nil {
-			// Version should be valid
-			if !v.IsValid() {
-				t.Errorf("ParseVersion(%q) returned invalid version: %+v", input, v)
+			// All version components should be non-negative
+			if v.Major < 0 || v.Minor < 0 || v.Patch < 0 {
+				t.Errorf("ParseVersion(%q) returned negative component: %+v", input, v)
+			}
+
+			// Precision should be 1, 2, or 3
+			if v.Precision < 1 || v.Precision > 3 {
+				t.Errorf("ParseVersion(%q) returned invalid precision: %d", input, v.Precision)
 			}
 
 			// String() should not panic
@@ -68,16 +73,6 @@ func FuzzParseVersion(f *testing.F) {
 				t.Errorf("Re-parsing %q (from %q) failed: %v", s, input, err2)
 			} else if v.Major != v2.Major || v.Minor != v2.Minor || v.Patch != v2.Patch || v.Precision != v2.Precision {
 				t.Errorf("Round-trip mismatch for %q: %+v != %+v", input, v, v2)
-			}
-
-			// All version components should be non-negative
-			if v.Major < 0 || v.Minor < 0 || v.Patch < 0 {
-				t.Errorf("ParseVersion(%q) returned negative component: %+v", input, v)
-			}
-
-			// Precision should be 1, 2, or 3
-			if v.Precision < 1 || v.Precision > 3 {
-				t.Errorf("ParseVersion(%q) returned invalid precision: %d", input, v.Precision)
 			}
 
 			// Test comparison methods don't panic

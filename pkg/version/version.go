@@ -275,15 +275,3 @@ func (v Version) Compare(other Version) int {
 
 	return 0
 }
-
-// IsValid returns true if the version has valid values.
-// All components must be non-negative and precision must be 1, 2, or 3.
-func (v Version) IsValid() bool {
-	if v.Major < 0 || v.Minor < 0 || v.Patch < 0 {
-		return false
-	}
-	if v.Precision < 1 || v.Precision > 3 {
-		return false
-	}
-	return true
-}

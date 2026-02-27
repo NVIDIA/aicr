@@ -151,8 +151,10 @@ license: ## Add/verify license headers in source files
 
 license-check: ## Check license is approved
 	@echo "Checking license headers..."
+	@STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
-        --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0
+        --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0 \
+        --ignore=$$STDLIB_IGNORE
 
 .PHONY: test
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)

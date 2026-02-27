@@ -35,16 +35,6 @@ func (k Kind) String() string {
 	return string(k)
 }
 
-// IsValid checks if the Kind is one of the recognized kinds.
-func (k *Kind) IsValid() bool {
-	switch *k {
-	case KindSnapshot, KindRecipe, KindRecipeResult, KindValidationResult:
-		return true
-	default:
-		return false
-	}
-}
-
 // New creates a new Header instance with an initialized Metadata map.
 func New() *Header {
 	return &Header{

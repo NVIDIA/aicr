@@ -176,51 +176,6 @@ func TestReference_String(t *testing.T) {
 	}
 }
 
-func TestReference_ImageReference(t *testing.T) {
-	tests := []struct {
-		name string
-		ref  *Reference
-		want string
-	}{
-		{
-			name: "local path returns empty",
-			ref: &Reference{
-				IsOCI:     false,
-				LocalPath: "./bundle",
-			},
-			want: "",
-		},
-		{
-			name: "OCI with tag",
-			ref: &Reference{
-				IsOCI:      true,
-				Registry:   "ghcr.io",
-				Repository: "nvidia/bundle",
-				Tag:        "v1.0.0",
-			},
-			want: "ghcr.io/nvidia/bundle:v1.0.0",
-		},
-		{
-			name: "OCI without tag",
-			ref: &Reference{
-				IsOCI:      true,
-				Registry:   "ghcr.io",
-				Repository: "nvidia/bundle",
-				Tag:        "",
-			},
-			want: "ghcr.io/nvidia/bundle",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.ref.ImageReference(); got != tt.want {
-				t.Errorf("Reference.ImageReference() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestReference_WithTag(t *testing.T) {
 	tests := []struct {
 		name    string

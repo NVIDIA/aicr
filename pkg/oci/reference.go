@@ -105,18 +105,6 @@ func (r *Reference) String() string {
 	return fmt.Sprintf("%s%s/%s:%s", URIScheme, r.Registry, r.Repository, r.Tag)
 }
 
-// ImageReference returns the Docker-style image reference (without oci:// scheme).
-// Returns empty string for non-OCI references.
-func (r *Reference) ImageReference() string {
-	if !r.IsOCI {
-		return ""
-	}
-	if r.Tag == "" {
-		return fmt.Sprintf("%s/%s", r.Registry, r.Repository)
-	}
-	return fmt.Sprintf("%s/%s:%s", r.Registry, r.Repository, r.Tag)
-}
-
 // WithTag returns a copy of the reference with the specified tag.
 // For non-OCI references, returns the same reference unchanged.
 func (r *Reference) WithTag(tag string) *Reference {

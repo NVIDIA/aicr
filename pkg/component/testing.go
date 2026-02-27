@@ -75,20 +75,6 @@ func (h *TestHarness) TestMake(bundler BundlerInterface) {
 	h.AssertResult(result, tmpDir)
 }
 
-// TestMakeWithConfig tests the Make method with a specific config.
-func (h *TestHarness) TestMakeWithConfig(bundler BundlerInterface, _ *config.Config) {
-	ctx := context.Background()
-	tmpDir := h.t.TempDir()
-
-	rec := h.getRecipe()
-	result, err := bundler.Make(ctx, rec, tmpDir)
-	if err != nil {
-		h.t.Fatalf("Make() error = %v", err)
-	}
-
-	h.AssertResult(result, tmpDir)
-}
-
 // AssertResult performs standard assertions on a bundler result.
 func (h *TestHarness) AssertResult(result *result.Result, outputDir string) {
 	if result == nil {
@@ -249,18 +235,6 @@ func ImageSubtype(images map[string]string) measurement.Subtype {
 	}
 }
 
-// RegistrySubtype creates a registry subtype with registry information.
-func RegistrySubtype(registry map[string]string) measurement.Subtype {
-	data := make(map[string]measurement.Reading)
-	for k, v := range registry {
-		data[k] = measurement.Str(v)
-	}
-	return measurement.Subtype{
-		Name: "registry",
-		Data: data,
-	}
-}
-
 // ConfigSubtype creates a config subtype with common config data.
 func ConfigSubtype(configs map[string]any) measurement.Subtype {
 	data := make(map[string]measurement.Reading)
@@ -290,42 +264,6 @@ func SMISubtype(data map[string]string) measurement.Subtype {
 	}
 	return measurement.Subtype{
 		Name: "smi",
-		Data: readings,
-	}
-}
-
-// GrubSubtype creates a grub subtype for OS measurements.
-func GrubSubtype(data map[string]string) measurement.Subtype {
-	readings := make(map[string]measurement.Reading)
-	for k, v := range data {
-		readings[k] = measurement.Str(v)
-	}
-	return measurement.Subtype{
-		Name: "grub",
-		Data: readings,
-	}
-}
-
-// SysctlSubtype creates a sysctl subtype for OS measurements.
-func SysctlSubtype(data map[string]string) measurement.Subtype {
-	readings := make(map[string]measurement.Reading)
-	for k, v := range data {
-		readings[k] = measurement.Str(v)
-	}
-	return measurement.Subtype{
-		Name: "sysctl",
-		Data: readings,
-	}
-}
-
-// ServiceSubtype creates a service subtype for SystemD measurements.
-func ServiceSubtype(serviceName string, data map[string]string) measurement.Subtype {
-	readings := make(map[string]measurement.Reading)
-	for k, v := range data {
-		readings[k] = measurement.Str(v)
-	}
-	return measurement.Subtype{
-		Name: serviceName,
 		Data: readings,
 	}
 }
@@ -378,64 +316,6 @@ func AssertConfigValue(t *testing.T, config map[string]string, key, expected str
 	} else if val != expected {
 		t.Errorf("Config[%s] = %s, want %s", key, val, expected)
 	}
-}
-
-// RecipeResultBuilder helps build test RecipeResult objects with fluent API.
-type RecipeResultBuilder struct {
-	componentRefs []recipe.ComponentRef
-	criteria      *recipe.Criteria
-}
-
-// NewRecipeResultBuilder creates a new RecipeResult builder.
-func NewRecipeResultBuilder() *RecipeResultBuilder {
-	return &RecipeResultBuilder{
-		componentRefs: []recipe.ComponentRef{},
-		criteria:      &recipe.Criteria{},
-	}
-}
-
-// WithComponent adds a component reference with inline overrides.
-func (rb *RecipeResultBuilder) WithComponent(name, version string, overrides map[string]any) *RecipeResultBuilder {
-	rb.componentRefs = append(rb.componentRefs, recipe.ComponentRef{
-		Name:      name,
-		Version:   version,
-		Overrides: overrides,
-	})
-	return rb
-}
-
-// WithComponentAndSource adds a component reference with source and inline overrides.
-func (rb *RecipeResultBuilder) WithComponentAndSource(name, version, source string, overrides map[string]any) *RecipeResultBuilder {
-	rb.componentRefs = append(rb.componentRefs, recipe.ComponentRef{
-		Name:      name,
-		Version:   version,
-		Source:    source,
-		Overrides: overrides,
-	})
-	return rb
-}
-
-// Build creates the RecipeResult.
-func (rb *RecipeResultBuilder) Build() *recipe.RecipeResult {
-	return &recipe.RecipeResult{
-		Kind:          "RecipeResult",
-		APIVersion:    recipe.RecipeAPIVersion,
-		ComponentRefs: rb.componentRefs,
-		Criteria:      rb.criteria,
-	}
-}
-
-// TestMakeWithRecipeResult tests the Make method using RecipeResult with inline overrides.
-func (h *TestHarness) TestMakeWithRecipeResult(bundler BundlerInterface, recipeResult *recipe.RecipeResult) {
-	ctx := context.Background()
-	tmpDir := h.t.TempDir()
-
-	result, err := bundler.Make(ctx, recipeResult, tmpDir)
-	if err != nil {
-		h.t.Fatalf("Make() error = %v", err)
-	}
-
-	h.AssertResult(result, tmpDir)
 }
 
 // BundlerFactory is a function that creates a new bundler instance.

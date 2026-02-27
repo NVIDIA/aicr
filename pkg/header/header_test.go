@@ -54,58 +54,6 @@ func TestKind_String(t *testing.T) {
 	}
 }
 
-func TestKind_IsValid(t *testing.T) {
-	tests := []struct {
-		name string
-		kind Kind
-		want bool
-	}{
-		{
-			name: "Snapshot is valid",
-			kind: KindSnapshot,
-			want: true,
-		},
-		{
-			name: "Recipe is valid",
-			kind: KindRecipe,
-			want: true,
-		},
-		{
-			name: "RecipeResult is valid",
-			kind: KindRecipeResult,
-			want: true,
-		},
-		{
-			name: "ValidationResult is valid",
-			kind: KindValidationResult,
-			want: true,
-		},
-		{
-			name: "Empty kind is invalid",
-			kind: Kind(""),
-			want: false,
-		},
-		{
-			name: "Unknown kind is invalid",
-			kind: Kind("InvalidKind"),
-			want: false,
-		},
-		{
-			name: "Case sensitive - lowercase is invalid",
-			kind: Kind("recipe"),
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.kind.IsValid(); got != tt.want {
-				t.Errorf("Kind.IsValid() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestNew(t *testing.T) {
 	h := New()
 	if h == nil {

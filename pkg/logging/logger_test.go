@@ -332,63 +332,6 @@ func Test_newTextLogger(t *testing.T) {
 	}
 }
 
-func TestSetDefaultLogger(t *testing.T) {
-	// Save original default logger to restore after test
-	originalLogger := slog.Default()
-	defer slog.SetDefault(originalLogger)
-
-	tests := []struct {
-		name    string
-		module  string
-		version string
-		envVar  string
-	}{
-		{
-			name:    "set default text logger with debug from env",
-			module:  "test-module",
-			version: "v1.0.0",
-			envVar:  "debug",
-		},
-		{
-			name:    "set default text logger with info from env",
-			module:  "info-module",
-			version: "v2.0.0",
-			envVar:  "info",
-		},
-		{
-			name:    "set default text logger with empty env (defaults to info)",
-			module:  "default-module",
-			version: "v3.0.0",
-			envVar:  "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Clean up any existing environment variable first
-			os.Unsetenv(EnvVarLogLevel)
-
-			// Set environment variable
-			if tt.envVar != "" {
-				os.Setenv(EnvVarLogLevel, tt.envVar)
-			}
-			defer os.Unsetenv(EnvVarLogLevel)
-
-			// Set the default logger
-			SetDefaultLogger(tt.module, tt.version)
-
-			// Verify we can use the default logger
-			defaultLogger := slog.Default()
-			if defaultLogger == nil {
-				t.Fatal("Default logger is nil after SetDefaultLogger")
-			}
-
-			// Verify the logger is usable
-			defaultLogger.Info("test message from default text logger")
-		})
-	}
-}
-
 func TestSetDefaultLoggerWithLevel(t *testing.T) {
 	// Save original default logger to restore after test
 	originalLogger := slog.Default()

@@ -160,14 +160,6 @@ func BenchmarkComparePrecision2(b *testing.B) {
 	}
 }
 
-func BenchmarkIsValid(b *testing.B) {
-	v := NewVersion(1, 2, 3)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = v.IsValid()
-	}
-}
-
 func BenchmarkNewVersion(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
