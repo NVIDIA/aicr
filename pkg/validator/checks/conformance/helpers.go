@@ -58,7 +58,8 @@ func httpGet(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create request", err)
 	}
-	resp, err := http.DefaultClient.Do(req) //nolint:gosec // G704 -- URL constructed from in-cluster service config
+	client := &http.Client{Timeout: defaults.HTTPClientTimeout}
+	resp, err := client.Do(req) //nolint:gosec // G704 -- URL constructed from in-cluster service config
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable,
 			fmt.Sprintf("failed to reach %s", url), err)

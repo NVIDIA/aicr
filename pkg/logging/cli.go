@@ -102,16 +102,7 @@ func (h *CLIHandler) WithGroup(_ string) slog.Handler {
 	return h
 }
 
-// NewCLILogger creates a new logger with CLI-friendly output format.
-// This logger outputs minimal, user-friendly messages:
-// - Normal messages: just the message text
-// - Error messages: message text in red color
-// Parameters:
-//   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
-//
-// Returns:
-//   - *slog.Logger: A pointer to the configured slog.Logger instance with CLI handler.
-func NewCLILogger(level string) *slog.Logger {
+func newCLILogger(level string) *slog.Logger {
 	lev := ParseLogLevel(level)
 	handler := NewCLIHandler(os.Stderr, lev)
 	return slog.New(handler)
@@ -122,5 +113,5 @@ func NewCLILogger(level string) *slog.Logger {
 // Parameters:
 //   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
 func SetDefaultCLILogger(level string) {
-	slog.SetDefault(NewCLILogger(level))
+	slog.SetDefault(newCLILogger(level))
 }

@@ -23,7 +23,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
  state         config         vs actual     manifests
 ```
 
-**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.9, Ko for images
+**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10.1, Ko for images
 
 ## Commands
 
@@ -79,7 +79,7 @@ make tools-check  # Verify versions match .settings.yaml
 - Commit to `main` branch (not `master`)
 - Do use `-S` to cryptographically sign the commit
 - Do NOT add `Co-Authored-By` lines (organization policy)
-- Do not sign-off commits (no `-s` flag) unless the commit can't be cryptographically signed
+- Do not sign-off commits (no `-s` flag); cryptographic signing (`-S`) satisfies DCO for AI-authored commits
 
 ## Key Packages
 
@@ -93,8 +93,12 @@ make tools-check  # Verify versions match .settings.yaml
 | `pkg/collector` | System state collection | Yes |
 | `pkg/validator` | Constraint evaluation | Yes |
 | `pkg/errors` | Structured error handling with codes | Yes |
+| `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
+| `pkg/evidence` | Conformance evidence capture and formatting | Yes |
+| `pkg/snapshotter` | System state snapshot orchestration | Yes |
 | `pkg/k8s/client` | Singleton Kubernetes client | Yes |
 | `pkg/k8s/pod` | Shared K8s Job/Pod utilities (wait, logs, ConfigMap URIs) | Yes |
+| `pkg/validator/helper` | Shared validator helpers (PodLifecycle, test context) | Yes |
 | `pkg/defaults` | Centralized timeout and configuration constants | Yes |
 
 **Critical Architecture Principle:**
@@ -255,7 +259,19 @@ content, err := readTemplateContent(ctx, path)
 return err
 ```
 
-**Exception:** Wrapping is unnecessary for `Close()` returns and K8s helpers like `k8s.IgnoreNotFound(err)`.
+**Exception:** Wrapping is unnecessary for read-only `Close()` returns and K8s helpers like `k8s.IgnoreNotFound(err)`.
+
+**Writable file handles must check `Close()` errors.** If a file handle is writable (e.g., from `os.Create` or `os.OpenFile`), closing it may flush buffered data; always capture and check the error:
+```go
+// BAD - writable Close() error ignored
+defer f.Close()
+
+// GOOD - writable Close() error checked
+closeErr := f.Close()
+if err == nil {
+    err = closeErr
+}
+```
 
 ## Context Propagation Rules
 
@@ -275,6 +291,18 @@ func (r *Reader) Read(url string) ([]byte, error) {
 ```
 
 **`context.Background()` is acceptable ONLY for:** cleanup in deferred functions (when parent context is canceled), graceful shutdown, and test setup.
+
+## HTTP Client Rules
+
+**Never use `http.DefaultClient`.** It has zero timeout. Always use a custom client with an explicit timeout:
+```go
+// BAD - no timeout, can hang indefinitely
+resp, err := http.DefaultClient.Do(req)
+
+// GOOD - bounded timeout from pkg/defaults
+client := &http.Client{Timeout: defaults.HTTPClientTimeout}
+resp, err := client.Do(req)
+```
 
 ## Logging Rules
 
@@ -328,6 +356,27 @@ for event := range watcher.ResultChan() {
     }
 }
 ```
+
+**Use create-or-update semantics for mutable K8s resources** instead of `IgnoreAlreadyExists`:
+```go
+// BAD - stale resource silently kept from prior run
+_, err = clientset.RbacV1().Roles(ns).Create(ctx, role, metav1.CreateOptions{})
+if apierrors.IsAlreadyExists(err) {
+    return nil // stale rules persist!
+}
+
+// GOOD - create, then update if exists
+_, err = clientset.RbacV1().Roles(ns).Create(ctx, role, metav1.CreateOptions{})
+if apierrors.IsAlreadyExists(err) {
+    _, err = clientset.RbacV1().Roles(ns).Update(ctx, role, metav1.UpdateOptions{})
+    if err != nil {
+        return errors.Wrap(errors.ErrCodeInternal, "failed to update Role", err)
+    }
+    return nil
+}
+```
+
+**`IgnoreAlreadyExists` is acceptable ONLY for:** immutable resources (ServiceAccounts, Namespaces) where updates are not needed.
 
 **Use shared utilities from `pkg/k8s/pod`** instead of reimplementing:
 ```go
@@ -389,6 +438,10 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 | Duplicate K8s utilities across packages | Use shared utilities from `pkg/k8s/pod` |
 | Run tests that connect to live clusters | Always use `--no-cluster` flag in tests |
 | Use boolean flags to track options | Use pointer pattern (nil = not set, &value = set) |
+| Use `http.DefaultClient` | Use custom `&http.Client{Timeout: defaults.HTTPClientTimeout}` |
+| Use `IgnoreAlreadyExists` for mutable K8s resources | Use create-or-update semantics (Create, then Update if exists) |
+| Ignore `Close()` error on writable file handles | Capture and check `closeErr := f.Close()` |
+| Hardcode resource names from templates | Extract to named constants to keep code and templates in sync |
 
 ## Key Files
 

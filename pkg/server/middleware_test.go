@@ -25,7 +25,7 @@ import (
 
 func TestRequestIDMiddleware_GeneratesNewID(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -57,7 +57,7 @@ func TestRequestIDMiddleware_GeneratesNewID(t *testing.T) {
 
 func TestRequestIDMiddleware_UsesProvidedID(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -81,7 +81,7 @@ func TestRequestIDMiddleware_UsesProvidedID(t *testing.T) {
 
 func TestRequestIDMiddleware_ReplacesInvalidID(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -108,7 +108,7 @@ func TestRequestIDMiddleware_ReplacesInvalidID(t *testing.T) {
 
 func TestVersionMiddleware_SetsHeader(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -128,7 +128,7 @@ func TestVersionMiddleware_SetsHeader(t *testing.T) {
 
 func TestVersionMiddleware_StoresInContext(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -153,7 +153,7 @@ func TestVersionMiddleware_StoresInContext(t *testing.T) {
 
 func TestRateLimitMiddleware_AllowsRequests(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -190,7 +190,7 @@ func TestRateLimitMiddleware_AllowsRequests(t *testing.T) {
 func TestRateLimitMiddleware_RejectsWhenExceeded(t *testing.T) {
 	// Create a limiter with no capacity
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(0, 0),
 	}
 
@@ -218,7 +218,7 @@ func TestRateLimitMiddleware_RejectsWhenExceeded(t *testing.T) {
 
 func TestPanicRecoveryMiddleware_RecoversPanic(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -239,7 +239,7 @@ func TestPanicRecoveryMiddleware_RecoversPanic(t *testing.T) {
 
 func TestPanicRecoveryMiddleware_PassesNormalRequests(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -264,7 +264,7 @@ func TestPanicRecoveryMiddleware_PassesNormalRequests(t *testing.T) {
 
 func TestLoggingMiddleware_TracksRequestID(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -288,7 +288,7 @@ func TestLoggingMiddleware_TracksRequestID(t *testing.T) {
 
 func TestLoggingMiddleware_TracksStatusCode(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -323,7 +323,7 @@ func TestLoggingMiddleware_TracksStatusCode(t *testing.T) {
 
 func TestMiddlewareChain_PropagatesContext(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 
@@ -349,7 +349,7 @@ func TestMiddlewareChain_PropagatesContext(t *testing.T) {
 
 func TestMiddlewareChain_SetsAllHeaders(t *testing.T) {
 	s := &Server{
-		config:      NewConfig(),
+		config:      parseConfig(),
 		rateLimiter: rate.NewLimiter(100, 200),
 	}
 

@@ -169,6 +169,67 @@ The install script (`./install`) performs this verification automatically when
 (`.github/workflows/build-attested.yaml`) can be triggered manually from the
 Actions tab to produce attested binaries from any branch without cutting a release.
 
+### Bundle Attestation
+
+When `aicr bundle` runs, it attests the bundle using Sigstore keyless OIDC signing.
+The attestation binds the bundle creator's identity to the bundle content (via
+`checksums.txt`) and the binary that produced it (via `resolvedDependencies`).
+
+The bundle output includes:
+- `bundle-attestation.sigstore.json` — SLSA Build Provenance v1 for the bundle
+- `aicr-attestation.sigstore.json` — copy of the binary's attestation (provenance chain)
+
+Use `--attest` to enable signing. Attestation is opt-in; bundles are unsigned by default.
+
+**Verify a bundle:**
+
+```shell
+aicr verify ./my-bundle
+```
+
+This verifies:
+1. Checksums — all content files match `checksums.txt`
+2. Bundle attestation — cryptographic signature verified against Sigstore trusted root
+3. Binary attestation — provenance chain verified with identity pinned to NVIDIA CI
+
+**Trust levels:**
+
+| Level | Name | Criteria |
+|-------|------|----------|
+| 4 | `verified` | Full chain verified, binary identity pinned to NVIDIA CI |
+| 3 | `attested` | Chain verified but binary attestation missing or external data used |
+| 2 | `unverified` | Checksums valid, `--attest` was not used |
+| 1 | `unknown` | Missing checksums or attestation files |
+
+**Enforce a minimum trust level:**
+
+```shell
+aicr verify ./my-bundle --min-trust-level verified
+```
+
+### Trusted Root Management
+
+Bundle verification uses a Sigstore trusted root to validate attestation signatures
+offline. The trusted root contains CA certificates and Rekor public keys.
+
+**Three layers of trust resolution (in priority order):**
+
+1. **TUF cache** (`~/.sigstore/root/`) — updated by `aicr trust update`
+2. **Embedded TUF root** — compiled into the binary, used to bootstrap
+3. **TUF update** — `aicr trust update` contacts the Sigstore TUF CDN
+
+Verification never contacts the network — it uses the cache or embedded root.
+The install script runs `aicr trust update` automatically after installation.
+
+**Update the trusted root:**
+
+```shell
+aicr trust update
+```
+
+Run this when Sigstore rotates their keys (a few times per year) or if
+verification reports a stale root.
+
 ### Setup
 
 Export variables for the image you want to verify:

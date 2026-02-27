@@ -35,6 +35,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -371,7 +372,7 @@ func createAuthClient(plainHTTP, insecureTLS bool) (*auth.Client, error) {
 	}
 
 	client := &auth.Client{
-		Client: &http.Client{Transport: transport},
+		Client: &http.Client{Timeout: defaults.HTTPClientTimeout, Transport: transport},
 		Cache:  auth.NewCache(),
 	}
 

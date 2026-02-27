@@ -313,12 +313,17 @@ func serializeTable(data any) ([]byte, error) {
 // WriteToFile writes data to a file at the specified path.
 // This is a convenience function for writing raw byte data to a file.
 // The file is created with 0644 permissions.
-func WriteToFile(path string, data []byte) error {
+func WriteToFile(path string, data []byte) (err error) {
 	file, err := os.Create(path)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create file", err)
 	}
-	defer file.Close()
+	defer func() {
+		closeErr := file.Close()
+		if err == nil && closeErr != nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close file", closeErr)
+		}
+	}()
 
 	if _, err := file.Write(data); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write data", err)

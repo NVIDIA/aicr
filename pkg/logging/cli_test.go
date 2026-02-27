@@ -21,7 +21,7 @@ import (
 	"testing"
 )
 
-func TestNewCLILogger(t *testing.T) {
+func Test_newCLILogger(t *testing.T) {
 	tests := []struct {
 		name  string
 		level string
@@ -34,9 +34,9 @@ func TestNewCLILogger(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logger := NewCLILogger(tt.level)
+			logger := newCLILogger(tt.level)
 			if logger == nil {
-				t.Fatal("NewCLILogger returned nil")
+				t.Fatal("newCLILogger returned nil")
 			}
 
 			// Verify logger is usable

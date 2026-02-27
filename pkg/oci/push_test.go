@@ -419,7 +419,7 @@ func TestOCIPackagingIntegration(t *testing.T) {
 	// (RecipeResult is required because bundlers use GetComponentRef)
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: recipe.FullAPIVersion,
+		APIVersion: recipe.RecipeAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:       "cert-manager",

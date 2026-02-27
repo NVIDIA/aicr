@@ -15,7 +15,6 @@
 package logging
 
 import (
-	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -26,17 +25,7 @@ const (
 	EnvVarLogLevel = "LOG_LEVEL"
 )
 
-// NewStructuredLogger creates a new structured logger with the specified log level
-// Defined module name and version are included in the logger's context.
-// AddSource is enabled for debug level logging only.
-// Parameters:
-//   - module: The name of the module/application using the logger.
-//   - version: The version of the module/application (e.g., "v1.0.0").
-//   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
-//
-// Returns:
-//   - *slog.Logger: A pointer to the configured slog.Logger instance.
-func NewStructuredLogger(module, version, level string) *slog.Logger {
+func newStructuredLogger(module, version, level string) *slog.Logger {
 	lev := ParseLogLevel(level)
 	addSource := lev <= slog.LevelDebug
 
@@ -46,17 +35,7 @@ func NewStructuredLogger(module, version, level string) *slog.Logger {
 	})).With("module", module, "version", version)
 }
 
-// NewTextLogger creates a new text logger with the specified log level
-// Defined module name and version are included in the logger's context.
-// AddSource is enabled for debug level logging only.
-// Parameters:
-//   - module: The name of the module/application using the logger.
-//   - version: The version of the module/application (e.g., "v1.0.0").
-//   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
-//
-// Returns:
-//   - *slog.Logger: A pointer to the configured slog.Logger instance with text handler.
-func NewTextLogger(module, version, level string) *slog.Logger {
+func newTextLogger(module, version, level string) *slog.Logger {
 	lev := ParseLogLevel(level)
 	addSource := lev <= slog.LevelDebug
 
@@ -64,28 +43,6 @@ func NewTextLogger(module, version, level string) *slog.Logger {
 		Level:     lev,
 		AddSource: addSource,
 	})).With("module", module, "version", version)
-}
-
-// NewLogLogger creates a new standard library log.Logger that writes logs
-// using the slog package with the specified log level.
-// Parameters:
-//   - level: The log level as a slog.Level.
-//
-// Returns:
-//   - *log.Logger: A pointer to the configured log.Logger instance.
-func NewLogLogger(module, version, level string) *log.Logger {
-	lev := ParseLogLevel(level)
-	addSource := lev <= slog.LevelDebug
-
-	handler := slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level:     lev,
-		AddSource: addSource,
-	}).WithAttrs([]slog.Attr{
-		slog.String("module", module),
-		slog.String("version", version),
-	})
-
-	return slog.NewLogLogger(handler, lev)
 }
 
 // SetDefaultStructuredLogger initializes the structured logger with the
@@ -107,7 +64,7 @@ func SetDefaultStructuredLogger(module, version string) {
 //   - version: The version of the module/application (e.g., "v1.0.0").
 //   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
 func SetDefaultStructuredLoggerWithLevel(module, version, level string) {
-	slog.SetDefault(NewStructuredLogger(module, version, level))
+	slog.SetDefault(newStructuredLogger(module, version, level))
 }
 
 // SetDefaultLogger initializes the text logger with the
@@ -130,7 +87,7 @@ func SetDefaultLogger(module, version string) {
 //   - version: The version of the module/application (e.g., "v1.0.0").
 //   - level: The log level as a string (e.g., "debug", "info", "warn", "error").
 func SetDefaultLoggerWithLevel(module, version, level string) {
-	slog.SetDefault(NewTextLogger(module, version, level))
+	slog.SetDefault(newTextLogger(module, version, level))
 }
 
 // ParseLogLevel converts a string representation of a log level into a slog.Level.

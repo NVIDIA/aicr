@@ -48,12 +48,6 @@ type Config struct {
 	ShutdownTimeout time.Duration
 }
 
-// NewConfig returns a new Config with sensible defaults.
-// Use this when you want to customize config programmatically.
-func NewConfig() *Config {
-	return parseConfig()
-}
-
 // parseConfig returns sensible defaults
 func parseConfig() *Config {
 	cfg := &Config{

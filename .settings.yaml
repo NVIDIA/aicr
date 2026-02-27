@@ -33,6 +33,7 @@ linting:
 # Security Tools
 security_tools:
   grype: 'v0.107.0'
+  cosign: 'v3.0.4'
 
 # E2E Testing Tools
 testing_tools:

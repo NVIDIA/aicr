@@ -149,6 +149,11 @@ license: ## Add/verify license headers in source files
 	@echo "Ensuring license headers..."
 	@addlicense -f .github/headers/LICENSE $(LICENSE_IGNORES) .
 
+license-check: ## Check license is approved
+	@echo "Checking license headers..."
+	go-licenses check ./... \
+        --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0
+
 .PHONY: test
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
@@ -191,7 +196,7 @@ scan: ## Scans for vulnerabilities with grype
 	grype dir:. --config .grype.yaml --fail-on high --quiet
 
 .PHONY: qualify
-qualify: test-coverage lint e2e scan ## Qualifies the codebase (test-coverage, lint, e2e, scan)
+qualify: test-coverage lint e2e scan license-check ## Qualifies the codebase (test-coverage, lint, e2e, scan)
 	@echo "Codebase qualification completed"
 
 .PHONY: server
@@ -231,7 +236,7 @@ site-clean: ## Clean documentation build artifacts
 	@echo "Cleaned documentation build artifacts"
 
 .PHONY: build
-build: tidy ## Builds binaries for the current OS and architecture
+build: ## Builds binaries for the current OS and architecture
 	@set -e; \
 	goreleaser build --clean --single-target --snapshot --timeout 10m0s || exit 1; \
 	echo "Build completed, binaries are in ./dist"

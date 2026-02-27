@@ -40,7 +40,7 @@ make qualify        # Full check: test + lint + e2e + scan
 
 | Tool | Purpose | Installation |
 |------|---------|--------------|
-| **Go 1.25+** | Language runtime | [golang.org/dl](https://golang.org/dl/) |
+| **Go 1.26+** | Language runtime | [golang.org/dl](https://golang.org/dl/) |
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
@@ -101,14 +101,14 @@ Example `make tools-check` output:
 
 Tool                 Expected        Installed       Status
 ----                 --------        ---------       ------
-go                   1.25            1.25            ✓
-golangci-lint        v2.9.0          2.9.0           ✓
+go                   1.26            1.26            ✓
+golangci-lint        v2.10.1         2.10.1          ✓
 grype                v0.107.0        0.107.0         ✓
 ko                   v0.18.0         0.18.0          ✓
 goreleaser           v2              2.13.3          ✓
-helm                 v4.1.0          v4.1.0          ✓
+helm                 v4.1.1          v4.1.1          ✓
 kind                 0.31.0          0.31.0          ✓
-yamllint             1.35.0          1.35.0          ✓
+yamllint             1.38.0          1.38.0          ✓
 kubectl              v1.35.0         v1.35.0         ✓
 docker               -               24.0.7          ✓
 
@@ -499,7 +499,6 @@ KWOK (Kubernetes WithOut Kubelet) tests recipe configurations and bundle schedul
 
 ```bash
 make kwok-test-all                      # Test all recipes (serial, shared cluster)
-make kwok-test-all-parallel             # Test all recipes (parallel, dedicated clusters)
 make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 ```
 
@@ -508,7 +507,6 @@ Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates
 | Command | Description |
 |---------|-------------|
 | `make kwok-test-all` | Test all recipes in shared cluster (serial) |
-| `make kwok-test-all-parallel` | Test all recipes in parallel clusters |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
 | `make kwok-status` | Show cluster and node status |
@@ -534,7 +532,6 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make scan` | Vulnerability scan with grype |
 | `make bench` | Run benchmarks |
 | `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
-| `make kwok-test-all-parallel` | Test all recipes with KWOK (parallel, dedicated clusters) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 
 ### Build & Release
@@ -559,6 +556,17 @@ Local `make build` is unaffected.
 To produce attested binaries without a release tag, use the **Build Attested Binaries**
 workflow (`.github/workflows/build-attested.yaml`) from the Actions tab. It runs
 `goreleaser release --snapshot` with cosign and uploads tar.gz archives as artifacts.
+
+#### Bundle Attestation
+
+`aicr bundle` attests bundles by default using Sigstore keyless OIDC signing:
+
+- **GitHub Actions**: Uses the ambient OIDC token automatically (requires `id-token: write`)
+- **Local**: Opens a browser for Sigstore OIDC authentication (GitHub, Google, or Microsoft)
+- **Opt-in**: Use `--attest` to enable signing (not required for local development)
+
+Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
+`aicr trust update` (run automatically by the install script).
 
 ### Local Development
 

@@ -25,8 +25,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -51,6 +53,12 @@ type bundleCmdOptions struct {
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
 
+	// attest enables bundle attestation and binary verification.
+	attest bool
+
+	// certificateIdentityRegexp overrides the identity pattern for binary attestation.
+	certificateIdentityRegexp string
+
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
 	plainHTTP     bool
@@ -61,12 +69,14 @@ type bundleCmdOptions struct {
 // parseBundleCmdOptions parses and validates command options.
 func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	opts := &bundleCmdOptions{
-		recipeFilePath: cmd.String("recipe"),
-		kubeconfig:     cmd.String("kubeconfig"),
-		repoURL:        cmd.String("repo"),
-		insecureTLS:    cmd.Bool("insecure-tls"),
-		plainHTTP:      cmd.Bool("plain-http"),
-		imageRefsPath:  cmd.String("image-refs"),
+		recipeFilePath:            cmd.String("recipe"),
+		kubeconfig:                cmd.String("kubeconfig"),
+		repoURL:                   cmd.String("repo"),
+		attest:                    cmd.Bool("attest"),
+		certificateIdentityRegexp: cmd.String("certificate-identity-regexp"),
+		insecureTLS:               cmd.Bool("insecure-tls"),
+		plainHTTP:                 cmd.Bool("plain-http"),
+		imageRefsPath:             cmd.String("image-refs"),
 	}
 
 	// Resolve recipe path to absolute and validate it exists early.
@@ -233,6 +243,7 @@ Package with explicit tag (overrides CLI version):
 				Required: true,
 				Usage: `Path/URI to previously generated recipe from which to build the bundle.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).`,
+				Category: "Input",
 			},
 			&cli.StringFlag{
 				Name:    "output",
@@ -242,154 +253,237 @@ Package with explicit tag (overrides CLI version):
 	For local output: ./my-bundle or /tmp/bundle
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
 	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)`,
+				Category: "Output",
 			},
 			&cli.StringSliceFlag{
 				Name: "set",
-				Usage: `Override values in generated bundle files 
+				Usage: `Override values in generated bundle files
 	(format: bundler:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true)`,
+				Category: "Deployment",
 			},
 			&cli.StringSliceFlag{
-				Name:  "system-node-selector",
-				Usage: "Node selector for system components (format: key=value, can be repeated)",
+				Name:     "system-node-selector",
+				Usage:    "Node selector for system components (format: key=value, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "system-node-toleration",
-				Usage: "Toleration for system components (format: key=value:effect, can be repeated)",
+				Name:     "system-node-toleration",
+				Usage:    "Toleration for system components (format: key=value:effect, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "accelerated-node-selector",
-				Usage: "Node selector for accelerated/GPU nodes (format: key=value, can be repeated)",
+				Name:     "accelerated-node-selector",
+				Usage:    "Node selector for accelerated/GPU nodes (format: key=value, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "accelerated-node-toleration",
-				Usage: "Toleration for accelerated/GPU nodes (format: key=value:effect, can be repeated)",
+				Name:     "accelerated-node-toleration",
+				Usage:    "Toleration for accelerated/GPU nodes (format: key=value:effect, can be repeated)",
+				Category: "Scheduling",
 			},
 			&cli.StringFlag{
-				Name:  "workload-gate",
-				Usage: "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Name:     "workload-gate",
+				Usage:    "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
-				Name:  "workload-selector",
-				Usage: "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+				Name:     "workload-selector",
+				Usage:    "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+				Category: "Scheduling",
 			},
 			&cli.IntFlag{
-				Name:  "nodes",
-				Value: 0,
-				Usage: "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+				Name:     "nodes",
+				Value:    0,
+				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+				Category: "Scheduling",
 			},
 			&cli.StringFlag{
-				Name:    "deployer",
-				Aliases: []string{"d"},
-				Value:   string(config.DeployerHelm),
-				Usage:   fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
+				Name:     "deployer",
+				Aliases:  []string{"d"},
+				Value:    string(config.DeployerHelm),
+				Usage:    fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
+				Category: "Deployment",
 			},
 			&cli.StringFlag{
-				Name:  "repo",
-				Value: "",
-				Usage: "Git repository URL for ArgoCD applications (only used with --deployer argocd)",
+				Name:     "repo",
+				Value:    "",
+				Usage:    "Git repository URL for ArgoCD applications (only used with --deployer argocd)",
+				Category: "Deployment",
+			},
+			&cli.BoolFlag{
+				Name:  "attest",
+				Usage: "Enable bundle attestation and binary provenance verification (requires OIDC authentication)",
+			},
+			&cli.StringFlag{
+				Name: "certificate-identity-regexp",
+				Usage: `Override the certificate identity pattern for binary attestation verification.
+	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
+	workflows (e.g., build-attested.yaml). Not intended for production use.`,
+			},
+			&cli.BoolFlag{
+				Name:  "attest",
+				Usage: "Enable bundle attestation and binary provenance verification (requires OIDC authentication)",
+			},
+			&cli.StringFlag{
+				Name: "certificate-identity-regexp",
+				Usage: `Override the certificate identity pattern for binary attestation verification.
+	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
+	workflows (e.g., build-attested.yaml). Not intended for production use.`,
+				Category: "Deployment",
 			},
 			kubeconfigFlag,
 			dataFlag,
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
-				Name:  "insecure-tls",
-				Usage: "Skip TLS certificate verification for OCI registry",
+				Name:     "insecure-tls",
+				Usage:    "Skip TLS certificate verification for OCI registry",
+				Category: "OCI Registry",
 			},
 			&cli.BoolFlag{
-				Name:  "plain-http",
-				Usage: "Use HTTP instead of HTTPS for OCI registry (for local development)",
+				Name:     "plain-http",
+				Usage:    "Use HTTP instead of HTTPS for OCI registry (for local development)",
+				Category: "OCI Registry",
 			},
 			&cli.StringFlag{
-				Name:  "image-refs",
-				Usage: "Path to file where the published image reference will be written (only used with OCI output)",
+				Name:     "image-refs",
+				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
+				Category: "OCI Registry",
 			},
 		},
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo"); err != nil {
-				return err
-			}
-
-			// Initialize external data provider if --data flag is set
-			if err := initDataProvider(cmd); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
-			}
-
-			opts, err := parseBundleCmdOptions(cmd)
-			if err != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid bundle command options", err)
-			}
-
-			outputType := "Helm per-component bundle"
-			if opts.deployer == config.DeployerArgoCD {
-				outputType = "ArgoCD applications"
-			}
-			slog.Info("generating bundle",
-				slog.String("deployer", opts.deployer.String()),
-				slog.String("type", outputType),
-				slog.String("recipe", opts.recipeFilePath),
-				slog.String("output", opts.outputDir),
-				slog.Bool("oci", opts.ociRef != nil),
-			)
-
-			// Load recipe from file/URL/ConfigMap
-			rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](opts.recipeFilePath, opts.kubeconfig)
-			if err != nil {
-				slog.Error("failed to load recipe file", "error", err, "path", opts.recipeFilePath)
-				return errors.Wrap(errors.ErrCodeInternal, "failed to load recipe file", err)
-			}
-
-			// Create bundler with config
-			cfg := config.NewConfig(
-				config.WithVersion(version),
-				config.WithDeployer(opts.deployer),
-				config.WithRepoURL(opts.repoURL),
-				config.WithValueOverrides(opts.valueOverrides),
-				config.WithSystemNodeSelector(opts.systemNodeSelector),
-				config.WithSystemNodeTolerations(opts.systemNodeTolerations),
-				config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
-				config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
-				config.WithWorkloadGateTaint(opts.workloadGateTaint),
-				config.WithWorkloadSelector(opts.workloadSelector),
-				config.WithEstimatedNodeCount(opts.estimatedNodeCount),
-			)
-
-			b, err := bundler.NewWithConfig(cfg)
-			if err != nil {
-				slog.Error("failed to create bundler", "error", err)
-				return err
-			}
-
-			// Generate bundle
-			out, err := b.Make(ctx, rec, opts.outputDir)
-			if err != nil {
-				slog.Error("bundle generation failed", "error", err)
-				return err
-			}
-
-			slog.Info("bundle generated",
-				"type", outputType,
-				"files", out.TotalFiles,
-				"size_bytes", out.TotalSize,
-				"duration_sec", out.TotalDuration.Seconds(),
-				"output_dir", out.OutputDir,
-			)
-
-			// Print deployment instructions (only for dir output)
-			if opts.ociRef == nil && out.Deployment != nil {
-				printDeploymentInstructions(out)
-			}
-
-			// Package and push as OCI artifact when output is oci://
-			if opts.ociRef != nil {
-				if err := pushOCIBundle(ctx, opts, out); err != nil {
-					return err
-				}
-			}
-
-			return nil
-		},
+		Action: runBundleCmd,
 	}
+}
+
+// runBundleCmd is the Action handler for the bundle command.
+func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
+	// Validate single-value flags are not duplicated
+	if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo"); err != nil {
+		return err
+	}
+
+	// Initialize external data provider if --data flag is set
+	if err := initDataProvider(cmd); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+	}
+
+	opts, err := parseBundleCmdOptions(cmd)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid bundle command options", err)
+	}
+
+	outputType := "Helm per-component bundle"
+	if opts.deployer == config.DeployerArgoCD {
+		outputType = "ArgoCD applications"
+	}
+	slog.Info("generating bundle",
+		slog.String("deployer", opts.deployer.String()),
+		slog.String("type", outputType),
+		slog.String("recipe", opts.recipeFilePath),
+		slog.String("output", opts.outputDir),
+		slog.Bool("oci", opts.ociRef != nil),
+	)
+
+	// Load recipe from file/URL/ConfigMap
+	rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](opts.recipeFilePath, opts.kubeconfig)
+	if err != nil {
+		slog.Error("failed to load recipe file", "error", err, "path", opts.recipeFilePath)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to load recipe file", err)
+	}
+
+	// Validate custom identity pattern if provided
+	if opts.certificateIdentityRegexp != "" {
+		if validErr := verifier.ValidateIdentityPattern(opts.certificateIdentityRegexp); validErr != nil {
+			return validErr
+		}
+	}
+
+	// Create bundler with config
+	cfg := config.NewConfig(
+		config.WithVersion(version),
+		config.WithDeployer(opts.deployer),
+		config.WithRepoURL(opts.repoURL),
+		config.WithAttest(opts.attest),
+		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
+		config.WithValueOverrides(opts.valueOverrides),
+		config.WithSystemNodeSelector(opts.systemNodeSelector),
+		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
+		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
+		config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
+		config.WithWorkloadGateTaint(opts.workloadGateTaint),
+		config.WithWorkloadSelector(opts.workloadSelector),
+		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
+	)
+
+	attester, err := selectAttester(ctx, opts.attest)
+	if err != nil {
+		return err
+	}
+
+	b, err := bundler.New(
+		bundler.WithConfig(cfg),
+		bundler.WithAttester(attester),
+	)
+	if err != nil {
+		slog.Error("failed to create bundler", "error", err)
+		return err
+	}
+
+	// Generate bundle
+	out, err := b.Make(ctx, rec, opts.outputDir)
+	if err != nil {
+		slog.Error("bundle generation failed", "error", err)
+		return err
+	}
+
+	slog.Info("bundle generated",
+		"type", outputType,
+		"files", out.TotalFiles,
+		"size_bytes", out.TotalSize,
+		"duration_sec", out.TotalDuration.Seconds(),
+		"output_dir", out.OutputDir,
+	)
+
+	// Print deployment instructions (only for dir output)
+	if opts.ociRef == nil && out.Deployment != nil {
+		printDeploymentInstructions(out)
+	}
+
+	// Package and push as OCI artifact when output is oci://
+	if opts.ociRef != nil {
+		if err := pushOCIBundle(ctx, opts, out); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// selectAttester returns the appropriate attester based on flags and environment.
+func selectAttester(ctx context.Context, attest bool) (attestation.Attester, error) {
+	if !attest {
+		return attestation.NewNoOpAttester(), nil
+	}
+
+	// Try ambient OIDC (GitHub Actions)
+	requestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
+	requestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+	if requestURL != "" && requestToken != "" {
+		oidcToken, err := attestation.FetchAmbientOIDCToken(ctx, requestURL, requestToken)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeUnavailable,
+				"failed to fetch OIDC token for attestation; remove --attest to skip", err)
+		}
+		return attestation.NewKeylessAttester(oidcToken), nil
+	}
+
+	// No ambient OIDC — try interactive browser flow
+	slog.Info("no ambient OIDC token, attempting interactive authentication")
+	oidcToken, err := attestation.FetchInteractiveOIDCToken(ctx)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeUnavailable,
+			"bundle attestation requires authentication; remove --attest to skip", err)
+	}
+	return attestation.NewKeylessAttester(oidcToken), nil
 }
 
 // pushOCIBundle packages and pushes the bundle to an OCI registry.

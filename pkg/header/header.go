@@ -45,64 +45,11 @@ func (k *Kind) IsValid() bool {
 	}
 }
 
-// Option is a functional option for configuring Header instances.
-type Option func(*Header)
-
-// WithMetadata returns an Option that adds a metadata key-value pair to the Header.
-// If the Metadata map is nil, it will be initialized.
-func WithMetadata(key, value string) Option {
-	return func(h *Header) {
-		if h.Metadata == nil {
-			h.Metadata = make(map[string]string)
-		}
-		h.Metadata[key] = value
-	}
-}
-
-// WithKind returns an Option that sets the Kind field of the Header.
-// Kind represents the type of the resource (e.g., "Snapshot", "Recipe").
-func WithKind(kind Kind) Option {
-	return func(h *Header) {
-		h.Kind = kind
-	}
-}
-
-// WithAPIVersion returns an Option that sets the APIVersion field of the Header.
-// The APIVersion identifies the schema version for the resource.
-func WithAPIVersion(version string) Option {
-	return func(h *Header) {
-		h.APIVersion = version
-	}
-}
-
-// SetKind updates the Kind field of the Header.
-func (h *Header) SetKind(kind Kind) {
-	h.Kind = kind
-}
-
-// GetKind returns the Kind field of the Header.
-func (h *Header) GetKind() Kind {
-	return h.Kind
-}
-
-// GetMetadata returns the Metadata map of the Header.
-func (h *Header) GetMetadata() map[string]string {
-	return h.Metadata
-}
-
-// New creates a new Header instance with the provided functional options.
-// The Metadata map is initialized automatically.
-func New(opts ...Option) *Header {
-	s := &Header{
+// New creates a new Header instance with an initialized Metadata map.
+func New() *Header {
+	return &Header{
 		Metadata: make(map[string]string),
 	}
-
-	// Apply options
-	for _, opt := range opts {
-		opt(s)
-	}
-
-	return s
 }
 
 // Header contains metadata and versioning information for AICR resources.
