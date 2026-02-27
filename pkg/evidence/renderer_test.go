@@ -124,18 +124,17 @@ func TestRender(t *testing.T) {
 			wantFiles: []string{"index.md", "accelerator-metrics.md"},
 		},
 		{
-			name: "no conformance phase",
+			name: "no conformance phase skips gracefully",
 			result: &validator.ValidationResult{
 				RunID: "20260223-120000-test",
 				Phases: map[string]*validator.PhaseResult{
 					"readiness": {Status: validator.ValidationStatusPass},
 				},
 			},
-			wantErr:     true,
-			errContains: "no conformance phase",
+			wantErr: false,
 		},
 		{
-			name: "all checks skipped produces error",
+			name: "all checks skipped skips gracefully",
 			result: &validator.ValidationResult{
 				RunID: "20260223-120000-test",
 				Phases: map[string]*validator.PhaseResult{
@@ -148,8 +147,7 @@ func TestRender(t *testing.T) {
 					},
 				},
 			},
-			wantErr:     true,
-			errContains: "no submission checks found",
+			wantErr: false,
 		},
 		{
 			name: "failing check produces FAIL evidence",
