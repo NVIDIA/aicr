@@ -119,6 +119,75 @@ func TestParseTrustLevel(t *testing.T) {
 	}
 }
 
+func TestCheckPolicy_ToolVersionConstraint(t *testing.T) {
+	tests := []struct {
+		name        string
+		toolVersion string
+		constraint  string
+		wantFail    bool
+	}{
+		// Bare version defaults to >= semantics
+		{"bare version equal", "0.8.0", "0.8.0", false},
+		{"bare version with v prefix in constraint", "0.8.0", "v0.8.0", false},
+		{"bare version with v prefix in result", "v0.8.0", "0.8.0", false},
+		{"bare version newer than required", "0.9.0", "0.8.0", false},
+		{"bare version older than required", "0.7.0", "0.8.0", true},
+
+		// Explicit >= operator
+		{">= equal", "0.8.0", ">= 0.8.0", false},
+		{">= newer", "0.9.0", ">= 0.8.0", false},
+		{">= older", "0.7.0", ">= 0.8.0", true},
+		{">= with v prefix", "0.8.0", ">= v0.8.0", false},
+
+		// Explicit > operator
+		{"> strictly newer", "0.8.1", "> 0.8.0", false},
+		{"> equal fails", "0.8.0", "> 0.8.0", true},
+		{"> older fails", "0.7.0", "> 0.8.0", true},
+
+		// Explicit == operator
+		{"== exact match", "0.8.0", "== 0.8.0", false},
+		{"== with v in result", "v0.8.0", "== 0.8.0", false},
+		{"== mismatch", "0.9.0", "== 0.8.0", true},
+
+		// Explicit < operator
+		{"< older passes", "0.7.0", "< 0.8.0", false},
+		{"< equal fails", "0.8.0", "< 0.8.0", true},
+
+		// Explicit <= operator
+		{"<= equal passes", "0.8.0", "<= 0.8.0", false},
+		{"<= older passes", "0.7.0", "<= 0.8.0", false},
+		{"<= newer fails", "0.9.0", "<= 0.8.0", true},
+
+		// Explicit != operator
+		{"!= different passes", "0.9.0", "!= 0.8.0", false},
+		{"!= same fails", "0.8.0", "!= 0.8.0", true},
+
+		// Empty tool version in result (unattested bundle)
+		{"empty tool version fails", "", "0.8.0", true},
+
+		// Empty constraint (no check)
+		{"empty constraint skips check", "0.8.0", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &VerifyResult{
+				TrustLevel:      TrustVerified,
+				ChecksumsPassed: true,
+				BundleAttested:  true,
+				ToolVersion:     tt.toolVersion,
+			}
+			policy := Policy{VersionConstraint: tt.constraint}
+			failure, err := result.CheckPolicy(policy)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if (failure != "") != tt.wantFail {
+				t.Errorf("CheckPolicy() failure = %q, wantFail %v", failure, tt.wantFail)
+			}
+		})
+	}
+}
+
 func TestMaxAchievableTrustLevel(t *testing.T) {
 	tests := []struct {
 		name   string

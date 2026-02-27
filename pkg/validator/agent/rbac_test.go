@@ -120,8 +120,8 @@ func TestEnsureRole(t *testing.T) {
 		}
 
 		// Verify policy rules
-		if len(role.Rules) != 5 {
-			t.Errorf("expected 5 rules, got %d", len(role.Rules))
+		if len(role.Rules) != 6 {
+			t.Errorf("expected 6 rules, got %d", len(role.Rules))
 		}
 
 		// Rule 0: namespaces, events, services, endpoints, nodes (get, list)
@@ -150,25 +150,30 @@ func TestEnsureRole(t *testing.T) {
 			t.Errorf("expected get/list/create/update/patch verbs for configmaps, got %v", rule1.Verbs)
 		}
 
-		// Rule 2: pods (get, list, create, update, patch, delete)
+		// Rule 2: pods (get, list, watch, create, update, patch, delete)
+		// watch is required by WaitForPodSuccess which uses the Kubernetes Watch API.
 		rule2 := role.Rules[2]
 		if len(rule2.Resources) != 1 || rule2.Resources[0] != "pods" {
 			t.Errorf("expected pods in third rule, got %v", rule2.Resources)
 		}
 		if !containsVerb(rule2.Verbs, "get") || !containsVerb(rule2.Verbs, "list") ||
-			!containsVerb(rule2.Verbs, "create") || !containsVerb(rule2.Verbs, "update") ||
-			!containsVerb(rule2.Verbs, "patch") || !containsVerb(rule2.Verbs, "delete") {
+			!containsVerb(rule2.Verbs, "watch") || !containsVerb(rule2.Verbs, "create") ||
+			!containsVerb(rule2.Verbs, "update") || !containsVerb(rule2.Verbs, "patch") ||
+			!containsVerb(rule2.Verbs, "delete") {
 
-			t.Errorf("expected get/list/create/update/patch/delete verbs for pods, got %v", rule2.Verbs)
+			t.Errorf("expected get/list/watch/create/update/patch/delete verbs for pods, got %v", rule2.Verbs)
 		}
 
-		// Rule 3: pods/log, pods/status (get, list)
+		// Rule 3: pods/log, pods/status (get, list — no watch needed for subresources)
 		rule3 := role.Rules[3]
 		if !containsResource(rule3.Resources, "pods/log") || !containsResource(rule3.Resources, "pods/status") {
 			t.Errorf("expected pods/log and pods/status in fourth rule, got %v", rule3.Resources)
 		}
 		if !containsVerb(rule3.Verbs, "get") || !containsVerb(rule3.Verbs, "list") {
 			t.Errorf("expected get/list verbs for pod subresources, got %v", rule3.Verbs)
+		}
+		if containsVerb(rule3.Verbs, "watch") {
+			t.Error("pods/log and pods/status should not have watch verb (least privilege)")
 		}
 
 		// Rule 4: batch/jobs (get, list)
@@ -178,6 +183,21 @@ func TestEnsureRole(t *testing.T) {
 		}
 		if !containsResource(rule4.Resources, "jobs") {
 			t.Errorf("expected jobs in fifth rule, got %v", rule4.Resources)
+		}
+
+		// Rule 5: trainer.kubeflow.org trainingruntimes/trainjobs (get, list, create, update, delete)
+		rule5 := role.Rules[5]
+		if rule5.APIGroups[0] != "trainer.kubeflow.org" {
+			t.Errorf("expected trainer.kubeflow.org API group in sixth rule, got %v", rule5.APIGroups)
+		}
+		if !containsResource(rule5.Resources, "trainingruntimes") || !containsResource(rule5.Resources, "trainjobs") {
+			t.Errorf("expected trainingruntimes and trainjobs in sixth rule, got %v", rule5.Resources)
+		}
+		if !containsVerb(rule5.Verbs, "get") || !containsVerb(rule5.Verbs, "list") ||
+			!containsVerb(rule5.Verbs, "create") || !containsVerb(rule5.Verbs, "update") ||
+			!containsVerb(rule5.Verbs, "delete") {
+
+			t.Errorf("expected get/list/create/update/delete verbs for Trainer resources, got %v", rule5.Verbs)
 		}
 	})
 

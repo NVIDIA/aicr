@@ -27,13 +27,19 @@ import (
 )
 
 func init() {
-	// Register a test-only check for buildTestPattern tests.
-	// Cannot import deployment checks due to import cycle, so register directly.
+	// Register test-only checks/constraints for buildTestPattern tests.
+	// Cannot import phase-specific check packages due to import cycles, so register directly.
 	checks.RegisterCheck(&checks.Check{
 		Name:        "test-registered-check",
 		Description: "Test-only check for buildTestPattern coverage",
 		Phase:       "deployment",
 		TestName:    "TestRegisteredCheck",
+	})
+	checks.RegisterConstraintValidator(&checks.ConstraintValidator{
+		Pattern:     "test-perf-constraint",
+		Description: "Test-only performance constraint for buildTestPattern coverage",
+		Phase:       "performance",
+		TestName:    "TestPerfConstraint",
 	})
 }
 
@@ -1119,11 +1125,40 @@ func TestBuildTestPattern(t *testing.T) {
 			wantExpectedTests: 0,
 		},
 		{
-			name: "performance phase not implemented returns empty",
+			name: "performance phase with unregistered check falls back to generated name",
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Performance: &recipe.ValidationPhase{
 						Checks: []string{"perf-check"},
+					},
+				},
+			},
+			phase:             "performance",
+			wantPattern:       "^(TestPerfCheck)$",
+			wantExpectedTests: 1,
+		},
+		{
+			name: "performance phase with registered constraint uses registry test name",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Constraints: []recipe.Constraint{
+							{Name: "test-perf-constraint", Value: "200"},
+						},
+					},
+				},
+			},
+			phase:             "performance",
+			wantPattern:       "^(TestPerfConstraint)$",
+			wantExpectedTests: 1,
+		},
+		{
+			name: "performance phase with empty checks returns empty pattern",
+			recipe: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Checks:      []string{},
+						Constraints: []recipe.Constraint{},
 					},
 				},
 			},

@@ -208,6 +208,24 @@ const (
 	EvidenceRenderTimeout = 30 * time.Second
 )
 
+// Kubeflow Trainer install timeouts for NCCL performance validation.
+const (
+	// TrainerCRDEstablishedTimeout is the time to wait for Kubeflow Trainer CRDs
+	// to reach the Established condition after installation.
+	TrainerCRDEstablishedTimeout = 2 * time.Minute
+
+	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
+	NCCLTrainJobTimeout = 30 * time.Minute
+
+	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
+	NCCLLauncherPodTimeout = 5 * time.Minute
+
+	// NCCLTrainerArchiveDownloadTimeout is the timeout for downloading the Kubeflow Trainer
+	// source archive from GitHub. The archive is several MB, so a longer timeout than the
+	// standard HTTPClientTimeout is appropriate.
+	NCCLTrainerArchiveDownloadTimeout = 5 * time.Minute
+)
+
 // Deployment and pod scheduling test timeouts for conformance validation.
 const (
 	// DeploymentScaleTimeout is the timeout for waiting for Deployment controller

@@ -27,7 +27,7 @@ func TestBundleVerifyCmd_HasExpectedFlags(t *testing.T) {
 		t.Errorf("Name = %q, want %q", cmd.Name, "verify")
 	}
 
-	expectedFlags := []string{"min-trust-level", "require-creator", "require-tool-version", "certificate-identity-regexp", "format"}
+	expectedFlags := []string{"min-trust-level", "require-creator", "cli-version-constraint", "certificate-identity-regexp", "format"}
 	for _, name := range expectedFlags {
 		found := false
 		for _, f := range cmd.Flags {

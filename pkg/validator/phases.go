@@ -543,6 +543,10 @@ func (v *Validator) validatePerformance(
 					// Validate that all recipe constraints/checks are registered (logs warnings for missing)
 					v.validateRecipeRegistrations(recipeResult, "performance")
 
+					// Build a test pattern so only the tests required by the recipe run,
+					// not every test in the package (including unit tests).
+					patternResult := v.buildTestPattern(recipeResult, "performance")
+
 					// Deploy ONE Job for ALL performance checks and constraints in this phase
 					// Performance tests may need GPU nodes
 					jobConfig := agent.Config{
@@ -554,7 +558,7 @@ func (v *Validator) validatePerformance(
 						SnapshotConfigMap:  snapshotCMName,
 						RecipeConfigMap:    recipeCMName,
 						TestPackage:        "./pkg/validator/checks/performance",
-						TestPattern:        "", // Run all tests in package
+						TestPattern:        patternResult.Pattern,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
 						NodeSelector:       nil, // Will be set below if GPU required
 					}
@@ -900,7 +904,30 @@ func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase st
 			}
 		}
 	case string(PhasePerformance):
-		// TODO(#140): Implement for performance phase
+		if recipeResult.Validation != nil && recipeResult.Validation.Performance != nil {
+			// Add tests for constraints
+			for _, constraint := range recipeResult.Validation.Performance.Constraints {
+				testName, ok := checks.GetTestNameForConstraint(constraint.Name)
+				if ok && !uniqueTests[testName] {
+					testNames = append(testNames, testName)
+					uniqueTests[testName] = true
+					slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
+				}
+			}
+
+			// Add tests for explicit checks
+			for _, checkName := range recipeResult.Validation.Performance.Checks {
+				testName, ok := checks.GetTestNameForCheck(checkName)
+				if !ok {
+					testName = checkNameToTestName(checkName)
+				}
+				if !uniqueTests[testName] {
+					testNames = append(testNames, testName)
+					uniqueTests[testName] = true
+					slog.Debug("check mapped to test", "check", checkName, "test", testName)
+				}
+			}
+		}
 	case string(PhaseConformance):
 		if recipeResult.Validation != nil && recipeResult.Validation.Conformance != nil {
 			// Add tests for constraints

@@ -92,6 +92,13 @@ pkg/validator/checks/
 │   ├── gpu_operator_version_constraint_test.go      # Integration test
 │   └── gpu_operator_version_constraint_unit_test.go # Unit test
 ├── performance/                 # Performance phase checks + constraints
+│   ├── nccl_all_reduce_bw_constraint.go           # NCCL all-reduce BW constraint + registration
+│   ├── nccl_all_reduce_bw_constraint_test.go      # Integration test (TestNcclAllReduceBw — runs in Jobs)
+│   ├── nccl_all_reduce_bw_constraint_unit_test.go # Unit test (runs locally without cluster)
+│   ├── trainer_lifecycle.go                       # Kubeflow Trainer install/uninstall lifecycle
+│   └── testdata/h100/eks/                         # EKS+H100 TrainingRuntime/TrainJob templates
+│       ├── runtime.yaml
+│       └── trainjob.yaml
 └── conformance/                 # Conformance phase checks + constraints
 ```
 
@@ -726,24 +733,31 @@ cm, _ := ctx.Clientset.CoreV1().ConfigMaps(ns).Get(ctx.Context, name, metav1.Get
 #### Performance Phase
 
 **Typical validations:**
-- NCCL bandwidth measurements
+- NCCL all-reduce bus bandwidth (EW fabric between GPU nodes)
 - Network fabric health
 - GPU-to-GPU communication latency
 - Storage I/O performance
 
 **Example constraint names:**
-- `Performance.nccl.bandwidth`
+- `nccl-all-reduce-bw` (implemented — EKS + H100)
 - `Performance.network.latency`
 - `Performance.gpu.peer-access`
 
+**Implemented constraints:**
+- `nccl-all-reduce-bw` — Runs a Kubeflow Trainer `TrainJob` with NCCL `all_reduce_perf`, parses the 16 GB bus bandwidth from launcher logs, and validates it is within 10% of the recipe threshold. Skips gracefully when fewer than 2 GPU nodes are available (requires EKS + H100 to run). Auto-installs Kubeflow Trainer if not already present and tears it down on exit.
+
 **Access patterns:**
 ```go
-// Run Jobs for performance tests
-job, _ := ctx.Clientset.BatchV1().Jobs(ns).Create(ctx.Context, perfJob, metav1.CreateOptions{})
+// Dynamic client for CRD and TrainJob operations
+dynamicClient, _ := dynamic.NewForConfig(ctx.RESTConfig)
 
-// Wait for completion and read results from logs
-pods, _ := ctx.Clientset.CoreV1().Pods(ns).List(ctx.Context, metav1.ListOptions{LabelSelector: fmt.Sprintf("job-name=%s", jobName)})
-logs, _ := ctx.Clientset.CoreV1().Pods(ns).GetLogs(podName, &corev1.PodLogOptions{}).Stream(ctx.Context)
+// List schedulable GPU nodes
+nodes, _ := ctx.Clientset.CoreV1().Nodes().List(ctx.Context, metav1.ListOptions{})
+
+// Watch launcher pod for completion
+watcher, _ := ctx.Clientset.CoreV1().Pods(ns).Watch(ctx.Context, metav1.ListOptions{
+    FieldSelector: "metadata.name=" + podName,
+})
 ```
 
 #### Conformance Phase

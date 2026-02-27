@@ -51,6 +51,11 @@ Require a minimum trust level:
 Require a specific creator identity:
   aicr verify ./my-bundle --require-creator jdoe@company.com
 
+Require a minimum CLI version (bare version defaults to >= semantics):
+  aicr verify ./my-bundle --cli-version-constraint 0.8.0
+  aicr verify ./my-bundle --cli-version-constraint ">= 0.8.0"
+  aicr verify ./my-bundle --cli-version-constraint "== 0.8.0"
+
 Output as JSON:
   aicr verify ./my-bundle --format json
 `,
@@ -67,8 +72,10 @@ Output as JSON:
 				Usage: "Require a specific creator identity (matched against bundle attestation certificate)",
 			},
 			&cli.StringFlag{
-				Name:  "require-tool-version",
-				Usage: "Require a specific aicr version (matched against attestation predicate)",
+				Name: "cli-version-constraint",
+				Usage: `Version constraint for the aicr CLI version in the attestation predicate.
+	Supports operators: >=, >, <=, <, ==, !=.
+	A bare version (e.g. "0.8.0") is treated as ">= 0.8.0".`,
 			},
 			&cli.StringFlag{
 				Name: "certificate-identity-regexp",
@@ -122,9 +129,9 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 
 	// Check policy requirements
 	policy := verifier.Policy{
-		MinTrustLevel:      cmd.String("min-trust-level"),
-		RequireCreator:     cmd.String("require-creator"),
-		RequireToolVersion: cmd.String("require-tool-version"),
+		MinTrustLevel:     cmd.String("min-trust-level"),
+		RequireCreator:    cmd.String("require-creator"),
+		VersionConstraint: cmd.String("cli-version-constraint"),
 	}
 	policyFailure, policyErr := result.CheckPolicy(policy)
 	if policyErr != nil {

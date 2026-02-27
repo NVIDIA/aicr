@@ -23,6 +23,9 @@ ignore: |
   dist/
   node_modules/
 
+  # Generated snapshot output files (machine-generated, not hand-written)
+  snapshot.yaml
+
   # Examples (generated/reference files with varying styles)
   examples/
 
