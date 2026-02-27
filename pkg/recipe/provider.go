@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -237,6 +238,22 @@ func NewLayeredDataProvider(embedded *EmbeddedDataProvider, config LayeredProvid
 		externalDir:   config.ExternalDir,
 		externalFiles: externalFiles,
 	}, nil
+}
+
+// ExternalFiles returns a sorted list of file paths that came from the external
+// data directory. Paths are relative to the external directory root.
+func (p *LayeredDataProvider) ExternalFiles() []string {
+	files := make([]string, 0, len(p.externalFiles))
+	for path := range p.externalFiles {
+		files = append(files, path)
+	}
+	sort.Strings(files)
+	return files
+}
+
+// ExternalDir returns the path to the external data directory.
+func (p *LayeredDataProvider) ExternalDir() string {
+	return p.externalDir
 }
 
 // ReadFile reads a file, checking external directory first.

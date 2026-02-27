@@ -110,6 +110,11 @@ const (
 const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
+
+	// InteractiveOIDCTimeout is the maximum time to wait for a user to complete
+	// browser-based OIDC authentication. Prevents indefinite blocking if the
+	// browser flow is started but never completed.
+	InteractiveOIDCTimeout = 5 * time.Minute
 )
 
 // Validation phase timeouts for validation phase operations.
@@ -250,6 +255,10 @@ const (
 	// read by conformance checks (e.g., Prometheus metric scrapes). Prevents
 	// unbounded reads from in-cluster services.
 	HTTPResponseBodyLimit = 1 * 1024 * 1024 // 1 MiB
+
+	// MaxErrorBodySize is the maximum size in bytes for HTTP error response bodies.
+	// Bounds io.ReadAll on error paths to prevent unbounded memory allocation.
+	MaxErrorBodySize = 4096
 )
 
 // Job configuration constants.
@@ -264,4 +273,12 @@ const (
 	// ServerMaxHeaderBytes is the maximum size of request headers (64KB).
 	// Prevents header-based attacks.
 	ServerMaxHeaderBytes = 1 << 16
+)
+
+// Attestation file size limits.
+const (
+	// MaxSigstoreBundleSize is the maximum size in bytes for a .sigstore.json file.
+	// Prevents unbounded memory allocation when reading attestation bundles.
+	// A typical Sigstore bundle is under 100KB; 10 MiB provides generous headroom.
+	MaxSigstoreBundleSize = 10 * 1024 * 1024 // 10 MiB
 )

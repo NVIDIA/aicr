@@ -258,7 +258,9 @@ cd "${REPO_ROOT}"
 GO_VERSION=$(yq '.languages.go' .settings.yaml)
 GOLANGCI_LINT_VERSION=$(yq '.linting.golangci_lint' .settings.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
+GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
 GRYPE_VERSION=$(yq '.security_tools.grype' .settings.yaml)
+COSIGN_VERSION=$(yq '.security_tools.cosign' .settings.yaml)
 KIND_VERSION=$(yq '.testing_tools.kind' .settings.yaml)
 KUBECTL_VERSION=$(yq '.testing_tools.kubectl' .settings.yaml)
 CTLPTL_VERSION=$(yq '.testing_tools.ctlptl' .settings.yaml)
@@ -273,6 +275,7 @@ log_info "Target Versions:"
 echo "  Go:              ${GO_VERSION}"
 echo "  golangci-lint:   ${GOLANGCI_LINT_VERSION}"
 echo "  grype:           ${GRYPE_VERSION}"
+echo "  cosign:          ${COSIGN_VERSION}"
 echo "  kind:            ${KIND_VERSION}"
 echo "  kubectl:         ${KUBECTL_VERSION}"
 echo "  tilt:            ${TILT_VERSION}"
@@ -444,6 +447,28 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 rm -f "$GRYPE_TMP"
             fi
             log_success "grype installed"
+        fi
+    fi
+
+    # cosign (Sigstore signing and verification)
+    if command_exists cosign && [[ "${UPGRADE}" != "true" ]]; then
+        log_success "cosign already installed: $(cosign version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+    else
+        log_info "Installing cosign ${COSIGN_VERSION}..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                brew install cosign
+            elif [[ "${OS}" == "linux" ]]; then
+                COSIGN_VER="${COSIGN_VERSION#v}"
+                COSIGN_URL="https://github.com/sigstore/cosign/releases/download/v${COSIGN_VER}/cosign-linux-${GO_ARCH}"
+                if verify_download_url "$COSIGN_URL" "cosign ${COSIGN_VERSION} for Linux ${GO_ARCH}"; then
+                    sudo curl -fsSL "$COSIGN_URL" -o /usr/local/bin/cosign
+                    sudo chmod +x /usr/local/bin/cosign
+                else
+                    log_error "Failed to install cosign. Please install manually."
+                fi
+            fi
+            log_success "cosign installed"
         fi
     fi
 
@@ -635,6 +660,17 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         fi
     fi
 
+    # go-licenses
+    if command_exists go-licenses && [[ "${UPGRADE}" != "true" ]]; then
+        log_success "go-licenses already installed"
+    else
+        log_info "Installing go-licenses ${GO_LICENSES_VERSION}..."
+        if prompt_continue; then
+            go install github.com/google/go-licenses@"${GO_LICENSES_VERSION}"
+            log_success "go-licenses installed"
+        fi
+    fi
+
     echo ""
 fi
 
@@ -658,6 +694,7 @@ TOOLS=(
     "kubectl:kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+[^\"]*'"
     "yamllint:yamllint --version 2>/dev/null | awk '{print \$2}'"
     "grype:grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\\[' || echo installed"
+    "cosign:cosign version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
     "tilt:tilt version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
     "kind:kind version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
     "ctlptl:ctlptl version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
@@ -666,6 +703,7 @@ TOOLS=(
     "git-cliff:git-cliff --version 2>/dev/null | awk '{print \$2}'"
     "golangci-lint:golangci-lint version --short 2>/dev/null"
     "addlicense:echo installed"
+    "go-licenses:go-licenses version 2>/dev/null || echo installed"
 )
 
 for tool_spec in "${TOOLS[@]}"; do

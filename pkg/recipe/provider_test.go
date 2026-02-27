@@ -841,3 +841,63 @@ func TestDataProviderGeneration(t *testing.T) {
 		t.Errorf("expected generation %d, got %d", startGen+2, getDataProviderGeneration())
 	}
 }
+
+func TestLayeredDataProvider_ExternalFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create registry.yaml (required)
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create additional external files
+	if err := os.MkdirAll(filepath.Join(tmpDir, "components", "test"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "components", "test", "values.yaml"), []byte("key: value"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "overrides.yaml"), []byte("override: true"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := provider.ExternalFiles()
+	if len(files) == 0 {
+		t.Fatal("ExternalFiles() returned empty, expected at least 3 files")
+	}
+
+	// Should be sorted
+	for i := 1; i < len(files); i++ {
+		if files[i] < files[i-1] {
+			t.Errorf("ExternalFiles() not sorted: %q before %q", files[i-1], files[i])
+		}
+	}
+}
+
+func TestLayeredDataProvider_ExternalDir(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if provider.ExternalDir() != tmpDir {
+		t.Errorf("ExternalDir() = %q, want %q", provider.ExternalDir(), tmpDir)
+	}
+}

@@ -44,6 +44,18 @@ func TestConfigImmutability(t *testing.T) {
 	if cfg.Verbose() {
 		t.Error("Verbose() = true, want false")
 	}
+
+	if cfg.Attest() {
+		t.Error("Attest() = true, want false (default)")
+	}
+}
+
+func TestConfigAttest(t *testing.T) {
+	cfg := NewConfig(WithAttest(true))
+
+	if !cfg.Attest() {
+		t.Error("Attest() = false, want true")
+	}
 }
 
 func TestConfigValidate(t *testing.T) {

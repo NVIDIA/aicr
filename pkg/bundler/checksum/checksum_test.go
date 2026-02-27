@@ -160,6 +160,118 @@ func TestGenerateChecksums(t *testing.T) {
 	})
 }
 
+func TestVerifyChecksums(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid checksums pass", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+
+		// Create files and generate checksums
+		file1 := filepath.Join(dir, "file1.txt")
+		file2 := filepath.Join(dir, "sub/file2.txt")
+		if err := os.MkdirAll(filepath.Join(dir, "sub"), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file1, []byte("content1"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file2, []byte("content2"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := GenerateChecksums(context.Background(), dir, []string{file1, file2}); err != nil {
+			t.Fatal(err)
+		}
+
+		errs := VerifyChecksums(dir)
+		if len(errs) != 0 {
+			t.Errorf("VerifyChecksums() = %v, want no errors", errs)
+		}
+	})
+
+	t.Run("tampered file detected", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+
+		file1 := filepath.Join(dir, "file1.txt")
+		if err := os.WriteFile(file1, []byte("original"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := GenerateChecksums(context.Background(), dir, []string{file1}); err != nil {
+			t.Fatal(err)
+		}
+
+		// Tamper with the file
+		if err := os.WriteFile(file1, []byte("tampered"), 0644); err != nil {
+			t.Fatal(err)
+		}
+
+		errs := VerifyChecksums(dir)
+		if len(errs) == 0 {
+			t.Error("VerifyChecksums() should detect tampered file")
+		}
+	})
+
+	t.Run("missing checksums file", func(t *testing.T) {
+		t.Parallel()
+
+		errs := VerifyChecksums(t.TempDir())
+		if len(errs) == 0 {
+			t.Error("VerifyChecksums() should report missing checksums.txt")
+		}
+	})
+
+	t.Run("path traversal rejected", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+
+		// Write a checksums.txt with a path traversal entry
+		content := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  ../../etc/passwd\n"
+		checksumPath := filepath.Join(dir, ChecksumFileName)
+		if err := os.WriteFile(checksumPath, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		errs := VerifyChecksums(dir)
+		if len(errs) == 0 {
+			t.Fatal("VerifyChecksums() should reject path traversal")
+		}
+
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e, "path traversal") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected path traversal error, got: %v", errs)
+		}
+	})
+}
+
+func TestCountEntries(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	file1 := filepath.Join(dir, "a.txt")
+	file2 := filepath.Join(dir, "b.txt")
+	if err := os.WriteFile(file1, []byte("a"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file2, []byte("b"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := GenerateChecksums(context.Background(), dir, []string{file1, file2}); err != nil {
+		t.Fatal(err)
+	}
+
+	count := CountEntries(dir)
+	if count != 2 {
+		t.Errorf("CountEntries() = %d, want 2", count)
+	}
+}
+
 func TestGetChecksumFilePath(t *testing.T) {
 	t.Parallel()
 

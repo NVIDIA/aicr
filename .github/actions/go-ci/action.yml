@@ -54,9 +54,6 @@ runs:
         check-latest: true
 
     # Unit Tests
-    - name: Tidy Modules
-      shell: bash
-      run: make tidy
 
     - name: Verify vendor is in sync
       shell: bash

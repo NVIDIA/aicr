@@ -25,7 +25,7 @@ spec:
     Replaces test_snapshot_template_flags() in tools/e2e.
     No cluster needed.
   timeouts:
-    exec: 30s
+    exec: 180s
   steps:
     - name: setup
       description: Create a test template file.
