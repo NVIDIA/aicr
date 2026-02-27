@@ -79,6 +79,7 @@ spec:
         - dynamo-crds
         - cert-manager
         - kube-prometheus-stack
+        - kai-scheduler
       overrides:
         etcd:
           persistence:

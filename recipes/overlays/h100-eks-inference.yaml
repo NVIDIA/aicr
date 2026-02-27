@@ -33,6 +33,12 @@ spec:
       value: ">= 1.32.4"
 
   componentRefs:
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+        - kube-prometheus-stack
+        - skyhook-customizations
 
     - name: skyhook-customizations
       type: Helm

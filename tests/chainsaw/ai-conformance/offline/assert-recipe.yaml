@@ -60,12 +60,12 @@ deploymentOrder:
   - kgateway-crds
   - kgateway
   - kube-prometheus-stack
-  - dynamo-platform
-  - gpu-operator
   - k8s-ephemeral-storage-metrics
-  - kai-scheduler
-  - nvidia-dra-driver-gpu
-  - nvsentinel
   - prometheus-adapter
   - skyhook-operator
   - skyhook-customizations
+  - gpu-operator
+  - kai-scheduler
+  - dynamo-platform
+  - nvidia-dra-driver-gpu
+  - nvsentinel
