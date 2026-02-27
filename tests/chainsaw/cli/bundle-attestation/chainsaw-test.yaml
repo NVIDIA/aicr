@@ -189,17 +189,17 @@ spec:
             check:
               (contains($stdout, 'does not match required') || contains($stderr, 'does not match required')): true
 
-    - name: verify-require-tool-version-fails
-      description: --require-tool-version fails when version doesn't match.
+    - name: verify-cli-version-constraint-fails
+      description: --cli-version-constraint fails when version doesn't satisfy constraint.
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-attestation"
               ${AICR_BIN} verify "${WORK}/bundle" \
-                --require-tool-version v99.99.99 --min-trust-level unknown 2>&1 || true
+                --cli-version-constraint v99.99.99 --min-trust-level unknown 2>&1 || true
             check:
-              (contains($stdout, 'does not match required') || contains($stderr, 'does not match required')): true
+              (contains($stdout, 'tool version not available') || contains($stderr, 'tool version not available')): true
 
     - name: help-bundle-no-attest
       description: Bundle --help shows flag.
@@ -223,7 +223,7 @@ spec:
               ($error == null): true
               (contains($stdout, 'min-trust-level')): true
               (contains($stdout, 'require-creator')): true
-              (contains($stdout, 'require-tool-version')): true
+              (contains($stdout, 'cli-version-constraint')): true
               (contains($stdout, 'format')): true
 
     - name: help-trust-update

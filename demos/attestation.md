@@ -88,10 +88,12 @@ Require specific creator:
 aicr verify ./my-bundle --require-creator jdoe@company.com
 ```
 
-Require specific tool version:
+Require a minimum CLI version (bare version defaults to >= semantics):
 
 ```shell
-aicr verify ./my-bundle --require-tool-version v1.0.0
+aicr verify ./my-bundle --cli-version-constraint 1.0.0
+aicr verify ./my-bundle --cli-version-constraint ">= 1.0.0"
+aicr verify ./my-bundle --cli-version-constraint "== 1.0.0"
 ```
 
 JSON output (for CI pipelines):

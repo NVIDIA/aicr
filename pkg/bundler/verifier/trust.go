@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 // TrustLevel represents the verification trust level of a bundle.
@@ -116,8 +117,10 @@ type Policy struct {
 	// RequireCreator requires the bundle attestation creator to match.
 	RequireCreator string
 
-	// RequireToolVersion requires the tool version to match.
-	RequireToolVersion string
+	// VersionConstraint is a version constraint expression for the CLI version.
+	// Supports operators: >=, >, <=, <, ==, !=.
+	// A bare version (e.g. "0.8.0") is treated as ">= 0.8.0".
+	VersionConstraint string
 }
 
 // CheckPolicy validates the verification result against a policy.
@@ -147,10 +150,27 @@ func (r *VerifyResult) CheckPolicy(p Policy) (string, error) {
 			r.BundleCreator, p.RequireCreator), nil
 	}
 
-	// Tool version check
-	if p.RequireToolVersion != "" && r.ToolVersion != p.RequireToolVersion {
-		return fmt.Sprintf("tool version %q does not match required %q",
-			r.ToolVersion, p.RequireToolVersion), nil
+	// Tool version constraint check: bare versions default to ">=" semantics
+	if p.VersionConstraint != "" {
+		if r.ToolVersion == "" {
+			return "tool version not available in attestation (bundle may be unattested)", nil
+		}
+		expr := strings.TrimSpace(p.VersionConstraint)
+		if !hasOperatorPrefix(expr) {
+			expr = ">= " + expr
+		}
+		constraint, err := validator.ParseConstraintExpression(expr)
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInvalidRequest, "invalid tool version constraint", err)
+		}
+		passed, err := constraint.Evaluate(r.ToolVersion)
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInvalidRequest, "tool version evaluation failed", err)
+		}
+		if !passed {
+			return fmt.Sprintf("tool version %q does not satisfy constraint %q",
+				r.ToolVersion, constraint.String()), nil
+		}
 	}
 
 	return "", nil
@@ -174,4 +194,14 @@ func (r *VerifyResult) MaxAchievableTrustLevel() TrustLevel {
 		return TrustAttested
 	}
 	return TrustVerified
+}
+
+// hasOperatorPrefix returns true if the expression starts with a comparison operator.
+func hasOperatorPrefix(expr string) bool {
+	for _, prefix := range []string{">=", "<=", "!=", "==", ">", "<"} {
+		if strings.HasPrefix(expr, prefix) {
+			return true
+		}
+	}
+	return false
 }
