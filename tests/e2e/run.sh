@@ -1182,7 +1182,7 @@ RECIPE
 
   # Test 1: Chainsaw health check should pass using embedded registry
   # The embedded registry.yaml has healthCheck.assertFile for gpu-operator,
-  # and the embedded assert file (recipes/checks/gpu-operator/assert.yaml)
+  # and the embedded health check file (recipes/checks/gpu-operator/health-check.yaml)
   # checks that readyReplicas is 1. No --data needed.
   msg "--- Test: Chainsaw health check via embedded registry (should pass) ---"
 
@@ -1230,14 +1230,14 @@ components:
   - name: gpu-operator
     displayName: GPU Operator
     healthCheck:
-      assertFile: checks/gpu-operator/assert.yaml
+      assertFile: checks/gpu-operator/health-check.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
       defaultNamespace: gpu-operator
 REGISTRY
 
-  cat > "${data_dir}/checks/gpu-operator/assert.yaml" <<'ASSERT'
+  cat > "${data_dir}/checks/gpu-operator/health-check.yaml" <<'ASSERT'
 apiVersion: apps/v1
 kind: Deployment
 metadata:

@@ -951,13 +951,13 @@ components:
   - name: gpu-operator
     displayName: GPU Operator
     healthCheck:
-      assertFile: checks/gpu-operator/assert.yaml
+      assertFile: checks/gpu-operator/health-check.yaml
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
 `,
 			files: map[string][]byte{
-				"checks/gpu-operator/assert.yaml": []byte(assertContent),
+				"checks/gpu-operator/health-check.yaml": []byte(assertContent),
 			},
 			componentRefs: []recipe.ComponentRef{
 				{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},
@@ -1010,7 +1010,7 @@ components:
   - name: gpu-operator
     displayName: GPU Operator
     healthCheck:
-      assertFile: checks/missing/assert.yaml
+      assertFile: checks/missing/health-check.yaml
     helm:
       defaultChart: nvidia/gpu-operator
 `,
@@ -1030,7 +1030,7 @@ components:
   - name: gpu-operator
     displayName: GPU Operator
     healthCheck:
-      assertFile: checks/gpu-operator/assert.yaml
+      assertFile: checks/gpu-operator/health-check.yaml
     helm:
       defaultChart: nvidia/gpu-operator
   - name: network-operator
@@ -1039,7 +1039,7 @@ components:
       defaultChart: nvidia/network-operator
 `,
 			files: map[string][]byte{
-				"checks/gpu-operator/assert.yaml": []byte(assertContent),
+				"checks/gpu-operator/health-check.yaml": []byte(assertContent),
 			},
 			componentRefs: []recipe.ComponentRef{
 				{Name: "gpu-operator", Type: recipe.ComponentTypeHelm},

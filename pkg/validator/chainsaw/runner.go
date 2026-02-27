@@ -1,4 +1,4 @@
-// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,14 +13,18 @@
 // limitations under the License.
 
 // Package chainsaw executes Chainsaw-style assertions against a live Kubernetes cluster.
-// It uses the chainsaw Go library for field matching, replacing the previous
-// exec-based chainsaw CLI invocation.
+// It supports two modes:
+//   - Raw K8s resource YAML: Uses the chainsaw Go library for field matching (checks.Check).
+//   - Chainsaw Test format (apiVersion: chainsaw.kyverno.io/v1alpha1): Invokes the chainsaw
+//     binary for full test execution (assert, script, wait, catch, etc.).
 package chainsaw
 
 import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -65,11 +69,32 @@ type Result struct {
 	Error error
 }
 
+// RunOption configures the behavior of Run.
+type RunOption func(*runConfig)
+
+type runConfig struct {
+	chainsawBinary ChainsawBinary
+}
+
+// WithChainsawBinary sets the chainsaw binary used for Chainsaw Test format assertions.
+func WithChainsawBinary(bin ChainsawBinary) RunOption {
+	return func(cfg *runConfig) {
+		cfg.chainsawBinary = bin
+	}
+}
+
 // Run executes assertions for a set of components against live cluster resources.
 // Components are run concurrently with bounded parallelism.
-func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration, fetcher ResourceFetcher) []Result {
+// For Chainsaw Test format YAML, the chainsaw binary is invoked directly.
+// For raw K8s resource YAML, the Go library assertion engine is used.
+func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration, fetcher ResourceFetcher, opts ...RunOption) []Result {
 	if len(asserts) == 0 {
 		return nil
+	}
+
+	var cfg runConfig
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
 	results := make([]Result, len(asserts))
@@ -94,7 +119,7 @@ func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration, 
 				return
 			}
 
-			results[i] = assertComponent(ctx, ca, timeout, fetcher)
+			results[i] = assertComponent(ctx, ca, timeout, fetcher, &cfg)
 		}()
 	}
 
@@ -102,8 +127,73 @@ func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration, 
 	return results
 }
 
-// assertComponent runs all assertions in a ComponentAssert with retry-until-timeout.
-func assertComponent(ctx context.Context, ca ComponentAssert, timeout time.Duration, fetcher ResourceFetcher) Result {
+// isChainsawTest returns true if the YAML content is a Chainsaw Test
+// (apiVersion: chainsaw.kyverno.io/v1alpha1, kind: Test).
+func isChainsawTest(raw string) bool {
+	return strings.Contains(raw, "chainsaw.kyverno.io") && strings.Contains(raw, "kind: Test")
+}
+
+// assertComponent runs assertions for a single component.
+// Chainsaw Test format is dispatched to the binary; raw K8s YAML uses the Go library.
+func assertComponent(ctx context.Context, ca ComponentAssert, timeout time.Duration, fetcher ResourceFetcher, cfg *runConfig) Result {
+	if isChainsawTest(ca.AssertYAML) {
+		return runChainsawBinary(ctx, ca.Name, ca.AssertYAML, timeout, cfg)
+	}
+	return assertRawResources(ctx, ca, timeout, fetcher)
+}
+
+// runChainsawBinary writes the Chainsaw Test YAML to a temp directory and invokes the binary.
+func runChainsawBinary(ctx context.Context, component, yamlContent string, timeout time.Duration, cfg *runConfig) Result {
+	result := Result{Component: component}
+
+	if cfg == nil || cfg.chainsawBinary == nil {
+		result.Error = errors.New(errors.ErrCodeInternal, "chainsaw binary not configured; cannot run Chainsaw Test format")
+		return result
+	}
+
+	// Create temp directory with component subdirectory.
+	tmpDir, err := os.MkdirTemp("", "chainsaw-*")
+	if err != nil {
+		result.Error = errors.Wrap(errors.ErrCodeInternal, "failed to create temp directory", err)
+		return result
+	}
+	defer os.RemoveAll(tmpDir)
+
+	testDir := filepath.Join(tmpDir, component)
+	if mkdirErr := os.MkdirAll(testDir, 0o755); mkdirErr != nil {
+		result.Error = errors.Wrap(errors.ErrCodeInternal, "failed to create test directory", mkdirErr)
+		return result
+	}
+
+	testFile := filepath.Join(testDir, "chainsaw-test.yaml")
+	if writeErr := os.WriteFile(testFile, []byte(yamlContent), 0o600); writeErr != nil {
+		result.Error = errors.Wrap(errors.ErrCodeInternal, "failed to write test file", writeErr)
+		return result
+	}
+
+	// Run with timeout context.
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	passed, output, err := cfg.chainsawBinary.RunTest(ctx, testDir)
+	if err != nil {
+		result.Output = output
+		result.Error = err
+		return result
+	}
+
+	result.Passed = passed
+	result.Output = output
+	if passed {
+		slog.Info("health check passed", "component", component)
+	} else {
+		slog.Warn("health check failed", "component", component)
+	}
+	return result
+}
+
+// assertRawResources runs raw K8s resource YAML assertions with retry-until-timeout.
+func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Duration, fetcher ResourceFetcher) Result {
 	result := Result{Component: ca.Name}
 
 	docs, err := splitYAMLDocuments(ca.AssertYAML)

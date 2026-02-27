@@ -44,7 +44,7 @@ spec:
                 - name: gpu-operator
                   displayName: GPU Operator
                   healthCheck:
-                    assertFile: checks/gpu-operator/assert.yaml
+                    assertFile: checks/gpu-operator/health-check.yaml
                   helm:
                     defaultRepository: https://helm.ngc.nvidia.com/nvidia
                     defaultChart: nvidia/gpu-operator
@@ -52,7 +52,7 @@ spec:
               EOF
 
               # Create a Chainsaw-style assert file for gpu-operator
-              cat > "${WORK}/data/checks/gpu-operator/assert.yaml" <<'EOF'
+              cat > "${WORK}/data/checks/gpu-operator/health-check.yaml" <<'EOF'
               apiVersion: apps/v1
               kind: Deployment
               metadata:
@@ -135,8 +135,8 @@ spec:
                 -o /dev/null 2>&1) || true
 
               # The external data provider should discover and register the assert file
-              echo "$output" | grep -q "checks/gpu-operator/assert.yaml" || {
-                echo "assert file not discovered by external data provider" >&2
+              echo "$output" | grep -q "checks/gpu-operator/health-check.yaml" || {
+                echo "health check file not discovered by external data provider" >&2
                 echo "output: $output" >&2
                 exit 1
               }

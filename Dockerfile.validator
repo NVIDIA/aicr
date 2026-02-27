@@ -57,6 +57,22 @@ RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/depl
 # test2json (e.g. readiness.test -test.v | test2json).
 RUN CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
+# Download chainsaw binary with checksum verification
+# Version must match .settings.yaml testing_tools.chainsaw
+ARG CHAINSAW_VERSION=0.2.14
+RUN set -e; \
+    ARCH="$(dpkg --print-architecture)"; \
+    TAR="chainsaw_linux_${ARCH}.tar.gz"; \
+    curl -fsSL -o /tmp/chainsaw.tar.gz \
+      "https://github.com/kyverno/chainsaw/releases/download/v${CHAINSAW_VERSION}/${TAR}"; \
+    EXPECTED="$(case ${ARCH} in \
+      amd64) echo 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e';; \
+      arm64) echo 'b6494b71e490ab825890fc12cc575de7f59bfa637d5cfe73c66987e4454e397c';; \
+    esac)"; \
+    echo "${EXPECTED}  /tmp/chainsaw.tar.gz" | sha256sum -c; \
+    tar -xzf /tmp/chainsaw.tar.gz -C /out chainsaw; \
+    rm /tmp/chainsaw.tar.gz
+
 # ---------------------------------------------------------------------------
 # Final stage: CUDA runtime provides nvidia-smi for GPU validation
 # ---------------------------------------------------------------------------
@@ -71,6 +87,7 @@ COPY --from=builder /out/aicr /usr/local/bin/aicr
 COPY --from=builder /out/deployment.test /usr/local/bin/deployment.test
 COPY --from=builder /out/conformance.test /usr/local/bin/conformance.test
 COPY --from=builder /out/test2json /usr/local/bin/test2json
+COPY --from=builder /out/chainsaw /usr/local/bin/chainsaw
 
 # Copy testdata needed by deployment tests at runtime (loaded via os.ReadFile
 # relative to CWD, e.g. testdata/nvidia-smi-verify-pod.yaml)
