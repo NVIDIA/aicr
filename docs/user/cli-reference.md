@@ -664,6 +664,38 @@ aicr bundle [flags]
 | `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 
+**Node Scheduling:**
+
+The `--accelerated-node-selector` and `--accelerated-node-toleration` flags control scheduling for GPU-specific components:
+
+| Flag | GPU Daemonsets | NFD Workers |
+|------|---------------|-------------|
+| `--accelerated-node-selector` | Applied (restricts to GPU nodes) | **Not applied** (NFD runs on all nodes) |
+| `--accelerated-node-toleration` | Applied | Applied |
+| `--system-node-selector` | Not applied | Not applied |
+| `--system-node-toleration` | Not applied | Not applied |
+
+NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and system) to detect hardware features. This matches the gpu-operator default behavior where NFD workers also run on control-plane nodes. The `--accelerated-node-selector` is intentionally not applied to NFD workers so they are not restricted to GPU nodes.
+
+> **Note:** When no `--accelerated-node-toleration` is specified, a default toleration (`operator: Exists`) is applied to both GPU daemonsets and NFD workers, allowing them to run on nodes with any taint.
+
+**Example:**
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --system-node-toleration dedicated=system-workload:NoSchedule \
+  --system-node-toleration dedicated=system-workload:NoExecute \
+  --output bundle
+```
+
+This results in:
+- **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **System components** (gpu-operator controller, NFD gc/master): tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
+
 **Behavior:**
 - All components from the recipe are bundled automatically
 - Each component creates a subdirectory in the output directory

@@ -63,7 +63,8 @@ toolkit:
   enabled: true
 
 # ── Node Feature Discovery scheduling ───────────────────────────────
-# NFD master/gc run on system nodes, worker runs on GPU nodes
+# NFD master/gc run on system nodes, worker runs on all worker nodes
+# (no accelerated nodeSelector — NFD must discover features everywhere)
 node-feature-discovery:
   master:
     nodeSelector:
@@ -71,6 +72,3 @@ node-feature-discovery:
   gc:
     nodeSelector:
       nodeGroup: system-pool
-  worker:
-    nodeSelector:
-      nodeGroup: gpu-worker

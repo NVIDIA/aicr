@@ -62,7 +62,12 @@ components:
       accelerated:
         nodeSelectorPaths:
           - daemonsets.nodeSelector
-          - node-feature-discovery.worker.nodeSelector
+          # Note: NFD worker nodeSelector is intentionally excluded from
+          # accelerated scheduling. NFD must run on all nodes (GPU, CPU,
+          # and system) to detect hardware features — this matches the
+          # gpu-operator default behavior where NFD workers also run on
+          # control-plane nodes. NFD worker tolerations remain here so
+          # it inherits the same tolerations as GPU daemonsets.
         tolerationPaths:
           - daemonsets.tolerations
           - node-feature-discovery.worker.tolerations
