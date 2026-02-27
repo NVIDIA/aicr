@@ -46,7 +46,7 @@ NC='\033[0m' # No Color
 # Configuration
 aicrd_URL="${aicrd_URL:-http://localhost:8080}"
 OUTPUT_DIR="${OUTPUT_DIR:-$(mktemp -d)}"
-AICR_BIN=""
+AICR_BIN="${AICR_BIN:-}"
 AICR_IMAGE="${AICR_IMAGE:-localhost:5001/aicr:local}"
 AICR_VALIDATOR_IMAGE="${AICR_VALIDATOR_IMAGE:-localhost:5001/aicr-validator:local}"
 SNAPSHOT_NAMESPACE="${SNAPSHOT_NAMESPACE:-gpu-operator}"
@@ -125,6 +125,13 @@ build_binaries() {
   msg "=========================================="
   msg "Building binaries"
   msg "=========================================="
+
+  # Skip build if AICR_BIN is already set to a valid executable
+  if [ -n "$AICR_BIN" ] && [ -x "$AICR_BIN" ]; then
+    pass "build/aicr (pre-built)"
+    msg "Using: ${AICR_BIN}"
+    return 0
+  fi
 
   cd "${ROOT_DIR}"
 
