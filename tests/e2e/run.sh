@@ -49,7 +49,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$(mktemp -d)}"
 AICR_BIN="${AICR_BIN:-}"
 AICR_IMAGE="${AICR_IMAGE:-localhost:5001/aicr:local}"
 AICR_VALIDATOR_IMAGE="${AICR_VALIDATOR_IMAGE:-localhost:5001/aicr-validator:local}"
-SNAPSHOT_NAMESPACE="${SNAPSHOT_NAMESPACE:-gpu-operator}"
+SNAPSHOT_NAMESPACE="${SNAPSHOT_NAMESPACE:-default}"
 SNAPSHOT_CM="${SNAPSHOT_CM:-aicr-e2e-snapshot}"
 FAKE_GPU_ENABLED="${FAKE_GPU_ENABLED:-false}"
 

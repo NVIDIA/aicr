@@ -45,8 +45,6 @@ for node in $(docker ps --filter "name=aicr-worker" --format "{{.Names}}"); do
   docker cp tools/fake-nvidia-smi "${node}:/usr/local/bin/nvidia-smi"
   docker exec "$node" chmod +x /usr/local/bin/nvidia-smi
 done
-kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
-
 chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent
 ```
 

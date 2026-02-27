@@ -21,7 +21,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: aicr-e2e-snapshot
-  namespace: gpu-operator
+  namespace: default
   labels:
     app.kubernetes.io/component: Snapshot
     app.kubernetes.io/name: aicr

@@ -21,7 +21,7 @@ spec:
   description: |
     Deploys the aicr snapshot agent as a Job, then asserts on the K8s
     resources it creates (Job completion, ConfigMap metadata, snapshot content).
-    Requires: Kind cluster with fake nvidia-smi, gpu-operator namespace,
+    Requires: Kind cluster with fake nvidia-smi, default namespace,
     aicr image at localhost:5001/aicr:local.
     Run with: chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent
   timeouts:
@@ -34,9 +34,8 @@ spec:
       try:
         - script:
             content: |
-              kubectl delete job aicr-e2e-snapshot -n gpu-operator --ignore-not-found=true
-              kubectl delete cm aicr-e2e-snapshot -n gpu-operator --ignore-not-found=true
-              kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f -
+              kubectl delete job aicr-e2e-snapshot -n default --ignore-not-found=true
+              kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true
 
     - name: setup-rbac
       description: Create ServiceAccount, ClusterRole, and ClusterRoleBinding for the snapshot agent.
@@ -45,7 +44,7 @@ spec:
             file: rbac.yaml
 
     - name: deploy-snapshot-job
-      description: Deploy the snapshot agent Job to the gpu-operator namespace.
+      description: Deploy the snapshot agent Job to the default namespace.
       try:
         - apply:
             file: snapshot-job.yaml
@@ -69,7 +68,7 @@ spec:
             content: |
               WORK="/tmp/chainsaw-snapshot-deploy"
               mkdir -p "${WORK}"
-              kubectl get cm aicr-e2e-snapshot -n gpu-operator \
+              kubectl get cm aicr-e2e-snapshot -n default \
                 -o jsonpath='{.data.snapshot\.yaml}' > "${WORK}/snapshot.yaml"
               chainsaw assert --resource "${WORK}/snapshot.yaml" \
                 --file ./assert-snapshot-content.yaml \
@@ -78,8 +77,8 @@ spec:
       cleanup:
         - script:
             content: |
-              kubectl delete job aicr-e2e-snapshot -n gpu-operator --ignore-not-found=true
-              kubectl delete cm aicr-e2e-snapshot -n gpu-operator --ignore-not-found=true
+              kubectl delete job aicr-e2e-snapshot -n default --ignore-not-found=true
+              kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true
               rm -rf /tmp/chainsaw-snapshot-deploy
         - delete:
             file: rbac.yaml
