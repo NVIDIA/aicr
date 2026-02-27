@@ -618,6 +618,48 @@ func TestGetValueOverridesForComponent(t *testing.T) {
 	}
 }
 
+// TestApplyNodeSchedulingOverrides_EstimatedNodeCount verifies that when Config has
+// EstimatedNodeCount() > 0 and the component has nodeCountPaths, the value is written
+// to the values map via ApplyMapOverrides (and thus appears as an int for Helm).
+func TestApplyNodeSchedulingOverrides_EstimatedNodeCount(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	comp := registry.Get("skyhook-operator")
+	if comp == nil || len(comp.GetNodeCountPaths()) == 0 {
+		t.Skip("skyhook-operator with nodeCountPaths not in registry; skipping estimated node count path test")
+	}
+
+	cfg := config.NewConfig(config.WithEstimatedNodeCount(8))
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	values := make(map[string]any)
+	b.applyNodeSchedulingOverrides("skyhook-operator", values)
+
+	// Path "estimatedNodeCount" is in skyhook-operator's nodeCountPaths; convertMapValue produces int64.
+	got, ok := values["estimatedNodeCount"]
+	if !ok {
+		t.Fatal("estimatedNodeCount not set in values map")
+	}
+	var want int64 = 8
+	switch v := got.(type) {
+	case int64:
+		if v != want {
+			t.Errorf("estimatedNodeCount = %d, want %d", v, want)
+		}
+	case int:
+		if int64(v) != want {
+			t.Errorf("estimatedNodeCount = %d, want %d", v, want)
+		}
+	default:
+		t.Errorf("estimatedNodeCount type = %T, value = %v (want int/int64)", got, got)
+	}
+}
+
 func TestCollectComponentManifests(t *testing.T) {
 	bundler, err := New()
 	if err != nil {

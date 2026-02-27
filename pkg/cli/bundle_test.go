@@ -165,12 +165,13 @@ func TestBundleCmd(t *testing.T) {
 		}
 	}
 
-	// Verify node selector/toleration flags exist
+	// Verify node selector/toleration and scheduling flags exist
 	nodeFlags := []string{
 		"system-node-selector",
 		"system-node-toleration",
 		"accelerated-node-selector",
 		"accelerated-node-toleration",
+		"nodes",
 	}
 	for _, flag := range nodeFlags {
 		if !flagNames[flag] {

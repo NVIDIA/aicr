@@ -107,6 +107,9 @@ type NodeSchedulingConfig struct {
 
 	// Accelerated defines paths for GPU/accelerated node scheduling.
 	Accelerated SchedulingPaths `yaml:"accelerated,omitempty"`
+
+	// NodeCountPaths are Helm value paths where the bundle-time node count is injected (e.g. estimatedNodeCount for skyhook-operator).
+	NodeCountPaths []string `yaml:"nodeCountPaths,omitempty"`
 }
 
 // SchedulingPaths holds the Helm value paths for node scheduling.
@@ -364,6 +367,14 @@ func (c *ComponentConfig) GetAcceleratedTaintStrPaths() []string {
 		return nil
 	}
 	return c.NodeScheduling.Accelerated.TaintStrPaths
+}
+
+// GetNodeCountPaths returns Helm value paths where the node count is injected.
+func (c *ComponentConfig) GetNodeCountPaths() []string {
+	if c == nil {
+		return nil
+	}
+	return c.NodeScheduling.NodeCountPaths
 }
 
 // GetValidations returns all validation configurations for a component.

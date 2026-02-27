@@ -147,8 +147,9 @@ Flags:
 - `--system-node-toleration key=value:effect` – Toleration for system components (repeatable)
 - `--accelerated-node-selector key=value` – Node selector for GPU nodes (repeatable)
 - `--accelerated-node-toleration key=value:effect` – Toleration for GPU nodes (repeatable)
+- `--nodes N` – Estimated number of GPU nodes (bundle-time only; written to paths in registry under `nodeScheduling.nodeCountPaths`)
 
-These flags apply selectors/tolerations to bundler-specific paths (e.g., GPU Operator uses `operator.nodeSelector` and `daemonsets.nodeSelector`).
+These flags apply selectors/tolerations to bundler-specific paths (e.g., GPU Operator uses `operator.nodeSelector` and `daemonsets.nodeSelector`). The `--nodes` value is applied to paths listed in the registry under `nodeScheduling.nodeCountPaths`.
 
 **Execution model**:
 

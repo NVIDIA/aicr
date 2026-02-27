@@ -57,6 +57,7 @@ type bundleCmdOptions struct {
 
 	// certificateIdentityRegexp overrides the identity pattern for binary attestation.
 	certificateIdentityRegexp string
+	estimatedNodeCount        int
 
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
@@ -178,9 +179,17 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-selector", err)
 	}
 
+	// Parse --nodes (estimated node count for bundle; 0 = unset)
+	n := cmd.Int("nodes")
+	if n < 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
+	}
+	opts.estimatedNodeCount = n
+
 	return opts, nil
 }
 
+//nolint:funlen // bundle command is inherently large (flags + description + action)
 func bundleCmd() *cli.Command {
 	return &cli.Command{
 		Name:                  "bundle",
@@ -273,6 +282,11 @@ Package with explicit tag (overrides CLI version):
 				Name:  "workload-selector",
 				Usage: "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
 			},
+			&cli.IntFlag{
+				Name:  "nodes",
+				Value: 0,
+				Usage: "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
+			},
 			&cli.StringFlag{
 				Name:    "deployer",
 				Aliases: []string{"d"},
@@ -293,6 +307,17 @@ Package with explicit tag (overrides CLI version):
 				Usage: `Override the certificate identity pattern for binary attestation verification.
 	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
 	workflows (e.g., build-attested.yaml). Not intended for production use.`,
+			},
+			&cli.BoolFlag{
+				Name:  "attest",
+				Usage: "Enable bundle attestation and binary provenance verification (requires OIDC authentication)",
+			},
+			&cli.StringFlag{
+				Name: "certificate-identity-regexp",
+				Usage: `Override the certificate identity pattern for binary attestation verification.
+	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
+	workflows (e.g., build-attested.yaml). Not intended for production use.`,
+				Category: "Deployment",
 			},
 			kubeconfigFlag,
 			dataFlag,
@@ -371,6 +396,20 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
 		config.WithWorkloadGateTaint(opts.workloadGateTaint),
 		config.WithWorkloadSelector(opts.workloadSelector),
+	)
+	// Create bundler with config
+	cfg := config.NewConfig(
+		config.WithVersion(version),
+		config.WithDeployer(opts.deployer),
+		config.WithRepoURL(opts.repoURL),
+		config.WithValueOverrides(opts.valueOverrides),
+		config.WithSystemNodeSelector(opts.systemNodeSelector),
+		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
+		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
+		config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
+		config.WithWorkloadGateTaint(opts.workloadGateTaint),
+		config.WithWorkloadSelector(opts.workloadSelector),
+		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 	)
 
 	attester, err := selectAttester(ctx, opts.attest)

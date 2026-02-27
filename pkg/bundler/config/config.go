@@ -113,6 +113,9 @@ type Config struct {
 	// certificateIdentityRegexp overrides the default identity pinning pattern
 	// for binary attestation verification during bundle creation.
 	certificateIdentityRegexp string
+
+	// estimatedNodeCount is the estimated number of GPU nodes (0 = unset). Used by skyhook-operator for estimatedNodeCount Helm value.
+	estimatedNodeCount int
 }
 
 // Getter methods for read-only access
@@ -237,6 +240,11 @@ func (c *Config) Attest() bool {
 // binary attestation verification, or empty string for the default.
 func (c *Config) CertificateIdentityRegexp() string {
 	return c.certificateIdentityRegexp
+}
+
+// EstimatedNodeCount returns the estimated number of GPU nodes (0 means unset).
+func (c *Config) EstimatedNodeCount() int {
+	return c.estimatedNodeCount
 }
 
 // Validate checks if the Config has valid settings.
@@ -393,6 +401,16 @@ func WithAttest(attest bool) Option {
 func WithCertificateIdentityRegexp(pattern string) Option {
 	return func(c *Config) {
 		c.certificateIdentityRegexp = pattern
+	}
+}
+
+// WithEstimatedNodeCount sets the estimated number of GPU nodes. 0 means unset. Negative values are clamped to 0 for defense-in-depth.
+func WithEstimatedNodeCount(n int) Option {
+	return func(c *Config) {
+		if n < 0 {
+			n = 0
+		}
+		c.estimatedNodeCount = n
 	}
 }
 
