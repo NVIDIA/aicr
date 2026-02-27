@@ -280,8 +280,8 @@ func downloadAndExtractGitHubArchive(ctx context.Context, archiveURL string) (st
 	}
 
 	// Use a bounded HTTP client — http.DefaultClient has no timeout.
-	client := &http.Client{Timeout: defaults.NCCLTrainerArchiveDownloadTimeout} //nolint:gosec // archiveURL is a compile-time constant, not user input
-	resp, err := client.Do(req)
+	client := &http.Client{Timeout: defaults.NCCLTrainerArchiveDownloadTimeout}
+	resp, err := client.Do(req) //nolint:gosec // archiveURL is a compile-time constant, not user input
 	if err != nil {
 		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to download archive from %s", archiveURL), err)
 	}
