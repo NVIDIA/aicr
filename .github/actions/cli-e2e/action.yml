@@ -24,7 +24,7 @@ inputs:
     required: true
 
 runs:
-  using: 'composite'
+  using: 'composite' 
   steps:
     - name: Setup Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
@@ -56,6 +56,7 @@ runs:
         rm -rf "${TMP}"
 
     - name: Generate SLSA predicate
+      if: github.event.pull_request.head.repo.fork == false
       uses: ./.github/actions/generate-slsa-predicate
       with:
         workflow_file: qualification.yaml
@@ -97,7 +98,21 @@ runs:
           echo "::warning::No binary attestation found (attestation tests will skip)"
         fi
 
+    ## skipping attestation tests for forked repository because 
+    ## OIDC authentication is not available
+    - name: Run CLI chainsaw tests (forked repository)
+      if: github.event.pull_request.head.repo.fork == true
+      shell: bash
+      run: |
+        set -euo pipefail
+        chainsaw test \
+          --no-cluster \
+          --config tests/chainsaw/chainsaw-config.yaml \
+          --test-dir tests/chainsaw/cli/ \
+          --selector 'ci!=true'
+    
     - name: Run CLI chainsaw tests
+      if: github.event.pull_request.head.repo.fork == false
       shell: bash
       run: |
         set -euo pipefail
@@ -105,6 +120,7 @@ runs:
           --no-cluster \
           --config tests/chainsaw/chainsaw-config.yaml \
           --test-dir tests/chainsaw/cli/
+    
 
     - name: Run AI-conformance offline tests
       shell: bash
