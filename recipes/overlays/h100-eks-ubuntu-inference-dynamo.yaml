@@ -59,20 +59,6 @@ spec:
   #     --protocol tcp --port 4222 --source-group <gpu-sg-id>
 
   componentRefs:
-    # Pin GPU Operator to v25.3.4 for dynamo inference recipes.
-    # GPU Operator v25.10.0+ with cdi.enabled=true triggers KAI scheduler
-    # to inject runtimeClassName: nvidia, which activates the
-    # management.nvidia.com CDI path and fails with "unresolvable CDI
-    # devices". v25.3.4 with cdi.default=false avoids this while still
-    # enabling CDI for DRA GPU allocation.
-    - name: gpu-operator
-      type: Helm
-      version: v25.3.4
-      overrides:
-        cdi:
-          enabled: true
-          default: false
-
     - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:
