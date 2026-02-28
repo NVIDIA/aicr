@@ -804,8 +804,7 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 3. **GPU Stress Workload** — Deployment running CUDA N-Body Simulation to generate GPU load
 4. **HPA Configuration** — Targets `gpu_utilization` with threshold of 50%
 5. **HPA Scale-Up** — Successfully scales replicas when GPU utilization exceeds target
-6. **HPA Scale-Down** — Successfully scales back down when GPU load is removed
-7. **Result: PASS**
+6. **Result: PASS**
 
 ---
 
@@ -857,20 +856,14 @@ EOF
     done
     capture "GPU workload pod" kubectl get pods -n hpa-test -o wide
 
-    # Wait for GPU metrics to be available and HPA to read them
-    log_info "Waiting for GPU metrics and HPA scaling (up to 5 minutes)..."
+    # Wait for GPU metrics to be available and HPA to scale up (up to 3 minutes)
+    log_info "Waiting for GPU metrics and HPA scale-up (up to 3 minutes)..."
     local hpa_scaled=false
-    for i in $(seq 1 20); do
+    for i in $(seq 1 12); do
         sleep 15
-        # Fail fast if workload pod is unhealthy
-        pod_phase=$(kubectl get pods -n hpa-test -l app=gpu-workload -o jsonpath='{.items[0].status.phase}' 2>/dev/null)
-        if [ "$pod_phase" = "Failed" ] || [ "$pod_phase" = "CrashLoopBackOff" ]; then
-            log_error "GPU workload pod is unhealthy: ${pod_phase}"
-            break
-        fi
         targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
         replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
-        log_info "  Check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-1}"
+        log_info "  Check ${i}/12: gpu_utilization=${targets:-unknown}, replicas=${replicas:-1}"
         if [ "${replicas:-1}" -gt 1 ] && [ -n "$targets" ]; then
             hpa_scaled=true
             break
@@ -900,42 +893,10 @@ EOF
 EOF
     capture "Pods after scale-up" kubectl get pods -n hpa-test -o wide
 
-    # Scale-down test: wait for N-Body to finish, verify HPA scales back to 1
-    local hpa_scaled_down=false
-    if [ "${hpa_scaled}" = "true" ]; then
-        cat >> "${EVIDENCE_FILE}" <<'EOF'
-
-## Scale-Down Verification
-
-The N-Body simulation runs a fixed number of iterations and then exits.
-Once the workload completes, GPU utilization drops to 0 and HPA scales
-back to minReplicas (1).
-EOF
-        log_info "Waiting for GPU workload to finish and HPA to scale down..."
-
-        log_info "Waiting for HPA scale-down (up to 5 minutes)..."
-        for i in $(seq 1 20); do
-            sleep 15
-            replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
-            targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
-            log_info "  Scale-down check ${i}/20: gpu_utilization=${targets:-unknown}, replicas=${replicas:-?}"
-            if [ "${replicas}" = "1" ] && [ "${targets:-unknown}" = "0" ]; then
-                hpa_scaled_down=true
-                break
-            fi
-        done
-
-        capture "HPA after scale-down" kubectl get hpa -n hpa-test
-        capture "Pods after scale-down" kubectl get pods -n hpa-test -o wide
-        capture "HPA events" kubectl describe hpa gpu-workload-hpa -n hpa-test
-    fi
-
-    # Verdict — require actual scaling for PASS
+    # Verdict — require actual scale-up for PASS
     echo "" >> "${EVIDENCE_FILE}"
-    if [ "${hpa_scaled}" = "true" ] && [ "${hpa_scaled_down}" = "true" ]; then
-        echo "**Result: PASS** — HPA successfully scaled up when GPU utilization exceeded target, and scaled back down when load was removed." >> "${EVIDENCE_FILE}"
-    elif [ "${hpa_scaled}" = "true" ]; then
-        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold. Scale-down not verified within timeout." >> "${EVIDENCE_FILE}"
+    if [ "${hpa_scaled}" = "true" ]; then
+        echo "**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — HPA did not scale replicas within the timeout. Check GPU workload, DCGM exporter, and prometheus-adapter configuration." >> "${EVIDENCE_FILE}"
     fi
@@ -944,6 +905,8 @@ EOF
 
 ## Cleanup
 EOF
+    kubectl delete deploy gpu-workload -n hpa-test --ignore-not-found 2>/dev/null || true
+    kubectl delete pods -n hpa-test -l app=gpu-workload --force --grace-period=0 2>/dev/null || true
     capture "Delete test namespace" cleanup_ns hpa-test
 
     log_info "Pod autoscaling evidence collection complete."

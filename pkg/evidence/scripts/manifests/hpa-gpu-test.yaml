@@ -37,6 +37,7 @@ spec:
         app: gpu-workload
     spec:
       restartPolicy: Always
+      terminationGracePeriodSeconds: 1
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -48,7 +49,7 @@ spec:
         - name: gpu-worker
           image: nvcr.io/nvidia/k8s/cuda-sample:nbody-cuda11.7.1-ubuntu18.04
           command: ["bash", "-c"]
-          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=30 || true; exec sleep infinity"]
+          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=9999 || true"]
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
