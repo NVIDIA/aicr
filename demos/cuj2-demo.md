@@ -29,6 +29,7 @@
   │      --accelerated-node-selector nodeGroup=gpu-worker \                │
   │      --accelerated-node-toleration dedicated=worker-workload:NoSchedule│
   │      --accelerated-node-toleration dedicated=worker-workload:NoExecute │
+  │      --system-node-selector dedicated=system-workload \                │
   │      --system-node-toleration dedicated=system-workload:NoSchedule     │
   │      --system-node-toleration dedicated=system-workload:NoExecute      │
   │                                                                        │
@@ -149,6 +150,7 @@
     --accelerated-node-selector nodeGroup=gpu-worker \
     --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
     --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+    --system-node-selector dedicated=system-workload \
     --system-node-toleration dedicated=system-workload:NoSchedule \
     --system-node-toleration dedicated=system-workload:NoExecute \
     --output bundle

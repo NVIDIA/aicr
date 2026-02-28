@@ -18,9 +18,7 @@
 # disaggregated prefill/decode, and SLA-driven autoscaling.
 
 dynamo-operator:
-  controllerManager:
-    tolerations:
-      - operator: Exists
+  controllerManager: {}
 
   # Use Kubernetes-native service discovery (no external etcd dependency for discovery)
   discoveryBackend: "kubernetes"
@@ -38,16 +36,12 @@ kai-scheduler:
 # Grove operator for pod lifecycle management (required by DynamoGraphDeployment)
 grove:
   enabled: true
-  tolerations:
-    - operator: Exists
 
 # etcd for operator state storage
 # Do NOT set fullnameOverride — the operator constructs the etcd endpoint from
 # the release name (<release>-etcd). Overriding the name breaks connectivity.
 etcd:
   enabled: true
-  tolerations:
-    - operator: Exists
   image:
     repository: bitnamilegacy/etcd
     tag: 3.5.18-debian-12-r5
@@ -69,9 +63,7 @@ nats:
   enabled: true
   podTemplate:
     merge:
-      spec:
-        tolerations:
-          - operator: Exists
+      spec: {}
   config:
     cluster:
       enabled: false

@@ -348,8 +348,14 @@ components:
       system:
         nodeSelectorPaths:
           - dynamo-operator.controllerManager.nodeSelector
+          - grove.nodeSelector
+          - etcd.nodeSelector
+          - nats.podTemplate.merge.spec.nodeSelector
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
+          - grove.tolerations
+          - etcd.tolerations
+          - nats.podTemplate.merge.spec.tolerations
 
   - name: kgateway-crds
     displayName: kgateway-crds

@@ -16,6 +16,34 @@
 # via the Kubernetes Gateway API. Any inference workload (dynamo, vLLM,
 # TGI, etc.) can route through this gateway using HTTPRoute or
 # InferenceModel resources.
+{{- $kgw := index .Values "kgateway" }}
+# GatewayParameters configures the proxy pod scheduling to match the
+# system node tolerations/nodeSelector injected by the bundler into
+# the kgateway controller. Without this, proxy pods land on any
+# untainted node instead of system infrastructure nodes.
+---
+apiVersion: gateway.kgateway.dev/v1alpha1
+kind: GatewayParameters
+metadata:
+  name: system-proxy
+  namespace: kgateway-system
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  kube:
+    podTemplate:
+      extraLabels:
+        app.kubernetes.io/managed-by: aicr
+      {{- if $kgw.nodeSelector }}
+      nodeSelector:
+        {{- toYaml $kgw.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if $kgw.tolerations }}
+      tolerations:
+        {{- toYaml $kgw.tolerations | nindent 8 }}
+      {{- end }}
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
@@ -28,6 +56,11 @@ metadata:
     "helm.sh/hook-delete-policy": before-hook-creation
 spec:
   gatewayClassName: kgateway
+  infrastructure:
+    parametersRef:
+      group: gateway.kgateway.dev
+      kind: GatewayParameters
+      name: system-proxy
   listeners:
     - name: http
       port: 80
