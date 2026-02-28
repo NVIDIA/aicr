@@ -40,7 +40,7 @@ spec:
 
     # ── CRDs ───────────────────────────────────────────────────────────
     - name: assert-crds
-      description: Verify critical CRDs are installed (dynamo, GPU operator, cert-manager).
+      description: Verify critical CRDs are installed (GPU operator, cert-manager, skyhook).
       timeouts:
         assert: 120s
       try:
@@ -106,10 +106,3 @@ spec:
       try:
         - assert:
             file: ../cluster/assert-kai-scheduler.yaml
-
-    # ── Dynamo Platform ────────────────────────────────────────────────
-    - name: assert-dynamo
-      description: Verify Dynamo operator, etcd, and NATS are healthy.
-      try:
-        - assert:
-            file: ../cluster/assert-dynamo.yaml
