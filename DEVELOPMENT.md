@@ -115,11 +115,47 @@ docker               -               24.0.7          ✓
 Legend: ✓ = installed, ⚠ = version mismatch, ✗ = missing
 ```
 
+### Flox Environment (Alternative)
+
+[Flox](https://flox.dev) provides a declarative, Nix-based development environment as an alternative to `make tools-setup`. Instead of installing tools system-wide, Flox creates an isolated shell with all dependencies available.
+
+```bash
+# Install Flox (one-time): https://flox.dev/get-flox
+# Then activate the environment:
+flox activate
+
+# All tools are now available — verify with:
+make tools-check
+```
+
+Benefits over `make tools-setup`:
+- No system-wide installs — tools are scoped to the project shell
+- Reproducible across machines via the lockfile (`.flox/env/manifest.lock`)
+- Single command to get a fully configured environment
+
+The Flox manifest (`.flox/env/manifest.toml`) mirrors the tools defined in `tools/setup-tools`. `.settings.yaml` remains the single source of truth for versions.
+
+#### Keeping Flox in Sync
+
+When tool versions change in `.settings.yaml`, the Flox manifest should be updated to match. Use the following prompt with an AI assistant or as a manual checklist:
+
+> Compare `.settings.yaml` tool versions against `.flox/env/manifest.toml` packages.
+> For each tool in `tools/check-tools` `get_tool_metadata()`, ensure the corresponding
+> Flox package is listed in `[install]` with a compatible version. Update any mismatched
+> entries in `manifest.toml`, then run `flox install` to regenerate `manifest.lock`.
+
+To verify after updating:
+
+```bash
+flox activate -- make tools-check
+```
+
 ### Version Management
 
 All tool versions are centrally managed in `.settings.yaml`. This file is the single source of truth used by:
 - `make tools-setup` - Local development setup
 - `make tools-check` - Version verification
+- `.flox/env/manifest.toml` - Flox environment packages
 - GitHub Actions CI - Ensures CI uses identical versions
 
 When updating tool versions, edit `.settings.yaml` and the changes propagate everywhere automatically.

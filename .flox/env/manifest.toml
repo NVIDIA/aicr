@@ -1,0 +1,95 @@
+## Flox Environment Manifest -----------------------------------------
+##
+##   _Everything_ you need to know about the _manifest_ is here:
+##
+##   https://flox.dev/docs/reference/command-reference/manifest.toml/
+##
+## -------------------------------------------------------------------
+# Flox manifest version managed by Flox CLI
+version = 1
+
+
+## Install Packages --------------------------------------------------
+##  Mirrors tools/setup-tools — all dev tools from .settings.yaml
+## -------------------------------------------------------------------
+[install]
+# Language
+go.pkg-path = "go_1_26"
+go.version = "^1.26"
+
+# Build tools
+goreleaser.pkg-path = "goreleaser"
+ko.pkg-path = "ko"
+crane.pkg-path = "crane"
+git-cliff.pkg-path = "git-cliff"
+
+# Linting
+golangci-lint.pkg-path = "golangci-lint"
+yamllint.pkg-path = "yamllint"
+addlicense.pkg-path = "addlicense"
+go-licenses.pkg-path = "go-licenses"
+
+# Security tools
+grype.pkg-path = "grype"
+cosign.pkg-path = "cosign"
+
+# Kubernetes / testing tools
+kubectl.pkg-path = "kubectl"
+kubernetes-helm.pkg-path = "kubernetes-helm"
+kind.pkg-path = "kind"
+ctlptl.pkg-path = "ctlptl"
+tilt.pkg-path = "tilt"
+chainsaw.pkg-path = "kyverno-chainsaw"
+
+# Cloud CLIs
+awscli2.pkg-path = "awscli2"
+
+# Utilities
+yq.pkg-path = "yq-go"
+
+
+## Environment Variables ---------------------------------------------
+##  GOFLAGS is used by Makefile targets (go vet, go test, golangci-lint)
+##  GOPATH/GOBIN keep Go tool installs inside the flox environment cache
+## -------------------------------------------------------------------
+[vars]
+GOFLAGS = "-mod=vendor"
+
+
+## Activation Hook ---------------------------------------------------
+##  Sets up GOPATH/GOBIN inside the flox cache so `go install` artifacts
+##  stay isolated and are on PATH automatically.
+## -------------------------------------------------------------------
+[hook]
+on-activate = '''
+  export GOPATH="$FLOX_ENV_CACHE/go"
+  export GOBIN="$GOPATH/bin"
+  mkdir -p "$GOBIN"
+'''
+
+
+## Profile script ----------------------------------------------------
+##  Ensures GOBIN is on PATH in the user's shell.
+## -------------------------------------------------------------------
+[profile]
+common = '''
+  export GOPATH="$FLOX_ENV_CACHE/go"
+  export GOBIN="$GOPATH/bin"
+  export PATH="$GOBIN:$PATH"
+'''
+
+
+## Services ---------------------------------------------------------
+[services]
+
+
+## Include ----------------------------------------------------------
+[include]
+
+
+## Build and publish your own packages ------------------------------
+[build]
+
+
+## Other Environment Options -----------------------------------------
+[options]
