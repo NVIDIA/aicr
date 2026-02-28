@@ -142,7 +142,7 @@ When tool versions change in `.settings.yaml`, the Flox manifest should be updat
 > Compare `.settings.yaml` tool versions against `.flox/env/manifest.toml` packages.
 > For each tool in `tools/check-tools` `get_tool_metadata()`, ensure the corresponding
 > Flox package is listed in `[install]` with a compatible version. Update any mismatched
-> entries in `manifest.toml`, then run `flox install` to regenerate `manifest.lock`.
+> entries in `manifest.toml`, then run `flox activate` to regenerate `manifest.lock`.
 
 To verify after updating:
 
