@@ -6,23 +6,24 @@
       "addlicense": {
         "pkg-path": "addlicense"
       },
-      "awscli2": {
-        "pkg-path": "awscli2"
-      },
       "chainsaw": {
-        "pkg-path": "kyverno-chainsaw"
+        "pkg-path": "kyverno-chainsaw",
+        "version": "^0.2"
       },
       "cosign": {
-        "pkg-path": "cosign"
+        "pkg-path": "cosign",
+        "version": "^3"
       },
       "crane": {
         "pkg-path": "crane"
       },
       "ctlptl": {
-        "pkg-path": "ctlptl"
+        "pkg-path": "ctlptl",
+        "version": "^0.9"
       },
       "git-cliff": {
-        "pkg-path": "git-cliff"
+        "pkg-path": "git-cliff",
+        "version": "^2"
       },
       "go": {
         "pkg-path": "go_1_26",
@@ -32,34 +33,53 @@
         "pkg-path": "go-licenses"
       },
       "golangci-lint": {
-        "pkg-path": "golangci-lint"
+        "pkg-path": "golangci-lint",
+        "version": "^2"
       },
       "goreleaser": {
-        "pkg-path": "goreleaser"
+        "pkg-path": "goreleaser",
+        "version": "^2"
       },
       "grype": {
         "pkg-path": "grype"
       },
+      "hugo": {
+        "pkg-path": "hugo",
+        "version": "~0.155"
+      },
       "kind": {
-        "pkg-path": "kind"
+        "pkg-path": "kind",
+        "version": "^0.31"
       },
       "ko": {
-        "pkg-path": "ko"
+        "pkg-path": "ko",
+        "version": "^0.18"
       },
       "kubectl": {
-        "pkg-path": "kubectl"
+        "pkg-path": "kubectl",
+        "version": "^1"
       },
       "kubernetes-helm": {
         "pkg-path": "kubernetes-helm"
       },
+      "kwok": {
+        "pkg-path": "kwok",
+        "version": "^0.7"
+      },
+      "nodejs": {
+        "pkg-path": "nodejs_22"
+      },
       "tilt": {
-        "pkg-path": "tilt"
+        "pkg-path": "tilt",
+        "version": "^0.36"
       },
       "yamllint": {
-        "pkg-path": "yamllint"
+        "pkg-path": "yamllint",
+        "version": "^1"
       },
       "yq": {
-        "pkg-path": "yq-go"
+        "pkg-path": "yq-go",
+        "version": "^4"
       }
     },
     "vars": {
@@ -89,6 +109,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:01.395347Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -118,6 +139,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:00.751674Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -147,6 +169,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:08.022756Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -176,6 +199,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:09.332807Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -185,126 +209,6 @@
       ],
       "outputs": {
         "out": "/nix/store/b7yc99vrys784hq8n5yridg39q5lns3d-addlicense-1.2.0"
-      },
-      "system": "x86_64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "awscli2",
-      "broken": false,
-      "derivation": "/nix/store/6lk883jlxnrwfdzj9202n23hk8db0ckv-awscli2-2.33.2.drv",
-      "description": "Unified tool to manage your AWS services",
-      "install_id": "awscli2",
-      "license": "Apache-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
-      "name": "awscli2-2.33.2",
-      "pname": "awscli2",
-      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
-      "rev_count": 953160,
-      "rev_date": "2026-02-23T12:05:20Z",
-      "scrape_date": "2026-02-25T04:46:01.535366Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "2.33.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "dist": "/nix/store/mcjyd58vanwzgsdi6r47gp706g7is1kw-awscli2-2.33.2-dist",
-        "out": "/nix/store/7fs6pvb0zdzr5pwvjd56lcg4v50zm300-awscli2-2.33.2"
-      },
-      "system": "aarch64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "awscli2",
-      "broken": false,
-      "derivation": "/nix/store/28hflxp9kfkrp5lvkxhn5fqb9y6f52ly-awscli2-2.33.2.drv",
-      "description": "Unified tool to manage your AWS services",
-      "install_id": "awscli2",
-      "license": "Apache-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
-      "name": "awscli2-2.33.2",
-      "pname": "awscli2",
-      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
-      "rev_count": 953160,
-      "rev_date": "2026-02-23T12:05:20Z",
-      "scrape_date": "2026-02-25T05:24:00.903236Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "2.33.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "dist": "/nix/store/22jvkfalayg0s810xy8al26bxg8y9536-awscli2-2.33.2-dist",
-        "out": "/nix/store/laxzjbgfpaprmrafrgr3sm2a741bjj6m-awscli2-2.33.2"
-      },
-      "system": "aarch64-linux",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "awscli2",
-      "broken": false,
-      "derivation": "/nix/store/g2wspf1sq2mirch4wd3jr5sapnsrqbxp-awscli2-2.33.2.drv",
-      "description": "Unified tool to manage your AWS services",
-      "install_id": "awscli2",
-      "license": "Apache-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
-      "name": "awscli2-2.33.2",
-      "pname": "awscli2",
-      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
-      "rev_count": 953160,
-      "rev_date": "2026-02-23T12:05:20Z",
-      "scrape_date": "2026-02-25T06:09:08.154615Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "2.33.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "dist": "/nix/store/4xmpgna7g51r7gyhladf5cfdzgiji1dv-awscli2-2.33.2-dist",
-        "out": "/nix/store/5xcwq8mbylr3dwxkdjbxf3f0gr8gzb8p-awscli2-2.33.2"
-      },
-      "system": "x86_64-darwin",
-      "group": "toplevel",
-      "priority": 5
-    },
-    {
-      "attr_path": "awscli2",
-      "broken": false,
-      "derivation": "/nix/store/gh9js61k4amdm17pfv6bid8wl9hzxxi1-awscli2-2.33.2.drv",
-      "description": "Unified tool to manage your AWS services",
-      "install_id": "awscli2",
-      "license": "Apache-2.0",
-      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
-      "name": "awscli2-2.33.2",
-      "pname": "awscli2",
-      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
-      "rev_count": 953160,
-      "rev_date": "2026-02-23T12:05:20Z",
-      "scrape_date": "2026-02-25T07:00:09.514382Z",
-      "stabilities": [
-        "unstable"
-      ],
-      "unfree": false,
-      "version": "2.33.2",
-      "outputs_to_install": [
-        "out"
-      ],
-      "outputs": {
-        "dist": "/nix/store/z908n1mkn8a30dyfmcyf23dqjr2gnh6p-awscli2-2.33.2-dist",
-        "out": "/nix/store/03f0vsahckikf0xcnqig8mls25c01ga5-awscli2-2.33.2"
       },
       "system": "x86_64-linux",
       "group": "toplevel",
@@ -325,6 +229,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:19.226743Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -354,6 +259,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:23.553360Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -383,6 +289,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:25.408574Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -412,6 +319,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:34.844163Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -441,6 +349,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:01.989152Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -470,6 +379,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:01.517096Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -499,6 +409,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:08.567488Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -528,6 +439,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:10.136936Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -557,6 +469,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:02.001043Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -588,6 +501,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:01.543213Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -619,6 +533,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:08.579981Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -650,6 +565,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:10.167869Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -681,6 +597,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:02.023343Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -710,6 +627,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:01.575655Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -739,6 +657,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:08.602788Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -768,6 +687,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:10.210485Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -797,6 +717,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:02.826220Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -826,6 +747,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:02.692001Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -855,6 +777,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:09.366687Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -884,6 +807,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:11.547112Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -913,6 +837,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:02.962844Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -942,6 +867,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:03.311787Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -971,6 +897,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:09.537397Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1000,6 +927,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:12.261600Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1029,6 +957,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:02.952361Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1058,6 +987,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:03.297099Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1087,6 +1017,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:09.526743Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1116,6 +1047,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:12.242507Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1145,6 +1077,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:02.998104Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1174,6 +1107,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:03.369986Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1203,6 +1137,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:09.574396Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1232,6 +1167,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:12.332341Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1261,6 +1197,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:03.024338Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1290,6 +1227,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:03.409166Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1319,6 +1257,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:09.600135Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1348,6 +1287,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:12.382468Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1377,6 +1317,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:03.118281Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1406,6 +1347,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:03.562200Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1435,6 +1377,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:09.698060Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1464,6 +1407,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:12.574073Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1473,6 +1417,126 @@
       ],
       "outputs": {
         "out": "/nix/store/ljs2r2dixgrv3cynx75550mz7c017cc1-grype-0.108.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "hugo",
+      "broken": false,
+      "derivation": "/nix/store/p4glp6gbqaaadzkvh1qq24zgx1x6nz2y-hugo-0.155.3.drv",
+      "description": "Fast and modern static website engine",
+      "install_id": "hugo",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "hugo-0.155.3",
+      "pname": "hugo",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T04:46:17.377150Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.155.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/b6pd0yrbg5czwi993nn9bajxp4dvpnlj-hugo-0.155.3"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "hugo",
+      "broken": false,
+      "derivation": "/nix/store/yj5gdpqir9rsg7mv28bsqmzhrk4qgq0j-hugo-0.155.3.drv",
+      "description": "Fast and modern static website engine",
+      "install_id": "hugo",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "hugo-0.155.3",
+      "pname": "hugo",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T05:24:20.059666Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.155.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/c33ks8qpg3zh9wms2pqcgi3s4f4c58jq-hugo-0.155.3"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "hugo",
+      "broken": false,
+      "derivation": "/nix/store/7hhzyixgglyrka8ghszi5bi1qvaha5d9-hugo-0.155.3.drv",
+      "description": "Fast and modern static website engine",
+      "install_id": "hugo",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "hugo-0.155.3",
+      "pname": "hugo",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T06:09:23.548601Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.155.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/361s37bsqladwq5qiq42c8grkzrzhf3h-hugo-0.155.3"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "hugo",
+      "broken": false,
+      "derivation": "/nix/store/48bnxarwp5d1mqg0apn6fnjya54yxx2q-hugo-0.155.3.drv",
+      "description": "Fast and modern static website engine",
+      "install_id": "hugo",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "hugo-0.155.3",
+      "pname": "hugo",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T07:00:31.047706Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.155.3",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/bfv4cy2187qx89xkb2659dg283bwfyyz-hugo-0.155.3"
       },
       "system": "x86_64-linux",
       "group": "toplevel",
@@ -1493,6 +1557,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:18.868866Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1522,6 +1587,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:22.990899Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1551,6 +1617,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:25.061927Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1580,6 +1647,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:34.232584Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1609,6 +1677,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:18.929774Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1638,6 +1707,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:23.098842Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1667,6 +1737,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:25.121243Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1696,6 +1767,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:34.350199Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1725,6 +1797,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:19.108402Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1757,6 +1830,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:23.403387Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1789,6 +1863,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:25.293306Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1821,6 +1896,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:34.673535Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1853,6 +1929,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:46:19.158389Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1882,6 +1959,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:24:23.459983Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1911,6 +1989,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:09:25.341341Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1940,6 +2019,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:00:34.735652Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1949,6 +2029,242 @@
       ],
       "outputs": {
         "out": "/nix/store/3bjwp28yvv86pih7k9p7n7w5jhcn8qd9-kubernetes-helm-3.19.1"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "kwok",
+      "broken": false,
+      "derivation": "/nix/store/6vkwv2ixjxpvvkd6rkwyp4cdc22csjad-kwok-0.7.0.drv",
+      "description": "Simulate massive Kubernetes clusters with low resource usage locally without kubelet",
+      "install_id": "kwok",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "kwok-0.7.0",
+      "pname": "kwok",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T04:46:19.220830Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/d2p47wknaxg2h0jd8xjlq30nxd5igzbh-kwok-0.7.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "kwok",
+      "broken": false,
+      "derivation": "/nix/store/694z8v69cfsicihx7mxkkvrflsd1kyfd-kwok-0.7.0.drv",
+      "description": "Simulate massive Kubernetes clusters with low resource usage locally without kubelet",
+      "install_id": "kwok",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "kwok-0.7.0",
+      "pname": "kwok",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T05:24:23.542841Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/b7v017842bcs32ywqlhvjj0kmywyqchn-kwok-0.7.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "kwok",
+      "broken": false,
+      "derivation": "/nix/store/ksdipnwvk9wcmd44ysdzmjjmp6naxh10-kwok-0.7.0.drv",
+      "description": "Simulate massive Kubernetes clusters with low resource usage locally without kubelet",
+      "install_id": "kwok",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "kwok-0.7.0",
+      "pname": "kwok",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T06:09:25.402940Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/55qv2la73nvxncrd5wwqgv01rwwkzhq3-kwok-0.7.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "kwok",
+      "broken": false,
+      "derivation": "/nix/store/1kvwlacjpj7vw81q7x5mavb9ds61i7k4-kwok-0.7.0.drv",
+      "description": "Simulate massive Kubernetes clusters with low resource usage locally without kubelet",
+      "install_id": "kwok",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "kwok-0.7.0",
+      "pname": "kwok",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T07:00:34.831718Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "0.7.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/jz5xywv5p6kv6dgxvzmy6mv8877aa992-kwok-0.7.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nodejs_22",
+      "broken": false,
+      "derivation": "/nix/store/xnpn3j9g1bsqa9ra62pyzhxkqs2x6ra4-nodejs-22.22.0.drv",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "install_id": "nodejs",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "nodejs-22.22.0",
+      "pname": "nodejs_22",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T04:46:26.324539Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "22.22.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/3kkw1cwcwl0vvn4y2jkpfr3iarxaq284-nodejs-22.22.0"
+      },
+      "system": "aarch64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nodejs_22",
+      "broken": false,
+      "derivation": "/nix/store/adyrpjgjfrsxq1brcyvvln5c9r10vfc2-nodejs-22.22.0.drv",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "install_id": "nodejs",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "nodejs-22.22.0",
+      "pname": "nodejs_22",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T05:24:37.666254Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "22.22.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/7996sfm56iryn7p639frvhajrbrb4ych-nodejs-22.22.0"
+      },
+      "system": "aarch64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nodejs_22",
+      "broken": false,
+      "derivation": "/nix/store/mi9n311cpwwy3w0yffd23p8nfcimblwv-nodejs-22.22.0.drv",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "install_id": "nodejs",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "nodejs-22.22.0",
+      "pname": "nodejs_22",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T06:09:32.273461Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "22.22.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/ixd7h25iyw6wc4hz37bqfg19782bm7z2-nodejs-22.22.0"
+      },
+      "system": "x86_64-darwin",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "nodejs_22",
+      "broken": false,
+      "derivation": "/nix/store/9g04c3g04gizdx5862jxrb6b66cfblrn-nodejs-22.22.0.drv",
+      "description": "Event-driven I/O framework for the V8 JavaScript engine",
+      "install_id": "nodejs",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=2fc6539b481e1d2569f25f8799236694180c0993",
+      "name": "nodejs-22.22.0",
+      "pname": "nodejs_22",
+      "rev": "2fc6539b481e1d2569f25f8799236694180c0993",
+      "rev_count": 953160,
+      "rev_date": "2026-02-23T12:05:20Z",
+      "scrape_date": "2026-02-25T07:00:51.860917Z",
+      "stabilities": [
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "22.22.0",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/b87dfjnjvg932xsw4mszjg4qmvrqzlqk-nodejs-22.22.0"
       },
       "system": "x86_64-linux",
       "group": "toplevel",
@@ -1969,6 +2285,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:48:07.899049Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -1998,6 +2315,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:26:46.060967Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2027,6 +2345,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:11:14.893051Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2056,6 +2375,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:03:10.969009Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2085,6 +2405,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:48:39.219077Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2115,6 +2436,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:27:26.187806Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2145,6 +2467,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:11:46.546059Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2175,6 +2498,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:03:53.518976Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2205,6 +2529,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T04:48:39.671221Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2234,6 +2559,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T05:27:26.798864Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2263,6 +2589,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T06:11:46.984880Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,
@@ -2292,6 +2619,7 @@
       "rev_date": "2026-02-23T12:05:20Z",
       "scrape_date": "2026-02-25T07:03:54.188739Z",
       "stabilities": [
+        "staging",
         "unstable"
       ],
       "unfree": false,

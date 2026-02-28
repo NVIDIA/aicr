@@ -10,7 +10,7 @@ version = 1
 
 
 ## Install Packages --------------------------------------------------
-##  Mirrors tools/setup-tools — all dev tools from .settings.yaml
+##  Tracks tools/setup-tools — dev tools from .settings.yaml (best-effort)
 ## -------------------------------------------------------------------
 [install]
 # Language
@@ -19,33 +19,54 @@ go.version = "^1.26"
 
 # Build tools
 goreleaser.pkg-path = "goreleaser"
+goreleaser.version = "^2"
 ko.pkg-path = "ko"
+ko.version = "^0.18"
 crane.pkg-path = "crane"
+# crane 0.21 not yet in nixpkgs; unpinned to get latest available
 git-cliff.pkg-path = "git-cliff"
+git-cliff.version = "^2"
 
 # Linting
 golangci-lint.pkg-path = "golangci-lint"
+golangci-lint.version = "^2"
 yamllint.pkg-path = "yamllint"
+yamllint.version = "^1"
 addlicense.pkg-path = "addlicense"
 go-licenses.pkg-path = "go-licenses"
 
 # Security tools
 grype.pkg-path = "grype"
+# grype 0.107 not yet in nixpkgs; unpinned to get latest available
 cosign.pkg-path = "cosign"
+cosign.version = "^3"
 
 # Kubernetes / testing tools
 kubectl.pkg-path = "kubectl"
+kubectl.version = "^1"
 kubernetes-helm.pkg-path = "kubernetes-helm"
+# helm 4 not yet in nixpkgs; unpinned to get latest available (v3.x)
 kind.pkg-path = "kind"
+kind.version = "^0.31"
 ctlptl.pkg-path = "ctlptl"
+ctlptl.version = "^0.9"
 tilt.pkg-path = "tilt"
+tilt.version = "^0.36"
 chainsaw.pkg-path = "kyverno-chainsaw"
+chainsaw.version = "^0.2"
+kwok.pkg-path = "kwok"
+kwok.version = "^0.7"
+# Note: karpenter is a server-side K8s controller (deployed via Helm into
+# clusters), not a local CLI tool. It is intentionally excluded.
 
-# Cloud CLIs
-awscli2.pkg-path = "awscli2"
+# Documentation tools
+hugo.pkg-path = "hugo"
+hugo.version = "~0.155"
+nodejs.pkg-path = "nodejs_22"
 
 # Utilities
 yq.pkg-path = "yq-go"
+yq.version = "^4"
 
 
 ## Environment Variables ---------------------------------------------

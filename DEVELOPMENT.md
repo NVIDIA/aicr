@@ -133,7 +133,7 @@ Benefits over `make tools-setup`:
 - Reproducible across machines via the lockfile (`.flox/env/manifest.lock`)
 - Single command to get a fully configured environment
 
-The Flox manifest (`.flox/env/manifest.toml`) mirrors the tools defined in `tools/setup-tools`. `.settings.yaml` remains the single source of truth for versions.
+The Flox manifest (`.flox/env/manifest.toml`) tracks the tools defined in `tools/setup-tools`. It is maintained on a best-effort basis and may occasionally lag behind `.settings.yaml`. `.settings.yaml` remains the authoritative source of truth for versions.
 
 #### Keeping Flox in Sync
 
@@ -155,10 +155,9 @@ flox activate -- make tools-check
 All tool versions are centrally managed in `.settings.yaml`. This file is the single source of truth used by:
 - `make tools-setup` - Local development setup
 - `make tools-check` - Version verification
-- `.flox/env/manifest.toml` - Flox environment packages
 - GitHub Actions CI - Ensures CI uses identical versions
 
-When updating tool versions, edit `.settings.yaml` and the changes propagate everywhere automatically.
+When updating tool versions, edit `.settings.yaml`. The changes propagate to `make tools-setup`, `make tools-check`, and CI automatically. The Flox manifest (`.flox/env/manifest.toml`) requires a manual update — see [Keeping Flox in Sync](#keeping-flox-in-sync).
 
 ### Finalize Setup
 
