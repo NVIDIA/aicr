@@ -49,6 +49,7 @@ spec:
         - dynamo-crds
         - cert-manager
         - kube-prometheus-stack
+        - kai-scheduler
       overrides:
         # Use kind's local-path-provisioner instead of EBS gp2
         etcd:
