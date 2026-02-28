@@ -119,7 +119,7 @@ type Validator struct {
 	NoCluster bool
 
 	// Tolerations are applied to validation phase Jobs for scheduling on tainted nodes.
-	// Defaults to tolerate-all when not explicitly set via CLI.
+	// Defaults to tolerate-all so Jobs can schedule on any node regardless of taints.
 	Tolerations []corev1.Toleration
 
 	// NodeSelector constrains validation phase Jobs to specific nodes.
@@ -221,10 +221,11 @@ func New(opts ...Option) *Validator {
 	}
 
 	v := &Validator{
-		Namespace: "aicr-validation", // Default namespace for validation jobs
-		Image:     defaultImage,      // Default validator image
-		RunID:     generateRunID(),   // Generate unique RunID for this validation run
-		Cleanup:   true,              // Default to cleanup resources after validation
+		Namespace:   "aicr-validation",                                          // Default namespace for validation jobs
+		Image:       defaultImage,                                               // Default validator image
+		RunID:       generateRunID(),                                            // Generate unique RunID for this validation run
+		Cleanup:     true,                                                       // Default to cleanup resources after validation
+		Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}}, // tolerate-all default
 	}
 	for _, opt := range opts {
 		opt(v)

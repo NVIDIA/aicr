@@ -727,88 +727,99 @@ func TestNew_WithImage_MultipleOptions(t *testing.T) {
 	}
 }
 
-func TestNew_WithTolerations(t *testing.T) {
-	tolerations := []corev1.Toleration{
+func TestNew_SchedulingOptions(t *testing.T) {
+	tests := []struct {
+		name              string
+		opts              []Option
+		wantTolerations   int
+		wantNodeSelectors int
+		checkToleration   func(t *testing.T, tolerations []corev1.Toleration)
+		checkNodeSelector func(t *testing.T, nodeSelector map[string]string)
+	}{
 		{
-			Key:      "dedicated",
-			Value:    "worker-workload",
-			Effect:   corev1.TaintEffectNoSchedule,
-			Operator: corev1.TolerationOpEqual,
+			name:            "default tolerate-all",
+			opts:            nil,
+			wantTolerations: 1,
+			checkToleration: func(t *testing.T, tolerations []corev1.Toleration) {
+				if tolerations[0].Operator != corev1.TolerationOpExists {
+					t.Errorf("expected default Exists operator, got %q", tolerations[0].Operator)
+				}
+				if tolerations[0].Key != "" {
+					t.Errorf("expected empty key for default tolerate-all, got %q", tolerations[0].Key)
+				}
+			},
 		},
 		{
-			Key:      "dedicated",
-			Value:    "worker-workload",
-			Effect:   corev1.TaintEffectNoExecute,
-			Operator: corev1.TolerationOpEqual,
+			name: "with specific tolerations",
+			opts: []Option{WithTolerations([]corev1.Toleration{
+				{Key: "dedicated", Value: "worker-workload", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+				{Key: "dedicated", Value: "worker-workload", Effect: corev1.TaintEffectNoExecute, Operator: corev1.TolerationOpEqual},
+			})},
+			wantTolerations:   2,
+			wantNodeSelectors: 0,
+			checkToleration: func(t *testing.T, tolerations []corev1.Toleration) {
+				if tolerations[0].Key != "dedicated" {
+					t.Errorf("expected toleration key 'dedicated', got %q", tolerations[0].Key)
+				}
+				if tolerations[1].Effect != corev1.TaintEffectNoExecute {
+					t.Errorf("expected NoExecute effect, got %q", tolerations[1].Effect)
+				}
+			},
 		},
-	}
-
-	v := New(WithTolerations(tolerations))
-
-	if len(v.Tolerations) != 2 {
-		t.Fatalf("expected 2 tolerations, got %d", len(v.Tolerations))
-	}
-	if v.Tolerations[0].Key != "dedicated" {
-		t.Errorf("expected toleration key 'dedicated', got %q", v.Tolerations[0].Key)
-	}
-	if v.Tolerations[1].Effect != corev1.TaintEffectNoExecute {
-		t.Errorf("expected NoExecute effect, got %q", v.Tolerations[1].Effect)
-	}
-}
-
-func TestNew_WithTolerations_ToleratAll(t *testing.T) {
-	tolerations := []corev1.Toleration{
 		{
-			Operator: corev1.TolerationOpExists,
+			name: "with tolerate-all",
+			opts: []Option{WithTolerations([]corev1.Toleration{
+				{Operator: corev1.TolerationOpExists},
+			})},
+			wantTolerations:   1,
+			wantNodeSelectors: 0,
+			checkToleration: func(t *testing.T, tolerations []corev1.Toleration) {
+				if tolerations[0].Operator != corev1.TolerationOpExists {
+					t.Errorf("expected Exists operator, got %q", tolerations[0].Operator)
+				}
+				if tolerations[0].Key != "" {
+					t.Errorf("expected empty key for tolerate-all, got %q", tolerations[0].Key)
+				}
+			},
+		},
+		{
+			name:              "with node selector",
+			opts:              []Option{WithNodeSelector(map[string]string{"gpu": "true"})},
+			wantTolerations:   1,
+			wantNodeSelectors: 1,
+			checkNodeSelector: func(t *testing.T, nodeSelector map[string]string) {
+				if nodeSelector["gpu"] != "true" {
+					t.Errorf("expected node selector gpu=true, got %q", nodeSelector["gpu"])
+				}
+			},
+		},
+		{
+			name: "with tolerations and node selector",
+			opts: []Option{
+				WithTolerations([]corev1.Toleration{{Operator: corev1.TolerationOpExists}}),
+				WithNodeSelector(map[string]string{"gpu": "true"}),
+			},
+			wantTolerations:   1,
+			wantNodeSelectors: 1,
 		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(tt.opts...)
 
-	v := New(WithTolerations(tolerations))
-
-	if len(v.Tolerations) != 1 {
-		t.Fatalf("expected 1 toleration, got %d", len(v.Tolerations))
-	}
-	if v.Tolerations[0].Operator != corev1.TolerationOpExists {
-		t.Errorf("expected Exists operator, got %q", v.Tolerations[0].Operator)
-	}
-	if v.Tolerations[0].Key != "" {
-		t.Errorf("expected empty key for tolerate-all, got %q", v.Tolerations[0].Key)
-	}
-}
-
-func TestNew_WithNodeSelector(t *testing.T) {
-	nodeSelector := map[string]string{
-		"gpu": "true",
-	}
-
-	v := New(WithNodeSelector(nodeSelector))
-
-	if len(v.NodeSelector) != 1 {
-		t.Fatalf("expected 1 node selector, got %d", len(v.NodeSelector))
-	}
-	if v.NodeSelector["gpu"] != "true" {
-		t.Errorf("expected node selector gpu=true, got %q", v.NodeSelector["gpu"])
-	}
-}
-
-func TestNew_WithTolerationsAndNodeSelector(t *testing.T) {
-	tolerations := []corev1.Toleration{
-		{Operator: corev1.TolerationOpExists},
-	}
-	nodeSelector := map[string]string{
-		"gpu": "true",
-	}
-
-	v := New(
-		WithTolerations(tolerations),
-		WithNodeSelector(nodeSelector),
-	)
-
-	if len(v.Tolerations) != 1 {
-		t.Errorf("expected 1 toleration, got %d", len(v.Tolerations))
-	}
-	if len(v.NodeSelector) != 1 {
-		t.Errorf("expected 1 node selector, got %d", len(v.NodeSelector))
+			if len(v.Tolerations) != tt.wantTolerations {
+				t.Fatalf("expected %d tolerations, got %d", tt.wantTolerations, len(v.Tolerations))
+			}
+			if len(v.NodeSelector) != tt.wantNodeSelectors {
+				t.Fatalf("expected %d node selectors, got %d", tt.wantNodeSelectors, len(v.NodeSelector))
+			}
+			if tt.checkToleration != nil {
+				tt.checkToleration(t, v.Tolerations)
+			}
+			if tt.checkNodeSelector != nil {
+				tt.checkNodeSelector(t, v.NodeSelector)
+			}
+		})
 	}
 }
 

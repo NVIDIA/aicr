@@ -572,7 +572,9 @@ func (v *Validator) validatePerformance(
 						NodeSelector:       v.NodeSelector,
 					}
 
-					// Add GPU node selector if recipe specifies a GPU accelerator
+					// Add GPU node selector if recipe specifies a GPU accelerator.
+					// This intentionally overrides any user-provided value for the GPU label
+					// since the recipe's accelerator requirement takes precedence.
 					if recipeResult.Criteria != nil &&
 						recipeResult.Criteria.Accelerator != "" &&
 						recipeResult.Criteria.Accelerator != recipe.CriteriaAcceleratorAny {
