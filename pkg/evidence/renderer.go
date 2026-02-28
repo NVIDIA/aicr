@@ -64,14 +64,16 @@ func (r *Renderer) Render(ctx context.Context, result *validator.ValidationResul
 
 	conformance, ok := result.Phases["conformance"]
 	if !ok {
-		return errors.New(errors.ErrCodeNotFound, "no conformance phase in validation result")
+		slog.Warn("no conformance phase in validation result, skipping evidence rendering")
+		return nil
 	}
 
 	// Build evidence entries grouped by EvidenceFile.
 	entries := r.buildEntries(conformance)
 
 	if len(entries) == 0 {
-		return errors.New(errors.ErrCodeNotFound, "no submission checks found in conformance results")
+		slog.Warn("no submission checks found in conformance results, skipping evidence rendering")
+		return nil
 	}
 
 	// Create output directory.

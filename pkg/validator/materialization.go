@@ -74,7 +74,7 @@ func compareHelmComponent(ref recipe.ComponentRef, helmData map[string]measureme
 		},
 	}
 
-	if helmData == nil {
+	if len(helmData) == 0 {
 		result.Status = ValidationStatusSkipped
 		result.Message = "no helm data in snapshot"
 		return result

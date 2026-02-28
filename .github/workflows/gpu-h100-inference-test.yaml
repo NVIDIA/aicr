@@ -26,7 +26,9 @@ on:
       - '.github/actions/gpu-operator-install/**'
       - '.github/actions/aicr-build/**'
       - 'Dockerfile.validator'
+      - 'pkg/evidence/**'
       - 'pkg/validator/checks/conformance/**'
+      - 'pkg/validator/checks/deployment/**'
       - '.github/actions/gpu-test-cleanup/**'
       - '.github/actions/load-versions/**'
       - 'tests/manifests/**'
@@ -195,11 +197,19 @@ jobs:
           cleanup() { kill "${PF_PID}" 2>/dev/null || true; }
           trap cleanup EXIT
 
-          echo "=== Checking /v1/models ==="
-          MODELS=$(curl -sf http://localhost:8000/v1/models)
+          echo "=== Waiting for /v1/models (model registration may take time after worker ready) ==="
+          for i in $(seq 1 30); do
+            MODELS=$(curl -sf http://localhost:8000/v1/models 2>/dev/null || echo '{"data":[]}')
+            if echo "${MODELS}" | jq -e '.data | length > 0' >/dev/null 2>&1; then
+              echo "Models available after ${i} attempt(s)."
+              break
+            fi
+            echo "Waiting for model registration... (${i}/30)"
+            sleep 10
+          done
           echo "${MODELS}" | jq .
           if ! echo "${MODELS}" | jq -e '.data | length > 0' >/dev/null 2>&1; then
-            echo "::error::No models reported by frontend"
+            echo "::error::No models reported by frontend after 5 minutes"
             exit 1
           fi
 
