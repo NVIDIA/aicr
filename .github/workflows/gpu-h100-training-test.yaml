@@ -32,7 +32,6 @@ on:
       - '.github/actions/gpu-test-cleanup/**'
       - '.github/actions/load-versions/**'
       - 'tests/chainsaw/ai-conformance/kind-training/**'
-      - 'recipes/components/dynamo-platform/**'
       - 'recipes/overlays/kind.yaml'
       - 'recipes/overlays/h100-kind-training.yaml'
       - 'kwok/manifests/karpenter/**'
@@ -144,7 +143,6 @@ jobs:
             --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
             --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
             --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml \
             --kubeconfig="${HOME}/.kube/config" \
             --debug
 

@@ -19,7 +19,6 @@ metadata:
 
 spec:
   # Inherits from kind recipe (kind-specific GPU operator + monitoring settings)
-  # Adds Dynamo platform components for the training stack.
   base: kind
 
   criteria:
@@ -32,35 +31,6 @@ spec:
     - name: K8s.server.version
       value: ">= 1.34"
 
-  componentRefs:
-    # Dynamo platform (model serving, orchestration)
-    - name: dynamo-crds
-      type: Helm
-      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      version: "0.8.1"
-      valuesFile: components/dynamo-crds/values.yaml
-
-    - name: dynamo-platform
-      type: Helm
-      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      version: "0.8.1"
-      valuesFile: components/dynamo-platform/values.yaml
-      dependencyRefs:
-        - dynamo-crds
-        - cert-manager
-        - kube-prometheus-stack
-      overrides:
-        # Use kind's local-path-provisioner instead of EBS gp2
-        etcd:
-          persistence:
-            storageClass: standard
-        nats:
-          config:
-            jetstream:
-              fileStore:
-                pvc:
-                  storageClassName: standard
-
   validation:
     conformance:
       checks:
@@ -70,6 +40,5 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - gang-scheduling
-        - robust-controller
         - pod-autoscaling
         - cluster-autoscaling
