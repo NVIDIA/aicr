@@ -14,7 +14,7 @@
 
 # Assert that all namespaces created by the kind training stack exist.
 # Compared to the kind inference test:
-#   Removed: kgateway-system (inference-only)
+#   Removed: dynamo-system (no Dynamo dependency in kind training validation)
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -61,13 +61,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: kai-scheduler
-status:
-  phase: Active
----
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: dynamo-system
 status:
   phase: Active
 ---

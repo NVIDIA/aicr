@@ -36,7 +36,6 @@ on:
       - 'tests/manifests/**'
       - 'tests/chainsaw/ai-conformance/**'
       - 'docs/conformance/cncf/**'
-      - 'recipes/components/dynamo-platform/**'
       - 'recipes/components/prometheus-adapter/**'
       - 'recipes/overlays/kind.yaml'
       - 'recipes/overlays/kind-inference.yaml'
@@ -82,7 +81,6 @@ jobs:
           method: bundle
           accelerator: h100
           intent: training
-          platform: dynamo
 
       # --- Snapshot and validation ---
 
@@ -171,13 +169,6 @@ jobs:
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
           echo "=== Recent events (gpu-operator) ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-          echo "=== Dynamo pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get pods -o wide 2>/dev/null || true
-          echo "=== Dynamo operator logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
-            logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
-          echo "=== Recent events (dynamo-system) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== KAI scheduler pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kai-scheduler get pods -o wide 2>/dev/null || true
           echo "=== KAI scheduler logs ==="

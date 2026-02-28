@@ -90,8 +90,6 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"prometheus-adapter",
 				"nvidia-dra-driver-gpu",
 				"kai-scheduler",
-				"dynamo-crds",
-				"dynamo-platform",
 			},
 			requiredChecks: []string{
 				"platform-health",
@@ -100,7 +98,6 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"accelerator-metrics",
 				"ai-service-metrics",
 				"gang-scheduling",
-				"robust-controller",
 				"pod-autoscaling",
 				"cluster-autoscaling",
 			},
