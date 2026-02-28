@@ -23,6 +23,8 @@ import (
 	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -115,6 +117,13 @@ type Validator struct {
 	// NoCluster controls whether to skip actual cluster operations (dry-run mode).
 	// When true, validation runs without connecting to Kubernetes cluster.
 	NoCluster bool
+
+	// Tolerations are applied to validation phase Jobs for scheduling on tainted nodes.
+	// Defaults to tolerate-all when not explicitly set via CLI.
+	Tolerations []corev1.Toleration
+
+	// NodeSelector constrains validation phase Jobs to specific nodes.
+	NodeSelector map[string]string
 }
 
 // Option is a functional option for configuring Validator instances.
@@ -169,6 +178,20 @@ func WithImagePullSecrets(secrets []string) Option {
 func WithNoCluster(noCluster bool) Option {
 	return func(v *Validator) {
 		v.NoCluster = noCluster
+	}
+}
+
+// WithTolerations returns an Option that sets tolerations for validation phase Jobs.
+func WithTolerations(tolerations []corev1.Toleration) Option {
+	return func(v *Validator) {
+		v.Tolerations = tolerations
+	}
+}
+
+// WithNodeSelector returns an Option that sets node selectors for validation phase Jobs.
+func WithNodeSelector(nodeSelector map[string]string) Option {
+	return func(v *Validator) {
+		v.NodeSelector = nodeSelector
 	}
 }
 

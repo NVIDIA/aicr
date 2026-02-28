@@ -67,6 +67,12 @@ const (
 	DefaultConformanceTimeout = defaults.ValidateConformanceTimeout
 )
 
+// gpuPresentLabelKey and gpuPresentLabelValue are used to select GPU nodes for validation Jobs.
+const (
+	gpuPresentLabelKey   = "nvidia.com/gpu.present"
+	gpuPresentLabelValue = "true"
+)
+
 // PhaseOrder defines the canonical execution order for validation phases.
 // Readiness and deployment must run before performance or conformance.
 var PhaseOrder = []ValidationPhaseName{
@@ -407,6 +413,8 @@ func (v *Validator) validateDeployment(
 						TestPattern:        patternResult.Pattern,
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Deployment, DefaultDeploymentTimeout),
+						Tolerations:        v.Tolerations,
+						NodeSelector:       v.NodeSelector,
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -560,7 +568,8 @@ func (v *Validator) validatePerformance(
 						TestPackage:        "./pkg/validator/checks/performance",
 						TestPattern:        patternResult.Pattern,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
-						NodeSelector:       nil, // Will be set below if GPU required
+						Tolerations:        v.Tolerations,
+						NodeSelector:       v.NodeSelector,
 					}
 
 					// Add GPU node selector if recipe specifies a GPU accelerator
@@ -568,9 +577,10 @@ func (v *Validator) validatePerformance(
 						recipeResult.Criteria.Accelerator != "" &&
 						recipeResult.Criteria.Accelerator != recipe.CriteriaAcceleratorAny {
 
-						jobConfig.NodeSelector = map[string]string{
-							"nvidia.com/gpu.present": "true",
+						if jobConfig.NodeSelector == nil {
+							jobConfig.NodeSelector = make(map[string]string)
 						}
+						jobConfig.NodeSelector[gpuPresentLabelKey] = gpuPresentLabelValue
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -707,6 +717,8 @@ func (v *Validator) validateConformance(
 						TestPattern:        patternResult.Pattern,
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
+						Tolerations:        v.Tolerations,
+						NodeSelector:       v.NodeSelector,
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
