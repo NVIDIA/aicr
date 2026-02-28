@@ -283,13 +283,3 @@ When asked to review:
 3. List assumptions/open questions separately.
 4. Keep overviews brief and secondary to findings.
 
-## Local Environment Preferences (Mirrored from `.claude/settings.local.json`)
-
-These are preference-level notes for local execution contexts:
-
-- Sandbox enabled.
-- Bash commands broadly allowed in sandboxed mode.
-- Prefer web access via GitHub and raw GitHub domains when needed.
-- Additional allowed host pattern: `*.eks.amazonaws.com`.
-
-Note: actual tool/runtime permissions are enforced by the active Codex environment and may differ.
