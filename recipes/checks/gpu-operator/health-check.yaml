@@ -29,6 +29,19 @@ spec:
   timeouts:
     assert: 5m
   steps:
+    - name: validate-deployment-exists
+      try:
+        # Guard against vacuous pass on empty namespace: verify the
+        # gpu-operator deployment exists and has at least one ready replica.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: gpu-operator
+                namespace: gpu-operator
+              status:
+                (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases.

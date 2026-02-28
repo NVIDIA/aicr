@@ -27,6 +27,10 @@ inputs:
     description: 'Chainsaw version to install (e.g., v0.2.14)'
     required: false
     default: 'v0.2.14'
+  chainsaw_sha256:
+    description: 'Chainsaw SHA256 checksum for linux/amd64 (from .settings.yaml)'
+    required: false
+    default: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
 
 runs:
   using: 'composite'
@@ -49,6 +53,7 @@ runs:
         helm_version: '${{ inputs.helm_version }}'
         install_chainsaw: 'true'
         chainsaw_version: '${{ inputs.chainsaw_version }}'
+        chainsaw_sha256: '${{ inputs.chainsaw_sha256 }}'
 
     - name: Run Integration Tests
       shell: bash

@@ -58,8 +58,9 @@ RUN CGO_ENABLED=0 go test -c -o /out/deployment.test ./pkg/validator/checks/depl
 # test2json (e.g. readiness.test -test.v | test2json).
 RUN CGO_ENABLED=0 go build -o /out/test2json cmd/test2json
 
-# Download chainsaw binary with checksum verification
-# Version must match .settings.yaml testing_tools.chainsaw
+# Download chainsaw binary with checksum verification.
+# Version must match .settings.yaml testing_tools.chainsaw.
+# Checksums must match .settings.yaml testing_tools.chainsaw_checksums.
 ARG CHAINSAW_VERSION=0.2.14
 RUN set -e; \
     ARCH="$(dpkg --print-architecture)"; \

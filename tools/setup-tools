@@ -377,8 +377,10 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
             esac
             CHAINSAW_TAR="chainsaw_${CHAINSAW_OS}_${CHAINSAW_ARCH}.tar.gz"
             CHAINSAW_URL="https://github.com/kyverno/chainsaw/releases/download/v${CHAINSAW_VER}/${CHAINSAW_TAR}"
+            CHAINSAW_SHA256=$(yq ".testing_tools.chainsaw_checksums.${CHAINSAW_OS}_${CHAINSAW_ARCH}" .settings.yaml)
             CHAINSAW_TMP="$(mktemp -d)"
             curl -fsSL -o "${CHAINSAW_TMP}/${CHAINSAW_TAR}" "${CHAINSAW_URL}"
+            verify_sha256 "${CHAINSAW_TMP}/${CHAINSAW_TAR}" "${CHAINSAW_SHA256}"
             tar -xzf "${CHAINSAW_TMP}/${CHAINSAW_TAR}" -C "${CHAINSAW_TMP}"
             sudo mv "${CHAINSAW_TMP}/chainsaw" /usr/local/bin/chainsaw
             sudo chmod +x /usr/local/bin/chainsaw

@@ -44,6 +44,11 @@ testing_tools:
   helm: 'v4.1.1'
   kwok: 'v0.7.0'
   chainsaw: 'v0.2.14'
+  chainsaw_checksums:
+    linux_amd64: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
+    linux_arm64: 'b6494b71e490ab825890fc12cc575de7f59bfa637d5cfe73c66987e4454e397c'
+    darwin_amd64: '983ce0e4ff32a2112481833d7be4e0a0f0530fadba630fa93d3a635539bc1db0'
+    darwin_arm64: 'ff806554a15e12faca08b54d373a61e27808f40c34208248924f7b71a301f786'
   yq: 'v4.52.4'
   karpenter: 'v1.8.0'
 

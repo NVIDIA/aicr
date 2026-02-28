@@ -22,6 +22,10 @@ inputs:
   chainsaw_version:
     description: 'Chainsaw version (e.g., v0.2.14)'
     required: true
+  chainsaw_sha256:
+    description: 'Chainsaw SHA256 checksum for linux/amd64 (from .settings.yaml)'
+    required: false
+    default: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
 
 runs:
   using: 'composite'
@@ -48,8 +52,14 @@ runs:
         VERSION="${VERSION#v}"
         TAR="chainsaw_linux_amd64.tar.gz"
         URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
+        EXPECTED="${{ inputs.chainsaw_sha256 }}"
         TMP="$(mktemp -d)"
         curl -fsSL -o "${TMP}/${TAR}" "${URL}"
+        ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::chainsaw checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
         tar -xzf "${TMP}/${TAR}" -C "${TMP}"
         sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
         sudo chmod +x /usr/local/bin/chainsaw

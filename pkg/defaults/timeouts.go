@@ -144,9 +144,10 @@ const (
 
 // Chainsaw assertion configuration for component health checks.
 const (
-	// ChainsawAssertTimeout is the timeout for health check assertions
-	// when evaluating component assert files against live cluster resources.
-	ChainsawAssertTimeout = 2 * time.Minute
+	// ChainsawAssertTimeout is the outer timeout for the chainsaw binary process.
+	// Must be greater than the chainsaw-internal assert timeout (spec.timeouts.assert
+	// in health check YAML files, currently 5m) to avoid killing the process early.
+	ChainsawAssertTimeout = 6 * time.Minute
 
 	// ChainsawMaxParallel is the maximum number of concurrent assertion
 	// runs during component health checks.

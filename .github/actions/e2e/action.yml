@@ -86,16 +86,23 @@ runs:
           CGO_ENABLED=0 go test -c -o dist/validator/conformance.test \
             ./pkg/validator/checks/conformance &
           CGO_ENABLED=0 go build -o dist/validator/test2json cmd/test2json &
-          # Download chainsaw binary for health check assertions (version must match .settings.yaml)
+          # Download chainsaw binary for health check assertions.
+          # Version and checksum read from .settings.yaml (single source of truth).
+          # Hardcoded to amd64 — CI runners are x86-only.
           (
-            CHAINSAW_VERSION=0.2.14
+            CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml | sed 's/^v//')
+            CHAINSAW_SHA256=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)
             curl -fsSL -o dist/validator/chainsaw.tar.gz \
               "https://github.com/kyverno/chainsaw/releases/download/v${CHAINSAW_VERSION}/chainsaw_linux_amd64.tar.gz"
-            echo "f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e  dist/validator/chainsaw.tar.gz" | sha256sum -c
+            echo "${CHAINSAW_SHA256}  dist/validator/chainsaw.tar.gz" | sha256sum -c
             tar -xzf dist/validator/chainsaw.tar.gz -C dist/validator chainsaw
             rm dist/validator/chainsaw.tar.gz
           ) &
           wait
+          # TODO: Consider using `docker build -f Dockerfile.validator` instead of this
+          # inline Dockerfile. The inline copy exists for Go build cache reuse on the host,
+          # but it must be kept in sync with Dockerfile.validator manually. Missing the
+          # chainsaw binary here caused silent health check failures in E2E.
           docker build -t localhost:5001/aicr-validator:local -f - . <<'DOCKERFILE'
         FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
         COPY dist/validator/aicr /usr/local/bin/aicr

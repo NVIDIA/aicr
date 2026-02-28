@@ -64,6 +64,12 @@ outputs:
   chainsaw:
     description: 'Chainsaw version'
     value: ${{ steps.versions.outputs.chainsaw }}
+  chainsaw_sha256_linux_amd64:
+    description: 'Chainsaw SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+  chainsaw_sha256_linux_arm64:
+    description: 'Chainsaw SHA256 for linux/arm64'
+    value: ${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}
   yq:
     description: 'yq version'
     value: ${{ steps.versions.outputs.yq }}
@@ -120,6 +126,8 @@ runs:
         echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "kwok=$(yq eval '.testing_tools.kwok' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "chainsaw=$(yq eval '.testing_tools.chainsaw' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "chainsaw_sha256_linux_amd64=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "chainsaw_sha256_linux_arm64=$(yq eval '.testing_tools.chainsaw_checksums.linux_arm64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yq=$(yq eval '.testing_tools.yq' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Documentation tools
@@ -155,6 +163,8 @@ runs:
         echo "  helm: ${{ steps.versions.outputs.helm }}"
         echo "  kwok: ${{ steps.versions.outputs.kwok }}"
         echo "  chainsaw: ${{ steps.versions.outputs.chainsaw }}"
+        echo "  chainsaw_sha256_linux_amd64: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}"
+        echo "  chainsaw_sha256_linux_arm64: ${{ steps.versions.outputs.chainsaw_sha256_linux_arm64 }}"
         echo "  yq: ${{ steps.versions.outputs.yq }}"
         echo "  hugo: ${{ steps.versions.outputs.hugo }}"
         echo "  node: ${{ steps.versions.outputs.node }}"
