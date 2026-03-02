@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -575,12 +576,15 @@ func (v *Validator) validatePerformance(
 					// Add GPU node selector if recipe specifies a GPU accelerator.
 					// This intentionally overrides any user-provided value for the GPU label
 					// since the recipe's accelerator requirement takes precedence.
+					// Clone the map to avoid mutating v.NodeSelector, which is shared across phases.
 					if recipeResult.Criteria != nil &&
 						recipeResult.Criteria.Accelerator != "" &&
 						recipeResult.Criteria.Accelerator != recipe.CriteriaAcceleratorAny {
 
 						if jobConfig.NodeSelector == nil {
 							jobConfig.NodeSelector = make(map[string]string)
+						} else {
+							jobConfig.NodeSelector = maps.Clone(jobConfig.NodeSelector)
 						}
 						jobConfig.NodeSelector[gpuPresentLabelKey] = gpuPresentLabelValue
 					}
