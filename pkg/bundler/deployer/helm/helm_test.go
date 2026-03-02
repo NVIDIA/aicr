@@ -725,8 +725,8 @@ func TestGenerate_KustomizeOnly(t *testing.T) {
 	if !strings.Contains(undeployScript, "kustomize build") {
 		t.Error("undeploy.sh missing kustomize build command")
 	}
-	if strings.Contains(undeployScript, "helm uninstall") {
-		t.Error("undeploy.sh should not contain helm uninstall for kustomize-only bundle")
+	if strings.Contains(undeployScript, "helm_force_uninstall \"my-kustomize-app\"") {
+		t.Error("undeploy.sh should not call helm_force_uninstall for kustomize-only bundle")
 	}
 
 	// Component README should show kustomize instructions
@@ -1357,8 +1357,8 @@ func TestGenerateUndeployScript(t *testing.T) {
 					t.Fatalf("read undeploy.sh: %v", readErr)
 				}
 				script := string(content)
-				gammaIdx := strings.Index(script, "gamma")
-				alphaIdx := strings.Index(script, "alpha")
+				gammaIdx := strings.Index(script, "Uninstalling gamma")
+				alphaIdx := strings.Index(script, "Uninstalling alpha")
 				if gammaIdx < 0 || alphaIdx < 0 {
 					t.Fatal("expected both gamma and alpha in undeploy.sh")
 				}

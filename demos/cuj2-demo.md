@@ -29,6 +29,7 @@
   │      --accelerated-node-selector nodeGroup=gpu-worker \                │
   │      --accelerated-node-toleration dedicated=worker-workload:NoSchedule│
   │      --accelerated-node-toleration dedicated=worker-workload:NoExecute │
+  │      --system-node-selector dedicated=system-workload \                │
   │      --system-node-toleration dedicated=system-workload:NoSchedule     │
   │      --system-node-toleration dedicated=system-workload:NoExecute      │
   │                                                                        │
@@ -149,6 +150,7 @@
     --accelerated-node-selector nodeGroup=gpu-worker \
     --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
     --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+    --system-node-selector dedicated=system-workload \
     --system-node-toleration dedicated=system-workload:NoSchedule \
     --system-node-toleration dedicated=system-workload:NoExecute \
     --output bundle
@@ -171,15 +173,9 @@
 │  │  → Services          │       │                      │        │
 │  └──────────────────────┘       └──────────────────────┘        │
 │                                                                 │
-│  ┌──────────────────────┐       ┌──────────────────────┐        │
-│  │        etcd          │       │         NATS         │        │
-│  │   (state store)      │       │   (messaging +       │        │
-│  │                      │       │    JetStream)        │        │
-│  │  Stores:             │       │                      │        │
-│  │  - Worker metadata   │       │  Routes:             │        │
-│  │  - Leases            │       │  - Request dispatch  │        │
-│  │  - Discovery state   │       │  - Response streaming│        │
-│  └──────────────────────┘       └──────────────────────┘        │
+│  Discovery: Kubernetes-native (no etcd)                         │
+│  KV Store:  In-memory (DYN_STORE_KV=mem)                        │
+│  Events:    ZeroMQ (DYN_EVENT_PLANE=zmq, no NATS)               │
 │                                                                 │
 │  CRDs (6):                                                      │
 │  ├── DynamoGraphDeployment         (inference serving graph)    │
@@ -200,9 +196,9 @@
 │  DynamoGraphDeployment: vllm-agg                                │
 │  Status: successful — All resources are ready                   │
 │                                                                 │
-│  ┌─────────┐  HTTP  ┌───────────────┐  NATS  ┌──────────────┐   │
+│  ┌─────────┐  HTTP  ┌───────────────┐  ZMQ   ┌──────────────┐   │
 │  │  Client │───────▶│   Frontend    │───────▶│ VllmDecode   │   │
-│  │ (OpenAI │ :8000  │               │ :4222  │   Worker     │   │
+│  │ (OpenAI │ :8000  │               │        │   Worker     │   │
 │  │  API)   │◀───────│ vllm-runtime  │◀───────│              │   │
 │  └─────────┘        │ Qwen3-0.6B    │        │ dynamo.vllm  │   │
 │                     │               │        │ Qwen3-0.6B   │   │
@@ -216,9 +212,9 @@
 │                                                                 │
 │  Flow:                                                          │
 │    1. Client → /v1/chat/completions → Frontend :8000            │
-│    2. Frontend → NATS :4222 → VllmDecodeWorker                  │
+│    2. Frontend → ZMQ → VllmDecodeWorker                         │
 │    3. VllmDecodeWorker runs Qwen3-0.6B on H100                  │
-│    4. Response: Worker → NATS → Frontend → Client               │
+│    4. Response: Worker → ZMQ → Frontend → Client                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 ### ChatBot

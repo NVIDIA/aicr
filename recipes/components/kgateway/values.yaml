@@ -20,9 +20,6 @@
 # Override release name prefix to avoid aicr-stack- prefix
 fullnameOverride: kgateway
 
-tolerations:
-  - operator: Exists
-
 resources:
   requests:
     cpu: 100m

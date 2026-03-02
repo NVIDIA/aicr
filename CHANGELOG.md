@@ -2,6 +2,37 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-03-02
+
+### Bug Fixes
+
+- *(registry/skyhook_customizations)* Wrong paths set for accelerated selector and tolerations  by [@ayuskauskas](https://github.com/ayuskauskas)
+- *(attestation)* Fix version matching logic to align with the project  by [@lockwobr](https://github.com/lockwobr)
+- Pipeline issues around forked repos  by [@lockwobr](https://github.com/lockwobr)
+- *(bundler)* Delete PVCs during undeploy to prevent stale volume mounts  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(demos)* Add prerequisites and scheduling to vllm-agg workload  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Change default agent namespace from gpu-operator to default  by [@mchmarny](https://github.com/mchmarny)
+- *(recipes)* Correct component deployment ordering  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(ci)* Evidence renderer crash, Dynamo inference retry, and workflow cleanup  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(recipes)* Remove dynamo components from kind training overlay  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(bundler)* Improve deploy/undeploy script reliability  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(recipes)* Add system node scheduling for dynamo-platform and kgateway  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(evidence)* Simplify HPA conformance test to scale-up only  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(skyhook-customizations)* Update tuning to 0.2.2 which fixes tuning profile to be final override  by [@ayuskauskas](https://github.com/ayuskauskas)
+
+### Features
+
+- Adding nccl test  by [@iamkhaledh](https://github.com/iamkhaledh)
+- *(validator)* Invoke chainsaw binary for health checks and add gpu-operator pod health check  by [@xdu31](https://github.com/xdu31)
+- *(recipes)* Upgrade dynamo-platform to v0.9.0 and disable etcd/nats  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other
+
+- Add atif1996 to copy-pr-bot trusted users 
+
+Co-authored-by: Atif Mahmood <atif1996@users.noreply.github.com> by [@atif1996](https://github.com/atif1996)
+- *(demos)* Add aligned infographic prompts for demo images by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.8.0] - 2026-02-27
 
 ### Bug Fixes
