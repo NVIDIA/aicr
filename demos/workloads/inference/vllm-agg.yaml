@@ -13,8 +13,8 @@
 # limitations under the License.
 
 # Prerequisites:
-#   kubectl create namespace dynamo-workload
-#   kubectl apply -f kai-scheduler-queue.yaml
+#   - KAI Scheduler installed (provides default-parent-queue)
+#   - Dynamo platform deployed (dynamo-crds + dynamo-platform)
 
 ---
 # KAI Scheduler queue for Dynamo workloads
@@ -58,14 +58,23 @@ spec:
       envs:
         - name: SERVED_MODEL_NAME
           value: Qwen/Qwen3-0.6B
+        - name: DYN_STORE_KV
+          value: mem
+        - name: DYN_EVENT_PLANE
+          value: zmq
       extraPodSpec:
         nodeSelector:
           nodeGroup: cpu-worker
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
     VllmDecodeWorker:
       componentType: worker
       replicas: 1
+      envs:
+        - name: DYN_STORE_KV
+          value: mem
+        - name: DYN_EVENT_PLANE
+          value: zmq
       resources:
         limits:
           gpu: "1"
@@ -82,7 +91,7 @@ spec:
             value: worker-workload
             effect: NoExecute
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
           workingDir: /workspace/examples/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args: ["--model", "Qwen/Qwen3-0.6B"]
