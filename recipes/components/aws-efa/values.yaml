@@ -29,7 +29,7 @@ securityContext:
 supportedInstanceLabels:
   keys:
     - nodeGroup
-    - node.dgxc.nvidia.com/has-gpu
+    - nvidia.com/gpu.present
   values:
     - gpu
     - "true"

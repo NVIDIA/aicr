@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -65,6 +66,12 @@ const (
 	DefaultDeploymentTimeout  = defaults.ValidateDeploymentTimeout
 	DefaultPerformanceTimeout = defaults.ValidatePerformanceTimeout
 	DefaultConformanceTimeout = defaults.ValidateConformanceTimeout
+)
+
+// gpuPresentLabelKey and gpuPresentLabelValue are used to select GPU nodes for validation Jobs.
+const (
+	gpuPresentLabelKey   = "nvidia.com/gpu.present"
+	gpuPresentLabelValue = "true"
 )
 
 // PhaseOrder defines the canonical execution order for validation phases.
@@ -407,6 +414,8 @@ func (v *Validator) validateDeployment(
 						TestPattern:        patternResult.Pattern,
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Deployment, DefaultDeploymentTimeout),
+						Tolerations:        v.Tolerations,
+						NodeSelector:       v.NodeSelector,
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -560,17 +569,24 @@ func (v *Validator) validatePerformance(
 						TestPackage:        "./pkg/validator/checks/performance",
 						TestPattern:        patternResult.Pattern,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
-						NodeSelector:       nil, // Will be set below if GPU required
+						Tolerations:        v.Tolerations,
+						NodeSelector:       v.NodeSelector,
 					}
 
-					// Add GPU node selector if recipe specifies a GPU accelerator
+					// Add GPU node selector if recipe specifies a GPU accelerator.
+					// This intentionally overrides any user-provided value for the GPU label
+					// since the recipe's accelerator requirement takes precedence.
+					// Clone the map to avoid mutating v.NodeSelector, which is shared across phases.
 					if recipeResult.Criteria != nil &&
 						recipeResult.Criteria.Accelerator != "" &&
 						recipeResult.Criteria.Accelerator != recipe.CriteriaAcceleratorAny {
 
-						jobConfig.NodeSelector = map[string]string{
-							"nvidia.com/gpu.present": "true",
+						if jobConfig.NodeSelector == nil {
+							jobConfig.NodeSelector = make(map[string]string)
+						} else {
+							jobConfig.NodeSelector = maps.Clone(jobConfig.NodeSelector)
 						}
+						jobConfig.NodeSelector[gpuPresentLabelKey] = gpuPresentLabelValue
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -707,6 +723,8 @@ func (v *Validator) validateConformance(
 						TestPattern:        patternResult.Pattern,
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
+						Tolerations:        v.Tolerations,
+						NodeSelector:       v.NodeSelector,
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
