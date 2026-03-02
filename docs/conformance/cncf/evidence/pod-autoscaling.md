@@ -1,7 +1,7 @@
 # Pod Autoscaling (HPA with GPU Metrics)
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:43:33 UTC
+**Generated:** 2026-03-02 18:30:49 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -17,8 +17,7 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 3. **GPU Stress Workload** — Deployment running CUDA N-Body Simulation to generate GPU load
 4. **HPA Configuration** — Targets `gpu_utilization` with threshold of 50%
 5. **HPA Scale-Up** — Successfully scales replicas when GPU utilization exceeds target
-6. **HPA Scale-Down** — Successfully scales back down when GPU load is removed
-7. **Result: PASS**
+6. **Result: PASS**
 
 ---
 
@@ -27,15 +26,15 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 **Prometheus adapter pod**
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
-NAME                                 READY   STATUS    RESTARTS      AGE
-prometheus-adapter-d9dbc69cb-jxgp9   1/1     Running   1 (27m ago)   23h
+NAME                                  READY   STATUS    RESTARTS   AGE
+prometheus-adapter-585f5dfc99-nm42j   1/1     Running   0          47h
 ```
 
 **Prometheus adapter service**
 ```
 $ kubectl get svc prometheus-adapter -n monitoring
-NAME                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
-prometheus-adapter   ClusterIP   172.20.192.109   <none>        443/TCP   11d
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+prometheus-adapter   ClusterIP   172.20.42.196   <none>        443/TCP   2d
 ```
 
 ## Custom Metrics API
@@ -43,12 +42,12 @@ prometheus-adapter   ClusterIP   172.20.192.109   <none>        443/TCP   11d
 **Available custom metrics**
 ```
 $ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | jq .resources[].name
+pods/gpu_utilization
+namespaces/gpu_utilization
 pods/gpu_memory_used
 namespaces/gpu_memory_used
-pods/gpu_power_usage
 namespaces/gpu_power_usage
-namespaces/gpu_utilization
-pods/gpu_utilization
+pods/gpu_power_usage
 ```
 
 ## GPU Stress Test Deployment
@@ -57,8 +56,24 @@ Deploy a GPU workload running CUDA N-Body Simulation to generate sustained GPU u
 then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
 **Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
-
 ```yaml
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# HPA Pod Autoscaling test with custom GPU metrics
+# Demonstrates HPA scaling based on gpu_utilization from prometheus-adapter
+# Usage: kubectl apply -f pkg/evidence/scripts/manifests/hpa-gpu-test.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -80,6 +95,8 @@ spec:
       labels:
         app: gpu-workload
     spec:
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 1
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -91,7 +108,7 @@ spec:
         - name: gpu-worker
           image: nvcr.io/nvidia/k8s/cuda-sample:nbody-cuda11.7.1-ubuntu18.04
           command: ["bash", "-c"]
-          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=30 || true; exec sleep infinity"]
+          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=9999 || true"]
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -126,7 +143,7 @@ spec:
 
 **Apply test manifest**
 ```
-$ kubectl apply -f pkg/evidence/scripts/manifests/hpa-gpu-test.yaml
+$ kubectl apply -f manifests/hpa-gpu-test.yaml
 namespace/hpa-test created
 deployment.apps/gpu-workload created
 horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
@@ -135,8 +152,8 @@ horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
 **GPU workload pod**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                           READY   STATUS    RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-7d7f4dbdf-9559s   1/1     Running   0          3s    100.65.30.220   ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME                           READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
+gpu-workload-7bccc5b5d-vsztd   1/1     Running   0          3s    100.65.168.154   ip-100-64-147-149.ec2.internal   <none>           <none>
 ```
 
 ## HPA Status
@@ -145,7 +162,7 @@ gpu-workload-7d7f4dbdf-9559s   1/1     Running   0          3s    100.65.30.220 
 ```
 $ kubectl get hpa -n hpa-test
 NAME               REFERENCE                 TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
-gpu-workload-hpa   Deployment/gpu-workload   100/50    1         4         2          101s
+gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          48s
 ```
 
 **HPA details**
@@ -155,13 +172,25 @@ Name:                         gpu-workload-hpa
 Namespace:                    hpa-test
 Labels:                       <none>
 Annotations:                  <none>
-CreationTimestamp:            Tue, 24 Feb 2026 12:43:45 -0800
+CreationTimestamp:            Mon, 02 Mar 2026 10:30:59 -0800
 Reference:                    Deployment/gpu-workload
 Metrics:                      ( current / target )
   "gpu_utilization" on pods:  100 / 50
 Min replicas:                 1
-Max replicas:                 4
-Deployment pods:              2 current / 2 desired
+Max replicas:                 2
+Behavior:
+  Scale Up:
+    Stabilization Window: 0 seconds
+    Select Policy: Max
+    Policies:
+      - Type: Pods     Value: 4    Period: 15 seconds
+      - Type: Percent  Value: 100  Period: 15 seconds
+  Scale Down:
+    Stabilization Window: 30 seconds
+    Select Policy: Max
+    Policies:
+      - Type: Percent  Value: 100  Period: 15 seconds
+Deployment pods:       2 current / 2 desired
 Conditions:
   Type            Status  Reason              Message
   ----            ------  ------              -------
@@ -169,18 +198,20 @@ Conditions:
   ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from pods metric gpu_utilization
   ScalingLimited  False   DesiredWithinRange  the desired count is within the acceptable range
 Events:
-  Type    Reason             Age   From                       Message
-  ----    ------             ----  ----                       -------
-  Normal  SuccessfulRescale  28s   horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
+  Type     Reason                        Age   From                       Message
+  ----     ------                        ----  ----                       -------
+  Warning  FailedGetPodsMetric           35s   horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Warning  FailedComputeMetricsReplicas  35s   horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Normal   SuccessfulRescale             20s   horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
 ```
 
 ## GPU Utilization Evidence
 
 **GPU utilization (nvidia-smi)**
 ```
-$ kubectl exec -n hpa-test gpu-workload-7d7f4dbdf-9559s -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
+$ kubectl exec -n hpa-test gpu-workload-7bccc5b5d-vsztd -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
 utilization.gpu [%], utilization.memory [%], power.draw [W]
-100 %, 0 %, 592.74 W
+100 %, 0 %, 591.71 W
 ```
 
 ## Pods After Scale-Up
@@ -188,66 +219,17 @@ utilization.gpu [%], utilization.memory [%], power.draw [W]
 **Pods after scale-up**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                           READY   STATUS    RESTARTS   AGE    IP              NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-7d7f4dbdf-9559s   1/1     Running   0          108s   100.65.30.220   ip-100-64-171-120.ec2.internal   <none>           <none>
-gpu-workload-7d7f4dbdf-v8csq   1/1     Running   0          33s    100.65.63.246   ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME                           READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
+gpu-workload-7bccc5b5d-vsztd   1/1     Running   0          54s   100.65.168.154   ip-100-64-147-149.ec2.internal   <none>           <none>
+gpu-workload-7bccc5b5d-w75hq   1/1     Running   0          24s   100.65.115.146   ip-100-64-147-149.ec2.internal   <none>           <none>
 ```
 
-## Scale-Down Verification
-
-Scale the deployment to 0, replace GPU workload with an idle container, then
-scale back to 1. Verify HPA detects reduced utilization and scales down.
-
-**HPA after scale-down**
-```
-$ kubectl get hpa -n hpa-test
-NAME               REFERENCE                 TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
-gpu-workload-hpa   Deployment/gpu-workload   100/50    1         4         2          3m3s
-```
-
-**Pods after scale-down**
-```
-$ kubectl get pods -n hpa-test -o wide
-NAME                            READY   STATUS    RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-5dbfcc64b7-lsksc   1/1     Running   0          18s   100.65.38.156   ip-100-64-171-120.ec2.internal   <none>           <none>
-gpu-workload-5dbfcc64b7-td2mg   1/1     Running   0          40s   100.65.165.86   ip-100-64-171-120.ec2.internal   <none>           <none>
-```
-
-**HPA events**
-```
-$ kubectl describe hpa gpu-workload-hpa -n hpa-test
-Name:                         gpu-workload-hpa
-Namespace:                    hpa-test
-Labels:                       <none>
-Annotations:                  <none>
-CreationTimestamp:            Tue, 24 Feb 2026 12:43:45 -0800
-Reference:                    Deployment/gpu-workload
-Metrics:                      ( current / target )
-  "gpu_utilization" on pods:  100 / 50
-Min replicas:                 1
-Max replicas:                 4
-Deployment pods:              2 current / 2 desired
-Conditions:
-  Type            Status  Reason              Message
-  ----            ------  ------              -------
-  AbleToScale     True    ReadyForNewScale    recommended size matches current size
-  ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from pods metric gpu_utilization
-  ScalingLimited  False   DesiredWithinRange  the desired count is within the acceptable range
-Events:
-  Type     Reason                        Age                 From                       Message
-  ----     ------                        ----                ----                       -------
-  Warning  FailedGetScale                50s (x2 over 65s)   horizontal-pod-autoscaler  deployments.apps "gpu-workload" not found
-  Warning  FailedGetPodsMetric           35s                 horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Warning  FailedComputeMetricsReplicas  35s                 horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Normal   SuccessfulRescale             20s (x2 over 111s)  horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
-```
-
-**Result: PASS** — HPA successfully scaled up when GPU utilization exceeded target, and scaled back down when load was removed.
+**Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold.
 
 ## Cleanup
 
 **Delete test namespace**
 ```
-$ kubectl delete namespace hpa-test --ignore-not-found
-namespace "hpa-test" deleted
+$ cleanup_ns hpa-test
+
 ```

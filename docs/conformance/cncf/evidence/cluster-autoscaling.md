@@ -1,7 +1,7 @@
 # Cluster Autoscaling
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:26:59 UTC
+**Generated:** 2026-03-02 18:32:08 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -70,7 +70,7 @@ up/down based on workload demand. The ASG is configured with p5.48xlarge instanc
 +---------------------------------------+-------------------------+
 |                ImageId                |      InstanceType       |
 +---------------------------------------+-------------------------+
-|  ami-XXXXXXXXXXXX                     |  p5.48xlarge            |
+|  ami-00fc69912e2e87875                |  p5.48xlarge            |
 +---------------------------------------+-------------------------+
 ||                      CapacityReservation                      ||
 |+--------------------------------+------------------------------+|
@@ -93,7 +93,7 @@ on-demand availability risk.
 |    DescribeCapacityReservations     |
 +------------+------------------------+
 |  AZ        |  us-east-1e            |
-|  Available |  0                     |
+|  Available |  3                     |
 |  ID        |  cr-0cbe491320188dfa6  |
 |  State     |  active                |
 |  Total     |  10                    |
@@ -110,7 +110,7 @@ appropriate labels and GPU resources.
 ```
 $ kubectl get nodes -o custom-columns=NAME:.metadata.name,GPU:.status.capacity.nvidia\.com/gpu,INSTANCE-TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,VERSION:.status.nodeInfo.kubeletVersion
 NAME                             GPU      INSTANCE-TYPE   VERSION
-ip-100-64-171-120.ec2.internal   8        p5.48xlarge     v1.34.1
+ip-100-64-147-149.ec2.internal   8        p5.48xlarge     v1.34.3
 ip-100-64-4-149.ec2.internal     <none>   m4.16xlarge     v1.34.2
 ip-100-64-6-88.ec2.internal      <none>   m4.16xlarge     v1.34.2
 ip-100-64-83-166.ec2.internal    <none>   m4.16xlarge     v1.34.1

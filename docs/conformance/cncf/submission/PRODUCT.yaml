@@ -15,7 +15,7 @@
 metadata:
   kubernetesVersion: v1.34
   platformName: "Kubernetes Platforms Powered by NVIDIA AI Cluster Runtime (AICR)"
-  platformVersion: "0.7.7"
+  platformVersion: "0.8.0"
   vendorName: "NVIDIA"
   websiteUrl: "https://github.com/NVIDIA/aicr"
   repoUrl: "https://github.com/NVIDIA/aicr"

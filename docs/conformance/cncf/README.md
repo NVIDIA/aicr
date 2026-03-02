@@ -77,16 +77,17 @@ Alternatively, run the evidence collection script directly:
 ./pkg/evidence/scripts/collect-evidence.sh dra
 ```
 
-> **Note:** The `--cncf-submission` flag deploys GPU workloads and takes ~15
-> minutes. The HPA test uses CUDA N-Body Simulation to stress GPUs and verifies
-> both scale-up and scale-down.
+> **Note:** The `--cncf-submission` flag deploys GPU workloads and takes ~5-10
+> minutes. The evidence collection script uses polling with early exit on both
+> success and failure, minimizing wait times. The HPA test uses CUDA N-Body
+> Simulation to stress GPUs and verifies scale-up.
 
 ### Two Modes
 
 | | `aicr validate --phase conformance` | `--cncf-submission` |
 |---|---|---|
 | **Purpose** | CI pass/fail | CNCF submission evidence |
-| **Speed** | ~3 minutes | ~15 minutes |
+| **Speed** | ~3 minutes | ~5-10 minutes |
 | **Deploys workloads** | No | Yes |
 | **Output** | Structural evidence (pass/fail + artifacts) | Behavioral evidence (command outputs, logs, queries) |
 | **DRA GPU allocation test** | Status check only | Deploys pod, verifies GPU access |

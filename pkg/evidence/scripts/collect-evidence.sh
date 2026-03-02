@@ -69,7 +69,8 @@ capture() {
     echo '```' >> "${EVIDENCE_FILE}"
 }
 
-# Wait for a pod to reach a terminal phase (Succeeded or Failed)
+# Wait for a pod to reach a terminal phase (Succeeded or Failed).
+# Exits early on unrecoverable container errors (ImagePullBackOff, CrashLoopBackOff, etc.)
 wait_for_pod() {
     local ns="$1" name="$2" timeout="$3"
     local elapsed=0
@@ -78,10 +79,34 @@ wait_for_pod() {
         case "$phase" in
             Succeeded|Failed) echo "$phase"; return 0 ;;
         esac
+        # Check for unrecoverable container errors to fail early
+        local waiting_reason
+        waiting_reason=$(kubectl get pod "$name" -n "$ns" -o jsonpath='{.status.containerStatuses[0].state.waiting.reason}' 2>/dev/null)
+        case "$waiting_reason" in
+            ErrImagePull|ImagePullBackOff|CrashLoopBackOff|InvalidImageName|CreateContainerConfigError)
+                log_error "Pod $name failed early: $waiting_reason" >&2
+                echo "Failed"
+                return 1
+                ;;
+        esac
         sleep 5
         elapsed=$((elapsed + 5))
     done
     echo "Timeout"
+    return 1
+}
+
+# Wait for a local port to accept connections (e.g., after kubectl port-forward).
+# Exits early if the background process dies.
+wait_for_port() {
+    local port="$1" timeout="$2" pid="$3"
+    local elapsed=0
+    while [ $elapsed -lt "$timeout" ]; do
+        if curl -sf "http://localhost:${port}/-/ready" &>/dev/null; then return 0; fi
+        if ! kill -0 "$pid" 2>/dev/null; then return 1; fi
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
     return 1
 }
 
@@ -495,9 +520,8 @@ EOF
     # Port-forward to Prometheus and query
     kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
     local pf_pid=$!
-    sleep 3
 
-    if kill -0 "${pf_pid}" 2>/dev/null; then
+    if wait_for_port 9090 30 "${pf_pid}"; then
         # GPU Utilization
         echo "" >> "${EVIDENCE_FILE}"
         echo "**GPU Utilization (DCGM_FI_DEV_GPU_UTIL)**" >> "${EVIDENCE_FILE}"
@@ -530,11 +554,12 @@ EOF
             python3 -c "import sys,json; data=json.loads(sys.stdin.read()); print(json.dumps(data,indent=2))" >> "${EVIDENCE_FILE}" 2>&1
         echo '```' >> "${EVIDENCE_FILE}"
 
-        kill "${pf_pid}" 2>/dev/null || true
     else
         echo "" >> "${EVIDENCE_FILE}"
         echo "**WARNING:** Could not port-forward to Prometheus" >> "${EVIDENCE_FILE}"
     fi
+    # Always clean up port-forward process to avoid leaking on timeout/failure
+    kill "${pf_pid}" 2>/dev/null || true
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
@@ -845,29 +870,33 @@ EOF
     log_info "Deploying HPA GPU test..."
     capture "Apply test manifest" kubectl apply -f "${SCRIPT_DIR}/manifests/hpa-gpu-test.yaml"
 
-    # Wait for pod to start
+    # Wait for pod to become Ready (uses watch API for immediate detection)
     log_info "Waiting for GPU workload pod (up to ${POD_TIMEOUT}s)..."
-    local elapsed=0
-    while [ $elapsed -lt "${POD_TIMEOUT}" ]; do
-        ready=$(kubectl get pods -n hpa-test -l app=gpu-workload -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
-        if [ "$ready" = "True" ]; then break; fi
-        sleep 10
-        elapsed=$((elapsed + 10))
-    done
+    kubectl wait --for=condition=Ready pod -l app=gpu-workload -n hpa-test --timeout="${POD_TIMEOUT}s" 2>/dev/null || true
     capture "GPU workload pod" kubectl get pods -n hpa-test -o wide
 
     # Wait for GPU metrics to be available and HPA to scale up (up to 3 minutes)
+    # Check-then-sleep pattern: detect scale-up or failure as early as possible
     log_info "Waiting for GPU metrics and HPA scale-up (up to 3 minutes)..."
     local hpa_scaled=false
-    for i in $(seq 1 12); do
-        sleep 15
+    for i in $(seq 1 18); do
         targets=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentMetrics[0].pods.current.averageValue}' 2>/dev/null)
         replicas=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.currentReplicas}' 2>/dev/null)
-        log_info "  Check ${i}/12: gpu_utilization=${targets:-unknown}, replicas=${replicas:-1}"
+        log_info "  Check ${i}/18: gpu_utilization=${targets:-unknown}, replicas=${replicas:-1}"
         if [ "${replicas:-1}" -gt 1 ] && [ -n "$targets" ]; then
             hpa_scaled=true
             break
         fi
+        # Fail early on unrecoverable HPA conditions
+        local hpa_conditions
+        hpa_conditions=$(kubectl get hpa gpu-workload-hpa -n hpa-test -o jsonpath='{.status.conditions[?(@.status=="False")].reason}' 2>/dev/null)
+        case "$hpa_conditions" in
+            *FailedGetMetrics*|*InvalidMetricSourceType*)
+                log_error "HPA failed early: $hpa_conditions"
+                break
+                ;;
+        esac
+        sleep 10
     done
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'

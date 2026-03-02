@@ -1,7 +1,7 @@
 # Robust AI Operator (Dynamo Platform)
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:23:11 UTC
+**Generated:** 2026-03-02 18:30:29 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -28,39 +28,30 @@ webhooks operational, and custom resources reconciled.
 ```
 $ kubectl get deploy -n dynamo-system
 NAME                                                 READY   UP-TO-DATE   AVAILABLE   AGE
-dynamo-platform-dynamo-operator-controller-manager   1/1     1            1           6d21h
-grove-operator                                       1/1     1            1           5d23h
+dynamo-platform-dynamo-operator-controller-manager   1/1     1            1           144m
+grove-operator                                       1/1     1            1           144m
 ```
 
 **Dynamo operator pods**
 ```
 $ kubectl get pods -n dynamo-system
-NAME                                                              READY   STATUS      RESTARTS   AGE
-dynamo-operator-webhook-ca-inject-1-47jd7                         0/1     Completed   0          11d
-dynamo-operator-webhook-ca-inject-2-tf49w                         0/1     Completed   0          7d1h
-dynamo-operator-webhook-ca-inject-4-lhfsc                         0/1     Completed   0          7d1h
-dynamo-operator-webhook-ca-inject-5-6hxbn                         0/1     Completed   0          7d1h
-dynamo-operator-webhook-ca-inject-6-s85wc                         0/1     Completed   0          6d22h
-dynamo-operator-webhook-cert-gen-1-g8dx6                          0/1     Completed   0          11d
-dynamo-operator-webhook-cert-gen-6-5krdc                          0/1     Completed   0          6d22h
-dynamo-platform-dynamo-operator-controller-manager-5895f7f2pn9d   2/2     Running     0          5d20h
-dynamo-platform-dynamo-operator-webhook-ca-inject-1-wmjs9         0/1     Completed   0          6d21h
-dynamo-platform-dynamo-operator-webhook-cert-gen-1-tw4c9          0/1     Completed   0          6d21h
-dynamo-platform-etcd-0                                            1/1     Running     0          5d13h
-dynamo-platform-nats-0                                            2/2     Running     0          5d13h
-grove-operator-57565844db-lfsg2                                   1/1     Running     0          5d20h
+NAME                                                              READY   STATUS      RESTARTS       AGE
+dynamo-platform-dynamo-operator-controller-manager-79b8c69nn4nd   2/2     Running     0              144m
+dynamo-platform-dynamo-operator-webhook-ca-inject-1-6wbfn         0/1     Completed   0              143m
+dynamo-platform-dynamo-operator-webhook-cert-gen-1-9fqq6          0/1     Completed   0              144m
+grove-operator-6848cc55b8-7lxt2                                   1/1     Running     1 (144m ago)   144m
 ```
 
 ## Custom Resource Definitions
 
 **Dynamo CRDs**
 ```
-dynamocomponentdeployments.nvidia.com                  2026-02-12T20:41:17Z
-dynamographdeploymentrequests.nvidia.com               2026-02-12T20:41:17Z
-dynamographdeployments.nvidia.com                      2026-02-12T20:41:17Z
-dynamographdeploymentscalingadapters.nvidia.com        2026-02-12T20:41:17Z
-dynamomodels.nvidia.com                                2026-02-12T20:41:17Z
-dynamoworkermetadatas.nvidia.com                       2026-02-12T20:41:17Z
+dynamocomponentdeployments.nvidia.com                  2026-03-02T15:57:37Z
+dynamographdeploymentrequests.nvidia.com               2026-03-02T15:57:35Z
+dynamographdeployments.nvidia.com                      2026-03-02T15:57:37Z
+dynamographdeploymentscalingadapters.nvidia.com        2026-03-02T15:57:35Z
+dynamomodels.nvidia.com                                2026-03-02T15:57:35Z
+dynamoworkermetadatas.nvidia.com                       2026-03-02T15:57:35Z
 ```
 
 ## Webhooks
@@ -69,12 +60,12 @@ dynamoworkermetadatas.nvidia.com                       2026-02-12T20:41:17Z
 ```
 $ kubectl get validatingwebhookconfigurations -l app.kubernetes.io/instance=dynamo-platform
 NAME                                         WEBHOOKS   AGE
-dynamo-platform-dynamo-operator-validating   4          6d21h
+dynamo-platform-dynamo-operator-validating   4          144m
 ```
 
 **Dynamo validating webhooks**
 ```
-dynamo-platform-dynamo-operator-validating   4          6d21h
+dynamo-platform-dynamo-operator-validating   4          144m
 ```
 
 ## Custom Resource Reconciliation
@@ -86,7 +77,7 @@ it into component deployments with pods, services, and scaling configuration.
 ```
 $ kubectl get dynamographdeployments -A
 NAMESPACE         NAME       AGE
-dynamo-workload   vllm-agg   5d23h
+dynamo-workload   vllm-agg   90m
 ```
 
 **DynamoGraphDeployment details**
@@ -97,32 +88,41 @@ kind: DynamoGraphDeployment
 metadata:
   annotations:
     kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"nvidia.com/v1alpha1","kind":"DynamoGraphDeployment","metadata":{"annotations":{},"name":"vllm-agg","namespace":"dynamo-workload"},"spec":{"services":{"Frontend":{"componentType":"frontend","envFromSecret":"hf-token-secret","envs":[{"name":"SERVED_MODEL_NAME","value":"Qwen/Qwen3-0.6B"}],"extraPodSpec":{"mainContainer":{"image":"nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1"}},"replicas":1},"VllmDecodeWorker":{"componentType":"worker","envFromSecret":"hf-token-secret","extraPodSpec":{"mainContainer":{"args":["--model","Qwen/Qwen3-0.6B"],"command":["python3","-m","dynamo.vllm"],"image":"nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1","workingDir":"/workspace/examples/backends/vllm"}},"replicas":1,"resources":{"limits":{"gpu":"1"}}}}}}
-  creationTimestamp: "2026-02-18T21:12:53Z"
+      {"apiVersion":"nvidia.com/v1alpha1","kind":"DynamoGraphDeployment","metadata":{"annotations":{},"name":"vllm-agg","namespace":"dynamo-workload"},"spec":{"services":{"Frontend":{"componentType":"frontend","envs":[{"name":"SERVED_MODEL_NAME","value":"Qwen/Qwen3-0.6B"},{"name":"DYN_STORE_KV","value":"mem"},{"name":"DYN_EVENT_PLANE","value":"zmq"}],"extraPodSpec":{"mainContainer":{"image":"nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0"},"nodeSelector":{"nodeGroup":"cpu-worker"}},"replicas":1},"VllmDecodeWorker":{"componentType":"worker","envs":[{"name":"DYN_STORE_KV","value":"mem"},{"name":"DYN_EVENT_PLANE","value":"zmq"}],"extraPodSpec":{"mainContainer":{"args":["--model","Qwen/Qwen3-0.6B"],"command":["python3","-m","dynamo.vllm"],"image":"nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0","workingDir":"/workspace/examples/backends/vllm"},"nodeSelector":{"nodeGroup":"gpu-worker"},"tolerations":[{"effect":"NoSchedule","key":"dedicated","operator":"Equal","value":"worker-workload"},{"effect":"NoExecute","key":"dedicated","operator":"Equal","value":"worker-workload"}]},"replicas":1,"resources":{"limits":{"gpu":"1"}}}}}}
+  creationTimestamp: "2026-03-02T16:59:53Z"
   finalizers:
   - nvidia.com/finalizer
   generation: 2
   name: vllm-agg
   namespace: dynamo-workload
-  resourceVersion: "6642195"
-  uid: 1d5d783c-b616-404a-86e1-97a5751aa2fd
+  resourceVersion: "9854275"
+  uid: 89860009-949f-457e-9626-83853ee3d08f
 spec:
   services:
     Frontend:
       componentType: frontend
-      envFromSecret: hf-token-secret
       envs:
       - name: SERVED_MODEL_NAME
         value: Qwen/Qwen3-0.6B
+      - name: DYN_STORE_KV
+        value: mem
+      - name: DYN_EVENT_PLANE
+        value: zmq
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
           name: ""
           resources: {}
+        nodeSelector:
+          nodeGroup: cpu-worker
       replicas: 1
     VllmDecodeWorker:
       componentType: worker
-      envFromSecret: hf-token-secret
+      envs:
+      - name: DYN_STORE_KV
+        value: mem
+      - name: DYN_EVENT_PLANE
+        value: zmq
       extraPodSpec:
         mainContainer:
           args:
@@ -132,36 +132,46 @@ spec:
           - python3
           - -m
           - dynamo.vllm
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
           name: ""
           resources: {}
           workingDir: /workspace/examples/backends/vllm
+        nodeSelector:
+          nodeGroup: gpu-worker
+        tolerations:
+        - effect: NoSchedule
+          key: dedicated
+          operator: Equal
+          value: worker-workload
+        - effect: NoExecute
+          key: dedicated
+          operator: Equal
+          value: worker-workload
       replicas: 1
       resources:
         limits:
           gpu: "1"
 status:
   conditions:
-  - lastTransitionTime: "2026-02-24T20:17:50Z"
-    message: 'Resources not ready: vllm-agg: podclique/vllm-agg-0-frontend: desired=1,
-      ready=0; podclique/vllm-agg-0-vllmdecodeworker: desired=1, ready=0'
-    reason: some_resources_are_not_ready
-    status: "False"
+  - lastTransitionTime: "2026-03-02T17:03:59Z"
+    message: All resources are ready
+    reason: all_resources_are_ready
+    status: "True"
     type: Ready
   services:
     Frontend:
       componentKind: PodClique
       componentName: vllm-agg-0-frontend
-      readyReplicas: 0
+      readyReplicas: 1
       replicas: 1
-      updatedReplicas: 2
+      updatedReplicas: 1
     VllmDecodeWorker:
       componentKind: PodClique
       componentName: vllm-agg-0-vllmdecodeworker
-      readyReplicas: 0
+      readyReplicas: 1
       replicas: 1
       updatedReplicas: 1
-  state: pending
+  state: successful
 ```
 
 ### Workload Pods Created by Operator
@@ -169,9 +179,9 @@ status:
 **Dynamo workload pods**
 ```
 $ kubectl get pods -n dynamo-workload -o wide
-NAME                                READY   STATUS                   RESTARTS   AGE     IP       NODE                             NOMINATED NODE   READINESS GATES
-vllm-agg-0-frontend-wfg4h           0/1     SchedulingGated          0          5m46s   <none>   <none>                           <none>           <none>
-vllm-agg-0-vllmdecodeworker-5fljt   0/1     ContainerStatusUnknown   0          5d13h   <none>   ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME                                READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
+vllm-agg-0-frontend-fbbxm           1/1     Running   0          90m   100.65.57.214    ip-100-64-83-166.ec2.internal    <none>           <none>
+vllm-agg-0-vllmdecodeworker-dkb9q   1/1     Running   0          90m   100.65.180.246   ip-100-64-147-149.ec2.internal   <none>           <none>
 ```
 
 ### Component Deployments
