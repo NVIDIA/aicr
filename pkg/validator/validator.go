@@ -23,6 +23,8 @@ import (
 	"os"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -115,6 +117,13 @@ type Validator struct {
 	// NoCluster controls whether to skip actual cluster operations (dry-run mode).
 	// When true, validation runs without connecting to Kubernetes cluster.
 	NoCluster bool
+
+	// Tolerations are applied to validation phase Jobs for scheduling on tainted nodes.
+	// Defaults to tolerate-all so Jobs can schedule on any node regardless of taints.
+	Tolerations []corev1.Toleration
+
+	// NodeSelector constrains validation phase Jobs to specific nodes.
+	NodeSelector map[string]string
 }
 
 // Option is a functional option for configuring Validator instances.
@@ -172,6 +181,20 @@ func WithNoCluster(noCluster bool) Option {
 	}
 }
 
+// WithTolerations returns an Option that sets tolerations for validation phase Jobs.
+func WithTolerations(tolerations []corev1.Toleration) Option {
+	return func(v *Validator) {
+		v.Tolerations = tolerations
+	}
+}
+
+// WithNodeSelector returns an Option that sets node selectors for validation phase Jobs.
+func WithNodeSelector(nodeSelector map[string]string) Option {
+	return func(v *Validator) {
+		v.NodeSelector = nodeSelector
+	}
+}
+
 // generateRunID creates a unique identifier for a validation run.
 // Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9b2c1e7d04a68")
 func generateRunID() string {
@@ -198,10 +221,11 @@ func New(opts ...Option) *Validator {
 	}
 
 	v := &Validator{
-		Namespace: "aicr-validation", // Default namespace for validation jobs
-		Image:     defaultImage,      // Default validator image
-		RunID:     generateRunID(),   // Generate unique RunID for this validation run
-		Cleanup:   true,              // Default to cleanup resources after validation
+		Namespace:   "aicr-validation",                                          // Default namespace for validation jobs
+		Image:       defaultImage,                                               // Default validator image
+		RunID:       generateRunID(),                                            // Generate unique RunID for this validation run
+		Cleanup:     true,                                                       // Default to cleanup resources after validation
+		Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}}, // tolerate-all default
 	}
 	for _, opt := range opts {
 		opt(v)
