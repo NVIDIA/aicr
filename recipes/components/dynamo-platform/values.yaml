@@ -12,16 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values
-# NVIDIA Dynamo inference serving platform: operator, etcd, NATS.
+# Dynamo Platform Helm values (v0.9.0)
+# NVIDIA Dynamo inference serving platform: operator and grove.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
+#
+# NOTE: etcd and NATS are disabled below. The Dynamo team confirmed these
+# are no longer required (Kubernetes-native discovery replaces etcd, ZMQ
+# replaces NATS for KV events). However, the current chart (v0.9.0) still
+# renders --etcdAddr in operator args, and the runtime SDK still tries to
+# connect to etcd for lease creation. This is a known upstream issue.
+# Workloads must set DYN_STORE_KV=mem and DYN_EVENT_PLANE=zmq to bypass.
 
 dynamo-operator:
-  controllerManager: {}
+  controllerManager:
+    manager:
+      image:
+        # Pin to 0.9.0 — chart default renders 0.7.1 which lacks --enable-webhooks
+        tag: "0.9.0"
 
-  # Use Kubernetes-native service discovery (no external etcd dependency for discovery)
+  # Use Kubernetes-native service discovery (operator-level only;
+  # runtime pods still require DYN_STORE_KV=mem to skip etcd leases)
   discoveryBackend: "kubernetes"
+
+  # Disable NATS at the operator level to prevent --natsAddr injection
+  nats:
+    enabled: false
 
   # Point Dynamo to the existing kube-prometheus-stack for metrics collection.
   # PodMonitor CRs are auto-created by the operator for metric discovery.
@@ -37,38 +53,12 @@ kai-scheduler:
 grove:
   enabled: true
 
-# etcd for operator state storage
-# Do NOT set fullnameOverride — the operator constructs the etcd endpoint from
-# the release name (<release>-etcd). Overriding the name breaks connectivity.
+# Disable etcd — Kubernetes-native discovery replaces it for the operator.
+# Runtime pods bypass etcd via DYN_STORE_KV=mem on workloads.
 etcd:
-  enabled: true
-  image:
-    repository: bitnamilegacy/etcd
-    tag: 3.5.18-debian-12-r5
-  persistence:
-    enabled: true
-    size: 1Gi
-  resources:
-    requests:
-      cpu: 100m
-      memory: 128Mi
-    limits:
-      cpu: 500m
-      memory: 512Mi
+  enabled: false
 
-# NATS message broker for component communication
-# Do NOT set fullnameOverride — the operator constructs the NATS endpoint from
-# the release name (<release>-nats). Overriding the name breaks connectivity.
+# Disable NATS — ZMQ event plane replaces it.
+# Runtime pods bypass NATS via DYN_EVENT_PLANE=zmq on workloads.
 nats:
-  enabled: true
-  podTemplate:
-    merge:
-      spec: {}
-  config:
-    cluster:
-      enabled: false
-    jetstream:
-      enabled: true
-      fileStore:
-        pvc:
-          storageClassName: ""
+  enabled: false

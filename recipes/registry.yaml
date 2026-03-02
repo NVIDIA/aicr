@@ -331,7 +331,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-crds
-      defaultVersion: "0.8.1"
+      defaultVersion: "0.9.0"
       defaultNamespace: dynamo-system
 
   - name: dynamo-platform
@@ -342,20 +342,16 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "0.8.1"
+      defaultVersion: "0.9.0"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - dynamo-operator.controllerManager.nodeSelector
           - grove.nodeSelector
-          - etcd.nodeSelector
-          - nats.podTemplate.merge.spec.nodeSelector
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
           - grove.tolerations
-          - etcd.tolerations
-          - nats.podTemplate.merge.spec.tolerations
 
   - name: kgateway-crds
     displayName: kgateway-crds
