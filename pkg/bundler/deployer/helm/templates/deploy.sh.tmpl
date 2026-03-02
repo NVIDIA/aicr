@@ -47,12 +47,17 @@ echo "Deploying Cloud Native Stack components..."
 {{ range .Components -}}
 {{ if .IsKustomize -}}
 echo "Installing {{ .Name }} ({{ .Namespace }}) via kustomize..."
-kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f - || helm_failed "{{ .Name }}"
 kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
   | kubectl apply -n {{ .Namespace }} -f - \
   || helm_failed "{{ .Name }}"
 {{ else if .HasChart -}}
 echo "Installing {{ .Name }} ({{ .Namespace }})..."
+{{ if .HasManifests -}}
+echo "Applying pre-install manifests for {{ .Name }}..."
+kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f - || helm_failed "{{ .Name }}"
+kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" 2>&1 | grep -v "no matches for kind" >&2 || true
+{{ end -}}
 COMPONENT_WAIT_ARGS="${WAIT_ARGS}"
 if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then
   COMPONENT_WAIT_ARGS=""
@@ -74,10 +79,13 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
   ${COMPONENT_WAIT_ARGS} \
   || helm_failed "{{ .Name }}"
 {{ end -}}
-{{ end -}}
 {{ if .HasManifests -}}
+echo "Applying post-install manifests for {{ .Name }}..."
+kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" || helm_failed "{{ .Name }}"
+{{ end -}}
+{{ else if .HasManifests -}}
 echo "Applying manifests for {{ .Name }}..."
-kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/"
+kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" || helm_failed "{{ .Name }}"
 {{ end -}}
 {{ end }}
 if [[ -n "${FAILED_COMPONENTS}" ]]; then
