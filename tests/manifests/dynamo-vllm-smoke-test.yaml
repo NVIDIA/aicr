@@ -17,6 +17,9 @@
 # serving Qwen/Qwen3-0.6B (public, ungated, ~1.2GB).
 # No HuggingFace token required.
 #
+# Requires DYN_STORE_KV=mem and DYN_EVENT_PLANE=zmq because etcd/nats
+# are disabled in the dynamo-platform v0.9.0 deployment.
+#
 # Usage:
 #   kubectl apply -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
 #   kubectl port-forward svc/vllm-smoke-test-frontend 8000:8000 -n dynamo-system
@@ -34,18 +37,28 @@ spec:
     Frontend:
       componentType: frontend
       replicas: 1
+      envs:
+        - name: DYN_STORE_KV
+          value: mem
+        - name: DYN_EVENT_PLANE
+          value: zmq
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
     VllmDecodeWorker:
       componentType: worker
       replicas: 1
+      envs:
+        - name: DYN_STORE_KV
+          value: mem
+        - name: DYN_EVENT_PLANE
+          value: zmq
       resources:
         limits:
           gpu: "1"
       extraPodSpec:
         mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.8.1
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
           workingDir: /workspace/examples/backends/vllm
           command: ["python3", "-m", "dynamo.vllm"]
           args: ["--model", "Qwen/Qwen3-0.6B"]

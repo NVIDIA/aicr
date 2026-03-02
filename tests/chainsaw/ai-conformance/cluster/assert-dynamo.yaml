@@ -13,14 +13,12 @@
 # limitations under the License.
 
 # Assert Dynamo platform components are healthy.
-# Chart: dynamo-platform 0.8.1
+# Chart: dynamo-platform 0.9.0
 # Provides NVIDIA Dynamo inference serving: OpenAI-compatible endpoints,
 # KV-cache-aware routing, disaggregated prefill/decode, SLA-driven autoscaling.
 #
-# Resource naming (all use default <release>-<subchart> pattern):
-#   dynamo-operator: <release>-dynamo-operator = dynamo-platform-dynamo-operator
-#   etcd: <release>-etcd = dynamo-platform-etcd
-#   nats: <release>-nats = dynamo-platform-nats
+# v0.9.0: etcd and NATS are disabled — Kubernetes-native discovery replaces
+# etcd, ZMQ event plane replaces NATS. Only operator and grove are deployed.
 
 # Dynamo Operator — manages DynamoComponent and DynamoGraphDeployment CRs
 apiVersion: apps/v1
@@ -32,20 +30,12 @@ status:
   (conditions[?type == 'Available']):
     - status: "True"
 ---
-# etcd — operator state storage
+# Grove Operator — pod lifecycle management for DynamoGraphDeployments
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
-  name: dynamo-platform-etcd
+  name: grove-operator
   namespace: dynamo-system
 status:
-  (readyReplicas > `0`): true
----
-# NATS — message broker for component communication
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: dynamo-platform-nats
-  namespace: dynamo-system
-status:
-  (readyReplicas > `0`): true
+  (conditions[?type == 'Available']):
+    - status: "True"

@@ -686,15 +686,18 @@ aicr bundle --recipe recipe.yaml \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
   --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --system-node-selector dedicated=system-workload \
   --system-node-toleration dedicated=system-workload:NoSchedule \
   --system-node-toleration dedicated=system-workload:NoExecute \
   --output bundle
 ```
 
+> **Cluster node requirements:** This example assumes the cluster has nodes with the label `dedicated=system-workload` and matching taints for system infrastructure, plus GPU nodes with the label `nodeGroup=gpu-worker` and taints `dedicated=worker-workload:NoSchedule,NoExecute`.
+
 This results in:
 - **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
 - **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
-- **System components** (gpu-operator controller, NFD gc/master): tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
+- **System components** (gpu-operator controller, NFD gc/master, dynamo etcd/nats/grove, kgateway proxy): `nodeSelector=dedicated=system-workload` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
 **Behavior:**
 - All components from the recipe are bundled automatically
