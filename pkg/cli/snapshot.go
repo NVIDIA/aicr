@@ -242,7 +242,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 
 			// Create factory
 			factory := collector.NewDefaultFactory(
-				collector.WithMaxNodesPerEntry(int(cmd.Int("max-nodes-per-entry"))),
+				collector.WithMaxNodesPerEntry(cmd.Int("max-nodes-per-entry")),
 			)
 
 			// Create output serializer
@@ -303,7 +303,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				TemplatePath:       tmplOpts.templatePath,
 				HelmNamespaces:     helmNamespaces,
 				HelmAllNamespaces:  helmAllNamespaces,
-				MaxNodesPerEntry:   int(cmd.Int("max-nodes-per-entry")),
+				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
 			}
 
 			return ns.Measure(ctx)

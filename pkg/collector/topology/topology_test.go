@@ -26,6 +26,8 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+const effectNoSchedule = "NoSchedule"
+
 func makeNode(name string, taints []corev1.Taint, labels map[string]string) *corev1.Node {
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -137,7 +139,7 @@ func TestCollect(t *testing.T) {
 				if len(nodes) != 2 {
 					t.Errorf("expected 2 nodes, got %d: %q", len(nodes), parts[2])
 				}
-				if parts[0] != "NoSchedule" {
+				if parts[0] != effectNoSchedule {
 					t.Errorf("expected effect NoSchedule, got %q", parts[0])
 				}
 			},
@@ -195,7 +197,7 @@ func TestCollect(t *testing.T) {
 				if len(parts) != 3 {
 					t.Fatalf("expected 3 parts, got %d: %q", len(parts), val)
 				}
-				if parts[0] != "NoSchedule" {
+				if parts[0] != effectNoSchedule {
 					t.Errorf("expected effect NoSchedule, got %q", parts[0])
 				}
 				if parts[1] != "gpu-workload" {
@@ -393,7 +395,7 @@ func TestTaintEncoding(t *testing.T) {
 	if len(parts) != 3 {
 		t.Fatalf("expected 3 pipe-separated parts, got %d: %q", len(parts), val)
 	}
-	if parts[0] != "NoSchedule" {
+	if parts[0] != effectNoSchedule {
 		t.Errorf("effect = %q, want NoSchedule", parts[0])
 	}
 	if parts[1] != "present" {

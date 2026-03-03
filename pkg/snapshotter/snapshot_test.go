@@ -217,17 +217,17 @@ func (m *mockSerializer) Serialize(ctx context.Context, data any) error {
 }
 
 type mockFactory struct {
-	k8sCalled       bool
-	systemdCalled   bool
-	osCalled        bool
-	gpuCalled       bool
-	topologyCalled  bool
+	k8sCalled      bool
+	systemdCalled  bool
+	osCalled       bool
+	gpuCalled      bool
+	topologyCalled bool
 
-	k8sError       error
-	systemdError   error
-	osError        error
-	gpuError       error
-	topologyError  error
+	k8sError      error
+	systemdError  error
+	osError       error
+	gpuError      error
+	topologyError error
 
 	// gpuMeasurement overrides the default mock measurement for the GPU collector.
 	gpuMeasurement *measurement.Measurement
