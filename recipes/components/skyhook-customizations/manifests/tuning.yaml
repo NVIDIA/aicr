@@ -64,13 +64,15 @@ spec:
     # Check for kernel being >= to 6.14.0-1018 and if not install
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/skyhook-packages/nvidia-setup
-      version: "0.1.0"
+      version: "0.1.1"
       configMap:
         service: eks
         accelerator: h100
       env:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "true"
+        - name: NVIDIA_SETUP_KERNEL_ALLOW_NEWER
+          value: "false"
 
     nvidia-tuned:
       image: ghcr.io/nvidia/skyhook-packages/nvidia-tuned
@@ -89,12 +91,12 @@ spec:
         service: {{ $cust.service }}
         {{- end }}
       dependsOn:
-        nvidia-setup-kernel: "0.1.0"
+        nvidia-setup-kernel: "0.1.1"
 
     # Full setup after kernel is in place
     nvidia-setup-full:
       image: ghcr.io/nvidia/skyhook-packages/nvidia-setup
-      version: "0.1.0"
+      version: "0.1.1"
       interrupt:
         type: reboot
       resources:

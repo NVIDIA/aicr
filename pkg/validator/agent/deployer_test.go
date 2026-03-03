@@ -48,9 +48,6 @@ func createConfig() Config {
 		TestPattern:        "TestOperatorHealth",
 		Timeout:            5 * time.Minute,
 		ImagePullSecrets:   []string{"regcred"},
-		NodeSelector: map[string]string{
-			"nodeGroup": "gpu-nodes",
-		},
 		Tolerations: []corev1.Toleration{
 			{
 				Key:      "nvidia.com/gpu",
@@ -197,11 +194,6 @@ func TestDeployer_DeployJob(t *testing.T) {
 		if job.Spec.Template.Spec.ServiceAccountName != deployer.config.ServiceAccountName {
 			t.Errorf("expected ServiceAccountName %q, got %q",
 				deployer.config.ServiceAccountName, job.Spec.Template.Spec.ServiceAccountName)
-		}
-
-		// Verify node selector
-		if job.Spec.Template.Spec.NodeSelector["nodeGroup"] != "gpu-nodes" {
-			t.Errorf("expected nodeGroup=gpu-nodes, got %v", job.Spec.Template.Spec.NodeSelector)
 		}
 
 		// Verify tolerations

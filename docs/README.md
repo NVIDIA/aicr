@@ -100,6 +100,17 @@ AICR prioritizes trust in the software supply chain.
 *   **Verifiable Builds:** Every release includes provenance data showing exactly how and where it was built (SLSA Level 3).
 *   **SBOMs:** Complete inventories of all dependencies are provided for both binaries and container images, enabling automated vulnerability scanning.
 
+## Project Structure
+
+- `api/` — OpenAPI specifications for the REST API
+- `cmd/` — Entry points for CLI (`aicr`) and API server (`aicrd`)
+- `deployments/` — Kubernetes manifests for agent deployment
+- `docs/` — User-facing documentation, guides, and architecture docs
+- `examples/` — Example snapshots, recipes, and comparisons
+- `infra/` — Infrastructure as code (Terraform) for deployments
+- `pkg/` — Core Go packages (collectors, recipe engine, bundlers, serializers)
+- `tools/` — Build scripts, E2E testing, and utilities
+
 ## Documentation
 
 Documentation is organized by persona to help you find what you need quickly.
