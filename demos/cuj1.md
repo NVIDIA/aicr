@@ -31,8 +31,12 @@ aicr validate \
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --output bundle
+  --output bundle \
+  --accelerated-node-selector [key]=[value] \
+  --accelerated-node-toleration [key]=[value]:[operation] 
 ```
+
+Replace the values for `--accelerated-node-selector` and `--accelerated-node-toleration` with the appropriate ones to match your gpu pool(s). You do not want optimizations and training workloads to run across all nodes. Both options allow for comma delimination to supply multiple values. See the [aicr bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
 
 ## Install Bundle into the Cluster
 

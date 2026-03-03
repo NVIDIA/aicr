@@ -120,17 +120,6 @@ You integrate AICR into CI/CD pipelines, GitOps workflows, or larger platforms.
 - **[Recipe Development](docs/integrator/recipe-development.md)** – Adding and modifying recipe metadata
 </details>
 
-## Project Structure
-
-- `api/` — OpenAPI specifications for the REST API
-- `cmd/` — Entry points for CLI (`aicr`) and API server (`aicrd`)
-- `deployments/` — Kubernetes manifests for agent deployment
-- `docs/` — User-facing documentation, guides, and architecture docs
-- `examples/` — Example snapshots, recipes, and comparisons
-- `infra/` — Infrastructure as code (Terraform) for deployments
-- `pkg/` — Core Go packages (collectors, recipe engine, bundlers, serializers)
-- `tools/` — Build scripts, E2E testing, and utilities
-
 ## Documentation & Resources
 
 - **[Documentation](/docs)** – Documentation, guides, and examples.

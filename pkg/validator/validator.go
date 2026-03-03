@@ -121,9 +121,6 @@ type Validator struct {
 	// Tolerations are applied to validation phase Jobs for scheduling on tainted nodes.
 	// Defaults to tolerate-all so Jobs can schedule on any node regardless of taints.
 	Tolerations []corev1.Toleration
-
-	// NodeSelector constrains validation phase Jobs to specific nodes.
-	NodeSelector map[string]string
 }
 
 // Option is a functional option for configuring Validator instances.
@@ -185,13 +182,6 @@ func WithNoCluster(noCluster bool) Option {
 func WithTolerations(tolerations []corev1.Toleration) Option {
 	return func(v *Validator) {
 		v.Tolerations = tolerations
-	}
-}
-
-// WithNodeSelector returns an Option that sets node selectors for validation phase Jobs.
-func WithNodeSelector(nodeSelector map[string]string) Option {
-	return func(v *Validator) {
-		v.NodeSelector = nodeSelector
 	}
 }
 

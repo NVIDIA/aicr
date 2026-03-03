@@ -99,7 +99,7 @@ fmt.Printf("Check: %s, Status: %s\n", result.CheckName, result.Status)
 
 1. **Isolation** - Tests run in cluster context with proper RBAC
 2. **Resource limits** - Jobs can have CPU/memory constraints
-3. **Node affinity** - Performance tests can target GPU nodes
+3. **Smart scheduling** - Jobs prefer CPU nodes via soft affinity (`nvidia.com/gpu.present DoesNotExist`); checks that need GPUs create their own workload Pods with GPU resource requests
 4. **Observability** - Jobs show up in `kubectl get jobs`
 5. **Reproducibility** - Same execution environment every time
 
@@ -113,9 +113,8 @@ fmt.Printf("Check: %s, Status: %s\n", result.CheckName, result.Status)
 ### Why one Job per phase?
 
 1. **Early exit** - Can skip subsequent phases on failure
-2. **Resource scheduling** - Different phases need different nodes
-3. **Granular control** - Easier to retry specific phases
-4. **Clear boundaries** - Each phase is independent unit of work
+2. **Granular control** - Easier to retry specific phases
+3. **Clear boundaries** - Each phase is independent unit of work
 
 ## Integration with Validator
 

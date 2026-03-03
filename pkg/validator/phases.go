@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"maps"
 	"strings"
 	"time"
 
@@ -68,11 +67,9 @@ const (
 	DefaultConformanceTimeout = defaults.ValidateConformanceTimeout
 )
 
-// gpuPresentLabelKey and gpuPresentLabelValue are used to select GPU nodes for validation Jobs.
-const (
-	gpuPresentLabelKey   = "nvidia.com/gpu.present"
-	gpuPresentLabelValue = "true"
-)
+// gpuPresentLabelKey is the node label set by GPU Feature Discovery when a GPU is present.
+// Used in soft anti-affinity to prefer scheduling validator Jobs on CPU-only nodes.
+const gpuPresentLabelKey = "nvidia.com/gpu.present"
 
 // PhaseOrder defines the canonical execution order for validation phases.
 // Readiness and deployment must run before performance or conformance.
@@ -95,6 +92,30 @@ func resolvePhaseTimeout(phase *recipe.ValidationPhase, defaultTimeout time.Dura
 			"timeout", phase.Timeout, "default", defaultTimeout, "error", err)
 	}
 	return defaultTimeout
+}
+
+// preferCPUNodeAffinity returns a soft node affinity that prefers nodes
+// without nvidia.com/gpu.present labels. Validator Jobs only need K8s API
+// access and should avoid consuming GPU resources in heterogeneous clusters.
+// The preference is soft: if no CPU-only nodes exist, Jobs still schedule.
+func preferCPUNodeAffinity() *corev1.Affinity {
+	return &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+				{
+					Weight: 100,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      gpuPresentLabelKey,
+								Operator: corev1.NodeSelectorOpDoesNotExist,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 }
 
 // ValidatePhase runs validation for a specific phase.
@@ -415,7 +436,7 @@ func (v *Validator) validateDeployment(
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Deployment, DefaultDeploymentTimeout),
 						Tolerations:        v.Tolerations,
-						NodeSelector:       v.NodeSelector,
+						Affinity:           preferCPUNodeAffinity(),
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -557,7 +578,8 @@ func (v *Validator) validatePerformance(
 					patternResult := v.buildTestPattern(recipeResult, "performance")
 
 					// Deploy ONE Job for ALL performance checks and constraints in this phase
-					// Performance tests may need GPU nodes
+					// The Job pod is an orchestration layer (creates GPU workload Pods);
+					// it only needs K8s API access, so prefer CPU nodes.
 					jobConfig := agent.Config{
 						Namespace:          v.Namespace,
 						JobName:            fmt.Sprintf("aicr-%s-performance", v.RunID),
@@ -570,23 +592,7 @@ func (v *Validator) validatePerformance(
 						TestPattern:        patternResult.Pattern,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
 						Tolerations:        v.Tolerations,
-						NodeSelector:       v.NodeSelector,
-					}
-
-					// Add GPU node selector if recipe specifies a GPU accelerator.
-					// This intentionally overrides any user-provided value for the GPU label
-					// since the recipe's accelerator requirement takes precedence.
-					// Clone the map to avoid mutating v.NodeSelector, which is shared across phases.
-					if recipeResult.Criteria != nil &&
-						recipeResult.Criteria.Accelerator != "" &&
-						recipeResult.Criteria.Accelerator != recipe.CriteriaAcceleratorAny {
-
-						if jobConfig.NodeSelector == nil {
-							jobConfig.NodeSelector = make(map[string]string)
-						} else {
-							jobConfig.NodeSelector = maps.Clone(jobConfig.NodeSelector)
-						}
-						jobConfig.NodeSelector[gpuPresentLabelKey] = gpuPresentLabelValue
+						Affinity:           preferCPUNodeAffinity(),
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)
@@ -724,7 +730,7 @@ func (v *Validator) validateConformance(
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
 						Tolerations:        v.Tolerations,
-						NodeSelector:       v.NodeSelector,
+						Affinity:           preferCPUNodeAffinity(),
 					}
 
 					deployer := agent.NewDeployer(clientset, jobConfig)

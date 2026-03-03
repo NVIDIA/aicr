@@ -122,32 +122,6 @@ func TestBuildJobSpec(t *testing.T) {
 	}
 }
 
-func TestBuildJobSpec_WithNodeSelector(t *testing.T) {
-	deployer, _ := createDeployer()
-	deployer.config.NodeSelector = map[string]string{
-		"nodeGroup":            "gpu-nodes",
-		"kubernetes.io/arch":   "amd64",
-		"nvidia.com/gpu.count": "8",
-	}
-
-	job := deployer.buildJobSpec()
-
-	// Verify node selector
-	nodeSelector := job.Spec.Template.Spec.NodeSelector
-	if len(nodeSelector) != 3 {
-		t.Errorf("expected 3 node selector entries, got %d", len(nodeSelector))
-	}
-	if nodeSelector["nodeGroup"] != "gpu-nodes" {
-		t.Errorf("expected nodeGroup=gpu-nodes, got %q", nodeSelector["nodeGroup"])
-	}
-	if nodeSelector["kubernetes.io/arch"] != "amd64" {
-		t.Errorf("expected kubernetes.io/arch=amd64, got %q", nodeSelector["kubernetes.io/arch"])
-	}
-	if nodeSelector["nvidia.com/gpu.count"] != "8" {
-		t.Errorf("expected nvidia.com/gpu.count=8, got %q", nodeSelector["nvidia.com/gpu.count"])
-	}
-}
-
 func TestBuildJobSpec_WithTolerations(t *testing.T) {
 	deployer, _ := createDeployer()
 	deployer.config.Tolerations = []corev1.Toleration{
@@ -193,6 +167,68 @@ func TestBuildJobSpec_WithTolerations(t *testing.T) {
 	}
 	if tol1.Effect != corev1.TaintEffectNoExecute {
 		t.Errorf("expected effect NoExecute, got %v", tol1.Effect)
+	}
+}
+
+func TestBuildJobSpec_WithAffinity(t *testing.T) {
+	deployer, _ := createDeployer()
+	deployer.config.Affinity = &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []corev1.PreferredSchedulingTerm{
+				{
+					Weight: 100,
+					Preference: corev1.NodeSelectorTerm{
+						MatchExpressions: []corev1.NodeSelectorRequirement{
+							{
+								Key:      "nvidia.com/gpu.present",
+								Operator: corev1.NodeSelectorOpDoesNotExist,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	job := deployer.buildJobSpec()
+
+	// Verify affinity is set
+	affinity := job.Spec.Template.Spec.Affinity
+	if affinity == nil {
+		t.Fatal("expected affinity to be set")
+	}
+	if affinity.NodeAffinity == nil {
+		t.Fatal("expected NodeAffinity to be set")
+	}
+
+	preferred := affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	if len(preferred) != 1 {
+		t.Fatalf("expected 1 preferred scheduling term, got %d", len(preferred))
+	}
+	if preferred[0].Weight != 100 {
+		t.Errorf("expected weight 100, got %d", preferred[0].Weight)
+	}
+
+	expressions := preferred[0].Preference.MatchExpressions
+	if len(expressions) != 1 {
+		t.Fatalf("expected 1 match expression, got %d", len(expressions))
+	}
+	if expressions[0].Key != "nvidia.com/gpu.present" {
+		t.Errorf("expected key nvidia.com/gpu.present, got %q", expressions[0].Key)
+	}
+	if expressions[0].Operator != corev1.NodeSelectorOpDoesNotExist {
+		t.Errorf("expected operator DoesNotExist, got %v", expressions[0].Operator)
+	}
+}
+
+func TestBuildJobSpec_WithoutAffinity(t *testing.T) {
+	deployer, _ := createDeployer()
+
+	job := deployer.buildJobSpec()
+
+	// Verify affinity is nil when not configured
+	if job.Spec.Template.Spec.Affinity != nil {
+		t.Error("expected affinity to be nil when not configured")
 	}
 }
 

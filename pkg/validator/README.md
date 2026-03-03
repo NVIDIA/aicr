@@ -78,7 +78,7 @@ All checks run inside Kubernetes Jobs for:
 - **Isolation**: Proper RBAC and resource limits
 - **Observability**: Jobs visible in `kubectl get jobs`
 - **Reproducibility**: Consistent execution environment
-- **Flexibility**: Node affinity for GPU tests
+- **Smart scheduling**: Jobs prefer CPU nodes via soft affinity; checks that need GPUs create their own workload Pods with GPU resource requests
 
 ```
 Validator (CLI/API)
@@ -544,7 +544,7 @@ go test -v ./pkg/validator/checks/deployment/...
 
 1. **Cluster Context**: Checks run with proper RBAC inside the cluster
 2. **Resource Control**: Jobs can have CPU/memory limits
-3. **Node Scheduling**: Performance tests can target GPU nodes
+3. **Node Scheduling**: Jobs prefer CPU nodes; checks create GPU workload Pods as needed
 4. **Observability**: Jobs appear in `kubectl get jobs`
 5. **Isolation**: Each check is independent
 
