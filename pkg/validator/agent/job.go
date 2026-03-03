@@ -164,6 +164,11 @@ func (d *Deployer) buildJobSpec() *batchv1.Job {
 		podSpec.Tolerations = d.config.Tolerations
 	}
 
+	// Add affinity if specified
+	if d.config.Affinity != nil {
+		podSpec.Affinity = d.config.Affinity
+	}
+
 	// Build Job
 	backoffLimit := int32(0)                                                 // No retries - validation should be deterministic
 	ttlSecondsAfterFinished := int32(defaults.JobTTLAfterFinished.Seconds()) // Keep for 1 hour for debugging

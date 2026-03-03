@@ -44,6 +44,10 @@ type Config struct {
 	// Tolerations for scheduling on tainted nodes
 	Tolerations []corev1.Toleration
 
+	// Affinity specifies pod scheduling affinity rules.
+	// Used to prefer CPU nodes for non-GPU validation Jobs.
+	Affinity *corev1.Affinity
+
 	// SnapshotConfigMap is the ConfigMap containing the snapshot data
 	SnapshotConfigMap string
 

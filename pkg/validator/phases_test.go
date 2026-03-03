@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func init() {
@@ -1230,6 +1231,43 @@ func TestBuildTestPattern(t *testing.T) {
 				t.Errorf("buildTestPattern() expectedTests = %d, want %d", result.ExpectedTests, tt.wantExpectedTests)
 			}
 		})
+	}
+}
+
+func TestPreferCPUNodeAffinity(t *testing.T) {
+	affinity := preferCPUNodeAffinity()
+
+	if affinity == nil {
+		t.Fatal("expected non-nil affinity")
+	}
+	if affinity.NodeAffinity == nil {
+		t.Fatal("expected non-nil NodeAffinity")
+	}
+
+	// Should use preferred (soft), not required (hard)
+	if affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+		t.Error("expected no required scheduling terms (soft preference only)")
+	}
+
+	preferred := affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
+	if len(preferred) != 1 {
+		t.Fatalf("expected 1 preferred scheduling term, got %d", len(preferred))
+	}
+
+	term := preferred[0]
+	if term.Weight != 100 {
+		t.Errorf("expected weight 100, got %d", term.Weight)
+	}
+
+	expressions := term.Preference.MatchExpressions
+	if len(expressions) != 1 {
+		t.Fatalf("expected 1 match expression, got %d", len(expressions))
+	}
+	if expressions[0].Key != "nvidia.com/gpu.present" {
+		t.Errorf("expected key nvidia.com/gpu.present, got %q", expressions[0].Key)
+	}
+	if expressions[0].Operator != corev1.NodeSelectorOpDoesNotExist {
+		t.Errorf("expected operator DoesNotExist, got %v", expressions[0].Operator)
 	}
 }
 

@@ -407,7 +407,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated)",
+			Usage:    "Node selector for snapshot agent Job scheduling (format: key=value, can be repeated). Recommended in heterogeneous clusters to target GPU nodes. Validation phase Jobs automatically prefer CPU nodes.",
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{
@@ -500,6 +500,11 @@ pass, fail, or cannot be evaluated.
 You can either provide an existing snapshot file or deploy an agent to capture
 a fresh snapshot from the cluster.
 
+Validation runs post-deploy (after GPU Operator installation), so
+nvidia.com/gpu.present labels are available on GPU nodes. In heterogeneous
+clusters, --node-selector targets the snapshot agent to a GPU node, while
+validation phase Jobs automatically prefer CPU nodes via soft affinity.
+
 # Examples
 
 Validate using an existing snapshot file:
@@ -511,10 +516,10 @@ Load snapshot from ConfigMap:
 Deploy agent to capture and validate in one step:
   aicr validate --recipe recipe.yaml --namespace default
 
-Target specific GPU nodes with node selector:
+Target GPU nodes for snapshot agent in a heterogeneous cluster:
   aicr validate --recipe recipe.yaml \
     --namespace default \
-    --node-selector nodeGroup=customer-gpu
+    --node-selector nvidia.com/gpu.present=true
 
 Run multiple validation phases:
   aicr validate -r recipe.yaml -s snapshot.yaml \
