@@ -29,6 +29,7 @@ func TestTimeoutConstants(t *testing.T) {
 		// Collector timeouts
 		{"CollectorTimeout", CollectorTimeout, 5 * time.Second, 30 * time.Second},
 		{"CollectorK8sTimeout", CollectorK8sTimeout, 10 * time.Second, 60 * time.Second},
+		{"CollectorTopologyTimeout", CollectorTopologyTimeout, 30 * time.Second, 120 * time.Second},
 
 		// Handler timeouts
 		{"RecipeHandlerTimeout", RecipeHandlerTimeout, 10 * time.Second, 60 * time.Second},
@@ -150,5 +151,14 @@ func TestCollectorTimeoutLessThanK8s(t *testing.T) {
 	if CollectorTimeout > CollectorK8sTimeout {
 		t.Errorf("CollectorTimeout (%v) should not exceed CollectorK8sTimeout (%v)",
 			CollectorTimeout, CollectorK8sTimeout)
+	}
+}
+
+func TestTopologyTimeoutGreaterThanK8s(t *testing.T) {
+	// Topology collector paginates through all nodes, so it needs more time
+	// than the standard K8s collector
+	if CollectorTopologyTimeout <= CollectorK8sTimeout {
+		t.Errorf("CollectorTopologyTimeout (%v) should exceed CollectorK8sTimeout (%v)",
+			CollectorTopologyTimeout, CollectorK8sTimeout)
 	}
 }
