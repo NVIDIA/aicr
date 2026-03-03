@@ -432,7 +432,6 @@ func (v *Validator) validateDeployment(
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Deployment, DefaultDeploymentTimeout),
 						Tolerations:        v.Tolerations,
-						NodeSelector:       v.NodeSelector,
 						Affinity:           preferCPUNodeAffinity(),
 					}
 
@@ -589,7 +588,6 @@ func (v *Validator) validatePerformance(
 						TestPattern:        patternResult.Pattern,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
 						Tolerations:        v.Tolerations,
-						NodeSelector:       v.NodeSelector,
 						Affinity:           preferCPUNodeAffinity(),
 					}
 
@@ -728,7 +726,6 @@ func (v *Validator) validateConformance(
 						ExpectedTests:      patternResult.ExpectedTests,
 						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
 						Tolerations:        v.Tolerations,
-						NodeSelector:       v.NodeSelector,
 						Affinity:           preferCPUNodeAffinity(),
 					}
 

@@ -168,7 +168,6 @@ func runValidation(
 	evidenceDir string,
 	evidenceResultPath string,
 	tolerations []corev1.Toleration,
-	nodeSelector map[string]string,
 ) error {
 
 	slog.Info("running validation",
@@ -190,7 +189,6 @@ func runValidation(
 		validator.WithImagePullSecrets(imagePullSecrets),
 		validator.WithNoCluster(noCluster),
 		validator.WithTolerations(tolerations),
-		validator.WithNodeSelector(nodeSelector),
 	}
 	if resumeRunID != "" {
 		opts = append(opts, validator.WithRunID(resumeRunID))
@@ -412,7 +410,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
-			Usage:    "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
+			Usage:    "Toleration for snapshot agent and validation phase Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
 			Category: "Agent Deployment",
 		},
 		&cli.DurationFlag{
@@ -682,18 +680,14 @@ Use a saved result file for evidence instead of the live run:
 				}
 			}
 
-			// Parse tolerations and node selectors for validation phase Jobs.
-			// These are always needed regardless of snapshot source.
+			// Parse tolerations for validation phase Jobs.
+			// Tolerations are always needed regardless of snapshot source.
 			tolerations, tolErr := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 			if tolErr != nil {
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
 			}
-			nodeSelector, nsErr := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
-			if nsErr != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", nsErr)
-			}
 
-			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), evidenceDir, resultPath, tolerations, nodeSelector)
+			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), evidenceDir, resultPath, tolerations)
 		},
 	}
 }
