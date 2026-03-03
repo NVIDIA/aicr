@@ -19,6 +19,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/collector/os"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
 )
 
 // Factory defines the interface for creating collector instances.
@@ -29,6 +30,7 @@ type Factory interface {
 	CreateOSCollector() Collector
 	CreateKubernetesCollector() Collector
 	CreateGPUCollector() Collector
+	CreateNodeTopologyCollector() Collector
 }
 
 // Option defines a configuration option for DefaultFactory.
@@ -49,11 +51,20 @@ func WithHelmNamespaces(namespaces []string) Option {
 	}
 }
 
+// WithMaxNodesPerEntry configures the maximum number of node names stored per
+// taint/label entry in the topology collector. 0 = no limit.
+func WithMaxNodesPerEntry(max int) Option {
+	return func(f *DefaultFactory) {
+		f.MaxNodesPerEntry = max
+	}
+}
+
 // DefaultFactory is the standard implementation of Factory that creates collectors
 // with production dependencies. It configures default systemd services to monitor.
 type DefaultFactory struct {
-	SystemDServices []string
-	HelmNamespaces  []string
+	SystemDServices  []string
+	HelmNamespaces   []string
+	MaxNodesPerEntry int
 }
 
 // NewDefaultFactory creates a new DefaultFactory with default configuration.
@@ -97,5 +108,13 @@ func (f *DefaultFactory) CreateOSCollector() Collector {
 func (f *DefaultFactory) CreateKubernetesCollector() Collector {
 	return &k8s.Collector{
 		HelmNamespaces: f.HelmNamespaces,
+	}
+}
+
+// CreateNodeTopologyCollector creates a node topology collector that gathers
+// taint and label information across all cluster nodes.
+func (f *DefaultFactory) CreateNodeTopologyCollector() Collector {
+	return &topology.Collector{
+		MaxNodesPerEntry: f.MaxNodesPerEntry,
 	}
 }
