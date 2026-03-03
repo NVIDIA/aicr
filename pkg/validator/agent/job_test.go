@@ -122,32 +122,6 @@ func TestBuildJobSpec(t *testing.T) {
 	}
 }
 
-func TestBuildJobSpec_WithNodeSelector(t *testing.T) {
-	deployer, _ := createDeployer()
-	deployer.config.NodeSelector = map[string]string{
-		"nodeGroup":            "gpu-nodes",
-		"kubernetes.io/arch":   "amd64",
-		"nvidia.com/gpu.count": "8",
-	}
-
-	job := deployer.buildJobSpec()
-
-	// Verify node selector
-	nodeSelector := job.Spec.Template.Spec.NodeSelector
-	if len(nodeSelector) != 3 {
-		t.Errorf("expected 3 node selector entries, got %d", len(nodeSelector))
-	}
-	if nodeSelector["nodeGroup"] != "gpu-nodes" {
-		t.Errorf("expected nodeGroup=gpu-nodes, got %q", nodeSelector["nodeGroup"])
-	}
-	if nodeSelector["kubernetes.io/arch"] != "amd64" {
-		t.Errorf("expected kubernetes.io/arch=amd64, got %q", nodeSelector["kubernetes.io/arch"])
-	}
-	if nodeSelector["nvidia.com/gpu.count"] != "8" {
-		t.Errorf("expected nvidia.com/gpu.count=8, got %q", nodeSelector["nvidia.com/gpu.count"])
-	}
-}
-
 func TestBuildJobSpec_WithTolerations(t *testing.T) {
 	deployer, _ := createDeployer()
 	deployer.config.Tolerations = []corev1.Toleration{

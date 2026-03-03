@@ -38,9 +38,6 @@ type Config struct {
 	// ServiceAccountName for the Job pods
 	ServiceAccountName string
 
-	// NodeSelector for targeting specific nodes (e.g., GPU nodes for performance tests)
-	NodeSelector map[string]string
-
 	// Tolerations for scheduling on tainted nodes
 	Tolerations []corev1.Toleration
 

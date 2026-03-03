@@ -1263,8 +1263,8 @@ func TestPreferCPUNodeAffinity(t *testing.T) {
 	if len(expressions) != 1 {
 		t.Fatalf("expected 1 match expression, got %d", len(expressions))
 	}
-	if expressions[0].Key != "nvidia.com/gpu.present" {
-		t.Errorf("expected key nvidia.com/gpu.present, got %q", expressions[0].Key)
+	if expressions[0].Key != gpuPresentLabelKey {
+		t.Errorf("expected key %s, got %q", gpuPresentLabelKey, expressions[0].Key)
 	}
 	if expressions[0].Operator != corev1.NodeSelectorOpDoesNotExist {
 		t.Errorf("expected operator DoesNotExist, got %v", expressions[0].Operator)

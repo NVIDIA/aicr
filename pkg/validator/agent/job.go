@@ -154,11 +154,6 @@ func (d *Deployer) buildJobSpec() *batchv1.Job {
 		ImagePullSecrets:   imagePullSecrets,
 	}
 
-	// Add node selector if specified
-	if len(d.config.NodeSelector) > 0 {
-		podSpec.NodeSelector = d.config.NodeSelector
-	}
-
 	// Add tolerations if specified
 	if len(d.config.Tolerations) > 0 {
 		podSpec.Tolerations = d.config.Tolerations

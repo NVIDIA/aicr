@@ -67,6 +67,10 @@ const (
 	DefaultConformanceTimeout = defaults.ValidateConformanceTimeout
 )
 
+// gpuPresentLabelKey is the node label set by GPU Feature Discovery when a GPU is present.
+// Used in soft anti-affinity to prefer scheduling validator Jobs on CPU-only nodes.
+const gpuPresentLabelKey = "nvidia.com/gpu.present"
+
 // PhaseOrder defines the canonical execution order for validation phases.
 // Readiness and deployment must run before performance or conformance.
 var PhaseOrder = []ValidationPhaseName{
@@ -103,7 +107,7 @@ func preferCPUNodeAffinity() *corev1.Affinity {
 					Preference: corev1.NodeSelectorTerm{
 						MatchExpressions: []corev1.NodeSelectorRequirement{
 							{
-								Key:      "nvidia.com/gpu.present",
+								Key:      gpuPresentLabelKey,
 								Operator: corev1.NodeSelectorOpDoesNotExist,
 							},
 						},
