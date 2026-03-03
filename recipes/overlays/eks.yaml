@@ -59,6 +59,16 @@ spec:
                   resources:
                     requests:
                       storage: 50Gi
+
+    # Disable GDRCopy by default on EKS to avoid driver build/runtime
+    # incompatibilities across AMI kernel versions.
+    # Cluster-specific overlays may re-enable once kernel/driver combo is validated.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        gdrcopy:
+          enabled: false
+
     # EKS has no control-plane nodes — remove the default nodeAffinity
     # that requires node-role.kubernetes.io/control-plane
     - name: nvidia-dra-driver-gpu

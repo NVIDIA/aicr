@@ -43,8 +43,6 @@ spec:
       overrides:
         cdi:
           enabled: true
-        gdrcopy:
-          enabled: true
 
     - name: skyhook-customizations
       type: Helm
