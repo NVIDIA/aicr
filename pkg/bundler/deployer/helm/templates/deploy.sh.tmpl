@@ -43,6 +43,12 @@ ASYNC_COMPONENTS="kai-scheduler"
 
 echo "Deploying Cloud Native Stack components..."
 
+{{ if .PreInstallTaint -}}
+# Apply pre-install taint to prevent workloads from scheduling on accelerated nodes until
+# Skyhook has finished configuring them. Skyhook will remove this taint when done.
+echo "Applying pre-install taint {{ .PreInstallTaint }} to accelerated nodes..."
+kubectl taint nodes {{ if .PreInstallTaintNodeSelector }}-l {{ .PreInstallTaintNodeSelector }} {{ end }}{{ .PreInstallTaint }} --overwrite
+{{ end -}}
 # Install components in order
 {{ range .Components -}}
 {{ if .IsKustomize -}}

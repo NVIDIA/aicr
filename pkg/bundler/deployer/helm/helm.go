@@ -25,6 +25,8 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -85,6 +87,16 @@ type GeneratorInput struct {
 	// DataFiles lists additional file paths (relative to output dir) to include
 	// in checksum generation. Used for external data files copied into the bundle.
 	DataFiles []string
+
+	// WorkloadGateTaint is the taint to apply to accelerated nodes before skyhook-operator
+	// installs, preventing workloads from scheduling until Skyhook finishes node configuration.
+	// When set, deploy.sh will apply this taint via kubectl before installing any components.
+	WorkloadGateTaint *corev1.Taint
+
+	// AcceleratedNodeSelector contains label selectors used to target accelerated/GPU nodes
+	// when applying the WorkloadGateTaint. If empty and WorkloadGateTaint is set, the taint
+	// is applied to all nodes.
+	AcceleratedNodeSelector map[string]string
 }
 
 // GeneratorOutput contains the result of Helm bundle generation.
@@ -430,8 +442,10 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 	}
 
 	data := deployTemplateData{
-		BundlerVersion: input.Version,
-		Components:     components,
+		BundlerVersion:              input.Version,
+		Components:                  components,
+		PreInstallTaint:             formatTaintForKubectl(input.WorkloadGateTaint),
+		PreInstallTaintNodeSelector: formatSelectorForKubectl(input.AcceleratedNodeSelector),
 	}
 
 	deployPath, deploySize, err := shared.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
@@ -485,6 +499,12 @@ type readmeTemplateData struct {
 type deployTemplateData struct {
 	BundlerVersion string
 	Components     []ComponentData
+	// PreInstallTaint is the taint string to apply to nodes before component installation
+	// (e.g., "skyhook.nvidia.com/not-ready:NoSchedule"). Empty string disables the step.
+	PreInstallTaint string
+	// PreInstallTaintNodeSelector is the kubectl label selector string for targeting nodes
+	// when applying PreInstallTaint (e.g., "nodeGroup=gpu-nodes"). Empty means all nodes.
+	PreInstallTaintNodeSelector string
 }
 
 // undeployTemplateData is the template data for undeploy.sh generation.
@@ -500,6 +520,34 @@ func reverseComponents(components []ComponentData) []ComponentData {
 		reversed[len(components)-1-i] = comp
 	}
 	return reversed
+}
+
+// formatTaintForKubectl formats a corev1.Taint as a kubectl taint argument string
+// (e.g., "skyhook.nvidia.com/not-ready:NoSchedule"). Returns empty string when taint is nil.
+func formatTaintForKubectl(taint *corev1.Taint) string {
+	if taint == nil {
+		return ""
+	}
+	return taint.ToString()
+}
+
+// formatSelectorForKubectl formats a label selector map as a comma-separated kubectl -l string
+// (e.g., "nodeGroup=gpu-nodes,zone=us-east-1"). Returns empty string when selector is empty.
+func formatSelectorForKubectl(selector map[string]string) string {
+	if len(selector) == 0 {
+		return ""
+	}
+	pairs := make([]string, 0, len(selector))
+	// Sort keys for deterministic output
+	keys := make([]string, 0, len(selector))
+	for k := range selector {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		pairs = append(pairs, k+"="+selector[k])
+	}
+	return strings.Join(pairs, ",")
 }
 
 // hasYAMLObjects returns true if content contains at least one YAML object

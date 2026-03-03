@@ -223,12 +223,14 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 	// Generate per-component bundle
 	generator := helm.NewGenerator()
 	generatorInput := &helm.GeneratorInput{
-		RecipeResult:       recipeResult,
-		ComponentValues:    componentValues,
-		Version:            b.Config.Version(),
-		IncludeChecksums:   b.Config.IncludeChecksums(),
-		ComponentManifests: componentManifests,
-		DataFiles:          dataFiles,
+		RecipeResult:            recipeResult,
+		ComponentValues:         componentValues,
+		Version:                 b.Config.Version(),
+		IncludeChecksums:        b.Config.IncludeChecksums(),
+		ComponentManifests:      componentManifests,
+		DataFiles:               dataFiles,
+		WorkloadGateTaint:       b.Config.WorkloadGateTaint(),
+		AcceleratedNodeSelector: b.Config.AcceleratedNodeSelector(),
 	}
 
 	output, err := generator.Generate(ctx, generatorInput, dir)

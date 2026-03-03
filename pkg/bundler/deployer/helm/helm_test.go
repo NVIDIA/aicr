@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -1422,4 +1424,212 @@ func TestReverseComponents(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFormatTaintForKubectl(t *testing.T) {
+	tests := []struct {
+		name  string
+		taint *corev1.Taint
+		want  string
+	}{
+		{
+			name:  "nil taint returns empty string",
+			taint: nil,
+			want:  "",
+		},
+		{
+			name: "taint with key, value, and effect",
+			taint: &corev1.Taint{
+				Key:    "skyhook.nvidia.com/not-ready",
+				Value:  "",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			want: "skyhook.nvidia.com/not-ready:NoSchedule",
+		},
+		{
+			name: "taint with key, value, and effect",
+			taint: &corev1.Taint{
+				Key:    "dedicated",
+				Value:  "gpu",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			want: "dedicated=gpu:NoSchedule",
+		},
+		{
+			name: "taint with NoExecute effect",
+			taint: &corev1.Taint{
+				Key:    "node.kubernetes.io/not-ready",
+				Effect: corev1.TaintEffectNoExecute,
+			},
+			want: "node.kubernetes.io/not-ready:NoExecute",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatTaintForKubectl(tt.taint)
+			if got != tt.want {
+				t.Errorf("formatTaintForKubectl() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatSelectorForKubectl(t *testing.T) {
+	tests := []struct {
+		name     string
+		selector map[string]string
+		want     string
+	}{
+		{
+			name:     "nil selector returns empty string",
+			selector: nil,
+			want:     "",
+		},
+		{
+			name:     "empty selector returns empty string",
+			selector: map[string]string{},
+			want:     "",
+		},
+		{
+			name:     "single label",
+			selector: map[string]string{"nodeGroup": "gpu-nodes"},
+			want:     "nodeGroup=gpu-nodes",
+		},
+		{
+			name: "multiple labels sorted deterministically",
+			selector: map[string]string{
+				"zone":      "us-east-1",
+				"nodeGroup": "gpu-nodes",
+			},
+			want: "nodeGroup=gpu-nodes,zone=us-east-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatSelectorForKubectl(tt.selector)
+			if got != tt.want {
+				t.Errorf("formatSelectorForKubectl() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGenerateDeployScript_PreInstallTaint(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	components := []ComponentData{
+		{Name: "cert-manager", Namespace: "cert-manager", Repository: "https://charts.jetstack.io", ChartName: "cert-manager", Version: "v1.17.2", ChartVersion: "1.17.2", HasChart: true},
+		{Name: "skyhook-operator", Namespace: "skyhook", Repository: "https://nvidia.github.io/skyhook", ChartName: "skyhook-operator", Version: "v0.12.0", ChartVersion: "0.12.0", HasChart: true},
+	}
+
+	t.Run("no taint omits kubectl taint step", func(t *testing.T) {
+		input := &GeneratorInput{
+			Version:           "v1.0.0",
+			WorkloadGateTaint: nil,
+		}
+		dir := t.TempDir()
+		path, _, err := g.generateDeployScript(ctx, input, components, dir)
+		if err != nil {
+			t.Fatalf("generateDeployScript failed: %v", err)
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read deploy.sh: %v", err)
+		}
+		if strings.Contains(string(content), "kubectl taint") {
+			t.Error("deploy.sh should not contain 'kubectl taint' when no workload-gate taint is set")
+		}
+	})
+
+	t.Run("with taint and selector emits targeted kubectl taint", func(t *testing.T) {
+		input := &GeneratorInput{
+			Version: "v1.0.0",
+			WorkloadGateTaint: &corev1.Taint{
+				Key:    "skyhook.nvidia.com/not-ready",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			AcceleratedNodeSelector: map[string]string{"nodeGroup": "gpu-nodes"},
+		}
+		dir := t.TempDir()
+		path, _, err := g.generateDeployScript(ctx, input, components, dir)
+		if err != nil {
+			t.Fatalf("generateDeployScript failed: %v", err)
+		}
+		content := string(must(os.ReadFile(path)))
+
+		if !strings.Contains(content, "kubectl taint nodes") {
+			t.Error("deploy.sh should contain 'kubectl taint nodes'")
+		}
+		if !strings.Contains(content, "-l nodeGroup=gpu-nodes") {
+			t.Errorf("deploy.sh should target nodes with -l selector, got:\n%s", content)
+		}
+		if !strings.Contains(content, "skyhook.nvidia.com/not-ready:NoSchedule") {
+			t.Errorf("deploy.sh should contain taint string, got:\n%s", content)
+		}
+		if !strings.Contains(content, "--overwrite") {
+			t.Error("deploy.sh kubectl taint command should include --overwrite")
+		}
+	})
+
+	t.Run("with taint but no selector applies taint to all nodes", func(t *testing.T) {
+		input := &GeneratorInput{
+			Version: "v1.0.0",
+			WorkloadGateTaint: &corev1.Taint{
+				Key:    "skyhook.nvidia.com/not-ready",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+			AcceleratedNodeSelector: nil,
+		}
+		dir := t.TempDir()
+		path, _, err := g.generateDeployScript(ctx, input, components, dir)
+		if err != nil {
+			t.Fatalf("generateDeployScript failed: %v", err)
+		}
+		content := string(must(os.ReadFile(path)))
+
+		if !strings.Contains(content, "kubectl taint nodes") {
+			t.Error("deploy.sh should contain 'kubectl taint nodes'")
+		}
+		if strings.Contains(content, "-l ") {
+			t.Errorf("deploy.sh should not use -l selector when no accelerated node selector is set, got:\n%s", content)
+		}
+	})
+
+	t.Run("taint step appears before component installations", func(t *testing.T) {
+		input := &GeneratorInput{
+			Version: "v1.0.0",
+			WorkloadGateTaint: &corev1.Taint{
+				Key:    "skyhook.nvidia.com/not-ready",
+				Effect: corev1.TaintEffectNoSchedule,
+			},
+		}
+		dir := t.TempDir()
+		path, _, err := g.generateDeployScript(ctx, input, components, dir)
+		if err != nil {
+			t.Fatalf("generateDeployScript failed: %v", err)
+		}
+		content := string(must(os.ReadFile(path)))
+
+		taintIdx := strings.Index(content, "kubectl taint")
+		helmIdx := strings.Index(content, "helm upgrade --install")
+		if taintIdx == -1 {
+			t.Fatal("deploy.sh missing kubectl taint step")
+		}
+		if helmIdx == -1 {
+			t.Fatal("deploy.sh missing helm upgrade --install step")
+		}
+		if taintIdx > helmIdx {
+			t.Error("kubectl taint step should appear before helm upgrade --install steps")
+		}
+	})
+}
+
+// must is a test helper that panics on error.
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
 }
