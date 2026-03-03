@@ -143,6 +143,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Usage:    "Path to Go template file for custom output formatting (requires YAML format)",
 			Category: "Output",
 		},
+		&cli.IntFlag{
+			Name:     "max-nodes-per-entry",
+			Usage:    "Maximum node names per taint/label entry in topology collection (0 = unlimited)",
+			Value:    0,
+			Category: "Output",
+		},
 		&cli.StringSliceFlag{
 			Name:     "helm-namespaces",
 			Usage:    "Namespaces for Helm release collection (creates scoped RBAC for secrets access). Mutually exclusive with --helm-all-namespaces.",
@@ -218,7 +224,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "output", "format"); err != nil {
 				return err
 			}
 
@@ -235,7 +241,9 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			}
 
 			// Create factory
-			factory := collector.NewDefaultFactory()
+			factory := collector.NewDefaultFactory(
+				collector.WithMaxNodesPerEntry(int(cmd.Int("max-nodes-per-entry"))),
+			)
 
 			// Create output serializer
 			ser, err := createSnapshotSerializer(tmplOpts)
@@ -295,6 +303,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				TemplatePath:       tmplOpts.templatePath,
 				HelmNamespaces:     helmNamespaces,
 				HelmAllNamespaces:  helmAllNamespaces,
+				MaxNodesPerEntry:   int(cmd.Int("max-nodes-per-entry")),
 			}
 
 			return ns.Measure(ctx)

@@ -37,6 +37,7 @@ type Config struct {
 	RequireGPU         bool     // If true, request nvidia.com/gpu resource (required for CDI environments)
 	HelmNamespaces     []string // Per-NS secrets access for Helm release collection
 	HelmAllNamespaces  bool     // Cluster-wide secrets access for Helm collection
+	MaxNodesPerEntry   int      // Max node names per topology entry (0 = unlimited)
 }
 
 // Deployer manages the deployment and lifecycle of the agent Job.

@@ -95,6 +95,9 @@ type AgentConfig struct {
 
 	// HelmAllNamespaces enables cluster-wide Helm secrets access.
 	HelmAllNamespaces bool
+
+	// MaxNodesPerEntry limits node names per topology entry (0 = unlimited).
+	MaxNodesPerEntry int
 }
 
 // DeployAndGetSnapshot deploys an agent to capture a snapshot and returns the Snapshot struct.
@@ -138,6 +141,7 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		RequireGPU:         config.RequireGPU,
 		HelmNamespaces:     config.HelmNamespaces,
 		HelmAllNamespaces:  config.HelmAllNamespaces,
+		MaxNodesPerEntry:   config.MaxNodesPerEntry,
 	}
 
 	// Create deployer
@@ -402,6 +406,7 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		RequireGPU:         n.AgentConfig.RequireGPU,
 		HelmNamespaces:     n.AgentConfig.HelmNamespaces,
 		HelmAllNamespaces:  n.AgentConfig.HelmAllNamespaces,
+		MaxNodesPerEntry:   n.AgentConfig.MaxNodesPerEntry,
 	}
 
 	// Create deployer
