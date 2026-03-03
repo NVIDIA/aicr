@@ -22,6 +22,7 @@ Captures system configuration:
 - SystemD services: containerd, docker, kubelet (service state and configuration)
 - Kubernetes: API server version, container images, ClusterPolicy custom resource
 - GPU hardware: driver version, CUDA libraries, MIG configuration, device properties
+- Node topology (cluster-wide taints and labels)
 
 **Output destinations:**
 

@@ -95,6 +95,7 @@ make tools-check  # Verify versions match .settings.yaml
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
 | `pkg/evidence` | Conformance evidence capture and formatting | Yes |
+| `pkg/collector/topology` | Cluster-wide node taint/label topology collection | Yes |
 | `pkg/snapshotter` | System state snapshot orchestration | Yes |
 | `pkg/k8s/client` | Singleton Kubernetes client | Yes |
 | `pkg/k8s/pod` | Shared K8s Job/Pod utilities (wait, logs, ConfigMap URIs) | Yes |

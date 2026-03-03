@@ -67,8 +67,12 @@ Each stage transforms input data into a different format:
 │   │   └─ subtypes: [server, image, policy]              │
 │   │       └─ data: map[string]Reading                   │
 │   │                                                     │
-│   └─ GPU                                                │
-│       └─ subtypes: [smi, driver, device]                │
+│   ├─ GPU                                                │
+│   │   └─ subtypes: [smi, driver, device]                │
+│   │       └─ data: map[string]Reading                   │
+│   │                                                     │
+│   └─ NodeTopology                                       │
+│       └─ subtypes: [summary, taint, label]              │
 │           └─ data: map[string]Reading                   │
 └─────────────────────────────────────────────────────────┘
 ```
