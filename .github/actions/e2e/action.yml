@@ -83,6 +83,8 @@ runs:
             -o dist/validator/aicr ./cmd/aicr &
           CGO_ENABLED=0 go test -c -o dist/validator/deployment.test \
             ./pkg/validator/checks/deployment &
+          CGO_ENABLED=0 go test -c -o dist/validator/performance.test \
+            ./pkg/validator/checks/performance &
           CGO_ENABLED=0 go test -c -o dist/validator/conformance.test \
             ./pkg/validator/checks/conformance &
           CGO_ENABLED=0 go build -o dist/validator/test2json cmd/test2json &
@@ -107,10 +109,12 @@ runs:
         FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
         COPY dist/validator/aicr /usr/local/bin/aicr
         COPY dist/validator/deployment.test /usr/local/bin/deployment.test
+        COPY dist/validator/performance.test /usr/local/bin/performance.test
         COPY dist/validator/conformance.test /usr/local/bin/conformance.test
         COPY dist/validator/test2json /usr/local/bin/test2json
         COPY dist/validator/chainsaw /usr/local/bin/chainsaw
         COPY pkg/validator/checks/deployment/testdata /app/testdata
+        COPY pkg/validator/checks/performance/testdata /app/testdata
         WORKDIR /app
         CMD ["/bin/bash"]
         DOCKERFILE

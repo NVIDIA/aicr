@@ -106,7 +106,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated)",
+			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated). Recommended in heterogeneous clusters to target GPU nodes",
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{
@@ -192,13 +192,23 @@ The snapshot process:
   5. Save it to the target output location
   6. Clean up the Job (optionally keep RBAC for reuse)
 
+The snapshot Job must run on a GPU node to collect GPU hardware information
+(nvidia-smi, device properties, driver version). In heterogeneous clusters
+with both CPU and GPU nodes, use --node-selector to ensure the Job lands
+on a GPU node. Before GPU Operator is installed, use the node name or a
+user-defined label; after installation, nvidia.com/gpu.present=true is
+available.
+
 Examples:
 
-Basic snapshot:
+Basic snapshot (homogeneous GPU cluster):
   aicr snapshot --output cm://default/aicr-snapshot
 
-Target specific GPU nodes with node selector:
-  aicr snapshot --node-selector nodeGroup=customer-gpu
+Target a GPU node before GPU Operator installation:
+  aicr snapshot --node-selector kubernetes.io/hostname=gpu-node-1
+
+Target GPU nodes after GPU Operator installation:
+  aicr snapshot --node-selector nvidia.com/gpu.present=true
 
 Override default tolerations (by default, all taints are tolerated):
   aicr snapshot --toleration dedicated=user-workload:NoSchedule
