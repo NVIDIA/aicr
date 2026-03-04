@@ -359,6 +359,7 @@ generate_bundle() {
         --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
         --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
         --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
+        --set "certmanager:startupapicheck.enabled=false" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
         --set "skyhook-customizations:enabled=false" \
