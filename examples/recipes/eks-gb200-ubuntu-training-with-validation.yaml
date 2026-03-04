@@ -142,7 +142,7 @@ componentRefs:
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
-    version: 0.11.1
+    version: 0.13.0
     valuesFile: components/skyhook-operator/values.yaml
     overrides:
       customization: ubuntu

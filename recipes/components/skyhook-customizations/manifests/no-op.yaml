@@ -39,6 +39,8 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
+  # Default: true. Disable with --set skyhookcustomizations:autoTaintNewNodes=false
+  autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
   additionalTolerations:
     {{- if $cust.acceleratedTolerations }}

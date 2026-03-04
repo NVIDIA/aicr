@@ -12,15 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert Skyhook operator controller-manager is available.
-# fullnameOverride: skyhook-operator (from values.yaml)
-# Chart: skyhook-operator v0.13.0
-# Manages NodeConfiguration CRs for node-level customizations (sysctl, kmod, etc.)
-apiVersion: apps/v1
-kind: Deployment
+# Assert tuning manifest with custom scheduling options.
+# --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+# --accelerated-node-selector nodeGroup=gpu-worker
+# --workload-selector app=training
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
 metadata:
-  name: skyhook-operator-controller-manager
-  namespace: skyhook
-status:
-  (conditions[?type == 'Available']):
-    - status: "True"
+  name: tuning
+spec:
+  runtimeRequired: true
+  autoTaintNewNodes: true
+  additionalTolerations:
+    - key: nvidia.com/gpu
+      operator: Equal
+      value: present
+      effect: NoSchedule
+  nodeSelectors:
+    matchLabels:
+      nodeGroup: gpu-worker
+  podNonInterruptLabels:
+    matchLabels:
+      app: training

@@ -60,7 +60,7 @@ measurements:
           skyhook-customizations.chart: skyhook-customizations
           skyhook-customizations.namespace: skyhook
           skyhook-operator.chart: skyhook-operator
-          skyhook-operator.version: v0.12.0
+          skyhook-operator.version: v0.13.0
           skyhook-operator.namespace: skyhook
   - type: OS
     subtypes:

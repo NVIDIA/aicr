@@ -12,15 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert Skyhook operator controller-manager is available.
-# fullnameOverride: skyhook-operator (from values.yaml)
-# Chart: skyhook-operator v0.13.0
-# Manages NodeConfiguration CRs for node-level customizations (sysctl, kmod, etc.)
-apiVersion: apps/v1
-kind: Deployment
+# Assert tuning manifest with autoTaintNewNodes disabled.
+# --set skyhookcustomizations:autoTaintNewNodes=false
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
 metadata:
-  name: skyhook-operator-controller-manager
-  namespace: skyhook
-status:
-  (conditions[?type == 'Available']):
-    - status: "True"
+  name: tuning
+spec:
+  runtimeRequired: true
+  autoTaintNewNodes: false

@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -186,8 +187,7 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 // defer time; cleanup must still complete.
 func deleteTrainer(dynamicClient dynamic.Interface, resources []trainerResourceRef) {
 	slog.Info("Deleting installed Kubeflow Trainer resources", "count", len(resources))
-	for i := len(resources) - 1; i >= 0; i-- {
-		ref := resources[i]
+	for _, ref := range slices.Backward(resources) {
 		deleteCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 
 		var err error
