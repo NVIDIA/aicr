@@ -248,6 +248,56 @@ Get entry details:
 rekor-cli get --uuid <entry-uuid>
 ```
 
+## Bundle Attestation
+
+In addition to image and binary attestations, AICR can attest the **deployment bundles** it generates. When `--attest` is passed to `aicr bundle`, the bundle is signed with SLSA Build Provenance v1 using Sigstore keyless OIDC signing, binding the creator's identity to the bundle content and the binary that produced it.
+
+**Create an attested bundle:**
+
+```shell
+aicr bundle \
+  --recipe recipe.yaml \
+  --output ./my-bundle \
+  --attest
+```
+
+In GitHub Actions the OIDC token is detected automatically. Locally, a browser window opens for authentication.
+
+**Verify a bundle:**
+
+```shell
+aicr verify ./my-bundle
+```
+
+This verifies:
+1. **Checksums** — all content files match `checksums.txt`
+2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
+3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI
+
+**Trust levels:**
+
+| Level | Name | Criteria |
+|-------|------|----------|
+| 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
+| 3 | `attested` | Chain verified but binary attestation missing or external data used |
+| 2 | `unverified` | Checksums valid, `--attest` was not used |
+| 1 | `unknown` | Missing or invalid checksums |
+
+**Enforce a minimum trust level:**
+
+```shell
+aicr verify ./my-bundle --min-trust-level verified
+```
+
+**JSON output for CI pipelines:**
+
+```shell
+aicr verify ./my-bundle --format json
+```
+
+For the full demo walkthrough, see [demos/attestation.md](attestation.md). For CLI flag details, see the [CLI Reference](../docs/user/cli-reference.md#aicr-verify).
+
 ## Links
 
 * [Security](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md)
+* [Bundle Attestation Demo](attestation.md)

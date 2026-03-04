@@ -86,6 +86,13 @@ const (
 
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
+
+	// K8sPodTerminationWaitTimeout is the maximum time to wait for a Job pod
+	// to fully terminate after the Job is deleted. Prevents race conditions
+	// where RBAC resources are cleaned up while the pod is still running
+	// cleanup operations (e.g., chainsaw namespace deletion).
+	// Must exceed the default Kubernetes terminationGracePeriodSeconds (30s).
+	K8sPodTerminationWaitTimeout = 60 * time.Second
 )
 
 // HTTP client timeouts for outbound requests.

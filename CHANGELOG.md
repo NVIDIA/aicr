@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.9] - 2026-03-04
+
+### Bug Fixes
+
+- *(validator)* Resolve lint issues in pod termination wait by [@mchmarny](https://github.com/mchmarny)
+
+## [0.8.8] - 2026-03-04
+
+### Bug Fixes
+
+- *(validator)* Wait for pod termination before RBAC cleanup by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.8.7] - 2026-03-04
 
 ### Bug Fixes

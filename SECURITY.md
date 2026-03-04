@@ -230,6 +230,8 @@ aicr trust update
 Run this when Sigstore rotates their keys (a few times per year) or if
 verification reports a stale root.
 
+For full CLI flag documentation, see the [CLI Reference](docs/user/cli-reference.md#aicr-verify) (`aicr verify`, `aicr bundle --attest`, `aicr trust update`). For a hands-on walkthrough, see the [Bundle Attestation Demo](demos/attestation.md).
+
 ### Setup
 
 Export variables for the image you want to verify:

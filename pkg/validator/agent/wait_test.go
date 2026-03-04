@@ -666,3 +666,76 @@ func TestParseGoTestJSON_EmptyOutput(t *testing.T) {
 		t.Errorf("expected 0 tests for empty output, got %d", len(result.Tests))
 	}
 }
+
+func TestWaitForJobPodTermination_NoPod(t *testing.T) {
+	t.Helper()
+
+	deployer, _ := createDeployer()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	// Should return immediately when no pod exists (no panic, no block)
+	deployer.WaitForJobPodTermination(ctx)
+}
+
+func TestWaitForJobPodTermination_AlreadyTerminal(t *testing.T) {
+	deployer, clientset := createDeployer()
+	ctx := context.Background()
+
+	// Create a pod in Failed state (terminal)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: deployer.config.Namespace,
+			Labels: map[string]string{
+				"aicr.nvidia.com/job": deployer.config.JobName,
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodFailed,
+		},
+	}
+	if _, err := clientset.CoreV1().Pods(deployer.config.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create test pod: %v", err)
+	}
+
+	// Should return immediately for terminal pod
+	termCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	deployer.WaitForJobPodTermination(termCtx)
+
+	// Verify context was not exhausted (returned early)
+	if termCtx.Err() != nil {
+		t.Error("WaitForJobPodTermination should return immediately for terminal pod")
+	}
+}
+
+func TestWaitForJobPodTermination_Succeeded(t *testing.T) {
+	deployer, clientset := createDeployer()
+	ctx := context.Background()
+
+	// Create a pod in Succeeded state (terminal)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: deployer.config.Namespace,
+			Labels: map[string]string{
+				"aicr.nvidia.com/job": deployer.config.JobName,
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodSucceeded,
+		},
+	}
+	if _, err := clientset.CoreV1().Pods(deployer.config.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create test pod: %v", err)
+	}
+
+	termCtx, cancel := context.WithTimeout(ctx, 1*time.Second)
+	defer cancel()
+	deployer.WaitForJobPodTermination(termCtx)
+
+	if termCtx.Err() != nil {
+		t.Error("WaitForJobPodTermination should return immediately for succeeded pod")
+	}
+}

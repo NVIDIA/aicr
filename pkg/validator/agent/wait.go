@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 // waitForJobCompletion waits for the Job to complete or timeout.
@@ -115,6 +116,64 @@ func (d *Deployer) getJobFailureReasonFromPod(pod *corev1.Pod) string {
 
 	default:
 		return fmt.Sprintf("Unexpected pod phase: %s", pod.Status.Phase)
+	}
+}
+
+// WaitForJobPodTermination waits for the Job's pod to reach a terminal state
+// or be deleted. This prevents race conditions where RBAC resources are cleaned
+// up while the pod is still running cleanup operations (e.g., chainsaw namespace
+// deletion). The caller must provide a timeout-bounded context.
+func (d *Deployer) WaitForJobPodTermination(ctx context.Context) {
+	jobPod, err := d.getPodForJob(ctx)
+	if err != nil {
+		slog.Debug("no pod found for job, skipping termination wait", "job", d.config.JobName)
+		return
+	}
+
+	if jobPod.Status.Phase == corev1.PodSucceeded || jobPod.Status.Phase == corev1.PodFailed {
+		slog.Debug("pod already in terminal state", "pod", jobPod.Name, "phase", jobPod.Status.Phase)
+		return
+	}
+
+	slog.Debug("waiting for job pod termination", "pod", jobPod.Name, "job", d.config.JobName)
+
+	watcher, err := d.clientset.CoreV1().Pods(d.config.Namespace).Watch(
+		ctx,
+		metav1.ListOptions{
+			FieldSelector: "metadata.name=" + jobPod.Name,
+		},
+	)
+	if err != nil {
+		slog.Warn("failed to watch pod for termination", "pod", jobPod.Name, "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Warn("timed out waiting for pod termination", "pod", jobPod.Name)
+			return
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return
+			}
+
+			if event.Type == watch.Deleted {
+				slog.Debug("pod deleted", "pod", jobPod.Name)
+				return
+			}
+
+			watchedPod, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+
+			if watchedPod.Status.Phase == corev1.PodSucceeded || watchedPod.Status.Phase == corev1.PodFailed {
+				slog.Debug("pod reached terminal state", "pod", watchedPod.Name, "phase", watchedPod.Status.Phase)
+				return
+			}
+		}
 	}
 }
 
