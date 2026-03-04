@@ -158,6 +158,8 @@ components:
     displayName: skyhook-customizations
     valueOverrideKeys:
       - skyhookcustomizations
+    healthCheck:
+      assertFile: checks/skyhook-customizations/health-check.yaml
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
