@@ -448,7 +448,7 @@ import (
 func init() {
 \t// Register this constraint validator
 \tchecks.RegisterConstraintValidator(&checks.ConstraintValidator{
-\t\tPattern:     "{{.ConstraintName}}",
+\t\tName:        "{{.ConstraintName}}",
 \t\tDescription: "{{.Description}}",
 \t\tFunc:        validate{{.FuncName}},
 \t\tTestName:    "{{.TestName}}",
@@ -608,8 +608,8 @@ func TestValidate{{.FuncName}}Registration(t *testing.T) {
 \t\tt.Fatal("{{.ConstraintName}} constraint validator not registered")
 \t}
 
-\tif validator.Pattern != "{{.ConstraintName}}" {
-\t\tt.Errorf("Pattern = %v, want {{.ConstraintName}}", validator.Pattern)
+\tif validator.Name != "{{.ConstraintName}}" {
+\t\tt.Errorf("Name = %v, want {{.ConstraintName}}", validator.Name)
 \t}
 
 \tif validator.Description == "" {

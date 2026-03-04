@@ -151,7 +151,7 @@ Return (actualVersion, passed, error)
    ```go
    func init() {
        checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-           Pattern:     "Deployment.my-resource.property",
+           Name:        "Deployment.my-resource.property",
            Description: "Validates my resource property",
            Func:        ValidateMyConstraint,
        })

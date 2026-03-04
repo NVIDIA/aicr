@@ -589,7 +589,7 @@ func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResul
 			if len(available) > 0 {
 				fmt.Fprintf(&msg, "\nAvailable constraints for phase '%s' (%d):\n", phase, len(available))
 				for _, ct := range available {
-					fmt.Fprintf(&msg, "  - %s: %s\n", ct.Pattern, ct.Description)
+					fmt.Fprintf(&msg, "  - %s: %s\n", ct.Name, ct.Description)
 				}
 			}
 		}

@@ -29,7 +29,7 @@ import (
 
 func init() {
 	checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-		Pattern:     "Deployment.gpu-operator.version",
+		Name:        "Deployment.gpu-operator.version",
 		Description: "Validates GPU Operator version by querying deployed resources",
 		Func:        ValidateGPUOperatorVersion,
 		TestName:    "TestGPUOperatorVersion",

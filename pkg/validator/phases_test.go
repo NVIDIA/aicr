@@ -37,7 +37,7 @@ func init() {
 		TestName:    "TestRegisteredCheck",
 	})
 	checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-		Pattern:     "test-perf-constraint",
+		Name:        "test-perf-constraint",
 		Description: "Test-only performance constraint for buildTestPattern coverage",
 		Phase:       "performance",
 		TestName:    "TestPerfConstraint",

@@ -317,8 +317,8 @@ func TestValidateNcclAllReduceBwRegistration(t *testing.T) {
 		t.Fatal("nccl-all-reduce-bw constraint validator not registered")
 	}
 
-	if validator.Pattern != "nccl-all-reduce-bw" {
-		t.Errorf("Pattern = %v, want nccl-all-reduce-bw", validator.Pattern)
+	if validator.Name != "nccl-all-reduce-bw" {
+		t.Errorf("Name = %v, want nccl-all-reduce-bw", validator.Name)
 	}
 
 	if validator.Description == "" {

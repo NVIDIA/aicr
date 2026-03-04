@@ -44,7 +44,7 @@ func TestConstraintRegistrationCompleteness(t *testing.T) {
 	var missing []string
 	for _, ct := range constraintTests {
 		if !existingTests[ct.TestName] {
-			missing = append(missing, ct.TestName+" (pattern: "+ct.Pattern+")")
+			missing = append(missing, ct.TestName+" (constraint: "+ct.Name+")")
 		}
 	}
 
@@ -118,7 +118,7 @@ func TestIntegrationTestsAreRegistered(t *testing.T) {
 	}
 
 	if len(unregistered) > 0 {
-		t.Errorf("Integration tests without registration (add RegisterConstraintTest or RegisterCheck):\n%s",
+		t.Errorf("Integration tests without registration (add RegisterConstraintValidator or RegisterCheck):\n%s",
 			strings.Join(unregistered, "\n"))
 	}
 }

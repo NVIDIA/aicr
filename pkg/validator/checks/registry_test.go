@@ -347,7 +347,7 @@ func TestRegisterConstraintValidator(t *testing.T) {
 	}()
 
 	validator := &ConstraintValidator{
-		Pattern:     "test.pattern",
+		Name:        "test.pattern",
 		Description: "Test validator",
 		Func: func(ctx *ValidationContext, constraint recipe.Constraint) (string, bool, error) {
 			return "test", true, nil
@@ -363,8 +363,8 @@ func TestRegisterConstraintValidator(t *testing.T) {
 		t.Fatal("ConstraintValidator not found after registration")
 	}
 
-	if retrieved.Pattern != validator.Pattern {
-		t.Errorf("Pattern = %v, want %v", retrieved.Pattern, validator.Pattern)
+	if retrieved.Name != validator.Name {
+		t.Errorf("Name = %v, want %v", retrieved.Name, validator.Name)
 	}
 }
 
@@ -385,7 +385,7 @@ func TestRegisterConstraintValidatorDuplicate(t *testing.T) {
 	}()
 
 	validator := &ConstraintValidator{
-		Pattern: "duplicate.pattern",
+		Name: "duplicate.pattern",
 		Func: func(ctx *ValidationContext, constraint recipe.Constraint) (string, bool, error) {
 			return "", false, nil
 		},
@@ -412,7 +412,7 @@ func TestGetConstraintValidator(t *testing.T) {
 		originalRegistry[k] = v
 	}
 	constraintRegistry = map[string]*ConstraintValidator{
-		"existing.pattern": {Pattern: "existing.pattern"},
+		"existing.pattern": {Name: "existing.pattern"},
 	}
 	registryMu.Unlock()
 
@@ -445,8 +445,8 @@ func TestGetConstraintValidator(t *testing.T) {
 			if ok != tt.wantOk {
 				t.Errorf("GetConstraintValidator() ok = %v, want %v", ok, tt.wantOk)
 			}
-			if tt.wantOk && validator.Pattern != tt.pattern {
-				t.Errorf("GetConstraintValidator() Pattern = %v, want %v", validator.Pattern, tt.pattern)
+			if tt.wantOk && validator.Name != tt.pattern {
+				t.Errorf("GetConstraintValidator() Name = %v, want %v", validator.Name, tt.pattern)
 			}
 		})
 	}
@@ -460,9 +460,9 @@ func TestListConstraintValidators(t *testing.T) {
 		originalRegistry[k] = v
 	}
 	constraintRegistry = map[string]*ConstraintValidator{
-		"pattern1": {Pattern: "pattern1"},
-		"pattern2": {Pattern: "pattern2"},
-		"pattern3": {Pattern: "pattern3"},
+		"pattern1": {Name: "pattern1"},
+		"pattern2": {Name: "pattern2"},
+		"pattern3": {Name: "pattern3"},
 	}
 	registryMu.Unlock()
 
@@ -481,7 +481,7 @@ func TestListConstraintValidators(t *testing.T) {
 	// Verify all validators are included
 	patterns := make(map[string]bool)
 	for _, v := range validators {
-		patterns[v.Pattern] = true
+		patterns[v.Name] = true
 	}
 
 	expectedPatterns := []string{"pattern1", "pattern2", "pattern3"}
@@ -550,96 +550,25 @@ func TestRegistryConcurrency(t *testing.T) {
 	}
 }
 
-func TestRegisterConstraintTest(t *testing.T) {
-	// Save and restore registry
-	originalRegistry := make(map[string]*ConstraintTest)
-	registryMu.Lock()
-	for k, v := range constraintTestRegistry {
-		originalRegistry[k] = v
-	}
-	constraintTestRegistry = make(map[string]*ConstraintTest)
-	registryMu.Unlock()
-
-	defer func() {
-		registryMu.Lock()
-		constraintTestRegistry = originalRegistry
-		registryMu.Unlock()
-	}()
-
-	tests := []struct {
-		name      string
-		test      *ConstraintTest
-		wantPanic bool
-	}{
-		{
-			name: "register valid constraint test",
-			test: &ConstraintTest{
-				TestName:    "TestMyConstraint",
-				Pattern:     "Deployment.my-app.version",
-				Description: "Validates my-app version",
-				Phase:       "deployment",
-			},
-			wantPanic: false,
-		},
-		{
-			name: "register constraint test with nil",
-			test: nil,
-			// Panics because it accesses test.Pattern without nil check
-			// This is consistent with RegisterCheck behavior
-			wantPanic: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			defer func() {
-				r := recover()
-				if (r != nil) != tt.wantPanic {
-					t.Errorf("RegisterConstraintTest() panic = %v, wantPanic = %v", r, tt.wantPanic)
-				}
-			}()
-
-			RegisterConstraintTest(tt.test)
-
-			if tt.test != nil && !tt.wantPanic {
-				// Verify registration
-				testName, found := GetTestNameForConstraint(tt.test.Pattern)
-				if !found {
-					t.Errorf("constraint test not found after registration")
-				}
-				if testName != tt.test.TestName {
-					t.Errorf("GetTestNameForConstraint() = %v, want %v", testName, tt.test.TestName)
-				}
-			}
-		})
-	}
-}
-
 func TestGetTestNameForConstraint(t *testing.T) {
-	// Save and restore both registries
-	originalTestRegistry := make(map[string]*ConstraintTest)
+	// Save and restore registry
 	originalValidatorRegistry := make(map[string]*ConstraintValidator)
 	registryMu.Lock()
-	for k, v := range constraintTestRegistry {
-		originalTestRegistry[k] = v
-	}
 	for k, v := range constraintRegistry {
 		originalValidatorRegistry[k] = v
 	}
-	constraintTestRegistry = make(map[string]*ConstraintTest)
 	constraintRegistry = make(map[string]*ConstraintValidator)
 	registryMu.Unlock()
 
 	defer func() {
 		registryMu.Lock()
-		constraintTestRegistry = originalTestRegistry
 		constraintRegistry = originalValidatorRegistry
 		registryMu.Unlock()
 	}()
 
 	// Register a test constraint via ConstraintValidator (preferred single-registration)
 	RegisterConstraintValidator(&ConstraintValidator{
-		Pattern:     "Deployment.gpu-operator.version",
+		Name:        "Deployment.gpu-operator.version",
 		Description: "Validates GPU operator version",
 		TestName:    "TestGPUOperatorVersion",
 		Phase:       "deployment",
@@ -685,40 +614,34 @@ func TestGetTestNameForConstraint(t *testing.T) {
 }
 
 func TestListConstraintTests(t *testing.T) {
-	// Save and restore both registries
-	originalTestRegistry := make(map[string]*ConstraintTest)
+	// Save and restore registry
 	originalValidatorRegistry := make(map[string]*ConstraintValidator)
 	registryMu.Lock()
-	for k, v := range constraintTestRegistry {
-		originalTestRegistry[k] = v
-	}
 	for k, v := range constraintRegistry {
 		originalValidatorRegistry[k] = v
 	}
-	constraintTestRegistry = make(map[string]*ConstraintTest)
 	constraintRegistry = make(map[string]*ConstraintValidator)
 	registryMu.Unlock()
 
 	defer func() {
 		registryMu.Lock()
-		constraintTestRegistry = originalTestRegistry
 		constraintRegistry = originalValidatorRegistry
 		registryMu.Unlock()
 	}()
 
 	// Register test constraints using preferred single-registration pattern
 	RegisterConstraintValidator(&ConstraintValidator{
-		Pattern:  "Deployment.test1.version",
+		Name:     "Deployment.test1.version",
 		TestName: "TestDeploymentConstraint1",
 		Phase:    "deployment",
 	})
 	RegisterConstraintValidator(&ConstraintValidator{
-		Pattern:  "Deployment.test2.version",
+		Name:     "Deployment.test2.version",
 		TestName: "TestDeploymentConstraint2",
 		Phase:    "deployment",
 	})
 	RegisterConstraintValidator(&ConstraintValidator{
-		Pattern:  "Readiness.test.version",
+		Name:     "Readiness.test.version",
 		TestName: "TestReadinessConstraint",
 		Phase:    "readiness",
 	})

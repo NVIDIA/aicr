@@ -286,7 +286,7 @@ import (
 
 func init() {
     checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-        Pattern:     "Deployment.my-app.version",
+        Name:        "Deployment.my-app.version",
         Description: "Validates my-app deployment version",
         TestName:    "TestMyAppVersion",  // Test function name for Job execution
         Phase:       "deployment",
@@ -623,7 +623,7 @@ import (
 
 func init() {
     checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-        Pattern:     "Deployment.device-plugin.replicas",  // ← Constraint name pattern
+        Name:        "Deployment.device-plugin.replicas",  // ← Constraint name
         Description: "Validates device plugin replica count",
         Func:        ValidateDevicePluginReplicas,
     })
@@ -1190,10 +1190,10 @@ The generator creates `my_app_version_integration_test.go` with proper registrat
 
 ```go
 func init() {
-    checks.RegisterConstraintTest(&checks.ConstraintTest{
-        TestName:    "TestMyAppVersion",
-        Pattern:     "Deployment.my-app.version",
+    checks.RegisterConstraintValidator(&checks.ConstraintValidator{
+        Name:        "Deployment.my-app.version",
         Description: "Validates my-app version",
+        TestName:    "TestMyAppVersion",
         Phase:       "deployment",
     })
 }

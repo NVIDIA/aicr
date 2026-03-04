@@ -82,7 +82,7 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 func init() {
 	// Register this constraint validator
 	checks.RegisterConstraintValidator(&checks.ConstraintValidator{
-		Pattern:     "nccl-all-reduce-bw",
+		Name:        "nccl-all-reduce-bw",
 		Description: "Verify NCCL All Reduce Bus Bandwidth within 10% of threshold",
 		Func:        validateNcclAllReduceBw,
 		TestName:    "TestNcclAllReduceBw",
