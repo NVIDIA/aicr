@@ -669,6 +669,8 @@ aicr bundle [flags]
 | `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
+| `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
+| `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 
 **Node Scheduling:**
 
@@ -803,6 +805,12 @@ aicr bundle -r recipe.yaml \
   --workload-selector workload-type=training \
   -o ./bundles
 
+# Generate an attested bundle (opens browser for OIDC auth)
+aicr bundle -r recipe.yaml --attest -o ./bundles
+
+# In GitHub Actions (OIDC token detected automatically)
+aicr bundle -r recipe.yaml --attest -o ./bundles
+
 # Generate ArgoCD Application manifests for GitOps
 aicr bundle -r recipe.yaml --deployer argocd -o ./bundles
 
@@ -823,7 +831,10 @@ bundles/
 ├── README.md                      # Deployment guide with ordered steps
 ├── deploy.sh                      # One-command deployment script
 ├── recipe.yaml                    # Recipe used to generate bundle
-├── checksums.txt                  # SHA256 checksums (optional)
+├── checksums.txt                  # SHA256 checksums
+├── attestation/                   # Present when --attest is used
+│   ├── bundle-attestation.sigstore.json   # SLSA Build Provenance v1
+│   └── aicr-attestation.sigstore.json     # Binary SLSA provenance chain
 ├── gpu-operator/
 │   ├── values.yaml                # Component-specific Helm values
 │   ├── README.md                  # Per-component install/upgrade/uninstall
@@ -949,6 +960,17 @@ ArgoCD Applications use multi-source to:
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)
 
+#### Bundle Attestation
+
+When `--attest` is passed, the bundle command performs four steps:
+
+1. **Acquires an OIDC token** — In GitHub Actions the ambient OIDC token is used automatically. Locally, a browser window opens for Sigstore OIDC authentication.
+2. **Verifies the binary's own attestation** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) from an NVIDIA release. This ensures only NVIDIA-built binaries can produce attested bundles.
+3. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the bundle content (via `checksums.txt` digest) and the binary that produced it.
+4. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
+
+Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
+
 **Deploying a bundle:**
 ```shell
 # Navigate to bundle
@@ -963,6 +985,84 @@ sha256sum -c checksums.txt
 
 # Deploy to cluster
 chmod +x deploy.sh && ./deploy.sh
+```
+
+---
+
+### aicr verify
+
+Verify the integrity and attestation chain of a bundle. Verification is fully offline — no network calls are made.
+
+**Synopsis:**
+```shell
+aicr verify <bundle-dir> [flags]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--min-trust-level` | string | `max` | Minimum required trust level. `max` auto-detects the highest achievable level and verifies against it. Explicit levels: `verified`, `attested`, `unverified`, `unknown`. |
+| `--require-creator` | string | | Require a specific creator identity, matched against the bundle attestation signing certificate. |
+| `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
+| `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
+| `--format` | string | `text` | Output format: `text` or `json`. |
+
+**Trust Levels:**
+
+| Level | Name | Criteria |
+|-------|------|----------|
+| 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
+| 3 | `attested` | Chain verified but binary attestation missing or external data (`--data`) was used |
+| 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
+| 1 | `unknown` | Missing or invalid checksums |
+
+**Verification steps:**
+
+1. **Checksums** — verifies all content files match `checksums.txt`
+2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
+3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI (`on-tag.yaml` workflow)
+
+**Examples:**
+```shell
+# Auto-detect maximum trust level
+aicr verify ./my-bundle
+
+# Enforce a minimum trust level
+aicr verify ./my-bundle --min-trust-level verified
+
+# Require a specific bundle creator
+aicr verify ./my-bundle --require-creator jdoe@company.com
+
+# Require minimum CLI version used to create the bundle
+aicr verify ./my-bundle --cli-version-constraint ">= 0.8.0"
+
+# JSON output for CI pipelines
+aicr verify ./my-bundle --format json
+```
+
+> **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
+
+---
+
+### aicr trust update
+
+Fetch the latest Sigstore trusted root from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year).
+
+**Synopsis:**
+```shell
+aicr trust update
+```
+
+**No flags.** This command contacts `tuf-repo-cdn.sigstore.dev`, verifies the update chain against the embedded TUF root, and writes the result to `~/.sigstore/root/`.
+
+**When to run:**
+- After initial installation (the install script runs this automatically)
+- When `aicr verify` reports a stale or expired trusted root
+- When Sigstore announces key rotation
+
+**Example:**
+```shell
+aicr trust update
 ```
 
 ---
