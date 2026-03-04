@@ -119,6 +119,36 @@ func (d *Deployer) getJobFailureReasonFromPod(pod *corev1.Pod) string {
 	}
 }
 
+// WaitForPodReady waits for the Job's pod to appear and reach the Running phase.
+// This is used before streaming logs so we have a pod to follow.
+// The caller must provide a timeout-bounded context.
+func (d *Deployer) WaitForPodReady(ctx context.Context) error {
+	slog.Debug("waiting for job pod to be ready", "job", d.config.JobName)
+
+	// Poll for pod to appear and be Running
+	ticker := time.NewTicker(defaults.PodPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout, "timed out waiting for pod ready", ctx.Err())
+		case <-ticker.C:
+			jobPod, err := d.getPodForJob(ctx)
+			if err != nil {
+				continue // Pod not yet created
+			}
+			if jobPod.Status.Phase == corev1.PodRunning {
+				slog.Debug("job pod is running", "pod", jobPod.Name)
+				return nil
+			}
+			if jobPod.Status.Phase == corev1.PodSucceeded || jobPod.Status.Phase == corev1.PodFailed {
+				return nil // Already terminal, caller can still read logs
+			}
+		}
+	}
+}
+
 // WaitForJobPodTermination waits for the Job's pod to reach a terminal state
 // or be deleted. This prevents race conditions where RBAC resources are cleaned
 // up while the pod is still running cleanup operations (e.g., chainsaw namespace

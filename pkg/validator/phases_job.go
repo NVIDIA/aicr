@@ -133,6 +133,30 @@ func extractArtifacts(output []string) ([]checks.Artifact, []string) {
 	return artifacts, reasonLines
 }
 
+// startLogStreaming waits for the Job pod to be ready, then streams logs
+// in a background goroutine. Returns true if streaming started successfully.
+// The caller must cancel logCtx when done to stop the goroutine.
+func startLogStreaming(logCtx context.Context, deployer *agent.Deployer, phaseName string) bool {
+	podReadyCtx, podReadyCancel := context.WithTimeout(logCtx, defaults.K8sPodReadyTimeout)
+	defer podReadyCancel()
+
+	if podErr := deployer.WaitForPodReady(podReadyCtx); podErr != nil {
+		slog.Debug("could not wait for pod ready, skipping log streaming",
+			"phase", phaseName, "error", podErr)
+		return false
+	}
+
+	go func() {
+		if streamErr := deployer.StreamLogs(logCtx); streamErr != nil {
+			if logCtx.Err() == nil {
+				slog.Debug("log streaming ended", "phase", phaseName, "reason", streamErr.Error())
+			}
+		}
+	}()
+	return true
+}
+
+//nolint:funlen // Orchestration function with sequential job lifecycle steps
 func (v *Validator) runPhaseJob(
 	ctx context.Context,
 	deployer *agent.Deployer,
@@ -167,15 +191,25 @@ func (v *Validator) runPhaseJob(
 		return result
 	}
 
-	// Wait for Job completion
+	// Stream logs in background while waiting for Job completion.
+	logCtx, cancelLogs := context.WithCancel(ctx)
+	defer cancelLogs()
+	streamingActive := startLogStreaming(logCtx, deployer, phaseName)
+
+	// Wait for Job completion (logs stream concurrently in background)
 	if err := deployer.WaitForCompletion(ctx, config.Timeout); err != nil {
-		// Try to capture Job logs before cleanup
-		logs, logErr := deployer.GetPodLogs(ctx)
-		if logErr != nil {
-			slog.Warn("failed to capture Job logs", "job", config.JobName, "error", logErr)
-		} else if logs != "" {
-			// Output logs to stderr for debugging
-			slog.Info("validation job logs", "job", config.JobName, "logs", logs)
+		cancelLogs()
+
+		// Capture logs for error context (fallback if streaming wasn't active,
+		// or for the error reason snippet regardless)
+		var logs string
+		if !streamingActive {
+			if captured, logErr := deployer.GetPodLogs(ctx); logErr != nil {
+				slog.Warn("failed to capture Job logs", "job", config.JobName, "error", logErr)
+			} else if captured != "" {
+				slog.Info("validation job logs", "job", config.JobName, "logs", captured)
+				logs = captured
+			}
 		}
 
 		// Cleanup failed Job (only if cleanup enabled)

@@ -14,9 +14,9 @@
 
 # NVSentinel Health Check
 #
-# Validates that the NVSentinel controller manager is running and healthy in
-# the nvsentinel namespace. Checks that the nvsentinel-controller-manager
-# deployment has at least one available replica and that no pods in the
+# Validates that the NVSentinel labeler is running and healthy in
+# the nvsentinel namespace. Checks that the labeler deployment has at
+# least one available replica and that no pods in the
 # namespace are stuck in Pending, Failed, or Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
@@ -36,7 +36,7 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: nvsentinel-controller-manager
+                name: labeler
                 namespace: nvsentinel
               status:
                 (availableReplicas > `0`): true

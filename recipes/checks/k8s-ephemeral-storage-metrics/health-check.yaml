@@ -14,9 +14,9 @@
 
 # K8s Ephemeral Storage Metrics Health Check
 #
-# Validates that the k8s-ephemeral-storage-metrics DaemonSet is running and
-# healthy in the monitoring namespace. Checks that the DaemonSet has at least
-# one ready pod and that no ephemeral storage metrics pods (selected by label)
+# Validates that the k8s-ephemeral-storage-metrics Deployment is running and
+# healthy in the monitoring namespace. Checks that the Deployment has at least
+# one available replica and that no ephemeral storage metrics pods (selected by label)
 # are stuck in Pending, Failed, or Unknown phases. Label selectors are used
 # because monitoring is a shared namespace.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -34,12 +34,12 @@ spec:
         - assert:
             resource:
               apiVersion: apps/v1
-              kind: DaemonSet
+              kind: Deployment
               metadata:
                 name: k8s-ephemeral-storage-metrics
                 namespace: monitoring
               status:
-                (numberReady > `0`): true
+                (availableReplicas > `0`): true
     - name: validate-all-pods-healthy
       try:
         # Assert no ephemeral storage metrics pods are in unhealthy phases.

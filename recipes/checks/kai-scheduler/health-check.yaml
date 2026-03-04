@@ -15,7 +15,7 @@
 # KAI Scheduler Health Check
 #
 # Validates that the KAI Scheduler is running and healthy in the kai-scheduler
-# namespace. Checks that the kai-scheduler deployment has at least one
+# namespace. Checks that the kai-operator deployment has at least one
 # available replica and that no pods in the namespace are stuck in Pending,
 # Failed, or Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -35,7 +35,7 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: kai-scheduler
+                name: kai-operator
                 namespace: kai-scheduler
               status:
                 (availableReplicas > `0`): true

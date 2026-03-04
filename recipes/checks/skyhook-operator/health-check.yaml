@@ -15,7 +15,7 @@
 # Skyhook Operator Health Check
 #
 # Validates that the Skyhook Operator is running and healthy in the skyhook
-# namespace. Checks that the skyhook-operator deployment has at least one
+# namespace. Checks that the skyhook-operator-controller-manager deployment has at least one
 # available replica and that no pods in the namespace are stuck in Pending,
 # Failed, or Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
@@ -35,7 +35,7 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: skyhook-operator
+                name: skyhook-operator-controller-manager
                 namespace: skyhook
               status:
                 (availableReplicas > `0`): true

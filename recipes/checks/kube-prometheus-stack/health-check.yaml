@@ -36,7 +36,7 @@ spec:
               apiVersion: apps/v1
               kind: Deployment
               metadata:
-                name: kube-prometheus-stack-operator
+                name: kube-prometheus-operator
                 namespace: monitoring
               status:
                 (availableReplicas > `0`): true
