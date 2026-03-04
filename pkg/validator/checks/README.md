@@ -507,7 +507,7 @@ Example: `pkg/validator/checks/deployment/operator_health.go`
 **Step 2: Implement Check Function**
 
 ```go
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 // [Standard license header...]
 
 package deployment
@@ -605,7 +605,7 @@ Create `constraints.go` in the phase directory:
 **Step 2: Implement Constraint Validator**
 
 ```go
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 // [Standard license header...]
 
 package deployment

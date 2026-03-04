@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,10 +27,13 @@ import (
 
 // StreamLogs streams pod logs to the provided writer in real-time.
 // Logs are written line-by-line as they are received from the pod.
-func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, podName string, logWriter io.Writer) error {
-	req := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
-		Follow: true,
-	})
+// When containerName is empty, Kubernetes defaults to the first container.
+func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string, logWriter io.Writer) error {
+	opts := &corev1.PodLogOptions{Follow: true}
+	if containerName != "" {
+		opts.Container = containerName
+	}
+	req := client.CoreV1().Pods(namespace).GetLogs(podName, opts)
 
 	stream, err := req.Stream(ctx)
 	if err != nil {
@@ -59,8 +62,13 @@ func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 
 // GetPodLogs retrieves all logs from a pod as a string.
 // This function is suitable for completed pods or when you need the full log history.
-func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, podName string) (string, error) {
-	req := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{})
+// When containerName is empty, Kubernetes defaults to the first container.
+func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string) (string, error) {
+	opts := &corev1.PodLogOptions{}
+	if containerName != "" {
+		opts.Container = containerName
+	}
+	req := client.CoreV1().Pods(namespace).GetLogs(podName, opts)
 
 	stream, err := req.Stream(ctx)
 	if err != nil {

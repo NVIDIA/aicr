@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ func (d *Deployer) StreamLogs(ctx context.Context, w io.Writer, prefix string) e
 		w = &prefixWriter{writer: w, prefix: prefix}
 	}
 
-	return pod.StreamLogs(ctx, d.clientset, d.config.Namespace, podName, w)
+	return pod.StreamLogs(ctx, d.clientset, d.config.Namespace, podName, "", w)
 }
 
 // GetPodLogs retrieves logs from the Job's Pod.
@@ -82,7 +82,7 @@ func (d *Deployer) GetPodLogs(ctx context.Context) (string, error) {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to find pod for log retrieval", err)
 	}
 
-	return pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, podName)
+	return pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, podName, "")
 }
 
 // WaitForPodReady waits for the Job's Pod to be in Running state.

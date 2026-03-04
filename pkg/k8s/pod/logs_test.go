@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ func TestStreamLogs_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	err := pod.StreamLogs(ctx, client, "default", "test-pod", &buf)
+	err := pod.StreamLogs(ctx, client, "default", "test-pod", "", &buf)
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
@@ -50,7 +50,7 @@ func TestGetPodLogs_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := pod.GetPodLogs(ctx, client, "default", "test-pod")
+	_, err := pod.GetPodLogs(ctx, client, "default", "test-pod", "")
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
@@ -66,7 +66,7 @@ func TestStreamLogs_Success(t *testing.T) {
 	var buf bytes.Buffer
 
 	// Fake client returns "fake logs" for any stream request.
-	err := pod.StreamLogs(context.Background(), client, "default", "test-pod", &buf)
+	err := pod.StreamLogs(context.Background(), client, "default", "test-pod", "", &buf)
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestGetPodLogs_Success(t *testing.T) {
 	client := fake.NewSimpleClientset(p)
 
 	// Fake client returns "fake logs" for any stream request.
-	result, err := pod.GetPodLogs(context.Background(), client, "default", "test-pod")
+	result, err := pod.GetPodLogs(context.Background(), client, "default", "test-pod", "")
 	if err != nil {
 		t.Errorf("expected no error, got: %v", err)
 	}

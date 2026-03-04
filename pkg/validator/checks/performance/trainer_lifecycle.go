@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -292,7 +292,7 @@ func downloadAndExtractGitHubArchive(ctx context.Context, archiveURL string) (st
 	}
 
 	// Use a bounded HTTP client — http.DefaultClient has no timeout.
-	client := &http.Client{Timeout: defaults.NCCLTrainerArchiveDownloadTimeout}
+	client := defaults.NewHTTPClient(defaults.NCCLTrainerArchiveDownloadTimeout)
 	resp, err := client.Do(req) //nolint:gosec // archiveURL is a compile-time constant, not user input
 	if err != nil {
 		return "", nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("failed to download archive from %s", archiveURL), err)

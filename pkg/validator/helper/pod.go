@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ package helper
 import (
 	"bytes"
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -25,6 +24,7 @@ import (
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	podutil "github.com/NVIDIA/aicr/pkg/k8s/pod"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	v1 "k8s.io/api/core/v1"
@@ -96,89 +96,21 @@ func (p *PodLifecycle) WaitForPodByName(ctx context.Context, podName string, tim
 	}
 }
 
-// WaitForPodSuccess waits for a pod to reach Succeeded phase
-func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	slog.Info("Waiting for pod to reach Succeeded state", "name", pod.Name)
-
-	// Use watch API for efficient monitoring
-	watcher, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Watch(
-		timeoutCtx,
-		metav1.ListOptions{
-			FieldSelector: "metadata.name=" + pod.Name,
-		},
-	)
-	if err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch pod", err)
-	}
-	defer watcher.Stop()
-
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "pod wait timeout", timeoutCtx.Err())
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				return aicrErrors.New(aicrErrors.ErrCodeInternal, "watch channel closed unexpectedly")
-			}
-
-			watchedPod, ok := event.Object.(*v1.Pod)
-			if !ok {
-				continue
-			}
-
-			slog.Info("Pod current phase", "name", watchedPod.Name, "status", watchedPod.Status.Phase)
-
-			// Check for success
-			if watchedPod.Status.Phase == v1.PodSucceeded {
-				slog.Info("Pod successfully completed", "name", watchedPod.Name)
-				return nil
-			}
-
-			// Check for failure
-			if watchedPod.Status.Phase == v1.PodFailed {
-				return aicrErrors.NewWithContext(aicrErrors.ErrCodeInternal, "pod failed", map[string]interface{}{
-					"namespace": watchedPod.Namespace,
-					"name":      watchedPod.Name,
-					"reason":    watchedPod.Status.Reason,
-					"message":   watchedPod.Status.Message,
-				})
-			}
-		}
-	}
+// WaitForPodSuccess waits for a pod to reach Succeeded phase.
+// Delegates to the shared pod.WaitForPodSucceeded utility.
+func (p *PodLifecycle) WaitForPodSuccess(ctx context.Context, v1Pod *v1.Pod, timeout time.Duration) error {
+	return podutil.WaitForPodSucceeded(ctx, p.ClientSet, v1Pod.Namespace, v1Pod.Name, timeout)
 }
 
-// GetPodLogs retrieves logs from a pod
+// GetPodLogs retrieves logs from a pod.
+// Delegates to the shared podutil.GetPodLogs utility, targeting the first container.
 //
 //nolint:unparam // string return used by callers in performance and deployment packages
 func (p *PodLifecycle) GetPodLogs(ctx context.Context, pod *v1.Pod) (string, error) {
-	// Check if pod has containers
 	if len(pod.Spec.Containers) == 0 {
 		return "", aicrErrors.New(aicrErrors.ErrCodeInternal, "pod has no containers")
 	}
-
-	logsReq := p.ClientSet.CoreV1().Pods(pod.Namespace).GetLogs(pod.Name, &v1.PodLogOptions{
-		Container: pod.Spec.Containers[0].Name,
-	})
-
-	logsReader, err := logsReq.Stream(ctx)
-	if err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get logs stream", err)
-	}
-	defer func() {
-		if closeErr := logsReader.Close(); closeErr != nil {
-			slog.Error("Error closing logs reader", "error", closeErr)
-		}
-	}()
-
-	logBytes, err := io.ReadAll(logsReader)
-	if err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read logs", err)
-	}
-
-	return string(logBytes), nil
+	return podutil.GetPodLogs(ctx, p.ClientSet, pod.Namespace, pod.Name, pod.Spec.Containers[0].Name)
 }
 
 // CleanupPod deletes a pod

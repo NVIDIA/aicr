@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -126,7 +126,7 @@ func (d *Deployer) getResultFromJobLogs(ctx context.Context) (*ValidationResult,
 	}
 
 	// Get pod logs using shared function
-	logs, err := pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name)
+	logs, err := pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name, "")
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +185,7 @@ func (d *Deployer) streamPodLogs(ctx context.Context) error {
 		return errors.Wrap(errors.ErrCodeNotFound, "failed to find pod", err)
 	}
 
-	return pod.StreamLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name, slogWriter{})
+	return pod.StreamLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name, "", slogWriter{})
 }
 
 // getPodLogsAsString retrieves all pod logs as a string.
@@ -196,7 +196,7 @@ func (d *Deployer) getPodLogsAsString(ctx context.Context) (string, error) {
 		return "", errors.Wrap(errors.ErrCodeNotFound, "failed to find pod", err)
 	}
 
-	return pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name)
+	return pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name, "")
 }
 
 // getPodForJob finds the pod created by the Job.

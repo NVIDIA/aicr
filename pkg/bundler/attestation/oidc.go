@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 
@@ -57,19 +56,7 @@ func FetchAmbientOIDCToken(ctx context.Context, requestURL, requestToken string)
 
 	req.Header.Set("Authorization", "Bearer "+requestToken)
 
-	client := &http.Client{
-		Timeout: defaults.HTTPClientTimeout,
-		Transport: &http.Transport{
-			DialContext: (&net.Dialer{
-				Timeout:   defaults.HTTPConnectTimeout,
-				KeepAlive: defaults.HTTPKeepAlive,
-			}).DialContext,
-			TLSHandshakeTimeout:   defaults.HTTPTLSHandshakeTimeout,
-			ResponseHeaderTimeout: defaults.HTTPResponseHeaderTimeout,
-			IdleConnTimeout:       defaults.HTTPIdleConnTimeout,
-			ExpectContinueTimeout: defaults.HTTPExpectContinueTimeout,
-		},
-	}
+	client := defaults.NewHTTPClient(0)
 	resp, err := client.Do(req) //nolint:gosec // URL is from ACTIONS_ID_TOKEN_REQUEST_URL (trusted GitHub Actions env var)
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeUnavailable, "OIDC token request failed", err)
