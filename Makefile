@@ -134,7 +134,6 @@ LICENSE_IGNORES = \
 	-ignore '**/*.csv' \
 	-ignore '**/*.pyc' \
 	-ignore '**/*.xml' \
-	-ignore '**/*.toml' \
 	-ignore '**/*lock.hcl' \
 	-ignore '**/*pb2*' \
 	-ignore 'bundles/**' \
