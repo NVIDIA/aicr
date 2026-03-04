@@ -88,7 +88,6 @@ spec:
                         gpu-operator.values.toolkit.enabled: "true"
                         gpu-operator.values.gfd.enabled: "true"
                         gpu-operator.values.gdrcopy.enabled: "true"
-                        gpu-operator.values.gdrcopy.version: v2.5
                         gpu-operator.values.fullnameOverride: gpu-operator
                         gpu-operator.values.operator.upgradeCRD: "true"
                         gpu-operator.values.migManager.enabled: "true"
