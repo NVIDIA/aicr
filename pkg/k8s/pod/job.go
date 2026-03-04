@@ -28,13 +28,21 @@ import (
 // WaitForJobCompletion waits for a Kubernetes Job to complete successfully or fail.
 // Returns nil if job completes successfully, error if job fails or context deadline exceeded.
 //
-// This function uses the Kubernetes watch API for efficient monitoring instead of polling.
+// Performs an initial Get to catch already-complete Jobs, then uses the
+// watch API for efficient monitoring.
 func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, namespace, name string, timeout time.Duration) error {
-	// Create timeout context
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Use watch API for efficient monitoring
+	// Fast path: Job may already be in a terminal state.
+	current, err := client.BatchV1().Jobs(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to get Job", err)
+	}
+	if done, checkErr := checkJobStatus(current); done {
+		return checkErr
+	}
+
 	watcher, err := client.BatchV1().Jobs(namespace).Watch(
 		timeoutCtx,
 		metav1.ListOptions{
@@ -60,20 +68,28 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 				continue
 			}
 
-			// Check job status conditions
-			for _, condition := range job.Status.Conditions {
-				if condition.Type == batchv1.JobComplete && condition.Status == corev1.ConditionTrue {
-					return nil
-				}
-				if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
-					return errors.NewWithContext(errors.ErrCodeInternal, "job failed", map[string]interface{}{
-						"namespace": namespace,
-						"name":      name,
-						"reason":    condition.Reason,
-						"message":   condition.Message,
-					})
-				}
+			if done, checkErr := checkJobStatus(job); done {
+				return checkErr
 			}
 		}
 	}
+}
+
+// checkJobStatus returns (true, nil) for Complete, (true, error) for Failed,
+// and (false, nil) when the Job is still running.
+func checkJobStatus(job *batchv1.Job) (bool, error) {
+	for _, condition := range job.Status.Conditions {
+		if condition.Type == batchv1.JobComplete && condition.Status == corev1.ConditionTrue {
+			return true, nil
+		}
+		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
+			return true, errors.NewWithContext(errors.ErrCodeInternal, "job failed", map[string]interface{}{
+				"namespace": job.Namespace,
+				"name":      job.Name,
+				"reason":    condition.Reason,
+				"message":   condition.Message,
+			})
+		}
+	}
+	return false, nil
 }

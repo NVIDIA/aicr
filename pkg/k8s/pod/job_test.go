@@ -94,6 +94,44 @@ func TestWaitForJobCompletion_Timeout(t *testing.T) {
 	}
 }
 
+func TestWaitForJobCompletion_AlreadyComplete(t *testing.T) {
+	// Job already has Complete condition before WaitForJobCompletion is called.
+	// This tests the fast-path Get check that catches already-terminal Jobs.
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+		Status: batchv1.JobStatus{
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(job)
+
+	err := pod.WaitForJobCompletion(context.Background(), client, "default", "test-job", 1*time.Second)
+	if err != nil {
+		t.Errorf("expected no error for already-complete Job, got: %v", err)
+	}
+}
+
+func TestWaitForJobCompletion_AlreadyFailed(t *testing.T) {
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+		Status: batchv1.JobStatus{
+			Conditions: []batchv1.JobCondition{
+				{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"},
+			},
+		},
+	}
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	client := fake.NewSimpleClientset(job)
+
+	err := pod.WaitForJobCompletion(context.Background(), client, "default", "test-job", 1*time.Second)
+	if err == nil {
+		t.Error("expected error for already-failed Job")
+	}
+}
+
 func TestWaitForJobCompletion_ContextCancelled(t *testing.T) {
 	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
 	client := fake.NewSimpleClientset()
