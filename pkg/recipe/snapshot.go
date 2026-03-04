@@ -88,7 +88,7 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 				}
 			}
 
-		case measurement.TypeSystemD:
+		case measurement.TypeSystemD, measurement.TypeNodeTopology:
 			continue
 		}
 	}

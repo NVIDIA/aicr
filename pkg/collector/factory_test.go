@@ -65,6 +65,7 @@ func TestDefaultCollectorFactory_AllCollectors(t *testing.T) {
 		factory.CreateOSCollector,
 		factory.CreateGPUCollector,
 		factory.CreateKubernetesCollector,
+		factory.CreateNodeTopologyCollector,
 	}
 
 	for i, createFunc := range collectorFuncs {

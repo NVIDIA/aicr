@@ -87,6 +87,7 @@ aicr snapshot [flags]
 | `--cleanup` | | bool | true | Delete Job and RBAC resources on completion. Use `--cleanup=false` to keep resources for debugging. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
+| `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
 
 **Output Destinations:**
 - **stdout**: Default when no `-o` flag specified
@@ -98,6 +99,7 @@ aicr snapshot [flags]
 - **OS Configuration**: grub, kmod, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
 - **GPU**: driver version, CUDA, MIG settings, hardware info
+- **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
 
 **Examples:**
 
@@ -167,10 +169,14 @@ The `--template` flag enables custom output formatting using Go templates with [
 .APIVersion     # API version string
 .Metadata       # Map of key-value pairs (timestamp, version, source-node)
 .Measurements   # Array of Measurement objects
-  .Type         # Measurement type (K8s, GPU, OS, SystemD)
+  .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
   .Subtypes     # Array of Subtype objects
     .Name       # Subtype name (e.g., "server", "smi", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
+
+# NodeTopology measurement type has subtypes: summary, taint, label
+# Taint encoding: effect|value|node1,node2,...  (parseable with Sprig splitList "|")
+# Label encoding: value|node1,node2,...
 ```
 
 Example template extracting key cluster info:

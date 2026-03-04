@@ -65,10 +65,11 @@ func (mt Type) String() string {
 }
 
 const (
-	TypeK8s     Type = "K8s"
-	TypeGPU     Type = "GPU"
-	TypeOS      Type = "OS"
-	TypeSystemD Type = "SystemD"
+	TypeK8s          Type = "K8s"
+	TypeGPU          Type = "GPU"
+	TypeOS           Type = "OS"
+	TypeSystemD      Type = "SystemD"
+	TypeNodeTopology Type = "NodeTopology"
 )
 
 // Types is the list of all supported measurement types.
@@ -77,6 +78,7 @@ var Types = []Type{
 	TypeGPU,
 	TypeOS,
 	TypeSystemD,
+	TypeNodeTopology,
 }
 
 // ParseType parses a string into a measurement Type.

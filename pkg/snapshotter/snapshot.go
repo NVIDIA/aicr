@@ -18,6 +18,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -78,12 +79,30 @@ func parseHelmNamespacesEnv() []string {
 	return strings.Split(val, ",")
 }
 
+// parseMaxNodesPerEntryEnv reads the AICR_MAX_NODES_PER_ENTRY env var set by the agent Job.
+// Returns 0 (no limit) when unset or invalid.
+func parseMaxNodesPerEntryEnv() int {
+	val := os.Getenv("AICR_MAX_NODES_PER_ENTRY")
+	if val == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		slog.Warn("invalid AICR_MAX_NODES_PER_ENTRY value, using 0", slog.String("value", val))
+		return 0
+	}
+	return n
+}
+
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	if n.Factory == nil {
 		var opts []collector.Option
 		if helmNS := parseHelmNamespacesEnv(); len(helmNS) > 0 {
 			opts = append(opts, collector.WithHelmNamespaces(helmNS))
+		}
+		if maxNodes := parseMaxNodesPerEntryEnv(); maxNodes > 0 {
+			opts = append(opts, collector.WithMaxNodesPerEntry(maxNodes))
 		}
 		n.Factory = collector.NewDefaultFactory(opts...)
 	}
@@ -103,7 +122,7 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 
 	// Initialize snapshot structure
 	snap := NewSnapshot()
-	snap.Measurements = make([]*measurement.Measurement, 0, 5)
+	snap.Measurements = make([]*measurement.Measurement, 0, 6)
 
 	// collectSafe runs a named collector, appending its measurement on success
 	// and logging a warning on failure. Snapshot collection never fails due to
@@ -138,11 +157,12 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
 
 	// Launch all collectors in parallel — each degrades gracefully on error
-	wg.Add(4)
+	wg.Add(5)
 	go collectSafe("k8s", n.Factory.CreateKubernetesCollector())
 	go collectSafe("systemd", n.Factory.CreateSystemDCollector())
 	go collectSafe("os", n.Factory.CreateOSCollector())
 	go collectSafe("gpu", n.Factory.CreateGPUCollector())
+	go collectSafe("topology", n.Factory.CreateNodeTopologyCollector())
 
 	wg.Wait()
 

@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -286,6 +287,13 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "AICR_HELM_NAMESPACES",
 			Value: helmNS,
+		})
+	}
+
+	if d.config.MaxNodesPerEntry > 0 {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AICR_MAX_NODES_PER_ENTRY",
+			Value: strconv.Itoa(d.config.MaxNodesPerEntry),
 		})
 	}
 

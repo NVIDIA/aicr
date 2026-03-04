@@ -115,9 +115,9 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 		if !ok {
 			t.Fatal("serialized data is not a *Snapshot")
 		}
-		// k8s and os failed, systemd and gpu succeeded = 2 measurements
-		if len(snap.Measurements) != 2 {
-			t.Errorf("expected 2 measurements (from working collectors), got %d", len(snap.Measurements))
+		// k8s and os failed, systemd, gpu, and topology succeeded = 3 measurements
+		if len(snap.Measurements) != 3 {
+			t.Errorf("expected 3 measurements (from working collectors), got %d", len(snap.Measurements))
 		}
 	})
 }
@@ -217,15 +217,17 @@ func (m *mockSerializer) Serialize(ctx context.Context, data any) error {
 }
 
 type mockFactory struct {
-	k8sCalled     bool
-	systemdCalled bool
-	osCalled      bool
-	gpuCalled     bool
+	k8sCalled      bool
+	systemdCalled  bool
+	osCalled       bool
+	gpuCalled      bool
+	topologyCalled bool
 
-	k8sError     error
-	systemdError error
-	osError      error
-	gpuError     error
+	k8sError      error
+	systemdError  error
+	osError       error
+	gpuError      error
+	topologyError error
 
 	// gpuMeasurement overrides the default mock measurement for the GPU collector.
 	gpuMeasurement *measurement.Measurement
@@ -249,6 +251,11 @@ func (m *mockFactory) CreateOSCollector() collector.Collector {
 func (m *mockFactory) CreateGPUCollector() collector.Collector {
 	m.gpuCalled = true
 	return &mockCollector{err: m.gpuError, result: m.gpuMeasurement}
+}
+
+func (m *mockFactory) CreateNodeTopologyCollector() collector.Collector {
+	m.topologyCalled = true
+	return &mockCollector{err: m.topologyError}
 }
 
 type mockCollector struct {

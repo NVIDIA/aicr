@@ -26,6 +26,16 @@ const (
 	CollectorK8sTimeout = 30 * time.Second
 )
 
+// Node topology collector constants.
+const (
+	// CollectorTopologyTimeout is the timeout for node topology collection.
+	// Longer than standard K8s collector because of paginated node listing.
+	CollectorTopologyTimeout = 60 * time.Second
+
+	// TopologyListPageSize is the number of nodes per List API page.
+	TopologyListPageSize = int64(500)
+)
+
 // Handler timeouts for HTTP request processing.
 const (
 	// RecipeHandlerTimeout is the timeout for recipe generation requests.
