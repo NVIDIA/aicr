@@ -7,6 +7,11 @@ set -euo pipefail
 # Usage: ./deploy.sh [--no-wait] [--best-effort]
 #   --no-wait      Skip waiting for each component to become ready
 #   --best-effort  Continue past individual component failures (log warnings)
+#
+# This script is optional — each component subdirectory has a README.md with
+# manual install commands. For detailed behavior docs (CRD ordering, async
+# components, error handling), see the AICR CLI Reference:
+#   https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -24,6 +29,7 @@ for arg in "$@"; do
   case "${arg}" in
     --no-wait) WAIT_ARGS="" ;;
     --best-effort) BEST_EFFORT=true ;;
+    *) echo "Error: unknown option: ${arg}"; echo "Usage: ./deploy.sh [--no-wait] [--best-effort]"; exit 1 ;;
   esac
 done
 
@@ -56,7 +62,22 @@ echo "Installing {{ .Name }} ({{ .Namespace }})..."
 {{ if .HasManifests -}}
 echo "Applying pre-install manifests for {{ .Name }}..."
 kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f - || helm_failed "{{ .Name }}"
-kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" 2>&1 | grep -v "no matches for kind" >&2 || true
+if ! apply_out=$(kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" 2>&1); then
+  # CRD-race warnings ("no matches for kind") are expected on first deploy;
+  # real errors (auth, timeout, webhook denial) must still fail the script.
+  # Only evaluate error-like lines; kubectl may include informational
+  # "created/configured" lines in failed multi-object applies.
+  err_lines=$(echo "${apply_out}" | grep -Ei '(^error:|^Error from server|forbidden|denied|timed out|unable to|failed to|invalid)' || true)
+  non_crd_err_lines=$(echo "${err_lines}" | grep -Eiv 'no matches for kind|ensure CRDs are installed first' || true)
+  if [[ -n "${non_crd_err_lines}" ]]; then
+    echo "${non_crd_err_lines}" >&2
+    helm_failed "{{ .Name }}"
+  elif [[ -z "${err_lines}" ]]; then
+    # Unexpected failure format: fail safe with full output.
+    echo "${apply_out}" >&2
+    helm_failed "{{ .Name }}"
+  fi
+fi
 {{ end -}}
 COMPONENT_WAIT_ARGS="${WAIT_ARGS}"
 if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then

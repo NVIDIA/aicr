@@ -882,13 +882,13 @@ aicr bundle -r recipe.yaml \
 
 # Resolve accelerated selector warning
 aicr bundle -r recipe.yaml \
-  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-selector dedicated=gpu-workload \
   -o ./bundle
 
 # Resolve both warnings
 aicr bundle -r recipe.yaml \
   --workload-selector workload-type=training \
-  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-selector dedicated=gpu-workload \
   -o ./bundle
 ```
 
@@ -928,6 +928,61 @@ sha256sum -c checksums.txt
 # Deploy to cluster
 chmod +x deploy.sh && ./deploy.sh
 ```
+
+> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each component subdirectory contains a `README.md` with the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
+
+#### Deploy Script Behavior (`deploy.sh`)
+
+The deploy script installs components in the order specified by `deploymentOrder` in the recipe.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--no-wait` | Skip `helm --wait` for each component (faster, no readiness check) |
+| `--best-effort` | Continue past individual component failures instead of exiting |
+
+Unknown flags are rejected with an error to catch typos (e.g., `--best-effrot`).
+
+**Pre-install manifests and CRD ordering:**
+
+Some components have pre-install manifests (CRDs, namespaces, ConfigMaps) that must exist before `helm install`. The script applies these with `kubectl apply` before the Helm install. On first deploy, CRD-dependent resources may produce `no matches for kind` warnings because the CRD hasn't been registered yet — these warnings are suppressed. All other `kubectl apply` errors (auth failures, webhook denials, bad manifests) fail the script immediately.
+
+After `helm install`, the same manifests are re-applied as post-install to ensure CRD-dependent resources are created.
+
+**Async components:**
+
+Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness.
+
+#### Undeploy Script Behavior (`undeploy.sh`)
+
+The undeploy script removes components in reverse deployment order.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--keep-namespaces` | Skip namespace deletion after component removal |
+| `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
+| `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
+
+**PVC preservation (default):**
+
+PVCs are **not deleted** by default. This preserves historical data (Prometheus metrics, Alertmanager state, etcd data) across redeploys. If an EBS-backed PV has an AZ mismatch after redeployment, the PVC will stay Pending with a clear error — the operator can then decide to delete it manually.
+
+Pass `--delete-pvcs` to delete all PVCs. Protected namespaces (`kube-system`, `kube-public`, `kube-node-lease`, `default`) are always excluded from PVC deletion to prevent accidental removal of non-bundle PVCs.
+
+**Shared namespace ordering:**
+
+When multiple components share a namespace (e.g., `monitoring` contains `kube-prometheus-stack`, `prometheus-adapter`, and `k8s-ephemeral-storage-metrics`), all components are uninstalled first, then PVC and namespace cleanup runs once. This prevents hangs caused by `kubernetes.io/pvc-protection` finalizers — if a StatefulSet owner is still running when PVC deletion is attempted, the delete blocks indefinitely.
+
+**Stuck release handling:**
+
+If a Helm release is in a `pending-install` or `pending-upgrade` state (from an interrupted deploy), the script retries with `--no-hooks` to force removal.
+
+**Orphaned webhook cleanup:**
+
+After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
 
 ---
 
