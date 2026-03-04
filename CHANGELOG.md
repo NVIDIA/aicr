@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.4] - 2026-03-04
+
+### Bug Fixes
+
+- *(snapshot)* Classify network errors, deduplicate taint encoding, fix helm env propagation by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.8.3] - 2026-03-04
 
 ### Bug Fixes
