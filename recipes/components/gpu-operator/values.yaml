@@ -51,7 +51,6 @@ dcgmExporter:
 
 gdrcopy:
   enabled: true
-  version: v2.5
 
 gfd:
   enabled: true
