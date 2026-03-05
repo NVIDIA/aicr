@@ -6,26 +6,6 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 
 ### Core CI/CD Actions
 
-#### `go-ci/`
-**Purpose**: Complete Go project CI pipeline (setup, test, lint)
-**When to use**: Every workflow that needs to validate Go code
-**Inputs**:
-- `go_version` (required): Go version (e.g., "1.25")
-- `golangci_lint_version` (required): golangci-lint version (e.g., "v2.6")
-- `addlicense_version` (optional): addlicense version (default: "v1.1.1")
-- `coverage_report` (optional): Whether to generate GitHub-native coverage report (default: "false")
-- `coverage_threshold` (optional): Minimum coverage percentage required (default: "70")
-
-**Example**:
-```yaml
-- uses: ./.github/actions/go-ci
-  with:
-    go_version: '1.25'
-    golangci_lint_version: 'v2.6'
-    coverage_report: 'true'
-    coverage_threshold: '70'
-```
-
 #### `security-scan/`
 **Purpose**: Trivy vulnerability scanning with SARIF upload  
 **When to use**: Security validation in CI/CD pipelines  
@@ -316,11 +296,14 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: ./.github/actions/go-ci
+      - uses: ./.github/actions/go-test
+        with:
+          go_version: ${{ steps.versions.outputs.go }}
+          coverage_report: 'true'
+      - uses: ./.github/actions/go-lint
         with:
           go_version: ${{ steps.versions.outputs.go }}
           golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
-          coverage_report: 'true'
       - uses: ./.github/actions/security-scan
 ```
 
@@ -333,10 +316,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: ./.github/actions/go-ci
+      - uses: ./.github/actions/go-test
         with:
           go_version: ${{ steps.versions.outputs.go }}
-          golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
       - uses: ./.github/actions/go-build-release
         id: release
       - uses: ./.github/actions/attest-image-from-tag
@@ -396,9 +378,8 @@ This eliminates "works on my machine" issues by ensuring:
 ### Cross-Repo Reusability
 To use these actions in other repositories:
 ```yaml
-- uses: NVIDIA/aicr/.github/actions/go-ci@main
+- uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
     go_version: '1.25'
-    golangci_lint_version: 'v2.6.2'
     coverage_report: 'true'
 ```

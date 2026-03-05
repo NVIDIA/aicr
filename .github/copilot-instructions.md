@@ -741,7 +741,8 @@ AICR uses a **three-layer composite actions architecture** for reusability:
 - `security-scan` – Grype vulnerability scanning
 
 **Layer 2: Composed Actions** (Combine Primitives)
-- `go-ci` – Complete Go CI pipeline (setup → test → lint)
+- `go-test` – Go setup, vendor verify, unit tests with coverage
+- `go-lint` – Go linter, YAML linter, license header checks
 - `go-build-release` – Full build/release pipeline
 - `attest-image-from-tag` – Resolve digest + generate attestations
 - `cloud-run-deploy` – Demo API server deployment (example deployment to GCP)
@@ -758,11 +759,14 @@ jobs:
   unit:
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/go-ci
+      - uses: ./.github/actions/go-test
+        with:
+          go_version: '1.25'
+          coverage_report: 'true'
+      - uses: ./.github/actions/go-lint
         with:
           go_version: '1.25'
           golangci_lint_version: 'v2.9.0'
-          coverage_report: 'true'
       - uses: ./.github/actions/security-scan
   integration:
     steps:

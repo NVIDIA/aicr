@@ -45,25 +45,11 @@ runs:
         install-only: true
 
     - name: Install Chainsaw
-      shell: bash
-      run: |
-        set -euo pipefail
-        VERSION="${{ inputs.chainsaw_version }}"
-        VERSION="${VERSION#v}"
-        TAR="chainsaw_linux_amd64.tar.gz"
-        URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
-        EXPECTED="${{ inputs.chainsaw_sha256 }}"
-        TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${URL}"
-        ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
-        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
-          echo "::error::chainsaw checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
-          exit 1
-        fi
-        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
-        sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
-        sudo chmod +x /usr/local/bin/chainsaw
-        rm -rf "${TMP}"
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_chainsaw: 'true'
+        chainsaw_version: '${{ inputs.chainsaw_version }}'
+        chainsaw_sha256: '${{ inputs.chainsaw_sha256 }}'
 
     - name: Generate SLSA predicate
       if: github.event.pull_request.head.repo.fork == false

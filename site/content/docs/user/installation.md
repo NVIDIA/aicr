@@ -29,12 +29,19 @@ curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
   https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 
+To install to a custom directory instead of the default `/usr/local/bin`:
+
+```shell
+curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/bin
+```
+
 You can generate a personal access token at [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens). The token needs `repo` scope for private repository access.
 
 This script:
 - Detects your OS and architecture automatically
 - Downloads the appropriate binary from GitHub releases
-- Installs to `/usr/local/bin/aicr` (requires sudo)
+- Installs to `/usr/local/bin/aicr` by default (use `-d <dir>` for a custom location)
 - Verifies the installation
 - Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 

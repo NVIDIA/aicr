@@ -37,21 +37,8 @@ runs:
         go-version: ${{ inputs.go_version }}
         cache: true
 
-    - name: Free up disk space
-      shell: bash
-      run: |
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        docker system prune -f
-
-    - name: Prep system for Kind cluster
-      shell: bash
-      run: |
-        # Network configuration for Kind
-        sudo sysctl -w net.ipv4.ip_forward=1
-        sudo sysctl -w fs.inotify.max_user_watches=524288
-        sudo sysctl -w fs.inotify.max_user_instances=1024
+    - name: Prep runner for Kind
+      uses: ./.github/actions/prep-kind-runner
 
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools

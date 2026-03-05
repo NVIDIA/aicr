@@ -74,13 +74,8 @@ runs:
           /usr/local/bin/yq
         key: kwok-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.settings.yaml') }}
 
-    - name: Free up disk space
-      shell: bash
-      run: |
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        docker system prune -f
+    - name: Prep runner for Kind
+      uses: ./.github/actions/prep-kind-runner
 
     - name: Setup build tools
       uses: ./.github/actions/setup-build-tools
@@ -94,13 +89,6 @@ runs:
         install_yq: 'true'
         yq_version: '${{ inputs.yq_version }}'
         install_goreleaser: 'true'
-
-    - name: Prep system for Kind cluster
-      shell: bash
-      run: |
-        sudo sysctl -w net.ipv4.ip_forward=1
-        sudo sysctl -w fs.inotify.max_user_watches=524288
-        sudo sysctl -w fs.inotify.max_user_instances=1024
 
     - name: Build aicr binary
       shell: bash

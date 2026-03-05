@@ -358,16 +358,27 @@ jobs:
 
   # =============================================================================
   # Site: Deploy versioned documentation to GitHub Pages
+  # Dispatched on main (not the tag ref) to satisfy the github-pages
+  # environment's branch deployment policy.
   # =============================================================================
 
   site:
     name: Deploy Site
+    runs-on: ubuntu-latest
     needs: [publish]
-    uses: ./.github/workflows/gh-pages.yaml
+    timeout-minutes: 5
     permissions:
-      contents: read
-      pages: write
-      id-token: write
+      actions: write
+    steps:
+      - name: Trigger site deploy on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run gh-pages.yaml \
+            --repo "${REPO}" \
+            --ref main
 
   # =============================================================================
   # Summary: Release pipeline report (always runs, even on failure)

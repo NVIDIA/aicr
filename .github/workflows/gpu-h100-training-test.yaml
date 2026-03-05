@@ -88,10 +88,9 @@ jobs:
       # --- Install Karpenter before validation so cluster-autoscaling check passes ---
 
       - name: Install Karpenter + KWOK (setup)
-        run: |
-          export KARPENTER_VERSION=$(yq eval '.testing_tools.karpenter' .settings.yaml)
-          bash kwok/scripts/install-karpenter-kwok.sh
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f kwok/manifests/karpenter/nodepool.yaml
+        uses: ./.github/actions/install-karpenter-kwok
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
       # --- Health checks (run before conformance to give metrics pipeline time) ---
 
