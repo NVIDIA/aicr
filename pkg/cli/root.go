@@ -35,7 +35,21 @@ const (
 	name                   = "aicr"
 	versionDefault         = "dev"
 	functionalCategoryName = "Functional"
+	agentImageBase         = "ghcr.io/nvidia/aicr-validator"
 )
+
+// defaultAgentImage returns the agent container image reference matching the
+// CLI version. Release builds (e.g. "0.8.10") produce "ghcr.io/…:v0.8.10".
+// Dev builds ("dev") and snapshot builds ("v0.8.10-next") use ":latest".
+func defaultAgentImage() string {
+	if version == versionDefault || strings.Contains(version, "-next") {
+		return agentImageBase + ":latest"
+	}
+	if strings.HasPrefix(version, "v") {
+		return agentImageBase + ":" + version
+	}
+	return agentImageBase + ":v" + version
+}
 
 var (
 	// overridden during build with ldflags

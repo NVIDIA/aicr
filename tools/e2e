@@ -96,17 +96,12 @@ build_binary
 
 export REPO_ROOT="${ROOT}"
 
-msg "Running chainsaw tests (no-cluster CLI tests)"
+msg "Running chainsaw tests (CLI + bundle template tests)"
 chainsaw test \
   --no-cluster \
   --config "${ROOT}/tests/chainsaw/chainsaw-config.yaml" \
   --test-dir "${ROOT}/tests/chainsaw/cli/" \
+  --test-dir "${ROOT}/tests/chainsaw/bundle-templates/" \
   --selector 'ci!=true'
-
-msg "Running chainsaw tests (bundle template tests)"
-chainsaw test \
-  --no-cluster \
-  --config "${ROOT}/tests/chainsaw/chainsaw-config.yaml" \
-  --test-dir "${ROOT}/tests/chainsaw/bundle-templates/"
 
 msg "All tests passed!"

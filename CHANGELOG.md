@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.11] - 2026-03-05
+
+### Bug Fixes
+
+- *(validator)* Filter log streaming output and discover Prometheus URL from recipe by [@mchmarny](https://github.com/mchmarny)
+- *(conformance)* Improve ai-service-metrics error messages and add URL discovery tests by [@mchmarny](https://github.com/mchmarny)
+
+### New Features
+
+- *(cli)* Default agent image tag to CLI version for release builds by [@mchmarny](https://github.com/mchmarny)
+
+### Other Tasks
+
+- Feat/skyhook customizations - Add OFI install and fix EFA install on hardened systems  by [@ayuskauskas](https://github.com/ayuskauskas)
+
 ## [0.8.10] - 2026-03-04
 
 ### Bug Fixes

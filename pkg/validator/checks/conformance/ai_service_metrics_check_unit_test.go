@@ -22,7 +22,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -129,10 +132,6 @@ func TestCheckAIServiceMetrics(t *testing.T) {
 				promURL = "http://127.0.0.1:1"
 			}
 
-			// Note: We only test the Prometheus part of the check.
-			// The custom metrics API part uses Discovery().RESTClient() which is
-			// harder to mock with fake.NewSimpleClientset. The fake discovery client
-			// returns success for unknown paths, so the happy path test covers it.
 			err := checkAIServiceMetricsWithURL(ctx, promURL)
 
 			if (err != nil) != tt.wantErr {
@@ -142,8 +141,101 @@ func TestCheckAIServiceMetrics(t *testing.T) {
 
 			if tt.wantErr && err != nil && tt.errContains != "" {
 				if !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("checkAIServiceMetricsWithURL() error = %v, should contain %q", err, tt.errContains)
+					t.Errorf("error = %v, should contain %q", err, tt.errContains)
 				}
+			}
+		})
+	}
+}
+
+func TestDiscoverPrometheusURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		recipe      *recipe.RecipeResult
+		services    []corev1.Service
+		wantURL     string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "no recipe",
+			wantErr:     true,
+			errContains: "recipe is not available",
+		},
+		{
+			name: "component not in recipe",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "other", Namespace: "default"},
+				},
+			},
+			wantErr:     true,
+			errContains: "not found in recipe",
+		},
+		{
+			name: "no matching service",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: prometheusComponentName, Namespace: "monitoring"},
+				},
+			},
+			wantErr:     true,
+			errContains: "no Prometheus service with port",
+		},
+		{
+			name: "service discovered",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: prometheusComponentName, Namespace: "monitoring"},
+				},
+			},
+			services: []corev1.Service{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "kube-prometheus-prometheus",
+						Namespace: "monitoring",
+						Labels:    map[string]string{"app.kubernetes.io/name": "prometheus"},
+					},
+					Spec: corev1.ServiceSpec{
+						Ports: []corev1.ServicePort{{Port: 9090}},
+					},
+				},
+			},
+			wantURL: "http://kube-prometheus-prometheus.monitoring.svc:9090",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			clientset := fake.NewSimpleClientset()
+			for i := range tt.services {
+				svc := &tt.services[i]
+				if _, err := clientset.CoreV1().Services(svc.Namespace).Create(
+					context.Background(), svc, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("failed to create service: %v", err)
+				}
+			}
+
+			ctx := &checks.ValidationContext{
+				Context:   context.Background(),
+				Clientset: clientset,
+				Recipe:    tt.recipe,
+			}
+
+			got, err := discoverPrometheusURL(ctx)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("discoverPrometheusURL() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.errContains != "" {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+			if !tt.wantErr && got != tt.wantURL {
+				t.Errorf("discoverPrometheusURL() = %q, want %q", got, tt.wantURL)
 			}
 		})
 	}

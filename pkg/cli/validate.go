@@ -355,7 +355,7 @@ func validateCmdFlags() []cli.Flag {
 			Name:     "image",
 			Usage:    "Container image for validation Jobs (must include Go toolchain)",
 			Sources:  cli.EnvVars("AICR_VALIDATOR_IMAGE"),
-			Value:    "ghcr.io/nvidia/aicr-validator:latest",
+			Value:    defaultAgentImage(),
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{

@@ -84,7 +84,7 @@ func snapshotCmdFlags() []cli.Flag {
 			Name:     "image",
 			Usage:    "Container image for agent Job",
 			Sources:  cli.EnvVars("AICR_IMAGE"),
-			Value:    "ghcr.io/nvidia/aicr-validator:latest",
+			Value:    defaultAgentImage(),
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{

@@ -21,9 +21,13 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const prometheusBaseURL = "http://kube-prometheus-prometheus.monitoring.svc:9090"
+const (
+	prometheusComponentName = "kube-prometheus-stack"
+	prometheusDefaultPort   = 9090
+)
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
@@ -41,10 +45,55 @@ func init() {
 }
 
 // CheckAIServiceMetrics validates CNCF requirement #5: AI Service Metrics.
-// Verifies that GPU metric time series exist in Prometheus and that the
-// custom metrics API is available.
+// Discovers the Prometheus service URL from the recipe's kube-prometheus-stack
+// component, then verifies GPU metric time series exist and that the custom
+// metrics API is available.
 func CheckAIServiceMetrics(ctx *checks.ValidationContext) error {
-	return checkAIServiceMetricsWithURL(ctx, prometheusBaseURL)
+	promURL, err := discoverPrometheusURL(ctx)
+	if err != nil {
+		return err
+	}
+	return checkAIServiceMetricsWithURL(ctx, promURL)
+}
+
+// discoverPrometheusURL finds the Prometheus service URL by looking up the
+// kube-prometheus-stack component namespace in the recipe and discovering
+// the Prometheus service via label selector. No hardcoded service names.
+func discoverPrometheusURL(ctx *checks.ValidationContext) (string, error) {
+	if ctx.Recipe == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
+	}
+
+	var namespace string
+	for _, ref := range ctx.Recipe.ComponentRefs {
+		if ref.Name == prometheusComponentName {
+			namespace = ref.Namespace
+			break
+		}
+	}
+	if namespace == "" {
+		return "", errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("component %q not found in recipe or has no namespace", prometheusComponentName))
+	}
+
+	services, err := ctx.Clientset.CoreV1().Services(namespace).List(ctx.Context, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=prometheus",
+	})
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Prometheus services", err)
+	}
+
+	for i := range services.Items {
+		svc := &services.Items[i]
+		for _, port := range svc.Spec.Ports {
+			if port.Port == int32(prometheusDefaultPort) {
+				return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, namespace, prometheusDefaultPort), nil
+			}
+		}
+	}
+
+	return "", errors.New(errors.ErrCodeNotFound,
+		fmt.Sprintf("no Prometheus service with port %d found in namespace %q (label: app.kubernetes.io/name=prometheus)", prometheusDefaultPort, namespace))
 }
 
 // checkAIServiceMetricsWithURL is the testable implementation that accepts a configurable URL.
@@ -57,7 +106,10 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 	queryURL := fmt.Sprintf("%s/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL", promBaseURL)
 	body, err := httpGet(ctx.Context, queryURL)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable, "Prometheus unreachable", err)
+		return errors.Wrap(errors.ErrCodeUnavailable,
+			fmt.Sprintf("Prometheus unreachable at %s — verify network connectivity "+
+				"(security groups, network policies) between validator pod and Prometheus service",
+				promBaseURL), err)
 	}
 
 	var promResp struct {
@@ -78,7 +130,7 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 
 	if len(promResp.Data.Result) == 0 {
 		return errors.New(errors.ErrCodeNotFound,
-			"no DCGM_FI_DEV_GPU_UTIL time series in Prometheus")
+			"no DCGM_FI_DEV_GPU_UTIL time series in Prometheus — verify DCGM exporter is running and scraping GPU metrics")
 	}
 
 	// 2. Custom metrics API available
@@ -93,7 +145,7 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 			"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1",
 			fmt.Sprintf("Status: unavailable\nError: %v", cmErr))
 		return errors.Wrap(errors.ErrCodeNotFound,
-			"custom metrics API not available", cmErr)
+			"custom metrics API not available — verify prometheus-adapter is deployed and healthy", cmErr)
 	}
 	var statusCode int
 	result.StatusCode(&statusCode)

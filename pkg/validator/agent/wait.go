@@ -254,17 +254,54 @@ func (d *Deployer) getResultFromJobLogs(ctx context.Context) (*ValidationResult,
 	return result, nil
 }
 
-// slogWriter is an io.Writer that forwards each line to slog.Info.
+// slogWriter is an io.Writer that parses go-test JSON output and routes
+// meaningful progress lines (health check results, test pass/fail) to
+// slog.Info, while sending verbose details to slog.Debug. This keeps the
+// default CLI output concise during long validation runs.
 type slogWriter struct{}
 
 func (w slogWriter) Write(p []byte) (n int, err error) {
-	// Remove trailing newline if present
-	line := string(p)
-	if len(line) > 0 && line[len(line)-1] == '\n' {
-		line = line[:len(line)-1]
+	line := strings.TrimRight(string(p), "\n")
+	if line == "" {
+		return len(p), nil
 	}
+
+	// Try to parse as go-test JSON
+	var event struct {
+		Action string `json:"Action"`
+		Output string `json:"Output"`
+	}
+	if json.Unmarshal([]byte(line), &event) == nil {
+		if event.Action == actionOutput && event.Output != "" {
+			output := strings.TrimRight(event.Output, "\n")
+			if isProgressLine(output) {
+				slog.Info(output)
+			} else {
+				slog.Debug(output)
+			}
+			return len(p), nil
+		}
+		// Non-output events (start, run, pass, fail)
+		slog.Debug(line)
+		return len(p), nil
+	}
+
+	// Non-JSON lines (wrapper messages like "Running validation tests...")
 	slog.Info(line)
 	return len(p), nil
+}
+
+// isProgressLine returns true for lines that convey meaningful validation progress.
+func isProgressLine(s string) bool {
+	return strings.Contains(s, "health check passed") ||
+		strings.Contains(s, "health check failed") ||
+		strings.Contains(s, "Check passed") ||
+		strings.Contains(s, "Check failed") ||
+		strings.Contains(s, "--- PASS:") ||
+		strings.Contains(s, "--- FAIL:") ||
+		strings.Contains(s, "running health check") ||
+		strings.HasPrefix(s, "PASS") ||
+		strings.HasPrefix(s, "FAIL")
 }
 
 // streamPodLogs streams logs from the Job's pod.
@@ -306,11 +343,12 @@ func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 }
 
 const (
-	// Test status constants
-	statusPass = "pass"
-	statusFail = "fail"
-	statusSkip = "skip"
-	statusRun  = "running"
+	// Go test JSON action/status constants
+	actionOutput = "output"
+	statusPass   = "pass"
+	statusFail   = "fail"
+	statusSkip   = "skip"
+	statusRun    = "running"
 )
 
 // GoTestEvent represents a single event from go test -json output.
@@ -363,7 +401,7 @@ func parseGoTestJSON(jsonOutput string) (*ValidationResult, error) {
 			if event.Action == statusFail {
 				result.Status = statusFail
 			}
-			if event.Action == "output" && event.Output != "" {
+			if event.Action == actionOutput && event.Output != "" {
 				key := ""
 				pending := pendingOutput[key]
 				combined := pending + event.Output
@@ -411,7 +449,7 @@ func parseGoTestJSON(jsonOutput string) (*ValidationResult, error) {
 			if event.Elapsed > 0 {
 				test.Duration = time.Duration(event.Elapsed * float64(time.Second))
 			}
-		case "output":
+		case actionOutput:
 			if event.Output != "" {
 				pending := pendingOutput[testName]
 				combined := pending + event.Output

@@ -12,26 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook Helm values
-# Base configuration for all deployments
-
-# Override release name prefix to avoid aicr-stack- prefix in resource names
-fullnameOverride: skyhook-operator
-
-limitRange:
-  default:
-    cpu: "1"
-    memory: "1Gi"
-  defaultRequest:
-    cpu: "500m"
-    memory: "512Mi"
-
-controllerManager:
-  manager:
-    resources:
-      limits:
-        cpu: 1000m
-        memory: 4000Mi
-      requests:
-        cpu: 1000m
-        memory: 2000Mi
+# Assert allow-intra-namespace NetworkPolicy is created with correct rules.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-intra-namespace
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 9443
+          protocol: TCP
+        - port: 10250
+          protocol: TCP

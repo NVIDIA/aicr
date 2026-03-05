@@ -1,0 +1,100 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-gpu-operator-templates
+spec:
+  description: |
+    Validates that gpu-operator manifest templates render correctly.
+    Tests the dcgm-exporter ConfigMap creation and disable gate.
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/gpu-operator
+  timeouts:
+    exec: 30s
+  steps:
+
+    - name: generate-recipe
+      description: Generate an EKS H100 training recipe.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe \
+                --service eks \
+                --accelerator h100 \
+                --os ubuntu \
+                --intent training \
+                --output "${WORK}/recipe.yaml"
+
+    ## ── DCGM Exporter: default (enabled) ───────────────────────────────
+
+    - name: bundle-dcgm-defaults
+      description: Generate bundle with default dcgm-exporter config.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
+              rm -rf "${WORK}/bundle-defaults"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle-defaults"
+
+    - name: assert-dcgm-defaults
+      description: Verify dcgm-exporter ConfigMap is created with default name.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
+              chainsaw assert \
+                --resource "${WORK}/bundle-defaults/gpu-operator/manifests/dcgm-exporter.yaml" \
+                --file ./assert-dcgm-defaults.yaml \
+                --no-color --timeout 5s
+
+    ## ── DCGM Exporter: disabled ────────────────────────────────────────
+
+    - name: bundle-dcgm-disabled
+      description: Generate bundle with dcgm-exporter config creation disabled.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
+              rm -rf "${WORK}/bundle-dcgm-disabled"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle-dcgm-disabled" \
+                --set gpuoperator:dcgmExporter.config.create=false
+
+    - name: assert-dcgm-disabled
+      description: Verify dcgm-exporter manifest is empty when create=false.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
+              MANIFEST="${WORK}/bundle-dcgm-disabled/gpu-operator/manifests/dcgm-exporter.yaml"
+              ## When create=false, the template gate prevents any YAML objects
+              ## from being rendered. The bundler removes empty manifests.
+              if [ -f "${MANIFEST}" ]; then
+                echo "FAIL: dcgm-exporter.yaml should not exist when create=false"
+                exit 1
+              fi
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-gpu-operator-templates
