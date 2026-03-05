@@ -493,7 +493,7 @@ func TestMergeValidationConfig(t *testing.T) {
 				},
 				Deployment: &ValidationPhase{
 					Timeout: "5m",
-					Checks:  []string{"operator-health"},
+					Checks:  []string{"expected-resources"},
 				},
 			},
 		}
@@ -501,7 +501,7 @@ func TestMergeValidationConfig(t *testing.T) {
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
 					Timeout: "10m",
-					Checks:  []string{"operator-health", "expected-resources"},
+					Checks:  []string{"expected-resources", "check-nvidia-smi"},
 				},
 				Performance: &ValidationPhase{
 					Timeout:        "15m",
@@ -539,7 +539,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		overlay := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
-					Checks: []string{"operator-health"},
+					Checks: []string{"expected-resources"},
 				},
 			},
 		}
@@ -548,7 +548,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation == nil {
 			t.Fatal("validation should be set from overlay")
 		}
-		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0] != "operator-health" {
+		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0] != "expected-resources" {
 			t.Error("deployment check should be set from overlay")
 		}
 	})
@@ -557,7 +557,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
-					Checks: []string{"operator-health"},
+					Checks: []string{"expected-resources"},
 				},
 			},
 		}
@@ -577,7 +577,7 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 		},
 		Validation: &ValidationConfig{
 			Deployment: &ValidationPhase{
-				Checks: []string{"operator-health"},
+				Checks: []string{"expected-resources"},
 			},
 		},
 	}
@@ -592,8 +592,8 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 	if result.Validation.Deployment == nil {
 		t.Fatal("result.Validation.Deployment should not be nil")
 	}
-	if result.Validation.Deployment.Checks[0] != "operator-health" {
-		t.Errorf("check = %q, want operator-health", result.Validation.Deployment.Checks[0])
+	if result.Validation.Deployment.Checks[0] != "expected-resources" {
+		t.Errorf("check = %q, want expected-resources", result.Validation.Deployment.Checks[0])
 	}
 }
 

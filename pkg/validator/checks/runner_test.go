@@ -380,7 +380,7 @@ func TestTestRunner_HasCheck(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
 		Validation: &recipe.ValidationConfig{
 			Deployment: &recipe.ValidationPhase{
-				Checks: []string{"operator-health", "check-nvidia-smi"},
+				Checks: []string{"expected-resources", "check-nvidia-smi"},
 			},
 			Performance: &recipe.ValidationPhase{
 				Checks: []string{"nccl-bandwidth"},
@@ -407,14 +407,14 @@ func TestTestRunner_HasCheck(t *testing.T) {
 		checkName string
 		want      bool
 	}{
-		{"deployment phase has check", "deployment", "operator-health", true},
+		{"deployment phase has check", "deployment", "expected-resources", true},
 		{"deployment phase has second check", "deployment", "check-nvidia-smi", true},
 		{"deployment phase missing check", "deployment", "nonexistent", false},
 		{"performance phase has check", "performance", "nccl-bandwidth", true},
 		{"performance phase missing check", "performance", "nonexistent", false},
 		{"conformance phase has check", "conformance", "k8s-conformance", true},
 		{"conformance phase missing check", "conformance", "nonexistent", false},
-		{"unknown phase", "unknown", "operator-health", false},
+		{"unknown phase", "unknown", "expected-resources", false},
 	}
 
 	for _, tt := range tests {
@@ -437,7 +437,7 @@ func TestTestRunner_HasCheck(t *testing.T) {
 				Recipe:    nil,
 			},
 		}
-		if nilRunner.HasCheck("deployment", "operator-health") {
+		if nilRunner.HasCheck("deployment", "expected-resources") {
 			t.Error("HasCheck() should return false with nil recipe")
 		}
 	})
@@ -453,7 +453,7 @@ func TestTestRunner_HasCheck(t *testing.T) {
 				Recipe:    &recipe.RecipeResult{Validation: nil},
 			},
 		}
-		if nilValRunner.HasCheck("deployment", "operator-health") {
+		if nilValRunner.HasCheck("deployment", "expected-resources") {
 			t.Error("HasCheck() should return false with nil validation")
 		}
 	})
@@ -473,7 +473,7 @@ func TestTestRunner_HasCheck(t *testing.T) {
 				},
 			},
 		}
-		if nilPhaseRunner.HasCheck("deployment", "operator-health") {
+		if nilPhaseRunner.HasCheck("deployment", "expected-resources") {
 			t.Error("HasCheck() should return false with nil deployment phase")
 		}
 	})

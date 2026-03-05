@@ -269,7 +269,7 @@ componentRefs:
 validation:
   # Readiness phase has no checks — constraints are evaluated inline from snapshot.
   deployment:
-    checks: [operator-health, expected-resources]
+    checks: [expected-resources]
   performance:
     infrastructure: nccl-doctor
     checks: [nccl-bandwidth-test]

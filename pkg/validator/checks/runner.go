@@ -48,14 +48,14 @@ type testingT interface {
 //
 // Example usage in test wrappers:
 //
-//	func TestOperatorHealth(t *testing.T) {
+//	func TestGPUOperatorHealth(t *testing.T) {
 //	    runner, err := checks.NewTestRunner(t)
 //	    if err != nil {
 //	        t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
 //	        return
 //	    }
 //	    defer runner.Cancel() // Clean up context when test completes
-//	    runner.RunCheck("operator-health")
+//	    runner.RunCheck("gpu-operator-health")
 //	}
 type TestRunner struct {
 	t      testingT

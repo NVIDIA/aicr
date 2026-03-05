@@ -32,7 +32,7 @@ import (
 
 // checkNameToTestName converts a check name to a test function name.
 // Handles '-', '.', and '_' separators for consistency with patternToFuncName.
-// Example: "operator-health" -> "TestOperatorHealth"
+// Example: "expected-resources" -> "TestExpectedResources"
 func checkNameToTestName(checkName string) string {
 	parts := strings.FieldsFunc(checkName, func(r rune) bool {
 		return r == '-' || r == '.' || r == '_'

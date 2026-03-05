@@ -218,11 +218,11 @@ func TestValidateDeployment(t *testing.T) {
 			name: "with checks",
 			validationConfig: &recipe.ValidationConfig{
 				Deployment: &recipe.ValidationPhase{
-					Checks: []string{"operator-health", "expected-resources"},
+					Checks: []string{"expected-resources"},
 				},
 			},
 			wantStatus: ValidationStatusPass,
-			wantChecks: 2,
+			wantChecks: 1,
 		},
 		{
 			name:             "not configured",
@@ -237,7 +237,7 @@ func TestValidateDeployment(t *testing.T) {
 					Constraints: []recipe.Constraint{
 						{Name: "gpu-operator.version", Value: "== v25.10.1"},
 					},
-					Checks: []string{"operator-health"},
+					Checks: []string{"expected-resources"},
 				},
 			},
 			wantStatus: ValidationStatusPass,
@@ -529,7 +529,7 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 		},
 		Validation: &recipe.ValidationConfig{
 			Deployment: &recipe.ValidationPhase{
-				Checks: []string{"operator-health", "expected-resources"},
+				Checks: []string{"expected-resources"},
 			},
 			Performance: &recipe.ValidationPhase{
 				Infrastructure: "nccl-doctor",
@@ -1031,8 +1031,8 @@ func TestCheckNameToTestName(t *testing.T) {
 	}{
 		{
 			name:      "simple hyphenated name",
-			checkName: "operator-health",
-			want:      "TestOperatorHealth",
+			checkName: "expected-resources",
+			want:      "TestExpectedResources",
 		},
 		{
 			name:      "multiple hyphens",

@@ -713,7 +713,7 @@ func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase st
 		return buildTestPatternResult{Pattern: "", ExpectedTests: 0}
 	}
 
-	// Build regex: ^(TestGPUOperatorVersion|TestOperatorHealth)$
+	// Build regex: ^(TestGPUOperatorVersion|TestCheckExpectedResources)$
 	pattern := "^(" + strings.Join(testNames, "|") + ")$"
 	slog.Info("built test pattern from recipe", "pattern", pattern, "tests", len(testNames))
 	return buildTestPatternResult{Pattern: pattern, ExpectedTests: len(testNames)}

@@ -352,7 +352,7 @@ func TestSharedEvidenceFileIntentional(t *testing.T) {
 }
 
 // checkNameToTestName converts a check name to test function name.
-// Example: "operator-health" -> "TestOperatorHealth"
+// Example: "expected-resources" -> "TestExpectedResources"
 func checkNameToTestName(checkName string) string {
 	// Common acronyms that should be all-caps
 	acronyms := map[string]string{

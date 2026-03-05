@@ -17,13 +17,13 @@
 
 Usage:
   Check (no expected value, yes/no validation):
-    tools/generate-validator --check operator-health --phase deployment
+    tools/generate-validator --check my-check --phase deployment
 
   Constraint (has expected value from recipe):
     tools/generate-validator --constraint Deployment.gpu-operator.version --phase deployment
 
   Via Make:
-    make generate-validator ARGS="--check operator-health --phase deployment"
+    make generate-validator ARGS="--check my-check --phase deployment"
 """
 
 import argparse
@@ -39,7 +39,7 @@ import sys
 def check_name_to_func_name(name):
     """Convert a check name to a Go function name.
 
-    "operator-health" -> "OperatorHealth"
+    "my-check" -> "MyCheck"
     """
     parts = re.split(r"[-_]", name)
     return "".join(p[0].upper() + p[1:] for p in parts if p)
@@ -984,7 +984,7 @@ def main():
         description="Generate scaffolding for a new check or constraint validator",
         epilog="""\
 examples:
-  %(prog)s --check operator-health --phase deployment
+  %(prog)s --check my-check --phase deployment
   %(prog)s --constraint Deployment.gpu-operator.version --phase deployment
   %(prog)s --check my-check --phase readiness --output /tmp/test-gen
 """,
@@ -992,7 +992,7 @@ examples:
     )
     parser.add_argument(
         "--check",
-        help="Check name (e.g., operator-health) - for yes/no validations",
+        help="Check name (e.g., my-check) - for yes/no validations",
     )
     parser.add_argument(
         "--constraint",

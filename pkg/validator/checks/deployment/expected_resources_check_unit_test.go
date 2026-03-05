@@ -646,3 +646,12 @@ func createDaemonSet(name, namespace string, desired, ready int32) *appsv1.Daemo
 		},
 	}
 }
+
+// fakeAPIError implements error interface for simulating API errors.
+type fakeAPIError struct {
+	message string
+}
+
+func (e *fakeAPIError) Error() string {
+	return e.message
+}
