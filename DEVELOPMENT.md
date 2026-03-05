@@ -11,6 +11,7 @@ This guide covers project setup, architecture, development workflows, and toolin
 - [Development Workflow](#development-workflow)
 - [Local Kubernetes Development](#local-kubernetes-development)
 - [KWOK Simulated Cluster Testing](#kwok-simulated-cluster-testing)
+- [Local Health Check Validation](#local-health-check-validation)
 - [Make Targets Reference](#make-targets-reference)
 - [Debugging](#debugging)
 - [Validator Development](#validator-development)
@@ -533,6 +534,9 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make bench` | Run benchmarks |
 | `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
+| `make check-health COMPONENT=<name>` | Run chainsaw health check directly against Kind cluster |
+| `make check-health-all` | Run all chainsaw health checks against Kind cluster |
+| `make validate-local RECIPE=<path>` | Build validator image, load into Kind, run deployment validation |
 
 ### Build & Release
 
@@ -658,6 +662,140 @@ tilt logs -f tilt/Tiltfile
 # Reset everything
 make dev-reset
 ```
+
+## Local Health Check Validation
+
+Health checks are Chainsaw test YAMLs in `recipes/checks/<component>/health-check.yaml` that assert component health (deployments exist, pods are running). Two workflows let you validate these locally without a release build.
+
+### Prerequisites
+
+- Kind cluster running: `make dev-env` (or `make cluster-create` for cluster only)
+- Component deployed to the cluster (the health check asserts against live resources)
+- Chainsaw installed: `make tools-setup` (or `make tools-check` to verify)
+
+### Quick Check (Direct Chainsaw)
+
+Runs chainsaw directly against the Kind cluster. Fast (~5s), validates YAML syntax and assertions.
+
+```bash
+# Run health check for a single component
+make check-health COMPONENT=nvsentinel
+
+# Run all health checks
+make check-health-all
+
+# List available components
+make check-health
+```
+
+**When to use:** Iterating on health check YAML — writing new checks or modifying existing ones. This validates your Chainsaw assertions work against the live cluster.
+
+### Full Pipeline Validation
+
+Builds the validator image, loads it into Kind, and runs the real validation pipeline (Job creation, RBAC, ConfigMap mounts, chainsaw execution inside the container).
+
+```bash
+# Build validator image and run deployment validation
+make validate-local RECIPE=path/to/recipe.yaml
+
+# With custom image tag
+make validate-local RECIPE=recipe.yaml IMAGE_TAG=dev
+```
+
+**When to use:** Before pushing changes, to confirm health checks work through the full validator pipeline — not just the chainsaw assertions but the entire Job-based execution.
+
+### Workflow for New Health Checks
+
+1. **Create the check file:**
+
+   ```bash
+   mkdir -p recipes/checks/my-component/
+   ```
+
+   Create `recipes/checks/my-component/health-check.yaml`:
+
+   ```yaml
+   apiVersion: chainsaw.kyverno.io/v1alpha1
+   kind: Test
+   metadata:
+     name: my-component-health-check
+   spec:
+     timeouts:
+       assert: 5m
+     steps:
+       - name: validate-deployment-exists
+         try:
+           - assert:
+               resource:
+                 apiVersion: apps/v1
+                 kind: Deployment
+                 metadata:
+                   name: my-component
+                   namespace: my-namespace
+                 status:
+                   (availableReplicas > `0`): true
+       - name: validate-all-pods-healthy
+         try:
+           - error:
+               resource:
+                 apiVersion: v1
+                 kind: Pod
+                 metadata:
+                   namespace: my-namespace
+                 status:
+                   phase: Pending
+           - error:
+               resource:
+                 apiVersion: v1
+                 kind: Pod
+                 metadata:
+                   namespace: my-namespace
+                 status:
+                   phase: Failed
+           - error:
+               resource:
+                 apiVersion: v1
+                 kind: Pod
+                 metadata:
+                   namespace: my-namespace
+                 status:
+                   phase: Unknown
+   ```
+
+2. **Register in registry:**
+
+   Add to `recipes/registry.yaml` on the component entry:
+
+   ```yaml
+   healthCheck:
+     assertFile: checks/my-component/health-check.yaml
+   ```
+
+3. **Deploy component to Kind cluster:**
+
+   ```bash
+   make dev-env  # if not already running
+   helm install my-component <chart> -n my-namespace --create-namespace
+   ```
+
+4. **Iterate with quick check:**
+
+   ```bash
+   make check-health COMPONENT=my-component
+   # Edit health-check.yaml, re-run, repeat
+   ```
+
+5. **Verify full pipeline:**
+
+   ```bash
+   make validate-local RECIPE=path/to/recipe.yaml
+   ```
+
+6. **Run qualify before pushing:**
+
+   ```bash
+   make qualify
+   ```
 
 ## Validator Development
 

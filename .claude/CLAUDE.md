@@ -61,6 +61,11 @@ unset GITLAB_TOKEN && ./tools/e2e
 # Tools management
 make tools-setup  # Install all required tools
 make tools-check  # Verify versions match .settings.yaml
+
+# Local health check validation
+make check-health COMPONENT=nvsentinel  # Direct chainsaw against Kind
+make check-health-all                   # All components
+make validate-local RECIPE=recipe.yaml  # Full pipeline in Kind
 ```
 
 ## Non-Negotiable Rules
@@ -205,6 +210,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 | New collector | `pkg/collector/<type>/` | Implement `Collector` interface, add to factory |
 | New API endpoint | `pkg/api/` | Handler + middleware chain + OpenAPI spec update |
 | Fix test failures | Run `make test` | Check race conditions (`-race`), verify context handling |
+| New health check | `recipes/checks/<name>/` | Create `health-check.yaml`, register in `registry.yaml`, test with `make check-health` |
 
 **Adding a Helm component (declarative - no Go code needed):**
 ```yaml

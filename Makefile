@@ -258,6 +258,70 @@ image-validator: build ## Builds validator image with Go toolchain (IMAGE_REGIST
 		docker push $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG); \
 	fi
 
+.PHONY: check-health
+check-health: ## Runs chainsaw health check directly against Kind cluster (COMPONENT=<name>)
+	@set -e; \
+	if [ -z "$(COMPONENT)" ]; then \
+		echo "Usage: make check-health COMPONENT=<name>"; \
+		echo "Available components:"; \
+		ls -1 recipes/checks/; \
+		exit 1; \
+	fi; \
+	CHECK_FILE="recipes/checks/$(COMPONENT)/health-check.yaml"; \
+	if [ ! -f "$$CHECK_FILE" ]; then \
+		echo "Error: $$CHECK_FILE not found"; \
+		echo "Available components:"; \
+		ls -1 recipes/checks/; \
+		exit 1; \
+	fi; \
+	echo "Running health check for $(COMPONENT)..."; \
+	chainsaw test --test-dir "recipes/checks/$(COMPONENT)/" --test-file health-check.yaml --no-color
+
+.PHONY: check-health-all
+check-health-all: ## Runs all chainsaw health checks against Kind cluster
+	@set -e; \
+	FAILED=""; \
+	for dir in recipes/checks/*/; do \
+		COMPONENT=$$(basename "$$dir"); \
+		echo "=== $$COMPONENT ==="; \
+		if chainsaw test --test-dir "$$dir" --test-file health-check.yaml --no-color; then \
+			echo "PASS: $$COMPONENT"; \
+		else \
+			echo "FAIL: $$COMPONENT"; \
+			FAILED="$$FAILED $$COMPONENT"; \
+		fi; \
+		echo ""; \
+	done; \
+	if [ -n "$$FAILED" ]; then \
+		echo "Failed components:$$FAILED"; \
+		exit 1; \
+	fi; \
+	echo "All health checks passed"
+
+.PHONY: validate-local
+validate-local: image-validator ## Builds validator image and runs validation in Kind (RECIPE=<path>)
+	@set -e; \
+	if [ -z "$(RECIPE)" ]; then \
+		echo "Usage: make validate-local RECIPE=<path-to-recipe.yaml>"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(RECIPE)" ]; then \
+		echo "Error: recipe file $(RECIPE) not found"; \
+		exit 1; \
+	fi; \
+	echo "Loading validator image into Kind cluster..."; \
+	kind load docker-image $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG) --name kind-aicr; \
+	echo "Running validation with local image..."; \
+	AICR_BIN=$$(find dist/ -name "aicr" -type f | head -1); \
+	if [ -z "$$AICR_BIN" ]; then \
+		echo "Error: aicr binary not found in dist/. Run 'make build' first."; \
+		exit 1; \
+	fi; \
+	$$AICR_BIN validate \
+		--recipe "$(RECIPE)" \
+		--image "$(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG)" \
+		--phase deployment
+
 .PHONY: release
 release: ## Runs the full release process with goreleaser
 	@set -e; \
