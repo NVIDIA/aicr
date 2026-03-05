@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook H100 EKS Ubuntu Customization
+# Skyhook EKS Ubuntu GPU Customization (no-op)
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
 #
-# This customization configures H100 GPU nodes on Ubuntu with:
+# No-op placeholder for accelerators without tuning packages.
 # - GRUB parameters for hugepages and nokaslr
 # - Containerd service limits
 # - Sysctl kernel tuning parameters
@@ -55,7 +55,7 @@ spec:
     matchLabels:
       {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
   {{- end }}
-  # Static: Baked-in tuning for H100 Ubuntu training
+  # Static: No-op placeholder for accelerators without tuning packages
   packages:
     no-op:
       image: ghcr.io/nvidia/skyhook-packages/shellscript
