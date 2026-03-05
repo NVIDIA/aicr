@@ -1,5 +1,12 @@
 # AICR Bundle Attestation Demo
 
+Bundle attestation provides cryptographic proof of who created a bundle and what
+tool built it. When you run `aicr bundle --attest`, the CLI signs the bundle
+contents using [Sigstore](https://www.sigstore.dev/) and generates SLSA Build
+Provenance metadata. Anyone can later verify the bundle with `aicr verify` to
+confirm it hasn't been tampered with, was created by a trusted identity, and was
+built by an authorized version of the AICR CLI.
+
 ## Prerequisites
 
 * Installed `aicr` from a release archive (includes binary attestation)
