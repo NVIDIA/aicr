@@ -1487,7 +1487,7 @@ func Test_my_check(t *testing.T) { ... }
 **Naming rule:** Convert kebab-case check name to PascalCase:
 - `my-check` → `TestCheckMyCheck`
 - `nccl-bandwidth` → `TestNCCLBandwidth`
-- `gpu-operator-health` → `TestCheckGpuOperatorHealth`
+- `gpu-operator-health` → `TestGPUOperatorHealth`
 
 Verify test file compiles:
 ```bash

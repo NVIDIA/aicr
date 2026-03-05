@@ -467,7 +467,7 @@ aicr validate --phase all -o table
 | **Returns** | Pass/fail (error) | Actual value + pass/fail |
 | **Registration** | `RegisterCheck()` | `RegisterConstraintValidator()` |
 | **Recipe Syntax** | `checks: [name]` | `constraints: [{name, value}]` |
-| **Example** | `Deployment.gpu-operator.version` | `Deployment.gpu-operator.version: ">= v24.6.0"` |
+| **Example** | `expected-resources` | `Deployment.gpu-operator.version: ">= v24.6.0"` |
 
 ### ValidationContext
 
