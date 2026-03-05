@@ -24,6 +24,7 @@ Before contributing:
 2. Check existing [issues](https://github.com/NVIDIA/aicr/issues) to avoid duplicates
 3. Review the [security policy](SECURITY.md) for security-related contributions
 4. Set up your development environment following [DEVELOPMENT.md](DEVELOPMENT.md)
+5. If using coding assistants, review [AGENTS.md](AGENTS.md) for project rules and workflows
 
 ## How to Contribute
 

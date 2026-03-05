@@ -1,6 +1,6 @@
 # Copilot Instructions for NVIDIA AI Cluster Runtime (AICR)
 
-This file contains extended technical documentation for GitHub Copilot. For core rules and patterns, see `.claude/CLAUDE.md`.
+This file contains extended technical documentation for GitHub Copilot. For core rules and patterns, see `AGENTS.md`.
 
 ## Critical Rules (Always Apply)
 
@@ -377,7 +377,8 @@ aicr bundle -r recipe.yaml \
 
 ### Key Links
 
-- **[CLAUDE.md](../.claude/CLAUDE.md)** – Core rules, patterns, and commands
+- **[AGENTS.md](../AGENTS.md)** – Core rules, patterns, and commands (synced from `.claude/CLAUDE.md`)
+- **[CLAUDE.md](../.claude/CLAUDE.md)** – Canonical source for coding-agent rules
 - **[Contributing Guide](../CONTRIBUTING.md)** – Design principles, development setup, PR process
 - **[Development Guide](../DEVELOPMENT.md)** – Local development, Make targets, Tilt/Kind setup
 - **[Release Process](../RELEASING.md)** – Maintainer guide for releases, verification, hotfixes

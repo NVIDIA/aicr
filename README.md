@@ -101,6 +101,7 @@ You deploy and operate GPU-accelerated Kubernetes clusters using validated confi
 
 You contribute code, extend functionality, or work on AICR internals.
 
+- **[Agent Instructions](AGENTS.md)** – Core coding-agent guidance for Codex/Copilot (mirrors `.claude/CLAUDE.md`)
 - **[Contributing Guide](CONTRIBUTING.md)** – Development setup, testing, and PR process
 - **[Development Guide](DEVELOPMENT.md)** – Local development, Make targets, and tooling
 - **[Architecture Overview](docs/contributor/README.md)** – System design and components

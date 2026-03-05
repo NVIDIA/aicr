@@ -1,7 +1,7 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file is the canonical source for coding-agent rules. `AGENTS.md` is an auto-synced mirror (CI enforced).
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex and other coding agents when working with code in this repository.
+<!-- AUTO-SYNCED: canonical source is .claude/CLAUDE.md. Only the first 4 lines differ. CI enforces sync. -->
 
 ## Role & Expertise
 

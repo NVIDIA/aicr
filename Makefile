@@ -103,8 +103,12 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license ## Lints the entire project (Go, YAML, and license headers)
+lint: lint-go lint-yaml license check-agents-sync ## Lints the entire project (Go, YAML, and license headers)
 	@echo "Completed Go and YAML lints and ensured license headers"
+
+.PHONY: check-agents-sync
+check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
+	@./tools/check-agents-sync
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
