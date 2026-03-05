@@ -311,18 +311,9 @@ Package with explicit tag (overrides CLI version):
 				Category: "Deployment",
 			},
 			&cli.BoolFlag{
-				Name:  "attest",
-				Usage: "Enable bundle attestation and binary provenance verification (requires OIDC authentication)",
-			},
-			&cli.StringFlag{
-				Name: "certificate-identity-regexp",
-				Usage: `Override the certificate identity pattern for binary attestation verification.
-	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
-	workflows (e.g., build-attested.yaml). Not intended for production use.`,
-			},
-			&cli.BoolFlag{
-				Name:  "attest",
-				Usage: "Enable bundle attestation and binary provenance verification (requires OIDC authentication)",
+				Name:     "attest",
+				Usage:    "Enable bundle attestation and binary provenance verification (requires binary installed via install script; uses OIDC authentication)",
+				Category: "Deployment",
 			},
 			&cli.StringFlag{
 				Name: "certificate-identity-regexp",
@@ -413,6 +404,27 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithWorkloadSelector(opts.workloadSelector),
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 	)
+
+	// Pre-flight: verify binary attestation file exists before OIDC auth.
+	// selectAttester may open a browser; fail fast if attestation is impossible.
+	if opts.attest {
+		binaryPath, execErr := os.Executable()
+		if execErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal,
+				"could not resolve executable path; remove --attest to skip", execErr)
+		}
+		if _, findErr := attestation.FindBinaryAttestation(binaryPath); findErr != nil {
+			return errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("binary attestation not found at %s\n\n"+
+					"The --attest flag requires a binary installed using the install script, which\n"+
+					"includes a cryptographic attestation from NVIDIA CI. Binaries installed via\n"+
+					"\"go install\" or manual download do not include this file.\n\n"+
+					"To fix:\n"+
+					"  - Reinstall using the install script\n"+
+					"  - Or remove --attest to generate bundles without attestation",
+					binaryPath+attestation.AttestationFileSuffix))
+		}
+	}
 
 	attester, err := selectAttester(ctx, opts.attest)
 	if err != nil {

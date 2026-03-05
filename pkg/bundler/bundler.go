@@ -113,6 +113,29 @@ func New(opts ...Option) (*DefaultBundler, error) {
 		opt(db)
 	}
 
+	// Fail fast: if attestation is requested, verify that the binary attestation
+	// file exists before any expensive work (OIDC auth, recipe resolution, bundle
+	// generation). Binaries installed via "go install" or manual download won't
+	// have the attestation file that is included in release archives.
+	if db.Config.Attest() {
+		binaryPath, err := os.Executable()
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"could not resolve executable path; remove --attest to skip", err)
+		}
+		if _, err := attestation.FindBinaryAttestation(binaryPath); err != nil {
+			return nil, errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("binary attestation not found at %s\n\n"+
+					"The --attest flag requires a binary installed using the install script, which\n"+
+					"includes a cryptographic attestation from NVIDIA. Binaries installed via\n"+
+					"\"go install\" or manual download do not include this file.\n\n"+
+					"To fix:\n"+
+					"  - Reinstall using the install script\n"+
+					"  - Or remove --attest to generate bundles without attestation",
+					binaryPath+attestation.AttestationFileSuffix))
+		}
+	}
+
 	return db, nil
 }
 
