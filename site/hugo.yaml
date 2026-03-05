@@ -76,9 +76,10 @@ params:
   github_branch: main
   version_menu: "Versions"
   version_menu_pagelinks: true
+  # versions: overridden at build time by build-versioned-site action
   versions:
-    - version: "Latest (main)"
-      url: "https://aicr.dgxc.io"
+    - version: "dev (local)"
+      url: "/docs/"
 
 menu:
   main:

@@ -76,24 +76,32 @@ func discoverPrometheusURL(ctx *checks.ValidationContext) (string, error) {
 			fmt.Sprintf("component %q not found in recipe or has no namespace", prometheusComponentName))
 	}
 
-	services, err := ctx.Clientset.CoreV1().Services(namespace).List(ctx.Context, metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/name=prometheus",
-	})
-	if err != nil {
-		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Prometheus services", err)
+	// Try multiple label selectors to handle different kube-prometheus-stack versions.
+	// Older versions (<=81.x) use app.kubernetes.io/name=prometheus;
+	// newer versions (>=82.x) dropped that label but retain self-monitor=true.
+	selectors := []string{
+		"app.kubernetes.io/name=prometheus",
+		"self-monitor=true",
 	}
-
-	for i := range services.Items {
-		svc := &services.Items[i]
-		for _, port := range svc.Spec.Ports {
-			if port.Port == int32(prometheusDefaultPort) {
-				return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, namespace, prometheusDefaultPort), nil
+	for _, selector := range selectors {
+		services, err := ctx.Clientset.CoreV1().Services(namespace).List(ctx.Context, metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Prometheus services", err)
+		}
+		for i := range services.Items {
+			svc := &services.Items[i]
+			for _, port := range svc.Spec.Ports {
+				if port.Port == int32(prometheusDefaultPort) {
+					return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, namespace, prometheusDefaultPort), nil
+				}
 			}
 		}
 	}
 
 	return "", errors.New(errors.ErrCodeNotFound,
-		fmt.Sprintf("no Prometheus service with port %d found in namespace %q (label: app.kubernetes.io/name=prometheus)", prometheusDefaultPort, namespace))
+		fmt.Sprintf("no Prometheus service with port %d found in namespace %q", prometheusDefaultPort, namespace))
 }
 
 // checkAIServiceMetricsWithURL is the testable implementation that accepts a configurable URL.

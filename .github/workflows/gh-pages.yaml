@@ -21,12 +21,15 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/gh-pages.yaml'
+      - '.github/actions/build-versioned-site/**'
   pull_request:
     branches:
       - main
     paths:
       - 'site/**'
       - '.github/workflows/gh-pages.yaml'
+      - '.github/actions/build-versioned-site/**'
+  workflow_call: {}
   workflow_dispatch: {}
 
 permissions:
@@ -75,23 +78,31 @@ jobs:
         with:
           node-version: ${{ steps.versions.outputs.node }}
 
-      - name: Install dependencies
+      # PR preview: fast single unversioned build
+      - name: Install dependencies (PR)
+        if: github.event_name == 'pull_request'
         working-directory: site
         run: npm ci
 
-      - name: Build site
+      - name: Build site (PR)
+        if: github.event_name == 'pull_request'
         working-directory: site
         run: hugo --minify
 
+      # Main/release: versioned multi-build
+      - name: Build versioned site
+        if: github.event_name != 'pull_request'
+        uses: ./.github/actions/build-versioned-site
+
       - name: Upload artifact
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3.0.1
         with:
-          path: site/public
+          path: versioned-site-output
 
   deploy:
     name: Deploy
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

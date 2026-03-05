@@ -357,13 +357,26 @@ jobs:
             --draft=false
 
   # =============================================================================
+  # Site: Deploy versioned documentation to GitHub Pages
+  # =============================================================================
+
+  site:
+    name: Deploy Site
+    needs: [publish]
+    uses: ./.github/workflows/gh-pages.yaml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  # =============================================================================
   # Summary: Release pipeline report (always runs, even on failure)
   # =============================================================================
 
   summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [tests, build-ko, build-docker, docker-manifest, image-vuln-scan, attest, release-check, deploy, publish]
+    needs: [tests, build-ko, build-docker, docker-manifest, image-vuln-scan, attest, release-check, deploy, publish, site]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -380,6 +393,7 @@ jobs:
           RELEASE_CHECK: ${{ needs.release-check.result }}
           DEPLOY: ${{ needs.deploy.result }}
           PUBLISH: ${{ needs.publish.result }}
+          SITE: ${{ needs.site.result }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
         run: |
@@ -400,4 +414,5 @@ jobs:
             echo "| Release Check | ${RELEASE_CHECK} |"
             echo "| Deploy | ${DEPLOY} |"
             echo "| Publish | ${PUBLISH} |"
+            echo "| Site | ${SITE} |"
           } >> "$GITHUB_STEP_SUMMARY"

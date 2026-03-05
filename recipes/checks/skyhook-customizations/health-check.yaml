@@ -38,6 +38,5 @@ spec:
               kind: Skyhook
               metadata:
                 name: tuning
-                namespace: skyhook
               status:
                 status: complete

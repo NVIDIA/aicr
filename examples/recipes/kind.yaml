@@ -37,14 +37,14 @@ componentRefs:
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
-    version: 0.13.0
+    version: 0.13.1
     valuesFile: components/skyhook-operator/values.yaml
   - name: kube-prometheus-stack
     namespace: nvidia-system
     chart: kube-prometheus-stack
     type: Helm
     source: https://prometheus-community.github.io/helm-charts
-    version: 81.2.2
+    version: 82.8.0
     valuesFile: components/kube-prometheus-stack/values.yaml
   - name: k8s-ephemeral-storage-metrics
     namespace: nvidia-system

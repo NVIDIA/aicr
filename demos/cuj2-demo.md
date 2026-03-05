@@ -26,9 +26,9 @@
   │   files, Kubernetes manifests, installation scripts, and checksums.    │
   │                                                                        │
   │  $ aicr bundle --recipe recipe.yaml \                                  │
-  │      --accelerated-node-selector nodeGroup=gpu-worker \                │
-  │      --accelerated-node-toleration dedicated=worker-workload:NoSchedule│
-  │      --accelerated-node-toleration dedicated=worker-workload:NoExecute │
+  │      --accelerated-node-selector dedicated=gpu-workload \              │
+  │      --accelerated-node-toleration dedicated=gpu-workload:NoSchedule   │
+  │      --accelerated-node-toleration dedicated=gpu-workload:NoExecute    │
   │      --system-node-selector dedicated=system-workload \                │
   │      --system-node-toleration dedicated=system-workload:NoSchedule     │
   │      --system-node-toleration dedicated=system-workload:NoExecute      │
@@ -139,6 +139,19 @@
 └───────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Node Labels and Taints
+
+| Role | Instance | Label | Taint |
+|------|----------|-------|-------|
+| GPU worker | p5.48xlarge | `dedicated=gpu-workload` | `dedicated=gpu-workload:NoSchedule` + `:NoExecute` |
+| System | m4.16xlarge | `dedicated=system-workload` | `dedicated=system-workload:NoSchedule` + `:NoExecute` |
+| CPU worker | m4.16xlarge | `dedicated=cpu-workload` | `dedicated=cpu-workload:NoSchedule` + `:NoExecute` |
+
+- **GPU nodes**: Run GPU operator DaemonSets, DRA driver, skyhook tuning, and GPU workloads
+- **System nodes**: Run control-plane components (cert-manager, monitoring, schedulers, operators)
+- **CPU nodes**: Run CPU-only workloads (e.g., Dynamo frontend, inference gateway)
+- EKS-managed add-ons (CoreDNS, metrics-server) tolerate `dedicated=system-workload` by default
+
 ### Recipe and Bundle Generation 
 ```
  aicr recipe --service eks --accelerator h100 \
@@ -147,9 +160,9 @@
 ```
 ```
    aicr bundle --recipe recipe.yaml \
-    --accelerated-node-selector nodeGroup=gpu-worker \
-    --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
-    --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+    --accelerated-node-selector dedicated=gpu-workload \
+    --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
+    --accelerated-node-toleration dedicated=gpu-workload:NoExecute \
     --system-node-selector dedicated=system-workload \
     --system-node-toleration dedicated=system-workload:NoSchedule \
     --system-node-toleration dedicated=system-workload:NoExecute \
