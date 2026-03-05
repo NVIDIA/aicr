@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      ref:
+        description: 'Git ref to checkout (defaults to triggering ref)'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -40,6 +45,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Load versions
@@ -62,6 +68,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Load versions
@@ -78,6 +85,7 @@ jobs:
 
   cli-e2e:
     name: CLI E2E
+    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -88,6 +96,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Load versions
@@ -110,6 +119,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Load versions
@@ -133,6 +143,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
+          ref: ${{ inputs.ref || '' }}
           persist-credentials: false
 
       - name: Security Scan
