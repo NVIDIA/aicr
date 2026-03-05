@@ -47,7 +47,7 @@ spec:
         - operator: Exists
       containers:
         - name: gpu-worker
-          image: nvidia/cuda:12.9.0-devel-ubuntu24.04
+          image: nvcr.io/nvidia/cuda:12.9.0-devel-ubuntu24.04
           command: ["bash", "-c"]
           args:
             - |
