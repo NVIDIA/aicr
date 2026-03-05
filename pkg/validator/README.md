@@ -158,13 +158,13 @@ func CheckOperatorHealth(ctx *checks.ValidationContext) error {
 }
 
 // Test wrapper (enables Job execution)
-func TestOperatorHealth(t *testing.T) {
+func TestCheckExpectedResources(t *testing.T) {
     runner, err := checks.NewTestRunner(t)  // Loads context from Job env
     if err != nil {
         t.Skipf("Skipping (not in Kubernetes): %v", err)
         return
     }
-    runner.RunCheck("operator-health")  // Executes check
+    runner.RunCheck("expected-resources")  // Executes check
 }
 ```
 
@@ -333,7 +333,6 @@ componentRefs:
 validation:
   deployment:
     checks:
-      - operator-health
       - expected-resources
 ```
 
@@ -369,7 +368,6 @@ validation:
       - name: Deployment.gpu-operator.version
         value: ">= v24.6.0"
     checks:
-      - operator-health
       - expected-resources
 
   # Phase 3: Performance (measure system performance)
@@ -416,7 +414,7 @@ type ConstraintValidation struct {
 }
 
 type CheckResult struct {
-    Name     string  // e.g., "operator-health"
+    Name     string  // e.g., "expected-resources"
     Status   ValidationStatus
     Message  string
     Duration time.Duration
@@ -469,7 +467,7 @@ aicr validate --phase all -o table
 | **Returns** | Pass/fail (error) | Actual value + pass/fail |
 | **Registration** | `RegisterCheck()` | `RegisterConstraintValidator()` |
 | **Recipe Syntax** | `checks: [name]` | `constraints: [{name, value}]` |
-| **Example** | `operator-health` | `Deployment.gpu-operator.version: ">= v24.6.0"` |
+| **Example** | `Deployment.gpu-operator.version` | `Deployment.gpu-operator.version: ">= v24.6.0"` |
 
 ### ValidationContext
 
@@ -592,7 +590,7 @@ validation:
       - name: Deployment.gpu-operator.version
         value: ">= v24.6.0"
     checks:
-      - operator-health
+      - expected-resources
 ```
 
 ### Example 2: Performance Validation
@@ -622,7 +620,7 @@ validation:
       - name: Deployment.gpu-operator.version
         value: ">= v24.6.0"
     checks:
-      - operator-health
+      - expected-resources
 
   performance:
     checks:
@@ -659,7 +657,7 @@ results, err := validator.ValidatePhases(ctx,
 
 ```go
 // Get registered check
-check, ok := checks.GetCheck("operator-health")
+check, ok := checks.GetCheck("expected-resources")
 
 // Get registered constraint validator
 validator, ok := checks.GetConstraintValidator("Deployment.gpu-operator.version")

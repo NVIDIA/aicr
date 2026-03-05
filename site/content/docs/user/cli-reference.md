@@ -608,8 +608,6 @@ phases:
     checks:
       - name: gpu-operator.version
         status: pass
-      - name: operator-health
-        status: pass
       - name: expected-resources
         status: pass
     duration: 1.2µs

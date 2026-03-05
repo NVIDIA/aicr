@@ -58,7 +58,7 @@ Validation checks run inside Kubernetes Jobs to verify cluster configuration and
 
 | Type | Purpose | Returns | Example |
 |------|---------|---------|---------|
-| **Check** | Named validation test | `error` | `"operator-health"` checks if pods are running |
+| **Check** | Named validation test | `error` | `"gpu-operator-health"` checks if operator is healthy |
 | **Constraint Validator** | Evaluates constraint expressions | `(actual string, passed bool, error)` | `"Deployment.gpu-operator.version"` checks version >= v24.6.0 |
 
 **Key difference:**
@@ -85,9 +85,6 @@ pkg/validator/checks/
 ├── runner.go                    # Test runner for Job execution
 ├── generator.go                 # Code generator for new checks/constraints
 ├── deployment/                  # Deployment phase checks + constraints
-│   ├── operator_health_check.go           # Check registration and implementation
-│   ├── operator_health_check_test.go      # Integration test (runs in Jobs)
-│   ├── operator_health_check_unit_test.go # Unit test (runs locally)
 │   ├── gpu_operator_version_constraint.go           # Constraint validator
 │   ├── gpu_operator_version_constraint_test.go      # Integration test
 │   └── gpu_operator_version_constraint_unit_test.go # Unit test
@@ -131,9 +128,9 @@ This creates:
 ```go
 // pkg/validator/checks/deployment/my_check_check.go
 func validateMyCheck(ctx *checks.ValidationContext) error {
-    pods, err := ctx.Clientset.CoreV1().Pods("my-namespace").List(
+    pods, err := ctx.Clientset.CoreV1().Pods("gpu-operator").List(
         ctx.Context,
-        metav1.ListOptions{LabelSelector: "app=my-component"},
+        metav1.ListOptions{LabelSelector: "app=gpu-operator"},
     )
     if err != nil {
         return fmt.Errorf("failed to list pods: %w", err)
@@ -239,7 +236,6 @@ validation:
         value: ">= 1"
     checks:
       # These also run inside the Job
-      - operator-health
       - expected-resources  # validates componentRefs[].expectedResources
 ```
 
@@ -259,7 +255,6 @@ func init() {
     checks.RegisterCheck(&checks.Check{
         Name:        "my-check",
         Description: "Verify my component is healthy",
-        Phase:       "deployment",
         TestName:    "TestCheckMyCheck",  // Test function name for Job execution
     })
 }
@@ -289,7 +284,6 @@ func init() {
         Name:        "Deployment.my-app.version",
         Description: "Validates my-app deployment version",
         TestName:    "TestMyAppVersion",  // Test function name for Job execution
-        Phase:       "deployment",
     })
 }
 
@@ -338,7 +332,7 @@ type ValidationContext struct {
 
 Validation checks run inside Kubernetes Jobs via `go test`. The Jobs execute:
 ```bash
-go test -v -json ./pkg/validator/checks/deployment -run operator-health
+go test -v -json ./pkg/validator/checks/deployment -run my-check
 ```
 
 For `go test` to discover and run your check, you need a `Test*` function that:
@@ -355,11 +349,11 @@ For `go test` to discover and run your check, you need a `Test*` function that:
 The integration test file (`*_check_test.go`) contains the test wrapper that runs in Kubernetes Jobs:
 
 ```go
-// pkg/validator/checks/deployment/operator_health_check_test.go
+// pkg/validator/checks/deployment/my_check_check_test.go
 
-// TestOperatorHealth is the integration test for operator-health.
+// TestCheckMyCheck is the integration test for my-check.
 // This runs inside validator Jobs and invokes the validator.
-func TestOperatorHealth(t *testing.T) {
+func TestCheckMyCheck(t *testing.T) {
     if testing.Short() {
         t.Skip("Skipping integration test in short mode")
     }
@@ -371,7 +365,7 @@ func TestOperatorHealth(t *testing.T) {
     }
     defer runner.Cancel()
 
-    runner.RunCheck("operator-health")
+    runner.RunCheck("my-check")
 }
 ```
 
@@ -381,7 +375,7 @@ The test wrapper function name must match the check name pattern:
 
 | Check Name | Test Wrapper Function |
 |------------|----------------------|
-| `operator-health` | `TestOperatorHealth` |
+| `my-check` | `TestCheckMyCheck` |
 | `nccl-bandwidth` | `TestNCCLBandwidth` |
 
 **Pattern:** Convert kebab-case to PascalCase and prefix with `Test`.
@@ -416,7 +410,6 @@ func init() {
     checks.RegisterCheck(&checks.Check{
         Name:        "nccl-bandwidth",
         Description: "Measure NCCL all-reduce bandwidth",
-        Phase:       "performance",
         Func:        CheckNCCLBandwidth,
     })
 }
@@ -477,7 +470,7 @@ The validation Job automatically sets these environment variables:
 | `AICR_SNAPSHOT_PATH` | Path to mounted snapshot file | `/data/snapshot/snapshot.yaml` |
 | `AICR_RECIPE_PATH` | Path to mounted recipe file | `/data/recipe/recipe.yaml` |
 | `AICR_NAMESPACE` | Namespace where Job is running | `aicr-validation` |
-| `AICR_RESULT_CONFIGMAP` | ConfigMap name for results | `aicr-validation-deployment-operator-health-result` |
+| `AICR_RESULT_CONFIGMAP` | ConfigMap name for results | `aicr-validation-deployment-my-check-result` |
 
 ### Local vs Job Execution
 
@@ -486,7 +479,7 @@ The validation Job automatically sets these environment variables:
 - Unit tests **run** (use mocked context)
 - Fast feedback during development
 
-**Job execution** (`go test -run operator-health`):
+**Job execution** (`go test -run my-check`):
 - Test wrappers **run** (inside Kubernetes)
 - Unit tests **excluded** by `-run` pattern
 - Real validation against live cluster
@@ -502,7 +495,7 @@ Create a file in the appropriate phase directory:
 - `pkg/validator/checks/performance/` - For performance checks
 - `pkg/validator/checks/conformance/` - For conformance checks
 
-Example: `pkg/validator/checks/deployment/operator_health.go`
+Example: `pkg/validator/checks/deployment/my_check_check.go`
 
 **Step 2: Implement Check Function**
 
@@ -521,26 +514,25 @@ import (
 
 func init() {
     checks.RegisterCheck(&checks.Check{
-        Name:        "operator-health",              // ← Used in recipe
-        Description: "Verify GPU operator is healthy",
-        Phase:       "deployment",                   // ← Must match phase
-        Func:        CheckOperatorHealth,
+        Name:        "my-check",                    // ← Used in recipe
+        Description: "Verify my component is healthy",
+        TestName:    "TestCheckMyCheck",             // ← Test function for Job execution
     })
 }
 
-// CheckOperatorHealth verifies the GPU operator pods are running.
-func CheckOperatorHealth(ctx *checks.ValidationContext) error {
+// validateMyCheck verifies the component is healthy.
+func validateMyCheck(ctx *checks.ValidationContext) error {
     // Access live cluster via ctx.Clientset
     pods, err := ctx.Clientset.CoreV1().Pods("gpu-operator").List(
         ctx.Context,
         metav1.ListOptions{LabelSelector: "app=gpu-operator"},
     )
     if err != nil {
-        return fmt.Errorf("failed to list GPU operator pods: %w", err)
+        return fmt.Errorf("failed to list pods: %w", err)
     }
 
     if len(pods.Items) == 0 {
-        return fmt.Errorf("no GPU operator pods found")
+        return fmt.Errorf("no pods found")
     }
 
     // Verify at least one pod is running
@@ -550,14 +542,14 @@ func CheckOperatorHealth(ctx *checks.ValidationContext) error {
         }
     }
 
-    return fmt.Errorf("no GPU operator pods in Running state")
+    return fmt.Errorf("no pods in Running state")
 }
 ```
 
 **Step 3: Add Test Wrapper**
 
 ```go
-// pkg/validator/checks/deployment/operator_health_test.go
+// pkg/validator/checks/deployment/my_check_check_test.go
 package deployment
 
 import (
@@ -565,13 +557,13 @@ import (
     "github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
-func TestOperatorHealth(t *testing.T) {
+func TestCheckMyCheck(t *testing.T) {
     runner, err := checks.NewTestRunner(t)
     if err != nil {
         t.Skipf("Skipping integration test (not in Kubernetes): %v", err)
         return
     }
-    runner.RunCheck("operator-health")
+    runner.RunCheck("my-check")
 }
 ```
 
@@ -581,7 +573,7 @@ func TestOperatorHealth(t *testing.T) {
 validation:
   deployment:
     checks:
-      - operator-health  # ← Must match Check.Name
+      - my-check  # ← Must match Check.Name
 ```
 
 **Step 5: Import Package (if needed)**
@@ -937,7 +929,7 @@ func TestConstraintValidatorRegistration(t *testing.T) {
 #### Testing Checks Locally
 
 ```go
-func TestOperatorHealthLocal(t *testing.T) {
+func TestMyCheckLocal(t *testing.T) {
     deployment := createTestDeployment("gpu-operator", "gpu-operator")
     clientset := fake.NewSimpleClientset(deployment)
 
@@ -946,7 +938,7 @@ func TestOperatorHealthLocal(t *testing.T) {
         Clientset: clientset,
     }
 
-    check, ok := checks.GetCheck("operator-health")
+    check, ok := checks.GetCheck("my-check")
     if !ok {
         t.Fatal("check not registered")
     }
@@ -1194,7 +1186,6 @@ func init() {
         Name:        "Deployment.my-app.version",
         Description: "Validates my-app version",
         TestName:    "TestMyAppVersion",
-        Phase:       "deployment",
     })
 }
 
@@ -1484,19 +1475,19 @@ Job logs: testing: warning: no tests to run
 Check test function naming:
 ```go
 // Correct
-func TestOperatorHealth(t *testing.T) { ... }
+func TestCheckMyCheck(t *testing.T) { ... }
 
 // Wrong - lowercase
-func TestOperatorhealth(t *testing.T) { ... }
+func TestCheckMycheck(t *testing.T) { ... }
 
 // Wrong - underscore separator
-func Test_operator_health(t *testing.T) { ... }
+func Test_my_check(t *testing.T) { ... }
 ```
 
 **Naming rule:** Convert kebab-case check name to PascalCase:
-- `operator-health` → `TestOperatorHealth`
+- `my-check` → `TestCheckMyCheck`
 - `nccl-bandwidth` → `TestNCCLBandwidth`
-- `expected-resources` → `TestExpectedResources`
+- `gpu-operator-health` → `TestCheckGpuOperatorHealth`
 
 Verify test file compiles:
 ```bash
@@ -1507,7 +1498,7 @@ go test -c ./pkg/validator/checks/deployment/
 
 **Symptom:**
 ```
-Job logs: Check "operator-health" not found in registry
+Job logs: Check "my-check" not found in registry
 ```
 
 **Causes:**
@@ -1522,22 +1513,21 @@ Verify check registration:
 // Must be in same package as check function
 func init() {
     checks.RegisterCheck(&checks.Check{
-        Name:  "operator-health",  // ← Must match exactly
-        Phase: "deployment",
-        Func:  CheckOperatorHealth,
+        Name:     "my-check",  // ← Must match exactly
+        TestName: "TestCheckMyCheck",
     })
 }
 ```
 
 Verify test wrapper uses same name:
 ```go
-func TestOperatorHealth(t *testing.T) {
+func TestCheckMyCheck(t *testing.T) {
     runner, err := checks.NewTestRunner(t)
     if err != nil {
         t.Skipf("Skipping integration test: %v", err)
         return
     }
-    runner.RunCheck("operator-health")  // ← Must match registration
+    runner.RunCheck("my-check")  // ← Must match registration
 }
 ```
 
@@ -1552,7 +1542,7 @@ SKIP: Skipping integration test (not in Kubernetes): failed to create in-cluster
 
 **Verify skip logic:**
 ```go
-func TestMyCheck(t *testing.T) {
+func TestCheckMyCheck(t *testing.T) {
     runner, err := checks.NewTestRunner(t)
     if err != nil {
         // Should skip, not fail
@@ -1806,7 +1796,7 @@ subjects:
 **Symptom:**
 ```
 Error: context deadline exceeded
-Check: operator-health
+Check: my-check
 Duration: 2m0s
 ```
 
@@ -1892,7 +1882,7 @@ kubectl describe job aicr-validation-performance -n aicr-validation
 
 **Symptom:**
 ```
-Error: check "operator-health" not registered
+Error: check "my-check" not registered
 ```
 
 **Causes:**
@@ -1905,11 +1895,11 @@ Error: check "operator-health" not registered
 Verify check is registered:
 ```go
 func TestCheckRegistered(t *testing.T) {
-    check, ok := checks.GetCheck("operator-health")
+    check, ok := checks.GetCheck("my-check")
     if !ok {
         t.Fatal("Check not registered")
     }
-    assert.Equal(t, "operator-health", check.Name)
+    assert.Equal(t, "my-check", check.Name)
 }
 ```
 
@@ -2152,7 +2142,7 @@ go test -v ./pkg/validator/checks/deployment/... -run TestIntegration
 
 Add integration tests:
 ```go
-func TestOperatorHealthIntegration(t *testing.T) {
+func TestMyCheckIntegration(t *testing.T) {
     if os.Getenv("USE_REAL_CLUSTER") != "true" {
         t.Skip("Skipping integration test")
     }
@@ -2165,7 +2155,7 @@ func TestOperatorHealthIntegration(t *testing.T) {
         Clientset: clientset,
     }
 
-    err = CheckOperatorHealth(ctx)
+    err = validateMyCheck(ctx)
     assert.NoError(t, err)
 }
 ```
@@ -2175,7 +2165,7 @@ func TestOperatorHealthIntegration(t *testing.T) {
 **Symptom:**
 ```
 WARN Job deployment failed (likely test mode), returning skeleton check
-Check: operator-health
+Check: my-check
 Status: pass
 Reason: skipped - Job deployment failed (test mode)
 ```

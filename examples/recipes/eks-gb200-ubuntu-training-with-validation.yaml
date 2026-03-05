@@ -65,7 +65,6 @@ validation:
         severity: warning
         remediation: "Update GPU Operator to v25.10.1"
     checks:
-      - operator-health
       - expected-resources
 
   # Performance phase: Validate system performance
