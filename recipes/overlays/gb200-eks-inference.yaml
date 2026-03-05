@@ -1,0 +1,56 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gb200-eks-inference
+
+spec:
+  # Inherits from eks-inference recipe (EKS + inference settings)
+  base: eks-inference
+
+  criteria:
+    service: eks
+    accelerator: gb200
+    intent: inference
+
+  # Specific constraints for GB200 on EKS inference workloads
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  componentRefs:
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+        - kube-prometheus-stack
+        - skyhook-customizations
+
+    # GB200 uses skyhook no-op: the H100 tuning packages (nvidia-setup,
+    # nvidia-tuned) are not compatible with GB200's ARM64 host CPU and
+    # Blackwell GPU architecture. Replace with tuning.yaml once GB200-specific
+    # packages are available. See docs/integrator/eks-dynamo-networking.md#gb200-skyhook-note.
+    - name: skyhook-customizations
+      type: Helm
+      manifestFiles:
+        - components/skyhook-customizations/manifests/no-op.yaml
+      overrides:
+        service: aws
+        accelerator: gb200
+        intent: inference
+      dependencyRefs:
+        - skyhook-operator

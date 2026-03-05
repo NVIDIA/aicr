@@ -954,6 +954,22 @@ After `helm install`, the same manifests are re-applied as post-install to ensur
 
 Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness.
 
+**DRA kubelet plugin registration:**
+
+After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin daemonset. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
+
+If DRA pods fail with this error after redeployment, the daemonset restart alone may not be sufficient — a **node reboot** is required to reset the kubelet's plugin registration state. To reboot GPU nodes:
+
+```bash
+# Cordon, drain, and reboot the affected node
+kubectl cordon <node-name>
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+# Reboot via cloud provider (e.g., AWS EC2 console or CLI)
+aws ec2 reboot-instances --instance-ids <instance-id>
+# Uncordon after node returns
+kubectl uncordon <node-name>
+```
+
 #### Undeploy Script Behavior (`undeploy.sh`)
 
 The undeploy script removes components in reverse deployment order.

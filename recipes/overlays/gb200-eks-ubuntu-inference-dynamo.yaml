@@ -15,16 +15,16 @@
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: h100-eks-ubuntu-inference-dynamo
+  name: gb200-eks-ubuntu-inference-dynamo
 
 spec:
-  # Inherits from h100-eks-ubuntu-inference (H100 + Ubuntu inference settings)
+  # Inherits from gb200-eks-ubuntu-inference (GB200 + Ubuntu inference settings)
   # Adds Dynamo inference platform components.
-  base: h100-eks-ubuntu-inference
+  base: gb200-eks-ubuntu-inference
 
   criteria:
     service: eks
-    accelerator: h100
+    accelerator: gb200
     os: ubuntu
     intent: inference
     platform: dynamo

@@ -104,6 +104,24 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
 echo "Applying post-install manifests for {{ .Name }}..."
 kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" || helm_failed "{{ .Name }}"
 {{ end -}}
+{{ if eq .Name "nvidia-dra-driver-gpu" -}}
+# Best-effort mitigation for kubelet DRA plugin registration drift.
+# After uninstall/reinstall, kubelet's fsnotify watcher may not detect new
+# registration sockets. Restarting the plugin DS forces fresh socket creation.
+# This does NOT fix cases where kubelet itself has lost registration state —
+# a node reboot is required for that. See docs/user/cli-reference.md.
+DRA_DS=$(kubectl get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
+if [[ -n "${DRA_DS}" ]]; then
+  echo "  Restarting DRA kubelet plugin (${DRA_DS##*/}) to ensure registration..."
+  if ! kubectl rollout restart "${DRA_DS}" -n {{ .Namespace }}; then
+    echo "  WARNING: failed to restart DRA kubelet plugin daemonset"
+  elif ! kubectl rollout status "${DRA_DS}" -n {{ .Namespace }} --timeout=120s; then
+    echo "  WARNING: DRA kubelet plugin rollout did not complete within 120s"
+  fi
+else
+  echo "  WARNING: no DRA kubelet plugin daemonset found in {{ .Namespace }}"
+fi
+{{ end -}}
 {{ else if .HasManifests -}}
 echo "Applying manifests for {{ .Name }}..."
 kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" || helm_failed "{{ .Name }}"

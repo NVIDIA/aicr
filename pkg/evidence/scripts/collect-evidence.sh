@@ -163,6 +163,12 @@ EOF
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
+## DeviceClasses
+EOF
+    capture "DeviceClasses" kubectl get deviceclass
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
 ## DRA Driver Health
 EOF
     capture "DRA driver pods" kubectl get pods -n nvidia-dra-driver -o wide

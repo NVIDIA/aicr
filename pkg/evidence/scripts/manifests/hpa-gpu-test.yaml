@@ -47,11 +47,25 @@ spec:
         - operator: Exists
       containers:
         - name: gpu-worker
-          image: nvcr.io/nvidia/k8s/cuda-sample:nbody-cuda11.7.1-ubuntu18.04
+          image: nvidia/cuda:12.9.0-devel-ubuntu24.04
           command: ["bash", "-c"]
-          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=9999 || true"]
+          args:
+            - |
+              cat > /tmp/s.cu << 'EOF'
+              __global__ void k(float *d, int n) {
+                int i = blockIdx.x * blockDim.x + threadIdx.x;
+                float v = (float)i;
+                for (int j = 0; j < n; j++) v = v * v + 0.1f;
+                if (i < 1) d[0] = v;
+              }
+              int main() {
+                float *d; cudaMalloc(&d, sizeof(float));
+                for (;;) { k<<<4096,256>>>(d, 1000000); cudaDeviceSynchronize(); }
+              }
+              EOF
+              nvcc -o /tmp/s /tmp/s.cu && exec /tmp/s
           securityContext:
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false  # nvcc writes to /tmp during compile
             allowPrivilegeEscalation: false
           resources:
             limits:

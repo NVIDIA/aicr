@@ -22,6 +22,7 @@ This section is for integrators who:
 | [Automation](/docs/integrator/automation/) | CI/CD integration patterns for GitHub Actions, GitLab CI, Jenkins, and Terraform |
 | [Data Flow](/docs/integrator/data-flow/) | Understanding snapshots, recipes, validation, and bundles data transformations |
 | [Kubernetes Deployment](/docs/integrator/kubernetes-deployment/) | Self-hosted API server deployment with Kubernetes manifests |
+| [EKS Dynamo Networking](/docs/integrator/eks-dynamo-networking/) | Security group prerequisites for Dynamo overlays on EKS |
 | [Recipe Development](/docs/integrator/recipe-development/) | Creating and modifying recipe metadata for custom environments |
 
 ## Quick Start
