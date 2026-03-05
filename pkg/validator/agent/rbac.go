@@ -181,6 +181,12 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 				Resources: []string{"clusterpolicies"},
 				Verbs:     []string{"get", "list"},
 			},
+			// Deployment: Skyhook CR (skyhook-customizations health check)
+			{
+				APIGroups: []string{"skyhook.nvidia.com"},
+				Resources: []string{"skyhooks"},
+				Verbs:     []string{"get", "list"},
+			},
 			// Conformance: robust-controller webhook behavioral test
 			{
 				APIGroups: []string{"nvidia.com"},
