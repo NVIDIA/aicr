@@ -16,54 +16,26 @@ package conformance
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/rest"
 )
 
 func TestCheckAIServiceMetrics(t *testing.T) {
-	promResponseWithData := `{
-		"status": "success",
-		"data": {
-			"resultType": "vector",
-			"result": [
-				{"metric": {"__name__": "DCGM_FI_DEV_GPU_UTIL", "gpu": "0"}, "value": [1700000000, "42"]}
-			]
-		}
-	}`
-
-	promResponseEmpty := `{
-		"status": "success",
-		"data": {
-			"resultType": "vector",
-			"result": []
-		}
-	}`
-
 	tests := []struct {
 		name        string
-		handler     http.HandlerFunc
 		clientset   bool
 		wantErr     bool
 		errContains string
 	}{
-		{
-			name: "prometheus has data but fake client lacks REST client",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprint(w, promResponseWithData)
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "discovery REST client is not available",
-		},
 		{
 			name:        "no clientset",
 			clientset:   false,
@@ -71,38 +43,10 @@ func TestCheckAIServiceMetrics(t *testing.T) {
 			errContains: "kubernetes client is not available",
 		},
 		{
-			name: "prometheus has no data",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprint(w, promResponseEmpty)
-			},
+			name:        "fake client lacks REST client — custom metrics API fails",
 			clientset:   true,
 			wantErr:     true,
-			errContains: "no DCGM_FI_DEV_GPU_UTIL time series",
-		},
-		{
-			name: "prometheus returns error",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusServiceUnavailable)
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "Prometheus unreachable",
-		},
-		{
-			name: "prometheus returns invalid JSON",
-			handler: func(w http.ResponseWriter, r *http.Request) {
-				fmt.Fprint(w, "not json")
-			},
-			clientset:   true,
-			wantErr:     true,
-			errContains: "failed to parse Prometheus response",
-		},
-		{
-			name:        "prometheus unreachable",
-			handler:     nil,
-			clientset:   true,
-			wantErr:     true,
-			errContains: "Prometheus unreachable",
+			errContains: "discovery REST client is not available",
 		},
 	}
 
@@ -112,10 +56,9 @@ func TestCheckAIServiceMetrics(t *testing.T) {
 
 			if tt.clientset {
 				//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-				clientset := fake.NewSimpleClientset()
 				ctx = &checks.ValidationContext{
 					Context:   context.Background(),
-					Clientset: clientset,
+					Clientset: fake.NewSimpleClientset(),
 				}
 			} else {
 				ctx = &checks.ValidationContext{
@@ -123,19 +66,10 @@ func TestCheckAIServiceMetrics(t *testing.T) {
 				}
 			}
 
-			var promURL string
-			if tt.handler != nil {
-				server := httptest.NewServer(tt.handler)
-				defer server.Close()
-				promURL = server.URL
-			} else {
-				promURL = "http://127.0.0.1:1"
-			}
-
-			err := checkAIServiceMetricsWithURL(ctx, promURL)
+			err := CheckAIServiceMetrics(ctx)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("checkAIServiceMetricsWithURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("CheckAIServiceMetrics() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -148,94 +82,161 @@ func TestCheckAIServiceMetrics(t *testing.T) {
 	}
 }
 
-func TestDiscoverPrometheusURL(t *testing.T) {
+// TestCheckAIServiceMetricsDataPath validates the positive path: custom metrics
+// API returns resource list with required metrics AND data queries return items.
+// Uses httptest to create a real REST client since fake.NewSimpleClientset()
+// returns nil for Discovery().RESTClient().
+func TestCheckAIServiceMetricsDataPath(t *testing.T) {
+	// Custom metrics API resource list with GPU metrics registered.
+	resourceList := map[string]interface{}{
+		"groupVersion": "custom.metrics.k8s.io/v1beta1",
+		"resources": []map[string]interface{}{
+			{"name": "pods/gpu_utilization", "namespaced": true},
+			{"name": "namespaces/gpu_utilization", "namespaced": false},
+			{"name": "pods/gpu_memory_used", "namespaced": true},
+			{"name": "namespaces/gpu_memory_used", "namespaced": false},
+			{"name": "pods/gpu_power_usage", "namespaced": true},
+			{"name": "namespaces/gpu_power_usage", "namespaced": false},
+		},
+	}
+
+	// Metric data response with actual samples.
+	metricData := map[string]interface{}{
+		"kind":       "MetricValueList",
+		"apiVersion": "custom.metrics.k8s.io/v1beta1",
+		"items": []map[string]interface{}{
+			{
+				"describedObject": map[string]interface{}{
+					"kind":      "Pod",
+					"namespace": "gpu-operator",
+					"name":      "dcgm-exporter-abc",
+				},
+				"metricName": "gpu_utilization",
+				"value":      "42",
+			},
+		},
+	}
+
+	// Empty data response (no samples).
+	emptyData := map[string]interface{}{
+		"kind":       "MetricValueList",
+		"apiVersion": "custom.metrics.k8s.io/v1beta1",
+		"items":      []interface{}{},
+	}
+
 	tests := []struct {
 		name        string
-		recipe      *recipe.RecipeResult
-		services    []corev1.Service
-		wantURL     string
+		handler     http.HandlerFunc
 		wantErr     bool
 		errContains string
 	}{
 		{
-			name:        "no recipe",
-			wantErr:     true,
-			errContains: "recipe is not available",
+			name: "all metrics have data — passes",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				if strings.HasSuffix(path, "custom.metrics.k8s.io/v1beta1") {
+					json.NewEncoder(w).Encode(resourceList) //nolint:errcheck
+					return
+				}
+				// All pod-scoped queries return data.
+				if strings.Contains(path, "/pods/") {
+					json.NewEncoder(w).Encode(metricData) //nolint:errcheck
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
+			},
+			wantErr: false,
 		},
 		{
-			name: "component not in recipe",
-			recipe: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: "other", Namespace: "default"},
-				},
+			name: "metrics registered but no samples — fails",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				if strings.HasSuffix(path, "custom.metrics.k8s.io/v1beta1") {
+					json.NewEncoder(w).Encode(resourceList) //nolint:errcheck
+					return
+				}
+				// All data queries return empty items.
+				json.NewEncoder(w).Encode(emptyData) //nolint:errcheck
 			},
 			wantErr:     true,
-			errContains: "not found in recipe",
+			errContains: "no samples flowing",
 		},
 		{
-			name: "no matching service",
-			recipe: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: prometheusComponentName, Namespace: "monitoring"},
-				},
+			name: "metrics not registered — fails",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				// Return empty resource list.
+				json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+					"groupVersion": "custom.metrics.k8s.io/v1beta1",
+					"resources":    []interface{}{},
+				})
 			},
 			wantErr:     true,
-			errContains: "no Prometheus service with port",
+			errContains: "not registered in custom metrics API",
 		},
 		{
-			name: "service discovered",
-			recipe: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: prometheusComponentName, Namespace: "monitoring"},
-				},
+			name: "custom metrics API unavailable — fails",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusServiceUnavailable)
 			},
-			services: []corev1.Service{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "kube-prometheus-prometheus",
-						Namespace: "monitoring",
-						Labels:    map[string]string{"app.kubernetes.io/name": "prometheus"},
-					},
-					Spec: corev1.ServiceSpec{
-						Ports: []corev1.ServicePort{{Port: 9090}},
-					},
-				},
+			wantErr:     true,
+			errContains: "custom metrics API not available",
+		},
+		{
+			name: "namespace-scoped only — still passes",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				path := r.URL.Path
+				if strings.HasSuffix(path, "custom.metrics.k8s.io/v1beta1") {
+					// Only namespace-scoped metrics registered.
+					json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+						"groupVersion": "custom.metrics.k8s.io/v1beta1",
+						"resources": []map[string]interface{}{
+							{"name": "namespaces/gpu_utilization", "namespaced": false},
+							{"name": "namespaces/gpu_memory_used", "namespaced": false},
+							{"name": "namespaces/gpu_power_usage", "namespaced": false},
+						},
+					})
+					return
+				}
+				// Pod-scoped queries return 404, namespace-scoped return data.
+				if strings.Contains(path, "/pods/") {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				if strings.Contains(path, "/metrics/") {
+					json.NewEncoder(w).Encode(metricData) //nolint:errcheck
+					return
+				}
+				w.WriteHeader(http.StatusNotFound)
 			},
-			wantURL: "http://kube-prometheus-prometheus.monitoring.svc:9090",
+			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-			clientset := fake.NewSimpleClientset()
-			for i := range tt.services {
-				svc := &tt.services[i]
-				if _, err := clientset.CoreV1().Services(svc.Namespace).Create(
-					context.Background(), svc, metav1.CreateOptions{}); err != nil {
-					t.Fatalf("failed to create service: %v", err)
-				}
+			server := httptest.NewServer(tt.handler)
+			defer server.Close()
+
+			clientset, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+			if err != nil {
+				t.Fatalf("failed to create clientset: %v", err)
 			}
 
 			ctx := &checks.ValidationContext{
 				Context:   context.Background(),
 				Clientset: clientset,
-				Recipe:    tt.recipe,
 			}
 
-			got, err := discoverPrometheusURL(ctx)
+			err = CheckAIServiceMetrics(ctx)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("discoverPrometheusURL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("CheckAIServiceMetrics() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr && tt.errContains != "" {
 				if !strings.Contains(err.Error(), tt.errContains) {
 					t.Errorf("error = %v, should contain %q", err, tt.errContains)
 				}
-			}
-			if !tt.wantErr && got != tt.wantURL {
-				t.Errorf("discoverPrometheusURL() = %q, want %q", got, tt.wantURL)
 			}
 		})
 	}
@@ -251,5 +252,80 @@ func TestCheckAIServiceMetricsRegistration(t *testing.T) {
 	}
 	if check.Func == nil {
 		t.Fatal("Func is nil")
+	}
+}
+
+func TestRequiredCustomMetrics(t *testing.T) {
+	if len(requiredCustomMetrics) == 0 {
+		t.Fatal("requiredCustomMetrics must not be empty")
+	}
+	expected := map[string]bool{
+		"gpu_utilization": true,
+		"gpu_memory_used": true,
+		"gpu_power_usage": true,
+	}
+	for _, m := range requiredCustomMetrics {
+		if !expected[m] {
+			t.Errorf("unexpected required metric: %s", m)
+		}
+	}
+}
+
+// metricDataPathTemplate is the expected URL path pattern for metric data queries.
+// This test ensures the path shape stays consistent with the standard custom metrics API.
+func TestMetricDataPathShape(t *testing.T) {
+	var queriedPaths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		queriedPaths = append(queriedPaths, path)
+
+		if strings.HasSuffix(path, "custom.metrics.k8s.io/v1beta1") {
+			json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+				"groupVersion": "custom.metrics.k8s.io/v1beta1",
+				"resources": []map[string]interface{}{
+					{"name": "pods/gpu_utilization", "namespaced": true},
+					{"name": "pods/gpu_memory_used", "namespaced": true},
+					{"name": "pods/gpu_power_usage", "namespaced": true},
+				},
+			})
+			return
+		}
+		// Return data for all queries.
+		json.NewEncoder(w).Encode(map[string]interface{}{ //nolint:errcheck
+			"items": []map[string]interface{}{
+				{"metricName": "test", "value": "1"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	clientset, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatalf("failed to create clientset: %v", err)
+	}
+
+	ctx := &checks.ValidationContext{
+		Context:   context.Background(),
+		Clientset: clientset,
+	}
+
+	if err := CheckAIServiceMetrics(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify data query paths match standard custom metrics API shape.
+	for _, path := range queriedPaths {
+		if strings.Contains(path, "/pods/") {
+			// Must match: /apis/custom.metrics.k8s.io/v1beta1/namespaces/{ns}/pods/*/{metric}
+			expected := fmt.Sprintf("/apis/custom.metrics.k8s.io/v1beta1/namespaces/%s/pods/", "gpu-operator")
+			if !strings.HasPrefix(path, expected) {
+				t.Errorf("pod-scoped path %q does not start with expected prefix %q", path, expected)
+			}
+			// Must end with */{metric_name}
+			parts := strings.Split(path, "/")
+			if len(parts) < 2 || parts[len(parts)-2] != "*" {
+				t.Errorf("pod-scoped path %q missing wildcard selector (expected .../pods/*/<metric>)", path)
+			}
+		}
 	}
 }

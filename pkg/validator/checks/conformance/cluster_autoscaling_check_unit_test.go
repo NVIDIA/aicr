@@ -75,8 +75,9 @@ func TestCheckClusterAutoscaling(t *testing.T) {
 			k8sObjects: []runtime.Object{
 				createDeployment("karpenter", "karpenter", 0),
 			},
-			clientset: true,
-			wantErr:   false,
+			clientset:   true,
+			wantErr:     true,
+			errContains: "Karpenter deployment exists but is not healthy",
 		},
 		{
 			name: "no NodePools",
@@ -480,6 +481,142 @@ func TestCheckClusterAutoscalingRegistration(t *testing.T) {
 	}
 	if check.Func == nil {
 		t.Fatal("Func is nil")
+	}
+}
+
+func TestValidateEKSAutoscaling(t *testing.T) {
+	tests := []struct {
+		name        string
+		nodes       []corev1.Node
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name: "EKS cluster with GPU nodes",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ip-10-0-1-1.ec2.internal",
+						Labels: map[string]string{
+							"nvidia.com/gpu.present":           "true",
+							"nvidia.com/gpu.count":             "8",
+							"nvidia.com/gpu.product":           "NVIDIA-H100-80GB-HBM3",
+							"node.kubernetes.io/instance-type": "p5.48xlarge",
+							"nodeGroup":                        "gpu-worker",
+							"topology.kubernetes.io/region":    "us-east-1",
+							"topology.kubernetes.io/zone":      "us-east-1a",
+						},
+					},
+					Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-abc123"},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ip-10-0-2-2.ec2.internal",
+						Labels: map[string]string{
+							"node.kubernetes.io/instance-type": "m5.xlarge",
+						},
+					},
+					Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1b/i-def456"},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "EKS cluster with no GPU nodes",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "ip-10-0-1-1.ec2.internal",
+						Labels: map[string]string{},
+					},
+					Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-abc123"},
+				},
+			},
+			wantErr:     true,
+			errContains: "no GPU nodes found",
+		},
+		{
+			name: "EKS GPU nodes without node group label",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "ip-10-0-1-1.ec2.internal",
+						Labels: map[string]string{
+							"nvidia.com/gpu.present": "true",
+						},
+					},
+					Spec: corev1.NodeSpec{ProviderID: "aws:///us-east-1a/i-abc123"},
+				},
+			},
+			wantErr:     true,
+			errContains: "no GPU nodes have a node group label",
+		},
+		{
+			name: "non-EKS cluster skips gracefully",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-1",
+						Labels: map[string]string{},
+					},
+					Spec: corev1.NodeSpec{ProviderID: "kind://docker/kind/kind-control-plane"},
+				},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			objects := make([]runtime.Object, len(tt.nodes))
+			for i := range tt.nodes {
+				objects[i] = &tt.nodes[i]
+			}
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			clientset := fake.NewSimpleClientset(objects...)
+
+			ctx := &checks.ValidationContext{
+				Context:   context.Background(),
+				Clientset: clientset,
+			}
+
+			err := validateEKSAutoscaling(ctx)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateEKSAutoscaling() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.errContains != "" {
+				if !strings.Contains(err.Error(), tt.errContains) {
+					t.Errorf("error = %v, should contain %q", err, tt.errContains)
+				}
+			}
+		})
+	}
+}
+
+func TestNodeGroupName(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   string
+	}{
+		{"eks label", map[string]string{"eks.amazonaws.com/nodegroup": "gpu-ng"}, "gpu-ng"},
+		{"nodeGroup label", map[string]string{"nodeGroup": "gpu-worker"}, "gpu-worker"},
+		{"eksctl label", map[string]string{"alpha.eksctl.io/nodegroup-name": "ng-1"}, "ng-1"},
+		{"no label", map[string]string{}, ""},
+		{"eks takes precedence", map[string]string{
+			"eks.amazonaws.com/nodegroup": "eks-ng",
+			"nodeGroup":                   "other",
+		}, "eks-ng"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := nodeGroupName(tt.labels)
+			if got != tt.want {
+				t.Errorf("nodeGroupName() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

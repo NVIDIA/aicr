@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -29,6 +30,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -80,12 +82,25 @@ func CheckClusterAutoscaling(ctx *checks.ValidationContext) error {
 	}
 
 	// 1. Karpenter controller deployment running.
-	// Skip gracefully when Karpenter is not installed — the cluster may use
-	// a different autoscaling mechanism (e.g., ASG, Cluster Autoscaler).
+	// Only fall back to EKS ASG-based validation when Karpenter is truly not
+	// installed (NotFound). If Karpenter exists but is unhealthy (e.g., 0/1
+	// replicas available), that's a real failure — don't mask it with EKS fallback.
 	deploy, deployErr := getDeploymentIfAvailable(ctx, "karpenter", "karpenter")
 	if deployErr != nil {
-		slog.Info("Karpenter not found, skipping cluster autoscaling check — cluster may use ASG or Cluster Autoscaler instead")
-		return nil
+		// Distinguish "not installed" from "installed but unhealthy" or transient errors.
+		// getDeploymentIfAvailable wraps all Get errors as ErrCodeNotFound, so we
+		// unwrap to the underlying K8s API error for accurate classification.
+		var se *errors.StructuredError
+		if stderrors.As(deployErr, &se) && se.Code == errors.ErrCodeNotFound {
+			if k8serrors.IsNotFound(se.Cause) {
+				slog.Info("Karpenter not installed, checking for EKS ASG-based autoscaling")
+				return validateEKSAutoscaling(ctx)
+			}
+			// API error that isn't NotFound (e.g., auth, network) — don't mask as "not installed".
+			return errors.Wrap(errors.ErrCodeInternal, "failed to check Karpenter deployment", deployErr)
+		}
+		// ErrCodeInternal = deployment exists but 0 replicas available.
+		return errors.Wrap(errors.ErrCodeInternal, "Karpenter deployment exists but is not healthy", deployErr)
 	}
 	expected := int32(1)
 	if deploy.Spec.Replicas != nil {
@@ -487,4 +502,133 @@ func verifyPodsScheduled(ctx context.Context, clientset kubernetes.Interface, na
 		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "pod scheduling verification failed", err)
 	}
 	return scheduledOut, totalOut, nil
+}
+
+// validateEKSAutoscaling validates cluster autoscaling on EKS clusters by
+// inspecting node metadata. EKS nodes expose ASG membership, instance types,
+// and GPU topology through Kubernetes labels and providerID. This proves GPU
+// nodes are managed by Auto Scaling Groups without requiring AWS CLI access.
+func validateEKSAutoscaling(ctx *checks.ValidationContext) error {
+	nodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Context, metav1.ListOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to list nodes", err)
+	}
+
+	// Detect EKS: node.spec.providerID starts with "aws://".
+	var isEKS bool
+	for _, n := range nodes.Items {
+		if strings.HasPrefix(n.Spec.ProviderID, "aws://") {
+			isEKS = true
+			break
+		}
+	}
+	if !isEKS {
+		slog.Info("not an EKS cluster and Karpenter not found, skipping cluster autoscaling check")
+		return nil
+	}
+
+	// Collect GPU nodes and their ASG metadata from node labels.
+	type gpuNodeInfo struct {
+		Name         string
+		InstanceType string
+		NodeGroup    string
+		GPUCount     string
+		GPUProduct   string
+		Region       string
+		Zone         string
+	}
+	var gpuNodes []gpuNodeInfo
+	for _, n := range nodes.Items {
+		if n.Labels["nvidia.com/gpu.present"] != "true" {
+			continue
+		}
+		gpuNodes = append(gpuNodes, gpuNodeInfo{
+			Name:         n.Name,
+			InstanceType: n.Labels["node.kubernetes.io/instance-type"],
+			NodeGroup:    nodeGroupName(n.Labels),
+			GPUCount:     n.Labels["nvidia.com/gpu.count"],
+			GPUProduct:   n.Labels["nvidia.com/gpu.product"],
+			Region:       n.Labels["topology.kubernetes.io/region"],
+			Zone:         n.Labels["topology.kubernetes.io/zone"],
+		})
+	}
+
+	if len(gpuNodes) == 0 {
+		return errors.New(errors.ErrCodeNotFound, "no GPU nodes found in EKS cluster")
+	}
+
+	// Record GPU node inventory as evidence.
+	var nodeSummary strings.Builder
+	fmt.Fprintf(&nodeSummary, "GPU Nodes: %d\n\n", len(gpuNodes))
+	for _, n := range gpuNodes {
+		fmt.Fprintf(&nodeSummary, "%-44s instance=%s gpus=%s product=%s group=%s zone=%s\n",
+			n.Name, valueOrUnknown(n.InstanceType), valueOrUnknown(n.GPUCount),
+			valueOrUnknown(n.GPUProduct), valueOrUnknown(n.NodeGroup), valueOrUnknown(n.Zone))
+	}
+	recordRawTextArtifact(ctx, "EKS GPU Nodes",
+		"kubectl get nodes -l nvidia.com/gpu.present=true -o custom-columns=NAME:.metadata.name,INSTANCE:.metadata.labels.node\\.kubernetes\\.io/instance-type,GPUS:.metadata.labels.nvidia\\.com/gpu\\.count,PRODUCT:.metadata.labels.nvidia\\.com/gpu\\.product",
+		nodeSummary.String())
+
+	// Verify node group labels exist (proves ASG-managed).
+	// Check ALL GPU nodes — not just the first — to avoid order-sensitive misclassification.
+	groupCounts := make(map[string]int)
+	var nodesWithoutGroup []string
+	for _, n := range gpuNodes {
+		if n.NodeGroup == "" {
+			nodesWithoutGroup = append(nodesWithoutGroup, n.Name)
+		} else {
+			groupCounts[n.NodeGroup]++
+		}
+	}
+	if len(groupCounts) == 0 {
+		return errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("no GPU nodes have a node group label — cannot verify ASG-based autoscaling (nodes without label: %s)",
+				strings.Join(nodesWithoutGroup, ", ")))
+	}
+	if len(nodesWithoutGroup) > 0 {
+		slog.Warn("some GPU nodes missing node group label",
+			"nodesWithoutGroup", nodesWithoutGroup, "nodesWithGroup", len(gpuNodes)-len(nodesWithoutGroup))
+	}
+	var groupSummary strings.Builder
+	for group, count := range groupCounts {
+		fmt.Fprintf(&groupSummary, "%-32s nodes=%d\n", group, count)
+	}
+	recordRawTextArtifact(ctx, "EKS GPU Node Groups",
+		"kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[*].metadata.labels.nodeGroup}'",
+		fmt.Sprintf("Node Groups: %d\n\n%s", len(groupCounts), groupSummary.String()))
+
+	// Record region/platform info from the first GPU node with a group label.
+	var representative gpuNodeInfo
+	for _, n := range gpuNodes {
+		if n.NodeGroup != "" {
+			representative = n
+			break
+		}
+	}
+	recordRawTextArtifact(ctx, "EKS Cluster Platform",
+		"kubectl get nodes -o jsonpath='{.items[0].spec.providerID}'",
+		fmt.Sprintf("Platform:      EKS (AWS)\nRegion:        %s\nInstance Type: %s\nGPU Product:   %s\nGPUs per Node: %s",
+			valueOrUnknown(representative.Region), valueOrUnknown(representative.InstanceType),
+			valueOrUnknown(representative.GPUProduct), valueOrUnknown(representative.GPUCount)))
+
+	slog.Info("EKS GPU autoscaling validated via node group metadata",
+		"gpuNodes", len(gpuNodes), "nodeGroups", len(groupCounts))
+	return nil
+}
+
+// nodeGroupName extracts the node group name from node labels.
+// EKS uses "eks.amazonaws.com/nodegroup", but some clusters use "nodeGroup" or
+// "alpha.eksctl.io/nodegroup-name" depending on how the node group was created.
+func nodeGroupName(labels map[string]string) string {
+	for _, key := range []string{
+		"eks.amazonaws.com/nodegroup",
+		"nodeGroup",
+		"alpha.eksctl.io/nodegroup-name",
+		"kops.k8s.io/instancegroup",
+	} {
+		if v, ok := labels[key]; ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
