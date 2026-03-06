@@ -117,6 +117,11 @@ func (v *Validator) ValidatePhases(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
 	}
 
+	// Ensure validation namespace exists before starting informers or creating RBAC.
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
+	}
+
 	// Shared informer factory scoped to the validation namespace.
 	// Started once and reused across all phases and deployers.
 	factory := informers.NewSharedInformerFactoryWithOptions(
@@ -207,6 +212,10 @@ func (v *Validator) ValidatePhase(
 	clientset, _, err := k8sclient.GetKubeClient()
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
 	}
 
 	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
@@ -511,6 +520,26 @@ func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kuberne
 			slog.Warn("failed to delete CTRF ConfigMap", "phase", phase, "error", err)
 		}
 	}
+}
+
+// ensureNamespace creates the namespace if it does not exist.
+// Uses create-or-ignore since namespaces are immutable.
+func ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+			Labels: map[string]string{
+				labels.Name:      labels.ValueAICR,
+				labels.Component: labels.ValueValidation,
+				labels.ManagedBy: labels.ValueAICR,
+			},
+		},
+	}
+	_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	return nil
 }
 
 func generateRunID() string {

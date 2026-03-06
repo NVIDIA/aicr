@@ -333,6 +333,134 @@ func TestBuilderTimestamps(t *testing.T) {
 	}
 }
 
+func TestMergeReportsSingleReport(t *testing.T) {
+	b := NewBuilder("aicr", "1.0.0", "deployment")
+	b.AddResult(&ValidatorResult{
+		Name:     "v1",
+		Phase:    "deployment",
+		ExitCode: 0,
+		Duration: 5 * time.Second,
+	})
+	original := b.Build()
+
+	merged := MergeReports("aicr", "1.0.0", []*Report{original})
+	if merged != original {
+		t.Error("MergeReports with single report should return the same pointer")
+	}
+}
+
+func TestMergeReportsMultiple(t *testing.T) {
+	b1 := NewBuilder("aicr", "1.0.0", "deployment")
+	b1.AddResult(&ValidatorResult{Name: "v1", Phase: "deployment", ExitCode: 0, Duration: 5 * time.Second})
+	b1.AddResult(&ValidatorResult{Name: "v2", Phase: "deployment", ExitCode: 1, Duration: 3 * time.Second})
+	r1 := b1.Build()
+
+	b2 := NewBuilder("aicr", "1.0.0", "performance")
+	b2.AddResult(&ValidatorResult{Name: "v3", Phase: "performance", ExitCode: 0, Duration: 10 * time.Second})
+	b2.AddSkipped("v4", "performance", "skipped")
+	r2 := b2.Build()
+
+	merged := MergeReports("aicr", "1.0.0", []*Report{r1, r2})
+
+	if merged.ReportFormat != ReportFormatCTRF {
+		t.Errorf("ReportFormat = %q, want %q", merged.ReportFormat, ReportFormatCTRF)
+	}
+	if merged.Results.Summary.Tests != 4 {
+		t.Errorf("Summary.Tests = %d, want 4", merged.Results.Summary.Tests)
+	}
+	if merged.Results.Summary.Passed != 2 {
+		t.Errorf("Summary.Passed = %d, want 2", merged.Results.Summary.Passed)
+	}
+	if merged.Results.Summary.Failed != 1 {
+		t.Errorf("Summary.Failed = %d, want 1", merged.Results.Summary.Failed)
+	}
+	if merged.Results.Summary.Skipped != 1 {
+		t.Errorf("Summary.Skipped = %d, want 1", merged.Results.Summary.Skipped)
+	}
+	if len(merged.Results.Tests) != 4 {
+		t.Errorf("Tests length = %d, want 4", len(merged.Results.Tests))
+	}
+
+	// Earliest start, latest stop
+	if merged.Results.Summary.Start != r1.Results.Summary.Start {
+		t.Errorf("Summary.Start = %d, want %d (earliest)", merged.Results.Summary.Start, r1.Results.Summary.Start)
+	}
+	if merged.Results.Summary.Stop < r2.Results.Summary.Stop {
+		t.Errorf("Summary.Stop = %d, should be >= %d (latest)", merged.Results.Summary.Stop, r2.Results.Summary.Stop)
+	}
+
+	// Timestamp from first report
+	if merged.Timestamp != r1.Timestamp {
+		t.Errorf("Timestamp = %q, want %q (first report)", merged.Timestamp, r1.Timestamp)
+	}
+}
+
+func TestMergeReportsEmpty(t *testing.T) {
+	merged := MergeReports("aicr", "1.0.0", []*Report{})
+	if merged == nil {
+		t.Fatal("MergeReports with empty slice should not return nil")
+	}
+	if merged.Results.Summary.Tests != 0 {
+		t.Errorf("Summary.Tests = %d, want 0", merged.Results.Summary.Tests)
+	}
+	if merged.Timestamp == "" {
+		t.Error("Timestamp should be set even for empty merge")
+	}
+}
+
+func TestMergeReportsNilInSlice(t *testing.T) {
+	b := NewBuilder("aicr", "1.0.0", "deployment")
+	b.AddResult(&ValidatorResult{Name: "v1", Phase: "deployment", ExitCode: 0, Duration: 1 * time.Second})
+	r := b.Build()
+
+	merged := MergeReports("aicr", "1.0.0", []*Report{nil, r, nil})
+	if merged.Results.Summary.Tests != 1 {
+		t.Errorf("Summary.Tests = %d, want 1", merged.Results.Summary.Tests)
+	}
+	if merged.Results.Summary.Passed != 1 {
+		t.Errorf("Summary.Passed = %d, want 1", merged.Results.Summary.Passed)
+	}
+	if len(merged.Results.Tests) != 1 {
+		t.Errorf("Tests length = %d, want 1", len(merged.Results.Tests))
+	}
+}
+
+func TestMergeReportsEnvironmentFromLast(t *testing.T) {
+	r1 := &Report{
+		ReportFormat: ReportFormatCTRF,
+		SpecVersion:  SpecVersion,
+		Timestamp:    "2026-01-01T00:00:00Z",
+		Results: Results{
+			Summary: Summary{Tests: 1, Passed: 1, Start: 1000, Stop: 2000},
+			Tests:   []TestResult{{Name: "v1", Status: StatusPassed}},
+			Environment: &Environment{
+				TestEnvironment: "env-first",
+			},
+		},
+	}
+	r2 := &Report{
+		ReportFormat: ReportFormatCTRF,
+		SpecVersion:  SpecVersion,
+		Timestamp:    "2026-01-01T00:01:00Z",
+		Results: Results{
+			Summary: Summary{Tests: 1, Passed: 1, Start: 2000, Stop: 3000},
+			Tests:   []TestResult{{Name: "v2", Status: StatusPassed}},
+			Environment: &Environment{
+				TestEnvironment: "env-second",
+			},
+		},
+	}
+
+	merged := MergeReports("aicr", "1.0.0", []*Report{r1, r2})
+	if merged.Results.Environment == nil {
+		t.Fatal("Environment should not be nil")
+	}
+	if merged.Results.Environment.TestEnvironment != "env-second" {
+		t.Errorf("Environment.TestEnvironment = %q, want %q (last non-nil wins)",
+			merged.Results.Environment.TestEnvironment, "env-second")
+	}
+}
+
 func TestBuilderStdoutNotCapturedWhenEmpty(t *testing.T) {
 	b := NewBuilder("aicr", "1.0.0", testPhase)
 	b.AddResult(&ValidatorResult{

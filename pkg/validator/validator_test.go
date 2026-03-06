@@ -18,6 +18,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	corev1 "k8s.io/api/core/v1"
@@ -210,6 +212,175 @@ func TestValidatePhaseNoCluster(t *testing.T) {
 	}
 	if pr.Phase != PhaseDeployment {
 		t.Errorf("phase = %q, want %q", pr.Phase, PhaseDeployment)
+	}
+}
+
+func TestCheckReadinessNilInputs(t *testing.T) {
+	tests := []struct {
+		name string
+		rec  *recipe.RecipeResult
+		snap *snapshotter.Snapshot
+	}{
+		{"nil recipe", nil, &snapshotter.Snapshot{}},
+		{"nil snapshot", &recipe.RecipeResult{}, nil},
+		{"both nil", nil, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := checkReadiness(tt.rec, tt.snap); err != nil {
+				t.Errorf("checkReadiness() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestCheckReadinessEmptyConstraints(t *testing.T) {
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{},
+	}
+	snap := &snapshotter.Snapshot{}
+	if err := checkReadiness(rec, snap); err != nil {
+		t.Errorf("checkReadiness() = %v, want nil for empty constraints", err)
+	}
+}
+
+func TestCheckReadinessPassingConstraint(t *testing.T) {
+	// Use a constraint path that Evaluate can resolve.
+	// When the path cannot be parsed or value not found, Evaluate returns Error (skipped).
+	// A constraint with an unparseable name results in Error != nil -> skipped (not failure).
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{
+			{Name: "invalid-path-that-will-be-skipped", Value: "anything"},
+		},
+	}
+	snap := &snapshotter.Snapshot{}
+	// Unparseable constraint path => skipped (warn), not failure.
+	if err := checkReadiness(rec, snap); err != nil {
+		t.Errorf("checkReadiness() = %v, want nil for skipped constraint", err)
+	}
+}
+
+func TestFilterEntriesByRecipeNilRecipe(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+		{Name: "v2", Phase: "deployment"},
+	}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, nil)
+	if len(got) != 2 {
+		t.Errorf("filterEntriesByRecipe(nil recipe) returned %d entries, want 2", len(got))
+	}
+}
+
+func TestFilterEntriesByRecipeNilValidation(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+	}
+	rec := &recipe.RecipeResult{Validation: nil}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, rec)
+	if len(got) != 1 {
+		t.Errorf("filterEntriesByRecipe(nil validation) returned %d entries, want 1", len(got))
+	}
+}
+
+func TestFilterEntriesByRecipeNoChecks(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+		{Name: "v2", Phase: "deployment"},
+	}
+	rec := &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{},
+		},
+	}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, rec)
+	if len(got) != 2 {
+		t.Errorf("filterEntriesByRecipe(empty checks) returned %d entries, want 2 (all)", len(got))
+	}
+}
+
+func TestFilterEntriesByRecipeWithChecks(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+		{Name: "v2", Phase: "deployment"},
+		{Name: "v3", Phase: "deployment"},
+	}
+
+	tests := []struct {
+		name     string
+		phase    Phase
+		rec      *recipe.RecipeResult
+		expected int
+		names    []string
+	}{
+		{
+			name:  "deployment filters to declared checks",
+			phase: PhaseDeployment,
+			rec: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"v1", "v3"},
+					},
+				},
+			},
+			expected: 2,
+			names:    []string{"v1", "v3"},
+		},
+		{
+			name:  "performance phase with no matching entries",
+			phase: PhasePerformance,
+			rec: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Checks: []string{"perf-only"},
+					},
+				},
+			},
+			expected: 0,
+		},
+		{
+			name:  "conformance phase returns all when nil phase config",
+			phase: PhaseConformance,
+			rec: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"v1"},
+					},
+				},
+			},
+			expected: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterEntriesByRecipe(entries, tt.phase, tt.rec)
+			if len(got) != tt.expected {
+				t.Errorf("filterEntriesByRecipe() returned %d entries, want %d", len(got), tt.expected)
+			}
+			if tt.names != nil {
+				for i, name := range tt.names {
+					if i < len(got) && got[i].Name != name {
+						t.Errorf("got[%d].Name = %q, want %q", i, got[i].Name, name)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestFilterEntriesByRecipeEmptyChecksList(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+	}
+	rec := &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{
+				Checks: []string{},
+			},
+		},
+	}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, rec)
+	if len(got) != 1 {
+		t.Errorf("filterEntriesByRecipe(empty checks list) returned %d entries, want 1 (all)", len(got))
 	}
 }
 
