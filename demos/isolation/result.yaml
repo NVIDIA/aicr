@@ -1,0 +1,42 @@
+recipeSource: demos/isolation/recipe.yaml
+snapshotSource: snapshot.yaml
+summary:
+  passed: 4
+  failed: 0
+  skipped: 0
+  total: 4
+  status: pass
+  duration: 8.926139959s
+phases:
+  deployment:
+    status: pass
+    checks:
+      - name: TestCheckExpectedResources
+        status: pass
+        reason: |-
+          === RUN   TestCheckExpectedResources
+              expected_resources_check_test.go:42: Running check: expected-resources
+              expected_resources_check_test.go:51: ✓ Check passed: expected-resources
+          --- PASS: TestCheckExpectedResources (0.02s)
+        source: shared
+      - name: TestGPUOperatorVersion
+        status: pass
+        reason: |-
+          === RUN   TestGPUOperatorVersion
+              gpu_operator_version_constraint_test.go:43: Validating constraint: Deployment.gpu-operator.version = >= v24.6.0
+              gpu_operator_version_constraint_test.go:52: CONSTRAINT_RESULT: name=Deployment.gpu-operator.version expected=>= v24.6.0 actual=v24.6.0 passed=true
+              gpu_operator_version_constraint_test.go:58: ✓ Constraint satisfied: Deployment.gpu-operator.version = v24.6.0
+          --- PASS: TestGPUOperatorVersion (0.00s)
+        source: shared
+      - name: TestCheckExpectedResources
+        status: pass
+        reason: |-
+          === RUN   TestCheckExpectedResources
+              expected_resources_check_test.go:42: Running check: expected-resources
+              expected_resources_check_test.go:51: ✓ Check passed: expected-resources
+          --- PASS: TestCheckExpectedResources (0.01s)
+        source: isolated
+      - name: cluster-dns-check
+        status: pass
+        source: external
+    duration: 8.926139959s

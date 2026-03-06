@@ -23,6 +23,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -117,79 +118,14 @@ func (v *Validator) validateDeployment(
 	if recipeResult.Validation == nil || recipeResult.Validation.Deployment == nil {
 		phaseResult.Status = ValidationStatusSkipped
 		phaseResult.Reason = "deployment phase not configured in recipe"
-	} else { //nolint:gocritic // elseif not applicable, multiple statements in else block
-		// NOTE: Deployment phase constraints require live cluster access.
-		// They are NOT evaluated inline like readiness constraints.
-		// Instead, they should be registered as constraint validators in the checks registry
-		// and will be evaluated inside the validation Job with cluster access.
-		// See pkg/validator/checks/deployment/constraints.go for examples.
-
-		// Run checks and evaluate constraints as Kubernetes Jobs
-		// Note: RBAC resources must be created by the caller before invoking this function.
-		// For multi-phase validation, validateAll() manages RBAC lifecycle.
-		// For single-phase validation, the CLI/API should call agent.EnsureRBAC() first.
-		if len(recipeResult.Validation.Deployment.Checks) > 0 || len(recipeResult.Validation.Deployment.Constraints) > 0 {
-			if v.NoCluster {
-				slog.Info("no-cluster mode enabled, skipping cluster check execution for deployment phase")
-				// Create stub check results for each check in the recipe
-				for _, checkName := range recipeResult.Validation.Deployment.Checks {
-					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
-						Name:   checkName,
-						Status: ValidationStatusSkipped,
-						Reason: "skipped - no-cluster mode (test mode)",
-					})
-				}
-			} else {
-				clientset, _, err := k8sclient.GetKubeClient()
-				if err != nil {
-					// If Kubernetes is not available (e.g., running in test mode), skip check execution
-					slog.Warn("Kubernetes client unavailable, skipping check execution",
-						"error", err,
-						"checks", len(recipeResult.Validation.Deployment.Checks))
-					// Add skeleton check result
-					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
-						Name:   "deployment",
-						Status: ValidationStatusPass,
-						Reason: "skipped - Kubernetes unavailable (test mode)",
-					})
-				} else {
-					// ConfigMap names (created once per validation run by validateAll)
-					snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
-					recipeCMName := fmt.Sprintf("aicr-recipe-%s", v.RunID)
-
-					// Validate that all recipe constraints/checks are registered (logs warnings for missing)
-					v.validateRecipeRegistrations(recipeResult, "deployment")
-
-					// Build test pattern from recipe (constraint names -> test names)
-					patternResult := v.buildTestPattern(recipeResult, "deployment")
-
-					// Deploy ONE Job for ALL deployment checks and constraints in this phase
-					jobConfig := agent.Config{
-						Namespace:          v.Namespace,
-						JobName:            fmt.Sprintf("aicr-%s-deployment", v.RunID),
-						Image:              v.Image,
-						ImagePullSecrets:   v.ImagePullSecrets,
-						ServiceAccountName: "aicr-validator",
-						SnapshotConfigMap:  snapshotCMName,
-						RecipeConfigMap:    recipeCMName,
-						TestPackage:        "./pkg/validator/checks/deployment",
-						TestPattern:        patternResult.Pattern,
-						ExpectedTests:      patternResult.ExpectedTests,
-						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Deployment, DefaultDeploymentTimeout),
-						Tolerations:        v.Tolerations,
-						Affinity:           preferCPUNodeAffinity(),
-					}
-
-					deployer := agent.NewDeployer(clientset, jobConfig)
-
-					// Run the phase Job and aggregate results
-					phaseJobResult := v.runPhaseJob(ctx, deployer, jobConfig, "deployment")
-
-					// Merge Job results into phase result
-					phaseResult.Checks = phaseJobResult.Checks
-				}
-			}
-		}
+	} else {
+		v.executePhaseChecks(ctx, recipeResult, phaseExecConfig{
+			name:           string(PhaseDeployment),
+			testPackage:    "./pkg/validator/checks/deployment",
+			defaultTimeout: DefaultDeploymentTimeout,
+			phase:          recipeResult.Validation.Deployment,
+			topLevel:       recipeResult.Validation.Isolated,
+		}, phaseResult)
 	}
 
 	// Determine phase status based on checks
@@ -255,86 +191,19 @@ func (v *Validator) validatePerformance(
 		phaseResult.Status = ValidationStatusSkipped
 		phaseResult.Reason = "performance phase not configured in recipe"
 	} else {
-		// NOTE: Performance phase constraints require live cluster access and measurements.
-		// They are NOT evaluated inline like readiness constraints.
-		// Instead, they should be registered as constraint validators in the checks registry
-		// and will be evaluated inside the validation Job with cluster access.
-		// See pkg/validator/checks/performance/ for examples.
-
 		// Log infrastructure component if specified
 		if recipeResult.Validation.Performance.Infrastructure != "" {
 			slog.Debug("performance infrastructure specified",
 				"component", recipeResult.Validation.Performance.Infrastructure)
 		}
 
-		// Run checks and evaluate constraints as Kubernetes Jobs
-		// Note: RBAC resources must be created by the caller before invoking this function.
-		// For multi-phase validation, validateAll() manages RBAC lifecycle.
-		// For single-phase validation, the CLI/API should call agent.EnsureRBAC() first.
-		if len(recipeResult.Validation.Performance.Checks) > 0 || len(recipeResult.Validation.Performance.Constraints) > 0 {
-			if v.NoCluster {
-				slog.Info("no-cluster mode enabled, skipping cluster check execution for performance phase")
-				// Create stub check results for each check in the recipe
-				for _, checkName := range recipeResult.Validation.Performance.Checks {
-					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
-						Name:   checkName,
-						Status: ValidationStatusSkipped,
-						Reason: "skipped - no-cluster mode (test mode)",
-					})
-				}
-			} else {
-				clientset, _, err := k8sclient.GetKubeClient()
-				if err != nil {
-					// If Kubernetes is not available (e.g., running in test mode), skip check execution
-					slog.Warn("Kubernetes client unavailable, skipping check execution",
-						"error", err,
-						"checks", len(recipeResult.Validation.Performance.Checks))
-					// Add skeleton check result
-					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
-						Name:   "performance",
-						Status: ValidationStatusPass,
-						Reason: "skipped - Kubernetes unavailable (test mode)",
-					})
-				} else {
-					// ConfigMap names (created once per validation run by validateAll)
-					snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
-					recipeCMName := fmt.Sprintf("aicr-recipe-%s", v.RunID)
-
-					// Validate that all recipe constraints/checks are registered (logs warnings for missing)
-					v.validateRecipeRegistrations(recipeResult, "performance")
-
-					// Build a test pattern so only the tests required by the recipe run,
-					// not every test in the package (including unit tests).
-					patternResult := v.buildTestPattern(recipeResult, "performance")
-
-					// Deploy ONE Job for ALL performance checks and constraints in this phase
-					// The Job pod is an orchestration layer (creates GPU workload Pods);
-					// it only needs K8s API access, so prefer CPU nodes.
-					jobConfig := agent.Config{
-						Namespace:          v.Namespace,
-						JobName:            fmt.Sprintf("aicr-%s-performance", v.RunID),
-						Image:              v.Image,
-						ImagePullSecrets:   v.ImagePullSecrets,
-						ServiceAccountName: "aicr-validator",
-						SnapshotConfigMap:  snapshotCMName,
-						RecipeConfigMap:    recipeCMName,
-						TestPackage:        "./pkg/validator/checks/performance",
-						TestPattern:        patternResult.Pattern,
-						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Performance, DefaultPerformanceTimeout),
-						Tolerations:        v.Tolerations,
-						Affinity:           preferCPUNodeAffinity(),
-					}
-
-					deployer := agent.NewDeployer(clientset, jobConfig)
-
-					// Run the phase Job and aggregate results
-					phaseJobResult := v.runPhaseJob(ctx, deployer, jobConfig, "performance")
-
-					// Merge Job results into phase result
-					phaseResult.Checks = phaseJobResult.Checks
-				}
-			}
-		}
+		v.executePhaseChecks(ctx, recipeResult, phaseExecConfig{
+			name:           string(PhasePerformance),
+			testPackage:    "./pkg/validator/checks/performance",
+			defaultTimeout: DefaultPerformanceTimeout,
+			phase:          recipeResult.Validation.Performance,
+			topLevel:       recipeResult.Validation.Isolated,
+		}, phaseResult)
 	}
 
 	// Determine phase status based on checks
@@ -400,79 +269,14 @@ func (v *Validator) validateConformance(
 	if recipeResult.Validation == nil || recipeResult.Validation.Conformance == nil {
 		phaseResult.Status = ValidationStatusSkipped
 		phaseResult.Reason = "conformance phase not configured in recipe"
-	} else { //nolint:gocritic // elseif not applicable, multiple statements in else block
-		// NOTE: Conformance phase constraints require live cluster access.
-		// They are NOT evaluated inline like readiness constraints.
-		// Instead, they should be registered as constraint validators in the checks registry
-		// and will be evaluated inside the validation Job with cluster access.
-		// See pkg/validator/checks/conformance/ for examples.
-
-		// Run checks and evaluate constraints as Kubernetes Jobs
-		// Note: RBAC resources must be created by the caller before invoking this function.
-		// For multi-phase validation, validateAll() manages RBAC lifecycle.
-		// For single-phase validation, the CLI/API should call agent.EnsureRBAC() first.
-		if len(recipeResult.Validation.Conformance.Checks) > 0 || len(recipeResult.Validation.Conformance.Constraints) > 0 {
-			if v.NoCluster {
-				slog.Info("no-cluster mode enabled, skipping cluster check execution for conformance phase")
-				// Create stub check results for each check in the recipe
-				for _, checkName := range recipeResult.Validation.Conformance.Checks {
-					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
-						Name:   checkName,
-						Status: ValidationStatusSkipped,
-						Reason: "skipped - no-cluster mode (test mode)",
-					})
-				}
-			} else {
-				clientset, _, err := k8sclient.GetKubeClient()
-				if err != nil {
-					// If Kubernetes is not available (e.g., running in test mode), skip check execution
-					slog.Warn("Kubernetes client unavailable, skipping check execution",
-						"error", err,
-						"checks", len(recipeResult.Validation.Conformance.Checks))
-					// Add skeleton check result
-					phaseResult.Checks = append(phaseResult.Checks, CheckResult{
-						Name:   "conformance",
-						Status: ValidationStatusSkipped,
-						Reason: "skipped - Kubernetes unavailable (test mode)",
-					})
-				} else {
-					// ConfigMap names (created once per validation run by validateAll)
-					snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
-					recipeCMName := fmt.Sprintf("aicr-recipe-%s", v.RunID)
-
-					// Validate that all recipe constraints/checks are registered (logs warnings for missing)
-					v.validateRecipeRegistrations(recipeResult, "conformance")
-
-					// Build test pattern from recipe (check/constraint names -> test names)
-					patternResult := v.buildTestPattern(recipeResult, "conformance")
-
-					// Deploy ONE Job for ALL conformance checks and constraints in this phase
-					jobConfig := agent.Config{
-						Namespace:          v.Namespace,
-						JobName:            fmt.Sprintf("aicr-%s-conformance", v.RunID),
-						Image:              v.Image,
-						ImagePullSecrets:   v.ImagePullSecrets,
-						ServiceAccountName: "aicr-validator",
-						SnapshotConfigMap:  snapshotCMName,
-						RecipeConfigMap:    recipeCMName,
-						TestPackage:        "./pkg/validator/checks/conformance",
-						TestPattern:        patternResult.Pattern,
-						ExpectedTests:      patternResult.ExpectedTests,
-						Timeout:            resolvePhaseTimeout(recipeResult.Validation.Conformance, DefaultConformanceTimeout),
-						Tolerations:        v.Tolerations,
-						Affinity:           preferCPUNodeAffinity(),
-					}
-
-					deployer := agent.NewDeployer(clientset, jobConfig)
-
-					// Run the phase Job and aggregate results
-					phaseJobResult := v.runPhaseJob(ctx, deployer, jobConfig, "conformance")
-
-					// Merge Job results into phase result
-					phaseResult.Checks = phaseJobResult.Checks
-				}
-			}
-		}
+	} else {
+		v.executePhaseChecks(ctx, recipeResult, phaseExecConfig{
+			name:           string(PhaseConformance),
+			testPackage:    "./pkg/validator/checks/conformance",
+			defaultTimeout: DefaultConformanceTimeout,
+			phase:          recipeResult.Validation.Conformance,
+			topLevel:       recipeResult.Validation.Isolated,
+		}, phaseResult)
 	}
 
 	// Determine phase status based on checks
@@ -532,10 +336,10 @@ func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResul
 			}
 
 			// Check explicit checks
-			for _, checkName := range recipeResult.Validation.Deployment.Checks {
-				_, ok := checks.GetCheck(checkName)
+			for _, check := range recipeResult.Validation.Deployment.Checks {
+				_, ok := checks.GetCheck(check.Name)
 				if !ok {
-					unregisteredChecks = append(unregisteredChecks, checkName)
+					unregisteredChecks = append(unregisteredChecks, check.Name)
 				}
 			}
 		}
@@ -548,10 +352,10 @@ func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResul
 				}
 			}
 
-			for _, checkName := range recipeResult.Validation.Performance.Checks {
-				_, ok := checks.GetCheck(checkName)
+			for _, check := range recipeResult.Validation.Performance.Checks {
+				_, ok := checks.GetCheck(check.Name)
 				if !ok {
-					unregisteredChecks = append(unregisteredChecks, checkName)
+					unregisteredChecks = append(unregisteredChecks, check.Name)
 				}
 			}
 		}
@@ -564,10 +368,10 @@ func (v *Validator) validateRecipeRegistrations(recipeResult *recipe.RecipeResul
 				}
 			}
 
-			for _, checkName := range recipeResult.Validation.Conformance.Checks {
-				_, ok := checks.GetCheck(checkName)
+			for _, check := range recipeResult.Validation.Conformance.Checks {
+				_, ok := checks.GetCheck(check.Name)
 				if !ok {
-					unregisteredChecks = append(unregisteredChecks, checkName)
+					unregisteredChecks = append(unregisteredChecks, check.Name)
 				}
 			}
 		}
@@ -624,97 +428,378 @@ type buildTestPatternResult struct {
 }
 
 func (v *Validator) buildTestPattern(recipeResult *recipe.RecipeResult, phase string) buildTestPatternResult {
-	var testNames []string
-	uniqueTests := make(map[string]bool)
+	if recipeResult.Validation == nil {
+		return buildTestPatternResult{}
+	}
 
 	switch phase {
 	case string(PhaseDeployment):
-		if recipeResult.Validation != nil && recipeResult.Validation.Deployment != nil {
-			// Add tests for constraints
-			for _, constraint := range recipeResult.Validation.Deployment.Constraints {
-				testName, ok := checks.GetTestNameForConstraint(constraint.Name)
-				if ok && !uniqueTests[testName] {
-					testNames = append(testNames, testName)
-					uniqueTests[testName] = true
-					slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
-				}
-				// Note: Missing registrations are caught by validateRecipeRegistrations
-			}
-
-			// Add tests for explicit checks
-			for _, checkName := range recipeResult.Validation.Deployment.Checks {
-				testName, ok := checks.GetTestNameForCheck(checkName)
-				if !ok {
-					// Fallback to generated name if not registered
-					testName = checkNameToTestName(checkName)
-				}
-				if !uniqueTests[testName] {
-					testNames = append(testNames, testName)
-					uniqueTests[testName] = true
-					slog.Debug("check mapped to test", "check", checkName, "test", testName)
-				}
-			}
+		if recipeResult.Validation.Deployment != nil {
+			return buildTestPatternFromItems(recipeResult.Validation.Deployment.Checks, recipeResult.Validation.Deployment.Constraints)
 		}
 	case string(PhasePerformance):
-		if recipeResult.Validation != nil && recipeResult.Validation.Performance != nil {
-			// Add tests for constraints
-			for _, constraint := range recipeResult.Validation.Performance.Constraints {
-				testName, ok := checks.GetTestNameForConstraint(constraint.Name)
-				if ok && !uniqueTests[testName] {
-					testNames = append(testNames, testName)
-					uniqueTests[testName] = true
-					slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
-				}
-			}
-
-			// Add tests for explicit checks
-			for _, checkName := range recipeResult.Validation.Performance.Checks {
-				testName, ok := checks.GetTestNameForCheck(checkName)
-				if !ok {
-					testName = checkNameToTestName(checkName)
-				}
-				if !uniqueTests[testName] {
-					testNames = append(testNames, testName)
-					uniqueTests[testName] = true
-					slog.Debug("check mapped to test", "check", checkName, "test", testName)
-				}
-			}
+		if recipeResult.Validation.Performance != nil {
+			return buildTestPatternFromItems(recipeResult.Validation.Performance.Checks, recipeResult.Validation.Performance.Constraints)
 		}
 	case string(PhaseConformance):
-		if recipeResult.Validation != nil && recipeResult.Validation.Conformance != nil {
-			// Add tests for constraints
-			for _, constraint := range recipeResult.Validation.Conformance.Constraints {
-				testName, ok := checks.GetTestNameForConstraint(constraint.Name)
-				if ok && !uniqueTests[testName] {
-					testNames = append(testNames, testName)
-					uniqueTests[testName] = true
-					slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
-				}
-			}
+		if recipeResult.Validation.Conformance != nil {
+			return buildTestPatternFromItems(recipeResult.Validation.Conformance.Checks, recipeResult.Validation.Conformance.Constraints)
+		}
+	}
 
-			// Add tests for explicit checks
-			for _, checkName := range recipeResult.Validation.Conformance.Checks {
-				testName, ok := checks.GetTestNameForCheck(checkName)
-				if !ok {
-					testName = checkNameToTestName(checkName)
-				}
-				if !uniqueTests[testName] {
-					testNames = append(testNames, testName)
-					uniqueTests[testName] = true
-					slog.Debug("check mapped to test", "check", checkName, "test", testName)
-				}
-			}
+	return buildTestPatternResult{}
+}
+
+// buildTestPatternFromItems builds a test pattern from explicit check and constraint lists.
+// This is the core pattern builder used by both buildTestPattern and executePhaseChecks.
+func buildTestPatternFromItems(checkRefs []recipe.CheckRef, constraints []recipe.Constraint) buildTestPatternResult {
+	var testNames []string
+	uniqueTests := make(map[string]bool)
+
+	for _, constraint := range constraints {
+		testName, ok := checks.GetTestNameForConstraint(constraint.Name)
+		if ok && !uniqueTests[testName] {
+			testNames = append(testNames, testName)
+			uniqueTests[testName] = true
+			slog.Debug("constraint mapped to test", "constraint", constraint.Name, "test", testName)
+		}
+	}
+
+	for _, check := range checkRefs {
+		testName, ok := checks.GetTestNameForCheck(check.Name)
+		if !ok {
+			testName = checkNameToTestName(check.Name)
+		}
+		if !uniqueTests[testName] {
+			testNames = append(testNames, testName)
+			uniqueTests[testName] = true
+			slog.Debug("check mapped to test", "check", check.Name, "test", testName)
 		}
 	}
 
 	if len(testNames) == 0 {
-		// No pattern - run all tests
-		slog.Debug("no pattern specified, will run all tests in package")
-		return buildTestPatternResult{Pattern: "", ExpectedTests: 0}
+		return buildTestPatternResult{}
 	}
 
-	// Build regex: ^(TestGPUOperatorVersion|TestCheckExpectedResources)$
 	pattern := "^(" + strings.Join(testNames, "|") + ")$"
-	slog.Info("built test pattern from recipe", "pattern", pattern, "tests", len(testNames))
+	slog.Info("built test pattern from items", "pattern", pattern, "tests", len(testNames))
 	return buildTestPatternResult{Pattern: pattern, ExpectedTests: len(testNames)}
+}
+
+// sanitizeLabelValue converts a check/constraint name to a valid Kubernetes Job name suffix.
+// Lowercases, replaces dots and underscores with hyphens, truncates to 40 chars.
+// sanitizeLabelValue converts a check or constraint name to a valid Kubernetes label value.
+// Lowercase, dots/underscores become hyphens, capped at 63 chars, no trailing hyphen.
+func sanitizeLabelValue(name string) string {
+	s := strings.ToLower(name)
+	s = strings.NewReplacer(".", "-", "_", "-").Replace(s)
+	if len(s) > 63 {
+		s = s[:63]
+	}
+	return strings.TrimRight(s, "-")
+}
+
+// resolveItemTimeout returns the timeout for an individual check or constraint.
+// Falls back to phaseTimeout if the item has no timeout specified.
+func resolveItemTimeout(itemTimeout string, phaseTimeout time.Duration) time.Duration {
+	if itemTimeout != "" {
+		if parsed, err := time.ParseDuration(itemTimeout); err == nil {
+			return parsed
+		}
+		slog.Warn("invalid item timeout, using phase timeout",
+			"timeout", itemTimeout, "phaseTimeout", phaseTimeout)
+	}
+	return phaseTimeout
+}
+
+// baseJobConfig returns a Job config with fields common to all Jobs in a validation run.
+// Callers set JobName, TestPattern, ExpectedTests, and Timeout on the returned config.
+func (v *Validator) baseJobConfig(testPackage string) agent.Config {
+	return agent.Config{
+		Namespace:          v.Namespace,
+		Image:              v.Image,
+		ImagePullSecrets:   v.ImagePullSecrets,
+		ServiceAccountName: "aicr-validator",
+		SnapshotConfigMap:  fmt.Sprintf("aicr-snapshot-%s", v.RunID),
+		RecipeConfigMap:    fmt.Sprintf("aicr-recipe-%s", v.RunID),
+		TestPackage:        testPackage,
+		Tolerations:        v.Tolerations,
+		Affinity:           preferCPUNodeAffinity(),
+	}
+}
+
+// phaseExecConfig holds phase-specific parameters for executePhaseChecks.
+type phaseExecConfig struct {
+	name           string
+	testPackage    string
+	defaultTimeout time.Duration
+	phase          *recipe.ValidationPhase
+	topLevel       *bool
+}
+
+// executePhaseChecks runs all checks and constraints for a phase using the
+// three-tier execution model: shared Job, isolated Jobs, external validators.
+// Results are appended to phaseResult.Checks.
+//
+//nolint:funlen // Orchestration function with sequential tier execution
+func (v *Validator) executePhaseChecks(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	cfg phaseExecConfig,
+	phaseResult *PhaseResult,
+) {
+
+	if cfg.phase == nil {
+		return
+	}
+
+	partition := partitionByIsolation(cfg.phase, cfg.topLevel)
+	if !partition.hasShared() && !partition.hasIsolated() {
+		return
+	}
+
+	if v.NoCluster {
+		slog.Info("no-cluster mode enabled, skipping cluster check execution",
+			"phase", cfg.name)
+		for _, check := range partition.SharedChecks {
+			phaseResult.Checks = append(phaseResult.Checks, CheckResult{
+				Name:   check.Name,
+				Status: ValidationStatusSkipped,
+				Reason: "skipped - no-cluster mode (test mode)",
+				Source: CheckSourceShared,
+			})
+		}
+		for _, check := range partition.IsolatedChecks {
+			phaseResult.Checks = append(phaseResult.Checks, CheckResult{
+				Name:   check.Name,
+				Status: ValidationStatusSkipped,
+				Reason: "skipped - no-cluster mode (test mode)",
+				Source: CheckSourceIsolated,
+			})
+		}
+		for _, ev := range cfg.phase.Validators {
+			phaseResult.Checks = append(phaseResult.Checks, CheckResult{
+				Name:   ev.Name,
+				Status: ValidationStatusSkipped,
+				Reason: "skipped - no-cluster mode (test mode)",
+				Source: CheckSourceExternal,
+			})
+		}
+		return
+	}
+
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		slog.Warn("Kubernetes client unavailable, skipping check execution",
+			"error", err, "phase", cfg.name)
+		phaseResult.Checks = append(phaseResult.Checks, CheckResult{
+			Name:   cfg.name,
+			Status: ValidationStatusPass,
+			Reason: "skipped - Kubernetes unavailable (test mode)",
+		})
+		return
+	}
+
+	v.validateRecipeRegistrations(recipeResult, cfg.name)
+	phaseTimeout := resolvePhaseTimeout(cfg.phase, cfg.defaultTimeout)
+	baseCfg := v.baseJobConfig(cfg.testPackage)
+
+	// Tier 1: Shared Job — all non-isolated checks + constraints in one Job
+	if partition.hasShared() {
+		patternResult := buildTestPatternFromItems(partition.SharedChecks, partition.SharedConstraints)
+		jobCfg := baseCfg
+		jobCfg.JobName = fmt.Sprintf("aicr-%s-%s", v.RunID, cfg.name)
+		jobCfg.TestPattern = patternResult.Pattern
+		jobCfg.ExpectedTests = patternResult.ExpectedTests
+		jobCfg.Timeout = phaseTimeout
+		jobCfg.Labels = map[string]string{
+			"aicr.nvidia.com/run-id": v.RunID,
+			"aicr.nvidia.com/phase":  cfg.name,
+			"aicr.nvidia.com/tier":   "shared",
+		}
+
+		deployer := agent.NewDeployer(clientset, jobCfg)
+		jobResult := v.runPhaseJob(ctx, deployer, jobCfg, cfg.name)
+		for i := range jobResult.Checks {
+			jobResult.Checks[i].Source = CheckSourceShared
+		}
+		phaseResult.Checks = append(phaseResult.Checks, jobResult.Checks...)
+	}
+
+	// Tier 2: Isolated checks — each gets its own Job with the same validator image
+	for _, check := range partition.IsolatedChecks {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		checkLabel := sanitizeLabelValue(check.Name)
+		patternResult := buildTestPatternFromItems([]recipe.CheckRef{check}, nil)
+		jobCfg := baseCfg
+		jobCfg.JobName = fmt.Sprintf("aicr-%s-%s-%s", v.RunID, cfg.name, checkLabel)
+		jobCfg.TestPattern = patternResult.Pattern
+		jobCfg.ExpectedTests = patternResult.ExpectedTests
+		jobCfg.Timeout = resolveItemTimeout(check.Timeout, phaseTimeout)
+		jobCfg.Labels = map[string]string{
+			"aicr.nvidia.com/run-id": v.RunID,
+			"aicr.nvidia.com/phase":  cfg.name,
+			"aicr.nvidia.com/tier":   "isolated",
+			"aicr.nvidia.com/check":  checkLabel,
+		}
+
+		deployer := agent.NewDeployer(clientset, jobCfg)
+		jobResult := v.runPhaseJob(ctx, deployer, jobCfg, cfg.name)
+		for i := range jobResult.Checks {
+			jobResult.Checks[i].Source = CheckSourceIsolated
+		}
+		phaseResult.Checks = append(phaseResult.Checks, jobResult.Checks...)
+	}
+
+	// Tier 2: Isolated constraints — each gets its own Job
+	for _, constraint := range partition.IsolatedConstraints {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		constraintLabel := sanitizeLabelValue(constraint.Name)
+		patternResult := buildTestPatternFromItems(nil, []recipe.Constraint{constraint})
+		jobCfg := baseCfg
+		jobCfg.JobName = fmt.Sprintf("aicr-%s-%s-%s", v.RunID, cfg.name, constraintLabel)
+		jobCfg.TestPattern = patternResult.Pattern
+		jobCfg.ExpectedTests = patternResult.ExpectedTests
+		jobCfg.Timeout = resolveItemTimeout(constraint.Timeout, phaseTimeout)
+		jobCfg.Labels = map[string]string{
+			"aicr.nvidia.com/run-id":     v.RunID,
+			"aicr.nvidia.com/phase":      cfg.name,
+			"aicr.nvidia.com/tier":       "isolated",
+			"aicr.nvidia.com/constraint": constraintLabel,
+		}
+
+		deployer := agent.NewDeployer(clientset, jobCfg)
+		jobResult := v.runPhaseJob(ctx, deployer, jobCfg, cfg.name)
+		for i := range jobResult.Checks {
+			jobResult.Checks[i].Source = CheckSourceIsolated
+		}
+		phaseResult.Checks = append(phaseResult.Checks, jobResult.Checks...)
+	}
+
+	// Tier 3: External validators — user-provided OCI containers
+	for _, ev := range cfg.phase.Validators {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		result := v.runExternalJob(ctx, clientset, ev, cfg.name)
+		phaseResult.Checks = append(phaseResult.Checks, result)
+	}
+}
+
+// runExternalJob deploys an external validator container as a Kubernetes Job.
+// Exit 0 = pass, non-zero = fail. Failure reason is extracted from pod termination
+// message or last lines of stdout.
+//
+//nolint:funlen // Sequential Job lifecycle steps
+func (v *Validator) runExternalJob(
+	ctx context.Context,
+	clientset k8sclient.Interface,
+	ev recipe.ExternalValidator,
+	phaseName string,
+) CheckResult {
+
+	evTimeout := resolveItemTimeout(ev.Timeout, defaults.ExternalValidatorTimeout)
+
+	validatorLabel := sanitizeLabelValue(ev.Name)
+	jobCfg := agent.Config{
+		Namespace:          v.Namespace,
+		JobName:            fmt.Sprintf("aicr-%s-%s-%s", v.RunID, phaseName, validatorLabel),
+		Image:              ev.Image,
+		ImagePullSecrets:   v.ImagePullSecrets,
+		ServiceAccountName: "aicr-validator",
+		SnapshotConfigMap:  fmt.Sprintf("aicr-snapshot-%s", v.RunID),
+		RecipeConfigMap:    fmt.Sprintf("aicr-recipe-%s", v.RunID),
+		ExternalCommand:    true,
+		Timeout:            evTimeout,
+		Tolerations:        v.Tolerations,
+		Affinity:           preferCPUNodeAffinity(),
+		Labels: map[string]string{
+			"aicr.nvidia.com/run-id":    v.RunID,
+			"aicr.nvidia.com/phase":     phaseName,
+			"aicr.nvidia.com/tier":      "external",
+			"aicr.nvidia.com/validator": validatorLabel,
+		},
+	}
+
+	deployer := agent.NewDeployer(clientset, jobCfg)
+
+	slog.Info("deploying external validator", "name", ev.Name, "image", ev.Image, "phase", phaseName)
+
+	// Deploy Job
+	if err := deployer.DeployJob(ctx); err != nil {
+		return CheckResult{
+			Name:   ev.Name,
+			Status: ValidationStatusFail,
+			Reason: fmt.Sprintf("failed to deploy external validator Job: %v", err),
+			Source: CheckSourceExternal,
+		}
+	}
+
+	// Stream logs in background
+	logCtx, cancelLogs := context.WithCancel(ctx)
+	defer cancelLogs()
+	streamingActive := startLogStreaming(logCtx, deployer, ev.Name)
+
+	// Wait for Job completion
+	if err := deployer.WaitForCompletion(ctx, evTimeout); err != nil {
+		cancelLogs()
+
+		// Capture logs for error context
+		var logs string
+		if !streamingActive {
+			if captured, logErr := deployer.GetPodLogs(ctx); logErr == nil && captured != "" {
+				logs = captured
+			}
+		}
+
+		if v.Cleanup {
+			if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
+				slog.Warn("failed to cleanup external validator Job", "name", ev.Name, "error", cleanupErr)
+			}
+		}
+
+		reason := fmt.Sprintf("external validator %q failed: %v", ev.Name, err)
+		if logs != "" {
+			logLines := strings.Split(strings.TrimSpace(logs), "\n")
+			lastLines := logLines
+			if len(logLines) > 10 {
+				lastLines = logLines[len(logLines)-10:]
+			}
+			reason += fmt.Sprintf("\n\nLast %d lines of output:\n%s", len(lastLines), strings.Join(lastLines, "\n"))
+		}
+
+		return CheckResult{
+			Name:   ev.Name,
+			Status: ValidationStatusFail,
+			Reason: reason,
+			Source: CheckSourceExternal,
+		}
+	}
+
+	// Success — cleanup and return pass
+	if v.Cleanup {
+		if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
+			slog.Warn("failed to cleanup external validator Job", "name", ev.Name, "error", cleanupErr)
+		}
+	}
+
+	slog.Info("external validator passed", "name", ev.Name, "image", ev.Image)
+	return CheckResult{
+		Name:   ev.Name,
+		Status: ValidationStatusPass,
+		Source: CheckSourceExternal,
+	}
 }

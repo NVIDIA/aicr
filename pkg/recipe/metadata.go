@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"gopkg.in/yaml.v3"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
@@ -58,6 +59,63 @@ type Constraint struct {
 
 	// Unit specifies the unit for numeric constraints (e.g., "GB/s").
 	Unit string `json:"unit,omitempty" yaml:"unit,omitempty"`
+
+	// Isolated overrides the phase/top-level isolated setting for this constraint.
+	// nil means "inherit from parent"; explicit value overrides.
+	Isolated *bool `json:"isolated,omitempty" yaml:"isolated,omitempty"`
+
+	// Timeout overrides the phase timeout for this individual constraint.
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+}
+
+// CheckRef represents a reference to a validation check.
+// Supports both string shorthand ("expected-resources") and full object form
+// with optional isolation and timeout overrides.
+type CheckRef struct {
+	// Name is the check identifier (e.g., "expected-resources").
+	Name string `json:"name" yaml:"name"`
+
+	// Isolated overrides the phase/top-level isolated setting for this check.
+	// nil means "inherit from parent"; explicit value overrides.
+	Isolated *bool `json:"isolated,omitempty" yaml:"isolated,omitempty"`
+
+	// Timeout overrides the phase timeout for this individual check.
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler for CheckRef.
+// Accepts either a plain string ("expected-resources") or a mapping
+// ({name: heavy-test, isolated: true, timeout: 10m}).
+func (c *CheckRef) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		c.Name = node.Value
+		return nil
+	}
+	if node.Kind == yaml.MappingNode {
+		// Use alias type to avoid infinite recursion.
+		type checkRefAlias CheckRef
+		var raw checkRefAlias
+		if err := node.Decode(&raw); err != nil {
+			return fmt.Errorf("line %d: invalid check object: %w", node.Line, err)
+		}
+		*c = CheckRef(raw)
+		return nil
+	}
+	return fmt.Errorf("line %d: check must be a string or object, got %v", node.Line, node.Tag)
+}
+
+// ExternalValidator represents a user-provided OCI container for validation.
+// External validators communicate results via exit codes (0=pass, 1=fail, 2=skip),
+// /dev/termination-log (error context), and stdout (evidence).
+type ExternalValidator struct {
+	// Name is a human-readable identifier for this validator.
+	Name string `json:"name" yaml:"name"`
+
+	// Image is the OCI container image reference (e.g., "myregistry.io/check:v1.0").
+	Image string `json:"image" yaml:"image"`
+
+	// Timeout overrides the phase timeout for this external validator.
+	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 }
 
 // ComponentRef represents a reference to a deployable component.
@@ -133,6 +191,11 @@ type ExpectedResource struct {
 
 // ValidationConfig defines validation phases and settings.
 type ValidationConfig struct {
+	// Isolated is the top-level default for check/constraint isolation.
+	// When true, each check and constraint runs in its own Kubernetes Job.
+	// Can be overridden at phase level and individual check/constraint level.
+	Isolated *bool `json:"isolated,omitempty" yaml:"isolated,omitempty"`
+
 	// Readiness defines readiness validation phase settings.
 	Readiness *ValidationPhase `json:"readiness,omitempty" yaml:"readiness,omitempty"`
 
@@ -151,11 +214,20 @@ type ValidationPhase struct {
 	// Timeout is the maximum duration for this phase (e.g., "10m").
 	Timeout string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
 
+	// Isolated overrides the top-level isolated setting for all items in this phase.
+	// nil means "inherit from top-level"; explicit value overrides.
+	Isolated *bool `json:"isolated,omitempty" yaml:"isolated,omitempty"`
+
 	// Constraints are phase-level constraints to evaluate.
 	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 
 	// Checks are named validation checks to run in this phase.
-	Checks []string `json:"checks,omitempty" yaml:"checks,omitempty"`
+	// Supports both string shorthand and object form with isolation/timeout overrides.
+	Checks []CheckRef `json:"checks,omitempty" yaml:"checks,omitempty"`
+
+	// Validators lists external OCI containers to run as validation Jobs.
+	// Each validator runs in its own isolated Job with the user-provided image.
+	Validators []ExternalValidator `json:"validators,omitempty" yaml:"validators,omitempty"`
 
 	// NodeSelection defines which nodes to include in validation.
 	NodeSelection *NodeSelection `json:"nodeSelection,omitempty" yaml:"nodeSelection,omitempty"`
@@ -383,6 +455,9 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		if s.Validation == nil {
 			s.Validation = other.Validation
 		} else {
+			if other.Validation.Isolated != nil {
+				s.Validation.Isolated = other.Validation.Isolated
+			}
 			if other.Validation.Readiness != nil {
 				s.Validation.Readiness = other.Validation.Readiness
 			}

@@ -180,9 +180,9 @@ The test wrapper pattern enables:
 
 Each validation run is assigned a unique **RunID** for resource isolation and resumability:
 
-**RunID Format:** `YYYYMMDD-HHMMSS-XXXXXXXXXXXXXXXX` (e.g., `20260206-140523-a3f9b2c1e7d04a68b2c1e7d04a68`)
+**RunID Format:** `YYYYMMDD-HHMMSS-XXXX` (e.g., `20260206-140523-a3f9`)
 - Timestamp: Date and time when validation started
-- Random suffix: 16 hex characters for uniqueness
+- Random suffix: 4 hex characters for uniqueness
 
 **Resource Naming:**
 All resources created during a validation run include the RunID:

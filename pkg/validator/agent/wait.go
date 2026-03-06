@@ -326,10 +326,11 @@ func (d *Deployer) getPodLogsAsString(ctx context.Context) (string, error) {
 	return pod.GetPodLogs(ctx, d.clientset, d.config.Namespace, jobPod.Name, "")
 }
 
-// getPodForJob finds the pod created by the Job.
+// getPodForJob finds the pod created by the Job using the Kubernetes-managed
+// batch.kubernetes.io/job-name label (auto-added by the Job controller).
 func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
 	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("aicr.nvidia.com/job=%s", d.config.JobName),
+		LabelSelector: fmt.Sprintf("batch.kubernetes.io/job-name=%s", d.config.JobName),
 	})
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list pods for job", err)

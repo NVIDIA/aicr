@@ -380,13 +380,13 @@ func TestTestRunner_HasCheck(t *testing.T) {
 	recipeResult := &recipe.RecipeResult{
 		Validation: &recipe.ValidationConfig{
 			Deployment: &recipe.ValidationPhase{
-				Checks: []string{"expected-resources", "check-nvidia-smi"},
+				Checks: []recipe.CheckRef{{Name: "expected-resources"}, {Name: "check-nvidia-smi"}},
 			},
 			Performance: &recipe.ValidationPhase{
-				Checks: []string{"nccl-bandwidth"},
+				Checks: []recipe.CheckRef{{Name: "nccl-bandwidth"}},
 			},
 			Conformance: &recipe.ValidationPhase{
-				Checks: []string{"k8s-conformance"},
+				Checks: []recipe.CheckRef{{Name: "k8s-conformance"}},
 			},
 		},
 	}

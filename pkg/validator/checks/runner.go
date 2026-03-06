@@ -171,7 +171,7 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 		return false
 	}
 
-	var checkList []string
+	var checkList []recipe.CheckRef
 	switch phase {
 	case "deployment":
 		if r.ctx.Recipe.Validation.Deployment != nil {
@@ -187,8 +187,8 @@ func (r *TestRunner) HasCheck(phase, checkName string) bool {
 		}
 	}
 
-	for _, name := range checkList {
-		if name == checkName {
+	for _, check := range checkList {
+		if check.Name == checkName {
 			return true
 		}
 	}

@@ -204,7 +204,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			// 3. All required conformance checks present
 			checkSet := make(map[string]bool)
 			for _, c := range result.Validation.Conformance.Checks {
-				checkSet[c] = true
+				checkSet[c.Name] = true
 			}
 			for _, check := range tt.requiredChecks {
 				if !checkSet[check] {

@@ -66,6 +66,15 @@ type Config struct {
 	// Timeout for the Job to complete
 	Timeout time.Duration
 
+	// Labels are additional labels applied to the pod template.
+	// Used for structured identification (run-id, phase, check) and pod lookup.
+	Labels map[string]string
+
+	// ExternalCommand indicates this Job runs a user-provided container ENTRYPOINT
+	// instead of go test. When true, Command and Args are omitted from the container
+	// spec, and TerminationMessagePolicy is set to FallbackToLogsOnError.
+	ExternalCommand bool
+
 	// Cleanup determines whether to remove Job and RBAC on completion
 	Cleanup bool
 

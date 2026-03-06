@@ -186,15 +186,16 @@ func WithTolerations(tolerations []corev1.Toleration) Option {
 }
 
 // generateRunID creates a unique identifier for a validation run.
-// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9b2c1e7d04a68")
+// Format: YYYYMMDD-HHMMSS-XXXX (e.g., "20260206-140523-a3f9").
+// The 4-hex suffix (2 bytes) provides sufficient uniqueness when combined with
+// the second-precision timestamp. The total RunID length (20 chars) keeps
+// derived Job names like "aicr-{runID}-{phase}-{check}" within the Kubernetes
+// 63-character label value limit.
 func generateRunID() string {
-	// Generate timestamp
 	timestamp := time.Now().Format("20060102-150405")
 
-	// Generate 16 random hex characters (8 bytes)
-	randomBytes := make([]byte, 8)
+	randomBytes := make([]byte, 2)
 	if _, err := rand.Read(randomBytes); err != nil {
-		// Fallback to timestamp only if random generation fails
 		return timestamp
 	}
 	randomHex := hex.EncodeToString(randomBytes)

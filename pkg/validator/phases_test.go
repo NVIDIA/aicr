@@ -218,7 +218,7 @@ func TestValidateDeployment(t *testing.T) {
 			name: "with checks",
 			validationConfig: &recipe.ValidationConfig{
 				Deployment: &recipe.ValidationPhase{
-					Checks: []string{"expected-resources"},
+					Checks: []recipe.CheckRef{{Name: "expected-resources"}},
 				},
 			},
 			wantStatus: ValidationStatusPass,
@@ -237,7 +237,7 @@ func TestValidateDeployment(t *testing.T) {
 					Constraints: []recipe.Constraint{
 						{Name: "gpu-operator.version", Value: "== v25.10.1"},
 					},
-					Checks: []string{"expected-resources"},
+					Checks: []recipe.CheckRef{{Name: "expected-resources"}},
 				},
 			},
 			wantStatus: ValidationStatusPass,
@@ -297,7 +297,7 @@ func TestValidatePerformance(t *testing.T) {
 			validationConfig: &recipe.ValidationConfig{
 				Performance: &recipe.ValidationPhase{
 					Infrastructure: "nccl-doctor",
-					Checks:         []string{"nccl-bandwidth-test", "fabric-health"},
+					Checks:         []recipe.CheckRef{{Name: "nccl-bandwidth-test"}, {Name: "fabric-health"}},
 				},
 			},
 			wantStatus: ValidationStatusPass,
@@ -362,7 +362,7 @@ func TestValidateConformance(t *testing.T) {
 			name: "with checks",
 			validationConfig: &recipe.ValidationConfig{
 				Conformance: &recipe.ValidationPhase{
-					Checks: []string{"ai-workload-validation"},
+					Checks: []recipe.CheckRef{{Name: "ai-workload-validation"}},
 				},
 			},
 			wantStatus: ValidationStatusPass,
@@ -529,11 +529,11 @@ func createTestRecipeWithValidation() *recipe.RecipeResult {
 		},
 		Validation: &recipe.ValidationConfig{
 			Deployment: &recipe.ValidationPhase{
-				Checks: []string{"expected-resources"},
+				Checks: []recipe.CheckRef{{Name: "expected-resources"}},
 			},
 			Performance: &recipe.ValidationPhase{
 				Infrastructure: "nccl-doctor",
-				Checks:         []string{"nccl-bandwidth-test", "fabric-health"},
+				Checks:         []recipe.CheckRef{{Name: "nccl-bandwidth-test"}, {Name: "fabric-health"}},
 			},
 			// Conformance not configured (will be skipped)
 		},
@@ -908,7 +908,7 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"nonexistent-check"},
+						Checks: []recipe.CheckRef{{Name: "nonexistent-check"}},
 					},
 				},
 			},
@@ -953,7 +953,7 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 						Constraints: []recipe.Constraint{
 							{Name: "Performance.nonexistent-metric.value", Value: ">= 100"},
 						},
-						Checks: []string{"nonexistent-perf-check"},
+						Checks: []recipe.CheckRef{{Name: "nonexistent-perf-check"}},
 					},
 				},
 			},
@@ -969,7 +969,7 @@ func TestValidateRecipeRegistrations(t *testing.T) {
 						Constraints: []recipe.Constraint{
 							{Name: "Conformance.fake.value", Value: ">= 1.0"},
 						},
-						Checks: []string{"fake-conformance-check"},
+						Checks: []recipe.CheckRef{{Name: "fake-conformance-check"}},
 					},
 				},
 			},
@@ -1116,7 +1116,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Deployment: &recipe.ValidationPhase{
-						Checks:      []string{},
+						Checks:      []recipe.CheckRef{},
 						Constraints: []recipe.Constraint{},
 					},
 				},
@@ -1130,7 +1130,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Performance: &recipe.ValidationPhase{
-						Checks: []string{"perf-check"},
+						Checks: []recipe.CheckRef{{Name: "perf-check"}},
 					},
 				},
 			},
@@ -1158,7 +1158,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Performance: &recipe.ValidationPhase{
-						Checks:      []string{},
+						Checks:      []recipe.CheckRef{},
 						Constraints: []recipe.Constraint{},
 					},
 				},
@@ -1172,7 +1172,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Conformance: &recipe.ValidationPhase{
-						Checks: []string{"conformance-check"},
+						Checks: []recipe.CheckRef{{Name: "conformance-check"}},
 					},
 				},
 			},
@@ -1185,7 +1185,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"test-registered-check"},
+						Checks: []recipe.CheckRef{{Name: "test-registered-check"}},
 					},
 				},
 			},
@@ -1198,7 +1198,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"some-unknown-check"},
+						Checks: []recipe.CheckRef{{Name: "some-unknown-check"}},
 					},
 				},
 			},
@@ -1211,7 +1211,7 @@ func TestBuildTestPattern(t *testing.T) {
 			recipe: &recipe.RecipeResult{
 				Validation: &recipe.ValidationConfig{
 					Deployment: &recipe.ValidationPhase{
-						Checks: []string{"test-registered-check", "some-unknown-check"},
+						Checks: []recipe.CheckRef{{Name: "test-registered-check"}, {Name: "some-unknown-check"}},
 					},
 				},
 			},
@@ -1315,6 +1315,229 @@ func TestResolvePhaseTimeout(t *testing.T) {
 			got := resolvePhaseTimeout(tt.phase, tt.defaultTimeout)
 			if got != tt.want {
 				t.Errorf("resolvePhaseTimeout() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExecutePhaseChecks_NoCluster_WithIsolation(t *testing.T) {
+	isoTrue := true
+	isoFalse := false
+
+	v := &Validator{
+		NoCluster: true,
+		RunID:     "test-run",
+		Namespace: "default",
+	}
+
+	phaseResult := &PhaseResult{
+		Checks: []CheckResult{},
+	}
+
+	v.executePhaseChecks(context.Background(), &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{
+				Checks: []recipe.CheckRef{
+					{Name: "shared-check"},
+					{Name: "isolated-check", Isolated: &isoTrue},
+					{Name: "explicit-shared", Isolated: &isoFalse},
+				},
+				Validators: []recipe.ExternalValidator{
+					{Name: "custom-check", Image: "myregistry.io/check:v1.0"},
+				},
+			},
+		},
+	}, phaseExecConfig{
+		name:           "deployment",
+		testPackage:    "./pkg/validator/checks/deployment",
+		defaultTimeout: 5 * time.Minute,
+		phase: &recipe.ValidationPhase{
+			Checks: []recipe.CheckRef{
+				{Name: "shared-check"},
+				{Name: "isolated-check", Isolated: &isoTrue},
+				{Name: "explicit-shared", Isolated: &isoFalse},
+			},
+			Validators: []recipe.ExternalValidator{
+				{Name: "custom-check", Image: "myregistry.io/check:v1.0"},
+			},
+		},
+	}, phaseResult)
+
+	// Should have 4 stubs: 2 shared + 1 isolated + 1 external
+	if len(phaseResult.Checks) != 4 {
+		t.Fatalf("expected 4 checks, got %d: %+v", len(phaseResult.Checks), phaseResult.Checks)
+	}
+
+	// Check sources
+	sourceCount := map[string]int{}
+	for _, c := range phaseResult.Checks {
+		sourceCount[c.Source]++
+		if c.Status != ValidationStatusSkipped {
+			t.Errorf("check %q status = %q, want %q", c.Name, c.Status, ValidationStatusSkipped)
+		}
+	}
+
+	if sourceCount[CheckSourceShared] != 2 {
+		t.Errorf("shared checks = %d, want 2", sourceCount[CheckSourceShared])
+	}
+	if sourceCount[CheckSourceIsolated] != 1 {
+		t.Errorf("isolated checks = %d, want 1", sourceCount[CheckSourceIsolated])
+	}
+	if sourceCount[CheckSourceExternal] != 1 {
+		t.Errorf("external checks = %d, want 1", sourceCount[CheckSourceExternal])
+	}
+}
+
+func TestExecutePhaseChecks_NilPhase(t *testing.T) {
+	v := &Validator{NoCluster: true}
+	phaseResult := &PhaseResult{Checks: []CheckResult{}}
+
+	v.executePhaseChecks(context.Background(), &recipe.RecipeResult{}, phaseExecConfig{
+		name:  "deployment",
+		phase: nil,
+	}, phaseResult)
+
+	if len(phaseResult.Checks) != 0 {
+		t.Errorf("expected 0 checks for nil phase, got %d", len(phaseResult.Checks))
+	}
+}
+
+func TestSanitizeLabelValue(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "simple check name",
+			input: "expected-resources",
+			want:  "expected-resources",
+		},
+		{
+			name:  "constraint with dots",
+			input: "Deployment.gpu-operator.version",
+			want:  "deployment-gpu-operator-version",
+		},
+		{
+			name:  "underscores",
+			input: "my_custom_check",
+			want:  "my-custom-check",
+		},
+		{
+			name:  "mixed case",
+			input: "MyCheck",
+			want:  "mycheck",
+		},
+		{
+			name:  "truncation at 63 chars",
+			input: "this-is-a-very-long-check-name-that-exceeds-sixty-three-characters-by-a-lot",
+			want:  "this-is-a-very-long-check-name-that-exceeds-sixty-three-charact",
+		},
+		{
+			name:  "trailing hyphen removed",
+			input: "check-name-",
+			want:  "check-name",
+		},
+		{
+			name:  "trailing hyphen from truncation",
+			input: "a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z-a-b-c-d-e-",
+			want:  "a-b-c-d-e-f-g-h-i-j-k-l-m-n-o-p-q-r-s-t-u-v-w-x-y-z-a-b-c-d-e",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sanitizeLabelValue(tt.input)
+			if got != tt.want {
+				t.Errorf("sanitizeLabelValue(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveItemTimeout(t *testing.T) {
+	phaseTimeout := 10 * time.Minute
+
+	tests := []struct {
+		name         string
+		itemTimeout  string
+		phaseTimeout time.Duration
+		want         time.Duration
+	}{
+		{
+			name:         "empty falls back to phase timeout",
+			itemTimeout:  "",
+			phaseTimeout: phaseTimeout,
+			want:         phaseTimeout,
+		},
+		{
+			name:         "valid item timeout",
+			itemTimeout:  "5m",
+			phaseTimeout: phaseTimeout,
+			want:         5 * time.Minute,
+		},
+		{
+			name:         "invalid timeout falls back to phase",
+			itemTimeout:  "not-a-duration",
+			phaseTimeout: phaseTimeout,
+			want:         phaseTimeout,
+		},
+		{
+			name:         "seconds",
+			itemTimeout:  "30s",
+			phaseTimeout: phaseTimeout,
+			want:         30 * time.Second,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := resolveItemTimeout(tt.itemTimeout, tt.phaseTimeout)
+			if got != tt.want {
+				t.Errorf("resolveItemTimeout(%q, %v) = %v, want %v", tt.itemTimeout, tt.phaseTimeout, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildTestPatternFromItems(t *testing.T) {
+	tests := []struct {
+		name         string
+		checks       []recipe.CheckRef
+		constraints  []recipe.Constraint
+		wantPattern  string
+		wantExpected int
+		wantNonEmpty bool
+	}{
+		{
+			name:        "empty inputs",
+			checks:      nil,
+			wantPattern: "",
+		},
+		{
+			name:   "checks only",
+			checks: []recipe.CheckRef{{Name: "platform-health"}},
+			// The pattern depends on check registration; since we're testing the function
+			// itself and the check isn't registered, it falls back to checkNameToTestName
+			wantNonEmpty: true,
+			wantExpected: 1,
+		},
+		{
+			name:         "no registered items produces empty for unregistered constraints",
+			constraints:  []recipe.Constraint{{Name: "Unregistered.constraint", Value: ">= v1.0"}},
+			wantPattern:  "",
+			wantExpected: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildTestPatternFromItems(tt.checks, tt.constraints)
+			if tt.wantNonEmpty && got.Pattern == "" {
+				t.Error("expected non-empty pattern")
+			}
+			if !tt.wantNonEmpty && got.Pattern != tt.wantPattern {
+				t.Errorf("Pattern = %q, want %q", got.Pattern, tt.wantPattern)
+			}
+			if tt.wantExpected > 0 && got.ExpectedTests != tt.wantExpected {
+				t.Errorf("ExpectedTests = %d, want %d", got.ExpectedTests, tt.wantExpected)
 			}
 		})
 	}

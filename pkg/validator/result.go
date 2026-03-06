@@ -41,6 +41,18 @@ const (
 	ValidationStatusWarning ValidationStatus = "warning"
 )
 
+// CheckSource constants indicate how a check was executed.
+const (
+	// CheckSourceShared means the check ran in the shared (combined) Job.
+	CheckSourceShared = "shared"
+
+	// CheckSourceIsolated means the check ran in its own isolated Job.
+	CheckSourceIsolated = "isolated"
+
+	// CheckSourceExternal means the check ran in a user-provided container.
+	CheckSourceExternal = "external"
+)
+
 // ConstraintStatus represents the outcome of evaluating a single constraint.
 type ConstraintStatus string
 
@@ -159,6 +171,9 @@ type CheckResult struct {
 
 	// Reason explains why the check failed or was skipped.
 	Reason string `json:"reason,omitempty" yaml:"reason,omitempty"`
+
+	// Source indicates how this check was executed (shared, isolated, external).
+	Source string `json:"source,omitempty" yaml:"source,omitempty"`
 
 	// Remediation provides actionable guidance for fixing failures.
 	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`

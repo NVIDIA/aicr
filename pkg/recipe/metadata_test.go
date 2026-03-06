@@ -37,6 +37,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
@@ -493,7 +495,7 @@ func TestMergeValidationConfig(t *testing.T) {
 				},
 				Deployment: &ValidationPhase{
 					Timeout: "5m",
-					Checks:  []string{"expected-resources"},
+					Checks:  []CheckRef{{Name: "expected-resources"}},
 				},
 			},
 		}
@@ -501,7 +503,7 @@ func TestMergeValidationConfig(t *testing.T) {
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
 					Timeout: "10m",
-					Checks:  []string{"expected-resources", "check-nvidia-smi"},
+					Checks:  []CheckRef{{Name: "expected-resources"}, {Name: "check-nvidia-smi"}},
 				},
 				Performance: &ValidationPhase{
 					Timeout:        "15m",
@@ -539,7 +541,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		overlay := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
-					Checks: []string{"expected-resources"},
+					Checks: []CheckRef{{Name: "expected-resources"}},
 				},
 			},
 		}
@@ -548,7 +550,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation == nil {
 			t.Fatal("validation should be set from overlay")
 		}
-		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0] != "expected-resources" {
+		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0].Name != "expected-resources" {
 			t.Error("deployment check should be set from overlay")
 		}
 	})
@@ -557,7 +559,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
-					Checks: []string{"expected-resources"},
+					Checks: []CheckRef{{Name: "expected-resources"}},
 				},
 			},
 		}
@@ -577,7 +579,7 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 		},
 		Validation: &ValidationConfig{
 			Deployment: &ValidationPhase{
-				Checks: []string{"expected-resources"},
+				Checks: []CheckRef{{Name: "expected-resources"}},
 			},
 		},
 	}
@@ -592,8 +594,8 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 	if result.Validation.Deployment == nil {
 		t.Fatal("result.Validation.Deployment should not be nil")
 	}
-	if result.Validation.Deployment.Checks[0] != "expected-resources" {
-		t.Errorf("check = %q, want expected-resources", result.Validation.Deployment.Checks[0])
+	if result.Validation.Deployment.Checks[0].Name != "expected-resources" {
+		t.Errorf("check = %q, want expected-resources", result.Validation.Deployment.Checks[0].Name)
 	}
 }
 
@@ -1272,3 +1274,107 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 		}
 	})
 }
+
+func TestCheckRefUnmarshalYAML(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantIso  *bool
+		wantErr  bool
+	}{
+		{
+			name:     "string form",
+			input:    `platform-health`,
+			wantName: "platform-health",
+		},
+		{
+			name:     "object form with name only",
+			input:    "name: gpu-test\n",
+			wantName: "gpu-test",
+		},
+		{
+			name:     "object form with isolated true",
+			input:    "name: heavy-check\nisolated: true\ntimeout: 10m\n",
+			wantName: "heavy-check",
+			wantIso:  boolP(true),
+		},
+		{
+			name:     "object form with isolated false",
+			input:    "name: light-check\nisolated: false\n",
+			wantName: "light-check",
+			wantIso:  boolP(false),
+		},
+		{
+			name:    "invalid type (sequence)",
+			input:   "- a\n- b\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ref CheckRef
+			err := yaml.Unmarshal([]byte(tt.input), &ref)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if ref.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", ref.Name, tt.wantName)
+			}
+			if tt.wantIso == nil && ref.Isolated != nil {
+				t.Errorf("Isolated = %v, want nil", *ref.Isolated)
+			}
+			if tt.wantIso != nil {
+				if ref.Isolated == nil {
+					t.Errorf("Isolated = nil, want %v", *tt.wantIso)
+				} else if *ref.Isolated != *tt.wantIso {
+					t.Errorf("Isolated = %v, want %v", *ref.Isolated, *tt.wantIso)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckRefUnmarshalYAMLInList(t *testing.T) {
+	input := `
+- dra-support
+- name: heavy-gpu-test
+  isolated: true
+  timeout: 10m
+- platform-health
+`
+	var refs []CheckRef
+	if err := yaml.Unmarshal([]byte(input), &refs); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if len(refs) != 3 {
+		t.Fatalf("got %d refs, want 3", len(refs))
+	}
+
+	if refs[0].Name != "dra-support" {
+		t.Errorf("refs[0].Name = %q, want %q", refs[0].Name, "dra-support")
+	}
+	if refs[0].Isolated != nil {
+		t.Errorf("refs[0].Isolated = %v, want nil", *refs[0].Isolated)
+	}
+
+	if refs[1].Name != "heavy-gpu-test" {
+		t.Errorf("refs[1].Name = %q, want %q", refs[1].Name, "heavy-gpu-test")
+	}
+	if refs[1].Isolated == nil || !*refs[1].Isolated {
+		t.Errorf("refs[1].Isolated = %v, want true", refs[1].Isolated)
+	}
+	if refs[1].Timeout != "10m" {
+		t.Errorf("refs[1].Timeout = %q, want %q", refs[1].Timeout, "10m")
+	}
+
+	if refs[2].Name != "platform-health" {
+		t.Errorf("refs[2].Name = %q, want %q", refs[2].Name, "platform-health")
+	}
+}
+
+func boolP(b bool) *bool { return &b }

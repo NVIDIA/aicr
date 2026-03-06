@@ -279,7 +279,7 @@ func TestGetPodForJob(t *testing.T) {
 				Name:      "test-pod",
 				Namespace: deployer.config.Namespace,
 				Labels: map[string]string{
-					"aicr.nvidia.com/job": deployer.config.JobName,
+					"batch.kubernetes.io/job-name": deployer.config.JobName,
 				},
 			},
 			Spec: corev1.PodSpec{
@@ -688,7 +688,7 @@ func TestWaitForJobPodTermination_AlreadyTerminal(t *testing.T) {
 			Name:      "test-pod",
 			Namespace: deployer.config.Namespace,
 			Labels: map[string]string{
-				"aicr.nvidia.com/job": deployer.config.JobName,
+				"batch.kubernetes.io/job-name": deployer.config.JobName,
 			},
 		},
 		Status: corev1.PodStatus{
@@ -720,7 +720,7 @@ func TestWaitForJobPodTermination_Succeeded(t *testing.T) {
 			Name:      "test-pod",
 			Namespace: deployer.config.Namespace,
 			Labels: map[string]string{
-				"aicr.nvidia.com/job": deployer.config.JobName,
+				"batch.kubernetes.io/job-name": deployer.config.JobName,
 			},
 		},
 		Status: corev1.PodStatus{

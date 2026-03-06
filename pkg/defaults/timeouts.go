@@ -136,6 +136,14 @@ const (
 	InteractiveOIDCTimeout = 5 * time.Minute
 )
 
+// External validator timeouts.
+const (
+	// ExternalValidatorTimeout is the default timeout for external validator Jobs.
+	// External validators are user-provided OCI containers, which may need to pull
+	// images and perform arbitrary validation logic.
+	ExternalValidatorTimeout = 10 * time.Minute
+)
+
 // Validation phase timeouts for validation phase operations.
 // These are used when the recipe does not specify a timeout.
 const (

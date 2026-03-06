@@ -62,16 +62,11 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 
 // buildJobSpec constructs the Kubernetes Job specification.
 func (d *Deployer) buildJobSpec() *batchv1.Job {
-	// Build command to run tests
-	testCommand := d.buildTestCommand()
-
-	// Build container
+	// Build container with env vars and volume mounts common to all modes
 	container := corev1.Container{
 		Name:            "validator",
 		Image:           d.config.Image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         []string{"/bin/sh", "-c"},
-		Args:            []string{testCommand},
 		Env: []corev1.EnvVar{
 			{
 				Name:  "AICR_SNAPSHOT_PATH",
@@ -102,6 +97,19 @@ func (d *Deployer) buildJobSpec() *batchv1.Job {
 				ReadOnly:  true,
 			},
 		},
+	}
+
+	// Mode-specific container configuration
+	if d.config.ExternalCommand {
+		// External validator: use container's own ENTRYPOINT/CMD.
+		// Termination message falls back to last few bytes of stdout on error,
+		// giving us a failure reason even without structured output.
+		container.TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
+	} else {
+		// Internal validator: run pre-compiled go test binary
+		testCommand := d.buildTestCommand()
+		container.Command = []string{"/bin/sh", "-c"}
+		container.Args = []string{testCommand}
 	}
 
 	// Add debug flag if enabled
@@ -168,6 +176,14 @@ func (d *Deployer) buildJobSpec() *batchv1.Job {
 	backoffLimit := int32(0)                                                 // No retries - validation should be deterministic
 	ttlSecondsAfterFinished := int32(defaults.JobTTLAfterFinished.Seconds()) // Keep for 1 hour for debugging
 
+	podLabels := map[string]string{
+		"app.kubernetes.io/name":      "aicr",
+		"app.kubernetes.io/component": "validation",
+	}
+	for k, v := range d.config.Labels {
+		podLabels[k] = v
+	}
+
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      d.config.JobName,
@@ -183,11 +199,7 @@ func (d *Deployer) buildJobSpec() *batchv1.Job {
 			TTLSecondsAfterFinished: &ttlSecondsAfterFinished,
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app.kubernetes.io/name":      "aicr",
-						"app.kubernetes.io/component": "validation",
-						"aicr.nvidia.com/job":         d.config.JobName,
-					},
+					Labels: podLabels,
 				},
 				Spec: podSpec,
 			},

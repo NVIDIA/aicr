@@ -48,11 +48,10 @@ func TestBuildJobSpec(t *testing.T) {
 		}
 	}
 
-	// Verify pod labels
+	// Verify pod labels (base labels always present)
 	expectedPodLabels := map[string]string{
 		"app.kubernetes.io/name":      "aicr",
 		"app.kubernetes.io/component": "validation",
-		"aicr.nvidia.com/job":         deployer.config.JobName,
 	}
 	for key, expectedValue := range expectedPodLabels {
 		if value, ok := job.Spec.Template.Labels[key]; !ok || value != expectedValue {
@@ -500,6 +499,96 @@ func TestDeleteJob(t *testing.T) {
 			t.Errorf("deleteJob() should ignore not found: %v", err)
 		}
 	})
+}
+
+func TestBuildJobSpec_ExternalCommand(t *testing.T) {
+	deployer, _ := createDeployer()
+	deployer.config.ExternalCommand = true
+	deployer.config.Image = "myregistry.io/custom-check:v1.0"
+
+	job := deployer.buildJobSpec()
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// External command: no Command or Args (use container ENTRYPOINT)
+	if len(container.Command) != 0 {
+		t.Errorf("expected no Command for external validator, got %v", container.Command)
+	}
+	if len(container.Args) != 0 {
+		t.Errorf("expected no Args for external validator, got %v", container.Args)
+	}
+
+	// TerminationMessagePolicy should be FallbackToLogsOnError
+	if container.TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
+		t.Errorf("expected TerminationMessagePolicy FallbackToLogsOnError, got %v", container.TerminationMessagePolicy)
+	}
+
+	// Should still have the same env vars and volume mounts
+	foundSnapshot := false
+	foundRecipe := false
+	for _, env := range container.Env {
+		if env.Name == "AICR_SNAPSHOT_PATH" {
+			foundSnapshot = true
+		}
+		if env.Name == "AICR_RECIPE_PATH" {
+			foundRecipe = true
+		}
+	}
+	if !foundSnapshot {
+		t.Error("external validator should have AICR_SNAPSHOT_PATH env var")
+	}
+	if !foundRecipe {
+		t.Error("external validator should have AICR_RECIPE_PATH env var")
+	}
+
+	if len(container.VolumeMounts) != 2 {
+		t.Errorf("expected 2 volume mounts, got %d", len(container.VolumeMounts))
+	}
+}
+
+func TestBuildJobSpec_InternalCommand(t *testing.T) {
+	deployer, _ := createDeployer()
+	deployer.config.ExternalCommand = false
+
+	job := deployer.buildJobSpec()
+	container := job.Spec.Template.Spec.Containers[0]
+
+	// Internal command: should have Command and Args
+	if len(container.Command) == 0 {
+		t.Error("expected Command for internal validator")
+	}
+	if len(container.Args) == 0 {
+		t.Error("expected Args for internal validator")
+	}
+
+	// TerminationMessagePolicy should be empty (default)
+	if container.TerminationMessagePolicy != "" {
+		t.Errorf("expected default TerminationMessagePolicy, got %v", container.TerminationMessagePolicy)
+	}
+}
+
+func TestBuildJobSpec_WithLabels(t *testing.T) {
+	deployer, _ := createDeployer()
+	deployer.config.Labels = map[string]string{
+		"aicr.nvidia.com/run-id": "20260305-185555-5d19",
+		"aicr.nvidia.com/phase":  "deployment",
+		"aicr.nvidia.com/tier":   "isolated",
+		"aicr.nvidia.com/check":  "expected-resources",
+	}
+
+	job := deployer.buildJobSpec()
+
+	// Config labels should be merged into pod template labels
+	podLabels := job.Spec.Template.Labels
+	for k, v := range deployer.config.Labels {
+		if podLabels[k] != v {
+			t.Errorf("pod label %s = %q, want %q", k, podLabels[k], v)
+		}
+	}
+
+	// Base labels should still be present
+	if podLabels["app.kubernetes.io/name"] != "aicr" {
+		t.Errorf("base label app.kubernetes.io/name missing")
+	}
 }
 
 // Helper function to create test ConfigMaps
