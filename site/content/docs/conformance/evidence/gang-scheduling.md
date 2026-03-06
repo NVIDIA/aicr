@@ -5,8 +5,9 @@ weight: 20
 description: "Gang scheduling conformance evidence"
 ---
 
+
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:20:59 UTC
+**Generated:** 2026-03-06 19:37:40 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -21,26 +22,26 @@ scheduler with PodGroups. Both pods in the group must be scheduled together or n
 ```
 $ kubectl get deploy -n kai-scheduler
 NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
-admission               1/1     1            1           5d23h
-binder                  1/1     1            1           5d23h
-kai-operator            1/1     1            1           7d
-kai-scheduler-default   1/1     1            1           7d
-pod-grouper             1/1     1            1           5d23h
-podgroup-controller     1/1     1            1           5d23h
-queue-controller        1/1     1            1           5d23h
+admission               1/1     1            1           44h
+binder                  1/1     1            1           44h
+kai-operator            1/1     1            1           44h
+kai-scheduler-default   1/1     1            1           44h
+pod-grouper             1/1     1            1           44h
+podgroup-controller     1/1     1            1           44h
+queue-controller        1/1     1            1           44h
 ```
 
 **KAI scheduler pods**
 ```
 $ kubectl get pods -n kai-scheduler
 NAME                                     READY   STATUS    RESTARTS   AGE
-admission-669878d9d8-thrfv               1/1     Running   0          5d20h
-binder-7f67b6c8f8-qkx4v                  1/1     Running   0          5d20h
-kai-operator-6dd58c647-mhbr2             1/1     Running   0          5d20h
-kai-scheduler-default-75b48f4b9f-vq52j   1/1     Running   0          5d20h
-pod-grouper-5d5c88b6fb-fgbfn             1/1     Running   0          5d20h
-podgroup-controller-56947478b-ldphl      1/1     Running   0          5d20h
-queue-controller-5f5b6895b6-t46mz        1/1     Running   0          5d20h
+admission-54f4bcf874-lczkp               1/1     Running   0          44h
+binder-5f9dc97959-thrf8                  1/1     Running   0          44h
+kai-operator-86675bdc5d-ww9sf            1/1     Running   0          44h
+kai-scheduler-default-68bc7484b8-hczc2   1/1     Running   0          44h
+pod-grouper-56947ccdf-rslf9              1/1     Running   0          44h
+podgroup-controller-65c74cbc9c-nbwvr     1/1     Running   0          44h
+queue-controller-7847c76b97-zhzdv        1/1     Running   0          44h
 ```
 
 ## PodGroup CRD
@@ -49,7 +50,7 @@ queue-controller-5f5b6895b6-t46mz        1/1     Running   0          5d20h
 ```
 $ kubectl get crd podgroups.scheduling.run.ai
 NAME                          CREATED AT
-podgroups.scheduling.run.ai   2026-02-12T20:42:05Z
+podgroups.scheduling.run.ai   2026-02-28T18:05:52Z
 ```
 
 ## Gang Scheduling Test
@@ -57,9 +58,26 @@ podgroups.scheduling.run.ai   2026-02-12T20:42:05Z
 Deploy a PodGroup with minMember=2 and two GPU pods. KAI scheduler ensures both
 pods are scheduled atomically.
 
-**Test manifest:** [`docs/conformance/cncf/manifests/gang-scheduling-test.yaml`](https://github.com/NVIDIA/aicr/tree/main/docs/conformance/cncf/manifests/gang-scheduling-test.yaml)
-
+**Test manifest:** `pkg/evidence/scripts/manifests/gang-scheduling-test.yaml`
 ```yaml
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Gang scheduling test with PodGroup and KAI scheduler
+# Demonstrates all-or-nothing scheduling: both pods must be scheduled together
+# Requires: KAI scheduler with PodGroup CRD
+# Usage: kubectl apply -f pkg/evidence/scripts/manifests/gang-scheduling-test.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -86,18 +104,21 @@ metadata:
 spec:
   schedulerName: kai-scheduler
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
   tolerations:
     - operator: Exists
   containers:
     - name: worker
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "nvidia-smi && echo 'Gang worker 0 completed successfully'"]
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-0
+        limits:
+          nvidia.com/gpu: 1
 ---
 apiVersion: v1
 kind: Pod
@@ -110,80 +131,53 @@ metadata:
 spec:
   schedulerName: kai-scheduler
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
   tolerations:
     - operator: Exists
   containers:
     - name: worker
       image: nvidia/cuda:12.9.0-base-ubuntu24.04
       command: ["bash", "-c", "nvidia-smi && echo 'Gang worker 1 completed successfully'"]
+      securityContext:
+        allowPrivilegeEscalation: false
       resources:
-        claims:
-          - name: gpu
-  resourceClaims:
-    - name: gpu
-      resourceClaimName: gang-gpu-claim-1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-0
-  namespace: gang-scheduling-test
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
-metadata:
-  name: gang-gpu-claim-1
-  namespace: gang-scheduling-test
-spec:
-  devices:
-    requests:
-      - name: gpu
-        exactly:
-          deviceClassName: gpu.nvidia.com
-          allocationMode: ExactCount
-          count: 1
+        limits:
+          nvidia.com/gpu: 1
 ```
 
 **Apply test manifest**
 ```
-$ kubectl apply -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml
+$ kubectl apply -f manifests/gang-scheduling-test.yaml
 namespace/gang-scheduling-test created
 podgroup.scheduling.run.ai/gang-test-group created
 pod/gang-worker-0 created
 pod/gang-worker-1 created
-resourceclaim.resource.k8s.io/gang-gpu-claim-0 created
-resourceclaim.resource.k8s.io/gang-gpu-claim-1 created
 ```
 
 **PodGroup status**
 ```
 $ kubectl get podgroups -n gang-scheduling-test -o wide
 NAME                                                    AGE
-gang-test-group                                         12s
-pg-gang-worker-0-9d788a4d-ca91-4057-8fcd-569ca994417e   12s
-pg-gang-worker-1-ac139cd5-5d46-471f-bdfb-6c52470eb405   11s
+gang-test-group                                         11s
+pg-gang-worker-0-99f4d8ea-2574-4ed1-ba4f-8e83daededad   10s
+pg-gang-worker-1-0605b26c-1b90-4954-9e6f-8ec74c2713c2   10s
 ```
 
 **Pod status**
 ```
 $ kubectl get pods -n gang-scheduling-test -o wide
-NAME            READY   STATUS      RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-gang-worker-0   0/1     Completed   0          13s   100.65.1.153    ip-100-64-171-120.ec2.internal   <none>           <none>
-gang-worker-1   0/1     Completed   0          12s   100.65.247.22   ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME            READY   STATUS      RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
+gang-worker-0   0/1     Completed   0          13s   100.65.208.144   ip-100-64-147-149.ec2.internal   <none>           <none>
+gang-worker-1   0/1     Completed   0          12s   100.65.218.207   ip-100-64-147-149.ec2.internal   <none>           <none>
 ```
 
 **gang-worker-0 logs**
 ```
 $ kubectl logs gang-worker-0 -n gang-scheduling-test
-Tue Feb 24 20:21:18 2026
+Fri Mar  6 19:37:52 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.105.08             Driver Version: 580.105.08     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -191,8 +185,8 @@ Tue Feb 24 20:21:18 2026
 | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
-|   0  NVIDIA H100 80GB HBM3          On  |   00000000:75:00.0 Off |                    0 |
-| N/A   28C    P0             67W /  700W |       0MiB /  81559MiB |      0%      Default |
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:64:00.0 Off |                    0 |
+| N/A   29C    P0             71W /  700W |       0MiB /  81559MiB |      0%      Default |
 |                                         |                        |             Disabled |
 +-----------------------------------------+------------------------+----------------------+
 
@@ -209,7 +203,7 @@ Gang worker 0 completed successfully
 **gang-worker-1 logs**
 ```
 $ kubectl logs gang-worker-1 -n gang-scheduling-test
-Tue Feb 24 20:21:18 2026
+Fri Mar  6 19:37:52 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.105.08             Driver Version: 580.105.08     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -218,7 +212,7 @@ Tue Feb 24 20:21:18 2026
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
 |   0  NVIDIA H100 80GB HBM3          On  |   00000000:86:00.0 Off |                    0 |
-| N/A   29C    P0             69W /  700W |       0MiB /  81559MiB |      0%      Default |
+| N/A   30C    P0             67W /  700W |       0MiB /  81559MiB |      0%      Default |
 |                                         |                        |             Disabled |
 +-----------------------------------------+------------------------+----------------------+
 
@@ -232,12 +226,12 @@ Tue Feb 24 20:21:18 2026
 Gang worker 1 completed successfully
 ```
 
-**Result: PASS** -- Both pods scheduled and completed together via gang scheduling.
+**Result: PASS** — Both pods scheduled and completed together via gang scheduling.
 
 ## Cleanup
 
 **Delete test namespace**
 ```
-$ kubectl delete namespace gang-scheduling-test --ignore-not-found
-namespace "gang-scheduling-test" deleted
+$ cleanup_ns gang-scheduling-test
+
 ```
