@@ -1,1 +1,3 @@
 ** linguist-detectable=true
+vendor/** linguist-generated=true
+vendor/** -diff
