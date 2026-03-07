@@ -147,7 +147,6 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 
 	agentFlags := []string{
 		"namespace",
-		"validation-namespace",
 		"image",
 		"image-pull-secret",
 		"job-name",

@@ -1041,7 +1041,7 @@ RECIPE
     --recipe "$recipe_chainsaw" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    --validation-namespace aicr-validation \
+    --namespace aicr-validation \
     --image "${AICR_VALIDATOR_IMAGE}" \
     --output "$result_chainsaw_pass" 2>&1) || validate_exit=$?
 
@@ -1095,7 +1095,7 @@ RECIPE
     --recipe "$recipe_chainsaw_fail" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    --validation-namespace aicr-validation \
+    --namespace aicr-validation \
     --output "$result_chainsaw_fail" 2>&1) || validate_fail_exit=$?
 
   detail "Captured validation output:"
@@ -1233,7 +1233,7 @@ test_validate_job_deployment() {
 
   # Test 2: Validation with custom namespace
   msg "--- Test: Validation Job in custom namespace ---"
-  echo -e "${DIM}  \$ aicr validate --validation-namespace custom-validation --cleanup=true${NC}"
+  echo -e "${DIM}  \$ aicr validate --namespace custom-validation --cleanup=true${NC}"
 
   # Create custom validation namespace
   kubectl create namespace custom-validation 2>&1 || true
@@ -1244,7 +1244,7 @@ test_validate_job_deployment() {
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    --validation-namespace custom-validation \
+    --namespace custom-validation \
     --output "$validation_custom" \
     --cleanup=true 2>&1 || true  # Keep || true here as this is just testing namespace config
 

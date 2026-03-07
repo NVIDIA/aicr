@@ -22,10 +22,14 @@ import (
 
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -113,7 +117,20 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 }
 
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
+// Creates the namespace if it does not exist.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
+	// Ensure namespace exists before deploying the agent Job.
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.namespace}}
+	if _, nsErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); nsErr != nil {
+		if !apierrors.IsAlreadyExists(nsErr) {
+			return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", nsErr)
+		}
+	}
+
 	agentConfig := &snapshotter.AgentConfig{
 		Kubeconfig:         cfg.kubeconfig,
 		Namespace:          cfg.namespace,
@@ -277,17 +294,10 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:     "namespace",
 			Aliases:  []string{"n"},
-			Usage:    "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
+			Usage:    "Kubernetes namespace for snapshot agent and validation Jobs",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
-			Value:    "default",
-			Category: "Agent Deployment",
-		},
-		&cli.StringFlag{
-			Name:     "validation-namespace",
-			Usage:    "Kubernetes namespace where validation jobs will run.",
-			Sources:  cli.EnvVars("AICR_VALIDATION_NAMESPACE"),
 			Value:    "aicr-validation",
-			Category: "Agent Deployment",
+			Category: "Deployment",
 		},
 		&cli.StringFlag{
 			Name:     "image",
@@ -384,7 +394,7 @@ Run validation without failing on check errors (informational mode):
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
 				return err
 			}
 
@@ -401,10 +411,7 @@ Run validation without failing on check errors (informational mode):
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
 
-			validationNamespace := cmd.String("validation-namespace")
-			if !cmd.IsSet("validation-namespace") && validationNamespace == "aicr-validation" {
-				validationNamespace = cmd.String("namespace")
-			}
+			validationNamespace := cmd.String("namespace")
 
 			if recipeFilePath == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required")
