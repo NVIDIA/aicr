@@ -747,7 +747,7 @@ RECIPE
 
   if [ -f "$deployment_result" ] && \
      grep -q "gpu-operator-version" "$deployment_result"; then
-    if grep -A1 '"gpu-operator-version"' "$deployment_result" | grep -q '"status": "passed"; then
+    if grep -A1 '"gpu-operator-version"' "$deployment_result" | grep -q '"status": "passed"'; then
       detail "GPU operator version constraint: PASS (v24.6.0 >= v24.6.0)"
       pass "validate/deployment-constraint-pass"
     else
@@ -790,7 +790,7 @@ RECIPE
 
   if [ -f "$deployment_fail_result" ] && \
      grep -q "gpu-operator-version" "$deployment_fail_result"; then
-    if grep -A1 '"gpu-operator-version"' "$deployment_fail_result" | grep -q '"status": "failed"; then
+    if grep -A1 '"gpu-operator-version"' "$deployment_fail_result" | grep -q '"status": "failed"'; then
       detail "GPU operator version constraint: FAIL (v24.6.0 < v25.0.0) - as expected"
       pass "validate/deployment-constraint-fail"
     else
@@ -843,10 +843,10 @@ RECIPE
 
   if [ -f "$result_er_fail" ] && \
      grep -q '"expected-resources"' "$result_er_fail"; then
-    if grep -A1 '"expected-resources"' "$result_er_fail" | grep -q '"status": "fail"; then
+    if grep -A1 '"expected-resources"' "$result_er_fail" | grep -q '"status": "failed"'; then
       detail "Expected-resources check: FAIL (nonexistent-deployment not found) - as expected"
       pass "validate/expected-resources-fail"
-    elif grep -q "summary:" "$result_er_fail" && grep -q '"status": "fail" "$result_er_fail"; then
+    elif grep -q '"summary"' "$result_er_fail" && grep -q '"status": "failed"' "$result_er_fail"; then
       detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/expected-resources-fail"
     else
@@ -925,7 +925,7 @@ RECIPE
       echo "$result_manual_output" | sed 's/^/    /'
 
       if [ -f "$result_manual" ] && grep -q '"expected-resources"' "$result_manual"; then
-        if grep -A1 '"expected-resources"' "$result_manual" | grep -q '"status": "pass"; then
+        if grep -A1 '"expected-resources"' "$result_manual" | grep -q '"status": "passed"'; then
           detail "Expected-resources check passed for deployed nginx"
           pass "validate/expected-resources-manual-pass"
         else
@@ -976,7 +976,7 @@ RECIPE
       echo "$result_merge_output" | sed 's/^/    /'
 
       if [ -f "$result_merge" ] && grep -q '"expected-resources"' "$result_merge"; then
-        if grep -A1 '"expected-resources"' "$result_merge" | grep -q '"status": "fail"; then
+        if grep -A1 '"expected-resources"' "$result_merge" | grep -q '"status": "failed"'; then
           detail "Expected-resources check correctly failed for missing resource in merge"
           pass "validate/expected-resources-manual-merge"
         else
@@ -1050,10 +1050,10 @@ RECIPE
 
   if [ -f "$result_chainsaw_pass" ] && \
      grep -q '"expected-resources"' "$result_chainsaw_pass"; then
-    if grep -A1 '"expected-resources"' "$result_chainsaw_pass" | grep -q '"status": "pass"; then
+    if grep -A1 '"expected-resources"' "$result_chainsaw_pass" | grep -q '"status": "passed"'; then
       detail "Chainsaw health check: PASS (gpu-operator deployment found via embedded assert)"
       pass "validate/chainsaw-healthcheck-pass"
-    elif grep -q "summary:" "$result_chainsaw_pass" && grep -q '"status": "pass" "$result_chainsaw_pass"; then
+    elif grep -q '"summary"' "$result_chainsaw_pass" && grep -q '"status": "passed"' "$result_chainsaw_pass"; then
       detail "Chainsaw health check: PASS (from summary status)"
       pass "validate/chainsaw-healthcheck-pass"
     else
@@ -1103,10 +1103,10 @@ RECIPE
 
   if [ -f "$result_chainsaw_fail" ] && \
      grep -q '"expected-resources"' "$result_chainsaw_fail"; then
-    if grep -A1 '"expected-resources"' "$result_chainsaw_fail" | grep -q '"status": "fail"; then
+    if grep -A1 '"expected-resources"' "$result_chainsaw_fail" | grep -q '"status": "failed"'; then
       detail "Expected-resources check: FAIL (nonexistent resource not found) - as expected"
       pass "validate/chainsaw-healthcheck-fail"
-    elif grep -q "summary:" "$result_chainsaw_fail" && grep -q '"status": "fail" "$result_chainsaw_fail"; then
+    elif grep -q '"summary"' "$result_chainsaw_fail" && grep -q '"status": "failed"' "$result_chainsaw_fail"; then
       detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/chainsaw-healthcheck-fail"
     else

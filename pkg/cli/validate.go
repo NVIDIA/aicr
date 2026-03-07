@@ -116,6 +116,43 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	return phases, nil
 }
 
+// validatePhasesAgainstRecipe warns when a requested phase has no checks
+// defined in the recipe. The phase will still run but produce 0 tests
+// in the CTRF report.
+func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) error {
+	if rec.Validation == nil {
+		if len(phases) > 0 {
+			slog.Warn("recipe has no validation section; requested phases will have no checks",
+				"phases", phases)
+		}
+		return nil
+	}
+
+	if len(phases) == 0 {
+		return nil
+	}
+
+	defined := make(map[validator.Phase]bool)
+	if rec.Validation.Deployment != nil && len(rec.Validation.Deployment.Checks) > 0 {
+		defined[validator.PhaseDeployment] = true
+	}
+	if rec.Validation.Performance != nil && len(rec.Validation.Performance.Checks) > 0 {
+		defined[validator.PhasePerformance] = true
+	}
+	if rec.Validation.Conformance != nil && len(rec.Validation.Conformance.Checks) > 0 {
+		defined[validator.PhaseConformance] = true
+	}
+
+	for _, p := range phases {
+		if !defined[p] {
+			slog.Warn("phase requested but no checks defined in recipe; phase will be empty",
+				"phase", p)
+		}
+	}
+
+	return nil
+}
+
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
 // Creates the namespace if it does not exist.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
@@ -456,6 +493,11 @@ Run validation without failing on check errors (informational mode):
 			tolerations, tolErr := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 			if tolErr != nil {
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
+			}
+
+			// Validate that requested phases are defined in the recipe.
+			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
+				return err
 			}
 
 			return runValidation(ctx, rec, snap, phases, cmd.String("output"), serializer.FormatJSON, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, cmd.String("evidence-dir"))

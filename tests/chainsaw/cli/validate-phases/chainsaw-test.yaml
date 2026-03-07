@@ -95,9 +95,8 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-validate-phases"
-              # CTRF report should have reportFormat field (YAML output by default)
-              grep -q 'reportformat: CTRF' "${WORK}/all-phases.json" || \
-                grep -q '"reportFormat"' "${WORK}/all-phases.json"
+              # CTRF report should have reportFormat field (JSON output)
+              grep -q '"reportFormat"' "${WORK}/all-phases.json"
             check:
               ($error == null): true
 

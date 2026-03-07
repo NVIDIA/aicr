@@ -104,10 +104,16 @@ func checkNvidiaSMI(ctx *validators.Context) error {
 
 func verifySingleGPUNode(ctx *validators.Context, nodeName string) error {
 	templateData := map[string]string{
-		"NODE_NAME": strings.ToLower(nodeName),
+		"NODE_NAME": sanitizeNodeName(nodeName),
 		"NAMESPACE": ctx.Namespace,
 		"IMAGE":     getNvidiaSMIImage(ctx),
 	}
+
+	slog.Info("deploying nvidia-smi verify pod",
+		"node", nodeName,
+		"podName", "nvidia-smi-verify-"+sanitizeNodeName(nodeName),
+		"image", templateData["IMAGE"],
+		"namespace", ctx.Namespace)
 
 	// Load and create pod directly — no PodLifecycle wrapper needed.
 	pod, err := helper.LoadPodFromTemplate(nvidiaSMIPodTemplateFile, templateData)
@@ -139,9 +145,13 @@ func verifySingleGPUNode(ctx *validators.Context, nodeName string) error {
 
 	if waitErr != nil {
 		logSnippet := getLogSnippet(podLogs, nvidiaSMILogContextLines)
+
+		// Capture pod status and events for debugging.
+		debugInfo := collectPodDebugInfo(ctx, createdPod.Name)
+
 		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("pod failed on node %s\nFirst %d lines:\n%s",
-				nodeName, nvidiaSMILogContextLines, logSnippet), waitErr)
+			fmt.Sprintf("pod failed on node %s\n%s\nFirst %d lines:\n%s",
+				nodeName, debugInfo, nvidiaSMILogContextLines, logSnippet), waitErr)
 	}
 
 	return verifyNvidiaSMILogs(podLogs, createdPod)
@@ -183,4 +193,48 @@ func getNvidiaSMIImage(_ *validators.Context) string {
 	// Default image for most GPU types.
 	// Future: read accelerator type from recipe to select GB200-specific image.
 	return "nvcr.io/nvidia/cuda:13.0.0-base-ubuntu22.04"
+}
+
+// sanitizeNodeName converts a node name (e.g., ip-10-0-135-83.ec2.internal)
+// into a valid DNS label for use in pod names (replaces dots with dashes).
+func sanitizeNodeName(nodeName string) string {
+	return strings.ReplaceAll(strings.ToLower(nodeName), ".", "-")
+}
+
+// collectPodDebugInfo captures container status and events for a failed pod.
+func collectPodDebugInfo(ctx *validators.Context, podName string) string {
+	var info strings.Builder
+
+	pod, err := ctx.Clientset.CoreV1().Pods(ctx.Namespace).Get(ctx.Ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Sprintf("could not retrieve pod status: %v", err)
+	}
+
+	// Container status
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting != nil {
+			fmt.Fprintf(&info, "Container %s: waiting (%s: %s)\n", cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
+		}
+		if cs.State.Terminated != nil {
+			fmt.Fprintf(&info, "Container %s: terminated (reason=%s exitCode=%d message=%s)\n",
+				cs.Name, cs.State.Terminated.Reason, cs.State.Terminated.ExitCode, cs.State.Terminated.Message)
+		}
+	}
+
+	// Pod events
+	events, evtErr := ctx.Clientset.CoreV1().Events(ctx.Namespace).List(ctx.Ctx, metav1.ListOptions{
+		FieldSelector: "involvedObject.name=" + podName,
+	})
+	if evtErr == nil {
+		for _, evt := range events.Items {
+			if evt.Type == "Warning" {
+				fmt.Fprintf(&info, "Event: %s — %s\n", evt.Reason, evt.Message)
+			}
+		}
+	}
+
+	if info.Len() == 0 {
+		return "no additional debug info available"
+	}
+	return info.String()
 }
