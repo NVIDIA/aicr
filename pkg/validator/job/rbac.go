@@ -32,42 +32,66 @@ const (
 	// ServiceAccountName is the name of the ServiceAccount used by all validator Jobs.
 	ServiceAccountName = "aicr-validator"
 
-	// ClusterRoleName is the name of the purpose-built ClusterRole for validators.
-	ClusterRoleName = "aicr-validator"
-
 	// ClusterRoleBindingName is the name of the ClusterRoleBinding that grants
-	// the validator ClusterRole to the validator ServiceAccount.
+	// cluster-admin to the validator ServiceAccount.
 	ClusterRoleBindingName = "aicr-validator"
+
+	// clusterAdminRole is the built-in Kubernetes ClusterRole bound to validators.
+	//
+	// Why cluster-admin is safe here:
+	//
+	// 1. Kubernetes RBAC has built-in privilege escalation prevention (KEP-1850,
+	//    k8s.io/apiserver/pkg/authorization/rbac). A user can only create a
+	//    ClusterRoleBinding to cluster-admin if they ALREADY have cluster-admin
+	//    permissions themselves. The person running `aicr validate` must be a
+	//    cluster administrator. This is not a backdoor — it is a reflection of
+	//    the permissions the caller already has.
+	//
+	// 2. Validators need to inspect arbitrary resources across the cluster:
+	//    CRDs (DRA, Karpenter, KAI scheduler), custom metrics APIs, discovery
+	//    APIs, ResourceSlices, PodGroups, and resources from operators that may
+	//    not exist at compile time. A scoped ClusterRole requires enumerating
+	//    every resource upfront, which breaks whenever a new validator or CRD is
+	//    added. This is the core reason the scoped approach fails in practice.
+	//
+	// 3. The ServiceAccount is ephemeral — created at the start of a validation
+	//    run and deleted at the end. It exists for minutes, not permanently.
+	//
+	// 4. The validator containers are built and signed by the AICR CI pipeline.
+	//    They are not arbitrary user code. The ServiceAccount cannot be used by
+	//    other workloads because it lives in the aicr-validation namespace which
+	//    is also ephemeral.
+	//
+	// 5. This matches the pattern used by other cluster validation tools:
+	//    Sonobuoy uses cluster-admin for conformance tests, and the Kubernetes
+	//    e2e test suite itself requires cluster-admin.
+	clusterAdminRole = "cluster-admin"
 
 	// fieldManager is the SSA field manager name for all RBAC resources.
 	fieldManager = labels.ValueAICR
 )
 
-// EnsureRBAC applies the ServiceAccount, ClusterRole, and ClusterRoleBinding
-// for validator Jobs using server-side apply. Call once per validation run
-// before deploying any Jobs.
+// EnsureRBAC applies the ServiceAccount and ClusterRoleBinding for validator
+// Jobs using server-side apply. Call once per validation run before deploying
+// any Jobs.
 func EnsureRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
 	if err := applyServiceAccount(ctx, clientset, namespace); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ServiceAccount", err)
-	}
-
-	if err := applyClusterRole(ctx, clientset); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ClusterRole", err)
+		return err
 	}
 
 	if err := applyClusterRoleBinding(ctx, clientset, namespace); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ClusterRoleBinding", err)
+		return err
 	}
 
 	slog.Debug("RBAC resources applied",
 		"serviceAccount", ServiceAccountName,
 		"namespace", namespace,
-		"clusterRole", ClusterRoleName)
+		"clusterRole", clusterAdminRole)
 
 	return nil
 }
 
-// CleanupRBAC removes the ServiceAccount, ClusterRole, and ClusterRoleBinding.
+// CleanupRBAC removes the ServiceAccount and ClusterRoleBinding.
 // Ignores NotFound errors (idempotent). Call once at end of validation run.
 func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
 	var errs []string
@@ -81,12 +105,6 @@ func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace 
 	if err := clientset.RbacV1().ClusterRoleBindings().Delete(ctx, ClusterRoleBindingName, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			errs = append(errs, "ClusterRoleBinding: "+err.Error())
-		}
-	}
-
-	if err := clientset.RbacV1().ClusterRoles().Delete(ctx, ClusterRoleName, metav1.DeleteOptions{}); err != nil {
-		if !apierrors.IsNotFound(err) {
-			errs = append(errs, "ClusterRole: "+err.Error())
 		}
 	}
 
@@ -111,70 +129,10 @@ func applyServiceAccount(ctx context.Context, clientset kubernetes.Interface, na
 	_, err := clientset.CoreV1().ServiceAccounts(namespace).Apply(
 		ctx, sa, metav1.ApplyOptions{FieldManager: fieldManager, Force: true},
 	)
-	return err
-}
-
-func applyClusterRole(ctx context.Context, clientset kubernetes.Interface) error {
-	cr := applyrbacv1.ClusterRole(ClusterRoleName).
-		WithLabels(map[string]string{
-			labels.Name:      labels.ValueValidator,
-			labels.ManagedBy: labels.ValueAICR,
-		}).
-		WithRules(
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("").
-				WithResources("pods", "pods/log", "services", "configmaps", "namespaces", "nodes", "serviceaccounts", "events").
-				WithVerbs("get", "list", "watch"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("").
-				WithResources("pods").
-				WithVerbs("create", "delete"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("").
-				WithResources("secrets").
-				WithVerbs("get", "list"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("apps").
-				WithResources("deployments", "daemonsets", "statefulsets", "replicasets").
-				WithVerbs("get", "list", "watch"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("batch").
-				WithResources("jobs").
-				WithVerbs("get", "list", "watch"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("autoscaling").
-				WithResources("horizontalpodautoscalers").
-				WithVerbs("get", "list", "watch", "create", "delete"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("karpenter.sh").
-				WithResources("nodepools", "nodeclaims").
-				WithVerbs("get", "list"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("resource.k8s.io").
-				WithResources("resourceclaims", "resourceclaimtemplates", "deviceclasses").
-				WithVerbs("get", "list", "create", "delete"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("gateway.networking.k8s.io").
-				WithResources("gateways", "httproutes").
-				WithVerbs("get", "list"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("monitoring.coreos.com").
-				WithResources("servicemonitors", "podmonitors").
-				WithVerbs("get", "list"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("scheduling.x-k8s.io").
-				WithResources("podgroups").
-				WithVerbs("get", "list", "create", "delete"),
-			applyrbacv1.PolicyRule().
-				WithAPIGroups("rbac.authorization.k8s.io").
-				WithResources("clusterroles", "clusterrolebindings", "roles", "rolebindings").
-				WithVerbs("get", "list"),
-		)
-
-	_, err := clientset.RbacV1().ClusterRoles().Apply(
-		ctx, cr, metav1.ApplyOptions{FieldManager: fieldManager, Force: true},
-	)
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ServiceAccount", err)
+	}
+	return nil
 }
 
 func applyClusterRoleBinding(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
@@ -193,11 +151,14 @@ func applyClusterRoleBinding(ctx context.Context, clientset kubernetes.Interface
 			applyrbacv1.RoleRef().
 				WithAPIGroup("rbac.authorization.k8s.io").
 				WithKind("ClusterRole").
-				WithName(ClusterRoleName),
+				WithName(clusterAdminRole),
 		)
 
 	_, err := clientset.RbacV1().ClusterRoleBindings().Apply(
 		ctx, crb, metav1.ApplyOptions{FieldManager: fieldManager, Force: true},
 	)
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to apply ClusterRoleBinding", err)
+	}
+	return nil
 }

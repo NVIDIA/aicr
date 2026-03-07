@@ -1175,11 +1175,13 @@ RECIPE
     fail "validate/job-rbac-serviceaccount" "ServiceAccount not found after --cleanup=false"
   fi
 
-  if kubectl get clusterrole aicr-validator &>/dev/null; then
-    detail "ClusterRole created: aicr-validator"
+  if kubectl get clusterrolebinding aicr-validator &>/dev/null; then
+    local role_ref
+    role_ref=$(kubectl get clusterrolebinding aicr-validator -o jsonpath='{.roleRef.name}')
+    detail "ClusterRoleBinding created: aicr-validator → ${role_ref}"
     pass "validate/job-rbac-role"
   else
-    fail "validate/job-rbac-role" "ClusterRole not found after --cleanup=false"
+    fail "validate/job-rbac-role" "ClusterRoleBinding not found after --cleanup=false"
   fi
 
   # Check if jobs were created (they may not exist if recipe has no checks)

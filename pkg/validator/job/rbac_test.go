@@ -43,8 +43,8 @@ func TestEnsureRBAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClusterRoleBinding not found: %v", err)
 	}
-	if crb.RoleRef.Name != ClusterRoleName {
-		t.Errorf("ClusterRoleBinding roleRef = %q, want %q", crb.RoleRef.Name, ClusterRoleName)
+	if crb.RoleRef.Name != clusterAdminRole {
+		t.Errorf("ClusterRoleBinding roleRef = %q, want %q", crb.RoleRef.Name, clusterAdminRole)
 	}
 	if len(crb.Subjects) != 1 {
 		t.Fatalf("ClusterRoleBinding subjects length = %d, want 1", len(crb.Subjects))
