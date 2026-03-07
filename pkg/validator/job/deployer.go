@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -159,7 +158,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 					WithContainers(applycorev1.Container().
 						WithName("validator").
 						WithImage(d.entry.Image).
-						WithImagePullPolicy(imagePullPolicy(d.entry.Image)).
+						WithImagePullPolicy(corev1.PullIfNotPresent).
 						WithArgs(d.entry.Args...).
 						WithEnv(d.buildEnvApply()...).
 						WithResources(applycorev1.ResourceRequirements().
@@ -360,18 +359,6 @@ func checkJobTerminal(job *batchv1.Job) (bool, string) {
 		}
 	}
 	return false, ""
-}
-
-// imagePullPolicy returns PullAlways for :latest tags on remote registries
-// (ensures fresh images), PullIfNotPresent for versioned tags or local
-// registries (ko.local, localhost — used in Kind/KWOK tests).
-func imagePullPolicy(image string) corev1.PullPolicy {
-	isLatest := strings.HasSuffix(image, ":latest") || !strings.Contains(image, ":")
-	isLocal := strings.HasPrefix(image, "ko.local") || strings.HasPrefix(image, "localhost")
-	if isLatest && !isLocal {
-		return corev1.PullAlways
-	}
-	return corev1.PullIfNotPresent
 }
 
 func preferCPUNodeAffinityApply() *applycorev1.AffinityApplyConfiguration {

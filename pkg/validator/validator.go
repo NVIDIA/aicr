@@ -102,7 +102,7 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
-	cat, err := catalog.Load()
+	cat, err := catalog.Load(v.Version)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
 	}
@@ -200,7 +200,7 @@ func (v *Validator) ValidatePhase(
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
-	cat, err := catalog.Load()
+	cat, err := catalog.Load(v.Version)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
 	}

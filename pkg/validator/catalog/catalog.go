@@ -92,9 +92,14 @@ type EnvVar struct {
 }
 
 // Load reads and parses the embedded catalog.
-// If AICR_VALIDATOR_IMAGE_REGISTRY is set, it overrides the registry prefix
-// in all catalog image references (e.g., "localhost:5001" replaces "ghcr.io/nvidia").
-func Load() (*ValidatorCatalog, error) {
+//
+// Image tag resolution (applied in order):
+//  1. If a catalog entry uses :latest and version is a release (vX.Y.Z),
+//     the tag is replaced with the CLI version for reproducibility.
+//  2. If AICR_VALIDATOR_IMAGE_REGISTRY is set, the registry prefix is replaced.
+//
+// Entries with explicit version tags (e.g., :v1.2.3) are never modified.
+func Load(version string) (*ValidatorCatalog, error) {
 	data, err := recipes.FS.ReadFile("validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read embedded catalog", err)
@@ -105,6 +110,13 @@ func Load() (*ValidatorCatalog, error) {
 		return nil, err
 	}
 
+	// Replace :latest with CLI version for reproducibility.
+	if isReleaseVersion(version) {
+		for i := range cat.Validators {
+			cat.Validators[i].Image = replaceLatestTag(cat.Validators[i].Image, version)
+		}
+	}
+
 	// Apply image registry override if set.
 	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
 		for i := range cat.Validators {
@@ -113,6 +125,21 @@ func Load() (*ValidatorCatalog, error) {
 	}
 
 	return cat, nil
+}
+
+// isReleaseVersion returns true for semantic version strings (vX.Y.Z),
+// false for dev builds ("dev", "v0.0.0-next", empty).
+func isReleaseVersion(version string) bool {
+	return version != "" && version != "dev" && strings.HasPrefix(version, "v") && !strings.Contains(version, "-next")
+}
+
+// replaceLatestTag replaces :latest with the given version tag.
+// Images with explicit version tags are not modified.
+func replaceLatestTag(image, version string) string {
+	if strings.HasSuffix(image, ":latest") {
+		return strings.TrimSuffix(image, ":latest") + ":" + version
+	}
+	return image
 }
 
 // Parse parses a catalog from raw YAML bytes. Exported for testing with

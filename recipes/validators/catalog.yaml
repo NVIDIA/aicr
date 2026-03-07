@@ -17,10 +17,14 @@ kind: ValidatorCatalog
 metadata:
   name: aicr-validators
   version: "1.0.0"
-# Image registry can be overridden at runtime via AICR_VALIDATOR_IMAGE_REGISTRY.
-# Example: AICR_VALIDATOR_IMAGE_REGISTRY=localhost:5001 replaces ghcr.io/nvidia
-# so "ghcr.io/nvidia/aicr-validators/deployment:latest" becomes
-# "localhost:5001/aicr-validators/deployment:latest".
+# Image tag resolution (applied in order by catalog.Load):
+#   1. :latest tags are replaced with the CLI version (e.g., :v0.9.5) for
+#      release builds, ensuring reproducible validator-to-CLI version locking.
+#      Dev builds ("dev", "-next") keep :latest.
+#   2. Explicit version tags (e.g., :v1.2.3) are never modified — use these
+#      to pin a validator to a specific version independent of the CLI.
+#   3. AICR_VALIDATOR_IMAGE_REGISTRY overrides the registry prefix.
+#      Example: AICR_VALIDATOR_IMAGE_REGISTRY=localhost:5001 replaces ghcr.io/nvidia.
 validators:
   # Deployment phase
   - name: operator-health

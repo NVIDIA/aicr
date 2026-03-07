@@ -21,7 +21,7 @@ import (
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
-	catalog, err := Load()
+	catalog, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -152,7 +152,7 @@ validators:
 }
 
 func TestForPhaseNoMatch(t *testing.T) {
-	catalog, err := Load()
+	catalog, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestReplaceRegistry(t *testing.T) {
 func TestLoadWithRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
 
-	cat, err := Load()
+	cat, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestLoadWithRegistryOverride(t *testing.T) {
 func TestLoadWithoutRegistryOverride(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 
-	cat, err := Load()
+	cat, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}

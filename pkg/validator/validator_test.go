@@ -99,7 +99,7 @@ func TestGenerateRunID(t *testing.T) {
 
 func loadEmbeddedCatalog(t *testing.T) *catalog.ValidatorCatalog {
 	t.Helper()
-	cat, err := catalog.Load()
+	cat, err := catalog.Load("")
 	if err != nil {
 		t.Fatalf("failed to load catalog: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestPhaseOrder(t *testing.T) {
 // in recipe overlays exists in the validator catalog for the correct phase.
 // Catches typos and drift between recipes and catalog at PR time.
 func TestRecipeCheckNamesMatchCatalog(t *testing.T) {
-	cat, err := catalog.Load()
+	cat, err := catalog.Load("")
 	if err != nil {
 		t.Fatalf("failed to load catalog: %v", err)
 	}
