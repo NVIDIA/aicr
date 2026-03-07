@@ -614,7 +614,7 @@ test_validate() {
     echo -e "${DIM}  \$ grep reportFormat validation-all.json${NC}"
 
     # Check if CTRF reportFormat field exists
-    if grep -q 'reportformat: CTRF' "$all_result" || grep -q '"reportFormat"' "$all_result"; then
+    if grep -q '"reportFormat"' "$all_result" || grep -q '"reportFormat"' "$all_result"; then
       detail "CTRF result structure: PASS"
       pass "validate/result-structure"
     else
@@ -728,7 +728,7 @@ RECIPE
 
   msg "--- Test: Deployment constraint (should pass) ---"
   echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe.yaml${NC}"
-  local deployment_result="${validate_dir}/validation-deployment-pass.yaml"
+  local deployment_result="${validate_dir}/validation-deployment-pass.json"
   local deployment_output
   deployment_output=$("${AICR_BIN}" validate \
     --recipe "$recipe_file" \
@@ -747,7 +747,7 @@ RECIPE
 
   if [ -f "$deployment_result" ] && \
      grep -q "gpu-operator-version" "$deployment_result"; then
-    if grep -A1 "name: gpu-operator-version" "$deployment_result" | grep -q "status: passed"; then
+    if grep -A1 '"gpu-operator-version"' "$deployment_result" | grep -q '"status": "passed"; then
       detail "GPU operator version constraint: PASS (v24.6.0 >= v24.6.0)"
       pass "validate/deployment-constraint-pass"
     else
@@ -780,7 +780,7 @@ validation:
 RECIPE
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe.yaml${NC}"
-  local deployment_fail_result="${validate_dir}/validation-deployment-fail.yaml"
+  local deployment_fail_result="${validate_dir}/validation-deployment-fail.json"
   local deployment_fail_output
   deployment_fail_output=$("${AICR_BIN}" validate \
     --recipe "$recipe_file_fail" \
@@ -790,7 +790,7 @@ RECIPE
 
   if [ -f "$deployment_fail_result" ] && \
      grep -q "gpu-operator-version" "$deployment_fail_result"; then
-    if grep -A1 "name: gpu-operator-version" "$deployment_fail_result" | grep -q "status: failed"; then
+    if grep -A1 '"gpu-operator-version"' "$deployment_fail_result" | grep -q '"status": "failed"; then
       detail "GPU operator version constraint: FAIL (v24.6.0 < v25.0.0) - as expected"
       pass "validate/deployment-constraint-fail"
     else
@@ -832,7 +832,7 @@ validation:
 RECIPE
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe-fail.yaml${NC}"
-  local result_er_fail="${validate_dir}/result-er-fail.yaml"
+  local result_er_fail="${validate_dir}/result-er-fail.json"
   local result_er_fail_output
   result_er_fail_output=$("${AICR_BIN}" validate \
     --recipe "$recipe_er_fail" \
@@ -842,11 +842,11 @@ RECIPE
     --output "$result_er_fail" 2>&1) || true
 
   if [ -f "$result_er_fail" ] && \
-     grep -q "name: expected-resources" "$result_er_fail"; then
-    if grep -A1 "name: expected-resources" "$result_er_fail" | grep -q "status: fail"; then
+     grep -q '"expected-resources"' "$result_er_fail"; then
+    if grep -A1 '"expected-resources"' "$result_er_fail" | grep -q '"status": "fail"; then
       detail "Expected-resources check: FAIL (nonexistent-deployment not found) - as expected"
       pass "validate/expected-resources-fail"
-    elif grep -q "summary:" "$result_er_fail" && grep -q "status: fail" "$result_er_fail"; then
+    elif grep -q "summary:" "$result_er_fail" && grep -q '"status": "fail" "$result_er_fail"; then
       detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/expected-resources-fail"
     else
@@ -912,7 +912,7 @@ validation:
 RECIPE
 
       echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe-manual-pass.yaml${NC}"
-      local result_manual="${validate_dir}/result-manual-pass.yaml"
+      local result_manual="${validate_dir}/result-manual-pass.json"
       local result_manual_output
       result_manual_output=$("${AICR_BIN}" validate \
         --recipe "$recipe_manual" \
@@ -924,8 +924,8 @@ RECIPE
       detail "Captured validation output:"
       echo "$result_manual_output" | sed 's/^/    /'
 
-      if [ -f "$result_manual" ] && grep -q "name: expected-resources" "$result_manual"; then
-        if grep -A1 "name: expected-resources" "$result_manual" | grep -q "status: pass"; then
+      if [ -f "$result_manual" ] && grep -q '"expected-resources"' "$result_manual"; then
+        if grep -A1 '"expected-resources"' "$result_manual" | grep -q '"status": "pass"; then
           detail "Expected-resources check passed for deployed nginx"
           pass "validate/expected-resources-manual-pass"
         else
@@ -963,7 +963,7 @@ validation:
 RECIPE
 
       echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe-manual-merge.yaml${NC}"
-      local result_merge="${validate_dir}/result-manual-merge.yaml"
+      local result_merge="${validate_dir}/result-manual-merge.json"
       local result_merge_output
       result_merge_output=$("${AICR_BIN}" validate \
         --recipe "$recipe_merge" \
@@ -975,8 +975,8 @@ RECIPE
       detail "Captured validation output:"
       echo "$result_merge_output" | sed 's/^/    /'
 
-      if [ -f "$result_merge" ] && grep -q "name: expected-resources" "$result_merge"; then
-        if grep -A1 "name: expected-resources" "$result_merge" | grep -q "status: fail"; then
+      if [ -f "$result_merge" ] && grep -q '"expected-resources"' "$result_merge"; then
+        if grep -A1 '"expected-resources"' "$result_merge" | grep -q '"status": "fail"; then
           detail "Expected-resources check correctly failed for missing resource in merge"
           pass "validate/expected-resources-manual-merge"
         else
@@ -1034,7 +1034,7 @@ RECIPE
   msg "--- Test: Chainsaw health check via embedded registry (should pass) ---"
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe.yaml${NC}"
-  local result_chainsaw_pass="${validate_dir}/result-chainsaw-pass.yaml"
+  local result_chainsaw_pass="${validate_dir}/result-chainsaw-pass.json"
   local result_chainsaw_output
   local validate_exit=0
   result_chainsaw_output=$("${AICR_BIN}" validate \
@@ -1049,16 +1049,16 @@ RECIPE
   echo "$result_chainsaw_output" | sed 's/^/    /'
 
   if [ -f "$result_chainsaw_pass" ] && \
-     grep -q "name: expected-resources" "$result_chainsaw_pass"; then
-    if grep -A1 "name: expected-resources" "$result_chainsaw_pass" | grep -q "status: pass"; then
+     grep -q '"expected-resources"' "$result_chainsaw_pass"; then
+    if grep -A1 '"expected-resources"' "$result_chainsaw_pass" | grep -q '"status": "pass"; then
       detail "Chainsaw health check: PASS (gpu-operator deployment found via embedded assert)"
       pass "validate/chainsaw-healthcheck-pass"
-    elif grep -q "summary:" "$result_chainsaw_pass" && grep -q "status: pass" "$result_chainsaw_pass"; then
+    elif grep -q "summary:" "$result_chainsaw_pass" && grep -q '"status": "pass" "$result_chainsaw_pass"; then
       detail "Chainsaw health check: PASS (from summary status)"
       pass "validate/chainsaw-healthcheck-pass"
     else
       detail "Check found but status unclear. Showing check section:"
-      grep -A5 "name: expected-resources" "$result_chainsaw_pass" | sed 's/^/    /' || true
+      grep -A5 '"expected-resources"' "$result_chainsaw_pass" | sed 's/^/    /' || true
       fail "validate/chainsaw-healthcheck-pass" "Check did not pass"
     fi
   else
@@ -1088,7 +1088,7 @@ validation:
 RECIPE
 
   echo -e "${DIM}  \$ aicr validate --phase deployment --recipe recipe-fail.yaml (should fail)${NC}"
-  local result_chainsaw_fail="${validate_dir}/result-chainsaw-fail.yaml"
+  local result_chainsaw_fail="${validate_dir}/result-chainsaw-fail.json"
   local result_chainsaw_fail_output
   local validate_fail_exit=0
   result_chainsaw_fail_output=$("${AICR_BIN}" validate \
@@ -1102,11 +1102,11 @@ RECIPE
   echo "$result_chainsaw_fail_output" | sed 's/^/    /'
 
   if [ -f "$result_chainsaw_fail" ] && \
-     grep -q "name: expected-resources" "$result_chainsaw_fail"; then
-    if grep -A1 "name: expected-resources" "$result_chainsaw_fail" | grep -q "status: fail"; then
+     grep -q '"expected-resources"' "$result_chainsaw_fail"; then
+    if grep -A1 '"expected-resources"' "$result_chainsaw_fail" | grep -q '"status": "fail"; then
       detail "Expected-resources check: FAIL (nonexistent resource not found) - as expected"
       pass "validate/chainsaw-healthcheck-fail"
-    elif grep -q "summary:" "$result_chainsaw_fail" && grep -q "status: fail" "$result_chainsaw_fail"; then
+    elif grep -q "summary:" "$result_chainsaw_fail" && grep -q '"status": "fail" "$result_chainsaw_fail"; then
       detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/chainsaw-healthcheck-fail"
     else
@@ -1291,7 +1291,7 @@ test_validate_job_deployment() {
   msg "--- Test: Validation result format ---"
   if [ -f "$validation_result" ]; then
     # Check for expected CTRF JSON structure
-    if grep -q 'reportformat: CTRF' "$validation_result" || grep -q '"reportFormat"' "$validation_result"; then
+    if grep -q '"reportFormat"' "$validation_result" || grep -q '"reportFormat"' "$validation_result"; then
       detail "Validation result has correct structure"
       pass "validate/job-result-format"
     else

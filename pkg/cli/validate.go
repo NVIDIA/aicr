@@ -358,7 +358,6 @@ func validateCmdFlags() []cli.Flag {
 		},
 		dataFlag,
 		outputFlag,
-		formatFlag,
 		kubeconfigFlag,
 	}
 }
@@ -368,33 +367,38 @@ func validateCmd() *cli.Command {
 		Name:                  "validate",
 		Category:              functionalCategoryName,
 		EnableShellCompletion: true,
-		Usage:                 "Validate cluster using specific recipe.",
-		Description: `Validate a system snapshot against the constraints defined in a recipe.
+		Usage:                 "Validate cluster against recipe constraints using containerized validators.",
+		Description: `Run validation checks against a cluster snapshot using the constraints and
+checks defined in a recipe. Each validator runs as an isolated Kubernetes Job.
 
-Each validator runs as a containerized Kubernetes Job. Results are reported
-in CTRF (Common Test Report Format).
+Results are output in CTRF (Common Test Report Format) JSON — an industry-standard
+schema for test reporting (https://ctrf.io/). Output goes to stdout or the file
+specified by --output.
 
-You can either provide an existing snapshot file or deploy an agent to capture
-a fresh snapshot from the cluster.
+You can either provide an existing snapshot file or let the command deploy an
+agent to capture a fresh snapshot from the cluster.
 
 # Examples
 
-Validate using an existing snapshot file:
+Validate using an existing snapshot:
   aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 Deploy agent to capture and validate in one step:
-  aicr validate --recipe recipe.yaml --namespace default
+  aicr validate --recipe recipe.yaml
 
 Run specific phases:
   aicr validate -r recipe.yaml -s snapshot.yaml \
     --phase deployment --phase conformance
+
+Save CTRF report to file:
+  aicr validate -r recipe.yaml -s snapshot.yaml --output report.json
 
 Run validation without failing on check errors (informational mode):
   aicr validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
 				return err
 			}
 
@@ -415,11 +419,6 @@ Run validation without failing on check errors (informational mode):
 
 			if recipeFilePath == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required")
-			}
-
-			outFormat, err := parseOutputFormat(cmd)
-			if err != nil {
-				return err
 			}
 
 			failOnError := cmd.Bool("fail-on-error")
@@ -459,7 +458,7 @@ Run validation without failing on check errors (informational mode):
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
 			}
 
-			return runValidation(ctx, rec, snap, phases, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, cmd.String("evidence-dir"))
+			return runValidation(ctx, rec, snap, phases, cmd.String("output"), serializer.FormatJSON, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, cmd.String("evidence-dir"))
 		},
 	}
 }
