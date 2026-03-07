@@ -4,8 +4,8 @@
 
 **Accepted and Implemented** — 2026-03-06
 
-The migration is complete. `pkg/validatorv2` has been renamed to `pkg/validator`.
-The v1 engine has been deleted. All references to "v2" in this document are historical.
+The migration is complete. The implementation lives in `pkg/validator/` with validator
+containers in `validators/`. The v1 engine has been deleted.
 
 ## Context
 
@@ -43,7 +43,7 @@ This approach has several fundamental problems:
 
 We will replace the Go test-based validation engine with a **container-per-validator**
 model where each validation is a standalone OCI container image, orchestrated as
-individual Kubernetes Jobs. The new implementation lives in `pkg/validatorv2/`.
+individual Kubernetes Jobs. The orchestrator lives in `pkg/validator/`, validator containers in `validators/`.
 
 ### Result Protocol
 
@@ -63,7 +63,7 @@ for structured evidence; stderr is for debug/test logs.
 
 ### Validator Catalog
 
-A versioned, declarative YAML catalog embedded in `pkg/validatorv2/catalog/catalog.yaml`
+A versioned, declarative YAML catalog embedded in `recipes/catalog.yaml`
 defines all validators:
 
 ```yaml
@@ -192,10 +192,11 @@ Not containerized because readiness requires no cluster access and must work in
 
 ### Migration Strategy
 
-1. New code in `pkg/validatorv2/` — no changes to `pkg/validator/`
-2. CLI flag `--validator-version=v2` selects the new engine (default: v1)
-3. Existing checks ported to standalone containers over time
-4. Once complete, v2 becomes default; eventually v1 is removed
+Migration is complete. The v1 engine was replaced in a single PR:
+
+1. Orchestrator in `pkg/validator/` (catalog, CTRF, job deployer, RBAC)
+2. Validator containers in `validators/` (deployment, conformance, performance)
+3. Catalog in `recipes/catalog.yaml` (embedded alongside recipe data)
 
 ## Consequences
 

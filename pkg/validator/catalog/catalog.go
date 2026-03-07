@@ -18,18 +18,15 @@
 package catalog
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/recipes"
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed catalog.yaml
-var catalogFS embed.FS
 
 const (
 	// expectedAPIVersion is the supported catalog API version.
@@ -98,7 +95,7 @@ type EnvVar struct {
 // If AICR_VALIDATOR_IMAGE_REGISTRY is set, it overrides the registry prefix
 // in all catalog image references (e.g., "localhost:5001" replaces "ghcr.io/nvidia").
 func Load() (*ValidatorCatalog, error) {
-	data, err := catalogFS.ReadFile("catalog.yaml")
+	data, err := recipes.FS.ReadFile("validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read embedded catalog", err)
 	}

@@ -18,5 +18,5 @@ import (
 	"embed"
 )
 
-//go:embed overlays/*.yaml registry.yaml components/*/*.yaml components/*/manifests/*.yaml checks/*/*.yaml
+//go:embed overlays/*.yaml registry.yaml validators/catalog.yaml components/*/*.yaml components/*/manifests/*.yaml checks/*/*.yaml
 var FS embed.FS
