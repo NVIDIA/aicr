@@ -40,8 +40,8 @@ func TestMain(m *testing.M) {
 
 	cfg, err := env.Start()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "envtest start failed (set KUBEBUILDER_ASSETS): %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "envtest not available, integration tests will be skipped: %v\n", err)
+		os.Exit(m.Run())
 	}
 
 	testClientset, err = kubernetes.NewForConfig(cfg)
@@ -57,10 +57,19 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
+// requireEnvtest skips the test if envtest is not available.
+func requireEnvtest(t *testing.T) {
+	t.Helper()
+	if testClientset == nil {
+		t.Skip("envtest not available (set KUBEBUILDER_ASSETS)")
+	}
+}
+
 // createUniqueNamespace creates a unique namespace for test isolation and registers
 // cleanup via t.Cleanup. Returns the namespace name.
 func createUniqueNamespace(t *testing.T) string {
 	t.Helper()
+	requireEnvtest(t)
 	name := fmt.Sprintf("test-ns-%05d", nsCounter.Add(1))
 	_, err := testClientset.CoreV1().Namespaces().Create(
 		context.Background(),

@@ -4,8 +4,8 @@
 
 **Accepted and Implemented** — 2026-03-06
 
-The migration is complete. `pkg/validatorv2` has been renamed to `pkg/validator`.
-The v1 engine has been deleted. All references to "v2" in this document are historical.
+The migration is complete. The implementation lives in `pkg/validator/` with validator
+containers in `validators/`. The v1 engine has been deleted.
 
 ## Context
 
@@ -43,7 +43,7 @@ This approach has several fundamental problems:
 
 We will replace the Go test-based validation engine with a **container-per-validator**
 model where each validation is a standalone OCI container image, orchestrated as
-individual Kubernetes Jobs. The new implementation lives in `pkg/validatorv2/`.
+individual Kubernetes Jobs. The orchestrator lives in `pkg/validator/`, validator containers in `validators/`.
 
 ### Result Protocol
 
@@ -63,7 +63,7 @@ for structured evidence; stderr is for debug/test logs.
 
 ### Validator Catalog
 
-A versioned, declarative YAML catalog embedded in `pkg/validatorv2/catalog/catalog.yaml`
+A versioned, declarative YAML catalog embedded in `recipes/catalog.yaml`
 defines all validators:
 
 ```yaml
@@ -91,7 +91,7 @@ Every validator container:
 4. Writes error context to `/dev/termination-log` on failure (exit 1)
 5. Writes evidence to **stdout** (captured in CTRF report)
 6. Writes debug/test logs to **stderr** (not captured in CTRF)
-7. Uses the mounted ServiceAccount (`cluster-admin`) for K8s API access
+7. Uses the mounted ServiceAccount (`aicr-validator` with scoped ClusterRole) for K8s API access
 8. For GPU workloads: creates its own Pod on a GPU node (two-level scheduling)
 9. Handles SIGTERM gracefully — writes partial results within `terminationGracePeriodSeconds` (30s)
 
@@ -103,23 +103,23 @@ Each validator runs as a K8s Job with:
 - `terminationGracePeriodSeconds: 30` — time between SIGTERM and SIGKILL
 - `ttlSecondsAfterFinished: 3600` — 1 hour retention for debugging
 - `restartPolicy: Never`
-- `imagePullPolicy: Always`
-- Resources: `requests/limits: {cpu: 1, memory: 1Gi}`
+- `imagePullPolicy: IfNotPresent` (version-locked tags)
+- Resources: `requests/limits: {cpu: 1, memory: 1Gi}` (configurable per catalog entry)
 - Soft CPU node affinity, tolerate-all tolerations
-- ServiceAccount: `aicr-validator` (bound to `cluster-admin`)
+- ServiceAccount: `aicr-validator` (bound to purpose-built ClusterRole)
 - Volumes: snapshot + recipe ConfigMaps (read-only)
 
-Job naming: `aicr-v2-{runID}-{validatorName}`
+Job naming: `aicr-{validatorName}-{hash}`
 
 ### RBAC
 
-Two resources, using the built-in `cluster-admin` ClusterRole:
+Three resources, using a purpose-built ClusterRole with minimum required permissions:
 
 1. **ServiceAccount** `aicr-validator` in validation namespace
-2. **ClusterRoleBinding** `aicr-validator-cluster-admin` binding the SA to the
-   built-in `cluster-admin` ClusterRole
+2. **ClusterRole** `aicr-validator` with scoped read/write rules per resource type
+3. **ClusterRoleBinding** `aicr-validator` binding the SA to the ClusterRole
 
-No custom Role, ClusterRole, or RoleBinding. Created once per run, cleaned up at end.
+Created once per run via Server-Side Apply, cleaned up at end.
 
 ### Timeout and Termination
 
@@ -192,10 +192,11 @@ Not containerized because readiness requires no cluster access and must work in
 
 ### Migration Strategy
 
-1. New code in `pkg/validatorv2/` — no changes to `pkg/validator/`
-2. CLI flag `--validator-version=v2` selects the new engine (default: v1)
-3. Existing checks ported to standalone containers over time
-4. Once complete, v2 becomes default; eventually v1 is removed
+Migration is complete. The v1 engine was replaced in a single PR:
+
+1. Orchestrator in `pkg/validator/` (catalog, CTRF, job deployer, RBAC)
+2. Validator containers in `validators/` (deployment, conformance, performance)
+3. Catalog in `recipes/catalog.yaml` (embedded alongside recipe data)
 
 ## Consequences
 
@@ -219,7 +220,7 @@ Not containerized because readiness requires no cluster access and must work in
 
 ### Neutral
 
-- **RBAC is cluster-admin.** Broad but short-lived. Same blast radius as v1.
+- **RBAC is scoped but broad.** Purpose-built ClusterRole with minimum required permissions. Short-lived (created and deleted per run).
 - **Data delivery unchanged.** Same ConfigMap approach. Same 1MB limitation.
 
 ## Alternatives Considered
@@ -244,14 +245,14 @@ Monolithic pod problem remains. Tight coupling remains.
 **Deferred:** Adds complexity. Sequential is simpler. Parallelism can be added
 later without changing the architecture.
 
-### 5. Custom ClusterRole with enumerated permissions
+### 5. cluster-admin vs scoped ClusterRole
 
-**Rejected in favor of cluster-admin:** The custom ClusterRole in v1 already has
-30+ rules spanning 15 API groups. Every new validator potentially needs new
-permissions. Maintaining a precise permission set is high-friction and provides
-little security benefit given the short-lived nature of the ServiceAccount (created
-at validation start, deleted at end). Using `cluster-admin` eliminates permission
-maintenance as a barrier to adding validators.
+**Initially cluster-admin, later replaced with a purpose-built ClusterRole.**
+The initial implementation used `cluster-admin` for simplicity. During review,
+this was replaced with a scoped `aicr-validator` ClusterRole that grants only
+the permissions validators actually need (read access to workloads/nodes,
+create/delete for test pods, DRA/scheduling resources). The ClusterRole is
+managed via Server-Side Apply and cleaned up after each run.
 
 ## References
 

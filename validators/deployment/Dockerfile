@@ -26,6 +26,8 @@ RUN CGO_ENABLED=0 go build -o /out/deployment ./validators/deployment
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /out/deployment /deployment
+COPY --from=builder /src/validators/deployment/testdata /app/testdata
 
+WORKDIR /app
 USER nonroot
 ENTRYPOINT ["/deployment"]

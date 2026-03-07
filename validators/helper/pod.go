@@ -274,3 +274,31 @@ func LoadPodFromTemplate(templatePath string, data map[string]string) (*v1.Pod, 
 
 	return pod, nil
 }
+
+// GetOwnPodTolerations reads the current pod's tolerations from the K8s API.
+// This allows validators to inherit tolerations and apply them to child pods
+// (e.g., nvidia-smi verify pods) so they can schedule on the same tainted nodes.
+func GetOwnPodTolerations(ctx context.Context, clientset kubernetes.Interface) ([]v1.Toleration, error) {
+	podName := os.Getenv("HOSTNAME")
+	if podName == "" {
+		return nil, nil
+	}
+
+	namespace := os.Getenv("AICR_NAMESPACE")
+	if namespace == "" {
+		// Try the service account namespace file.
+		if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+			namespace = strings.TrimSpace(string(data))
+		}
+	}
+	if namespace == "" {
+		return nil, nil
+	}
+
+	pod, err := clientset.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get own pod", err)
+	}
+
+	return pod.Spec.Tolerations, nil
+}

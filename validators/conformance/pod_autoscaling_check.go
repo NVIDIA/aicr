@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -57,6 +58,14 @@ type hpaBehaviorReport struct {
 func CheckPodAutoscaling(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
+	}
+
+	// 0. Check if DCGM exporter is running (needed for GPU-aware HPA).
+	dcgmPods, dcgmErr := ctx.Clientset.CoreV1().Pods("").List(ctx.Ctx, metav1.ListOptions{
+		LabelSelector: "app=nvidia-dcgm-exporter",
+	})
+	if dcgmErr != nil || len(dcgmPods.Items) == 0 {
+		return validators.Skip("DCGM exporter not found — GPU metrics not available for HPA")
 	}
 
 	// 1. Custom metrics API available
@@ -337,7 +346,7 @@ func buildHPATestHPA(name, deployName, namespace string) *autoscalingv2.Horizont
 				Kind:       "Deployment",
 				Name:       deployName,
 			},
-			MinReplicas: int32Ptr(1),
+			MinReplicas: helper.Int32Ptr(1),
 			MaxReplicas: 3,
 			Metrics: []autoscalingv2.MetricSpec{
 				{
@@ -357,7 +366,7 @@ func buildHPATestHPA(name, deployName, namespace string) *autoscalingv2.Horizont
 			// so the scale-down behavioral test completes in reasonable time.
 			Behavior: &autoscalingv2.HorizontalPodAutoscalerBehavior{
 				ScaleDown: &autoscalingv2.HPAScalingRules{
-					StabilizationWindowSeconds: int32Ptr(0),
+					StabilizationWindowSeconds: helper.Int32Ptr(0),
 				},
 			},
 		},

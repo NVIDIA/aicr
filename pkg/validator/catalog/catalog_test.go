@@ -15,12 +15,13 @@
 package catalog
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
-	catalog, err := Load()
+	catalog, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -151,7 +152,7 @@ validators:
 }
 
 func TestForPhaseNoMatch(t *testing.T) {
-	catalog, err := Load()
+	catalog, err := Load("")
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
@@ -272,5 +273,89 @@ func TestParseInvalidYAML(t *testing.T) {
 	_, err := Parse(data)
 	if err == nil {
 		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestReplaceRegistry(t *testing.T) {
+	tests := []struct {
+		name        string
+		image       string
+		newRegistry string
+		expected    string
+	}{
+		{
+			name:        "3-part image replaces registry and org",
+			image:       "ghcr.io/nvidia/aicr-validators/deployment:latest",
+			newRegistry: "localhost:5001",
+			expected:    "localhost:5001/aicr-validators/deployment:latest",
+		},
+		{
+			name:        "2-part image replaces registry",
+			image:       "registry.io/image:tag",
+			newRegistry: "newregistry",
+			expected:    "newregistry/image:tag",
+		},
+		{
+			name:        "1-part image returns unchanged",
+			image:       "image",
+			newRegistry: "localhost:5001",
+			expected:    "image",
+		},
+		{
+			name:        "empty override still applied on 3-part",
+			image:       "ghcr.io/nvidia/aicr-validators/deployment:latest",
+			newRegistry: "",
+			expected:    "/aicr-validators/deployment:latest",
+		},
+		{
+			name:        "3-part image with nested path",
+			image:       "ghcr.io/nvidia/aicr-validators/sub/path:v1.0.0",
+			newRegistry: "myregistry.io",
+			expected:    "myregistry.io/aicr-validators/sub/path:v1.0.0",
+		},
+		{
+			name:        "2-part image with tag and digest",
+			image:       "registry.io/myimage@sha256:abc123",
+			newRegistry: "other.io",
+			expected:    "other.io/myimage@sha256:abc123",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := replaceRegistry(tt.image, tt.newRegistry)
+			if got != tt.expected {
+				t.Errorf("replaceRegistry(%q, %q) = %q, want %q", tt.image, tt.newRegistry, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLoadWithRegistryOverride(t *testing.T) {
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
+
+	cat, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	for i, v := range cat.Validators {
+		if !strings.HasPrefix(v.Image, "localhost:5001/") {
+			t.Errorf("Validators[%d].Image = %q, want prefix %q", i, v.Image, "localhost:5001/")
+		}
+	}
+}
+
+func TestLoadWithoutRegistryOverride(t *testing.T) {
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+
+	cat, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	for i, v := range cat.Validators {
+		if strings.HasPrefix(v.Image, "localhost:5001/") {
+			t.Errorf("Validators[%d].Image should not have localhost prefix: %q", i, v.Image)
+		}
 	}
 }

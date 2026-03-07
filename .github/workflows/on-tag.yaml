@@ -17,7 +17,7 @@ name: On Tag Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'  # Only build tags with semantic versioning format
+      - 'v[0-9]+.[0-9]+.[0-9]+*'  # Semantic versioning with optional pre-release suffix (e.g., v1.2.3-rc1)
 
 permissions:
   contents: read
@@ -113,6 +113,7 @@ jobs:
       fail-fast: false
       matrix:
         phase: [deployment, performance, conformance]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-latest
@@ -140,6 +141,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ github.ref_name }}-${{ matrix.arch }}
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
@@ -172,12 +174,23 @@ jobs:
 
       - name: Create multi-arch manifests for validator images
         run: |
+          set -euo pipefail
           for phase in deployment performance conformance; do
+            IMAGE="${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}"
+
+            # Version tag manifest
             docker manifest create \
-              "${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}:${{ github.ref_name }}" \
-              "${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}:${{ github.ref_name }}-amd64" \
-              "${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}:${{ github.ref_name }}-arm64"
-            docker manifest push "${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}:${{ github.ref_name }}"
+              "${IMAGE}:${{ github.ref_name }}" \
+              "${IMAGE}:${{ github.ref_name }}-amd64" \
+              "${IMAGE}:${{ github.ref_name }}-arm64"
+            docker manifest push "${IMAGE}:${{ github.ref_name }}"
+
+            # Latest tag manifest (matches catalog's default :latest references)
+            docker manifest create --amend \
+              "${IMAGE}:latest" \
+              "${IMAGE}:${{ github.ref_name }}-amd64" \
+              "${IMAGE}:${{ github.ref_name }}-arm64"
+            docker manifest push "${IMAGE}:latest"
           done
 
   # =============================================================================
@@ -283,12 +296,26 @@ jobs:
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
-      - name: Attest validator images
-        run: |
-          for phase in deployment performance conformance; do
-            echo "Attesting ${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}..."
-          done
-        # TODO: Update attest-image-from-tag action to support multiple images
+      - name: Attest deployment validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/deployment
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest performance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/performance
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest conformance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/conformance
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
 
 
   # =============================================================================

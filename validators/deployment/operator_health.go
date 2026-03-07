@@ -20,6 +20,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -51,7 +52,7 @@ func checkOperatorHealth(ctx *validators.Context) error {
 	for _, pod := range pods.Items {
 		status := string(pod.Status.Phase)
 		fmt.Printf("  %s: %s\n", pod.Name, status)
-		if pod.Status.Phase == "Running" {
+		if pod.Status.Phase == v1.PodRunning {
 			runningCount++
 		}
 	}

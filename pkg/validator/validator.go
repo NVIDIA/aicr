@@ -102,7 +102,7 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
-	cat, err := catalog.Load()
+	cat, err := catalog.Load(v.Version)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
 	}
@@ -115,6 +115,11 @@ func (v *Validator) ValidatePhases(
 	clientset, _, err := k8sclient.GetKubeClient()
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	// Ensure validation namespace exists before starting informers or creating RBAC.
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
 	}
 
 	// Shared informer factory scoped to the validation namespace.
@@ -195,7 +200,7 @@ func (v *Validator) ValidatePhase(
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
-	cat, err := catalog.Load()
+	cat, err := catalog.Load(v.Version)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
 	}
@@ -207,6 +212,10 @@ func (v *Validator) ValidatePhase(
 	clientset, _, err := k8sclient.GetKubeClient()
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
 	}
 
 	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
@@ -246,11 +255,12 @@ func (v *Validator) ValidatePhase(
 }
 
 // filterEntriesByRecipe returns only catalog entries that the recipe declares
-// for the given phase. If the recipe has no checks for this phase, all entries
-// are returned (backward compatible — run everything).
+// for the given phase. If the recipe has no validation section or the phase
+// has no checks declared, no entries are returned (skip the phase).
+// The recipe is the source of truth — only explicitly declared checks run.
 func filterEntriesByRecipe(entries []catalog.ValidatorEntry, phase Phase, recipeResult *recipe.RecipeResult) []catalog.ValidatorEntry {
 	if recipeResult == nil || recipeResult.Validation == nil {
-		return entries
+		return nil
 	}
 
 	var phaseChecks []string
@@ -269,9 +279,9 @@ func filterEntriesByRecipe(entries []catalog.ValidatorEntry, phase Phase, recipe
 		}
 	}
 
-	// No checks declared → run all catalog entries for this phase.
+	// No checks declared for this phase → skip it.
 	if len(phaseChecks) == 0 {
-		return entries
+		return nil
 	}
 
 	// Build set for O(1) lookup.
@@ -511,6 +521,26 @@ func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kuberne
 			slog.Warn("failed to delete CTRF ConfigMap", "phase", phase, "error", err)
 		}
 	}
+}
+
+// ensureNamespace creates the namespace if it does not exist.
+// Uses create-or-ignore since namespaces are immutable.
+func ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+			Labels: map[string]string{
+				labels.Name:      labels.ValueAICR,
+				labels.Component: labels.ValueValidation,
+				labels.ManagedBy: labels.ValueAICR,
+			},
+		},
+	}
+	_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	return nil
 }
 
 func generateRunID() string {

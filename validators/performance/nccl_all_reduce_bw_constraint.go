@@ -125,11 +125,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 	slog.Info("Target bandwidth threshold", "threshold", threshold, "tolerance", "10%")
 
-	// Create dynamic client for CRD operations (needed for trainer check and NCCL resources).
-	dynamicClient, err := dynamic.NewForConfig(ctx.RESTConfig)
-	if err != nil {
-		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create dynamic client", err)
-	}
+	// Use the dynamic client from context for CRD operations.
+	dynamicClient := ctx.DynamicClient
 
 	// Ensure Kubeflow Trainer is installed.  If it is already present we leave it
 	// alone; if we install it we clean it up after the test completes.

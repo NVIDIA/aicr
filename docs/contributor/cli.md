@@ -350,7 +350,7 @@ spec:
       serviceAccountName: aicr
       containers:
       - name: aicr
-        image: ghcr.io/nvidia/aicr-validator:latest
+        image: ghcr.io/nvidia/aicr:latest
         command:
         - aicr
         - snapshot
@@ -2118,7 +2118,7 @@ spec:
           type: RuntimeDefault
       containers:
       - name: aicr
-        image: ghcr.io/nvidia/aicr-validator:latest
+        image: ghcr.io/nvidia/aicr:latest
         securityContext:
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true

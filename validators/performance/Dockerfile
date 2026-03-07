@@ -26,6 +26,8 @@ RUN CGO_ENABLED=0 go build -o /out/performance ./validators/performance
 FROM gcr.io/distroless/static-debian12:nonroot
 
 COPY --from=builder /out/performance /performance
+COPY --from=builder /src/validators/performance/testdata /app/testdata
 
+WORKDIR /app
 USER nonroot
 ENTRYPOINT ["/performance"]

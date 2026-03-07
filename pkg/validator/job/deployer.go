@@ -31,11 +31,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	applybatchv1 "k8s.io/client-go/applyconfigurations/batch/v1"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/cache"
 )
 
 // Deployer manages the lifecycle of a single validator Job.
@@ -238,11 +238,11 @@ func (d *Deployer) buildTolerationsApply() []*applycorev1.TolerationApplyConfigu
 	return tols
 }
 
-// WaitForCompletion uses the shared informer to wait until the Job reaches a
-// terminal state (Complete or Failed). Returns nil for both — the caller uses
-// ExtractResult to determine pass/fail/skip from the exit code.
+// WaitForCompletion watches the Job until it reaches a terminal state
+// (Complete or Failed). Returns nil for both — the caller uses ExtractResult
+// to determine pass/fail/skip from the exit code.
 //
-// Returns error only for infrastructure failures (timeout, informer sync).
+// Returns error only for infrastructure failures (watch error, timeout).
 // Job failure (exit != 0) is NOT an error return.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
 	waitTimeout := timeout + defaults.ValidatorWaitBuffer
@@ -258,68 +258,50 @@ func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration)
 		return nil
 	}
 
-	jobInformer := d.factory.Batch().V1().Jobs().Informer()
-
-	// Wait for the informer cache to sync.
-	if !cache.WaitForCacheSync(timeoutCtx.Done(), jobInformer.HasSynced) {
-		return errors.Wrap(errors.ErrCodeTimeout, "Job informer cache sync timeout", timeoutCtx.Err())
-	}
-
-	// Register an event handler that signals when this specific Job goes terminal.
-	doneCh := make(chan struct{})
-	reg, regErr := jobInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(_, newObj interface{}) {
-			job, ok := newObj.(*batchv1.Job)
-			if !ok || job.Name != d.jobName || job.Namespace != d.namespace {
-				return
-			}
-			if terminal, _ := checkJobTerminal(job); terminal {
-				select {
-				case doneCh <- struct{}{}:
-				default:
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			job, ok := obj.(*batchv1.Job)
-			if !ok || job.Name != d.jobName || job.Namespace != d.namespace {
-				return
-			}
-			select {
-			case doneCh <- struct{}{}:
-			default:
-			}
-		},
+	// Watch for state changes, starting from the current resourceVersion.
+	watcher, err := d.clientset.BatchV1().Jobs(d.namespace).Watch(timeoutCtx, metav1.ListOptions{
+		FieldSelector:   "metadata.name=" + d.jobName,
+		ResourceVersion: currentJob.ResourceVersion,
 	})
-	if regErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to add Job event handler", regErr)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to watch Job", err)
 	}
-	defer func() {
-		if removeErr := jobInformer.RemoveEventHandler(reg); removeErr != nil {
-			slog.Warn("failed to remove Job event handler", "error", removeErr)
-		}
-	}()
+	defer watcher.Stop()
 
-	// Re-check via direct API call after registering handler to close the race
-	// window between the cache read and handler registration.
-	currentJob, getErr := d.clientset.BatchV1().Jobs(d.namespace).Get(timeoutCtx, d.jobName, metav1.GetOptions{})
-	if getErr == nil {
-		if terminal, _ := checkJobTerminal(currentJob); terminal {
-			return nil
-		}
-	}
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout, "validator wait timeout", timeoutCtx.Err())
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				// Watch channel closed — re-check Job status directly.
+				recheck, recheckErr := d.clientset.BatchV1().Jobs(d.namespace).Get(timeoutCtx, d.jobName, metav1.GetOptions{})
+				if recheckErr != nil {
+					return errors.Wrap(errors.ErrCodeInternal, "watch closed and Job not found", recheckErr)
+				}
+				if terminal, _ := checkJobTerminal(recheck); terminal {
+					return nil
+				}
+				return errors.New(errors.ErrCodeInternal, "watch channel closed, Job still running")
+			}
 
-	select {
-	case <-timeoutCtx.Done():
-		return errors.Wrap(errors.ErrCodeTimeout, "validator wait timeout", timeoutCtx.Err())
-	case <-doneCh:
-		return nil
+			if event.Type == watch.Deleted {
+				return errors.New(errors.ErrCodeInternal, "Job was deleted externally")
+			}
+
+			watchedJob, ok := event.Object.(*batchv1.Job)
+			if !ok {
+				continue
+			}
+			if terminal, _ := checkJobTerminal(watchedJob); terminal {
+				return nil
+			}
+		}
 	}
 }
 
-// WaitForPodTermination uses the shared informer to wait for the Job's pod
-// to reach a terminal state. Prevents RBAC cleanup from racing with
-// in-progress pod operations.
+// WaitForPodTermination watches the Job's pod until it reaches a terminal
+// state. Prevents RBAC cleanup from racing with in-progress pod operations.
 func (d *Deployer) WaitForPodTermination(ctx context.Context) {
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
@@ -333,61 +315,36 @@ func (d *Deployer) WaitForPodTermination(ctx context.Context) {
 
 	slog.Debug("waiting for pod termination", "pod", jobPod.Name)
 
-	podInformer := d.factory.Core().V1().Pods().Informer()
-	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
-		slog.Warn("Pod informer cache failed to sync")
-		return
-	}
-
-	doneCh := make(chan struct{})
-	podName := jobPod.Name
-	reg, regErr := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(_, newObj interface{}) {
-			pod, ok := newObj.(*corev1.Pod)
-			if !ok || pod.Name != podName || pod.Namespace != d.namespace {
-				return
-			}
-			if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-				select {
-				case doneCh <- struct{}{}:
-				default:
-				}
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			pod, ok := obj.(*corev1.Pod)
-			if !ok || pod.Name != podName || pod.Namespace != d.namespace {
-				return
-			}
-			select {
-			case doneCh <- struct{}{}:
-			default:
-			}
-		},
+	watcher, err := d.clientset.CoreV1().Pods(d.namespace).Watch(ctx, metav1.ListOptions{
+		FieldSelector:   "metadata.name=" + jobPod.Name,
+		ResourceVersion: jobPod.ResourceVersion,
 	})
-	if regErr != nil {
-		slog.Warn("failed to add Pod event handler", "error", regErr)
+	if err != nil {
+		slog.Warn("failed to watch pod for termination", "error", err)
 		return
 	}
-	defer func() {
-		if removeErr := podInformer.RemoveEventHandler(reg); removeErr != nil {
-			slog.Warn("failed to remove Pod event handler", "error", removeErr)
-		}
-	}()
+	defer watcher.Stop()
 
-	// Re-check after handler registration.
-	obj, exists, getErr := podInformer.GetStore().GetByKey(d.namespace + "/" + podName)
-	if getErr == nil && exists {
-		pod := obj.(*corev1.Pod)
-		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Warn("timed out waiting for pod termination", "pod", jobPod.Name)
 			return
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return
+			}
+			if event.Type == watch.Deleted {
+				return
+			}
+			watchedPod, ok := event.Object.(*corev1.Pod)
+			if !ok {
+				continue
+			}
+			if watchedPod.Status.Phase == corev1.PodSucceeded || watchedPod.Status.Phase == corev1.PodFailed {
+				return
+			}
 		}
-	}
-
-	select {
-	case <-ctx.Done():
-		slog.Warn("timed out waiting for pod termination", "pod", podName)
-	case <-doneCh:
 	}
 }
 

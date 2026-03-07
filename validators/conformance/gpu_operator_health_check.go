@@ -32,8 +32,15 @@ func CheckGPUOperatorHealth(ctx *validators.Context) error {
 	}
 
 	// 1. GPU Operator Deployment running
-	if err := verifyDeploymentAvailable(ctx, "gpu-operator", "gpu-operator"); err != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "GPU operator deployment check failed", err)
+	// Check by listing deployments with the gpu-operator label in the namespace.
+	deploys, err := ctx.Clientset.AppsV1().Deployments("gpu-operator").List(ctx.Ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=gpu-operator",
+	})
+	if err != nil || len(deploys.Items) == 0 {
+		// Fallback: try exact name match.
+		if verifyErr := verifyDeploymentAvailable(ctx, "gpu-operator", "gpu-operator"); verifyErr != nil {
+			return errors.Wrap(errors.ErrCodeNotFound, "GPU operator deployment not found (checked label app.kubernetes.io/name=gpu-operator and exact name)", verifyErr)
+		}
 	}
 
 	// 2. ClusterPolicy state = ready (dynamic client — CRD type)

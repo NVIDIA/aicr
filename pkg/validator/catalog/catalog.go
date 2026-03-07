@@ -18,18 +18,15 @@
 package catalog
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/recipes"
 	"gopkg.in/yaml.v3"
 )
-
-//go:embed catalog.yaml
-var catalogFS embed.FS
 
 const (
 	// expectedAPIVersion is the supported catalog API version.
@@ -95,10 +92,15 @@ type EnvVar struct {
 }
 
 // Load reads and parses the embedded catalog.
-// If AICR_VALIDATOR_IMAGE_REGISTRY is set, it overrides the registry prefix
-// in all catalog image references (e.g., "localhost:5001" replaces "ghcr.io/nvidia").
-func Load() (*ValidatorCatalog, error) {
-	data, err := catalogFS.ReadFile("catalog.yaml")
+//
+// Image tag resolution (applied in order):
+//  1. If a catalog entry uses :latest and version is a release (vX.Y.Z),
+//     the tag is replaced with the CLI version for reproducibility.
+//  2. If AICR_VALIDATOR_IMAGE_REGISTRY is set, the registry prefix is replaced.
+//
+// Entries with explicit version tags (e.g., :v1.2.3) are never modified.
+func Load(version string) (*ValidatorCatalog, error) {
+	data, err := recipes.FS.ReadFile("validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read embedded catalog", err)
 	}
@@ -106,6 +108,13 @@ func Load() (*ValidatorCatalog, error) {
 	cat, err := Parse(data)
 	if err != nil {
 		return nil, err
+	}
+
+	// Replace :latest with CLI version for reproducibility.
+	if isReleaseVersion(version) {
+		for i := range cat.Validators {
+			cat.Validators[i].Image = replaceLatestTag(cat.Validators[i].Image, version)
+		}
 	}
 
 	// Apply image registry override if set.
@@ -116,6 +125,30 @@ func Load() (*ValidatorCatalog, error) {
 	}
 
 	return cat, nil
+}
+
+// isReleaseVersion returns true for semantic version strings (vX.Y.Z),
+// false for dev builds ("dev", "v0.0.0-next", empty).
+func isReleaseVersion(version string) bool {
+	if version == "" || version == "dev" || strings.Contains(version, "-next") {
+		return false
+	}
+	return true
+}
+
+// replaceLatestTag replaces :latest with the given version tag.
+// Images with explicit version tags are not modified.
+// Ensures the tag has a "v" prefix to match the on-tag release workflow
+// (GoReleaser strips the "v" from the version but tags keep it).
+func replaceLatestTag(image, version string) string {
+	if strings.HasSuffix(image, ":latest") {
+		tag := version
+		if !strings.HasPrefix(tag, "v") {
+			tag = "v" + tag
+		}
+		return strings.TrimSuffix(image, ":latest") + ":" + tag
+	}
+	return image
 }
 
 // Parse parses a catalog from raw YAML bytes. Exported for testing with

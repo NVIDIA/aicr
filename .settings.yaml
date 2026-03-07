@@ -54,8 +54,8 @@ testing_tools:
 
 # Quality Thresholds
 quality:
-  coverage_threshold: '50'  # Temporarily lowered during v1→v2 validator migration. TODO: restore to 70 as v2 test coverage increases.
-  lint_timeout: '5m'
+  coverage_threshold: '70'
+  lint_timeout: '10m'
   test_timeout: '10m'
 
 # Build Configuration

@@ -131,13 +131,16 @@ func getVersionFromDeployment(ctx context.Context, clientset kubernetes.Interfac
 }
 
 func extractVersionFromImage(image string) string {
-	parts := strings.Split(image, ":")
-	if len(parts) != 2 {
+	idx := strings.LastIndex(image, ":")
+	if idx == -1 {
 		return ""
 	}
-	tag := parts[1]
-	if idx := strings.Index(tag, "-"); idx != -1 {
-		tag = tag[:idx]
+	tag := image[idx+1:]
+	if tag == "" {
+		return ""
+	}
+	if dashIdx := strings.Index(tag, "-"); dashIdx != -1 {
+		tag = tag[:dashIdx]
 	}
 	return normalizeVersion(tag)
 }

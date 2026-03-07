@@ -20,12 +20,12 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -116,7 +116,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 		return err
 	}
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
 		cleanupDRATestResources(cleanupCtx, ctx.Clientset, dynClient, run)
 	}()
@@ -156,7 +156,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 			"kubectl logs isolation-test -n dra-test",
 			fmt.Sprintf("failed to read isolation test logs: %v", logErr))
 	} else {
-		recordChunkedTextArtifact(ctx, "Isolation test logs",
+		recordRawTextArtifact(ctx, "Isolation test logs",
 			"kubectl logs isolation-test -n dra-test", string(logBytes))
 	}
 
@@ -172,7 +172,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 		fmt.Sprintf("Pod:               %s/%s\nPhase:             %s\nExitCode:          %d\nResourceClaims:    %d\nHostPathGPUMounts: %d",
 			draTestNamespace, isolationReport.PodName, isolationReport.PodPhase,
 			isolationReport.ExitCode, isolationReport.ResourceClaims, isolationReport.HostPathGPUMounts))
-	recordChunkedTextArtifact(ctx, "No-claim pod logs",
+	recordRawTextArtifact(ctx, "No-claim pod logs",
 		"kubectl logs dra-no-claim-<id> -n dra-test", isolationReport.Logs)
 	return nil
 }
@@ -381,7 +381,7 @@ func validateDRAIsolation(ctx context.Context, clientset kubernetes.Interface, r
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create no-claim isolation test pod", err)
 	}
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
 		_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(draTestNamespace).Delete(
 			cleanupCtx, run.noClaimPodName, metav1.DeleteOptions{}))
@@ -538,7 +538,7 @@ func buildDRATestPod(run *draTestRun) *corev1.Pod {
 			ResourceClaims: []corev1.PodResourceClaim{
 				{
 					Name:              "gpu",
-					ResourceClaimName: strPtr(run.claimName),
+					ResourceClaimName: helper.StrPtr(run.claimName),
 				},
 			},
 			Containers: []corev1.Container{
@@ -615,10 +615,6 @@ func buildResourceClaim(run *draTestRun) *unstructured.Unstructured {
 			},
 		},
 	}
-}
-
-func strPtr(s string) *string {
-	return &s
 }
 
 func podExitCode(pod *corev1.Pod) int32 {

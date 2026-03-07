@@ -40,8 +40,7 @@ spec:
         nvidia.com/gpu: "1"
       requests:
         nvidia.com/gpu: "1"
+  # Tolerate all taints — the pod is pinned to a specific GPU node via nodeName,
+  # so scheduling is not affected. Tolerations prevent taint-based eviction.
   tolerations:
-  - key: dedicated
-    value: user-workload
-    operator: Equal
-    effect: NoExecute
+  - operator: Exists

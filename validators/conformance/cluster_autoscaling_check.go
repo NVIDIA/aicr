@@ -26,6 +26,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	corev1 "k8s.io/api/core/v1"
@@ -334,8 +335,8 @@ func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv
 								},
 							},
 							SecurityContext: &corev1.SecurityContext{
-								AllowPrivilegeEscalation: boolPtr(false),
-								ReadOnlyRootFilesystem:   boolPtr(true),
+								AllowPrivilegeEscalation: helper.BoolPtr(false),
+								ReadOnlyRootFilesystem:   helper.BoolPtr(true),
 							},
 						},
 					},
@@ -345,9 +346,6 @@ func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv
 		},
 	}
 }
-
-// boolPtr returns a pointer to the given bool value.
-func boolPtr(b bool) *bool { return &b }
 
 // buildClusterAutoTestHPA creates an HPA targeting external metric dcgm_gpu_power_usage
 // with a very low threshold (10W). An idle H100 draws ~46W, so this reliably triggers
@@ -364,7 +362,7 @@ func buildClusterAutoTestHPA(name, deployName, namespace string) *autoscalingv2.
 				Kind:       "Deployment",
 				Name:       deployName,
 			},
-			MinReplicas: int32Ptr(1),
+			MinReplicas: helper.Int32Ptr(1),
 			MaxReplicas: 4,
 			Metrics: []autoscalingv2.MetricSpec{
 				{

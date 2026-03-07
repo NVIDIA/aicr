@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package recipes
+package helper
 
-import (
-	"embed"
-)
+// Int32Ptr returns a pointer to the given int32 value.
+func Int32Ptr(i int32) *int32 { return &i }
 
-//go:embed overlays/*.yaml registry.yaml validators/catalog.yaml components/*/*.yaml components/*/manifests/*.yaml checks/*/*.yaml
-var FS embed.FS
+// BoolPtr returns a pointer to the given bool value.
+func BoolPtr(b bool) *bool { return &b }
+
+// StrPtr returns a pointer to the given string value.
+func StrPtr(s string) *string { return &s }

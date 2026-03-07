@@ -56,8 +56,11 @@ func CheckRobustController(ctx *validators.Context) error {
 	}
 
 	// 1. Dynamo operator controller-manager deployment running
-	// Name from: tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml:29
+	// Skip if Dynamo operator is not installed.
 	deploy, deployErr := getDeploymentIfAvailable(ctx, "dynamo-system", "dynamo-platform-dynamo-operator-controller-manager")
+	if deployErr != nil {
+		return validators.Skip("Dynamo operator not found — cluster may not use Dynamo inference platform")
+	}
 	if deploy != nil {
 		expected := int32(1)
 		if deploy.Spec.Replicas != nil {
@@ -69,9 +72,6 @@ func CheckRobustController(ctx *validators.Context) error {
 				deploy.Namespace, deploy.Name,
 				deploy.Status.AvailableReplicas, expected,
 				firstContainerImage(deploy.Spec.Template.Spec.Containers)))
-	}
-	if deployErr != nil {
-		return errors.Wrap(errors.ErrCodeNotFound, "Dynamo operator controller-manager check failed", deployErr)
 	}
 	operatorPods, podErr := ctx.Clientset.CoreV1().Pods("dynamo-system").List(ctx.Ctx, metav1.ListOptions{})
 	if podErr != nil {

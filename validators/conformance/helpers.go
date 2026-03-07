@@ -34,8 +34,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// phaseConformance is the phase identifier for conformance checks.
-
 // getDynamicClient returns the dynamic client from context, or creates one from RESTConfig.
 func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
 	if ctx.DynamicClient != nil {
@@ -166,9 +164,6 @@ func getDaemonSetIfReady(ctx *validators.Context, namespace, name string) (*apps
 	return ds, nil
 }
 
-// int32Ptr returns a pointer to the given int32 value.
-func int32Ptr(i int32) *int32 { return &i }
-
 // recordArtifact writes diagnostic evidence to stdout.
 // In v2, stdout is captured as the CTRF stdout field. No chunking needed.
 func recordArtifact(_ *validators.Context, label, data string) {
@@ -182,13 +177,6 @@ func recordRawTextArtifact(_ *validators.Context, label, equivalent, data string
 	} else {
 		fmt.Printf("--- %s ---\n%s\n", label, data)
 	}
-}
-
-// recordChunkedTextArtifact is an alias for recordRawTextArtifact.
-// In v1, this chunked large payloads for the base64 artifact collector.
-// In v2, stdout has no size limit (truncation happens at the orchestrator).
-func recordChunkedTextArtifact(ctx *validators.Context, label, equivalent, data string) {
-	recordRawTextArtifact(ctx, label, equivalent, data)
 }
 
 // recordObjectYAMLArtifact writes a structured object as YAML evidence.

@@ -69,8 +69,8 @@ func ExitCodeToCTRFStatus(code int32) string {
 // MergeReports combines multiple CTRF reports into a single report.
 // It aggregates test results, summaries, and picks the earliest timestamp.
 func MergeReports(toolName, toolVersion string, reports []*Report) *Report {
-	if len(reports) == 1 && reports[0] != nil {
-		return reports[0]
+	if len(reports) == 1 && reports[0] != nil { //nolint:gosec // Index is safe: len==1 guarantees bounds
+		return reports[0] //nolint:gosec // Index is safe: len==1 guarantees bounds
 	}
 
 	merged := &Report{

@@ -49,9 +49,12 @@ runs:
         CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance
         CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance
         for phase in deployment performance conformance; do
+          mkdir -p "validators/${phase}/testdata"
           docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
         FROM gcr.io/distroless/static-debian12:nonroot
         COPY dist/validator/${phase} /${phase}
+        COPY validators/${phase}/testdata /app/testdata
+        WORKDIR /app
         USER nonroot
         ENTRYPOINT ["/${phase}"]
         DOCKERFILE

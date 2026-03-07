@@ -453,13 +453,23 @@ func TestWaitForCompletionFastPath(t *testing.T) {
 	job, _ := testClientset.BatchV1().Jobs(ns).Get(ctx, d.JobName(), metav1.GetOptions{})
 	job.Status.StartTime = &now
 	job.Status.CompletionTime = &now
+	// K8s 1.33+ requires SuccessCriteriaMet before Complete on Jobs with SuccessPolicy.
+	// Set both conditions; if the API server rejects SuccessCriteriaMet (older K8s),
+	// fall back to Complete only.
 	job.Status.Conditions = []batchv1.JobCondition{
 		{Type: batchv1.JobSuccessCriteriaMet, Status: corev1.ConditionTrue, LastTransitionTime: now},
 		{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
 	}
 	_, err := testClientset.BatchV1().Jobs(ns).UpdateStatus(ctx, job, metav1.UpdateOptions{})
 	if err != nil {
-		t.Fatalf("failed to update Job status: %v", err)
+		// Older K8s may reject SuccessCriteriaMet — retry with Complete only.
+		job.Status.Conditions = []batchv1.JobCondition{
+			{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, LastTransitionTime: now},
+		}
+		_, err = testClientset.BatchV1().Jobs(ns).UpdateStatus(ctx, job, metav1.UpdateOptions{})
+		if err != nil {
+			t.Fatalf("failed to update Job status: %v", err)
+		}
 	}
 
 	if err := d.WaitForCompletion(ctx, 1*time.Minute); err != nil {

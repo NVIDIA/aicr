@@ -62,6 +62,7 @@ func buildTestReport() *Report {
 }
 
 func TestWriteAndReadCTRFConfigMap(t *testing.T) {
+	requireEnvtest(t)
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 	runID := "20260305-abc123"
@@ -117,6 +118,7 @@ func TestWriteAndReadCTRFConfigMap(t *testing.T) {
 }
 
 func TestWriteCTRFConfigMapUpdateExisting(t *testing.T) {
+	requireEnvtest(t)
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 	runID := "run1"
@@ -156,6 +158,7 @@ func TestWriteCTRFConfigMapUpdateExisting(t *testing.T) {
 }
 
 func TestReadCTRFConfigMapNotFound(t *testing.T) {
+	requireEnvtest(t)
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 
@@ -166,6 +169,7 @@ func TestReadCTRFConfigMapNotFound(t *testing.T) {
 }
 
 func TestDeleteCTRFConfigMap(t *testing.T) {
+	requireEnvtest(t)
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 	runID := "run1"
@@ -190,6 +194,7 @@ func TestDeleteCTRFConfigMap(t *testing.T) {
 }
 
 func TestDeleteCTRFConfigMapNotFound(t *testing.T) {
+	requireEnvtest(t)
 	ns := createUniqueNamespace(t)
 	ctx := context.Background()
 

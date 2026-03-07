@@ -118,7 +118,7 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 	recordRawTextArtifact(ctx, "Prometheus Query: DCGM_FI_DEV_GPU_UTIL",
 		fmt.Sprintf("curl -sf '%s'", queryURL),
 		fmt.Sprintf("Status:            %s\nTime series count: %d", valueOrUnknown(promResp.Status), len(promResp.Data.Result)))
-	recordChunkedTextArtifact(ctx, "Prometheus query response (GPU util)",
+	recordRawTextArtifact(ctx, "Prometheus query response (GPU util)",
 		fmt.Sprintf("curl -sf '%s'", queryURL), string(body))
 
 	if len(promResp.Data.Result) == 0 {

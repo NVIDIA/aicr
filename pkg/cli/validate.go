@@ -22,10 +22,14 @@ import (
 
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -112,8 +116,58 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	return phases, nil
 }
 
+// validatePhasesAgainstRecipe warns when a requested phase has no checks
+// defined in the recipe. The phase will still run but produce 0 tests
+// in the CTRF report.
+func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) error {
+	if rec.Validation == nil {
+		if len(phases) > 0 {
+			slog.Warn("recipe has no validation section; requested phases will have no checks",
+				"phases", phases)
+		}
+		return nil
+	}
+
+	if len(phases) == 0 {
+		return nil
+	}
+
+	defined := make(map[validator.Phase]bool)
+	if rec.Validation.Deployment != nil && len(rec.Validation.Deployment.Checks) > 0 {
+		defined[validator.PhaseDeployment] = true
+	}
+	if rec.Validation.Performance != nil && len(rec.Validation.Performance.Checks) > 0 {
+		defined[validator.PhasePerformance] = true
+	}
+	if rec.Validation.Conformance != nil && len(rec.Validation.Conformance.Checks) > 0 {
+		defined[validator.PhaseConformance] = true
+	}
+
+	for _, p := range phases {
+		if !defined[p] {
+			slog.Warn("phase requested but no checks defined in recipe; phase will be empty",
+				"phase", p)
+		}
+	}
+
+	return nil
+}
+
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
+// Creates the namespace if it does not exist.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
+	// Ensure namespace exists before deploying the agent Job.
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.namespace}}
+	if _, nsErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); nsErr != nil {
+		if !apierrors.IsAlreadyExists(nsErr) {
+			return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", nsErr)
+		}
+	}
+
 	agentConfig := &snapshotter.AgentConfig{
 		Kubeconfig:         cfg.kubeconfig,
 		Namespace:          cfg.namespace,
@@ -277,17 +331,10 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringFlag{
 			Name:     "namespace",
 			Aliases:  []string{"n"},
-			Usage:    "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
+			Usage:    "Kubernetes namespace for snapshot agent and validation Jobs",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
-			Value:    "default",
-			Category: "Agent Deployment",
-		},
-		&cli.StringFlag{
-			Name:     "validation-namespace",
-			Usage:    "Kubernetes namespace where validation jobs will run.",
-			Sources:  cli.EnvVars("AICR_VALIDATION_NAMESPACE"),
 			Value:    "aicr-validation",
-			Category: "Agent Deployment",
+			Category: "Deployment",
 		},
 		&cli.StringFlag{
 			Name:     "image",
@@ -348,7 +395,6 @@ func validateCmdFlags() []cli.Flag {
 		},
 		dataFlag,
 		outputFlag,
-		formatFlag,
 		kubeconfigFlag,
 	}
 }
@@ -358,33 +404,38 @@ func validateCmd() *cli.Command {
 		Name:                  "validate",
 		Category:              functionalCategoryName,
 		EnableShellCompletion: true,
-		Usage:                 "Validate cluster using specific recipe.",
-		Description: `Validate a system snapshot against the constraints defined in a recipe.
+		Usage:                 "Validate cluster against recipe constraints using containerized validators.",
+		Description: `Run validation checks against a cluster snapshot using the constraints and
+checks defined in a recipe. Each validator runs as an isolated Kubernetes Job.
 
-Each validator runs as a containerized Kubernetes Job. Results are reported
-in CTRF (Common Test Report Format).
+Results are output in CTRF (Common Test Report Format) JSON — an industry-standard
+schema for test reporting (https://ctrf.io/). Output goes to stdout or the file
+specified by --output.
 
-You can either provide an existing snapshot file or deploy an agent to capture
-a fresh snapshot from the cluster.
+You can either provide an existing snapshot file or let the command deploy an
+agent to capture a fresh snapshot from the cluster.
 
 # Examples
 
-Validate using an existing snapshot file:
+Validate using an existing snapshot:
   aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 Deploy agent to capture and validate in one step:
-  aicr validate --recipe recipe.yaml --namespace default
+  aicr validate --recipe recipe.yaml
 
 Run specific phases:
   aicr validate -r recipe.yaml -s snapshot.yaml \
     --phase deployment --phase conformance
+
+Save CTRF report to file:
+  aicr validate -r recipe.yaml -s snapshot.yaml --output report.json
 
 Run validation without failing on check errors (informational mode):
   aicr validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
 				return err
 			}
 
@@ -401,18 +452,10 @@ Run validation without failing on check errors (informational mode):
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
 
-			validationNamespace := cmd.String("validation-namespace")
-			if !cmd.IsSet("validation-namespace") && validationNamespace == "aicr-validation" {
-				validationNamespace = cmd.String("namespace")
-			}
+			validationNamespace := cmd.String("namespace")
 
 			if recipeFilePath == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required")
-			}
-
-			outFormat, err := parseOutputFormat(cmd)
-			if err != nil {
-				return err
 			}
 
 			failOnError := cmd.Bool("fail-on-error")
@@ -452,7 +495,12 @@ Run validation without failing on check errors (informational mode):
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
 			}
 
-			return runValidation(ctx, rec, snap, phases, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, cmd.String("evidence-dir"))
+			// Validate that requested phases are defined in the recipe.
+			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
+				return err
+			}
+
+			return runValidation(ctx, rec, snap, phases, cmd.String("output"), serializer.FormatJSON, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, cmd.String("evidence-dir"))
 		},
 	}
 }
