@@ -212,11 +212,20 @@ type gpuConfiguration struct {
 	Namespace       string
 }
 
-// parseThreshold extracts the numeric threshold value from constraint
+// parseThreshold extracts the numeric threshold value from a constraint value.
+// Handles formats like "450", "450 GB/s", ">= 400", ">= 100 GB/s".
 func parseThreshold(value string) (float64, error) {
-	// Remove units and parse (e.g., "450 GB/s" -> 450)
 	numStr := strings.TrimSpace(value)
+	// Strip comparison operator prefix (>=, >, <=, <, ==, =)
+	numStr = strings.TrimLeft(numStr, "><=! ")
+	numStr = strings.TrimSpace(numStr)
+	// Strip units suffix (e.g., "GB/s")
 	numStr = strings.Split(numStr, " ")[0]
+
+	if numStr == "" {
+		return 0, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid threshold: no numeric value found in %q", value))
+	}
 
 	threshold, err := strconv.ParseFloat(numStr, 64)
 	if err != nil {
