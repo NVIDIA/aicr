@@ -43,6 +43,22 @@ spec:
   componentRefs: []
 
   validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - helm-values
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"
+    performance:
+      checks:
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 100"
     conformance:
       checks:
         - platform-health
@@ -53,3 +69,5 @@ spec:
         - gang-scheduling
         - pod-autoscaling
         - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

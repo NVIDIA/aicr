@@ -130,7 +130,7 @@ validators:
     timeout: 10m
     args: ["secure-accelerator-access"]
     env: []
-  - name: gpu-operator-health-conformance
+  - name: gpu-operator-health
     phase: conformance
     description: "Verify GPU operator health (conformance diagnostic)"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
