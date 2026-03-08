@@ -45,6 +45,8 @@ spec:
           spec:
             template:
               spec:
+                tolerations:
+                - operator: Exists
                 initContainers:
                 # Fix SSH key permissions: the MPI plugin mounts the secret at /tmp/mpi-keys
                 # with default 0644 permissions. SSH refuses to use id_rsa with > 0600.
@@ -145,6 +147,8 @@ spec:
               spec:
                 nodeSelector:
                   node.kubernetes.io/instance-type: p5.48xlarge
+                tolerations:
+                - operator: Exists
                 initContainers:
                 # Fix authorized_keys permissions so sshd accepts incoming connections.
                 # The MPI plugin mounts the secret at /tmp/mpi-keys with 0644; sshd
