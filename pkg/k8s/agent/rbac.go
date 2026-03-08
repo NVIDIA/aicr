@@ -25,6 +25,21 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// ensureNamespace creates the namespace if it does not exist.
+// Uses create-or-ignore since namespaces are immutable.
+func (d *Deployer) ensureNamespace(ctx context.Context) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: d.config.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "aicr",
+			},
+		},
+	}
+	_, err := d.clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	return k8s.IgnoreAlreadyExists(err)
+}
+
 // ensureServiceAccount creates the ServiceAccount for the agent.
 // If the ServiceAccount already exists, this is a no-op (idempotent).
 func (d *Deployer) ensureServiceAccount(ctx context.Context) error {

@@ -48,6 +48,29 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 	deployer := NewDeployer(clientset, config)
 	ctx := context.Background()
 
+	// Test Namespace creation
+	t.Run("create Namespace", func(t *testing.T) {
+		if err := deployer.ensureNamespace(ctx); err != nil {
+			t.Fatalf("failed to create Namespace: %v", err)
+		}
+
+		ns, err := clientset.CoreV1().Namespaces().
+			Get(ctx, config.Namespace, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Namespace not found: %v", err)
+		}
+		if ns.Labels["app.kubernetes.io/managed-by"] != "aicr" {
+			t.Errorf("expected managed-by label 'aicr', got %q", ns.Labels["app.kubernetes.io/managed-by"])
+		}
+	})
+
+	// Test Namespace idempotency
+	t.Run("create Namespace idempotent", func(t *testing.T) {
+		if err := deployer.ensureNamespace(ctx); err != nil {
+			t.Fatalf("second create failed (not idempotent): %v", err)
+		}
+	})
+
 	// Test ServiceAccount creation
 	t.Run("create ServiceAccount", func(t *testing.T) {
 		if err := deployer.ensureServiceAccount(ctx); err != nil {
@@ -391,8 +414,15 @@ func TestDeployer_Deploy(t *testing.T) {
 		t.Fatalf("Deploy() failed: %v", err)
 	}
 
+	// Verify Namespace
+	_, err := clientset.CoreV1().Namespaces().
+		Get(ctx, config.Namespace, metav1.GetOptions{})
+	if err != nil {
+		t.Errorf("Namespace not created: %v", err)
+	}
+
 	// Verify ServiceAccount
-	_, err := clientset.CoreV1().ServiceAccounts(config.Namespace).
+	_, err = clientset.CoreV1().ServiceAccounts(config.Namespace).
 		Get(ctx, testName, metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("ServiceAccount not created: %v", err)
