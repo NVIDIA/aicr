@@ -21,6 +21,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -99,7 +100,7 @@ func WithSkipEmptyValues(skip bool) Option {
 func NewParser(opts ...Option) *Parser {
 	p := &Parser{
 		delimiter:       "\n",
-		maxSize:         1 << 20, // 1MB default
+		maxSize:         defaults.FileParserMaxSize,
 		skipComments:    true,
 		kvDelimiter:     "=",
 		vDefault:        "",

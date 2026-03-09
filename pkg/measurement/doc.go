@@ -57,7 +57,7 @@
 //
 //	version, err := m.GetSubtype("cluster").GetString("version")
 //	nodes, err := m.GetSubtype("cluster").GetInt64("nodes")
-//	ready, err := m.GetSubtype("cluster").GetBool("ready")
+//	ready, err := m.GetSubtype("cluster").getBool("ready")
 //
 // # Filtering Data
 //
@@ -67,7 +67,7 @@
 //	filtered := FilterOut(readings, []string{"*password*", "secret*"})
 //
 //	// Keep only version and count fields
-//	kept := FilterIn(readings, []string{"version", "count"})
+//	kept := filterIn(readings, []string{"version", "count"})
 //
 // # Serialization
 //

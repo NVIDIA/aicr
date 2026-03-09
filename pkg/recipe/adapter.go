@@ -207,8 +207,8 @@ func mergeValues(dst, src map[string]any) {
 	}
 }
 
-// HasComponentRefs checks if the input is a RecipeResult with component references.
-func HasComponentRefs(input RecipeInput) bool {
+// hasComponentRefs checks if the input is a RecipeResult with component references.
+func hasComponentRefs(input RecipeInput) bool {
 	_, ok := input.(*RecipeResult)
 	return ok
 }

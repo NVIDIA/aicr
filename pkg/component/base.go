@@ -237,10 +237,10 @@ func GetRecipeBundlerVersion(m map[string]string) string {
 	return "unknown"
 }
 
-// BuildBaseConfigMap creates a configuration map with common bundler settings.
+// buildBaseConfigMap creates a configuration map with common bundler settings.
 // Returns a map containing bundler version.
 // Bundlers can extend this map with their specific values.
-func (b *BaseBundler) BuildBaseConfigMap() map[string]string {
+func (b *BaseBundler) buildBaseConfigMap() map[string]string {
 	config := make(map[string]string)
 
 	config[bundlerVersionKey] = b.Config.Version()
@@ -252,7 +252,7 @@ func (b *BaseBundler) BuildBaseConfigMap() map[string]string {
 // This includes base config from bundler settings plus recipe version.
 // Use this when working with RecipeResult (new format) instead of Recipe.
 func (b *BaseBundler) BuildConfigMapFromInput(input interface{ GetVersion() string }) map[string]string {
-	config := b.BuildBaseConfigMap()
+	config := b.buildBaseConfigMap()
 
 	// Add recipe version if available
 	if version := input.GetVersion(); version != "" {

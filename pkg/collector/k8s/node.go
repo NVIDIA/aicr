@@ -29,7 +29,7 @@ import (
 func (k *Collector) collectNode(ctx context.Context) (map[string]measurement.Reading, error) {
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "node collection cancelled", err)
 	}
 
 	// Get the current node name from environment
@@ -99,10 +99,6 @@ func parseProvider(providerID string) string {
 
 	// Split by "://" to get the provider prefix
 	parts := strings.SplitN(providerID, "://", 2)
-	if len(parts) < 1 {
-		slog.Warn("invalid providerID format", slog.String("providerID", providerID))
-		return ""
-	}
 
 	// Normalize provider names
 	provider := strings.ToLower(strings.TrimSpace(parts[0]))

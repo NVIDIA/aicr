@@ -86,11 +86,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
 	} else if logs != "" {
-		lines := strings.Split(strings.TrimRight(logs, "\n"), "\n")
-		if len(lines) > defaults.ValidatorMaxStdoutLines {
-			lines = lines[len(lines)-defaults.ValidatorMaxStdoutLines:]
-		}
-		result.Stdout = lines
+		result.Stdout = truncateLogLines(logs, defaults.ValidatorMaxStdoutLines)
 	}
 
 	return result
@@ -114,11 +110,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 
 	// Try to get logs
 	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ""); logErr == nil && logs != "" {
-		lines := strings.Split(strings.TrimRight(logs, "\n"), "\n")
-		if len(lines) > defaults.ValidatorMaxStdoutLines {
-			lines = lines[len(lines)-defaults.ValidatorMaxStdoutLines:]
-		}
-		result.Stdout = lines
+		result.Stdout = truncateLogLines(logs, defaults.ValidatorMaxStdoutLines)
 	}
 
 	// Try to get container status
@@ -140,6 +132,16 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 	}
 
 	return result
+}
+
+// truncateLogLines splits raw log output into lines and returns at most the
+// last maxLines lines (tail behavior).
+func truncateLogLines(logs string, maxLines int) []string {
+	lines := strings.Split(strings.TrimRight(logs, "\n"), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	return lines
 }
 
 // getPodForJob finds the pod created by the validator Job using label selection.

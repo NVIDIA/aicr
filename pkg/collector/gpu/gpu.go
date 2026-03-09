@@ -64,7 +64,7 @@ func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "GPU collection cancelled", err)
 	}
 
 	data, err := executeCommand(ctx, nvidiaSMICommand, "-q", "-x")

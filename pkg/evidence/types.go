@@ -18,9 +18,9 @@ import (
 	"time"
 )
 
-// EvidenceEntry holds all data needed to render a single evidence document.
+// evidenceEntry holds all data needed to render a single evidence document.
 // Multiple checks can contribute to one entry when they share a requirement.
-type EvidenceEntry struct {
+type evidenceEntry struct {
 	// RequirementID is the CNCF requirement identifier.
 	RequirementID string
 
@@ -34,7 +34,7 @@ type EvidenceEntry struct {
 	Filename string
 
 	// Checks contains the individual check results.
-	Checks []CheckEntry
+	Checks []checkEntry
 
 	// Status is the aggregate: "passed" if all pass, "failed" if any fails.
 	Status string
@@ -43,8 +43,8 @@ type EvidenceEntry struct {
 	GeneratedAt time.Time
 }
 
-// CheckEntry represents one check result within an evidence entry.
-type CheckEntry struct {
+// checkEntry represents one check result within an evidence entry.
+type checkEntry struct {
 	// Name is the validator name.
 	Name string
 

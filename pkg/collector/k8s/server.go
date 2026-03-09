@@ -27,7 +27,7 @@ import (
 func (k *Collector) collectServer(ctx context.Context) (map[string]measurement.Reading, error) {
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "server collection cancelled", err)
 	}
 
 	// Server Version

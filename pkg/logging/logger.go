@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	// EnvVarLogLevel is the environment variable name for setting the log level.
-	EnvVarLogLevel = "LOG_LEVEL"
+	// envVarLogLevel is the environment variable name for setting the log level.
+	envVarLogLevel = "LOG_LEVEL"
 )
 
 func newStructuredLogger(module, version, level string) *slog.Logger {
@@ -65,7 +65,7 @@ func SetDefaultLoggerWithLevel(module, version, level string) {
 //
 // Derives log level from the LOG_LEVEL environment variable.
 func SetDefaultStructuredLogger(module, version string) {
-	SetDefaultStructuredLoggerWithLevel(module, version, os.Getenv(EnvVarLogLevel))
+	SetDefaultStructuredLoggerWithLevel(module, version, os.Getenv(envVarLogLevel))
 }
 
 // SetDefaultStructuredLoggerWithLevel initializes the structured logger with the specified log level

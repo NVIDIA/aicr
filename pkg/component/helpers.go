@@ -26,8 +26,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// ComputeChecksum computes the SHA256 checksum of the given content.
-func ComputeChecksum(content []byte) string {
+// computeChecksum computes the SHA256 checksum of the given content.
+func computeChecksum(content []byte) string {
 	hash := sha256.Sum256(content)
 	return hex.EncodeToString(hash[:])
 }
@@ -83,8 +83,8 @@ func GetConfigValue(config map[string]string, key, defaultValue string) string {
 	return defaultValue
 }
 
-// ExtractCustomLabels extracts custom labels from config map with "label_" prefix.
-func ExtractCustomLabels(config map[string]string) map[string]string {
+// extractCustomLabels extracts custom labels from config map with "label_" prefix.
+func extractCustomLabels(config map[string]string) map[string]string {
 	labels := make(map[string]string)
 	for k, v := range config {
 		if len(k) > 6 && k[:6] == "label_" {
@@ -94,8 +94,8 @@ func ExtractCustomLabels(config map[string]string) map[string]string {
 	return labels
 }
 
-// ExtractCustomAnnotations extracts custom annotations from config map with "annotation_" prefix.
-func ExtractCustomAnnotations(config map[string]string) map[string]string {
+// extractCustomAnnotations extracts custom annotations from config map with "annotation_" prefix.
+func extractCustomAnnotations(config map[string]string) map[string]string {
 	annotations := make(map[string]string)
 	for k, v := range config {
 		if len(k) > 11 && k[:11] == "annotation_" {
@@ -111,17 +111,8 @@ const (
 	StrFalse = "false"
 )
 
-// BoolToString converts a boolean to "true" or "false" string.
-// Use this for Helm values that require string booleans.
-func BoolToString(b bool) string {
-	if b {
-		return StrTrue
-	}
-	return StrFalse
-}
-
-// ParseBoolString parses a string boolean value.
+// parseBoolString parses a string boolean value.
 // Returns true if the value is "true" or "1", false otherwise.
-func ParseBoolString(s string) bool {
+func parseBoolString(s string) bool {
 	return s == StrTrue || s == "1"
 }

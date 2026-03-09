@@ -27,7 +27,7 @@
 //
 // Related test files:
 // - recipe_test.go: Tests Recipe struct validation methods after recipes
-//   are built (Validate, ValidateStructure, ValidateMeasurementExists)
+//   are built (Validate, ValidateStructure, validateMeasurementExists)
 // - yaml_test.go: Tests embedded YAML data files for schema conformance,
 //   valid references, enum values, and constraint syntax
 

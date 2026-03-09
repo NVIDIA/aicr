@@ -78,7 +78,7 @@ func FuzzParseVersion(f *testing.F) {
 			// Test comparison methods don't panic
 			v3 := NewVersion(1, 2, 3)
 			_ = v.EqualsOrNewer(v3)
-			_ = v.IsNewer(v3)
+			_ = v.isNewer(v3)
 			_ = v.Equals(v3)
 			_ = v.Compare(v3)
 		}

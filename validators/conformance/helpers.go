@@ -27,9 +27,10 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 )
@@ -277,18 +278,30 @@ func podWaitingStatus(pod *corev1.Pod) string {
 	return "none"
 }
 
+// waitForDeletion polls until a resource is gone (NotFound) or the context expires.
+func waitForDeletion(ctx context.Context, getFunc func() error) {
+	pollCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+	_ = wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
+		func(ctx context.Context) (bool, error) {
+			err := getFunc()
+			if k8serrors.IsNotFound(err) {
+				return true, nil
+			}
+			return false, nil
+		},
+	)
+}
+
 // gpuDriverName is the DRA driver name for NVIDIA GPUs.
 const gpuDriverName = "gpu.nvidia.com"
 
 // countAvailableGPUs counts total GPU devices from ResourceSlices and subtracts
 // allocated devices from ResourceClaims to determine how many are free.
 func countAvailableGPUs(ctx context.Context, dynClient dynamic.Interface) (total, free int, err error) {
-	sliceGVR := schema.GroupVersionResource{
-		Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices",
-	}
-
 	// Count total GPU devices from ResourceSlices.
-	slices, err := dynClient.Resource(sliceGVR).List(ctx, metav1.ListOptions{})
+	// Uses package-level resourceSliceGVR defined in secure_access_check.go.
+	slices, err := dynClient.Resource(resourceSliceGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return 0, 0, errors.Wrap(errors.ErrCodeInternal, "failed to list ResourceSlices", err)
 	}

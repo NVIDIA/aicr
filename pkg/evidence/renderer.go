@@ -28,6 +28,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
+// Parsed templates cached at package level to avoid re-parsing on every render call.
+var (
+	parsedEvidenceTemplate = template.Must(template.New("evidence").Funcs(templateFuncs()).Parse(evidenceTemplate))
+	parsedIndexTemplate    = template.Must(template.New("index").Funcs(templateFuncs()).Parse(indexTemplate))
+)
+
 // Renderer generates CNCF conformance evidence documents from CTRF reports.
 type Renderer struct {
 	outputDir string
@@ -90,13 +96,13 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 }
 
 // buildEntries groups CTRF test results by requirement.
-func (r *Renderer) buildEntries(report *ctrf.Report) []EvidenceEntry {
+func (r *Renderer) buildEntries(report *ctrf.Report) []evidenceEntry {
 	now := time.Now().UTC()
 
 	// Group by evidence file, preserving order of first appearance.
 	type fileGroup struct {
-		meta    *RequirementMeta
-		checks  []CheckEntry
+		meta    *requirementMeta
+		checks  []checkEntry
 		hasFail bool
 	}
 	groupOrder := make([]string, 0)
@@ -113,7 +119,7 @@ func (r *Renderer) buildEntries(report *ctrf.Report) []EvidenceEntry {
 			continue
 		}
 
-		ce := CheckEntry{
+		ce := checkEntry{
 			Name:     test.Name,
 			Status:   test.Status,
 			Message:  test.Message,
@@ -133,14 +139,14 @@ func (r *Renderer) buildEntries(report *ctrf.Report) []EvidenceEntry {
 		}
 	}
 
-	entries := make([]EvidenceEntry, 0, len(groupOrder))
+	entries := make([]evidenceEntry, 0, len(groupOrder))
 	for _, filename := range groupOrder {
 		g := groups[filename]
 		status := ctrf.StatusPassed
 		if g.hasFail {
 			status = ctrf.StatusFailed
 		}
-		entries = append(entries, EvidenceEntry{
+		entries = append(entries, evidenceEntry{
 			RequirementID: g.meta.RequirementID,
 			Title:         g.meta.Title,
 			Description:   g.meta.Description,
@@ -154,12 +160,7 @@ func (r *Renderer) buildEntries(report *ctrf.Report) []EvidenceEntry {
 	return entries
 }
 
-func (r *Renderer) renderEvidence(entry EvidenceEntry) (err error) {
-	tmpl, parseErr := template.New("evidence").Funcs(templateFuncs()).Parse(evidenceTemplate)
-	if parseErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse evidence template", parseErr)
-	}
-
+func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
 	path := filepath.Join(r.outputDir, entry.Filename)
 	f, createErr := os.Create(path)
 	if createErr != nil {
@@ -171,19 +172,14 @@ func (r *Renderer) renderEvidence(entry EvidenceEntry) (err error) {
 		}
 	}()
 
-	if execErr := tmpl.Execute(f, entry); execErr != nil {
+	if execErr := parsedEvidenceTemplate.Execute(f, entry); execErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to render evidence template", execErr)
 	}
 	slog.Debug("evidence file written", "file", path)
 	return nil
 }
 
-func (r *Renderer) renderIndex(entries []EvidenceEntry) (err error) {
-	tmpl, parseErr := template.New("index").Funcs(templateFuncs()).Parse(indexTemplate)
-	if parseErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse index template", parseErr)
-	}
-
+func (r *Renderer) renderIndex(entries []evidenceEntry) (err error) {
 	path := filepath.Join(r.outputDir, "index.md")
 	f, createErr := os.Create(path)
 	if createErr != nil {
@@ -197,13 +193,13 @@ func (r *Renderer) renderIndex(entries []EvidenceEntry) (err error) {
 
 	data := struct {
 		GeneratedAt time.Time
-		Entries     []EvidenceEntry
+		Entries     []evidenceEntry
 	}{
 		GeneratedAt: time.Now().UTC(),
 		Entries:     entries,
 	}
 
-	if execErr := tmpl.Execute(f, data); execErr != nil {
+	if execErr := parsedIndexTemplate.Execute(f, data); execErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to render index template", execErr)
 	}
 	slog.Debug("evidence index written", "file", path)

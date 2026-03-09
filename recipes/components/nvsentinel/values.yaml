@@ -20,8 +20,8 @@ fullnameOverride: nvsentinel
 
 global: {}
 
-networkPolicyWorkaround:
-  enabled: true
+networkPolicy:
+  enabled: false
 
 platformConnector:
 

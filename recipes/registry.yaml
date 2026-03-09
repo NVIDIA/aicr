@@ -198,22 +198,14 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/nvsentinel
-      defaultVersion: v0.10.0
+      defaultVersion: v0.10.1
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - global.systemNodeSelector
-          - labeler.nodeSelector
         tolerationPaths:
-          - global.tolerations
-          - labeler.tolerations
-      accelerated:
-        nodeSelectorPaths:
-          - platformConnector.nodeSelector
-        tolerationPaths:
-          - global.tolerations
-          - platformConnector.tolerations
+          - global.systemNodeTolerations
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu

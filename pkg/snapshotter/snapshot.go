@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -98,10 +100,7 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 		snapshotCollectionDuration.Observe(time.Since(start).Seconds())
 	}()
 
-	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
-	)
+	var mu sync.Mutex
 
 	// Initialize snapshot structure
 	snap := NewSnapshot()
@@ -109,26 +108,27 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 
 	// collectSafe runs a named collector, appending its measurement on success
 	// and logging a warning on failure. Snapshot collection never fails due to
-	// an individual collector error.
-	collectSafe := func(name string, c collector.Collector) {
-		defer wg.Done()
+	// an individual collector error — returns nil to maintain non-fatal semantics.
+	collectSafe := func(name string, c collector.Collector) func() error {
+		return func() error {
+			collectorStart := time.Now()
+			defer func() {
+				snapshotCollectorDuration.WithLabelValues(name).Observe(time.Since(collectorStart).Seconds())
+			}()
 
-		collectorStart := time.Now()
-		defer func() {
-			snapshotCollectorDuration.WithLabelValues(name).Observe(time.Since(collectorStart).Seconds())
-		}()
+			m, err := c.Collect(ctx)
+			if err != nil {
+				slog.Warn("failed to collect "+name+" - skipping",
+					slog.String("collector", name),
+					slog.String("error", err.Error()))
+				return nil
+			}
 
-		m, err := c.Collect(ctx)
-		if err != nil {
-			slog.Warn("failed to collect "+name+" - skipping",
-				slog.String("collector", name),
-				slog.String("error", err.Error()))
-			return
+			mu.Lock()
+			defer mu.Unlock()
+			snap.Measurements = append(snap.Measurements, m)
+			return nil
 		}
-
-		mu.Lock()
-		defer mu.Unlock()
-		snap.Measurements = append(snap.Measurements, m)
 	}
 
 	// Collect metadata (synchronous — needed before parallel collectors)
@@ -140,14 +140,14 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
 
 	// Launch all collectors in parallel — each degrades gracefully on error
-	wg.Add(5)
-	go collectSafe("k8s", n.Factory.CreateKubernetesCollector())
-	go collectSafe("systemd", n.Factory.CreateSystemDCollector())
-	go collectSafe("os", n.Factory.CreateOSCollector())
-	go collectSafe("gpu", n.Factory.CreateGPUCollector())
-	go collectSafe("topology", n.Factory.CreateNodeTopologyCollector())
+	g, _ := errgroup.WithContext(ctx)
+	g.Go(collectSafe("k8s", n.Factory.CreateKubernetesCollector()))
+	g.Go(collectSafe("systemd", n.Factory.CreateSystemDCollector()))
+	g.Go(collectSafe("os", n.Factory.CreateOSCollector()))
+	g.Go(collectSafe("gpu", n.Factory.CreateGPUCollector()))
+	g.Go(collectSafe("topology", n.Factory.CreateNodeTopologyCollector()))
 
-	wg.Wait()
+	_ = g.Wait() // Individual collector errors are logged and swallowed; group always returns nil.
 
 	// Enforce GPU requirement if requested
 	if n.RequireGPU {

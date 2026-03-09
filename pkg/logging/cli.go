@@ -30,12 +30,12 @@ const (
 	colorRed   = "\033[31m"
 )
 
-// LogPrefixEnvVar is the environment variable name for customizing the log prefix.
-const LogPrefixEnvVar = "AICR_LOG_PREFIX"
+// logPrefixEnvVar is the environment variable name for customizing the log prefix.
+const logPrefixEnvVar = "AICR_LOG_PREFIX"
 
 // getLogPrefix returns the log prefix from env var or default "cli".
 func getLogPrefix() string {
-	if prefix := os.Getenv(LogPrefixEnvVar); prefix != "" {
+	if prefix := os.Getenv(logPrefixEnvVar); prefix != "" {
 		return prefix
 	}
 	return "cli"
@@ -50,8 +50,8 @@ type CLIHandler struct {
 	level  slog.Level
 }
 
-// NewCLIHandler creates a new CLI handler that writes to the given writer.
-func NewCLIHandler(w io.Writer, level slog.Level) *CLIHandler {
+// newCLIHandler creates a new CLI handler that writes to the given writer.
+func newCLIHandler(w io.Writer, level slog.Level) *CLIHandler {
 	return &CLIHandler{
 		writer: w,
 		level:  level,
@@ -104,7 +104,7 @@ func (h *CLIHandler) WithGroup(_ string) slog.Handler {
 
 func newCLILogger(level string) *slog.Logger {
 	lev := ParseLogLevel(level)
-	handler := NewCLIHandler(os.Stderr, lev)
+	handler := newCLIHandler(os.Stderr, lev)
 	return slog.New(handler)
 }
 
