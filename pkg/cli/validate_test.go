@@ -26,102 +26,65 @@ func TestParseValidationPhases(t *testing.T) {
 	tests := []struct {
 		name       string
 		phaseStrs  []string
-		wantPhases []validator.ValidationPhaseName
+		wantPhases []validator.Phase
 		wantErr    bool
 		errContain string
 	}{
 		{
-			name:       "empty defaults to readiness",
+			name:       "empty defaults to all (nil)",
 			phaseStrs:  []string{},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseReadiness},
-			wantErr:    false,
+			wantPhases: nil,
 		},
 		{
-			name:       "single readiness phase",
-			phaseStrs:  []string{"readiness"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseReadiness},
-			wantErr:    false,
+			name:       "all returns nil",
+			phaseStrs:  []string{"all"},
+			wantPhases: nil,
 		},
 		{
 			name:       "single deployment phase",
 			phaseStrs:  []string{"deployment"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseDeployment},
-			wantErr:    false,
+			wantPhases: []validator.Phase{validator.PhaseDeployment},
 		},
 		{
 			name:       "single performance phase",
 			phaseStrs:  []string{"performance"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhasePerformance},
-			wantErr:    false,
+			wantPhases: []validator.Phase{validator.PhasePerformance},
 		},
 		{
 			name:       "single conformance phase",
 			phaseStrs:  []string{"conformance"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseConformance},
-			wantErr:    false,
-		},
-		{
-			name:       "all phases",
-			phaseStrs:  []string{"all"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseAll},
-			wantErr:    false,
+			wantPhases: []validator.Phase{validator.PhaseConformance},
 		},
 		{
 			name:      "multiple phases",
-			phaseStrs: []string{"readiness", "deployment", "conformance"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
+			phaseStrs: []string{"deployment", "conformance"},
+			wantPhases: []validator.Phase{
 				validator.PhaseDeployment,
 				validator.PhaseConformance,
 			},
-			wantErr: false,
-		},
-		{
-			name:      "out of order phases reordered to canonical order",
-			phaseStrs: []string{"conformance", "readiness", "performance"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
-				validator.PhasePerformance,
-				validator.PhaseConformance,
-			},
-			wantErr: false,
 		},
 		{
 			name:      "duplicate phases deduplicated",
-			phaseStrs: []string{"readiness", "readiness", "deployment", "readiness"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
+			phaseStrs: []string{"deployment", "deployment", "conformance"},
+			wantPhases: []validator.Phase{
 				validator.PhaseDeployment,
+				validator.PhaseConformance,
 			},
-			wantErr: false,
 		},
 		{
-			name:      "duplicates with out of order",
-			phaseStrs: []string{"performance", "readiness", "performance", "deployment"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
-				validator.PhaseDeployment,
-				validator.PhasePerformance,
-			},
-			wantErr: false,
-		},
-		{
-			name:       "all with other phases returns just all",
-			phaseStrs:  []string{"readiness", "all", "deployment"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseAll},
-			wantErr:    false,
+			name:       "all with other phases returns nil",
+			phaseStrs:  []string{"deployment", "all", "conformance"},
+			wantPhases: nil,
 		},
 		{
 			name:       "invalid phase",
 			phaseStrs:  []string{"invalid"},
-			wantPhases: nil,
 			wantErr:    true,
 			errContain: "invalid phase",
 		},
 		{
-			name:       "mixed valid and invalid",
-			phaseStrs:  []string{"readiness", "bogus"},
-			wantPhases: nil,
+			name:       "readiness is invalid (not supported in v2)",
+			phaseStrs:  []string{"readiness"},
 			wantErr:    true,
 			errContain: "invalid phase",
 		},
@@ -160,12 +123,10 @@ func TestParseValidationPhases(t *testing.T) {
 func TestValidateCmd_CommandStructure(t *testing.T) {
 	cmd := validateCmd()
 
-	// Verify command name
 	if cmd.Name != "validate" {
 		t.Errorf("command name = %q, want %q", cmd.Name, "validate")
 	}
 
-	// Verify required flags exist
 	requiredFlags := []string{"recipe", "phase", "namespace", "node-selector", "toleration", "timeout"}
 	for _, flagName := range requiredFlags {
 		found := false
@@ -184,10 +145,8 @@ func TestValidateCmd_CommandStructure(t *testing.T) {
 func TestValidateCmd_AgentFlags(t *testing.T) {
 	cmd := validateCmd()
 
-	// Verify agent deployment flags exist
 	agentFlags := []string{
 		"namespace",
-		"validation-namespace",
 		"image",
 		"image-pull-secret",
 		"job-name",
@@ -212,7 +171,6 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 	}
 }
 
-// hasFlag checks if a cli.Flag has the given name
 func hasFlag(flag interface{ Names() []string }, name string) bool {
 	return slices.Contains(flag.Names(), name)
 }

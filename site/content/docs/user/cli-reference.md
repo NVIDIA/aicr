@@ -83,7 +83,7 @@ aicr snapshot [flags]
 | `--format` | `-f` | string | yaml | Output format: json, yaml, table |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
 | `--namespace` | `-n` | string | gpu-operator | Kubernetes namespace for agent deployment |
-| `--image` | | string | ghcr.io/nvidia/aicr-validator:latest | Container image for agent Job |
+| `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
 | `--node-selector` | | string[] | | Node selector for agent scheduling (key=value, repeatable) |

@@ -37,7 +37,12 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeUnauthorized, "insufficient permissions to deploy agent\n\nTo deploy the agent, you need cluster admin privileges.\nRun: aicr snapshot", err)
 	}
 
-	// Step 1: Ensure RBAC resources (idempotent - reuses if already exists)
+	// Step 1: Ensure namespace exists
+	if err := d.ensureNamespace(ctx); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to ensure namespace", err)
+	}
+
+	// Step 2: Ensure RBAC resources (idempotent - reuses if already exists)
 	if err := d.ensureServiceAccount(ctx); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)
 	}

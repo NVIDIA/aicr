@@ -14,25 +14,22 @@
 
 package evidence
 
-// indexTemplate renders the submission evidence index.
 const indexTemplate = `# CNCF AI Conformance Evidence
 
-**Generated:** {{ .GeneratedAt }}
-**Run ID:** {{ .RunID }}
+**Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
 
 ## Results
 
 | # | Requirement | Feature | Result | Evidence |
 |---|-------------|---------|--------|----------|
 {{- range $i, $e := .Entries }}
-| {{ inc $i }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
+| {{ add $i 1 }} | ` + "`{{ $e.RequirementID }}`" + ` | {{ $e.Title }} | {{ upper $e.Status }} | [{{ $e.Filename }}]({{ $e.Filename }}) |
 {{- end }}
 `
 
-// evidenceTemplate renders a single evidence document.
 const evidenceTemplate = `# {{ .Title }}
 
-**Generated:** {{ .GeneratedAt }}
+**Generated:** {{ .GeneratedAt.Format "2006-01-02T15:04:05Z" }}
 **Requirement:** ` + "`{{ .RequirementID }}`" + `
 **Result:** {{ upper .Status }}
 
@@ -45,21 +42,19 @@ const evidenceTemplate = `# {{ .Title }}
 ### {{ .Name }}
 
 - **Status:** {{ upper .Status }}
-{{- if .Duration }}
-- **Duration:** {{ .Duration }}
+- **Duration:** {{ .Duration }}ms
+{{- if .Message }}
+
+**Error:**
+` + "```" + `
+{{ .Message }}
+` + "```" + `
 {{- end }}
-{{- if .Reason }}
+{{- if .Stdout }}
 
+**Evidence Output:**
 ` + "```" + `
-{{ .Reason }}
-` + "```" + `
-{{- end }}
-{{- range .Artifacts }}
-
-#### {{ .Label }}
-
-` + "```" + `
-{{ .Data }}
+{{ join .Stdout "\n" }}
 ` + "```" + `
 {{- end }}
 {{ end }}

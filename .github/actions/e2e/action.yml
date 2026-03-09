@@ -62,22 +62,14 @@ runs:
         # Build images + CLI binary in parallel while deployment starts
         KO_DOCKER_REPO=localhost:5001/aicr ko build --bare --tags=local ./cmd/aicr &
         pid_aicr=$!
-        # Validator: compile on host (Go build cache hit), then COPY-only image
+        # Compile validator binaries on host (Go build cache hit) then COPY-only images.
+        # This is much faster than building inside Docker (no cache sharing).
         (
           mkdir -p dist/validator
-          CGO_ENABLED=0 go build -trimpath \
-            -ldflags="-w -s -extldflags '-static'" \
-            -o dist/validator/aicr ./cmd/aicr &
-          CGO_ENABLED=0 go test -c -o dist/validator/deployment.test \
-            ./pkg/validator/checks/deployment &
-          CGO_ENABLED=0 go test -c -o dist/validator/performance.test \
-            ./pkg/validator/checks/performance &
-          CGO_ENABLED=0 go test -c -o dist/validator/conformance.test \
-            ./pkg/validator/checks/conformance &
-          CGO_ENABLED=0 go build -o dist/validator/test2json cmd/test2json &
+          CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment &
+          CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance &
+          CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance &
           # Download chainsaw binary for health check assertions.
-          # Version and checksum read from .settings.yaml (single source of truth).
-          # Hardcoded to amd64 — CI runners are x86-only.
           (
             CHAINSAW_VERSION=$(yq eval '.testing_tools.chainsaw' .settings.yaml | sed 's/^v//')
             CHAINSAW_SHA256=$(yq eval '.testing_tools.chainsaw_checksums.linux_amd64' .settings.yaml)
@@ -88,36 +80,37 @@ runs:
             rm dist/validator/chainsaw.tar.gz
           ) &
           wait
-          # TODO: Consider using `docker build -f Dockerfile.validator` instead of this
-          # inline Dockerfile. The inline copy exists for Go build cache reuse on the host,
-          # but it must be kept in sync with Dockerfile.validator manually. Missing the
-          # chainsaw binary here caused silent health check failures in E2E.
-          docker build -t localhost:5001/aicr-validator:local -f - . <<'DOCKERFILE'
-        FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
-        COPY dist/validator/aicr /usr/local/bin/aicr
-        COPY dist/validator/deployment.test /usr/local/bin/deployment.test
-        COPY dist/validator/performance.test /usr/local/bin/performance.test
-        COPY dist/validator/conformance.test /usr/local/bin/conformance.test
-        COPY dist/validator/test2json /usr/local/bin/test2json
+          # Build per-phase COPY-only images and push to local registry.
+          # Ensure testdata dirs exist (conformance has none).
+          for phase in deployment performance conformance; do
+            mkdir -p "validators/${phase}/testdata"
+          done
+          for phase in deployment performance conformance; do
+            docker build -t "localhost:5001/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
+        FROM gcr.io/distroless/static-debian12:nonroot
+        COPY dist/validator/${phase} /${phase}
+        COPY validators/${phase}/testdata /app/testdata
         COPY dist/validator/chainsaw /usr/local/bin/chainsaw
-        COPY pkg/validator/checks/deployment/testdata /app/testdata
-        COPY pkg/validator/checks/performance/testdata /app/testdata
         WORKDIR /app
-        CMD ["/bin/bash"]
+        USER nonroot
+        ENTRYPOINT ["/${phase}"]
         DOCKERFILE
-          docker push localhost:5001/aicr-validator:local
+            docker push "localhost:5001/aicr-validators/${phase}:latest"
+          done
         ) &
-        pid_validator=$!
+        pid_validators=$!
         go build -o dist/e2e/aicr ./cmd/aicr &
         pid_cli=$!
-        wait $pid_aicr $pid_validator $pid_cli
+        wait $pid_aicr $pid_validators $pid_cli
 
         # Wait for deployment rollout (may already be ready)
         kubectl rollout status deployment/aicrd -n aicr --timeout=120s
 
         # Verify images are available
         curl -sf http://localhost:5001/v2/aicr/tags/list
-        curl -sf http://localhost:5001/v2/aicr-validator/tags/list
+        curl -sf http://localhost:5001/v2/aicr-validators/deployment/tags/list
+        curl -sf http://localhost:5001/v2/aicr-validators/performance/tags/list
+        curl -sf http://localhost:5001/v2/aicr-validators/conformance/tags/list
 
     - name: Set up fake GPU environment
       shell: bash
@@ -148,7 +141,7 @@ runs:
         GOFLAGS: -mod=vendor
         AICR_BIN: ${{ github.workspace }}/dist/e2e/aicr
         AICR_IMAGE: localhost:5001/aicr:local
-        AICR_VALIDATOR_IMAGE: localhost:5001/aicr-validator:local
+        AICR_VALIDATOR_IMAGE_REGISTRY: localhost:5001
         FAKE_GPU_ENABLED: "true"
       run: ./tests/e2e/run.sh
 

@@ -72,6 +72,16 @@ spec:
                   storageClassName: gp2
 
   validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - helm-values
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"
     conformance:
       checks:
         - platform-health
@@ -80,7 +90,8 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - inference-gateway
-        - robust-controller
-        - secure-accelerator-access
+        - gang-scheduling
         - pod-autoscaling
         - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

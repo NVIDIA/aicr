@@ -163,7 +163,8 @@ license-check: ## Check license is approved
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
-	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v /tests/chainsaw/) || exit 1; \
+	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
+	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v -e /tests/chainsaw/ -e /validators) || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
@@ -252,15 +253,18 @@ image: ## Builds and pushes container image (IMAGE_REGISTRY, IMAGE_TAG)
 	echo "Building and pushing image to $(IMAGE_REGISTRY)/aicr:$(IMAGE_TAG)"; \
 	KO_DOCKER_REPO=$(IMAGE_REGISTRY) ko build --bare --sbom=none --tags=$(IMAGE_TAG) ./cmd/aicr
 
-.PHONY: image-validator
-image-validator: build ## Builds validator image with Go toolchain (IMAGE_REGISTRY, IMAGE_TAG)
+.PHONY: image-validators
+image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
-	echo "Building validator image to $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG)"; \
-	docker build -f Dockerfile.validator -t $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG) .; \
-	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
-		echo "Pushing validator image to $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG)"; \
-		docker push $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG); \
-	fi
+	for phase in deployment performance conformance; do \
+		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
+		docker build -f validators/$${phase}/Dockerfile \
+			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
+		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
+			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
+			docker push $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG); \
+		fi; \
+	done
 
 .PHONY: check-health
 check-health: ## Runs chainsaw health check directly against Kind cluster (COMPONENT=<name>)
@@ -313,17 +317,18 @@ validate-local: image-validator ## Builds validator image and runs validation in
 		echo "Error: recipe file $(RECIPE) not found"; \
 		exit 1; \
 	fi; \
-	echo "Loading validator image into Kind cluster..."; \
-	kind load docker-image $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG) --name kind-aicr; \
-	echo "Running validation with local image..."; \
+	echo "Loading validator images into Kind cluster..."; \
+	for phase in deployment performance conformance; do \
+		kind load docker-image $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) --name kind-aicr; \
+	done; \
+	echo "Running validation with local images..."; \
 	AICR_BIN=$$(find dist/ -name "aicr" -type f | head -1); \
 	if [ -z "$$AICR_BIN" ]; then \
 		echo "Error: aicr binary not found in dist/. Run 'make build' first."; \
 		exit 1; \
 	fi; \
-	$$AICR_BIN validate \
+	AICR_VALIDATOR_IMAGE_REGISTRY=$(IMAGE_REGISTRY) $$AICR_BIN validate \
 		--recipe "$(RECIPE)" \
-		--image "$(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG)" \
 		--phase deployment
 
 .PHONY: release

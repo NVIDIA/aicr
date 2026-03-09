@@ -113,10 +113,10 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse %s", path), parseErr)
 			}
 
-			// Validate kind field
+			// Skip files with a different kind (e.g., ValidatorCatalog).
 			if metadata.Kind != "" && metadata.Kind != RecipeMetadataKind {
-				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid kind in %s: got %q, expected %q", path, metadata.Kind, RecipeMetadataKind))
+				slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadata.Kind)
+				return nil
 			}
 
 			// Categorize as base or overlay

@@ -22,11 +22,11 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
-	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 func recipeCmdFlags() []cli.Flag {
@@ -169,9 +169,9 @@ Override snapshot-detected criteria:
 				}
 
 				// Create a constraint evaluator that uses the snapshot
-				// This wraps validator.EvaluateConstraint with the snapshot data
+				// This wraps constraints.Evaluate with the snapshot data
 				evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
-					valResult := validator.EvaluateConstraint(constraint, snap)
+					valResult := constraints.Evaluate(constraint, snap)
 					return recipe.ConstraintEvalResult{
 						Passed: valResult.Passed,
 						Actual: valResult.Actual,
