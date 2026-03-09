@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v0.9.0)
+# Dynamo Platform Helm values (v0.9.1)
 # NVIDIA Dynamo inference serving platform: operator and grove.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
@@ -30,6 +30,12 @@ dynamo-operator:
       image:
         # Pin to 0.9.0 — chart default renders 0.7.1 which lacks --enable-webhooks
         tag: "0.9.0"
+    kubeRbacProxy:
+      image:
+        # gcr.io/kubebuilder/kube-rbac-proxy is no longer available after gcr.io deprecation.
+        # TODO: remove once upstream dynamo chart updates the default image reference.
+        repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
+        tag: v0.15.0
 
   # Use Kubernetes-native service discovery (operator-level only;
   # runtime pods still require DYN_STORE_KV=mem to skip etcd leases)

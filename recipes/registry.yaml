@@ -347,7 +347,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-crds
-      defaultVersion: "0.9.0"
+      defaultVersion: "0.9.1"
       defaultNamespace: dynamo-system
 
   - name: dynamo-platform
@@ -360,7 +360,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "0.9.0"
+      defaultVersion: "0.9.1"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
