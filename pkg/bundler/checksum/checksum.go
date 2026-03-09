@@ -49,19 +49,18 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 	checksums := make([]string, 0, len(files))
 
 	for _, file := range files {
-		data, err := os.ReadFile(file)
+		digest, err := SHA256Raw(file)
 		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read %s for checksum", file), err)
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to compute checksum for %s", file), err)
 		}
 
-		hash := sha256.Sum256(data)
 		relPath, err := filepath.Rel(bundleDir, file)
 		if err != nil {
 			// If relative path fails, use absolute path
 			relPath = file
 		}
 
-		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(hash[:]), relPath))
+		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(digest), relPath))
 	}
 
 	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
@@ -135,14 +134,13 @@ func VerifyChecksumsFromData(bundleDir string, data []byte) []string {
 			continue
 		}
 
-		fileData, readErr := os.ReadFile(filePath)
+		digest, readErr := SHA256Raw(filePath)
 		if readErr != nil {
 			errs = append(errs, fmt.Sprintf("failed to read %s: %v", relativePath, readErr))
 			continue
 		}
 
-		hash := sha256.Sum256(fileData)
-		actualDigest := hex.EncodeToString(hash[:])
+		actualDigest := hex.EncodeToString(digest)
 		if actualDigest != expectedDigest {
 			errs = append(errs, fmt.Sprintf("checksum mismatch: %s (expected %s, got %s)", relativePath, expectedDigest, actualDigest))
 		}

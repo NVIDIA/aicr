@@ -239,11 +239,10 @@ func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output)
 		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to open file", err)
 		}
-		defer file.Close()
-
-		_, err = io.Copy(writer, file)
-		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to copy file content", err)
+		_, copyErr := io.Copy(writer, file)
+		file.Close()
+		if copyErr != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to copy file content", copyErr)
 		}
 
 		return nil

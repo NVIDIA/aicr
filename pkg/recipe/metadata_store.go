@@ -48,12 +48,6 @@ type MetadataStore struct {
 
 // loadMetadataStore loads and caches the metadata store from the data provider.
 func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
-	// Check for cache hit before entering Once.Do
-	if cachedMetadataStore != nil && cachedMetadataErr == nil {
-		recipeCacheHits.Inc()
-		return cachedMetadataStore, nil
-	}
-
 	metadataStoreOnce.Do(func() {
 		// Record cache miss on first load
 		recipeCacheMisses.Inc()

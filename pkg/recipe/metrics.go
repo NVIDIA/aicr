@@ -30,12 +30,6 @@ var (
 	)
 
 	// Recipe metadata cache metrics
-	recipeCacheHits = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Name: "aicr_recipe_cache_hits_total",
-			Help: "Total number of recipe metadata cache hits",
-		},
-	)
 	recipeCacheMisses = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "aicr_recipe_cache_misses_total",
