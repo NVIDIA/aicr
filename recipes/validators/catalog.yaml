@@ -1,0 +1,150 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: aicr.nvidia.com/v1
+kind: ValidatorCatalog
+metadata:
+  name: aicr-validators
+  version: "1.0.0"
+# Image tag resolution (applied in order by catalog.Load):
+#   1. :latest tags are replaced with the CLI version (e.g., :v0.9.5) for
+#      release builds, ensuring reproducible validator-to-CLI version locking.
+#      Dev builds ("dev", "-next") keep :latest.
+#   2. Explicit version tags (e.g., :v1.2.3) are never modified — use these
+#      to pin a validator to a specific version independent of the CLI.
+#   3. AICR_VALIDATOR_IMAGE_REGISTRY overrides the registry prefix.
+#      Example: AICR_VALIDATOR_IMAGE_REGISTRY=localhost:5001 replaces ghcr.io/nvidia.
+validators:
+  # Deployment phase
+  - name: operator-health
+    phase: deployment
+    description: "Verify GPU operator pods are running and healthy"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 2m
+    args: ["operator-health"]
+    env: []
+  - name: expected-resources
+    phase: deployment
+    description: "Verify expected Kubernetes resources exist and are healthy"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 5m
+    args: ["expected-resources"]
+    env: []
+  - name: helm-values
+    phase: deployment
+    description: "Verify deployed Helm values match recipe configuration"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 2m
+    args: ["helm-values"]
+    env: []
+  - name: gpu-operator-version
+    phase: deployment
+    description: "Validate GPU Operator version against recipe constraints"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 2m
+    args: ["gpu-operator-version"]
+    env: []
+  - name: check-nvidia-smi
+    phase: deployment
+    description: "Verify nvidia-smi works on all GPU nodes"
+    image: ghcr.io/nvidia/aicr-validators/deployment:latest
+    timeout: 10m
+    args: ["check-nvidia-smi"]
+    env: []
+  # Performance phase
+  - name: nccl-all-reduce-bw
+    phase: performance
+    description: "Verify NCCL All Reduce Bus Bandwidth meets threshold"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    timeout: 30m
+    args: ["nccl-all-reduce-bw"]
+    env: []
+  # Conformance phase
+  - name: dra-support
+    phase: conformance
+    description: "Verify Dynamic Resource Allocation support"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["dra-support"]
+    env: []
+  - name: gang-scheduling
+    phase: conformance
+    description: "Verify gang scheduling with KAI scheduler"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 10m
+    args: ["gang-scheduling"]
+    env: []
+  - name: accelerator-metrics
+    phase: conformance
+    description: "Verify accelerator metrics from DCGM exporter"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["accelerator-metrics"]
+    env: []
+  - name: ai-service-metrics
+    phase: conformance
+    description: "Verify AI service metrics via Prometheus"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["ai-service-metrics"]
+    env: []
+  - name: inference-gateway
+    phase: conformance
+    description: "Verify inference gateway (kgateway) is operational"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["inference-gateway"]
+    env: []
+  - name: pod-autoscaling
+    phase: conformance
+    description: "Verify HPA-driven pod autoscaling with GPU metrics"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 10m
+    args: ["pod-autoscaling"]
+    env: []
+  - name: cluster-autoscaling
+    phase: conformance
+    description: "Verify cluster autoscaling with Karpenter"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 10m
+    args: ["cluster-autoscaling"]
+    env: []
+  - name: robust-controller
+    phase: conformance
+    description: "Verify Dynamo operator controller and webhooks"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["robust-controller"]
+    env: []
+  - name: secure-accelerator-access
+    phase: conformance
+    description: "Verify secure GPU access via DRA (no host device mounts)"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 10m
+    args: ["secure-accelerator-access"]
+    env: []
+  - name: gpu-operator-health
+    phase: conformance
+    description: "Verify GPU operator health (conformance diagnostic)"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 2m
+    args: ["gpu-operator-health"]
+    env: []
+  - name: platform-health
+    phase: conformance
+    description: "Verify platform component health (conformance diagnostic)"
+    image: ghcr.io/nvidia/aicr-validators/conformance:latest
+    timeout: 5m
+    args: ["platform-health"]
+    env: []

@@ -137,21 +137,8 @@ const (
 )
 
 // Validation phase timeouts for validation phase operations.
-// These are used when the recipe does not specify a timeout.
+// Validation phase timeouts.
 const (
-	// ValidateReadinessTimeout is the default timeout for readiness validation.
-	ValidateReadinessTimeout = 5 * time.Minute
-
-	// ValidateDeploymentTimeout is the default timeout for deployment validation.
-	ValidateDeploymentTimeout = 10 * time.Minute
-
-	// ValidatePerformanceTimeout is the default timeout for performance validation.
-	// Performance tests may take longer due to GPU benchmarks.
-	ValidatePerformanceTimeout = 30 * time.Minute
-
-	// ValidateConformanceTimeout is the default timeout for conformance validation.
-	ValidateConformanceTimeout = 15 * time.Minute
-
 	// ResourceVerificationTimeout is the timeout for verifying individual
 	// expected resources exist and are healthy during deployment validation.
 	ResourceVerificationTimeout = 10 * time.Second
@@ -222,12 +209,6 @@ const (
 	CoScheduleWindow = 30 * time.Second
 )
 
-// Evidence rendering timeouts.
-const (
-	// EvidenceRenderTimeout is the timeout for rendering conformance evidence markdown.
-	EvidenceRenderTimeout = 30 * time.Second
-)
-
 // Kubeflow Trainer install timeouts for NCCL performance validation.
 const (
 	// TrainerCRDEstablishedTimeout is the time to wait for Kubeflow Trainer CRDs
@@ -276,17 +257,6 @@ const (
 	PodReadyTimeout = 2 * time.Minute
 )
 
-// Artifact limits for conformance evidence capture.
-const (
-	// ArtifactMaxDataSize is the maximum size in bytes of a single artifact's Data field.
-	// Ensures each base64-encoded ARTIFACT: line stays well under the bufio.Scanner
-	// default 64KB limit (base64 expands ~4/3, so 8KB → ~11KB encoded).
-	ArtifactMaxDataSize = 8 * 1024
-
-	// ArtifactMaxPerCheck is the maximum number of artifacts a single check can record.
-	ArtifactMaxPerCheck = 20
-)
-
 // HTTP response limits for conformance checks.
 const (
 	// HTTPResponseBodyLimit is the maximum size in bytes for HTTP response bodies
@@ -319,6 +289,35 @@ const (
 	// Larger than the default 64KB to handle container runtime line splitting
 	// and long go test -json output events.
 	LogScannerBufferSize = 1 << 20 // 1MB
+)
+
+// Validator constants.
+const (
+	// ValidatorWaitBuffer is added to the catalog timeout when waiting for Job
+	// completion. Accounts for pod scheduling, image pull, and graceful termination.
+	ValidatorWaitBuffer = 30 * time.Second
+
+	// ValidatorDefaultTimeout is the default per-validator timeout if not
+	// specified in the catalog. Used as fallback only.
+	ValidatorDefaultTimeout = 5 * time.Minute
+
+	// ValidatorTerminationGracePeriod is the time between SIGTERM and SIGKILL
+	// for validator containers. Validators should trap SIGTERM and write partial
+	// results within this window.
+	ValidatorTerminationGracePeriod = 30 * time.Second
+
+	// ValidatorMaxStdoutLines is the maximum number of stdout lines captured
+	// per validator. Lines beyond this are truncated (keeping the last N lines)
+	// to prevent ConfigMap overflow.
+	ValidatorMaxStdoutLines = 1000
+
+	// ValidatorDefaultCPU is the default CPU request/limit for validator containers
+	// when not specified in the catalog entry.
+	ValidatorDefaultCPU = "1"
+
+	// ValidatorDefaultMemory is the default memory request/limit for validator
+	// containers when not specified in the catalog entry.
+	ValidatorDefaultMemory = "1Gi"
 )
 
 // Attestation file size limits.

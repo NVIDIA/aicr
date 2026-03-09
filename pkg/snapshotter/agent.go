@@ -173,24 +173,22 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		slog.String("job", agentConfig.JobName),
 		slog.Duration("timeout", timeout))
 
-	// Wait for Pod to be ready before streaming logs
-	podReadyTimeout := defaults.K8sPodReadyTimeout
+	// Stream logs in background while waiting for Job completion.
+	// If the pod completes before becoming "ready" (fast Jobs), log streaming
+	// is skipped — WaitForCompletion will still capture the result.
 	logCtx, cancelLogs := context.WithCancel(ctx)
 	defer cancelLogs()
 
-	if podErr := deployer.WaitForPodReady(ctx, podReadyTimeout); podErr != nil {
-		slog.Warn("could not wait for pod ready, skipping log streaming", slog.String("error", podErr.Error()))
-	} else {
-		// Start streaming logs in background
-		go func() {
-			if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
-				// Only log if not canceled (expected when job completes)
-				if logCtx.Err() == nil {
-					slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
-				}
+	go func() {
+		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
+			return
+		}
+		if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
+			if logCtx.Err() == nil {
+				slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
 			}
-		}()
-	}
+		}
+	}()
 
 	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
 		// On failure, try to get pod logs to show what went wrong
@@ -447,24 +445,22 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		slog.String("job", agentConfig.JobName),
 		slog.Duration("timeout", timeout))
 
-	// Wait for Pod to be ready before streaming logs
-	podReadyTimeout := defaults.K8sPodReadyTimeout
+	// Stream logs in background while waiting for Job completion.
+	// If the pod completes before becoming "ready" (fast Jobs), log streaming
+	// is skipped — WaitForCompletion will still capture the result.
 	logCtx, cancelLogs := context.WithCancel(ctx)
 	defer cancelLogs()
 
-	if podErr := deployer.WaitForPodReady(ctx, podReadyTimeout); podErr != nil {
-		slog.Warn("could not wait for pod ready, skipping log streaming", slog.String("error", podErr.Error()))
-	} else {
-		// Start streaming logs in background
-		go func() {
-			if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
-				// Only log if not canceled (expected when job completes)
-				if logCtx.Err() == nil {
-					slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
-				}
+	go func() {
+		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
+			return
+		}
+		if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
+			if logCtx.Err() == nil {
+				slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
 			}
-		}()
-	}
+		}
+	}()
 
 	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
 		// On failure, try to get pod logs to show what went wrong

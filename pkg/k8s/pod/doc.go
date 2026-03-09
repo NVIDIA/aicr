@@ -15,8 +15,8 @@
 /*
 Package pod provides shared utilities for Kubernetes Job and Pod operations.
 
-This package consolidates common functionality used by both the snapshot agent
-(pkg/k8s/agent) and validation agent (pkg/validator/agent):
+This package consolidates common functionality used by the snapshot agent
+(pkg/k8s/agent) and validator Job orchestrator (pkg/validator/job):
 
   - Job lifecycle: WaitForJobCompletion
   - Pod phase: WaitForPodSucceeded, WaitForPodReady

@@ -51,8 +51,7 @@ Install the latest version using the installation script:
 > Note: Temporally, while the repo is private, make sure to include your GitHub token first:
 
 ```shell
-curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 
 See [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.

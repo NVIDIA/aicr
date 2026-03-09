@@ -122,7 +122,7 @@ aicr snapshot \
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `gpu-operator`)
-- `--image`: Container image (default: `ghcr.io/nvidia/aicr-validator:latest`)
+- `--image`: Container image (default: `ghcr.io/nvidia/aicr:latest`)
 - `--job-name`: Job name (default: `aicr`)
 - `--service-account-name`: ServiceAccount name (default: `aicr`)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)

@@ -47,6 +47,12 @@ runs:
         go mod vendor
         git diff --exit-code vendor/ || (echo "vendor/ is out of sync with go.mod/go.sum; run 'make tidy' and commit go.mod, go.sum, and vendor/" && exit 1)
 
+    - name: Install envtest binaries
+      shell: bash
+      run: |
+        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        setup-envtest use --print path >/dev/null 2>&1
+
     - name: Run Tests with Coverage
       shell: bash
       run: make test

@@ -17,7 +17,7 @@ name: On Tag Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'  # Only build tags with semantic versioning format
+      - 'v[0-9]+.[0-9]+.[0-9]+*'  # Semantic versioning with optional pre-release suffix (e.g., v1.2.3-rc1)
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  VALIDATOR_IMAGE: ghcr.io/nvidia/aicr-validator
+  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
 
 jobs:
 
@@ -102,7 +102,7 @@ jobs:
   # =============================================================================
 
   build-docker:
-    name: Docker Validator (${{ matrix.arch }})
+    name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     needs: [tests]
     timeout-minutes: 15
@@ -112,6 +112,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        phase: [deployment, performance, conformance]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-latest
@@ -135,19 +137,16 @@ jobs:
         uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4  # v6.15.0
         with:
           context: .
-          file: Dockerfile.validator
+          file: validators/${{ matrix.phase }}/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-${{ matrix.arch }}
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp }}
+          tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ github.ref_name }}-${{ matrix.arch }}
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.title=aicr-validator
+            org.opencontainers.image.title=aicr-validator-${{ matrix.phase }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -173,11 +172,26 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
-      - name: Create multi-arch manifest
-        uses: ./.github/actions/docker-manifest
-        with:
-          image: ${{ env.VALIDATOR_IMAGE }}
-          tag: ${{ github.ref_name }}
+      - name: Create multi-arch manifests for validator images
+        run: |
+          set -euo pipefail
+          for phase in deployment performance conformance; do
+            IMAGE="${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}"
+
+            # Version tag manifest
+            docker manifest create \
+              "${IMAGE}:${{ github.ref_name }}" \
+              "${IMAGE}:${{ github.ref_name }}-amd64" \
+              "${IMAGE}:${{ github.ref_name }}-arm64"
+            docker manifest push "${IMAGE}:${{ github.ref_name }}"
+
+            # Latest tag manifest (matches catalog's default :latest references)
+            docker manifest create --amend \
+              "${IMAGE}:latest" \
+              "${IMAGE}:${{ github.ref_name }}-amd64" \
+              "${IMAGE}:${{ github.ref_name }}-arm64"
+            docker manifest push "${IMAGE}:latest"
+          done
 
   # =============================================================================
   # Container Image Vulnerability Scan (runs after all images are built)
@@ -199,7 +213,9 @@ jobs:
         image:
           - ghcr.io/nvidia/aicr
           - ghcr.io/nvidia/aicrd
-          - ghcr.io/nvidia/aicr-validator
+          - ghcr.io/nvidia/aicr-validators/deployment
+          - ghcr.io/nvidia/aicr-validators/performance
+          - ghcr.io/nvidia/aicr-validators/conformance
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -280,10 +296,24 @@ jobs:
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
-      - name: Attest aicr-validator image
+      - name: Attest deployment validator image
         uses: ./.github/actions/attest-image-from-tag
         with:
-          image_name: ghcr.io/nvidia/aicr-validator
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/deployment
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest performance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/performance
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest conformance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/conformance
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
