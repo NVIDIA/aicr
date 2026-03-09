@@ -6,10 +6,10 @@ This directory contains recipe metadata and component configurations for the NVI
 
 | Task | Documentation |
 |------|--------------|
-| Understand recipe architecture | [Data Architecture](../../../docs/contributor/data.md) |
-| Create/modify recipes | [Recipe Development Guide](../../../docs/integrator/recipe-development.md) |
-| Create new bundlers | [Bundler Development Guide](../../../docs/contributor/component.md) |
-| CLI commands | [CLI Reference](../../../docs/user/cli-reference.md) |
+| Understand recipe architecture | [Data Architecture](../docs/contributor/data.md) |
+| Create/modify recipes | [Recipe Development Guide](../docs/integrator/recipe-development.md) |
+| Create new bundlers | [Bundler Development Guide](../docs/contributor/component.md) |
+| CLI commands | [CLI Reference](../docs/user/cli-reference.md) |
 
 ## Directory Structure
 
@@ -81,10 +81,10 @@ aicr bundle -r recipes/overlays/your-recipe.yaml -o ./test-bundles
 # Verify merged values
 cat test-bundles/gpu-operator/values.yaml | grep -A5 "driver:"
 ```
-For detailed test documentation, see [Automated Validation](../../../docs/contributor/data.md#automated-validation).
+For detailed test documentation, see [Automated Validation](../docs/contributor/data.md#automated-validation).
 
 ## See Also
 
-- [Data Architecture](../../../docs/contributor/data.md) - Recipe generation process, overlay system, query matching
-- [Recipe Development Guide](../../../docs/integrator/recipe-development.md) - How to create and modify recipes
-- [Bundler Development Guide](../../../docs/contributor/component.md) - How to create new bundlers
+- [Data Architecture](../docs/contributor/data.md) - Recipe generation process, overlay system, query matching
+- [Recipe Development Guide](../docs/integrator/recipe-development.md) - How to create and modify recipes
+- [Bundler Development Guide](../docs/contributor/component.md) - How to create new bundlers

@@ -1129,7 +1129,7 @@ flowchart TD
 **Demo Deployment** (`cloud-run-deploy` action):
 - Demonstrates deployment to Google Cloud Run (users should self-host for production)
 - Authenticate with Workload Identity Federation (keyless)
-- Copy image from GHCR to GCP demo repo in Artifact Registry (us-docker.pkg.dev/eidosx/demo)
+- Copy image from GHCR to your configured GCP demo repo in Artifact Registry (for example, `us-docker.pkg.dev/<project-id>/demo`)
 - Deploy aicrd to Cloud Run as example deployment
 
 **Permissions**: `attestations: write`, `contents: write`, `id-token: write`, `packages: write`

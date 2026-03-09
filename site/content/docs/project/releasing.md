@@ -125,7 +125,7 @@ All releases must pass:
 - **Unit tests**: With race detector enabled
 - **Linting**: golangci-lint + yamllint
 - **License headers**: All source files verified
-- **Security scan**: Trivy vulnerability scan
+- **Security scans**: Trivy in release workflows, Grype in `make scan`
 
 ## Verification
 
@@ -184,7 +184,7 @@ curl http://localhost:8080/health
 
 The `aicrd` API server demo is automatically deployed to Google Cloud Run on successful release:
 
-- **Project**: `eidosx`
+- **Project**: configured in CI/CD deployment settings
 - **Region**: `us-west1`
 - **Service**: `api`
 - **Authentication**: Workload Identity Federation (keyless)

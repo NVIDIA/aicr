@@ -28,19 +28,19 @@ cluster-policy   ready    2026-03-04T22:42:37Z
 ```
 $ kubectl get pods -n gpu-operator -o wide
 NAME                                            READY   STATUS      RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-feature-discovery-8ll95                     1/1     Running     0          44h   100.65.22.255    ip-100-64-147-149.ec2.internal   <none>           <none>
-gpu-operator-786cd6c97d-ltrx4                   1/1     Running     0          44h   100.64.7.218     ip-100-64-6-88.ec2.internal      <none>           <none>
-node-feature-discovery-gc-bc77948b7-c4s4w       1/1     Running     0          44h   100.64.4.239     ip-100-64-6-88.ec2.internal      <none>           <none>
-node-feature-discovery-master-69bb75cbf-w5d79   1/1     Running     0          44h   100.64.8.82      ip-100-64-9-88.ec2.internal      <none>           <none>
-node-feature-discovery-worker-n2s2p             1/1     Running     0          44h   100.65.97.81     ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-container-toolkit-daemonset-lvc26        1/1     Running     0          44h   100.65.116.91    ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-cuda-validator-dcdzt                     0/1     Completed   0          44h   100.65.184.20    ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-dcgm-bn89w                               1/1     Running     0          44h   100.65.166.98    ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-dcgm-exporter-zfgtq                      1/1     Running     0          44h   100.65.16.111    ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-device-plugin-daemonset-4vrtv            1/1     Running     0          44h   100.65.28.147    ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-driver-daemonset-ppwxt                   3/3     Running     0          44h   100.65.153.241   ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-mig-manager-95lbg                        1/1     Running     0          44h   100.65.234.68    ip-100-64-147-149.ec2.internal   <none>           <none>
-nvidia-operator-validator-gwj97                 1/1     Running     0          44h   100.65.39.105    ip-100-64-147-149.ec2.internal   <none>           <none>
+gpu-feature-discovery-8ll95                     1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+gpu-operator-786cd6c97d-ltrx4                   1/1     Running     0          44h   10.0.0.10     node-a.example.internal      <none>           <none>
+node-feature-discovery-gc-bc77948b7-c4s4w       1/1     Running     0          44h   10.0.0.10     node-a.example.internal      <none>           <none>
+node-feature-discovery-master-69bb75cbf-w5d79   1/1     Running     0          44h   10.0.0.10      node-a.example.internal      <none>           <none>
+node-feature-discovery-worker-n2s2p             1/1     Running     0          44h   10.0.0.10     node-a.example.internal   <none>           <none>
+nvidia-container-toolkit-daemonset-lvc26        1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+nvidia-cuda-validator-dcdzt                     0/1     Completed   0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+nvidia-dcgm-bn89w                               1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+nvidia-dcgm-exporter-zfgtq                      1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+nvidia-device-plugin-daemonset-4vrtv            1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+nvidia-driver-daemonset-ppwxt                   3/3     Running     0          44h   10.0.0.10   node-a.example.internal   <none>           <none>
+nvidia-mig-manager-95lbg                        1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
+nvidia-operator-validator-gwj97                 1/1     Running     0          44h   10.0.0.10    node-a.example.internal   <none>           <none>
 ```
 
 ### GPU Operator DaemonSets
@@ -73,8 +73,8 @@ GPU devices via ResourceSlices, and pods request access through ResourceClaims.
 ```
 $ kubectl get resourceslices -o wide
 NAME                                                             NODE                             DRIVER                      POOL                             AGE
-ip-100-64-147-149.ec2.internal-compute-domain.nvidia.com-bbg8t   ip-100-64-147-149.ec2.internal   compute-domain.nvidia.com   ip-100-64-147-149.ec2.internal   44h
-ip-100-64-147-149.ec2.internal-gpu.nvidia.com-sgw47              ip-100-64-147-149.ec2.internal   gpu.nvidia.com              ip-100-64-147-149.ec2.internal   44h
+node-a.example.internal-compute-domain.nvidia.com-bbg8t   node-a.example.internal   compute-domain.nvidia.com   node-a.example.internal   44h
+node-a.example.internal-gpu.nvidia.com-sgw47              node-a.example.internal   gpu.nvidia.com              node-a.example.internal   44h
 ```
 
 ### GPU Device Details
@@ -88,14 +88,14 @@ items:
   kind: ResourceSlice
   metadata:
     creationTimestamp: "2026-03-04T22:44:34Z"
-    generateName: ip-100-64-147-149.ec2.internal-compute-domain.nvidia.com-
+    generateName: node-a.example.internal-compute-domain.nvidia.com-
     generation: 1
-    name: ip-100-64-147-149.ec2.internal-compute-domain.nvidia.com-bbg8t
+    name: node-a.example.internal-compute-domain.nvidia.com-bbg8t
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-100-64-147-149.ec2.internal
+      name: node-a.example.internal
       uid: 2e8f0172-e1d7-4713-9160-a9f215925a19
     resourceVersion: "11088653"
     uid: 0308025e-5f16-44ed-9e0c-e9b9aa51a0ef
@@ -114,23 +114,23 @@ items:
           string: channel
       name: channel-0
     driver: compute-domain.nvidia.com
-    nodeName: ip-100-64-147-149.ec2.internal
+    nodeName: node-a.example.internal
     pool:
       generation: 1
-      name: ip-100-64-147-149.ec2.internal
+      name: node-a.example.internal
       resourceSliceCount: 1
 - apiVersion: resource.k8s.io/v1
   kind: ResourceSlice
   metadata:
     creationTimestamp: "2026-03-04T22:44:35Z"
-    generateName: ip-100-64-147-149.ec2.internal-gpu.nvidia.com-
+    generateName: node-a.example.internal-gpu.nvidia.com-
     generation: 1
-    name: ip-100-64-147-149.ec2.internal-gpu.nvidia.com-sgw47
+    name: node-a.example.internal-gpu.nvidia.com-sgw47
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-100-64-147-149.ec2.internal
+      name: node-a.example.internal
       uid: 2e8f0172-e1d7-4713-9160-a9f215925a19
     resourceVersion: "11088663"
     uid: bde9cab9-6c52-4d1b-aed5-3fcd2241708b
@@ -353,10 +353,10 @@ items:
           value: 81559Mi
       name: gpu-2
     driver: gpu.nvidia.com
-    nodeName: ip-100-64-147-149.ec2.internal
+    nodeName: node-a.example.internal
     pool:
       generation: 1
-      name: ip-100-64-147-149.ec2.internal
+      name: node-a.example.internal
       resourceSliceCount: 1
 kind: List
 metadata:

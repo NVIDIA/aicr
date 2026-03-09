@@ -37,7 +37,7 @@ up/down based on workload demand. The ASG is configured with p5.48xlarge instanc
 ## EKS Cluster Details
 
 - **Region:** us-east-1
-- **Cluster:** aws-us-east-1-ktsetfavua-dgxc-k8s-aws-use1-non-prod
+- **Cluster:** aws-us-east-1-example-cluster
 - **GPU Node Group:** gpu-worker
 
 ## GPU Nodes
@@ -46,7 +46,7 @@ up/down based on workload demand. The ASG is configured with p5.48xlarge instanc
 ```
 $ kubectl get nodes -l nvidia.com/gpu.present=true -o custom-columns=NAME:.metadata.name,INSTANCE-TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,GPUS:.metadata.labels.nvidia\.com/gpu\.count,PRODUCT:.metadata.labels.nvidia\.com/gpu\.product,NODE-GROUP:.metadata.labels.nodeGroup,ZONE:.metadata.labels.topology\.kubernetes\.io/zone
 NAME                             INSTANCE-TYPE   GPUS   PRODUCT                 NODE-GROUP   ZONE
-ip-100-64-147-149.ec2.internal   p5.48xlarge     8      NVIDIA-H100-80GB-HBM3   gpu-worker   us-east-1e
+node-a.example.internal   p5.48xlarge     8      NVIDIA-H100-80GB-HBM3   gpu-worker   us-east-1e
 ```
 
 ## Auto Scaling Group (AWS)

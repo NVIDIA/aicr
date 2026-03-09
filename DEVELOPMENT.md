@@ -801,7 +801,7 @@ make validate-local RECIPE=recipe.yaml IMAGE_TAG=dev
 
 For detailed information on adding validation checks and constraint validators, see:
 
-**[pkg/validator/checks/README.md](../pkg/validator/checks/README.md)**
+**[pkg/validator/checks/README.md](pkg/validator/checks/README.md)**
 
 This comprehensive guide covers:
 - Architecture overview (Job-based validation, test registration framework)

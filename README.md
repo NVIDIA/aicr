@@ -48,8 +48,6 @@ This separation allows the same validated configuration to be applied consistent
 
 Install the latest version using the installation script:
 
-> Note: Temporally, while the repo is private, make sure to include your GitHub token first:
-
 ```shell
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
@@ -122,7 +120,7 @@ You integrate AICR into CI/CD pipelines, GitOps workflows, or larger platforms.
 
 ## Documentation & Resources
 
-- **[Documentation](/docs)** – Documentation, guides, and examples.
+- **[Documentation](docs/README.md)** – Documentation, guides, and examples.
 - **[Roadmap](ROADMAP.md)** – Feature priorities and development timeline
 - **[Overview](docs/README.md)** - Detailed system overview and glossary
 - **[Security](SECURITY.md)** - Security-related resources 
@@ -131,4 +129,4 @@ You integrate AICR into CI/CD pipelines, GitOps workflows, or larger platforms.
 
 ## Contributing
 
-Contributions are welcome. See [contributing](/CONTRIBUTING.md) for development setup, contribution guidelines, and the pull request process.
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, contribution guidelines, and the pull request process.

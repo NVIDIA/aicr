@@ -104,7 +104,7 @@ AICR prioritizes trust in the software supply chain.
 
 - `api/` — OpenAPI specifications for the REST API
 - `cmd/` — Entry points for CLI (`aicr`) and API server (`aicrd`)
-- `deployments/` — Kubernetes manifests for agent deployment
+- `recipes/` — Recipe overlays, component values, and validation checks
 - `docs/` — User-facing documentation, guides, and architecture docs
 - `examples/` — Example snapshots, recipes, and comparisons
 - `infra/` — Infrastructure as code (Terraform) for deployments
@@ -154,11 +154,8 @@ For engineers integrating AICR into CI/CD pipelines, GitOps workflows, or larger
 
 ### Install CLI
 
-> Note: Temporally, while the repo is private, make sure to include your GitHub token first:
-
 ```shell
-curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 
 See [Installation Guide](user/installation.md) for manual installation, building from source, and container images.
