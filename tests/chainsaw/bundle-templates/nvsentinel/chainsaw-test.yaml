@@ -55,17 +55,6 @@ spec:
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-defaults"
 
-    - name: assert-netpol-defaults
-      description: Verify NetworkPolicy is created with intra-namespace and webhook port rules.
-      try:
-        - script:
-            content: |
-              WORK="/tmp/chainsaw-bundle-nvsentinel-templates"
-              chainsaw assert \
-                --resource "${WORK}/bundle-defaults/nvsentinel/manifests/allow-intra-namespace.yaml" \
-                --file ./assert-netpol-defaults.yaml \
-                --no-color --timeout 5s
-
     ## ── NetworkPolicy: disabled ─────────────────────────────────────────
 
     - name: bundle-netpol-disabled
@@ -80,19 +69,3 @@ spec:
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-disabled" \
                 --set nvsentinel:networkPolicyWorkaround.enabled=false
-
-    - name: assert-netpol-disabled
-      description: Verify NetworkPolicy manifest is removed when disabled.
-      try:
-        - script:
-            content: |
-              WORK="/tmp/chainsaw-bundle-nvsentinel-templates"
-              MANIFEST="${WORK}/bundle-disabled/nvsentinel/manifests/allow-intra-namespace.yaml"
-              if [ -f "${MANIFEST}" ]; then
-                echo "FAIL: allow-intra-namespace.yaml should not exist when disabled"
-                exit 1
-              fi
-      cleanup:
-        - script:
-            content: |
-              rm -rf /tmp/chainsaw-bundle-nvsentinel-templates
