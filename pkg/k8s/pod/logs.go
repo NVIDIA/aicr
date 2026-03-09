@@ -82,6 +82,11 @@ func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, defaults.LogScannerBufferSize), defaults.LogScannerBufferSize)
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return "", errors.Wrap(errors.ErrCodeTimeout, "log collection cancelled", ctx.Err())
+		default:
+		}
 		logBuffer.WriteString(scanner.Text())
 		logBuffer.WriteByte('\n')
 	}

@@ -51,7 +51,7 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 	for _, pod := range pods.Items {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
 		}
 
 		for _, container := range pod.Spec.Containers {

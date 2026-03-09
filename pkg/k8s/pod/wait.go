@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -106,7 +107,7 @@ func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	return wait.PollUntilContextCancel(timeoutCtx, 500*time.Millisecond, true, func(ctx context.Context) (bool, error) {
+	return wait.PollUntilContextCancel(timeoutCtx, defaults.PodPollInterval, true, func(ctx context.Context) (bool, error) {
 		pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			return false, errors.Wrap(errors.ErrCodeInternal, "failed to get pod", err)

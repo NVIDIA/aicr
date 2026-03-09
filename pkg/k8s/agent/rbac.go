@@ -83,7 +83,10 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create Role", err)
+	}
+	return nil
 }
 
 // ensureRoleBinding creates or updates the RoleBinding to bind the Role to the ServiceAccount.
@@ -115,7 +118,10 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create RoleBinding", err)
+	}
+	return nil
 }
 
 // ensureClusterRole creates or updates the ClusterRole for node and cluster-wide resource access.
@@ -153,7 +159,10 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRole", err)
+	}
+	return nil
 }
 
 // ensureClusterRoleBinding creates or updates the ClusterRoleBinding to bind the ClusterRole to the ServiceAccount.
@@ -172,7 +181,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     "aicr-node-reader",
+			Name:     clusterRoleName,
 		},
 	}
 
@@ -184,7 +193,10 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
+	}
+	return nil
 }
 
 // deleteServiceAccount deletes the ServiceAccount.
@@ -215,7 +227,7 @@ func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
 // If the ClusterRole doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 	err := d.clientset.RbacV1().ClusterRoles().
-		Delete(ctx, "aicr-node-reader", metav1.DeleteOptions{})
+		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 
@@ -223,6 +235,6 @@ func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 // If the ClusterRoleBinding doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
 	err := d.clientset.RbacV1().ClusterRoleBindings().
-		Delete(ctx, "aicr-node-reader", metav1.DeleteOptions{})
+		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }

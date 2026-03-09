@@ -274,6 +274,10 @@ const (
 	// JobTTLAfterFinished is the time-to-live for completed Jobs.
 	// Jobs are kept for debugging purposes before automatic cleanup.
 	JobTTLAfterFinished = 1 * time.Hour
+
+	// AgentJobActiveDeadline is the active deadline for K8s agent Jobs.
+	// Prevents runaway Jobs from consuming cluster resources indefinitely.
+	AgentJobActiveDeadline = 5 * time.Hour
 )
 
 // Server size limits.
@@ -281,6 +285,18 @@ const (
 	// ServerMaxHeaderBytes is the maximum size of request headers (64KB).
 	// Prevents header-based attacks.
 	ServerMaxHeaderBytes = 1 << 16
+)
+
+// Server rate limiting constants.
+const (
+	// ServerDefaultRateLimit is the default requests per second for the rate limiter.
+	ServerDefaultRateLimit = 100
+
+	// ServerDefaultRateLimitBurst is the maximum burst size for the rate limiter.
+	ServerDefaultRateLimitBurst = 200
+
+	// ServerRetryAfterSeconds is the Retry-After header value when rate limited.
+	ServerRetryAfterSeconds = "1"
 )
 
 // Log scanner buffer sizes.
@@ -318,6 +334,12 @@ const (
 	// ValidatorDefaultMemory is the default memory request/limit for validator
 	// containers when not specified in the catalog entry.
 	ValidatorDefaultMemory = "1Gi"
+)
+
+// File parser limits.
+const (
+	// FileParserMaxSize is the maximum file size in bytes for the file collector parser.
+	FileParserMaxSize = 1 << 20 // 1MB
 )
 
 // Attestation file size limits.

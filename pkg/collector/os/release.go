@@ -42,7 +42,7 @@ var (
 func (c *Collector) collectRelease(ctx context.Context) (*measurement.Subtype, error) {
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "release collection cancelled", err)
 	}
 
 	// Try primary location first, fall back to alternative per freedesktop.org spec

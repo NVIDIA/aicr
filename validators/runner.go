@@ -20,6 +20,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // terminationLogPath is the standard K8s termination message path.
@@ -35,7 +37,7 @@ var errSkip = errors.New("skip")
 // Skip returns a skip sentinel error with the given reason.
 // When returned from a CheckFunc, the runner exits with code 2 (skip).
 func Skip(reason string) error {
-	return fmt.Errorf("%s: %w", reason, errSkip)
+	return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, reason, errSkip)
 }
 
 // CheckFunc is the signature for a v2 validator check function.
