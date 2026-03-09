@@ -108,7 +108,7 @@ func TestFilterOut(t *testing.T) {
 	}
 }
 
-func TestFilterIn(t *testing.T) {
+func Test_filterIn(t *testing.T) {
 	// Create test data
 	readings := map[string]Reading{
 		"root_user":       Str("admin"),
@@ -169,17 +169,17 @@ func TestFilterIn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FilterIn(readings, tt.patterns)
+			result := filterIn(readings, tt.patterns)
 
 			// Check that result has the expected number of keys
 			if len(result) != len(tt.wantKeys) {
-				t.Errorf("FilterIn() returned %d keys, want %d", len(result), len(tt.wantKeys))
+				t.Errorf("filterIn() returned %d keys, want %d", len(result), len(tt.wantKeys))
 			}
 
 			// Check that all expected keys are present
 			for _, wantKey := range tt.wantKeys {
 				if _, exists := result[wantKey]; !exists {
-					t.Errorf("FilterIn() missing expected key %q", wantKey)
+					t.Errorf("filterIn() missing expected key %q", wantKey)
 				}
 			}
 
@@ -193,7 +193,7 @@ func TestFilterIn(t *testing.T) {
 					}
 				}
 				if !found {
-					t.Errorf("FilterIn() contains unexpected key %q", key)
+					t.Errorf("filterIn() contains unexpected key %q", key)
 				}
 			}
 		})

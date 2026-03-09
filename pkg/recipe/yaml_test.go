@@ -29,7 +29,7 @@
 // - metadata_test.go: Tests RecipeMetadata types, Merge(), TopologicalSort(),
 //   ValidateDependencies(), and MetadataStore inheritance chain resolution
 // - recipe_test.go: Tests Recipe struct validation methods after recipes
-//   are built (Validate, ValidateStructure, ValidateMeasurementExists)
+//   are built (Validate, ValidateStructure, validateMeasurementExists)
 
 package recipe
 

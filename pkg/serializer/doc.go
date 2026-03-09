@@ -94,7 +94,7 @@
 //
 // Read from file with automatic format detection:
 //
-//	reader, err := serializer.NewFileReaderAuto("snapshot.yaml")
+//	reader, err := serializer.newFileReaderAuto("snapshot.yaml")
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -140,7 +140,7 @@
 //
 // Format detection is automatic when using:
 //   - NewFileWriterOrStdout(format, path)
-//   - NewFileReaderAuto(path)
+//   - newFileReaderAuto(path)
 //
 // # Table Format
 //

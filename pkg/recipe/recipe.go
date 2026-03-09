@@ -90,8 +90,8 @@ func (v *Recipe) ValidateStructure() error {
 	return nil
 }
 
-// ValidateMeasurementExists checks if a specific measurement type exists.
-func (v *Recipe) ValidateMeasurementExists(measurementType measurement.Type) error {
+// validateMeasurementExists checks if a specific measurement type exists.
+func (v *Recipe) validateMeasurementExists(measurementType measurement.Type) error {
 	if err := v.ValidateStructure(); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "measurement existence check failed", err)
 	}
@@ -104,9 +104,9 @@ func (v *Recipe) ValidateMeasurementExists(measurementType measurement.Type) err
 	return errors.New(errors.ErrCodeNotFound, fmt.Sprintf("measurement type %s not found in recipe", measurementType))
 }
 
-// ValidateSubtypeExists checks if a specific subtype exists within a measurement.
-func (v *Recipe) ValidateSubtypeExists(measurementType measurement.Type, subtypeName string) error {
-	if err := v.ValidateMeasurementExists(measurementType); err != nil {
+// validateSubtypeExists checks if a specific subtype exists within a measurement.
+func (v *Recipe) validateSubtypeExists(measurementType measurement.Type, subtypeName string) error {
+	if err := v.validateMeasurementExists(measurementType); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "subtype existence check failed", err)
 	}
 
@@ -123,8 +123,8 @@ func (v *Recipe) ValidateSubtypeExists(measurementType measurement.Type, subtype
 	return errors.New(errors.ErrCodeNotFound, fmt.Sprintf("measurement type %s not found in recipe", measurementType))
 }
 
-// ValidateRequiredKeys checks if required keys exist in a subtype's data.
-func ValidateRequiredKeys(subtype *measurement.Subtype, requiredKeys []string) error {
+// validateRequiredKeys checks if required keys exist in a subtype's data.
+func validateRequiredKeys(subtype *measurement.Subtype, requiredKeys []string) error {
 	if subtype == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "subtype is nil")
 	}

@@ -550,7 +550,7 @@ func TestIsNewer(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := tt.version.IsNewer(tt.other)
+			result := tt.version.isNewer(tt.other)
 			if result != tt.expected {
 				t.Errorf("got %v, want %v", result, tt.expected)
 			}

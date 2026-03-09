@@ -43,7 +43,7 @@ func TestSubtypeBuilder(t *testing.T) {
 			t.Errorf("GetInt64(nodes) = %v, %v; want 3, nil", nodes, err)
 		}
 
-		ready, err := st.GetBool("ready")
+		ready, err := st.getBool("ready")
 		if err != nil || !ready {
 			t.Errorf("GetBool(ready) = %v, %v; want true, nil", ready, err)
 		}
@@ -72,17 +72,17 @@ func TestSubtypeBuilder(t *testing.T) {
 			t.Errorf("int64_val = %v, want 9223372036854775807", int64Val)
 		}
 
-		uintVal, _ := st.GetUint64("uint_val")
+		uintVal, _ := st.getUint64("uint_val")
 		if uintVal != 42 {
 			t.Errorf("uint_val = %v, want 42", uintVal)
 		}
 
-		uint64Val, _ := st.GetUint64("uint64_val")
+		uint64Val, _ := st.getUint64("uint64_val")
 		if uint64Val != 18446744073709551615 {
 			t.Errorf("uint64_val = %v, want 18446744073709551615", uint64Val)
 		}
 
-		floatVal, _ := st.GetFloat64("float_val")
+		floatVal, _ := st.getFloat64("float_val")
 		if floatVal != 3.14 {
 			t.Errorf("float_val = %v, want 3.14", floatVal)
 		}
@@ -202,12 +202,12 @@ func TestMeasurementBuilder(t *testing.T) {
 			t.Errorf("Validate() error = %v", err)
 		}
 
-		if !m.HasSubtype("gpu0") || !m.HasSubtype("gpu1") {
+		if !m.hasSubtype("gpu0") || !m.hasSubtype("gpu1") {
 			t.Error("Expected both gpu0 and gpu1 subtypes")
 		}
 
 		gpu0 := m.GetSubtype("gpu0")
-		temp, err := gpu0.GetFloat64("temp")
+		temp, err := gpu0.getFloat64("temp")
 		if err != nil || temp != 65.5 {
 			t.Errorf("GetFloat64(temp) = %v, %v; want 65.5, nil", temp, err)
 		}

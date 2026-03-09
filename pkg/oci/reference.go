@@ -26,8 +26,8 @@ import (
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// URIScheme is the URI scheme for OCI registry output (e.g., "oci://ghcr.io/org/repo:tag").
-const URIScheme = "oci://"
+// uriScheme is the URI scheme for OCI registry output (e.g., "oci://ghcr.io/org/repo:tag").
+const uriScheme = "oci://"
 
 // Reference represents a parsed output target, which can be either an OCI registry
 // reference or a local directory path.
@@ -56,7 +56,7 @@ type Reference struct {
 // If no tag is specified in an OCI URI, Tag will be empty; the caller is responsible
 // for applying a default (e.g., CLI version).
 func ParseOutputTarget(target string) (*Reference, error) {
-	if !strings.HasPrefix(target, URIScheme) {
+	if !strings.HasPrefix(target, uriScheme) {
 		return &Reference{
 			IsOCI:     false,
 			LocalPath: target,
@@ -64,7 +64,7 @@ func ParseOutputTarget(target string) (*Reference, error) {
 	}
 
 	// Strip oci:// and parse as standard image reference
-	ref, err := reference.ParseNormalizedNamed(strings.TrimPrefix(target, URIScheme))
+	ref, err := reference.ParseNormalizedNamed(strings.TrimPrefix(target, uriScheme))
 	if err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeInvalidRequest, "invalid OCI reference", err)
 	}
@@ -80,7 +80,7 @@ func ParseOutputTarget(target string) (*Reference, error) {
 	// If no tag specified, return empty string; caller will apply default
 
 	// Validate registry and repository format
-	if err := ValidateRegistryReference(registry, repository); err != nil {
+	if err := validateRegistryReference(registry, repository); err != nil {
 		return nil, err
 	}
 
@@ -100,9 +100,9 @@ func (r *Reference) String() string {
 		return r.LocalPath
 	}
 	if r.Tag == "" {
-		return fmt.Sprintf("%s%s/%s", URIScheme, r.Registry, r.Repository)
+		return fmt.Sprintf("%s%s/%s", uriScheme, r.Registry, r.Repository)
 	}
-	return fmt.Sprintf("%s%s/%s:%s", URIScheme, r.Registry, r.Repository, r.Tag)
+	return fmt.Sprintf("%s%s/%s:%s", uriScheme, r.Registry, r.Repository, r.Tag)
 }
 
 // WithTag returns a copy of the reference with the specified tag.

@@ -184,16 +184,6 @@ func ResetComponentRegistryForTesting() {
 	globalRegistryOnce = sync.Once{}
 }
 
-// MustGetComponentRegistry returns the global component registry or panics.
-// Use this in init() functions where the registry must be available.
-func MustGetComponentRegistry() *ComponentRegistry {
-	reg, err := GetComponentRegistry()
-	if err != nil {
-		panic(fmt.Sprintf("failed to load component registry: %v", err))
-	}
-	return reg
-}
-
 // loadComponentRegistry loads the component registry from the data provider.
 func loadComponentRegistry() (*ComponentRegistry, error) {
 	provider := GetDataProvider()

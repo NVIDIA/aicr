@@ -24,8 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PermissionCheck represents a single permission check result.
-type PermissionCheck struct {
+// permissionCheck represents a single permission check result.
+type permissionCheck struct {
 	Resource  string
 	Verb      string
 	Namespace string
@@ -36,8 +36,8 @@ type PermissionCheck struct {
 // CheckPermissions verifies if the current user has the required permissions
 // to deploy the agent. Returns a list of permission checks and an error if any
 // required permissions are missing.
-func (d *Deployer) CheckPermissions(ctx context.Context) ([]PermissionCheck, error) {
-	checks := []PermissionCheck{}
+func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, error) {
+	checks := []permissionCheck{}
 
 	type permCheck struct {
 		resource  string
@@ -75,7 +75,7 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]PermissionCheck, err
 			return checks, errors.Wrap(code, fmt.Sprintf("failed to check permission for %s %s", check.verb, check.resource), err)
 		}
 
-		result := PermissionCheck{
+		result := permissionCheck{
 			Resource:  check.resource,
 			Verb:      check.verb,
 			Namespace: check.namespace,

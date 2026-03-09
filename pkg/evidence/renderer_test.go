@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -138,10 +139,10 @@ func TestRenderSharedEvidenceFile(t *testing.T) {
 	}
 
 	content := string(data)
-	if !contains(content, "accelerator-metrics") {
+	if !strings.Contains(content, "accelerator-metrics") {
 		t.Error("evidence file should contain accelerator-metrics check")
 	}
-	if !contains(content, "ai-service-metrics") {
+	if !strings.Contains(content, "ai-service-metrics") {
 		t.Error("evidence file should contain ai-service-metrics check")
 	}
 }
@@ -175,17 +176,4 @@ func TestGetRequirement(t *testing.T) {
 			}
 		})
 	}
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && findSubstring(s, substr))
-}
-
-func findSubstring(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
 }

@@ -24,8 +24,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrorResponse represents error responses as per OpenAPI spec
-type ErrorResponse struct {
+// errorResponse represents error responses as per OpenAPI spec
+type errorResponse struct {
 	Code      string         `json:"code" yaml:"code"`
 	Message   string         `json:"message" yaml:"message"`
 	Details   map[string]any `json:"details,omitempty" yaml:"details,omitempty"`
@@ -43,7 +43,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, statusCode int,
 		requestID = uuid.New().String()
 	}
 
-	errResp := ErrorResponse{
+	errResp := errorResponse{
 		Code:      string(code),
 		Message:   message,
 		Details:   details,
@@ -55,9 +55,9 @@ func WriteError(w http.ResponseWriter, r *http.Request, statusCode int,
 	serializer.RespondJSON(w, statusCode, errResp)
 }
 
-// HTTPStatusFromCode maps a canonical error code to an HTTP status.
+// httpStatusFromCode maps a canonical error code to an HTTP status.
 // This keeps transport-layer semantics centralized.
-func HTTPStatusFromCode(code aicrerrors.ErrorCode) int {
+func httpStatusFromCode(code aicrerrors.ErrorCode) int {
 	switch code {
 	case aicrerrors.ErrCodeInvalidRequest:
 		return http.StatusBadRequest
@@ -134,7 +134,7 @@ func WriteErrorFromErr(w http.ResponseWriter, r *http.Request, err error, fallba
 			details = mergeDetails(details, map[string]any{"error": se.Cause.Error()})
 		}
 
-		WriteError(w, r, HTTPStatusFromCode(se.Code), se.Code, msg, retryableFromCode(se.Code), details)
+		WriteError(w, r, httpStatusFromCode(se.Code), se.Code, msg, retryableFromCode(se.Code), details)
 		return
 	}
 

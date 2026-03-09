@@ -449,13 +449,13 @@ func TestBaseBundler_AddError(t *testing.T) {
 	}
 }
 
-func TestBaseBundler_BuildBaseConfigMap(t *testing.T) {
+func TestBaseBundler_buildBaseConfigMap(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithVersion("v1.2.3"),
 	)
 
 	b := NewBaseBundler(cfg, types.BundleType("gpu-operator"))
-	configMap := b.BuildBaseConfigMap()
+	configMap := b.buildBaseConfigMap()
 
 	// Test bundler version is set
 	if configMap["bundler_version"] != "v1.2.3" {

@@ -33,7 +33,7 @@ var (
 func (c *Collector) collectKMod(ctx context.Context) (*measurement.Subtype, error) {
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "kmod collection cancelled", err)
 	}
 
 	parser := file.NewParser()

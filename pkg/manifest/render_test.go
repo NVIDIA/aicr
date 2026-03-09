@@ -115,8 +115,8 @@ metadata:
 	}
 }
 
-func TestHelmFuncMap(t *testing.T) {
-	funcs := HelmFuncMap()
+func TestHelmFuncMapFunctions(t *testing.T) {
+	funcs := helmFuncMap()
 
 	t.Run("toYaml", func(t *testing.T) {
 		fn := funcs["toYaml"].(func(any) string)

@@ -480,16 +480,6 @@ func TestGetManifestContent(t *testing.T) {
 	})
 }
 
-func TestMustGetComponentRegistry(t *testing.T) {
-	reg := MustGetComponentRegistry()
-	if reg == nil {
-		t.Fatal("MustGetComponentRegistry() returned nil")
-	}
-	if len(reg.Components) == 0 {
-		t.Error("expected non-empty component registry")
-	}
-}
-
 func TestRecipe_Accessors(t *testing.T) {
 	t.Run("GetComponentRef always nil", func(t *testing.T) {
 		r := &Recipe{}
@@ -573,17 +563,17 @@ func TestRecipeResult_Accessors(t *testing.T) {
 	})
 }
 
-func TestHasComponentRefs(t *testing.T) {
+func Test_hasComponentRefs(t *testing.T) {
 	t.Run("RecipeResult returns true", func(t *testing.T) {
 		rr := &RecipeResult{}
-		if !HasComponentRefs(rr) {
+		if !hasComponentRefs(rr) {
 			t.Error("expected true for RecipeResult")
 		}
 	})
 
 	t.Run("Recipe returns false", func(t *testing.T) {
 		r := &Recipe{}
-		if HasComponentRefs(r) {
+		if hasComponentRefs(r) {
 			t.Error("expected false for Recipe")
 		}
 	})

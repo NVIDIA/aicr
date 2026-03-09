@@ -120,7 +120,7 @@ func BenchmarkIsNewer(b *testing.B) {
 	v2, _ := ParseVersion("1.2.0")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = v1.IsNewer(v2)
+		_ = v1.isNewer(v2)
 	}
 }
 

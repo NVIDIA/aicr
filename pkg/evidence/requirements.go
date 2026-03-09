@@ -14,8 +14,8 @@
 
 package evidence
 
-// RequirementMeta maps a validator name to its CNCF conformance requirement.
-type RequirementMeta struct {
+// requirementMeta maps a validator name to its CNCF conformance requirement.
+type requirementMeta struct {
 	// RequirementID is the CNCF requirement identifier (e.g., "dra_support").
 	RequirementID string
 
@@ -32,7 +32,7 @@ type RequirementMeta struct {
 // requirements maps conformance validator names to CNCF requirement metadata.
 // Only submission-required checks are included — diagnostic checks
 // (gpu-operator-health, platform-health) are excluded from evidence output.
-var requirements = map[string]RequirementMeta{
+var requirements = map[string]requirementMeta{
 	"dra-support": {
 		RequirementID: "dra_support",
 		Title:         "DRA Support (Dynamic Resource Allocation)",
@@ -91,7 +91,7 @@ var requirements = map[string]RequirementMeta{
 
 // GetRequirement returns the requirement metadata for a validator name.
 // Returns nil if the validator is not a submission-required conformance check.
-func GetRequirement(validatorName string) *RequirementMeta {
+func GetRequirement(validatorName string) *requirementMeta {
 	if meta, ok := requirements[validatorName]; ok {
 		return &meta
 	}

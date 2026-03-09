@@ -57,7 +57,7 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 	// Find all ClusterPolicy resources across all API groups
 	for _, apiResourceList := range apiResourceLists {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
 		}
 
 		if apiResourceList == nil {
@@ -105,7 +105,7 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 			for _, policy := range policies.Items {
 				// Check for context cancellation
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
 				}
 
 				// Extract spec for detailed information

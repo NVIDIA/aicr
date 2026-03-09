@@ -19,7 +19,7 @@ import (
 	"testing"
 )
 
-func TestComputeChecksum(t *testing.T) {
+func Test_computeChecksum(t *testing.T) {
 	tests := []struct {
 		name    string
 		content []byte
@@ -39,9 +39,9 @@ func TestComputeChecksum(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ComputeChecksum(tt.content)
+			got := computeChecksum(tt.content)
 			if got != tt.want {
-				t.Errorf("ComputeChecksum() = %v, want %v", got, tt.want)
+				t.Errorf("computeChecksum() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -88,7 +88,7 @@ func TestGetConfigValue(t *testing.T) {
 	}
 }
 
-func TestExtractCustomLabels(t *testing.T) {
+func Test_extractCustomLabels(t *testing.T) {
 	tests := []struct {
 		name   string
 		config map[string]string
@@ -122,20 +122,20 @@ func TestExtractCustomLabels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractCustomLabels(tt.config)
+			got := extractCustomLabels(tt.config)
 			if len(got) != len(tt.want) {
-				t.Errorf("ExtractCustomLabels() len = %v, want %v", len(got), len(tt.want))
+				t.Errorf("extractCustomLabels() len = %v, want %v", len(got), len(tt.want))
 			}
 			for k, v := range tt.want {
 				if got[k] != v {
-					t.Errorf("ExtractCustomLabels()[%v] = %v, want %v", k, got[k], v)
+					t.Errorf("extractCustomLabels()[%v] = %v, want %v", k, got[k], v)
 				}
 			}
 		})
 	}
 }
 
-func TestExtractCustomAnnotations(t *testing.T) {
+func Test_extractCustomAnnotations(t *testing.T) {
 	tests := []struct {
 		name   string
 		config map[string]string
@@ -162,13 +162,13 @@ func TestExtractCustomAnnotations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractCustomAnnotations(tt.config)
+			got := extractCustomAnnotations(tt.config)
 			if len(got) != len(tt.want) {
-				t.Errorf("ExtractCustomAnnotations() len = %v, want %v", len(got), len(tt.want))
+				t.Errorf("extractCustomAnnotations() len = %v, want %v", len(got), len(tt.want))
 			}
 			for k, v := range tt.want {
 				if got[k] != v {
-					t.Errorf("ExtractCustomAnnotations()[%v] = %v, want %v", k, got[k], v)
+					t.Errorf("extractCustomAnnotations()[%v] = %v, want %v", k, got[k], v)
 				}
 			}
 		})
@@ -231,27 +231,7 @@ func TestMarshalYAML(t *testing.T) {
 	}
 }
 
-func TestBoolToString(t *testing.T) {
-	tests := []struct {
-		name  string
-		value bool
-		want  string
-	}{
-		{"true value", true, StrTrue},
-		{"false value", false, StrFalse},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := BoolToString(tt.value)
-			if got != tt.want {
-				t.Errorf("BoolToString(%v) = %v, want %v", tt.value, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestParseBoolString(t *testing.T) {
+func Test_parseBoolString(t *testing.T) {
 	tests := []struct {
 		name  string
 		value string
@@ -267,9 +247,9 @@ func TestParseBoolString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ParseBoolString(tt.value)
+			got := parseBoolString(tt.value)
 			if got != tt.want {
-				t.Errorf("ParseBoolString(%q) = %v, want %v", tt.value, got, tt.want)
+				t.Errorf("parseBoolString(%q) = %v, want %v", tt.value, got, tt.want)
 			}
 		})
 	}

@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	// ArtifactType is the OCI media type for AICR bundle artifacts.
+	// artifactType is the OCI media type for AICR bundle artifacts.
 	//
 	// Artifacts with this type package a directory tree into an OCI artifact using ORAS.
 	// The artifact contains standard OCI layout (manifest, config, layers) but is not
@@ -48,11 +48,11 @@ const (
 	//
 	// Use cases: distributing AICR bundles (configs, assets) via OCI registries.
 	// Consumers that don't understand this type should treat it as a non-executable blob.
-	ArtifactType = "application/vnd.nvidia.aicr.artifact"
+	artifactType = "application/vnd.nvidia.aicr.artifact"
 
-	// Default timestamp for reproducible builds.
+	// reproducibleTimestamp is the default timestamp for reproducible builds.
 	// Use a fixed date (Unix epoch) to ensure builds are deterministic.
-	ReproducibleTimestamp = "1970-01-01T00:00:00Z"
+	reproducibleTimestamp = "1970-01-01T00:00:00Z"
 )
 
 // registryHostPattern validates registry host format (host:port or host).
@@ -114,8 +114,8 @@ type PushResult struct {
 	Reference string
 }
 
-// ValidateRegistryReference validates the registry and repository format.
-func ValidateRegistryReference(registry, repository string) error {
+// validateRegistryReference validates the registry and repository format.
+func validateRegistryReference(registry, repository string) error {
 	registryHost := stripProtocol(registry)
 
 	if !registryHostPattern.MatchString(registryHost) {
@@ -147,7 +147,7 @@ func Package(ctx context.Context, opts PackageOptions) (*PackageResult, error) {
 	}
 
 	// Validate registry and repository format
-	if err := ValidateRegistryReference(opts.Registry, opts.Repository); err != nil {
+	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
 		return nil, err
 	}
 
@@ -225,9 +225,9 @@ func Package(ctx context.Context, opts PackageOptions) (*PackageResult, error) {
 	}
 
 	// Always add consistent creation timestamp to ensure reproducible builds
-	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = ReproducibleTimestamp
+	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
 
-	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, ArtifactType, packOpts)
+	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, artifactType, packOpts)
 	if err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack manifest", err)
 	}
@@ -264,7 +264,7 @@ func PushFromStore(ctx context.Context, storePath string, opts PushOptions) (*Pu
 	}
 
 	// Validate registry and repository format
-	if err := ValidateRegistryReference(opts.Registry, opts.Repository); err != nil {
+	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
 		return nil, err
 	}
 

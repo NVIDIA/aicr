@@ -17,8 +17,8 @@ package agent
 import (
 	"context"
 	"strconv"
-	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
@@ -88,8 +88,8 @@ func (d *Deployer) buildJob() *batchv1.Job {
 			Parallelism:             ptr.To(int32(1)),
 			CompletionMode:          ptr.To(batchv1.NonIndexedCompletion),
 			BackoffLimit:            ptr.To(int32(0)),
-			TTLSecondsAfterFinished: ptr.To(int32(3600)),
-			ActiveDeadlineSeconds:   ptr.To(int64(18000)), // 5 hours
+			TTLSecondsAfterFinished: ptr.To(int32(defaults.JobTTLAfterFinished.Seconds())),
+			ActiveDeadlineSeconds:   ptr.To(int64(defaults.AgentJobActiveDeadline.Seconds())),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -306,8 +306,7 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 
 // waitForJobDeletion waits for the Job to be fully deleted.
 func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
-	timeout := 30 * time.Second
-	return wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, timeout, true,
+	return wait.PollUntilContextTimeout(ctx, defaults.PodPollInterval, defaults.K8sCleanupTimeout, true,
 		func(ctx context.Context) (bool, error) {
 			_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 				Get(ctx, d.config.JobName, metav1.GetOptions{})
