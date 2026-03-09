@@ -166,8 +166,6 @@ jobs:
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
-          AICR_IMAGE: "${{ env.VALIDATOR_IMAGE }}:${{ env.VALIDATOR_TAG }}"
-          AICR_VALIDATOR_IMAGE: "${{ env.VALIDATOR_IMAGE }}:${{ env.VALIDATOR_TAG }}"
         run: |
           set -euxo pipefail
           chainsaw test \
