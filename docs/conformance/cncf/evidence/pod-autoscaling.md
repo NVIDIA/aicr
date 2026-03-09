@@ -1,7 +1,7 @@
 # Pod Autoscaling (HPA with GPU Metrics)
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-02 18:30:49 UTC
+**Generated:** 2026-03-06 19:40:52 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -27,14 +27,14 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
 NAME                                  READY   STATUS    RESTARTS   AGE
-prometheus-adapter-585f5dfc99-nm42j   1/1     Running   0          47h
+prometheus-adapter-585f5dfc99-cwwdj   1/1     Running   0          47h
 ```
 
 **Prometheus adapter service**
 ```
 $ kubectl get svc prometheus-adapter -n monitoring
-NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
-prometheus-adapter   ClusterIP   172.20.42.196   <none>        443/TCP   2d
+NAME                 TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+prometheus-adapter   ClusterIP   172.20.140.0   <none>        443/TCP   47h
 ```
 
 ## Custom Metrics API
@@ -42,12 +42,12 @@ prometheus-adapter   ClusterIP   172.20.42.196   <none>        443/TCP   2d
 **Available custom metrics**
 ```
 $ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | jq .resources[].name
-pods/gpu_utilization
-namespaces/gpu_utilization
 pods/gpu_memory_used
-namespaces/gpu_memory_used
 namespaces/gpu_power_usage
 pods/gpu_power_usage
+pods/gpu_utilization
+namespaces/gpu_utilization
+namespaces/gpu_memory_used
 ```
 
 ## GPU Stress Test Deployment
@@ -106,11 +106,25 @@ spec:
         - operator: Exists
       containers:
         - name: gpu-worker
-          image: nvcr.io/nvidia/k8s/cuda-sample:nbody-cuda11.7.1-ubuntu18.04
+          image: nvcr.io/nvidia/cuda:12.9.0-devel-ubuntu24.04
           command: ["bash", "-c"]
-          args: ["/cuda-samples/nbody -benchmark -numbodies=4194304 -iterations=9999 || true"]
+          args:
+            - |
+              cat > /tmp/s.cu << 'EOF'
+              __global__ void k(float *d, int n) {
+                int i = blockIdx.x * blockDim.x + threadIdx.x;
+                float v = (float)i;
+                for (int j = 0; j < n; j++) v = v * v + 0.1f;
+                if (i < 1) d[0] = v;
+              }
+              int main() {
+                float *d; cudaMalloc(&d, sizeof(float));
+                for (;;) { k<<<4096,256>>>(d, 1000000); cudaDeviceSynchronize(); }
+              }
+              EOF
+              nvcc -o /tmp/s /tmp/s.cu && exec /tmp/s
           securityContext:
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false  # nvcc writes to /tmp during compile
             allowPrivilegeEscalation: false
           resources:
             limits:
@@ -152,8 +166,8 @@ horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
 **GPU workload pod**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                           READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-7bccc5b5d-vsztd   1/1     Running   0          3s    100.65.168.154   ip-100-64-147-149.ec2.internal   <none>           <none>
+NAME                            READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
+gpu-workload-6d87f8c876-dk552   1/1     Running   0          58s   100.65.208.144   ip-100-64-147-149.ec2.internal   <none>           <none>
 ```
 
 ## HPA Status
@@ -162,7 +176,7 @@ gpu-workload-7bccc5b5d-vsztd   1/1     Running   0          3s    100.65.168.154
 ```
 $ kubectl get hpa -n hpa-test
 NAME               REFERENCE                 TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
-gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          48s
+gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          116s
 ```
 
 **HPA details**
@@ -172,7 +186,7 @@ Name:                         gpu-workload-hpa
 Namespace:                    hpa-test
 Labels:                       <none>
 Annotations:                  <none>
-CreationTimestamp:            Mon, 02 Mar 2026 10:30:59 -0800
+CreationTimestamp:            Fri, 06 Mar 2026 11:41:01 -0800
 Reference:                    Deployment/gpu-workload
 Metrics:                      ( current / target )
   "gpu_utilization" on pods:  100 / 50
@@ -198,20 +212,22 @@ Conditions:
   ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from pods metric gpu_utilization
   ScalingLimited  False   DesiredWithinRange  the desired count is within the acceptable range
 Events:
-  Type     Reason                        Age   From                       Message
-  ----     ------                        ----  ----                       -------
-  Warning  FailedGetPodsMetric           35s   horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Warning  FailedComputeMetricsReplicas  35s   horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Normal   SuccessfulRescale             20s   horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
+  Type     Reason                        Age                From                       Message
+  ----     ------                        ----               ----                       -------
+  Warning  FailedGetPodsMetric           102s               horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Warning  FailedComputeMetricsReplicas  102s               horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Warning  FailedGetPodsMetric           71s (x2 over 86s)  horizontal-pod-autoscaler  did not receive metrics for targeted pods (pods might be unready)
+  Warning  FailedComputeMetricsReplicas  71s (x2 over 86s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: did not receive metrics for targeted pods (pods might be unready)
+  Normal   SuccessfulRescale             26s                horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
 ```
 
 ## GPU Utilization Evidence
 
 **GPU utilization (nvidia-smi)**
 ```
-$ kubectl exec -n hpa-test gpu-workload-7bccc5b5d-vsztd -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
+$ kubectl exec -n hpa-test gpu-workload-6d87f8c876-64jdz -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
 utilization.gpu [%], utilization.memory [%], power.draw [W]
-100 %, 0 %, 591.71 W
+100 %, 0 %, 304.79 W
 ```
 
 ## Pods After Scale-Up
@@ -219,9 +235,9 @@ utilization.gpu [%], utilization.memory [%], power.draw [W]
 **Pods after scale-up**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                           READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-7bccc5b5d-vsztd   1/1     Running   0          54s   100.65.168.154   ip-100-64-147-149.ec2.internal   <none>           <none>
-gpu-workload-7bccc5b5d-w75hq   1/1     Running   0          24s   100.65.115.146   ip-100-64-147-149.ec2.internal   <none>           <none>
+NAME                            READY   STATUS    RESTARTS   AGE    IP               NODE                             NOMINATED NODE   READINESS GATES
+gpu-workload-6d87f8c876-64jdz   1/1     Running   0          30s    100.65.21.135    ip-100-64-147-149.ec2.internal   <none>           <none>
+gpu-workload-6d87f8c876-dk552   1/1     Running   0          2m1s   100.65.208.144   ip-100-64-147-149.ec2.internal   <none>           <none>
 ```
 
 **Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold.

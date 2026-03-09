@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.16] - 2026-03-05
+
+### Bug Fixes
+
+- *(evidence)* Use nvcr image in HPA GPU test manifest  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+## [0.8.15] - 2026-03-05
+
+### Bug Fixes
+
+- *(verify)* Return FAILED and non-zero exit when bundle has verifica…  by [@lockwobr](https://github.com/lockwobr)
+
+### New Features
+
+- *(ci)* Support /ok-to-test for fork PRs by [@mchmarny](https://github.com/mchmarny)
+- *(recipes)* Add GB200 EKS recipe overlays, fix HPA multi-arch, add DRA evidence and deploy mitigations  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other Tasks
+
+- *(validator)* Remove redundant operator-health deployment check  by [@xdu31](https://github.com/xdu31)
+
 ## [0.8.14] - 2026-03-05
 
 ### Bug Fixes

@@ -12,10 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook H100 EKS Ubuntu Customization
+# Skyhook EKS Ubuntu GPU Customization
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
 #
-# This customization configures H100 GPU nodes on Ubuntu with:
+# This customization configures GPU nodes on Ubuntu with:
 # - GRUB parameters for hugepages and nokaslr
 # - Containerd service limits
 # - Sysctl kernel tuning parameters
@@ -68,8 +68,10 @@ spec:
       image: ghcr.io/nvidia/skyhook-packages/nvidia-setup
       version: "0.2.0"
       configMap:
-        service: eks
-        accelerator: h100
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
+        accelerator: {{ $cust.accelerator }}
       env:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "true"
@@ -107,8 +109,10 @@ spec:
         memoryLimit: 8192Mi
         memoryRequest: 4096Mi
       configMap:
-        service: eks
-        accelerator: h100
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
+        accelerator: {{ $cust.accelerator }}
       env:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "false"

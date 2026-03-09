@@ -21,13 +21,17 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/checks"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const (
-	prometheusComponentName = "kube-prometheus-stack"
-	prometheusDefaultPort   = 9090
-)
+// requiredCustomMetrics maps CNCF-required GPU metric categories to their
+// custom metrics API resource names (as exposed by prometheus-adapter).
+// If these exist in the custom metrics API, the full pipeline is proven:
+// DCGM exporter → Prometheus scraping → prometheus-adapter → custom metrics API.
+var requiredCustomMetrics = []string{
+	"gpu_utilization",
+	"gpu_memory_used",
+	"gpu_power_usage",
+}
 
 func init() {
 	checks.RegisterCheck(&checks.Check{
@@ -45,108 +49,22 @@ func init() {
 }
 
 // CheckAIServiceMetrics validates CNCF requirement #5: AI Service Metrics.
-// Discovers the Prometheus service URL from the recipe's kube-prometheus-stack
-// component, then verifies GPU metric time series exist and that the custom
-// metrics API is available.
+// Verifies that GPU metrics are available via the Kubernetes custom metrics API,
+// proving the full observability pipeline: DCGM exporter → Prometheus → prometheus-adapter → custom metrics API.
+// All queries route through the K8s API server, avoiding pod-to-pod network
+// issues (security groups, network policies) that can block direct HTTP.
 func CheckAIServiceMetrics(ctx *checks.ValidationContext) error {
-	promURL, err := discoverPrometheusURL(ctx)
-	if err != nil {
-		return err
-	}
-	return checkAIServiceMetricsWithURL(ctx, promURL)
-}
-
-// discoverPrometheusURL finds the Prometheus service URL by looking up the
-// kube-prometheus-stack component namespace in the recipe and discovering
-// the Prometheus service via label selector. No hardcoded service names.
-func discoverPrometheusURL(ctx *checks.ValidationContext) (string, error) {
-	if ctx.Recipe == nil {
-		return "", errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
-	}
-
-	var namespace string
-	for _, ref := range ctx.Recipe.ComponentRefs {
-		if ref.Name == prometheusComponentName {
-			namespace = ref.Namespace
-			break
-		}
-	}
-	if namespace == "" {
-		return "", errors.New(errors.ErrCodeNotFound,
-			fmt.Sprintf("component %q not found in recipe or has no namespace", prometheusComponentName))
-	}
-
-	// Try multiple label selectors to handle different kube-prometheus-stack versions.
-	// Older versions (<=81.x) use app.kubernetes.io/name=prometheus;
-	// newer versions (>=82.x) dropped that label but retain self-monitor=true.
-	selectors := []string{
-		"app.kubernetes.io/name=prometheus",
-		"self-monitor=true",
-	}
-	for _, selector := range selectors {
-		services, err := ctx.Clientset.CoreV1().Services(namespace).List(ctx.Context, metav1.ListOptions{
-			LabelSelector: selector,
-		})
-		if err != nil {
-			return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Prometheus services", err)
-		}
-		for i := range services.Items {
-			svc := &services.Items[i]
-			for _, port := range svc.Spec.Ports {
-				if port.Port == int32(prometheusDefaultPort) {
-					return fmt.Sprintf("http://%s.%s.svc:%d", svc.Name, namespace, prometheusDefaultPort), nil
-				}
-			}
-		}
-	}
-
-	return "", errors.New(errors.ErrCodeNotFound,
-		fmt.Sprintf("no Prometheus service with port %d found in namespace %q", prometheusDefaultPort, namespace))
-}
-
-// checkAIServiceMetricsWithURL is the testable implementation that accepts a configurable URL.
-func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL string) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 1. Query Prometheus for GPU metric time series
-	queryURL := fmt.Sprintf("%s/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL", promBaseURL)
-	body, err := httpGet(ctx.Context, queryURL)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable,
-			fmt.Sprintf("Prometheus unreachable at %s — verify network connectivity "+
-				"(security groups, network policies) between validator pod and Prometheus service",
-				promBaseURL), err)
-	}
-
-	var promResp struct {
-		Status string `json:"status"`
-		Data   struct {
-			Result []json.RawMessage `json:"result"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &promResp); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse Prometheus response", err)
-	}
-
-	recordRawTextArtifact(ctx, "Prometheus Query: DCGM_FI_DEV_GPU_UTIL",
-		fmt.Sprintf("curl -sf '%s'", queryURL),
-		fmt.Sprintf("Status:            %s\nTime series count: %d", valueOrUnknown(promResp.Status), len(promResp.Data.Result)))
-	recordChunkedTextArtifact(ctx, "Prometheus query response (GPU util)",
-		fmt.Sprintf("curl -sf '%s'", queryURL), string(body))
-
-	if len(promResp.Data.Result) == 0 {
-		return errors.New(errors.ErrCodeNotFound,
-			"no DCGM_FI_DEV_GPU_UTIL time series in Prometheus — verify DCGM exporter is running and scraping GPU metrics")
-	}
-
-	// 2. Custom metrics API available
-	rawURL := "/apis/custom.metrics.k8s.io/v1beta1"
 	restClient := ctx.Clientset.Discovery().RESTClient()
 	if restClient == nil {
 		return errors.New(errors.ErrCodeInternal, "discovery REST client is not available")
 	}
+
+	// 1. Custom metrics API is available (proves prometheus-adapter is deployed).
+	rawURL := "/apis/custom.metrics.k8s.io/v1beta1"
 	result := restClient.Get().AbsPath(rawURL).Do(ctx.Context)
 	if cmErr := result.Error(); cmErr != nil {
 		recordRawTextArtifact(ctx, "Custom Metrics API",
@@ -171,19 +89,140 @@ func checkAIServiceMetricsWithURL(ctx *checks.ValidationContext, promBaseURL str
 	if err := json.Unmarshal(rawBody, &customMetricsResp); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse custom metrics API response", err)
 	}
-	var resources strings.Builder
-	limit := len(customMetricsResp.Resources)
-	if limit > 20 {
-		limit = 20
-	}
-	for i := 0; i < limit; i++ {
-		r := customMetricsResp.Resources[i]
-		fmt.Fprintf(&resources, "- %s (namespaced=%t)\n", r.Name, r.Namespaced)
+
+	// Build a set of available metric resource names for lookup.
+	availableMetrics := make(map[string]bool, len(customMetricsResp.Resources))
+	var resourceList strings.Builder
+	for i, r := range customMetricsResp.Resources {
+		availableMetrics[r.Name] = true
+		if i < 20 {
+			fmt.Fprintf(&resourceList, "- %s (namespaced=%t)\n", r.Name, r.Namespaced)
+		}
 	}
 	recordRawTextArtifact(ctx, "Custom Metrics API",
 		"kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1",
 		fmt.Sprintf("HTTP Status:    %d\nGroupVersion:   %s\nResource count: %d\n\nResources:\n%s",
-			statusCode, valueOrUnknown(customMetricsResp.GroupVersion), len(customMetricsResp.Resources), resources.String()))
+			statusCode, valueOrUnknown(customMetricsResp.GroupVersion),
+			len(customMetricsResp.Resources), resourceList.String()))
+
+	// 2. Verify required GPU metrics have actual data (not just registered).
+	// Query each metric via the custom metrics API data path to prove samples
+	// are flowing through the pipeline. Resource registration alone can be
+	// present even when DCGM exporter is not scraping.
+	var missingMetrics []string
+	var emptyMetrics []string
+	var metricStatus strings.Builder
+
+	// Build candidate namespaces for metric queries. GPU metrics may exist in
+	// different namespaces depending on cluster configuration (gpu-operator,
+	// workload namespaces, etc.). Try recipe component namespaces first, then
+	// well-known defaults.
+	candidateNS := buildMetricNamespaces(ctx)
+
+	for _, metric := range requiredCustomMetrics {
+		podScoped := "pods/" + metric
+		nsScoped := "namespaces/" + metric
+		registered := availableMetrics[podScoped] || availableMetrics[nsScoped]
+		if !registered {
+			missingMetrics = append(missingMetrics, metric)
+			fmt.Fprintf(&metricStatus, "  %-30s NOT REGISTERED\n", metric)
+			continue
+		}
+
+		// Query actual metric values to verify data is flowing.
+		// Try multiple namespaces and both pod-scoped and namespace-scoped paths.
+		// Prometheus-adapter may expose metrics under different scopes depending
+		// on configuration. Accept whichever returns data first.
+		var itemCount int
+		var queryBody string
+		var queryPath string
+		for _, ns := range candidateNS {
+			paths := []string{
+				fmt.Sprintf("/apis/custom.metrics.k8s.io/v1beta1/namespaces/%s/pods/*/%s", ns, metric),
+				fmt.Sprintf("/apis/custom.metrics.k8s.io/v1beta1/namespaces/%s/metrics/%s", ns, metric),
+			}
+			for _, path := range paths {
+				result := restClient.Get().AbsPath(path).Do(ctx.Context)
+				if result.Error() != nil {
+					continue
+				}
+				body, err := result.Raw()
+				if err != nil {
+					continue
+				}
+				var resp struct {
+					Items []json.RawMessage `json:"items"`
+				}
+				if err := json.Unmarshal(body, &resp); err != nil {
+					continue
+				}
+				if len(resp.Items) > 0 {
+					itemCount = len(resp.Items)
+					queryBody = string(body)
+					queryPath = path
+					break
+				}
+			}
+			if itemCount > 0 {
+				break
+			}
+		}
+
+		if itemCount == 0 {
+			emptyMetrics = append(emptyMetrics, metric)
+			fmt.Fprintf(&metricStatus, "  %-30s REGISTERED (0 samples)\n", metric)
+		} else {
+			fmt.Fprintf(&metricStatus, "  %-30s OK (%d samples)\n", metric, itemCount)
+			recordChunkedTextArtifact(ctx, fmt.Sprintf("Custom Metrics: %s", metric),
+				fmt.Sprintf("kubectl get --raw '%s'", queryPath), queryBody)
+		}
+	}
+	recordRawTextArtifact(ctx, "Required GPU Metrics (Custom Metrics API)",
+		fmt.Sprintf("kubectl get --raw '/apis/custom.metrics.k8s.io/v1beta1/namespaces/{%s}/pods/*/<metric>'",
+			strings.Join(candidateNS, ",")),
+		metricStatus.String())
+
+	if len(missingMetrics) > 0 {
+		return errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("GPU metrics not registered in custom metrics API: %s — verify prometheus-adapter rules are configured",
+				strings.Join(missingMetrics, ", ")))
+	}
+	if len(emptyMetrics) > 0 {
+		return errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("GPU metrics registered but no samples flowing: %s — verify DCGM exporter is running and Prometheus is scraping",
+				strings.Join(emptyMetrics, ", ")))
+	}
 
 	return nil
+}
+
+// buildMetricNamespaces returns candidate namespaces for GPU metric queries.
+// Starts with recipe component namespaces (gpu-operator, dcgm-exporter), then
+// falls back to well-known defaults. Deduplicates and preserves order.
+func buildMetricNamespaces(ctx *checks.ValidationContext) []string {
+	seen := make(map[string]bool)
+	var namespaces []string
+
+	add := func(ns string) {
+		if ns != "" && !seen[ns] {
+			seen[ns] = true
+			namespaces = append(namespaces, ns)
+		}
+	}
+
+	// Recipe component namespaces first (most specific).
+	if ctx.Recipe != nil {
+		for _, ref := range ctx.Recipe.ComponentRefs {
+			switch ref.Name {
+			case "gpu-operator", "dcgm-exporter", "nvidia-dcgm-exporter":
+				add(ref.Namespace)
+			}
+		}
+	}
+
+	// Well-known defaults.
+	add("gpu-operator")
+	add("dynamo-system")
+
+	return namespaces
 }

@@ -1,87 +1,87 @@
 # Release Process
 
-This document outlines the release process for NVIDIA AI Cluster Runtime (AICR). For contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
+This document describes when, why, and how AICR releases are made. For contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Prerequisites
+## Cadence
 
-- Repository admin access with write permissions
-- Understanding of semantic versioning (vMAJOR.MINOR.PATCH)
-- Access to GitHub Actions workflows
-- [git-cliff](https://git-cliff.org/) installed (run `make tools-setup` to install)
+Releases follow a **bi-weekly cadence**, aligned with sprint boundaries. A new release is cut at the conclusion of each 2-week sprint.
 
-## Release Methods
+| Release Type | When | Version Bump | Decision |
+|-------------|------|-------------|----------|
+| Sprint release | End of each 2-week sprint | `patch` or `minor` | Maintainer determines bump type based on changes landed |
+| Hotfix | Between sprints, as needed | `patch` | Any maintainer can initiate for critical fixes |
+| Major | Planned | `major` | Requires team agreement and advance communication |
 
-### Method 1: Version Bump (Recommended)
+## What Goes Into a Release
 
-Use Makefile targets for standard releases:
+A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for releases — if it's on `main`, it ships.
+
+**Before cutting a release, verify:**
+
+- All CI checks pass on `main` (`make qualify`)
+- No known regressions from the current sprint
+- Breaking changes use `feat!:` or `fix!:` commit prefix (drives changelog and signals consumers)
+
+## Quality Gates
+
+Every release must pass these automated gates before artifacts are published:
+
+- Unit tests with race detector
+- golangci-lint + yamllint
+- License header verification
+- Trivy vulnerability scan
+- E2E tests on Kind cluster
+
+If any gate fails, the release pipeline stops. Fix forward on `main` and cut a new tag.
+
+## How to Release
+
+### Standard Release (recommended)
 
 ```bash
-make bump-patch   # v1.2.3 → v1.2.4
-make bump-minor   # v1.2.3 → v1.3.0
-make bump-major   # v1.2.3 → v2.0.0
+git checkout main
+git pull origin main
+make qualify          # Verify locally before releasing
+
+make bump-patch       # v1.2.3 -> v1.2.4
+# or
+make bump-minor       # v1.2.3 -> v1.3.0
 ```
 
-**What happens automatically**:
+This automatically: validates clean state, generates changelog, commits, tags, pushes, and triggers the release pipeline.
 
-1. Validates working directory is clean with no unpushed commits
-2. Calculates the new version based on bump type
-3. Generates/updates `CHANGELOG.md` using [git-cliff](https://git-cliff.org/)
-4. Commits the changelog update
-5. Creates an annotated tag
-6. Pushes both commit and tag to origin
-7. Triggers release workflows (see [Workflow Pipeline](#workflow-pipeline))
+### Manual Tag
 
-**Note**: Manual edits to `CHANGELOG.md` (e.g., corrections to previous releases) are preserved. The bump process prepends new entries without overwriting existing content.
+For more control:
 
-### Method 2: Manual Tag (Advanced)
-
-For cases where you need more control over the release process:
-
-1. **Ensure main is ready**:
-   ```bash
-   git checkout main
-   git pull origin main
-   make qualify  # All checks must pass
-   ```
-
-2. **Generate changelog manually** (optional):
-   ```bash
-   git-cliff --tag v1.2.3 -o CHANGELOG.md
-   git add CHANGELOG.md
-   git commit -m "chore: update CHANGELOG for v1.2.3"
-   git push origin main
-   ```
-
-3. **Create and push a version tag**:
-   ```bash
-   git tag -a v1.2.3 -m "Release v1.2.3"
-   git push origin v1.2.3
-   ```
-
-4. **Automatic workflows trigger** (via `on-tag.yaml`)
-
-### Method 3: Manual Workflow Trigger
-
-For rebuilding from existing tags or emergency releases:
-
-1. Navigate to **Actions** → **On Tag Release**
-2. Click **Run workflow**
-3. Enter the existing tag (e.g., `v1.2.3`)
-4. Click **Run workflow**
-
-This is useful when you need to re-run the release pipeline without creating a new tag.
-
-## Workflow Pipeline
-
-```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│ Tag Push │───▶│  Go CI   │───▶│  Build   │───▶│  Attest  │───▶│  Deploy  │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                  tests +         binaries +      SBOM +          Demo Deploy
-                  lint            images          provenance      (example)
+```bash
+git checkout main && git pull origin main
+make qualify
+git-cliff --tag v1.2.3 -o CHANGELOG.md       # Optional: generate changelog
+git add CHANGELOG.md && git commit -m "chore: update CHANGELOG for v1.2.3"
+git tag -a v1.2.3 -m "Release v1.2.3"
+git push origin main v1.2.3
 ```
 
-## Released Components
+### Re-run Existing Release
+
+To rebuild artifacts from an existing tag without creating a new one: **Actions** > **On Tag Release** > **Run workflow** > enter the tag.
+
+## Hotfix Procedure
+
+For critical fixes between sprints:
+
+1. Fix on `main` first (PR, review, merge as normal)
+2. Cut a patch release: `make bump-patch`
+3. For patching older release lines (rare): cherry-pick from `main` onto a hotfix branch, tag manually
+
+## Release Pipeline
+
+```
+Tag Push --> CI (tests + lint) --> Build (binaries + images) --> Attest (SBOM + provenance) --> Deploy (demo)
+```
+
+## Released Artifacts
 
 ### Binaries
 
@@ -101,39 +101,35 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/`):
 | `aicr` | `nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04` | CLI with CUDA runtime |
 | `aicrd` | `gcr.io/distroless/static:nonroot` | Minimal API server |
 
-Tags: `latest`, `v1.2.3`
+Tags: `latest`, `vX.Y.Z`
 
-### Supply Chain Artifacts
+### Supply Chain
 
 Every release includes:
 
-- **SLSA Build Level 3 Provenance**: Verifiable build attestations
-- **SBOM**: Software Bill of Materials (SPDX format)
-- **Sigstore Signatures**: Keyless signing via Fulcio + Rekor
-- **Checksums**: SHA256 checksums for all binaries
+- **SLSA Build Level 3 Provenance** — verifiable build attestations
+- **SBOM** — Software Bill of Materials (SPDX format)
+- **Sigstore Signatures** — keyless signing via Fulcio + Rekor
+- **Checksums** — SHA256 for all binaries
 
-## Quality Gates
+## Versioning
 
-All releases must pass:
-
-- **Unit tests**: With race detector enabled
-- **Linting**: golangci-lint + yamllint
-- **License headers**: All source files verified
-- **Security scan**: Trivy vulnerability scan
+- **Semantic versioning**: `vMAJOR.MINOR.PATCH`
+- **Pre-releases**: `v1.2.3-rc1`, `v1.2.3-beta1` (automatically marked in GitHub)
+- **Breaking changes**: Increment MAJOR version
 
 ## Verification
 
-### Verify Container Attestations
+### Container Attestations
 
 ```bash
-# Get latest release tag
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 
-# Verify with GitHub CLI (recommended)
+# GitHub CLI
 gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --owner nvidia
 gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --owner nvidia
 
-# Verify with Cosign
+# Cosign
 cosign verify-attestation \
   --type spdxjson \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
@@ -141,108 +137,30 @@ cosign verify-attestation \
   ghcr.io/nvidia/aicr:${TAG}
 ```
 
-### Verify Binary Checksums
+### Binary Checksums
 
 ```bash
-# Download checksums file from GitHub Release
 curl -sL "https://github.com/NVIDIA/aicr/releases/download/${TAG}/aicr_checksums.txt" -o checksums.txt
-
-# Verify downloaded binary
 sha256sum -c checksums.txt --ignore-missing
 ```
 
-### Pull and Test Images
+## Demo Deployment
 
-```bash
-# Pull container images
-docker pull ghcr.io/nvidia/aicr:${TAG}
-docker pull ghcr.io/nvidia/aicrd:${TAG}
+> **Note**: Demonstration only — not a production service. Self-host `aicrd` for production use. See [API Server Documentation](docs/contributor/api-server.md).
 
-# Test CLI
-docker run --rm ghcr.io/nvidia/aicr:${TAG} --version
-
-# Test API server
-docker run --rm -p 8080:8080 ghcr.io/nvidia/aicrd:${TAG} &
-curl http://localhost:8080/health
-```
-
-## Version Management
-
-- **Semantic versioning**: `vMAJOR.MINOR.PATCH`
-- **Pre-releases**: `v1.2.3-rc1`, `v1.2.3-beta1` (automatically marked in GitHub)
-- **Breaking changes**: Increment MAJOR version
-
-## Demo Cloud Run Deployment
-
-> **Note**: This is a **demonstration deployment** for testing and development purposes only. It is not a production service. Users should self-host the `aicrd` API server in their own infrastructure for production use. See [API Server Documentation](docs/contributor/api-server.md) for deployment guidance.
-
-The `aicrd` API server demo is automatically deployed to Google Cloud Run on successful release:
-
-- **Project**: `eidosx`
-- **Region**: `us-west1`
-- **Service**: `api`
-- **Authentication**: Workload Identity Federation (keyless)
-
-This demo deployment only occurs if the build step succeeds and serves as an example of how to deploy the API server.
+The `aicrd` API server demo deploys to Google Cloud Run on successful release (project: `eidosx`, region: `us-west1`, auth: Workload Identity Federation).
 
 ## Troubleshooting
 
-### Failed Release
+| Problem | Action |
+|---------|--------|
+| Tests fail during release | Fix on `main`, cut new tag |
+| Lint errors | Run `make lint` locally before releasing |
+| Image push failure | Check GHCR permissions |
+| Need to rebuild | Use manual workflow trigger with existing tag |
 
-1. Check **Actions** → **On Tag Release** for error logs
-2. Common issues:
-   - Tests failing: Fix and create new tag
-   - Lint errors: Run `make lint` locally first
-   - Image push failures: Check GHCR permissions
+## Prerequisites
 
-### Rebuild Existing Release
-
-Use manual workflow trigger with the existing tag. No need to delete and recreate tags.
-
-## Emergency Hotfix Procedure
-
-For urgent fixes:
-
-1. **Fix in main first**:
-   ```bash
-   git checkout main
-   git checkout -b fix/critical-issue
-   # Apply fix, create PR to main, merge
-   ```
-
-2. **Create hotfix release**:
-   ```bash
-   git checkout main
-   git pull origin main
-   make bump-patch  # Generates changelog, tags, and pushes
-   ```
-
-3. **For patching older releases** (rare):
-   ```bash
-   git checkout v1.2.3
-   git checkout -b hotfix/v1.2.4
-   git cherry-pick <commit-hash-from-main>
-   git-cliff --tag v1.2.4 --unreleased --prepend CHANGELOG.md
-   git add CHANGELOG.md
-   git commit -m "chore: update CHANGELOG for v1.2.4"
-   git tag -a v1.2.4 -m "Release v1.2.4"
-   git push origin hotfix/v1.2.4 v1.2.4
-   ```
-
-## Release Checklist
-
-Before running `make bump-*`:
-
-- [ ] All CI checks pass on main (`make qualify`)
-- [ ] Working directory is clean (no uncommitted changes)
-- [ ] All commits are pushed to origin
-- [ ] Breaking changes documented in commit messages (use `feat!:` or `fix!:` prefix)
-- [ ] Version bump type is correct (major for breaking, minor for features, patch for fixes)
-
-After release:
-
-- [ ] GitHub Release created with changelog
-- [ ] Container images available in GHCR
-- [ ] Attestations verifiable
-- [ ] Demo Cloud Run deployment successful (optional)
-- [ ] Announce release (if applicable)
+- Repository admin access with write permissions
+- Access to GitHub Actions workflows
+- [git-cliff](https://git-cliff.org/) installed (`make tools-setup`)

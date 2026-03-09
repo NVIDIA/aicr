@@ -88,13 +88,15 @@ Alternatively, run the evidence collection script directly:
 |---|---|---|
 | **Purpose** | CI pass/fail | CNCF submission evidence |
 | **Speed** | ~3 minutes | ~5-10 minutes |
-| **Deploys workloads** | No | Yes |
-| **Output** | Structural evidence (pass/fail + artifacts) | Behavioral evidence (command outputs, logs, queries) |
-| **DRA GPU allocation test** | Status check only | Deploys pod, verifies GPU access |
-| **Gang scheduling test** | Component check only | Deploys PodGroup, verifies co-scheduling |
-| **HPA autoscaling** | Metrics API check | Scale-up + scale-down with GPU load |
-| **Gateway** | Status check | Condition verification (Accepted, Programmed) |
-| **Webhook test** | No | Rejection test with invalid CR |
+| **Deploys workloads** | Yes (DRA, gang, HPA, secure access) | Yes (all + GPU stress test) |
+| **Output** | Pass/fail + diagnostic artifacts | Detailed behavioral evidence (command outputs, logs, metrics) |
+| **DRA GPU allocation test** | Deploys pod, verifies GPU access + isolation | Same + nvidia-smi output capture |
+| **Gang scheduling test** | Deploys PodGroup, verifies co-scheduling | Same + worker logs |
+| **HPA autoscaling** | Metrics API + scale-up/down validation | CUDA N-Body stress test + scale-up |
+| **Metrics** | Custom metrics API data-path verification | DCGM exporter + Prometheus queries |
+| **Gateway** | Condition verification (Accepted, Programmed) | Same |
+| **Webhook test** | Rejection test with invalid CR | Same |
+| **Cluster autoscaling** | Karpenter NodePools or EKS node group validation | EKS ASG via AWS API |
 
 ## Evidence
 

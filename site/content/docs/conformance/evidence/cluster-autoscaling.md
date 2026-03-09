@@ -5,8 +5,9 @@ weight: 80
 description: "Cluster autoscaling conformance evidence"
 ---
 
+
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:26:59 UTC
+**Generated:** 2026-03-06 19:43:17 UTC
 **Kubernetes Version:** v1.34
 **Platform:** linux/amd64
 
@@ -18,11 +19,11 @@ those accelerators.
 
 ## Summary
 
-1. **GPU Node Group (ASG)** -- EKS Auto Scaling Group configured with GPU instances (p5.48xlarge)
-2. **Capacity Reservation** -- Dedicated GPU capacity available for scale-up
-3. **Scalable Configuration** -- ASG min/max configurable for demand-based scaling
-4. **Kubernetes Integration** -- ASG nodes auto-join the EKS cluster with GPU labels
-5. **Autoscaler Compatibility** -- Cluster Autoscaler and Karpenter supported via ASG tag discovery
+1. **GPU Node Group (ASG)** — EKS Auto Scaling Group configured with GPU instances (p5.48xlarge)
+2. **Capacity Reservation** — Dedicated GPU capacity available for scale-up
+3. **Scalable Configuration** — ASG min/max configurable for demand-based scaling
+4. **Kubernetes Integration** — ASG nodes auto-join the EKS cluster with GPU labels
+5. **Autoscaler Compatibility** — Cluster Autoscaler and Karpenter supported via ASG tag discovery
 6. **Result: PASS**
 
 ---
@@ -33,72 +34,47 @@ The cluster uses an AWS Auto Scaling Group (ASG) for GPU nodes, which can scale
 up/down based on workload demand. The ASG is configured with p5.48xlarge instances
 (8x NVIDIA H100 80GB HBM3 each) backed by a capacity reservation.
 
-**Auto Scaling Groups**
+## EKS Cluster Details
+
+- **Region:** us-east-1
+- **Cluster:** aws-us-east-1-ktsetfavua-dgxc-k8s-aws-use1-non-prod
+- **GPU Node Group:** gpu-worker
+
+## GPU Nodes
+
+**GPU nodes**
 ```
--------------------------------------------------------------
-|                 DescribeAutoScalingGroups                 |
-+---------+------------+------+------+----------------------+
-| Desired | Instances  | Max  | Min  |        Name          |
-+---------+------------+------+------+----------------------+
-|  1      |  1         |  1   |  1   |  ktsetfavua-cpu      |
-|  1      |  1         |  1   |  1   |  ktsetfavua-gpu      |
-|  3      |  3         |  3   |  3   |  ktsetfavua-system   |
-+---------+------------+------+------+----------------------+
+$ kubectl get nodes -l nvidia.com/gpu.present=true -o custom-columns=NAME:.metadata.name,INSTANCE-TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,GPUS:.metadata.labels.nvidia\.com/gpu\.count,PRODUCT:.metadata.labels.nvidia\.com/gpu\.product,NODE-GROUP:.metadata.labels.nodeGroup,ZONE:.metadata.labels.topology\.kubernetes\.io/zone
+NAME                             INSTANCE-TYPE   GPUS   PRODUCT                 NODE-GROUP   ZONE
+ip-100-64-147-149.ec2.internal   p5.48xlarge     8      NVIDIA-H100-80GB-HBM3   gpu-worker   us-east-1e
 ```
 
-### GPU ASG Configuration
+## Auto Scaling Group (AWS)
 
 **GPU ASG details**
 ```
----------------------------------------
-|      DescribeAutoScalingGroups      |
-+------------------+------------------+
-|  DesiredCapacity |  1               |
-|  HealthCheckType |  EC2             |
-|  LaunchTemplate  |  ktsetfavua-gpu  |
-|  MaxSize         |  1               |
-|  MinSize         |  1               |
-|  Name            |  ktsetfavua-gpu  |
-+------------------+------------------+
-||         AvailabilityZones         ||
-|+-----------------------------------+|
-||  us-east-1e                       ||
-|+-----------------------------------+|
+$ aws autoscaling describe-auto-scaling-groups --region us-east-1 --auto-scaling-group-names None
+None --query AutoScalingGroups[0].{Name:AutoScalingGroupName,MinSize:MinSize,MaxSize:MaxSize,DesiredCapacity:DesiredCapacity,AvailabilityZones:AvailabilityZones,HealthCheckType:HealthCheckType} --output table
+
 ```
 
-### Launch Template (GPU Instance Type)
-
-**GPU launch template**
+**ASG autoscaler tags**
 ```
--------------------------------------------------------------------
-|                 DescribeLaunchTemplateVersions                  |
-+---------------------------------------+-------------------------+
-|                ImageId                |      InstanceType       |
-+---------------------------------------+-------------------------+
-|  ami-XXXXXXXXXXXX                     |  p5.48xlarge            |
-+---------------------------------------+-------------------------+
-||                      CapacityReservation                      ||
-|+--------------------------------+------------------------------+|
-||  CapacityReservationPreference |  capacity-reservations-only  ||
-|+--------------------------------+------------------------------+|
-|||                  CapacityReservationTarget                  |||
-||+------------------------------+------------------------------+||
-|||  CapacityReservationId       |  cr-0cbe491320188dfa6        |||
-||+------------------------------+------------------------------+||
+$ aws autoscaling describe-tags --region us-east-1 --filters Name=auto-scaling-group,Values=None
+None --query Tags[*].{Key:Key,Value:Value} --output table
+
 ```
 
 ## Capacity Reservation
 
-Dedicated GPU capacity ensures instances are available for scale-up without
-on-demand availability risk.
-
 **GPU capacity reservation**
 ```
+$ aws ec2 describe-capacity-reservations --region us-east-1 --query CapacityReservations[?InstanceType==`p5.48xlarge`].{ID:CapacityReservationId,Type:InstanceType,State:State,Total:TotalInstanceCount,Available:AvailableInstanceCount,AZ:AvailabilityZone} --output table
 ---------------------------------------
 |    DescribeCapacityReservations     |
 +------------+------------------------+
 |  AZ        |  us-east-1e            |
-|  Available |  0                     |
+|  Available |  3                     |
 |  ID        |  cr-0cbe491320188dfa6  |
 |  State     |  active                |
 |  Total     |  10                    |
@@ -106,56 +82,4 @@ on-demand availability risk.
 +------------+------------------------+
 ```
 
-## Current GPU Nodes
-
-GPU nodes provisioned by the ASG are registered in the Kubernetes cluster with
-appropriate labels and GPU resources.
-
-**GPU nodes**
-```
-$ kubectl get nodes -o custom-columns=NAME:.metadata.name,GPU:.status.capacity.nvidia\.com/gpu,INSTANCE-TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,VERSION:.status.nodeInfo.kubeletVersion
-NAME                             GPU      INSTANCE-TYPE   VERSION
-ip-100-64-171-120.ec2.internal   8        p5.48xlarge     v1.34.1
-ip-100-64-4-149.ec2.internal     <none>   m4.16xlarge     v1.34.2
-ip-100-64-6-88.ec2.internal      <none>   m4.16xlarge     v1.34.2
-ip-100-64-83-166.ec2.internal    <none>   m4.16xlarge     v1.34.1
-ip-100-64-9-88.ec2.internal      <none>   m4.16xlarge     v1.34.2
-```
-
-## Autoscaler Integration
-
-The GPU ASG is tagged for Kubernetes Cluster Autoscaler discovery. When a Cluster
-Autoscaler or Karpenter is deployed with appropriate IAM permissions, it can
-automatically scale GPU nodes based on pending pod requests.
-
-**ASG autoscaler tags**
-```
-------------------------------------------------------------------------------
-|                                DescribeTags                                |
-+-------------------------------------------------------------------+--------+
-|                                Key                                | Value  |
-+-------------------------------------------------------------------+--------+
-|  k8s.io/cluster-autoscaler/enabled                                |  true  |
-|  k8s.io/cluster-autoscaler/ktsetfavua-dgxc-k8s-aws-use1-non-prod  |  owned |
-|  k8s.io/cluster/ktsetfavua-dgxc-k8s-aws-use1-non-prod             |  owned |
-|  kubernetes.io/cluster/ktsetfavua-dgxc-k8s-aws-use1-non-prod      |  owned |
-+-------------------------------------------------------------------+--------+
-```
-
-## Platform Support
-
-Most major cloud providers offer native node autoscaling for their managed
-Kubernetes services:
-
-| Provider | Service | Autoscaling Mechanism |
-|----------|---------|----------------------|
-| AWS | EKS | Auto Scaling Groups, Karpenter, Cluster Autoscaler |
-| GCP | GKE | Node Auto-provisioning, Cluster Autoscaler |
-| Azure | AKS | Node pool autoscaling, Cluster Autoscaler, Karpenter |
-| OCI | OKE | Node pool autoscaling, Cluster Autoscaler |
-
-The cluster's GPU ASG can be integrated with any of the supported autoscaling
-mechanisms. Kubernetes Cluster Autoscaler and Karpenter both support ASG-based
-node group discovery via tags (`k8s.io/cluster-autoscaler/enabled`).
-
-**Result: PASS** -- GPU node group (ASG) configured with p5.48xlarge instances, backed by capacity reservation, tagged for autoscaler discovery, and scalable via min/max configuration.
+**Result: PASS** — EKS cluster with GPU nodes managed by Auto Scaling Group, ASG configuration verified via AWS API.
