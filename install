@@ -187,7 +187,7 @@ extract_asset_url() {
 
   # Fallback to browser_download_url (appears after "name" in the JSON)
   if [[ -z "$url" ]]; then
-    url=$(echo "$json" | sed -n "${name_line},$((name_line+15))p" | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    url=$(echo "$json" | sed -n "${name_line},$((name_line+30))p" | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
   fi
 
   [[ -z "$url" ]] && err "Failed to extract download URL for '$asset_name'"
