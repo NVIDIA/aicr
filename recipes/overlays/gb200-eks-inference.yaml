@@ -49,7 +49,7 @@ spec:
       manifestFiles:
         - components/skyhook-customizations/manifests/no-op.yaml
       overrides:
-        service: aws
+        service: eks
         accelerator: gb200
         intent: inference
       dependencyRefs:

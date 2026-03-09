@@ -37,7 +37,7 @@ jobs:
       DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
       CLUSTER_CONFIG: tests/uat/aws/config.yaml
       EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:c631e2bebf605690c6cfbb072cb2116023fd0f6b43c2c4c6ead0416ee586635d"
-      VALIDATOR_IMAGE: "ghcr.io/nvidia/aicr-validator"
+      VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
 
       # Debug
@@ -73,15 +73,14 @@ jobs:
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
-      - name: Build and push validator image
+      - name: Build and push validator images
         run: |
-          IMAGE="${VALIDATOR_IMAGE}:${VALIDATOR_TAG}"
-          docker build -f Dockerfile.validator \
-            --build-arg VERSION="${VALIDATOR_TAG}" \
-            --build-arg COMMIT="${{ github.sha }}" \
-            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -t "${IMAGE}" .
-          docker push "${IMAGE}"
+          for phase in deployment performance conformance; do
+            IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
+            docker build -f "validators/${phase}/Dockerfile" \
+              -t "${IMAGE}" .
+            docker push "${IMAGE}"
+          done
 
       # Auth
       - name: Configure AWS credentials
@@ -203,14 +202,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete the UAT-tagged image version to avoid GHCR clutter
-          VERSION_ID=$(gh api \
-            repos/${{ github.repository }}/packages/container/aicr-validator/versions \
-            --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-          if [[ -n "${VERSION_ID}" ]]; then
-            gh api --method DELETE \
-              repos/${{ github.repository }}/packages/container/aicr-validator/versions/${VERSION_ID} || true
-          fi
+          # Delete UAT-tagged validator images to avoid GHCR clutter
+          for phase in deployment performance conformance; do
+            VERSION_ID=$(gh api \
+              "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
+              --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
+            if [[ -n "${VERSION_ID}" ]]; then
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
+            fi
+          done
 
       # Artifacts
       - name: Upload Test Artifacts

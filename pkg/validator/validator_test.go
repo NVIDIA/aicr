@@ -15,852 +15,467 @@
 package validator
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"log/slog"
-	"strings"
+	"fmt"
+	"io/fs"
+	"path/filepath"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
+	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"github.com/NVIDIA/aicr/recipes"
+	corev1 "k8s.io/api/core/v1"
 )
 
-func TestValidator_Validate(t *testing.T) {
-	// Create a test snapshot
-	snapshot := &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{
-			{
-				Type: measurement.TypeK8s,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "server",
-						Data: map[string]measurement.Reading{
-							"version": measurement.Str("v1.33.5-eks-3025e55"),
-						},
-					},
-				},
-			},
-			{
-				Type: measurement.TypeOS,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "release",
-						Data: map[string]measurement.Reading{
-							"ID":         measurement.Str("ubuntu"),
-							"VERSION_ID": measurement.Str("24.04"),
-						},
-					},
-					{
-						Name: "sysctl",
-						Data: map[string]measurement.Reading{
-							"/proc/sys/kernel/osrelease": measurement.Str("6.8.0-1028-aws"),
-						},
-					},
-				},
-			},
-			{
-				Type: measurement.TypeGPU,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "info",
-						Data: map[string]measurement.Reading{
-							"type":   measurement.Str("H100"),
-							"driver": measurement.Str("550.107.02"),
-						},
-					},
-				},
-			},
-		},
+func TestNewDefaults(t *testing.T) {
+	v := New()
+
+	if v.Namespace != "aicr-validation" {
+		t.Errorf("Namespace = %q, want %q", v.Namespace, "aicr-validation")
 	}
-
-	tests := []struct {
-		name            string
-		constraints     []recipe.Constraint
-		wantStatus      ValidationStatus
-		wantPassed      int
-		wantFailed      int
-		wantSkipped     int
-		expectError     bool
-		snapshotNil     bool
-		recipeResultNil bool
-	}{
-		{
-			name: "all constraints pass",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 1.32.4"},
-				{Name: "OS.release.ID", Value: "ubuntu"},
-				{Name: "OS.release.VERSION_ID", Value: "24.04"},
-			},
-			wantStatus:  ValidationStatusPass,
-			wantPassed:  3,
-			wantFailed:  0,
-			wantSkipped: 0,
-		},
-		{
-			name: "one constraint fails",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 1.32.4"},
-				{Name: "OS.release.ID", Value: "rhel"}, // This should fail
-				{Name: "OS.release.VERSION_ID", Value: "24.04"},
-			},
-			wantStatus:  ValidationStatusFail,
-			wantPassed:  2,
-			wantFailed:  1,
-			wantSkipped: 0,
-		},
-		{
-			name: "all constraints fail",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 2.0.0"}, // Too high
-				{Name: "OS.release.ID", Value: "rhel"},          // Wrong OS
-				{Name: "OS.release.VERSION_ID", Value: "22.04"}, // Wrong version
-			},
-			wantStatus:  ValidationStatusFail,
-			wantPassed:  0,
-			wantFailed:  3,
-			wantSkipped: 0,
-		},
-		{
-			name: "one constraint skipped",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 1.32.4"},
-				{Name: "NonExistent.subtype.key", Value: "value"}, // This should be skipped
-				{Name: "OS.release.ID", Value: "ubuntu"},
-			},
-			wantStatus:  ValidationStatusPartial,
-			wantPassed:  2,
-			wantFailed:  0,
-			wantSkipped: 1,
-		},
-		{
-			name: "mixed results",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 1.32.4"},  // Pass
-				{Name: "OS.release.ID", Value: "rhel"},            // Fail
-				{Name: "NonExistent.subtype.key", Value: "value"}, // Skip
-			},
-			wantStatus:  ValidationStatusFail, // Failed takes precedence
-			wantPassed:  1,
-			wantFailed:  1,
-			wantSkipped: 1,
-		},
-		{
-			name: "value not found in snapshot",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.nonexistent", Value: "test"}, // Valid type but missing key
-			},
-			wantStatus:  ValidationStatusPartial,
-			wantPassed:  0,
-			wantFailed:  0,
-			wantSkipped: 1,
-		},
-		{
-			name: "invalid constraint expression",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ""}, // Empty expression
-			},
-			wantStatus:  ValidationStatusPartial,
-			wantPassed:  0,
-			wantFailed:  0,
-			wantSkipped: 1,
-		},
-		{
-			name: "evaluation failure on version parse",
-			constraints: []recipe.Constraint{
-				{Name: "OS.release.ID", Value: ">= 1.0.0"}, // Version comparison on non-version "ubuntu"
-			},
-			wantStatus:  ValidationStatusFail,
-			wantPassed:  0,
-			wantFailed:  1,
-			wantSkipped: 0,
-		},
-		{
-			name:        "empty constraints",
-			constraints: []recipe.Constraint{},
-			wantStatus:  ValidationStatusPass,
-			wantPassed:  0,
-			wantFailed:  0,
-			wantSkipped: 0,
-		},
-		{
-			name: "version comparison operators",
-			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= 1.30"},
-				{Name: "K8s.server.version", Value: "<= 2.0"},
-				{Name: "K8s.server.version", Value: "> 1.29"},
-				{Name: "K8s.server.version", Value: "< 2.1"},
-				{Name: "K8s.server.version", Value: "!= 1.30.0"},
-			},
-			wantStatus:  ValidationStatusPass,
-			wantPassed:  5,
-			wantFailed:  0,
-			wantSkipped: 0,
-		},
-		{
-			name: "kernel version constraint",
-			constraints: []recipe.Constraint{
-				{Name: "OS.sysctl./proc/sys/kernel/osrelease", Value: ">= 6.8"},
-			},
-			wantStatus:  ValidationStatusPass,
-			wantPassed:  1,
-			wantFailed:  0,
-			wantSkipped: 0,
-		},
-		{
-			name: "kernel version fails",
-			constraints: []recipe.Constraint{
-				{Name: "OS.sysctl./proc/sys/kernel/osrelease", Value: ">= 6.9"},
-			},
-			wantStatus:  ValidationStatusFail,
-			wantPassed:  0,
-			wantFailed:  1,
-			wantSkipped: 0,
-		},
-		{
-			name:        "nil snapshot",
-			constraints: []recipe.Constraint{},
-			snapshotNil: true,
-			expectError: true,
-		},
-		{
-			name:            "nil recipe result",
-			constraints:     []recipe.Constraint{},
-			recipeResultNil: true,
-			expectError:     true,
-		},
+	if v.RunID == "" {
+		t.Error("RunID should be generated")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			v := New(WithVersion("test"))
-
-			var testRecipe *recipe.RecipeResult
-			if !tt.recipeResultNil {
-				testRecipe = &recipe.RecipeResult{
-					Constraints: tt.constraints,
-				}
-			}
-
-			var testSnapshot *snapshotter.Snapshot
-			if !tt.snapshotNil {
-				testSnapshot = snapshot
-			}
-
-			result, err := v.Validate(context.Background(), testRecipe, testSnapshot)
-			if tt.expectError {
-				if err == nil {
-					t.Error("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if result.Summary.Status != tt.wantStatus {
-				t.Errorf("Status = %v, want %v", result.Summary.Status, tt.wantStatus)
-			}
-			if result.Summary.Passed != tt.wantPassed {
-				t.Errorf("Passed = %d, want %d", result.Summary.Passed, tt.wantPassed)
-			}
-			if result.Summary.Failed != tt.wantFailed {
-				t.Errorf("Failed = %d, want %d", result.Summary.Failed, tt.wantFailed)
-			}
-			if result.Summary.Skipped != tt.wantSkipped {
-				t.Errorf("Skipped = %d, want %d", result.Summary.Skipped, tt.wantSkipped)
-			}
-			if result.Summary.Total != len(tt.constraints) {
-				t.Errorf("Total = %d, want %d", result.Summary.Total, len(tt.constraints))
-			}
-		})
+	if !v.Cleanup {
+		t.Error("Cleanup should default to true")
+	}
+	if v.NoCluster {
+		t.Error("NoCluster should default to false")
+	}
+	if len(v.Tolerations) != 1 || v.Tolerations[0].Operator != corev1.TolerationOpExists {
+		t.Errorf("Tolerations should default to tolerate-all, got %v", v.Tolerations)
 	}
 }
 
-func TestValidator_Validate_ConstraintDetails(t *testing.T) {
-	snapshot := &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{
-			{
-				Type: measurement.TypeK8s,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "server",
-						Data: map[string]measurement.Reading{
-							"version": measurement.Str("v1.33.5-eks-3025e55"),
-						},
-					},
-				},
-			},
-		},
+func TestNewWithOptions(t *testing.T) {
+	v := New(
+		WithVersion("1.0.0"),
+		WithNamespace("custom-ns"),
+		WithRunID("test-run"),
+		WithCleanup(false),
+		WithNoCluster(true),
+		WithImagePullSecrets([]string{"secret1"}),
+		WithTolerations(nil),
+	)
+
+	if v.Version != "1.0.0" {
+		t.Errorf("Version = %q, want %q", v.Version, "1.0.0")
 	}
-
-	recipeResult := &recipe.RecipeResult{
-		Constraints: []recipe.Constraint{
-			{Name: "K8s.server.version", Value: ">= 1.32.4"},
-		},
+	if v.Namespace != "custom-ns" {
+		t.Errorf("Namespace = %q, want %q", v.Namespace, "custom-ns")
 	}
-
-	v := New(WithVersion("test"))
-	result, err := v.Validate(context.Background(), recipeResult, snapshot)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if v.RunID != "test-run" {
+		t.Errorf("RunID = %q, want %q", v.RunID, "test-run")
 	}
-
-	if len(result.Results) != 1 {
-		t.Fatalf("expected 1 result, got %d", len(result.Results))
+	if v.Cleanup {
+		t.Error("Cleanup should be false")
 	}
-
-	cv := result.Results[0]
-	if cv.Name != "K8s.server.version" {
-		t.Errorf("Name = %q, want %q", cv.Name, "K8s.server.version")
+	if !v.NoCluster {
+		t.Error("NoCluster should be true")
 	}
-	if cv.Expected != ">= 1.32.4" {
-		t.Errorf("Expected = %q, want %q", cv.Expected, ">= 1.32.4")
-	}
-	if cv.Actual != "v1.33.5-eks-3025e55" {
-		t.Errorf("Actual = %q, want %q", cv.Actual, "v1.33.5-eks-3025e55")
-	}
-	if cv.Status != ConstraintStatusPassed {
-		t.Errorf("Status = %v, want %v", cv.Status, ConstraintStatusPassed)
-	}
-}
-
-func TestNew(t *testing.T) {
-	t.Run("default validator", func(t *testing.T) {
-		v := New()
-		if v == nil {
-			t.Fatal("expected non-nil validator")
-		}
-		if v.Version != "" {
-			t.Errorf("Version = %q, want empty string", v.Version)
-		}
-	})
-
-	t.Run("with version", func(t *testing.T) {
-		v := New(WithVersion("v1.2.3"))
-		if v == nil {
-			t.Fatal("expected non-nil validator")
-		}
-		if v.Version != "v1.2.3" {
-			t.Errorf("Version = %q, want %q", v.Version, "v1.2.3")
-		}
-	})
-}
-
-func TestPrintDetectedCriteria(t *testing.T) {
-	tests := []struct {
-		name     string
-		path     string
-		value    string
-		wantLog  string
-		wantSkip bool
-	}{
-		{
-			name:    "K8s version logs service",
-			path:    "K8s.server.version",
-			value:   "v1.33.5-eks-3025e55",
-			wantLog: "service",
-		},
-		{
-			name:    "GPU model logs accelerator",
-			path:    "GPU.smi.gpu.model",
-			value:   "NVIDIA H100 80GB HBM3",
-			wantLog: "accelerator",
-		},
-		{
-			name:    "OS release logs os",
-			path:    "OS.release.ID",
-			value:   "ubuntu",
-			wantLog: "os",
-		},
-		{
-			name:    "OS version logs os_version",
-			path:    "OS.release.VERSION_ID",
-			value:   "24.04",
-			wantLog: "os_version",
-		},
-		{
-			name:     "unrecognized path does not log",
-			path:     "Other.subtype.key",
-			value:    "somevalue",
-			wantSkip: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
-			oldLogger := slog.Default()
-			slog.SetDefault(slog.New(handler))
-			defer slog.SetDefault(oldLogger)
-
-			printDetectedCriteria(tt.path, tt.value)
-
-			output := buf.String()
-			if tt.wantSkip {
-				if output != "" {
-					t.Errorf("expected no log output for path %q, got %q", tt.path, output)
-				}
-				return
-			}
-
-			if output == "" {
-				t.Errorf("expected log output for path %q, got none", tt.path)
-				return
-			}
-
-			if !bytes.Contains(buf.Bytes(), []byte(tt.wantLog)) {
-				t.Errorf("expected log to contain %q, got %q", tt.wantLog, output)
-			}
-			if !bytes.Contains(buf.Bytes(), []byte(tt.value)) {
-				t.Errorf("expected log to contain value %q, got %q", tt.value, output)
-			}
-		})
-	}
-}
-
-// TestValidator_Validate_ContextCancellation tests that validation respects context cancellation.
-func TestValidator_Validate_ContextCancellation(t *testing.T) {
-	snapshot := &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{
-			{
-				Type: measurement.TypeK8s,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "server",
-						Data: map[string]measurement.Reading{
-							"version": measurement.Str("v1.33.5-eks-3025e55"),
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Create many constraints to ensure the loop runs multiple times
-	constraints := make([]recipe.Constraint, 100)
-	for i := range constraints {
-		constraints[i] = recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.32.4"}
-	}
-
-	recipeResult := &recipe.RecipeResult{
-		Constraints: constraints,
-	}
-
-	// Create an already canceled context
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	v := New(WithVersion("test"))
-	_, err := v.Validate(ctx, recipeResult, snapshot)
-
-	if err == nil {
-		t.Error("expected error from canceled context, got nil")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("expected context.Canceled error, got %v", err)
-	}
-}
-
-// TestEvaluateConstraint tests the standalone EvaluateConstraint function.
-func TestEvaluateConstraint(t *testing.T) {
-	snapshot := &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{
-			{
-				Type: measurement.TypeK8s,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "server",
-						Data: map[string]measurement.Reading{
-							"version": measurement.Str("v1.33.5-eks-3025e55"),
-						},
-					},
-				},
-			},
-			{
-				Type: measurement.TypeOS,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "release",
-						Data: map[string]measurement.Reading{
-							"ID":         measurement.Str("ubuntu"),
-							"VERSION_ID": measurement.Str("24.04"),
-						},
-					},
-				},
-			},
-		},
-	}
-
-	tests := []struct {
-		name       string
-		constraint recipe.Constraint
-		wantPassed bool
-		wantActual string
-		wantError  bool
-	}{
-		{
-			name:       "version constraint passes",
-			constraint: recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.32.4"},
-			wantPassed: true,
-			wantActual: "v1.33.5-eks-3025e55",
-			wantError:  false,
-		},
-		{
-			name:       "version constraint fails",
-			constraint: recipe.Constraint{Name: "K8s.server.version", Value: ">= 1.35.0"},
-			wantPassed: false,
-			wantActual: "v1.33.5-eks-3025e55",
-			wantError:  false,
-		},
-		{
-			name:       "exact match passes",
-			constraint: recipe.Constraint{Name: "OS.release.ID", Value: "ubuntu"},
-			wantPassed: true,
-			wantActual: "ubuntu",
-			wantError:  false,
-		},
-		{
-			name:       "exact match fails",
-			constraint: recipe.Constraint{Name: "OS.release.ID", Value: "rhel"},
-			wantPassed: false,
-			wantActual: "ubuntu",
-			wantError:  false,
-		},
-		{
-			name:       "invalid path format",
-			constraint: recipe.Constraint{Name: "invalid.path", Value: "test"},
-			wantPassed: false,
-			wantActual: "",
-			wantError:  true,
-		},
-		{
-			name:       "value not found",
-			constraint: recipe.Constraint{Name: "K8s.server.nonexistent", Value: "test"},
-			wantPassed: false,
-			wantActual: "",
-			wantError:  true,
-		},
-		{
-			name:       "measurement type not found",
-			constraint: recipe.Constraint{Name: "GPU.info.driver", Value: "test"},
-			wantPassed: false,
-			wantActual: "",
-			wantError:  true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := EvaluateConstraint(tt.constraint, snapshot)
-
-			if result.Passed != tt.wantPassed {
-				t.Errorf("Passed = %v, want %v", result.Passed, tt.wantPassed)
-			}
-			if result.Actual != tt.wantActual {
-				t.Errorf("Actual = %q, want %q", result.Actual, tt.wantActual)
-			}
-			if (result.Error != nil) != tt.wantError {
-				t.Errorf("Error = %v, wantError = %v", result.Error, tt.wantError)
-			}
-		})
+	if len(v.ImagePullSecrets) != 1 || v.ImagePullSecrets[0] != "secret1" {
+		t.Errorf("ImagePullSecrets = %v", v.ImagePullSecrets)
 	}
 }
 
 func TestGenerateRunID(t *testing.T) {
-	// Test that RunID generation produces a valid format
-	runID := generateRunID()
+	id1 := generateRunID()
+	id2 := generateRunID()
 
-	// Expected format: YYYYMMDD-HHMMSS-XXXXXXXXXXXXXXXX (16 hex chars)
-	parts := strings.Split(runID, "-")
-	if len(parts) != 3 {
-		t.Errorf("RunID format incorrect, expected 3 parts, got %d: %s", len(parts), runID)
+	if id1 == "" {
+		t.Error("RunID should not be empty")
 	}
-
-	// Check timestamp part (YYYYMMDD)
-	if len(parts[0]) != 8 {
-		t.Errorf("Date part should be 8 characters (YYYYMMDD), got %d: %s", len(parts[0]), parts[0])
+	if id1 == id2 {
+		t.Error("RunIDs should be unique")
 	}
-
-	// Check time part (HHMMSS)
-	if len(parts[1]) != 6 {
-		t.Errorf("Time part should be 6 characters (HHMMSS), got %d: %s", len(parts[1]), parts[1])
-	}
-
-	// Check random part (16 hex characters)
-	if len(parts[2]) != 16 {
-		t.Errorf("Random part should be 16 characters, got %d: %s", len(parts[2]), parts[2])
+	if len(id1) < 20 {
+		t.Errorf("RunID too short: %q", id1)
 	}
 }
 
-func TestGenerateRunID_Uniqueness(t *testing.T) {
-	// Generate multiple RunIDs and verify they're unique
-	runIDs := make(map[string]bool)
-	for i := 0; i < 100; i++ {
-		runID := generateRunID()
-		if runIDs[runID] {
-			t.Errorf("Generated duplicate RunID: %s", runID)
+func loadEmbeddedCatalog(t *testing.T) *catalog.ValidatorCatalog {
+	t.Helper()
+	cat, err := catalog.Load("")
+	if err != nil {
+		t.Fatalf("failed to load catalog: %v", err)
+	}
+	return cat
+}
+
+func TestPhasesSkipped(t *testing.T) {
+	v := New(WithVersion("1.0.0"))
+	cat := loadEmbeddedCatalog(t)
+
+	results := v.phasesSkipped(cat, PhaseOrder, "test reason")
+	if len(results) != len(PhaseOrder) {
+		t.Fatalf("expected %d results, got %d", len(PhaseOrder), len(results))
+	}
+
+	for i, pr := range results {
+		if pr.Phase != PhaseOrder[i] {
+			t.Errorf("results[%d].Phase = %q, want %q", i, pr.Phase, PhaseOrder[i])
 		}
-		runIDs[runID] = true
+		if pr.Status != ctrf.StatusSkipped {
+			t.Errorf("results[%d].Status = %q, want %q", i, pr.Status, ctrf.StatusSkipped)
+		}
+		if pr.Report == nil {
+			t.Errorf("results[%d].Report should not be nil", i)
+		}
 	}
 }
 
-func TestNew_CustomImageFromEnv(t *testing.T) {
-	t.Setenv("AICR_VALIDATOR_IMAGE", "custom-image:latest")
-	v := New()
-	if v.Image != "custom-image:latest" {
-		t.Errorf("Image = %q, want custom-image:latest", v.Image)
+func TestPhasesSkippedSubset(t *testing.T) {
+	v := New(WithVersion("1.0.0"))
+	cat := loadEmbeddedCatalog(t)
+
+	subset := []Phase{PhaseDeployment}
+	results := v.phasesSkipped(cat, subset, "test reason")
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Phase != PhaseDeployment {
+		t.Errorf("Phase = %q, want %q", results[0].Phase, PhaseDeployment)
 	}
 }
 
-func TestNew_GeneratesRunID(t *testing.T) {
-	// Verify that New() automatically generates a RunID
-	v := New()
+func TestPhaseSkipped(t *testing.T) {
+	v := New(WithVersion("1.0.0"))
+	cat := loadEmbeddedCatalog(t)
 
-	if v.RunID == "" {
-		t.Error("New() should generate a RunID, but got empty string")
+	pr := v.phaseSkipped(cat, PhaseDeployment, "no cluster")
+	if pr.Phase != PhaseDeployment {
+		t.Errorf("Phase = %q, want %q", pr.Phase, PhaseDeployment)
 	}
-
-	// Verify format
-	parts := strings.Split(v.RunID, "-")
-	if len(parts) != 3 {
-		t.Errorf("Generated RunID has incorrect format: %s", v.RunID)
+	if pr.Status != ctrf.StatusSkipped {
+		t.Errorf("Status = %q, want %q", pr.Status, ctrf.StatusSkipped)
 	}
-}
-
-func TestNew_WithRunID(t *testing.T) {
-	// Verify that WithRunID option sets the RunID
-	customRunID := "20260101-120000-test"
-	v := New(WithRunID(customRunID))
-
-	if v.RunID != customRunID {
-		t.Errorf("WithRunID() should set RunID to %s, got %s", customRunID, v.RunID)
+	if pr.Report == nil {
+		t.Fatal("Report should not be nil")
+	}
+	if pr.Report.ReportFormat != ctrf.ReportFormatCTRF {
+		t.Errorf("ReportFormat = %q, want %q", pr.Report.ReportFormat, ctrf.ReportFormatCTRF)
 	}
 }
 
-func TestNew_UniqueRunIDs(t *testing.T) {
-	// Verify that multiple New() calls generate unique RunIDs
-	v1 := New()
-	v2 := New()
-
-	if v1.RunID == v2.RunID {
-		t.Errorf("New() should generate unique RunIDs, but both are: %s", v1.RunID)
-	}
-}
-
-func TestNew_DefaultNamespace(t *testing.T) {
-	v := New()
-
-	expectedNamespace := "aicr-validation"
-	if v.Namespace != expectedNamespace {
-		t.Errorf("Expected default namespace %s, got %s", expectedNamespace, v.Namespace)
-	}
-}
-
-func TestNew_WithNamespace(t *testing.T) {
-	customNamespace := "custom-validation"
-	v := New(WithNamespace(customNamespace))
-
-	if v.Namespace != customNamespace {
-		t.Errorf("Expected namespace %s, got %s", customNamespace, v.Namespace)
-	}
-}
-
-func TestNew_MultipleOptions(t *testing.T) {
-	version := "v1.0.0"
-	namespace := "custom-ns"
-	runID := "20260101-120000-test"
-	secrets := []string{"secret-a", "secret-b"}
-
+func TestValidatePhasesNoClusterAll(t *testing.T) {
 	v := New(
-		WithVersion(version),
-		WithNamespace(namespace),
-		WithRunID(runID),
-		WithCleanup(false),
-		WithImagePullSecrets(secrets),
+		WithVersion("1.0.0"),
+		WithNoCluster(true),
 	)
 
-	if v.Version != version {
-		t.Errorf("Expected version %s, got %s", version, v.Version)
+	results, err := v.ValidatePhases(context.Background(), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("ValidatePhases() failed: %v", err)
 	}
-	if v.Namespace != namespace {
-		t.Errorf("Expected namespace %s, got %s", namespace, v.Namespace)
+
+	if len(results) != len(PhaseOrder) {
+		t.Fatalf("expected %d results, got %d", len(PhaseOrder), len(results))
 	}
-	if v.RunID != runID {
-		t.Errorf("Expected runID %s, got %s", runID, v.RunID)
-	}
-	if v.Cleanup {
-		t.Error("Expected Cleanup to be false")
-	}
-	if len(v.ImagePullSecrets) != 2 || v.ImagePullSecrets[0] != "secret-a" {
-		t.Errorf("Expected ImagePullSecrets [secret-a secret-b], got %v", v.ImagePullSecrets)
+
+	for _, pr := range results {
+		if pr.Status != ctrf.StatusSkipped {
+			t.Errorf("phase %q status = %q, want %q", pr.Phase, pr.Status, ctrf.StatusSkipped)
+		}
 	}
 }
 
-func TestNew_WithImage(t *testing.T) {
-	customImage := "localhost:5001/aicr-validator:test"
-	v := New(WithImage(customImage))
-
-	if v.Image != customImage {
-		t.Errorf("Expected image %s, got %s", customImage, v.Image)
-	}
-}
-
-func TestNew_WithImage_MultipleOptions(t *testing.T) {
-	version := "v1.0.0"
-	image := "ghcr.io/nvidia/aicr-validator:v1.0.0"
-
+func TestValidatePhasesNoClusterSubset(t *testing.T) {
 	v := New(
-		WithVersion(version),
-		WithImage(image),
+		WithVersion("1.0.0"),
+		WithNoCluster(true),
 	)
 
-	if v.Version != version {
-		t.Errorf("Expected version %s, got %s", version, v.Version)
+	results, err := v.ValidatePhases(context.Background(), []Phase{PhaseDeployment}, nil, nil)
+	if err != nil {
+		t.Fatalf("ValidatePhases() failed: %v", err)
 	}
-	if v.Image != image {
-		t.Errorf("Expected image %s, got %s", image, v.Image)
+
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Phase != PhaseDeployment {
+		t.Errorf("Phase = %q, want %q", results[0].Phase, PhaseDeployment)
 	}
 }
 
-func TestNew_SchedulingOptions(t *testing.T) {
+func TestValidatePhaseNoCluster(t *testing.T) {
+	v := New(
+		WithVersion("1.0.0"),
+		WithNoCluster(true),
+	)
+
+	pr, err := v.ValidatePhase(context.Background(), PhaseDeployment, nil, nil)
+	if err != nil {
+		t.Fatalf("ValidatePhase() failed: %v", err)
+	}
+
+	if pr.Status != ctrf.StatusSkipped {
+		t.Errorf("status = %q, want %q", pr.Status, ctrf.StatusSkipped)
+	}
+	if pr.Phase != PhaseDeployment {
+		t.Errorf("phase = %q, want %q", pr.Phase, PhaseDeployment)
+	}
+}
+
+func TestCheckReadinessNilInputs(t *testing.T) {
 	tests := []struct {
-		name            string
-		opts            []Option
-		wantTolerations int
-		checkToleration func(t *testing.T, tolerations []corev1.Toleration)
+		name string
+		rec  *recipe.RecipeResult
+		snap *snapshotter.Snapshot
 	}{
-		{
-			name:            "default tolerate-all",
-			opts:            nil,
-			wantTolerations: 1,
-			checkToleration: func(t *testing.T, tolerations []corev1.Toleration) {
-				if tolerations[0].Operator != corev1.TolerationOpExists {
-					t.Errorf("expected default Exists operator, got %q", tolerations[0].Operator)
-				}
-				if tolerations[0].Key != "" {
-					t.Errorf("expected empty key for default tolerate-all, got %q", tolerations[0].Key)
-				}
-			},
-		},
-		{
-			name: "with specific tolerations",
-			opts: []Option{WithTolerations([]corev1.Toleration{
-				{Key: "dedicated", Value: "worker-workload", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
-				{Key: "dedicated", Value: "worker-workload", Effect: corev1.TaintEffectNoExecute, Operator: corev1.TolerationOpEqual},
-			})},
-			wantTolerations: 2,
-			checkToleration: func(t *testing.T, tolerations []corev1.Toleration) {
-				if tolerations[0].Key != "dedicated" {
-					t.Errorf("expected toleration key 'dedicated', got %q", tolerations[0].Key)
-				}
-				if tolerations[1].Effect != corev1.TaintEffectNoExecute {
-					t.Errorf("expected NoExecute effect, got %q", tolerations[1].Effect)
-				}
-			},
-		},
-		{
-			name: "with tolerate-all",
-			opts: []Option{WithTolerations([]corev1.Toleration{
-				{Operator: corev1.TolerationOpExists},
-			})},
-			wantTolerations: 1,
-			checkToleration: func(t *testing.T, tolerations []corev1.Toleration) {
-				if tolerations[0].Operator != corev1.TolerationOpExists {
-					t.Errorf("expected Exists operator, got %q", tolerations[0].Operator)
-				}
-				if tolerations[0].Key != "" {
-					t.Errorf("expected empty key for tolerate-all, got %q", tolerations[0].Key)
-				}
-			},
-		},
+		{"nil recipe", nil, &snapshotter.Snapshot{}},
+		{"nil snapshot", &recipe.RecipeResult{}, nil},
+		{"both nil", nil, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			v := New(tt.opts...)
-
-			if len(v.Tolerations) != tt.wantTolerations {
-				t.Fatalf("expected %d tolerations, got %d", tt.wantTolerations, len(v.Tolerations))
-			}
-			if tt.checkToleration != nil {
-				tt.checkToleration(t, v.Tolerations)
+			if err := checkReadiness(tt.rec, tt.snap); err != nil {
+				t.Errorf("checkReadiness() = %v, want nil", err)
 			}
 		})
 	}
 }
 
-// TestEvaluateConstraint_EvaluationFailure tests when Evaluate() returns an error.
-func TestEvaluateConstraint_EvaluationFailure(t *testing.T) {
-	// Create a snapshot with non-version-like values that will fail version comparison
-	snapshot := &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{
-			{
-				Type: measurement.TypeOS,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "release",
-						Data: map[string]measurement.Reading{
-							"ID": measurement.Str("not-a-version-string"),
-						},
-					},
-				},
-			},
-		},
+func TestCheckReadinessEmptyConstraints(t *testing.T) {
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{},
 	}
-
-	// Use a version comparison operator on a non-version value
-	// This should cause Evaluate() to fail when trying to parse versions
-	constraint := recipe.Constraint{
-		Name:  "OS.release.ID",
-		Value: ">= 1.0.0", // Version comparison on non-version string
-	}
-
-	result := EvaluateConstraint(constraint, snapshot)
-
-	// Should fail due to version parse error
-	if result.Passed {
-		t.Errorf("Expected constraint to fail, but it passed")
-	}
-	if result.Error == nil {
-		t.Errorf("Expected error from version comparison failure")
+	snap := &snapshotter.Snapshot{}
+	if err := checkReadiness(rec, snap); err != nil {
+		t.Errorf("checkReadiness() = %v, want nil for empty constraints", err)
 	}
 }
 
-// TestValidator_evaluateConstraint_InvalidExpression tests invalid constraint expressions.
-func TestValidator_evaluateConstraint_InvalidExpression(t *testing.T) {
-	snapshot := &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{
-			{
-				Type: measurement.TypeK8s,
-				Subtypes: []measurement.Subtype{
-					{
-						Name: "server",
-						Data: map[string]measurement.Reading{
-							"version": measurement.Str("v1.33.5"),
-						},
+func TestCheckReadinessPassingConstraint(t *testing.T) {
+	// Use a constraint path that Evaluate can resolve.
+	// When the path cannot be parsed or value not found, Evaluate returns Error (skipped).
+	// A constraint with an unparseable name results in Error != nil -> skipped (not failure).
+	rec := &recipe.RecipeResult{
+		Constraints: []recipe.Constraint{
+			{Name: "invalid-path-that-will-be-skipped", Value: "anything"},
+		},
+	}
+	snap := &snapshotter.Snapshot{}
+	// Unparseable constraint path => skipped (warn), not failure.
+	if err := checkReadiness(rec, snap); err != nil {
+		t.Errorf("checkReadiness() = %v, want nil for skipped constraint", err)
+	}
+}
+
+func TestFilterEntriesByRecipeNilRecipe(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+		{Name: "v2", Phase: "deployment"},
+	}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, nil)
+	if len(got) != 0 {
+		t.Errorf("filterEntriesByRecipe(nil recipe) returned %d entries, want 0 (skip)", len(got))
+	}
+}
+
+func TestFilterEntriesByRecipeNilValidation(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+	}
+	rec := &recipe.RecipeResult{Validation: nil}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, rec)
+	if len(got) != 0 {
+		t.Errorf("filterEntriesByRecipe(nil validation) returned %d entries, want 0 (skip)", len(got))
+	}
+}
+
+func TestFilterEntriesByRecipeNoChecks(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+		{Name: "v2", Phase: "deployment"},
+	}
+	rec := &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{},
+		},
+	}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, rec)
+	if len(got) != 0 {
+		t.Errorf("filterEntriesByRecipe(empty checks) returned %d entries, want 0 (skip)", len(got))
+	}
+}
+
+func TestFilterEntriesByRecipeWithChecks(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+		{Name: "v2", Phase: "deployment"},
+		{Name: "v3", Phase: "deployment"},
+	}
+
+	tests := []struct {
+		name     string
+		phase    Phase
+		rec      *recipe.RecipeResult
+		expected int
+		names    []string
+	}{
+		{
+			name:  "deployment filters to declared checks",
+			phase: PhaseDeployment,
+			rec: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"v1", "v3"},
 					},
 				},
 			},
+			expected: 2,
+			names:    []string{"v1", "v3"},
+		},
+		{
+			name:  "performance phase with no matching entries",
+			phase: PhasePerformance,
+			rec: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Performance: &recipe.ValidationPhase{
+						Checks: []string{"perf-only"},
+					},
+				},
+			},
+			expected: 0,
+		},
+		{
+			name:  "conformance phase returns none when nil phase config",
+			phase: PhaseConformance,
+			rec: &recipe.RecipeResult{
+				Validation: &recipe.ValidationConfig{
+					Deployment: &recipe.ValidationPhase{
+						Checks: []string{"v1"},
+					},
+				},
+			},
+			expected: 0,
 		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterEntriesByRecipe(entries, tt.phase, tt.rec)
+			if len(got) != tt.expected {
+				t.Errorf("filterEntriesByRecipe() returned %d entries, want %d", len(got), tt.expected)
+			}
+			if tt.names != nil {
+				for i, name := range tt.names {
+					if i < len(got) && got[i].Name != name {
+						t.Errorf("got[%d].Name = %q, want %q", i, got[i].Name, name)
+					}
+				}
+			}
+		})
+	}
+}
 
-	// Empty expression should cause parse failure
-	constraint := recipe.Constraint{
-		Name:  "K8s.server.version",
-		Value: "", // Empty expression is invalid
+func TestFilterEntriesByRecipeEmptyChecksList(t *testing.T) {
+	entries := []catalog.ValidatorEntry{
+		{Name: "v1", Phase: "deployment"},
+	}
+	rec := &recipe.RecipeResult{
+		Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{
+				Checks: []string{},
+			},
+		},
+	}
+	got := filterEntriesByRecipe(entries, PhaseDeployment, rec)
+	if len(got) != 0 {
+		t.Errorf("filterEntriesByRecipe(empty checks list) returned %d entries, want 0 (skip)", len(got))
+	}
+}
+
+func TestPhaseOrder(t *testing.T) {
+	expected := []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
+	if len(PhaseOrder) != len(expected) {
+		t.Fatalf("PhaseOrder length = %d, want %d", len(PhaseOrder), len(expected))
+	}
+	for i, p := range PhaseOrder {
+		if p != expected[i] {
+			t.Errorf("PhaseOrder[%d] = %q, want %q", i, p, expected[i])
+		}
+	}
+}
+
+// TestRecipeCheckNamesMatchCatalog verifies that every check name referenced
+// in recipe overlays exists in the validator catalog for the correct phase.
+// Catches typos and drift between recipes and catalog at PR time.
+func TestRecipeCheckNamesMatchCatalog(t *testing.T) {
+	cat, err := catalog.Load("")
+	if err != nil {
+		t.Fatalf("failed to load catalog: %v", err)
 	}
 
-	result := EvaluateConstraint(constraint, snapshot)
+	// Build lookup: phase → set of valid check names.
+	validChecks := map[string]map[string]bool{
+		"deployment":  make(map[string]bool),
+		"performance": make(map[string]bool),
+		"conformance": make(map[string]bool),
+	}
+	for _, entry := range cat.Validators {
+		if m, ok := validChecks[entry.Phase]; ok {
+			m[entry.Name] = true
+		}
+	}
 
-	// Should be skipped due to invalid expression
-	if result.Passed {
-		t.Errorf("Expected constraint to not pass with empty expression")
+	// Walk all embedded overlay YAML files.
+	err = fs.WalkDir(recipes.FS, "overlays", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || filepath.Ext(path) != ".yaml" {
+			return nil
+		}
+
+		data, readErr := recipes.FS.ReadFile(path)
+		if readErr != nil {
+			return fmt.Errorf("failed to read %s: %w", path, readErr)
+		}
+
+		var metadata recipe.RecipeMetadata
+		if unmarshalErr := yaml.Unmarshal(data, &metadata); unmarshalErr != nil {
+			return nil // skip non-recipe YAML
+		}
+
+		if metadata.Spec.Validation == nil {
+			return nil
+		}
+
+		phases := map[string]*recipe.ValidationPhase{
+			"deployment":  metadata.Spec.Validation.Deployment,
+			"performance": metadata.Spec.Validation.Performance,
+			"conformance": metadata.Spec.Validation.Conformance,
+		}
+
+		for phase, vp := range phases {
+			if vp == nil {
+				continue
+			}
+			for _, checkName := range vp.Checks {
+				if !validChecks[phase][checkName] {
+					t.Errorf("%s: check %q in %s phase does not exist in catalog (valid: %v)",
+						path, checkName, phase, catalogNames(cat, phase))
+				}
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk overlays: %v", err)
 	}
-	if result.Error == nil {
-		t.Errorf("Expected error from invalid expression")
+}
+
+func catalogNames(cat *catalog.ValidatorCatalog, phase string) []string {
+	entries := cat.ForPhase(phase)
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name)
 	}
+	return names
 }

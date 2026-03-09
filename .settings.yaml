@@ -55,7 +55,7 @@ testing_tools:
 # Quality Thresholds
 quality:
   coverage_threshold: '70'
-  lint_timeout: '5m'
+  lint_timeout: '10m'
   test_timeout: '10m'
 
 # Build Configuration

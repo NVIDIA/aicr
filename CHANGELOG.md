@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.12] - 2026-03-08
+
+### Bug Fixes
+
+- *(snapshot)* Ensure namespace exists before deploying agent
+
+### Other Tasks
+
+- Update service with correct value (eks)
+
 ## [0.8.16] - 2026-03-05
 
 ### Bug Fixes

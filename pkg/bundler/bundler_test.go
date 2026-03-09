@@ -66,6 +66,27 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {
+	// The test binary won't have an attestation file next to it,
+	// simulating a "go install" or manual download scenario.
+	cfg := config.NewConfig(config.WithAttest(true))
+	_, err := New(WithConfig(cfg))
+	if err == nil {
+		t.Fatal("New() with attest=true should fail when binary attestation file is missing")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "NOT_FOUND") {
+		t.Errorf("expected NOT_FOUND error code, got: %v", err)
+	}
+	if !strings.Contains(errMsg, "install script") {
+		t.Errorf("error should mention install script, got: %v", err)
+	}
+	if !strings.Contains(errMsg, "--attest") {
+		t.Errorf("error should mention --attest flag, got: %v", err)
+	}
+}
+
 func TestNewWithConfig(t *testing.T) {
 	t.Run("nil config uses default", func(t *testing.T) {
 		bundler, err := NewWithConfig(nil)

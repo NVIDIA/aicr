@@ -12,16 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert the multi-phase validation result contains all requested phases.
-#
-# NOTE: chainsaw assert --resource requires apiVersion/kind. The validate
-# output doesn't include these, so the test prepends them before asserting.
-kind: ValidationResult
-apiVersion: aicr.nvidia.com/v1alpha1
-phases:
-  readiness:
-    status: pass
-  deployment:
-    status: skipped
-  conformance:
-    status: pass
+# Assert the multi-phase validation result is a valid CTRF report.
+# The output is now CTRF JSON — this assertion verifies the top-level structure.
+# Full field-level assertions depend on which validators ran and cluster state.
+reportFormat: CTRF
+results:
+  tool:
+    name: aicr
+  summary:
+    tests: (@ > 0)

@@ -20,202 +20,59 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
 
+	"github.com/NVIDIA/aicr/pkg/constraints"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/header"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	"github.com/NVIDIA/aicr/pkg/validator/job"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 )
 
-const (
-	// APIVersion is the API version for validation results.
-	APIVersion = "aicr.nvidia.com/v1alpha1"
-)
-
-// ConstraintEvalResult represents the result of evaluating a single constraint.
-type ConstraintEvalResult struct {
-	// Passed indicates if the constraint was satisfied.
-	Passed bool
-
-	// Actual is the actual value extracted from the snapshot.
-	Actual string
-
-	// Error contains the error if evaluation failed (e.g., value not found).
-	Error error
-}
-
-// EvaluateConstraint evaluates a single constraint against a snapshot.
-// This is a standalone function that can be used by other packages without
-// creating a full Validator instance. Used by the recipe package to filter
-// overlays based on constraint evaluation during snapshot-based recipe generation.
-func EvaluateConstraint(constraint recipe.Constraint, snap *snapshotter.Snapshot) ConstraintEvalResult {
-	result := ConstraintEvalResult{}
-
-	// Parse the constraint path
-	path, err := ParseConstraintPath(constraint.Name)
-	if err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeInvalidRequest, "invalid constraint path", err)
-		return result
+// checkReadiness evaluates top-level recipe constraints against the snapshot.
+// Returns an error if any constraint fails, nil if all pass or no constraints exist.
+func checkReadiness(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) error {
+	if rec == nil || snap == nil || len(rec.Constraints) == 0 {
+		return nil
 	}
 
-	// Extract the actual value from snapshot
-	actual, err := path.ExtractValue(snap)
-	if err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeNotFound, "value not found in snapshot", err)
-		return result
-	}
-	result.Actual = actual
+	slog.Info("readiness pre-flight", "constraints", len(rec.Constraints))
 
-	// Parse the constraint expression
-	parsed, err := ParseConstraintExpression(constraint.Value)
-	if err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeInvalidRequest, "invalid constraint expression", err)
-		return result
-	}
-
-	// Evaluate the constraint
-	passed, err := parsed.Evaluate(actual)
-	if err != nil {
-		result.Error = errors.Wrap(errors.ErrCodeInternal, "evaluation failed", err)
-		return result
+	for _, c := range rec.Constraints {
+		result := constraints.Evaluate(c, snap)
+		if result.Error != nil {
+			slog.Warn("readiness constraint skipped", "name", c.Name, "error", result.Error)
+			continue
+		}
+		if !result.Passed {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("readiness check failed: %s expected %s, got %s", c.Name, c.Value, result.Actual))
+		}
+		slog.Info("readiness constraint passed", "name", c.Name, "expected", c.Value, "actual", result.Actual)
 	}
 
-	result.Passed = passed
-	return result
-}
-
-// Validator evaluates recipe constraints against snapshot measurements.
-type Validator struct {
-	// Version is the validator version (typically the CLI version).
-	Version string
-
-	// Namespace is the Kubernetes namespace where validation jobs will run.
-	// Defaults to "aicr-validation" if not specified.
-	Namespace string
-
-	// Image is the container image to use for validation Jobs.
-	// Must include Go toolchain for running tests.
-	// Defaults to "ghcr.io/nvidia/aicr-validator:latest".
-	Image string
-
-	// RunID is a unique identifier for this validation run.
-	// Used to scope all resources (ConfigMaps, Jobs) and enable resumability.
-	// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9")
-	RunID string
-
-	// Cleanup controls whether to delete Jobs, ConfigMaps, and RBAC resources after validation.
-	// Defaults to true. Set to false to keep resources for debugging.
-	Cleanup bool
-
-	// ImagePullSecrets are secret names for pulling images from private registries.
-	ImagePullSecrets []string
-
-	// NoCluster controls whether to skip actual cluster operations (dry-run mode).
-	// When true, validation runs without connecting to Kubernetes cluster.
-	NoCluster bool
-
-	// Tolerations are applied to validation phase Jobs for scheduling on tainted nodes.
-	// Defaults to tolerate-all so Jobs can schedule on any node regardless of taints.
-	Tolerations []corev1.Toleration
-}
-
-// Option is a functional option for configuring Validator instances.
-type Option func(*Validator)
-
-// WithVersion returns an Option that sets the Validator version string.
-func WithVersion(version string) Option {
-	return func(v *Validator) {
-		v.Version = version
-	}
-}
-
-// WithNamespace returns an Option that sets the namespace for validation jobs.
-func WithNamespace(namespace string) Option {
-	return func(v *Validator) {
-		v.Namespace = namespace
-	}
-}
-
-// WithImage returns an Option that sets the container image for validation Jobs.
-func WithImage(image string) Option {
-	return func(v *Validator) {
-		v.Image = image
-	}
-}
-
-// WithRunID returns an Option that sets the RunID for this validation run.
-// Used when resuming a previous validation run.
-func WithRunID(runID string) Option {
-	return func(v *Validator) {
-		v.RunID = runID
-	}
-}
-
-// WithCleanup returns an Option that controls cleanup of validation resources.
-// When false, Jobs, ConfigMaps, and RBAC resources are kept for debugging.
-func WithCleanup(cleanup bool) Option {
-	return func(v *Validator) {
-		v.Cleanup = cleanup
-	}
-}
-
-// WithImagePullSecrets returns an Option that sets image pull secrets for validation Jobs.
-func WithImagePullSecrets(secrets []string) Option {
-	return func(v *Validator) {
-		v.ImagePullSecrets = secrets
-	}
-}
-
-// WithNoCluster returns an Option that controls cluster access.
-// When set to true, validation runs in dry-run mode without connecting to cluster.
-func WithNoCluster(noCluster bool) Option {
-	return func(v *Validator) {
-		v.NoCluster = noCluster
-	}
-}
-
-// WithTolerations returns an Option that sets tolerations for validation phase Jobs.
-func WithTolerations(tolerations []corev1.Toleration) Option {
-	return func(v *Validator) {
-		v.Tolerations = tolerations
-	}
-}
-
-// generateRunID creates a unique identifier for a validation run.
-// Format: YYYYMMDD-HHMMSS-RANDOM (e.g., "20260206-140523-a3f9b2c1e7d04a68")
-func generateRunID() string {
-	// Generate timestamp
-	timestamp := time.Now().Format("20060102-150405")
-
-	// Generate 16 random hex characters (8 bytes)
-	randomBytes := make([]byte, 8)
-	if _, err := rand.Read(randomBytes); err != nil {
-		// Fallback to timestamp only if random generation fails
-		return timestamp
-	}
-	randomHex := hex.EncodeToString(randomBytes)
-
-	return fmt.Sprintf("%s-%s", timestamp, randomHex)
+	return nil
 }
 
 // New creates a new Validator with the provided options.
 func New(opts ...Option) *Validator {
-	// Default validator image (can be overridden by AICR_VALIDATOR_IMAGE env var for CI)
-	defaultImage := "ghcr.io/nvidia/aicr-validator:latest"
-	if envImage := os.Getenv("AICR_VALIDATOR_IMAGE"); envImage != "" {
-		defaultImage = envImage
-	}
-
 	v := &Validator{
-		Namespace:   "aicr-validation",                                          // Default namespace for validation jobs
-		Image:       defaultImage,                                               // Default validator image
-		RunID:       generateRunID(),                                            // Generate unique RunID for this validation run
-		Cleanup:     true,                                                       // Default to cleanup resources after validation
-		Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}}, // tolerate-all default
+		Namespace:   "aicr-validation",
+		RunID:       generateRunID(),
+		Cleanup:     true,
+		Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 	}
 	for _, opt := range opts {
 		opt(v)
@@ -223,154 +80,474 @@ func New(opts ...Option) *Validator {
 	return v
 }
 
-// Validate evaluates all constraints from the recipe against the snapshot.
-// Returns a ValidationResult containing per-constraint results and summary.
-func (v *Validator) Validate(ctx context.Context, recipeResult *recipe.RecipeResult, snap *snapshotter.Snapshot) (*ValidationResult, error) {
+// ValidatePhases runs the specified phases sequentially. If a phase fails,
+// subsequent phases are skipped. Returns one PhaseResult per phase.
+// Pass nil or empty phases to run all phases.
+func (v *Validator) ValidatePhases(
+	ctx context.Context,
+	phases []Phase,
+	recipeResult *recipe.RecipeResult,
+	snap *snapshotter.Snapshot,
+) ([]*PhaseResult, error) {
+
+	if len(phases) == 0 {
+		phases = PhaseOrder
+	}
+
+	slog.Info("running validation phases", "runID", v.RunID, "phases", phases)
+
+	// Pre-flight: evaluate top-level recipe constraints against snapshot.
+	// Fails fast before deploying any Jobs if prerequisites aren't met.
+	if err := checkReadiness(recipeResult, snap); err != nil {
+		return nil, err
+	}
+
+	cat, err := catalog.Load(v.Version)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
+	}
+
+	// --no-cluster: report all as skipped, no K8s calls
+	if v.NoCluster {
+		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
+	}
+
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	// Ensure validation namespace exists before starting informers or creating RBAC.
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
+	}
+
+	// Shared informer factory scoped to the validation namespace.
+	// Started once and reused across all phases and deployers.
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		clientset, 0, informers.WithNamespace(v.Namespace),
+	)
+	stopCh := make(chan struct{})
+	factory.Start(stopCh)
+	defer close(stopCh)
+
+	// RBAC: create once, cleanup at end
+	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
+	}
+	if v.Cleanup {
+		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+			defer cancel()
+			if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
+				slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
+			}
+		}()
+	}
+
+	// Data ConfigMaps: create once, cleanup at end
+	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
+	}
+	if v.Cleanup {
+		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+			defer cancel()
+			v.cleanupDataConfigMaps(cleanupCtx, clientset)
+		}()
+	}
+
+	results := make([]*PhaseResult, 0, len(phases))
+	overallFailed := false
+
+	for _, phase := range phases {
+		select {
+		case <-ctx.Done():
+			return results, ctx.Err()
+		default:
+		}
+
+		if overallFailed {
+			// Skip with a CTRF report showing all validators as skipped
+			pr := v.phaseSkipped(cat, phase, "skipped due to previous phase failure")
+			results = append(results, pr)
+			slog.Info("skipping phase due to previous failure", "phase", phase)
+			continue
+		}
+
+		pr, phaseErr := v.runPhase(ctx, clientset, factory, cat, phase, recipeResult)
+		if phaseErr != nil {
+			return results, phaseErr
+		}
+		results = append(results, pr)
+
+		if pr.Status == ctrf.StatusFailed {
+			overallFailed = true
+		}
+	}
+
+	slog.Info("all phases completed", "runID", v.RunID, "phases", len(results))
+	return results, nil
+}
+
+// ValidatePhase runs a single validation phase.
+func (v *Validator) ValidatePhase(
+	ctx context.Context,
+	phase Phase,
+	recipeResult *recipe.RecipeResult,
+	snap *snapshotter.Snapshot,
+) (*PhaseResult, error) {
+
+	cat, err := catalog.Load(v.Version)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
+	}
+
+	if v.NoCluster {
+		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
+	}
+
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
+	}
+
+	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
+	}
+	if v.Cleanup {
+		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+			defer cancel()
+			if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
+				slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
+			}
+		}()
+	}
+
+	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
+	}
+	if v.Cleanup {
+		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+		defer func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+			defer cancel()
+			v.cleanupDataConfigMaps(cleanupCtx, clientset)
+		}()
+	}
+
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		clientset, 0, informers.WithNamespace(v.Namespace),
+	)
+	stopCh := make(chan struct{})
+	factory.Start(stopCh)
+	defer close(stopCh)
+
+	return v.runPhase(ctx, clientset, factory, cat, phase, recipeResult)
+}
+
+// filterEntriesByRecipe returns only catalog entries that the recipe declares
+// for the given phase. If the recipe has no validation section or the phase
+// has no checks declared, no entries are returned (skip the phase).
+// The recipe is the source of truth — only explicitly declared checks run.
+func filterEntriesByRecipe(entries []catalog.ValidatorEntry, phase Phase, recipeResult *recipe.RecipeResult) []catalog.ValidatorEntry {
+	if recipeResult == nil || recipeResult.Validation == nil {
+		return nil
+	}
+
+	var phaseChecks []string
+	switch phase {
+	case PhaseDeployment:
+		if recipeResult.Validation.Deployment != nil {
+			phaseChecks = recipeResult.Validation.Deployment.Checks
+		}
+	case PhasePerformance:
+		if recipeResult.Validation.Performance != nil {
+			phaseChecks = recipeResult.Validation.Performance.Checks
+		}
+	case PhaseConformance:
+		if recipeResult.Validation.Conformance != nil {
+			phaseChecks = recipeResult.Validation.Conformance.Checks
+		}
+	}
+
+	// No checks declared for this phase → skip it.
+	if len(phaseChecks) == 0 {
+		return nil
+	}
+
+	// Build set for O(1) lookup.
+	allowed := make(map[string]bool, len(phaseChecks))
+	for _, name := range phaseChecks {
+		allowed[name] = true
+	}
+
+	filtered := make([]catalog.ValidatorEntry, 0, len(phaseChecks))
+	for _, entry := range entries {
+		if allowed[entry.Name] {
+			filtered = append(filtered, entry)
+		}
+	}
+
+	return filtered
+}
+
+// runPhase executes all validators for a single phase sequentially.
+//
+//nolint:funlen // Orchestration function with sequential lifecycle steps
+func (v *Validator) runPhase(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	factory informers.SharedInformerFactory,
+	cat *catalog.ValidatorCatalog,
+	phase Phase,
+	recipeResult *recipe.RecipeResult,
+) (*PhaseResult, error) {
+
 	start := time.Now()
+	allEntries := cat.ForPhase(string(phase))
 
-	if recipeResult == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe cannot be nil")
-	}
-	if snap == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "snapshot cannot be nil")
-	}
+	// Filter catalog entries by what the recipe declares.
+	// If the recipe has checks for this phase, only run those.
+	// If no checks are declared, run all catalog entries for the phase.
+	entries := filterEntriesByRecipe(allEntries, phase, recipeResult)
+	slog.Info("running validation phase", "phase", phase,
+		"catalog", len(allEntries), "selected", len(entries))
 
-	result := NewValidationResult()
-	result.Init(header.KindValidationResult, APIVersion, v.Version)
+	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
 
-	// Evaluate each constraint
-	for _, constraint := range recipeResult.Constraints {
+	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
 
-		cv := v.evaluateConstraint(constraint, snap)
-		result.Results = append(result.Results, cv)
+		slog.Info("running validator", "name", entry.Name, "phase", phase)
 
-		// Update summary counts
-		switch cv.Status {
-		case ConstraintStatusPassed:
-			result.Summary.Passed++
-		case ConstraintStatusFailed:
-			result.Summary.Failed++
-		case ConstraintStatusSkipped:
-			result.Summary.Skipped++
+		deployer := job.NewDeployer(
+			clientset, factory, v.Namespace, v.RunID, entry,
+			v.ImagePullSecrets, v.Tolerations,
+		)
+
+		// Deploy
+		if deployErr := deployer.DeployJob(ctx); deployErr != nil {
+			slog.Warn("failed to deploy validator Job", "name", entry.Name, "error", deployErr)
+			builder.AddResult(&ctrf.ValidatorResult{
+				Name:           entry.Name,
+				Phase:          entry.Phase,
+				ExitCode:       -1,
+				TerminationMsg: fmt.Sprintf("failed to deploy Job: %v", deployErr),
+			})
+			continue
+		}
+
+		// Wait
+		timeout := entry.Timeout
+		if timeout == 0 {
+			timeout = defaults.ValidatorDefaultTimeout
+		}
+
+		waitErr := deployer.WaitForCompletion(ctx, timeout)
+
+		var result *ctrf.ValidatorResult
+		if waitErr != nil {
+			// Timeout or infra error — extract what we can with a fresh context
+			captureCtx, captureCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout) //nolint:contextcheck // Fresh context: parent may be canceled
+			result = deployer.HandleTimeout(captureCtx)                                                        //nolint:contextcheck // Uses fresh context above
+			captureCancel()
+		} else {
+			// Normal completion — extract exit code, termination msg, stdout
+			result = deployer.ExtractResult(ctx)
+		}
+
+		builder.AddResult(result)
+		slog.Info("validator completed", "name", entry.Name, "status", result.CTRFStatus())
+
+		// Cleanup Job
+		if v.Cleanup {
+			if cleanupErr := deployer.CleanupJob(ctx); cleanupErr != nil {
+				slog.Warn("failed to cleanup Job", "name", entry.Name, "error", cleanupErr)
+			}
+			termCtx, termCancel := context.WithTimeout(context.Background(), defaults.K8sPodTerminationWaitTimeout) //nolint:contextcheck // Fresh context: parent may be canceled
+			deployer.WaitForPodTermination(termCtx)                                                                 //nolint:contextcheck // Uses fresh context above
+			termCancel()
 		}
 	}
 
-	// Calculate summary
-	result.Summary.Total = len(recipeResult.Constraints)
-	result.Summary.Duration = time.Since(start)
+	report := builder.Build()
 
-	// Determine overall status
+	// Write CTRF ConfigMap
+	if writeErr := ctrf.WriteCTRFConfigMap(ctx, clientset, v.Namespace, v.RunID, string(phase), report); writeErr != nil {
+		slog.Warn("failed to write CTRF ConfigMap", "phase", phase, "error", writeErr)
+	}
+
+	// Derive phase status from summary
+	var status string
 	switch {
-	case result.Summary.Failed > 0:
-		result.Summary.Status = ValidationStatusFail
-	case result.Summary.Skipped > 0:
-		result.Summary.Status = ValidationStatusPartial
+	case report.Results.Summary.Failed > 0:
+		status = ctrf.StatusFailed
+	case report.Results.Summary.Other > 0:
+		status = ctrf.StatusOther
+	case report.Results.Summary.Tests == 0:
+		status = ctrf.StatusSkipped
 	default:
-		result.Summary.Status = ValidationStatusPass
+		status = ctrf.StatusPassed
 	}
 
-	slog.Debug("validation completed",
-		"passed", result.Summary.Passed,
-		"failed", result.Summary.Failed,
-		"skipped", result.Summary.Skipped,
-		"status", result.Summary.Status,
-		"duration", result.Summary.Duration)
+	duration := time.Since(start)
+	slog.Info("phase completed",
+		"phase", phase,
+		"status", status,
+		"validators", report.Results.Summary.Tests,
+		"passed", report.Results.Summary.Passed,
+		"failed", report.Results.Summary.Failed,
+		"duration", duration)
 
-	return result, nil
+	return &PhaseResult{
+		Phase:    phase,
+		Status:   status,
+		Report:   report,
+		Duration: duration,
+	}, nil
 }
 
-// evaluateConstraint evaluates a single constraint against the snapshot.
-func (v *Validator) evaluateConstraint(constraint recipe.Constraint, snap *snapshotter.Snapshot) ConstraintValidation {
-	cv := ConstraintValidation{
-		Name:     constraint.Name,
-		Expected: constraint.Value,
+func (v *Validator) phasesSkipped(cat *catalog.ValidatorCatalog, phases []Phase, reason string) []*PhaseResult {
+	results := make([]*PhaseResult, 0, len(phases))
+	for _, phase := range phases {
+		results = append(results, v.phaseSkipped(cat, phase, reason))
 	}
-
-	// Parse the constraint path
-	path, err := ParseConstraintPath(constraint.Name)
-	if err != nil {
-		cv.Status = ConstraintStatusSkipped
-		cv.Message = fmt.Sprintf("invalid constraint path: %v", err)
-		slog.Warn("skipping constraint with invalid path",
-			"name", constraint.Name,
-			"error", err)
-		return cv
-	}
-
-	// Extract the actual value from snapshot
-	actual, err := path.ExtractValue(snap)
-	if err != nil {
-		cv.Status = ConstraintStatusSkipped
-		cv.Message = fmt.Sprintf("value not found in snapshot: %v", err)
-		slog.Warn("skipping constraint - value not found",
-			"name", constraint.Name,
-			"path", path.String(),
-			"error", err)
-		return cv
-	}
-	cv.Actual = actual
-
-	// Print detected criteria based on the path and value found
-	printDetectedCriteria(path.String(), actual)
-
-	// Parse the constraint expression
-	parsed, err := ParseConstraintExpression(constraint.Value)
-	if err != nil {
-		cv.Status = ConstraintStatusSkipped
-		cv.Message = fmt.Sprintf("invalid constraint expression: %v", err)
-		slog.Warn("skipping constraint with invalid expression",
-			"name", constraint.Name,
-			"expression", constraint.Value,
-			"error", err)
-		return cv
-	}
-
-	// Evaluate the constraint
-	passed, err := parsed.Evaluate(actual)
-	if err != nil {
-		cv.Status = ConstraintStatusFailed
-		cv.Message = fmt.Sprintf("evaluation failed: %v", err)
-		slog.Debug("constraint evaluation failed",
-			"name", constraint.Name,
-			"expected", constraint.Value,
-			"actual", actual,
-			"error", err)
-		return cv
-	}
-
-	if passed {
-		cv.Status = ConstraintStatusPassed
-		slog.Debug("constraint passed",
-			"name", constraint.Name,
-			"expected", constraint.Value,
-			"actual", actual)
-	} else {
-		cv.Status = ConstraintStatusFailed
-		cv.Message = fmt.Sprintf("expected %s, got %s", constraint.Value, actual)
-		slog.Debug("constraint failed",
-			"name", constraint.Name,
-			"expected", constraint.Value,
-			"actual", actual)
-	}
-
-	return cv
+	return results
 }
 
-// printDetectedCriteria prints detected criteria based on the constraint path and value.
-func printDetectedCriteria(path, value string) {
-	switch path {
-	case "K8s.server.version":
-		slog.Info("detected criteria", "service", value)
-	case "GPU.smi.gpu.model":
-		slog.Info("detected criteria", "accelerator", value)
-	case "OS.release.ID":
-		slog.Info("detected criteria", "os", value)
-	case "OS.release.VERSION_ID":
-		slog.Info("detected criteria", "os_version", value)
+func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, reason string) *PhaseResult {
+	builder := ctrf.NewBuilder("aicr", v.Version, string(phase))
+	for _, entry := range cat.ForPhase(string(phase)) {
+		builder.AddSkipped(entry.Name, entry.Phase, reason)
 	}
+	report := builder.Build()
+
+	return &PhaseResult{
+		Phase:  phase,
+		Status: ctrf.StatusSkipped,
+		Report: report,
+	}
+}
+
+// ensureDataConfigMaps creates snapshot and recipe ConfigMaps for this run.
+func (v *Validator) ensureDataConfigMaps(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	snap *snapshotter.Snapshot,
+	recipeResult *recipe.RecipeResult,
+) error {
+
+	snapshotYAML, err := yaml.Marshal(snap)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
+	}
+
+	recipeYAML, err := yaml.Marshal(recipeResult)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
+	}
+
+	snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
+	recipeCMName := fmt.Sprintf("aicr-recipe-%s", v.RunID)
+
+	for _, cm := range []struct {
+		name string
+		key  string
+		data string
+	}{
+		{snapshotCMName, "snapshot.yaml", string(snapshotYAML)},
+		{recipeCMName, "recipe.yaml", string(recipeYAML)},
+	} {
+		configMap := &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      cm.name,
+				Namespace: v.Namespace,
+				Labels: map[string]string{
+					labels.Name:      labels.ValueAICR,
+					labels.Component: labels.ValueValidation,
+					labels.ManagedBy: labels.ValueAICR,
+					labels.RunID:     v.RunID,
+				},
+			},
+			Data: map[string]string{
+				cm.key: cm.data,
+			},
+		}
+
+		_, createErr := clientset.CoreV1().ConfigMaps(v.Namespace).Create(ctx, configMap, metav1.CreateOptions{})
+		if createErr != nil && !apierrors.IsAlreadyExists(createErr) {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to create ConfigMap %s", cm.name), createErr)
+		}
+		if apierrors.IsAlreadyExists(createErr) {
+			_, updateErr := clientset.CoreV1().ConfigMaps(v.Namespace).Update(ctx, configMap, metav1.UpdateOptions{})
+			if updateErr != nil {
+				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to update ConfigMap %s", cm.name), updateErr)
+			}
+		}
+	}
+
+	slog.Debug("data ConfigMaps ensured", "runID", v.RunID)
+	return nil
+}
+
+// cleanupDataConfigMaps removes snapshot and recipe ConfigMaps for this run.
+func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kubernetes.Interface) {
+	for _, name := range []string{
+		fmt.Sprintf("aicr-snapshot-%s", v.RunID),
+		fmt.Sprintf("aicr-recipe-%s", v.RunID),
+	} {
+		err := clientset.CoreV1().ConfigMaps(v.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			slog.Warn("failed to delete ConfigMap", "name", name, "error", err)
+		}
+	}
+
+	// Also cleanup CTRF ConfigMaps
+	for _, phase := range PhaseOrder {
+		if err := ctrf.DeleteCTRFConfigMap(ctx, clientset, v.Namespace, v.RunID, string(phase)); err != nil {
+			slog.Warn("failed to delete CTRF ConfigMap", "phase", phase, "error", err)
+		}
+	}
+}
+
+// ensureNamespace creates the namespace if it does not exist.
+// Uses create-or-ignore since namespaces are immutable.
+func ensureNamespace(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: namespace,
+			Labels: map[string]string{
+				labels.Name:      labels.ValueAICR,
+				labels.Component: labels.ValueValidation,
+				labels.ManagedBy: labels.ValueAICR,
+			},
+		},
+	}
+	_, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	return nil
+}
+
+func generateRunID() string {
+	timestamp := time.Now().Format("20060102-150405")
+	randomBytes := make([]byte, 8)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return timestamp
+	}
+	return fmt.Sprintf("%s-%s", timestamp, hex.EncodeToString(randomBytes))
 }

@@ -35,7 +35,7 @@ const (
 	name                   = "aicr"
 	versionDefault         = "dev"
 	functionalCategoryName = "Functional"
-	agentImageBase         = "ghcr.io/nvidia/aicr-validator"
+	agentImageBase         = "ghcr.io/nvidia/aicr"
 )
 
 // defaultAgentImage returns the agent container image reference matching the

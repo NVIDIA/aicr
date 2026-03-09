@@ -316,7 +316,7 @@ spec:
 
       containers:
       - name: aicr
-        image: ghcr.io/nvidia/aicr-validator:latest
+        image: ghcr.io/nvidia/aicr:latest
         imagePullPolicy: IfNotPresent
 
         command:

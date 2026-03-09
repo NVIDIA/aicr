@@ -51,7 +51,7 @@ spec:
       manifestFiles:
         - components/skyhook-customizations/manifests/tuning.yaml
       overrides:
-        service: aws
+        service: eks
         accelerator: h100
         intent: multiNodeTraining
       dependencyRefs:
