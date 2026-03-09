@@ -194,35 +194,51 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 	return snap, source, nil
 }
 
+// validationConfig holds all parameters for a validation run.
+type validationConfig struct {
+	// Input
+	phases []validator.Phase
+
+	// Output
+	output    string
+	outFormat serializer.Format
+
+	// Validator deployment
+	validationNamespace string
+	cleanup             bool
+	imagePullSecrets    []string
+	noCluster           bool
+
+	// Scheduling
+	tolerations []corev1.Toleration
+
+	// Behavior
+	failOnError bool
+
+	// Evidence
+	evidenceDir string
+}
+
 // runValidation runs validation using the container-per-validator engine.
 func runValidation(
 	ctx context.Context,
 	rec *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
-	phases []validator.Phase,
-	output string,
-	outFormat serializer.Format,
-	failOnError bool,
-	validationNamespace string,
-	cleanup bool,
-	imagePullSecrets []string,
-	noCluster bool,
-	tolerations []corev1.Toleration,
-	evidenceDir string,
+	cfg validationConfig,
 ) error {
 
-	slog.Info("running validation", "phases", phases)
+	slog.Info("running validation", "phases", cfg.phases)
 
 	v := validator.New(
 		validator.WithVersion(version),
-		validator.WithNamespace(validationNamespace),
-		validator.WithCleanup(cleanup),
-		validator.WithImagePullSecrets(imagePullSecrets),
-		validator.WithNoCluster(noCluster),
-		validator.WithTolerations(tolerations),
+		validator.WithNamespace(cfg.validationNamespace),
+		validator.WithCleanup(cfg.cleanup),
+		validator.WithImagePullSecrets(cfg.imagePullSecrets),
+		validator.WithNoCluster(cfg.noCluster),
+		validator.WithTolerations(cfg.tolerations),
 	)
 
-	results, err := v.ValidatePhases(ctx, phases, rec, snap)
+	results, err := v.ValidatePhases(ctx, cfg.phases, rec, snap)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}
@@ -235,7 +251,7 @@ func runValidation(
 	combined := ctrf.MergeReports("aicr", version, reports)
 
 	// Serialize combined report
-	ser, serErr := serializer.NewFileWriterOrStdout(outFormat, output)
+	ser, serErr := serializer.NewFileWriterOrStdout(cfg.outFormat, cfg.output)
 	if serErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", serErr)
 	}
@@ -264,28 +280,28 @@ func runValidation(
 	}
 
 	// If cleanup is disabled, provide helpful debugging info
-	if !cleanup {
+	if !cfg.cleanup {
 		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
-			"namespace", validationNamespace,
+			"namespace", cfg.validationNamespace,
 			"runID", v.RunID)
-		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + validationNamespace)
-		slog.Info("to list Jobs: kubectl get jobs -n " + validationNamespace)
-		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + validationNamespace)
+		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + cfg.validationNamespace)
+		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
+		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
 	}
 
 	// Generate conformance evidence if requested.
-	if evidenceDir != "" {
+	if cfg.evidenceDir != "" {
 		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, 30*time.Second) //nolint:mnd // Evidence rendering is fast, 30s is generous
 		defer evidenceCancel()
 
-		renderer := evidence.New(evidence.WithOutputDir(evidenceDir))
+		renderer := evidence.New(evidence.WithOutputDir(cfg.evidenceDir))
 		if renderErr := renderer.Render(evidenceCtx, combined); renderErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", renderErr)
 		}
-		slog.Info("conformance evidence written", "dir", evidenceDir)
+		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
 	}
 
-	if failOnError && anyFailed {
+	if cfg.failOnError && anyFailed {
 		return errors.New(errors.ErrCodeInternal, "validation failed: one or more phases did not pass")
 	}
 
@@ -531,7 +547,18 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
-			return runValidation(ctx, rec, snap, phases, cmd.String("output"), serializer.FormatJSON, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, evidenceDir)
+			return runValidation(ctx, rec, snap, validationConfig{
+				phases:              phases,
+				output:              cmd.String("output"),
+				outFormat:           serializer.FormatJSON,
+				failOnError:         failOnError,
+				validationNamespace: validationNamespace,
+				cleanup:             cmd.Bool("cleanup"),
+				imagePullSecrets:    cmd.StringSlice("image-pull-secret"),
+				noCluster:           cmd.Bool("no-cluster"),
+				tolerations:         tolerations,
+				evidenceDir:         evidenceDir,
+			})
 		},
 	}
 }
