@@ -22,38 +22,45 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Common measurement keys exported for consistency and type safety.
+// Measurement keys used by external packages.
 const (
 	// Kubernetes measurement keys
-	KeyVersion     = "version"
-	KeyNodes       = "nodes"
-	KeyPods        = "pods"
-	KeyNamespace   = "namespace"
-	KeyClusterName = "cluster-name"
-	KeyReady       = "ready"
+	KeyVersion = "version"
 
 	// GPU measurement keys
 	KeyGPUDriver = "driver"
 	KeyGPUModel  = "model"
 	KeyGPUCount  = "gpu-count"
-	KeyGPUMemory = "memory"
-	KeyGPUTemp   = "temperature"
-	KeyGPUPower  = "power"
-	KeyGPUUUID   = "uuid"
+)
+
+// Internal measurement keys used only within this package.
+const (
+	// Kubernetes measurement keys
+	keyNodes       = "nodes"
+	keyPods        = "pods"
+	keyNamespace   = "namespace"
+	keyClusterName = "cluster-name"
+	keyReady       = "ready"
+
+	// GPU measurement keys
+	keyGPUMemory = "memory"
+	keyGPUTemp   = "temperature"
+	keyGPUPower  = "power"
+	keyGPUUUID   = "uuid"
 
 	// OS measurement keys
-	KeyOSName    = "name"
-	KeyOSVersion = "os-version"
-	KeyKernel    = "kernel"
-	KeyArch      = "architecture"
-	KeyHostname  = "hostname"
+	keyOSName    = "name"
+	keyOSVersion = "os-version"
+	keyKernel    = "kernel"
+	keyArch      = "architecture"
+	keyHostname  = "hostname"
 
 	// SystemD measurement keys
-	KeyServiceName   = "service-name"
-	KeyServiceState  = "state"
-	KeyServiceStatus = "status"
-	KeyEnabled       = "enabled"
-	KeyActive        = "active"
+	keyServiceName   = "service-name"
+	keyServiceState  = "state"
+	keyServiceStatus = "status"
+	keyEnabled       = "enabled"
+	keyActive        = "active"
 )
 
 // Type represents the category of a measurement (e.g., Kubernetes, GPU, OS, SystemD).
@@ -227,10 +234,10 @@ func ToReading(v any) Reading {
 	}
 }
 
-// ToReadingWithType converts a value to a Reading and returns whether the conversion
+// toReadingWithType converts a value to a Reading and returns whether the conversion
 // was lossy (i.e., converted to string via fmt.Sprintf).
 // This allows callers to detect if unexpected types were encountered.
-func ToReadingWithType(v any) (Reading, bool) {
+func toReadingWithType(v any) (Reading, bool) {
 	switch val := v.(type) {
 	case int:
 		return Int(val), true
@@ -296,14 +303,14 @@ func (m *Measurement) GetSubtype(name string) *Subtype {
 	return nil
 }
 
-// HasSubtype checks if a subtype with the given name exists.
-func (m *Measurement) HasSubtype(name string) bool {
+// hasSubtype checks if a subtype with the given name exists.
+func (m *Measurement) hasSubtype(name string) bool {
 	return m.GetSubtype(name) != nil
 }
 
-// GetOrCreateSubtype retrieves a subtype by name, creating it if it doesn't exist.
+// getOrCreateSubtype retrieves a subtype by name, creating it if it doesn't exist.
 // This simplifies dynamic measurement building by avoiding manual check-and-append logic.
-func (m *Measurement) GetOrCreateSubtype(name string) *Subtype {
+func (m *Measurement) getOrCreateSubtype(name string) *Subtype {
 	if st := m.GetSubtype(name); st != nil {
 		return st
 	}
@@ -317,8 +324,8 @@ func (m *Measurement) GetOrCreateSubtype(name string) *Subtype {
 	return &m.Subtypes[len(m.Subtypes)-1]
 }
 
-// SubtypeNames returns all subtype names.
-func (m *Measurement) SubtypeNames() []string {
+// subtypeNames returns all subtype names.
+func (m *Measurement) subtypeNames() []string {
 	names := make([]string, len(m.Subtypes))
 	for i, st := range m.Subtypes {
 		names[i] = st.Name
@@ -380,8 +387,8 @@ func (st *Subtype) Get(key string) Reading {
 	return st.Data[key]
 }
 
-// Keys returns all keys in the subtype data.
-func (st *Subtype) Keys() []string {
+// keys returns all keys in the subtype data.
+func (st *Subtype) keys() []string {
 	keys := make([]string, 0, len(st.Data))
 	for k := range st.Data {
 		keys = append(keys, k)
@@ -419,8 +426,8 @@ func (st *Subtype) GetInt64(key string) (int64, error) {
 	}
 }
 
-// GetUint64 attempts to retrieve a uint64 value, returning an error if not found or wrong type.
-func (st *Subtype) GetUint64(key string) (uint64, error) {
+// getUint64 attempts to retrieve a uint64 value, returning an error if not found or wrong type.
+func (st *Subtype) getUint64(key string) (uint64, error) {
 	reading := st.Data[key]
 	if reading == nil {
 		return 0, aicrerrors.New(aicrerrors.ErrCodeNotFound, fmt.Sprintf("key %q not found", key))
@@ -436,8 +443,8 @@ func (st *Subtype) GetUint64(key string) (uint64, error) {
 	}
 }
 
-// GetFloat64 attempts to retrieve a float64 value, returning an error if not found or wrong type.
-func (st *Subtype) GetFloat64(key string) (float64, error) {
+// getFloat64 attempts to retrieve a float64 value, returning an error if not found or wrong type.
+func (st *Subtype) getFloat64(key string) (float64, error) {
 	reading := st.Data[key]
 	if reading == nil {
 		return 0, aicrerrors.New(aicrerrors.ErrCodeNotFound, fmt.Sprintf("key %q not found", key))
@@ -449,8 +456,8 @@ func (st *Subtype) GetFloat64(key string) (float64, error) {
 	return v, nil
 }
 
-// GetBool attempts to retrieve a bool value, returning an error if not found or wrong type.
-func (st *Subtype) GetBool(key string) (bool, error) {
+// getBool attempts to retrieve a bool value, returning an error if not found or wrong type.
+func (st *Subtype) getBool(key string) (bool, error) {
 	reading := st.Data[key]
 	if reading == nil {
 		return false, aicrerrors.New(aicrerrors.ErrCodeNotFound, fmt.Sprintf("key %q not found", key))

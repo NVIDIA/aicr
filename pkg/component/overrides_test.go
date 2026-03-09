@@ -1485,7 +1485,7 @@ func TestSetTolerationsAtPath(t *testing.T) {
 	})
 }
 
-func TestNodeSelectorToMatchExpressions(t *testing.T) {
+func Test_nodeSelectorToMatchExpressions(t *testing.T) {
 	tests := []struct {
 		name         string
 		nodeSelector map[string]string
@@ -1575,7 +1575,7 @@ func TestNodeSelectorToMatchExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := NodeSelectorToMatchExpressions(tt.nodeSelector)
+			result := nodeSelectorToMatchExpressions(tt.nodeSelector)
 			tt.verify(t, result)
 		})
 	}

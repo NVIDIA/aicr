@@ -26,13 +26,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/server"
 )
 
-// DefaultRecipeCacheTTL is the default cache duration for recipe responses.
-// Exported for backwards compatibility; prefer using defaults.RecipeCacheTTL.
-const DefaultRecipeCacheTTL = defaults.RecipeCacheTTL
-
 var (
 	// recipeCacheTTL can be overridden for testing or custom configurations
-	recipeCacheTTL = DefaultRecipeCacheTTL
+	recipeCacheTTL = defaults.RecipeCacheTTL
 )
 
 // HandleRecipes processes recipe requests using the criteria-based system.

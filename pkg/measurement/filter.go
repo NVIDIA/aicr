@@ -41,14 +41,14 @@ func FilterOut(readings map[string]Reading, keys []string) map[string]Reading {
 	return result
 }
 
-// FilterIn returns a new map with only keys that match the provided patterns.
+// filterIn returns a new map with only keys that match the provided patterns.
 // This is the complement of FilterOut.
 // Supports the same wildcard patterns as FilterOut:
 //   - "prefix*" matches keys starting with "prefix"
 //   - "*suffix" matches keys ending with "suffix"
 //   - "*contains*" matches keys containing "contains"
 //   - "exact" matches keys exactly
-func FilterIn(readings map[string]Reading, keys []string) map[string]Reading {
+func filterIn(readings map[string]Reading, keys []string) map[string]Reading {
 	result := make(map[string]Reading)
 
 	for key, value := range readings {

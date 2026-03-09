@@ -60,7 +60,7 @@ func FormatFromPath(filePath string) Format {
 // It supports reading from any io.Reader source including files, strings, and HTTP responses.
 //
 // Resource Management:
-//   - Close must be called to release resources when using NewFileReader or NewFileReaderAuto
+//   - Close must be called to release resources when using NewFileReader or newFileReaderAuto
 //   - Safe to call Close multiple times (idempotent)
 //   - Close is a no-op for readers created with NewReader from non-closeable sources
 //
@@ -180,20 +180,12 @@ func NewFileReader(format Format, filePath string) (*Reader, error) {
 	}, nil
 }
 
-// NewFileReaderAuto creates a new Reader with automatic format detection.
+// newFileReaderAuto creates a new Reader with automatic format detection.
 // The format is determined from the file extension using FormatFromPath.
 //
 // This is a convenience wrapper around NewFileReader that auto-detects the format.
 // See NewFileReader for full documentation on supported paths, URLs, and resource management.
-//
-// Example:
-//
-//	reader, err := NewFileReaderAuto("config.yaml") // Auto-detects YAML format
-//	if err != nil { panic(err) }
-//	defer reader.Close()
-//	var config MyConfig
-//	err = reader.Deserialize(&config)
-func NewFileReaderAuto(filePath string) (*Reader, error) {
+func newFileReaderAuto(filePath string) (*Reader, error) {
 	format := FormatFromPath(filePath)
 	return NewFileReader(format, filePath)
 }
