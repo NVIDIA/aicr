@@ -18,7 +18,15 @@
 # Override release name prefix to avoid aicr-stack- prefix in resource names
 fullnameOverride: nvsentinel
 
-global: {}
+global:
+  # Tolerate all taints so GPU-node daemonsets (platform-connectors,
+  # gpu-health-monitor, syslog-health-monitor, metadata-collector) can
+  # schedule on nodes with NoSchedule/NoExecute taints set by ASG.
+  # Matches internal platform template behavior.
+  # TODO: remove once upstream NVSentinel chart defaults to this
+  # (see https://github.com/NVIDIA/NVSentinel/pull/1004)
+  tolerations:
+    - operator: Exists
 
 networkPolicy:
   enabled: false
