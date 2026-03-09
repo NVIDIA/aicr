@@ -53,7 +53,7 @@ func (r *Reader) Read(url string) ([]byte, error) {
 **Git Configuration:**
 - Commit to `main` branch (not `master`)
 - Do NOT add `Co-Authored-By` lines (organization policy)
-- Use DCO sign-off: `git commit -s -m "message"`
+- Use cryptographic commit signing: `git commit -S -m "message"` (use `-s` only when DCO sign-off is required for non-member contributions)
 
 **Decision Framework:**
 Choose solutions based on: testability, readability, consistency, simplicity, reversibility
@@ -178,7 +178,7 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
    make test
    ```
 
-→ See [Bundler Development Guide](docs/contributor/component.md) for full details
+→ See [Bundler Development Guide](../docs/contributor/component.md) for full details
 
 ### I Need To: Add New API Endpoint
 
@@ -800,7 +800,7 @@ jobs:
       - uses: ./.github/actions/cloud-run-deploy
         with:
           source_image: 'ghcr.io/nvidia/aicrd:${{ github.ref_name }}'
-          target_registry: 'us-docker.pkg.dev/eidosx/demo'
+          target_registry: 'us-docker.pkg.dev/example-gcp-project/demo'
 ```
 
 **Supply Chain Security:**

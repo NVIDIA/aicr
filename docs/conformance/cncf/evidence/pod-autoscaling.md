@@ -167,7 +167,7 @@ horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
 ```
 $ kubectl get pods -n hpa-test -o wide
 NAME                            READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-6d87f8c876-dk552   1/1     Running   0          58s   100.65.208.144   ip-100-64-147-149.ec2.internal   <none>           <none>
+gpu-workload-6d87f8c876-dk552   1/1     Running   0          58s   10.0.0.10   node-a.example.internal   <none>           <none>
 ```
 
 ## HPA Status
@@ -236,8 +236,8 @@ utilization.gpu [%], utilization.memory [%], power.draw [W]
 ```
 $ kubectl get pods -n hpa-test -o wide
 NAME                            READY   STATUS    RESTARTS   AGE    IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-6d87f8c876-64jdz   1/1     Running   0          30s    100.65.21.135    ip-100-64-147-149.ec2.internal   <none>           <none>
-gpu-workload-6d87f8c876-dk552   1/1     Running   0          2m1s   100.65.208.144   ip-100-64-147-149.ec2.internal   <none>           <none>
+gpu-workload-6d87f8c876-64jdz   1/1     Running   0          30s    10.0.0.10    node-a.example.internal   <none>           <none>
+gpu-workload-6d87f8c876-dk552   1/1     Running   0          2m1s   10.0.0.10   node-a.example.internal   <none>           <none>
 ```
 
 **Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold.

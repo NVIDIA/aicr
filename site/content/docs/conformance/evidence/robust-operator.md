@@ -195,8 +195,8 @@ status:
 ```
 $ kubectl get pods -n dynamo-workload -o wide
 NAME                                READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-vllm-agg-0-frontend-kdhdj           1/1     Running   0          45h   100.65.234.190   ip-100-64-83-166.ec2.internal    <none>           <none>
-vllm-agg-0-vllmdecodeworker-wmvrk   1/1     Running   0          45h   100.65.135.209   ip-100-64-147-149.ec2.internal   <none>           <none>
+vllm-agg-0-frontend-kdhdj           1/1     Running   0          45h   10.0.0.10   node-a.example.internal    <none>           <none>
+vllm-agg-0-vllmdecodeworker-wmvrk   1/1     Running   0          45h   10.0.0.10   node-a.example.internal   <none>           <none>
 ```
 
 ### Component Deployments

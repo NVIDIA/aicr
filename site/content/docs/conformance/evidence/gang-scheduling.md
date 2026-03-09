@@ -170,8 +170,8 @@ pg-gang-worker-1-0605b26c-1b90-4954-9e6f-8ec74c2713c2   10s
 ```
 $ kubectl get pods -n gang-scheduling-test -o wide
 NAME            READY   STATUS      RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-gang-worker-0   0/1     Completed   0          13s   100.65.208.144   ip-100-64-147-149.ec2.internal   <none>           <none>
-gang-worker-1   0/1     Completed   0          12s   100.65.218.207   ip-100-64-147-149.ec2.internal   <none>           <none>
+gang-worker-0   0/1     Completed   0          13s   10.0.0.10   node-a.example.internal   <none>           <none>
+gang-worker-1   0/1     Completed   0          12s   10.0.0.10   node-a.example.internal   <none>           <none>
 ```
 
 **gang-worker-0 logs**

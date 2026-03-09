@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.0] - 2026-03-09
+
+### Bug Fixes
+
+- *(bundle)* Fail fast when --attest is used without binary attestati…  by [@lockwobr](https://github.com/lockwobr)
+- *(skyhook-customizations)* Bump nvidia-setup and nvidia-tuned for fixes and add resource to kernel setup  by [@ayuskauskas](https://github.com/ayuskauskas)
+
+### New Features
+
+- *(validation)* Container-per-validator execution engine  by [@lalitadithya](https://github.com/lalitadithya)
+- Move to latest NVSentinel  by [@lalitadithya](https://github.com/lalitadithya)
+
+### Other Tasks
+
+- *(demos)* Fix hardcoded version and inconsistent headers in valid.md by [@mchmarny](https://github.com/mchmarny)
+- Remove token for auth by [@mchmarny](https://github.com/mchmarny)
+- Upgraded deps by [@mchmarny](https://github.com/mchmarny)
+- Remove report by [@mchmarny](https://github.com/mchmarny)
+- Remove NV registry from examples by [@mchmarny](https://github.com/mchmarny)
+- Remove nv data example by [@mchmarny](https://github.com/mchmarny)
+- Remove snapshots by [@mchmarny](https://github.com/mchmarny)
+- Removed scaffolding script by [@mchmarny](https://github.com/mchmarny)
+- Code review fixes — dead code, error wrapping, deduplication  by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.9.12] - 2026-03-08
 
 ### Bug Fixes

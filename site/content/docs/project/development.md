@@ -520,7 +520,7 @@ Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates
 | `make kwok-status` | Show cluster and node status |
 | `make kwok-cluster-delete` | Delete cluster |
 
-See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troubleshooting.
+See [KWOK Guide](https://github.com/NVIDIA/aicr/blob/main/kwok/README.md) for adding recipes, profiles, and troubleshooting.
 
 
 ## Make Targets Reference
@@ -661,7 +661,7 @@ make dev-reset
 
 For detailed information on adding validation checks and constraint validators, see:
 
-**[pkg/validator/checks/README.md](../pkg/validator/checks/README.md)**
+**[Validator Development Guide](/docs/contributor/validations/)**
 
 This comprehensive guide covers:
 - Architecture overview (Job-based validation, test registration framework)

@@ -29,7 +29,7 @@ Every release must pass these automated gates before artifacts are published:
 - Unit tests with race detector
 - golangci-lint + yamllint
 - License header verification
-- Trivy vulnerability scan
+- Vulnerability scans (Trivy in release workflows, Grype in `make scan`)
 - E2E tests on Kind cluster
 
 If any gate fails, the release pipeline stops. Fix forward on `main` and cut a new tag.
@@ -148,7 +148,7 @@ sha256sum -c checksums.txt --ignore-missing
 
 > **Note**: Demonstration only — not a production service. Self-host `aicrd` for production use. See [API Server Documentation](docs/contributor/api-server.md).
 
-The `aicrd` API server demo deploys to Google Cloud Run on successful release (project: `eidosx`, region: `us-west1`, auth: Workload Identity Federation).
+The `aicrd` API server demo deploys to Google Cloud Run on successful release (region: `us-west1`, auth: Workload Identity Federation). Project-specific details are managed in CI configuration.
 
 ## Troubleshooting
 

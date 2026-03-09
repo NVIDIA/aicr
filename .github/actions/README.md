@@ -196,13 +196,13 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 ```yaml
 - uses: ./.github/actions/cloud-run-deploy
   with:
-    project_id: 'eidosx'
+    project_id: 'example-gcp-project'
     workload_identity_provider: 'projects/.../providers/github-actions-provider'
-    service_account: 'github-actions@eidosx.iam.gserviceaccount.com'
+    service_account: 'github-actions@example-gcp-project.iam.gserviceaccount.com'
     region: 'us-west1'
     service: 'api'
     source_image: 'ghcr.io/nvidia/aicrd:v1.0.0'
-    target_registry: 'us-docker.pkg.dev/eidosx/demo'
+    target_registry: 'us-docker.pkg.dev/example-gcp-project/demo'
     image_name: 'aicrd'
     ghcr_token: ${{ github.token }}
 ```

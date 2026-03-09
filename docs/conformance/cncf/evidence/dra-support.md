@@ -42,8 +42,8 @@ vfio.gpu.nvidia.com                         44h
 ```
 $ kubectl get pods -n nvidia-dra-driver -o wide
 NAME                                               READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-nvidia-dra-driver-gpu-controller-9d69fbdcb-z27mn   1/1     Running   0          44h   100.64.5.27      ip-100-64-4-149.ec2.internal     <none>           <none>
-nvidia-dra-driver-gpu-kubelet-plugin-bdmdm         2/2     Running   0          44h   100.65.180.246   ip-100-64-147-149.ec2.internal   <none>           <none>
+nvidia-dra-driver-gpu-controller-9d69fbdcb-z27mn   1/1     Running   0          44h   10.0.0.10      node-a.example.internal     <none>           <none>
+nvidia-dra-driver-gpu-kubelet-plugin-bdmdm         2/2     Running   0          44h   10.0.0.10   node-a.example.internal   <none>           <none>
 ```
 
 ## Device Advertisement (ResourceSlices)
@@ -52,8 +52,8 @@ nvidia-dra-driver-gpu-kubelet-plugin-bdmdm         2/2     Running   0          
 ```
 $ kubectl get resourceslices
 NAME                                                             NODE                             DRIVER                      POOL                             AGE
-ip-100-64-147-149.ec2.internal-compute-domain.nvidia.com-bbg8t   ip-100-64-147-149.ec2.internal   compute-domain.nvidia.com   ip-100-64-147-149.ec2.internal   44h
-ip-100-64-147-149.ec2.internal-gpu.nvidia.com-sgw47              ip-100-64-147-149.ec2.internal   gpu.nvidia.com              ip-100-64-147-149.ec2.internal   44h
+node-a.example.internal-compute-domain.nvidia.com-bbg8t   node-a.example.internal   compute-domain.nvidia.com   node-a.example.internal   44h
+node-a.example.internal-gpu.nvidia.com-sgw47              node-a.example.internal   gpu.nvidia.com              node-a.example.internal   44h
 ```
 
 ## GPU Allocation Test
@@ -144,7 +144,7 @@ gpu-claim   pending   11s
 ```
 $ kubectl get pod dra-gpu-test -n dra-test -o wide
 NAME           READY   STATUS      RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-dra-gpu-test   0/1     Completed   0          11s   100.65.57.124   ip-100-64-147-149.ec2.internal   <none>           <none>
+dra-gpu-test   0/1     Completed   0          11s   10.0.0.10   node-a.example.internal   <none>           <none>
 ```
 
 **Pod logs**

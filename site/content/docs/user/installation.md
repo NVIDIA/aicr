@@ -22,21 +22,17 @@ This guide describes how to install the AI Cluster Runtime (AICR) CLI tool (`aic
 
 Install the latest version using the installation script:
 
-> Note: Temporally, while the repo is private, make sure to include your GitHub token first:
-
 ```shell
-curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 
 To install to a custom directory instead of the default `/usr/local/bin`:
 
 ```shell
-curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/bin
+curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/bin
 ```
 
-You can generate a personal access token at [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens). The token needs `repo` scope for private repository access.
+Optional: if you hit GitHub API rate limits, set `GITHUB_TOKEN` before running the install command. No special repository scope is required for public releases.
 
 This script:
 - Detects your OS and architecture automatically
