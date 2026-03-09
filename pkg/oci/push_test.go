@@ -131,7 +131,7 @@ func packageToOCILayout(t *testing.T, ctx context.Context, sourceDir, tag string
 	packOpts := oras.PackManifestOptions{
 		Layers: []ociv1.Descriptor{layerDesc},
 	}
-	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, ArtifactType, packOpts)
+	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, artifactType, packOpts)
 	if err != nil {
 		t.Fatalf("Failed to pack manifest: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestPushResult_Fields(t *testing.T) {
 	}
 }
 
-func TestValidateRegistryReference(t *testing.T) {
+func TestValidateRegistryReferenceFormat(t *testing.T) {
 	tests := []struct {
 		name       string
 		registry   string
@@ -310,9 +310,9 @@ func TestValidateRegistryReference(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRegistryReference(tt.registry, tt.repository)
+			err := validateRegistryReference(tt.registry, tt.repository)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateRegistryReference() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("validateRegistryReference() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -477,8 +477,8 @@ func TestOCIPackagingIntegration(t *testing.T) {
 	}
 
 	// Verify artifact type matches what Package() uses
-	if manifest.ArtifactType != ArtifactType {
-		t.Errorf("Manifest ArtifactType = %q, want %q", manifest.ArtifactType, ArtifactType)
+	if manifest.ArtifactType != artifactType {
+		t.Errorf("Manifest artifactType = %q, want %q", manifest.ArtifactType, artifactType)
 	}
 
 	// Verify we have exactly one layer
@@ -570,8 +570,8 @@ func TestOCIArtifactStructure(t *testing.T) {
 	}
 
 	// Verify artifact type
-	if manifest.ArtifactType != ArtifactType {
-		t.Errorf("Manifest ArtifactType = %q, want %q", manifest.ArtifactType, ArtifactType)
+	if manifest.ArtifactType != artifactType {
+		t.Errorf("Manifest artifactType = %q, want %q", manifest.ArtifactType, artifactType)
 	}
 
 	// Verify we have exactly one layer
@@ -650,10 +650,10 @@ func TestOCIReproducibleBuild(t *testing.T) {
 			Layers: []ociv1.Descriptor{layerDesc},
 			// Use fixed timestamp for reproducible manifest
 			ManifestAnnotations: map[string]string{
-				ociv1.AnnotationCreated: ReproducibleTimestamp,
+				ociv1.AnnotationCreated: reproducibleTimestamp,
 			},
 		}
-		manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, ArtifactType, packOpts)
+		manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, artifactType, packOpts)
 		if err != nil {
 			_ = fs.Close()
 			t.Fatalf("Iteration %d: Failed to pack manifest: %v", i, err)
@@ -1021,7 +1021,7 @@ func TestPushFromStore_MorePaths(t *testing.T) {
 func TestPackage_MorePaths(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("with ReproducibleTimestamp annotation", func(t *testing.T) {
+	t.Run("with reproducibleTimestamp annotation", func(t *testing.T) {
 		sourceDir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(sourceDir, "test.yaml"), []byte("test: data"), 0o644); err != nil {
 			t.Fatalf("Failed to create test file: %v", err)

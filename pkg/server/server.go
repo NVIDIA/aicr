@@ -37,7 +37,7 @@ import (
 // Server represents the HTTP server for handling API requests.
 // It includes rate limiting, health checks, metrics, and graceful shutdown capabilities.
 type Server struct {
-	config      *Config
+	config      *config
 	httpServer  *http.Server
 	rateLimiter *rate.Limiter
 	mu          sync.RWMutex
@@ -47,8 +47,8 @@ type Server struct {
 // Option is a functional option for configuring Server instances.
 type Option func(*Server)
 
-// WithConfig returns an Option that sets a custom configuration for the Server.
-func WithConfig(cfg *Config) Option {
+// withConfig returns an Option that sets a custom configuration for the Server.
+func withConfig(cfg *config) Option {
 	return func(s *Server) {
 		s.config = cfg
 	}

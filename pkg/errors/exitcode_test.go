@@ -110,30 +110,9 @@ func TestExitCodeFromErrorCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.code), func(t *testing.T) {
-			result := ExitCodeFromErrorCode(tt.code)
+			result := exitCodeFromErrorCode(tt.code)
 			if result != tt.expected {
-				t.Errorf("ExitCodeFromErrorCode(%s) = %d, want %d", tt.code, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestExitCodeFromSignal(t *testing.T) {
-	tests := []struct {
-		signal   int
-		expected int
-	}{
-		{2, 130},  // SIGINT
-		{15, 143}, // SIGTERM
-		{9, 137},  // SIGKILL
-		{1, 129},  // SIGHUP
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("signal_%d", tt.signal), func(t *testing.T) {
-			result := ExitCodeFromSignal(tt.signal)
-			if result != tt.expected {
-				t.Errorf("ExitCodeFromSignal(%d) = %d, want %d", tt.signal, result, tt.expected)
+				t.Errorf("exitCodeFromErrorCode(%s) = %d, want %d", tt.code, result, tt.expected)
 			}
 		})
 	}
@@ -146,12 +125,6 @@ func TestExitCodeConstants(t *testing.T) {
 	}
 	if ExitError != 1 {
 		t.Errorf("ExitError should be 1, got %d", ExitError)
-	}
-	if ExitFlagError != 125 {
-		t.Errorf("ExitFlagError should be 125 (Docker convention), got %d", ExitFlagError)
-	}
-	if ExitSignalBase != 128 {
-		t.Errorf("ExitSignalBase should be 128, got %d", ExitSignalBase)
 	}
 
 	// Verify application codes are in valid range (2-63)

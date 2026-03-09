@@ -55,9 +55,9 @@ func TestKind_String(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	h := New()
+	h := newHeader()
 	if h == nil {
-		t.Fatal("New() returned nil")
+		t.Fatal("newHeader() returned nil")
 	}
 	if h.Metadata == nil {
 		t.Error("Metadata should be initialized")
@@ -190,9 +190,7 @@ func TestConstants(t *testing.T) {
 	if KindRecipeResult != "RecipeResult" {
 		t.Errorf("KindRecipeResult = %v, want RecipeResult", KindRecipeResult)
 	}
-	if KindValidationResult != "ValidationResult" {
-		t.Errorf("KindValidationResult = %v, want ValidationResult", KindValidationResult)
-	}
+
 	// Note: API version constants moved to resource-specific packages
 	// - snapshotter.FullAPIVersion for Snapshot resources
 	// - recipe.FullAPIVersion for Recipe resources

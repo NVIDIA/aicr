@@ -60,7 +60,7 @@ type chartData struct {
 // and functions. Templates can use .Values, .Release, .Chart, and functions
 // like toYaml, nindent, toString, and default.
 func Render(content []byte, input RenderInput) ([]byte, error) {
-	tmpl, err := template.New("manifest").Funcs(HelmFuncMap()).Parse(string(content))
+	tmpl, err := template.New("manifest").Funcs(helmFuncMap()).Parse(string(content))
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +84,8 @@ func Render(content []byte, input RenderInput) ([]byte, error) {
 	return []byte(buf.String()), nil
 }
 
-// HelmFuncMap returns Helm-compatible template functions for manifest rendering.
-func HelmFuncMap() template.FuncMap {
+// helmFuncMap returns Helm-compatible template functions for manifest rendering.
+func helmFuncMap() template.FuncMap {
 	return template.FuncMap{
 		"toYaml": func(v any) string {
 			out, err := yaml.Marshal(v)

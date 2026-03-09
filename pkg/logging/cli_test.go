@@ -47,7 +47,7 @@ func Test_newCLILogger(t *testing.T) {
 
 func TestCLIHandler_InfoMessage(t *testing.T) {
 	var buf bytes.Buffer
-	handler := NewCLIHandler(&buf, slog.LevelInfo)
+	handler := newCLIHandler(&buf, slog.LevelInfo)
 	logger := slog.New(handler)
 
 	logger.Info("test info message")
@@ -67,7 +67,7 @@ func TestCLIHandler_InfoMessage(t *testing.T) {
 
 func TestCLIHandler_ErrorMessage(t *testing.T) {
 	var buf bytes.Buffer
-	handler := NewCLIHandler(&buf, slog.LevelInfo)
+	handler := newCLIHandler(&buf, slog.LevelInfo)
 	logger := slog.New(handler)
 
 	logger.Error("test error message")
@@ -138,7 +138,7 @@ func TestCLIHandler_LevelFiltering(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var buf bytes.Buffer
-			handler := NewCLIHandler(&buf, tt.handlerLevel)
+			handler := newCLIHandler(&buf, tt.handlerLevel)
 			logger := slog.New(handler)
 
 			tt.logFunc(logger)
@@ -155,7 +155,7 @@ func TestCLIHandler_LevelFiltering(t *testing.T) {
 
 func TestCLIHandler_IncludesAttributes(t *testing.T) {
 	var buf bytes.Buffer
-	handler := NewCLIHandler(&buf, slog.LevelInfo)
+	handler := newCLIHandler(&buf, slog.LevelInfo)
 	logger := slog.New(handler)
 
 	// Log with attributes
@@ -179,14 +179,14 @@ func TestCLIHandler_IncludesAttributes(t *testing.T) {
 
 func TestGetLogPrefix(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
-		t.Setenv(LogPrefixEnvVar, "")
+		t.Setenv(logPrefixEnvVar, "")
 		if got := getLogPrefix(); got != "cli" {
 			t.Errorf("getLogPrefix() = %q, want cli", got)
 		}
 	})
 
 	t.Run("custom", func(t *testing.T) {
-		t.Setenv(LogPrefixEnvVar, "test-prefix")
+		t.Setenv(logPrefixEnvVar, "test-prefix")
 		if got := getLogPrefix(); got != "test-prefix" {
 			t.Errorf("getLogPrefix() = %q, want test-prefix", got)
 		}
@@ -195,7 +195,7 @@ func TestGetLogPrefix(t *testing.T) {
 
 func TestCLIHandler_WithAttrs(t *testing.T) {
 	var buf bytes.Buffer
-	handler := NewCLIHandler(&buf, slog.LevelInfo)
+	handler := newCLIHandler(&buf, slog.LevelInfo)
 
 	// WithAttrs should return the same handler (no-op implementation)
 	result := handler.WithAttrs([]slog.Attr{slog.String("key", "value")})
@@ -212,7 +212,7 @@ func TestCLIHandler_WithAttrs(t *testing.T) {
 
 func TestCLIHandler_WithGroup(t *testing.T) {
 	var buf bytes.Buffer
-	handler := NewCLIHandler(&buf, slog.LevelInfo)
+	handler := newCLIHandler(&buf, slog.LevelInfo)
 
 	// WithGroup should return the same handler (no-op implementation)
 	result := handler.WithGroup("test-group")
