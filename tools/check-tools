@@ -114,7 +114,7 @@ get_tool_metadata() {
             echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
             ;;
         chainsaw)
-            echo "chainsaw:::chainsaw version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            echo "chainsaw:::chainsaw version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;
         # Optional tools (no version in .settings.yaml)
         docker)
