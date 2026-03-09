@@ -94,33 +94,10 @@ type AgentConfig struct {
 	MaxNodesPerEntry int
 }
 
-// DeployAndGetSnapshot deploys an agent to capture a snapshot and returns the Snapshot struct.
-// This is used by commands that need to capture a snapshot but also process the data
-// (e.g., validate command that needs to run validation on the captured snapshot).
-func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, error) {
-	if config == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "agent config is required")
-	}
-
-	slog.Debug("starting agent deployment for snapshot capture")
-
-	// Get Kubernetes client
-	var clientset k8sclient.Interface
-	var err error
-
-	if config.Kubeconfig != "" {
-		clientset, _, err = k8sclient.GetKubeClientWithConfig(config.Kubeconfig)
-	} else {
-		clientset, _, err = k8sclient.GetKubeClient()
-	}
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create Kubernetes client", err)
-	}
-
-	// Agent Job always writes to a ConfigMap internally.
-	agentOutput := fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, config.Namespace)
-
-	// Build agent configuration
+// deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
+// It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
+// and retrieves the snapshot data from the result ConfigMap.
+func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string) ([]byte, error) {
 	agentConfig := agent.Config{
 		Namespace:          config.Namespace,
 		ServiceAccountName: config.ServiceAccountName,
@@ -136,10 +113,8 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 		MaxNodesPerEntry:   config.MaxNodesPerEntry,
 	}
 
-	// Create deployer
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
-	// Ensure cleanup on error or success
 	//nolint:contextcheck // intentional: need fresh context for cleanup when parent is canceled
 	defer func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -156,14 +131,12 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 
 	slog.Info("deploying agent", slog.String("namespace", agentConfig.Namespace))
 
-	// Deploy RBAC and Job
 	if deployErr := deployer.Deploy(ctx); deployErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to deploy agent", deployErr)
 	}
 
 	slog.Info("agent deployed successfully")
 
-	// Wait for Job completion
 	timeout := config.Timeout
 	if timeout == 0 {
 		timeout = defaults.K8sJobCompletionTimeout
@@ -191,7 +164,6 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 	}()
 
 	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
-		// On failure, try to get pod logs to show what went wrong
 		if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
 			fmt.Fprintln(logWriter(), "--- agent logs ---")
 			fmt.Fprintln(logWriter(), logs)
@@ -202,14 +174,53 @@ func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, 
 
 	slog.Info("job completed successfully")
 
-	// Retrieve snapshot from ConfigMap
 	slog.Debug("retrieving snapshot from ConfigMap")
 	snapshotData, err := deployer.GetSnapshot(ctx)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
 	}
 
-	// Parse snapshot YAML into Snapshot struct
+	return snapshotData, nil
+}
+
+// getKubeClient returns a Kubernetes client, using the kubeconfig override if provided.
+func getKubeClient(kubeconfig string) (k8sclient.Interface, error) {
+	var clientset k8sclient.Interface
+	var err error
+
+	if kubeconfig != "" {
+		clientset, _, err = k8sclient.GetKubeClientWithConfig(kubeconfig)
+	} else {
+		clientset, _, err = k8sclient.GetKubeClient()
+	}
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create Kubernetes client", err)
+	}
+	return clientset, nil
+}
+
+// DeployAndGetSnapshot deploys an agent to capture a snapshot and returns the Snapshot struct.
+// This is used by commands that need to capture a snapshot but also process the data
+// (e.g., validate command that needs to run validation on the captured snapshot).
+func DeployAndGetSnapshot(ctx context.Context, config *AgentConfig) (*Snapshot, error) {
+	if config == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "agent config is required")
+	}
+
+	slog.Debug("starting agent deployment for snapshot capture")
+
+	clientset, err := getKubeClient(config.Kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+
+	agentOutput := fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, config.Namespace)
+
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput)
+	if err != nil {
+		return nil, err
+	}
+
 	var snap Snapshot
 	if err := yaml.Unmarshal(snapshotData, &snap); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse snapshot data", err)
@@ -357,17 +368,9 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 	slog.Debug("starting agent deployment")
 
-	// Get Kubernetes client
-	var clientset k8sclient.Interface
-	var err error
-
-	if n.AgentConfig.Kubeconfig != "" {
-		clientset, _, err = k8sclient.GetKubeClientWithConfig(n.AgentConfig.Kubeconfig)
-	} else {
-		clientset, _, err = k8sclient.GetKubeClient()
-	}
+	clientset, err := getKubeClient(n.AgentConfig.Kubeconfig)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create Kubernetes client", err)
+		return err
 	}
 
 	// The user's final output destination (file, stdout, or ConfigMap)
@@ -381,104 +384,9 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 		agentOutput = finalOutput
 	}
 
-	// Build agent configuration
-	agentConfig := agent.Config{
-		Namespace:          n.AgentConfig.Namespace,
-		ServiceAccountName: n.AgentConfig.ServiceAccountName,
-		JobName:            n.AgentConfig.JobName,
-		Image:              n.AgentConfig.Image,
-		ImagePullSecrets:   n.AgentConfig.ImagePullSecrets,
-		NodeSelector:       n.AgentConfig.NodeSelector,
-		Tolerations:        n.AgentConfig.Tolerations,
-		Output:             agentOutput,
-		Debug:              n.AgentConfig.Debug,
-		Privileged:         n.AgentConfig.Privileged,
-		RequireGPU:         n.AgentConfig.RequireGPU,
-		MaxNodesPerEntry:   n.AgentConfig.MaxNodesPerEntry,
-	}
-
-	// Create deployer
-	deployer := agent.NewDeployer(clientset, agentConfig)
-
-	// Ensure cleanup on error or success
-	//nolint:contextcheck // intentional: need fresh context for cleanup when parent is canceled
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		cleanupOpts := agent.CleanupOptions{Enabled: n.AgentConfig.Cleanup}
-		if cleanupErr := deployer.Cleanup(cleanupCtx, cleanupOpts); cleanupErr != nil {
-			slog.Warn("cleanup failed - resources may remain in cluster",
-				slog.String("error", cleanupErr.Error()),
-				slog.String("namespace", n.AgentConfig.Namespace),
-			)
-			slog.Warn("to manually clean up, run:",
-				slog.String("command", fmt.Sprintf(
-					"kubectl delete job/%s sa/%s role/%s rolebinding/%s -n %s && "+
-						"kubectl delete clusterrole/aicr-node-reader clusterrolebinding/aicr-node-reader",
-					n.AgentConfig.JobName,
-					n.AgentConfig.ServiceAccountName,
-					n.AgentConfig.ServiceAccountName,
-					n.AgentConfig.ServiceAccountName,
-					n.AgentConfig.Namespace,
-				)),
-			)
-		}
-	}()
-
-	slog.Info("deploying agent", slog.String("namespace", agentConfig.Namespace))
-
-	// Deploy RBAC and Job
-	if deployErr := deployer.Deploy(ctx); deployErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to deploy agent", deployErr)
-	}
-
-	slog.Info("agent deployed successfully")
-
-	// Wait for Job completion
-	timeout := n.AgentConfig.Timeout
-	if timeout == 0 {
-		timeout = defaults.K8sJobCompletionTimeout
-	}
-
-	slog.Info("waiting for Job completion",
-		slog.String("job", agentConfig.JobName),
-		slog.Duration("timeout", timeout))
-
-	// Stream logs in background while waiting for Job completion.
-	// If the pod completes before becoming "ready" (fast Jobs), log streaming
-	// is skipped — WaitForCompletion will still capture the result.
-	logCtx, cancelLogs := context.WithCancel(ctx)
-	defer cancelLogs()
-
-	go func() {
-		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
-			return
-		}
-		if streamErr := deployer.StreamLogs(logCtx, logWriter(), ""); streamErr != nil {
-			if logCtx.Err() == nil {
-				slog.Debug("log streaming ended", slog.String("reason", streamErr.Error()))
-			}
-		}
-	}()
-
-	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
-		// On failure, try to get pod logs to show what went wrong
-		if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
-			fmt.Fprintln(logWriter(), "--- agent logs ---")
-			fmt.Fprintln(logWriter(), logs)
-			fmt.Fprintln(logWriter(), "--- end logs ---")
-		}
-		return errors.Wrap(errors.ErrCodeInternal, "job failed", waitErr)
-	}
-
-	slog.Info("job completed successfully")
-
-	// Retrieve snapshot from ConfigMap
-	slog.Debug("retrieving snapshot from ConfigMap")
-	snapshotData, err := deployer.GetSnapshot(ctx)
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, n.AgentConfig, agentOutput)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
+		return err
 	}
 
 	// If template is specified, process the snapshot through the template

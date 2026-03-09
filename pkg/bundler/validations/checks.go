@@ -152,8 +152,8 @@ func checkConditions(recipeResult *recipe.RecipeResult, conditions map[string][]
 		// Check if actualValue matches any of the expected values (OR matching)
 		found := false
 		for _, expectedStr := range expectedValues {
-			// Use matchesCriteriaField for consistent matching logic
-			if matchesCriteriaField(actualValue, expectedStr) {
+			// Use recipe.MatchesCriteriaField for consistent matching logic
+			if recipe.MatchesCriteriaField(actualValue, expectedStr) {
 				found = true
 				break
 			}
@@ -164,21 +164,4 @@ func checkConditions(recipeResult *recipe.RecipeResult, conditions map[string][]
 	}
 
 	return true
-}
-
-// matchesCriteriaField implements matching for a single criteria field.
-// Reuses the logic from recipe/criteria.go for consistency.
-// Returns true if the actual value matches the expected value.
-// For validation conditions, we use simple equality matching (not asymmetric like recipe matching).
-func matchesCriteriaField(actualValue, expectedValue string) bool {
-	// Treat empty as "any" for consistency with criteria matching
-	expectedIsAny := expectedValue == "" || expectedValue == "any"
-
-	// If expected is "any", it matches any actual value
-	if expectedIsAny {
-		return true
-	}
-
-	// Expected has a specific value - actual must match exactly
-	return actualValue == expectedValue
 }

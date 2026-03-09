@@ -508,21 +508,6 @@ func cleanupDRATestResources(ctx context.Context, clientset kubernetes.Interface
 		ctx, run.noClaimPodName, metav1.DeleteOptions{}))
 }
 
-// waitForDeletion polls until a resource is gone (NotFound) or the context expires.
-func waitForDeletion(ctx context.Context, getFunc func() error) {
-	pollCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
-	defer cancel()
-	_ = wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
-		func(ctx context.Context) (bool, error) {
-			err := getFunc()
-			if k8serrors.IsNotFound(err) {
-				return true, nil
-			}
-			return false, nil
-		},
-	)
-}
-
 // buildDRATestPod returns the Pod spec for the DRA GPU allocation test.
 func buildDRATestPod(run *draTestRun) *corev1.Pod {
 	return &corev1.Pod{

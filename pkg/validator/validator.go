@@ -80,6 +80,68 @@ func New(opts ...Option) *Validator {
 	return v
 }
 
+// clusterState holds shared state from cluster preparation, used by both
+// ValidatePhases and ValidatePhase.
+type clusterState struct {
+	clientset kubernetes.Interface
+	factory   informers.SharedInformerFactory
+	stopCh    chan struct{}
+}
+
+// prepareCluster sets up namespace, RBAC, data ConfigMaps, and informer factory.
+// The caller must close stopCh and handle cleanup deferrals.
+func (v *Validator) prepareCluster(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	snap *snapshotter.Snapshot,
+) (*clusterState, error) {
+
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+
+	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
+	}
+
+	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
+	}
+
+	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
+	}
+
+	factory := informers.NewSharedInformerFactoryWithOptions(
+		clientset, 0, informers.WithNamespace(v.Namespace),
+	)
+	stopCh := make(chan struct{})
+	factory.Start(stopCh)
+
+	return &clusterState{
+		clientset: clientset,
+		factory:   factory,
+		stopCh:    stopCh,
+	}, nil
+}
+
+// deferClusterCleanup registers deferred cleanup for RBAC and data ConfigMaps.
+func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
+	if v.Cleanup {
+		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+		defer cancel()
+		if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
+			slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
+		}
+		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
+		cmCtx, cmCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+		defer cmCancel()
+		v.cleanupDataConfigMaps(cmCtx, clientset)
+	}
+}
+
 // ValidatePhases runs the specified phases sequentially. If a phase fails,
 // subsequent phases are skipped. Returns one PhaseResult per phase.
 // Pass nil or empty phases to run all phases.
@@ -112,52 +174,12 @@ func (v *Validator) ValidatePhases(
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
 	}
 
-	clientset, _, err := k8sclient.GetKubeClient()
+	cs, err := v.prepareCluster(ctx, recipeResult, snap)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+		return nil, err
 	}
-
-	// Ensure validation namespace exists before starting informers or creating RBAC.
-	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
-	}
-
-	// Shared informer factory scoped to the validation namespace.
-	// Started once and reused across all phases and deployers.
-	factory := informers.NewSharedInformerFactoryWithOptions(
-		clientset, 0, informers.WithNamespace(v.Namespace),
-	)
-	stopCh := make(chan struct{})
-	factory.Start(stopCh)
-	defer close(stopCh)
-
-	// RBAC: create once, cleanup at end
-	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
-	}
-	if v.Cleanup {
-		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-			defer cancel()
-			if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
-				slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
-			}
-		}()
-	}
-
-	// Data ConfigMaps: create once, cleanup at end
-	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
-	}
-	if v.Cleanup {
-		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-			defer cancel()
-			v.cleanupDataConfigMaps(cleanupCtx, clientset)
-		}()
-	}
+	defer close(cs.stopCh)
+	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
 	results := make([]*PhaseResult, 0, len(phases))
 	overallFailed := false
@@ -177,7 +199,7 @@ func (v *Validator) ValidatePhases(
 			continue
 		}
 
-		pr, phaseErr := v.runPhase(ctx, clientset, factory, cat, phase, recipeResult)
+		pr, phaseErr := v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, recipeResult)
 		if phaseErr != nil {
 			return results, phaseErr
 		}
@@ -209,49 +231,14 @@ func (v *Validator) ValidatePhase(
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
-	clientset, _, err := k8sclient.GetKubeClient()
+	cs, err := v.prepareCluster(ctx, recipeResult, snap)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+		return nil, err
 	}
+	defer close(cs.stopCh)
+	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
-	if nsErr := ensureNamespace(ctx, clientset, v.Namespace); nsErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure validation namespace", nsErr)
-	}
-
-	if rbacErr := job.EnsureRBAC(ctx, clientset, v.Namespace); rbacErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
-	}
-	if v.Cleanup {
-		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-			defer cancel()
-			if cleanupErr := job.CleanupRBAC(cleanupCtx, clientset, v.Namespace); cleanupErr != nil {
-				slog.Warn("failed to cleanup RBAC", "error", cleanupErr)
-			}
-		}()
-	}
-
-	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
-	}
-	if v.Cleanup {
-		//nolint:contextcheck // Fresh context: parent may be canceled during cleanup
-		defer func() {
-			cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
-			defer cancel()
-			v.cleanupDataConfigMaps(cleanupCtx, clientset)
-		}()
-	}
-
-	factory := informers.NewSharedInformerFactoryWithOptions(
-		clientset, 0, informers.WithNamespace(v.Namespace),
-	)
-	stopCh := make(chan struct{})
-	factory.Start(stopCh)
-	defer close(stopCh)
-
-	return v.runPhase(ctx, clientset, factory, cat, phase, recipeResult)
+	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, recipeResult)
 }
 
 // filterEntriesByRecipe returns only catalog entries that the recipe declares
