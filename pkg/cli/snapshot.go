@@ -121,9 +121,8 @@ func snapshotCmdFlags() []cli.Flag {
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
-			Name:     "cleanup",
-			Value:    true,
-			Usage:    "Remove Job and RBAC resources on completion",
+			Name:     "no-cleanup",
+			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
@@ -289,7 +288,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				NodeSelector:       nodeSelector,
 				Tolerations:        tolerations,
 				Timeout:            cmd.Duration("timeout"),
-				Cleanup:            cmd.Bool("cleanup"),
+				Cleanup:            !cmd.Bool("no-cleanup"),
 				Output:             tmplOpts.outputPath,
 				Debug:              cmd.Bool("debug"),
 				Privileged:         cmd.Bool("privileged"),

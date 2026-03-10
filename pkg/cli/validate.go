@@ -76,7 +76,7 @@ func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 		nodeSelector:       nodeSelector,
 		tolerations:        tolerations,
 		timeout:            cmd.Duration("timeout"),
-		cleanup:            cmd.Bool("cleanup"),
+		cleanup:            !cmd.Bool("no-cleanup"),
 		debug:              cmd.Bool("debug"),
 		requireGPU:         cmd.Bool("require-gpu"),
 	}, nil
@@ -394,9 +394,8 @@ func validateCmdFlags() []cli.Flag {
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
-			Name:     "cleanup",
-			Value:    true,
-			Usage:    "Remove Job and RBAC resources on completion",
+			Name:     "no-cleanup",
+			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
@@ -547,13 +546,20 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
+			noCleanup := cmd.Bool("no-cleanup")
+			if noCleanup {
+				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
+					"namespace", validationNamespace,
+					"binding", "aicr-validator")
+			}
+
 			return runValidation(ctx, rec, snap, validationConfig{
 				phases:              phases,
 				output:              cmd.String("output"),
 				outFormat:           serializer.FormatJSON,
 				failOnError:         failOnError,
 				validationNamespace: validationNamespace,
-				cleanup:             cmd.Bool("cleanup"),
+				cleanup:             !noCleanup,
 				imagePullSecrets:    cmd.StringSlice("image-pull-secret"),
 				noCluster:           cmd.Bool("no-cluster"),
 				tolerations:         tolerations,

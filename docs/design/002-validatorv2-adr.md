@@ -177,7 +177,7 @@ ValidateAll(ctx, recipe, snapshot)
 │   │   ├── WaitForCompletion(timeout + 30s buffer)
 │   │   ├── ExtractResult() — exit code, termination msg, stdout
 │   │   ├── Add to CTRF report
-│   │   └── CleanupJob() if --cleanup
+│   │   └── CleanupJob() unless --no-cleanup
 │   └── Write CTRF ConfigMap
 │
 ├── defer: CleanupRBAC()

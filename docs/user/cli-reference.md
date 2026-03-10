@@ -84,7 +84,7 @@ aicr snapshot [flags]
 | `--node-selector` | | string[] | | Node selector for agent scheduling (key=value, repeatable) |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
-| `--cleanup` | | bool | true | Delete Job and RBAC resources on completion. Use `--cleanup=false` to keep resources for debugging. |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
@@ -144,7 +144,7 @@ aicr snapshot \
   --toleration nvidia.com/gpu:NoSchedule \
   --timeout 10m \
   --output cm://gpu-operator/aicr-snapshot \
-  --cleanup
+  --no-cleanup
 
 # Custom template formatting
 aicr snapshot --template examples/templates/snapshot-template.md.tmpl
@@ -200,7 +200,7 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 3. **Waits for completion**: Monitors Job status with configurable timeout
 4. **Retrieves snapshot**: Reads snapshot from ConfigMap after Job completes
 5. **Writes output**: Saves snapshot to specified output destination
-6. **Cleanup**: Deletes Job and RBAC resources (use `--cleanup=false` to keep for debugging)
+6. **Cleanup**: Deletes Job and RBAC resources (use `--no-cleanup` to keep for debugging)
 
 **Benefits of agent deployment:**
 - Capture configuration from actual cluster nodes (not local machine)
