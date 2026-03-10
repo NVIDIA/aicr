@@ -70,6 +70,7 @@ func TestNodeCollector_CollectNodeWithFullDetails(t *testing.T) {
 		Status: corev1.NodeStatus{
 			NodeInfo: corev1.NodeSystemInfo{
 				ContainerRuntimeVersion: "containerd://1.7.2",
+				KubeletVersion:          "v1.28.0",
 				KernelVersion:           "5.15.0-91-generic",
 				OperatingSystem:         "linux",
 				OSImage:                 "Ubuntu 22.04.3 LTS",
@@ -94,6 +95,7 @@ func TestNodeCollector_CollectNodeWithFullDetails(t *testing.T) {
 	assert.Equal(t, "containerd://1.7.2", nodeData["container-runtime-id"].Any())
 	assert.Equal(t, "containerd", nodeData["container-runtime-name"].Any())
 	assert.Equal(t, "1.7.2", nodeData["container-runtime-version"].Any())
+	assert.Equal(t, "v1.28.0", nodeData["kubelet-version"].Any())
 	assert.Equal(t, "5.15.0-91-generic", nodeData["kernel-version"].Any())
 	assert.Equal(t, "linux", nodeData["operating-system"].Any())
 	assert.Equal(t, "Ubuntu 22.04.3 LTS", nodeData["os-image"].Any())
