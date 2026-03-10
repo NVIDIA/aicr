@@ -165,6 +165,8 @@ brews:
   - ids:
       - aicr
     repository:
+      owner: NVIDIA
+      name: homebrew-aicr
       git:
         url: "ssh://git@github.com/NVIDIA/homebrew-aicr.git"
         private_key: "{{ .Env.HOMEBREW_DEPLOY_KEY }}"
