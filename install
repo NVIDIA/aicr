@@ -127,24 +127,40 @@ download_release_asset() {
   [[ "$http_code" == "200" ]] || err "Failed to download $desc (HTTP $http_code): $url"
 }
 
-fetch_latest_release() {
-  local api_url="https://api.github.com/repos/${REPO}/releases/latest"
-  local response
+fetch_latest_version() {
+  local redirect_url version
 
   step "Fetching latest release from GitHub..."
-  response=$(github_api_curl "$api_url")
 
-  [[ -z "$response" ]] && err "Failed to fetch release information from GitHub API"
+  # Use the redirect from /releases/latest to extract the tag — no API call needed,
+  # so this works without GITHUB_TOKEN and is not subject to API rate limits.
+  redirect_url=$(curl -sI "https://github.com/${REPO}/releases/latest" | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
 
-  if grep -q "API rate limit exceeded" <<< "$response"; then
-    err "GitHub API rate limit exceeded. Set GITHUB_TOKEN to avoid rate limits, or try again later."
+  if [[ -z "$redirect_url" ]]; then
+    # Fallback to GitHub API (requires GITHUB_TOKEN if rate-limited)
+    local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    local response
+    response=$(github_api_curl "$api_url")
+
+    [[ -z "$response" ]] && err "Failed to fetch release information from GitHub"
+
+    if grep -q "API rate limit exceeded" <<< "$response"; then
+      err "GitHub API rate limit exceeded. Set GITHUB_TOKEN to avoid rate limits, or try again later."
+    fi
+
+    if grep -q "Not Found" <<< "$response"; then
+      err "Repository not found or no releases available."
+    fi
+
+    version=$(grep -m 1 '"tag_name"' <<< "$response" | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+  else
+    # Extract tag from redirect URL: https://github.com/NVIDIA/aicr/releases/tag/v1.2.3
+    version="${redirect_url##*/}"
   fi
 
-  if grep -q "Not Found" <<< "$response"; then
-    err "Repository not found or no releases available."
-  fi
+  [[ -z "$version" || "$version" == "null" ]] && err "Failed to determine latest version"
 
-  echo "$response"
+  echo "$version"
 }
 
 extract_version() {
@@ -203,10 +219,9 @@ main() {
   [[ $arch == "amd64" || $arch == "arm64" ]] || err "Unsupported architecture: $arch"
   has_tools "${REQUIRED_TOOLS[@]}"
   
-  # Fetch release information
-  local release_json archive_name
-  release_json=$(fetch_latest_release)
-  version=$(extract_version "$release_json")
+  # Fetch latest version (uses redirect, no API rate limit)
+  local archive_name
+  version=$(fetch_latest_version)
   archive_name=$(get_archive_name "$version" "$os" "$arch")
 
   msg ""
@@ -214,13 +229,13 @@ main() {
   msg "Version:  $version"
   msg ""
 
-  # Download archive and checksums
+  # Download archive and checksums using predictable GitHub release URLs
   temp_dir=$(mktemp -d)
   trap "rm -rf $temp_dir" EXIT
 
-  local archive_url checksum_url
-  archive_url=$(extract_asset_url "$release_json" "$archive_name")
-  checksum_url=$(extract_asset_url "$release_json" "$CHECKSUMS_FILE")
+  local base_url="https://github.com/${REPO}/releases/download/${version}"
+  local archive_url="${base_url}/${archive_name}"
+  local checksum_url="${base_url}/${CHECKSUMS_FILE}"
 
   download_release_asset "$archive_url" "${temp_dir}/${archive_name}" "$archive_name"
   download_release_asset "$checksum_url" "${temp_dir}/checksums.txt" "checksums"
