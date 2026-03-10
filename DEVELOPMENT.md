@@ -21,6 +21,11 @@ This guide covers project setup, architecture, development workflows, and toolin
 Set environment variable `AUTO_MODE=true` to avoid having to approve each tool install.
 
 ```bash
+# Handy alias for installing/upgrading aicr to ~/.local/bin
+alias aicrup='curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -- -d ~/.local/bin'
+```
+
+```bash
 # 1. Clone and setup
 git clone https://github.com/NVIDIA/aicr.git && cd aicr
 make tools-setup    # Install all required tools
