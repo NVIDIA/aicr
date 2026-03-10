@@ -13,13 +13,7 @@
 # limitations under the License.
 
 # GPU Operator Helm values
-# GKE-COS cluster configuration overrides
-#
-# Key differences from EKS:
-# - driver.enabled: false — GKE preinstalls NVIDIA drivers on COS nodes
-# - hostPaths.driverInstallDir: /home/kubernetes/bin/nvidia — COS driver path
-# - toolkit.installDir + RUNTIME_CONFIG_SOURCE — COS-specific toolkit config
-# - gdrcopy.enabled: false — not supported on COS (host-managed driver)
+# GKE-COS Training configuration overrides
 
 cdi:
   enabled: true
@@ -51,3 +45,9 @@ devicePlugin:
       value: "x"
     - name: DEVICE_LIST_STRATEGY
       value: cdi-cri,cdi-annotations,volume-mounts
+
+validator:
+  plugin:
+    env:
+      - name: WITH_WORKLOAD
+        value: "false"
