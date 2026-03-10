@@ -235,7 +235,7 @@ func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output)
 		}
 
 		// Open and copy file content
-		file, err := os.Open(path)
+		file, err := os.Open(filepath.Clean(path)) //nolint:gosec // G122: path from internal os.MkdirTemp, not user input
 		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to open file", err)
 		}
