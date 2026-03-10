@@ -1,0 +1,38 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gke-cos-training
+
+spec:
+  # Inherits from gke-cos recipe (GKE COS-specific settings)
+  base: gke-cos
+
+  criteria:
+    service: gke
+    os: cos
+    intent: training
+
+  # Training specific constraints for GKE workloads
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.30"
+
+  componentRefs:
+    # Training workloads use the GKE-COS training-optimized GPU Operator values
+    - name: gpu-operator
+      type: Helm
+      valuesFile: components/gpu-operator/values-gke-cos-training.yaml
