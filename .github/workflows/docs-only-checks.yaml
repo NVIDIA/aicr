@@ -1,0 +1,63 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Reusable workflow called by docs-only.yaml.
+# Job names here must match qualification.yaml exactly so that the
+# check names ("tests / Test", "tests / Lint", etc.) satisfy the
+# required status checks on documentation-only PRs.
+
+name: Qualification
+
+on:
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — tests not required"
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — lint not required"
+
+  cli-e2e:
+    name: CLI E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — CLI E2E not required"
+
+  e2e:
+    name: E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — E2E not required"
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — security scan not required"

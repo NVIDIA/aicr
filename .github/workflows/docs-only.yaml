@@ -1,0 +1,64 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Skip gate for documentation-only PRs.
+#
+# Required status checks (tests/*, analyze, malware-scan) use paths-ignore
+# to skip docs-only changes. When skipped, GitHub never receives a status,
+# blocking the PR. This workflow runs ONLY on docs-only changes and reports
+# success for each required check name so the PR can merge.
+#
+# The paths here are the inverse of the paths-ignore in on-push.yaml,
+# codeql.yaml, and vuln-scan.yaml. If a PR touches both code and docs,
+# the real workflows run (matching code paths) AND this workflow runs
+# (matching doc paths). Both report success — no conflict.
+#
+# Check name matching: required checks use the "<caller-job> / <called-job-name>"
+# format for reusable workflows. The on-push.yaml job key is "tests" and calls
+# qualification.yaml which has job names: Test, Lint, CLI E2E, E2E, Security Scan.
+# We replicate this by calling a local reusable workflow with matching job names.
+
+name: Docs Only Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '**.md'
+      - 'docs/**'
+      - 'site/**'
+      - 'LICENSE'
+
+permissions:
+  contents: read
+
+jobs:
+
+  tests:
+    uses: ./.github/workflows/docs-only-checks.yaml
+
+  # Required check: "analyze" (from codeql.yaml)
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — CodeQL analysis not required"
+
+  # Required check: "malware-scan" (from vuln-scan.yaml)
+  malware-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Documentation-only change — malware scan not required"
