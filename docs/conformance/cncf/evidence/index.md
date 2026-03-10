@@ -1,8 +1,9 @@
 # CNCF AI Conformance Evidence
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Kubernetes Version:** v1.34
-**Platform:** EKS (p5.48xlarge, NVIDIA H100 80GB HBM3)
+**Kubernetes Version:** v1.35
+**Platform:** EKS (p5.48xlarge, 2x NVIDIA H100 80GB HBM3 nodes)
+**Generated:** 2026-03-10
 
 ## Results
 

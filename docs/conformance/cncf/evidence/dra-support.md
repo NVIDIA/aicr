@@ -1,8 +1,8 @@
 # DRA Support (Dynamic Resource Allocation)
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-06 19:36:55 UTC
-**Kubernetes Version:** v1.34
+**Generated:** 2026-03-10 03:39:16 UTC
+**Kubernetes Version:** v1.35
 **Platform:** linux/amd64
 
 ---
@@ -29,11 +29,11 @@ resourceslices                        resource.k8s.io/v1   false        Resource
 ```
 $ kubectl get deviceclass
 NAME                                        AGE
-compute-domain-daemon.nvidia.com            44h
-compute-domain-default-channel.nvidia.com   44h
-gpu.nvidia.com                              44h
-mig.nvidia.com                              44h
-vfio.gpu.nvidia.com                         44h
+compute-domain-daemon.nvidia.com            10m
+compute-domain-default-channel.nvidia.com   10m
+gpu.nvidia.com                              10m
+mig.nvidia.com                              10m
+vfio.gpu.nvidia.com                         10m
 ```
 
 ## DRA Driver Health
@@ -41,9 +41,10 @@ vfio.gpu.nvidia.com                         44h
 **DRA driver pods**
 ```
 $ kubectl get pods -n nvidia-dra-driver -o wide
-NAME                                               READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-nvidia-dra-driver-gpu-controller-9d69fbdcb-z27mn   1/1     Running   0          44h   10.0.0.10      node-a.example.internal     <none>           <none>
-nvidia-dra-driver-gpu-kubelet-plugin-bdmdm         2/2     Running   0          44h   10.0.0.10   node-a.example.internal   <none>           <none>
+NAME                                                READY   STATUS    RESTARTS   AGE     IP             NODE                           NOMINATED NODE   READINESS GATES
+nvidia-dra-driver-gpu-controller-68966c79bb-zj7lf   1/1     Running   0          10m     10.0.4.122     ip-10-0-6-173.ec2.internal     <none>           <none>
+nvidia-dra-driver-gpu-kubelet-plugin-4kfhk          2/2     Running   0          9m54s   10.0.143.178   ip-10-0-171-111.ec2.internal   <none>           <none>
+nvidia-dra-driver-gpu-kubelet-plugin-grg2l          2/2     Running   0          9m54s   10.0.216.98    ip-10-0-206-2.ec2.internal     <none>           <none>
 ```
 
 ## Device Advertisement (ResourceSlices)
@@ -51,9 +52,11 @@ nvidia-dra-driver-gpu-kubelet-plugin-bdmdm         2/2     Running   0          
 **ResourceSlices**
 ```
 $ kubectl get resourceslices
-NAME                                                             NODE                             DRIVER                      POOL                             AGE
-node-a.example.internal-compute-domain.nvidia.com-bbg8t   node-a.example.internal   compute-domain.nvidia.com   node-a.example.internal   44h
-node-a.example.internal-gpu.nvidia.com-sgw47              node-a.example.internal   gpu.nvidia.com              node-a.example.internal   44h
+NAME                                                           NODE                           DRIVER                      POOL                           AGE
+ip-10-0-171-111.ec2.internal-compute-domain.nvidia.com-q9xqc   ip-10-0-171-111.ec2.internal   compute-domain.nvidia.com   ip-10-0-171-111.ec2.internal   10m
+ip-10-0-171-111.ec2.internal-gpu.nvidia.com-7cbz2              ip-10-0-171-111.ec2.internal   gpu.nvidia.com              ip-10-0-171-111.ec2.internal   10m
+ip-10-0-206-2.ec2.internal-compute-domain.nvidia.com-2n2cq     ip-10-0-206-2.ec2.internal     compute-domain.nvidia.com   ip-10-0-206-2.ec2.internal     10m
+ip-10-0-206-2.ec2.internal-gpu.nvidia.com-79gvw                ip-10-0-206-2.ec2.internal     gpu.nvidia.com              ip-10-0-206-2.ec2.internal     10m
 ```
 
 ## GPU Allocation Test
@@ -140,11 +143,13 @@ NAME        STATE     AGE
 gpu-claim   pending   11s
 ```
 
+> **Note:** ResourceClaim shows `pending` because the DRA controller deallocates the claim after pod completion. The pod logs below confirm the GPU was successfully allocated and visible during execution.
+
 **Pod status**
 ```
 $ kubectl get pod dra-gpu-test -n dra-test -o wide
-NAME           READY   STATUS      RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-dra-gpu-test   0/1     Completed   0          11s   10.0.0.10   node-a.example.internal   <none>           <none>
+NAME           READY   STATUS      RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
+dra-gpu-test   0/1     Completed   0          13s   10.0.177.19   ip-10-0-206-2.ec2.internal   <none>           <none>
 ```
 
 **Pod logs**
@@ -153,7 +158,7 @@ $ kubectl logs dra-gpu-test -n dra-test
 /dev/nvidia-modeset
 /dev/nvidia-uvm
 /dev/nvidia-uvm-tools
-/dev/nvidia3
+/dev/nvidia2
 /dev/nvidiactl
 DRA GPU allocation successful
 ```

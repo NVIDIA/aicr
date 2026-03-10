@@ -4,15 +4,15 @@
 
 This directory contains evidence for [CNCF Kubernetes AI Conformance](https://github.com/cncf/k8s-ai-conformance)
 certification. The evidence demonstrates that a cluster configured with a specific
-recipe meets the Must-have requirements for Kubernetes v1.34.
+recipe meets the Must-have requirements for Kubernetes v1.35.
 
 > **Note:** It is the **cluster configured by a recipe** that is conformant, not the
 > tool itself. The recipe determines which components are deployed and how they are
 > configured. Different recipes may produce clusters with different conformance profiles.
 
 **Recipe used:** `h100-eks-ubuntu-inference-dynamo`
-**Cluster:** EKS with p5.48xlarge (8x NVIDIA H100 80GB HBM3)
-**Kubernetes:** v1.34
+**Cluster:** EKS with 2x p5.48xlarge (8x NVIDIA H100 80GB HBM3 each)
+**Kubernetes:** v1.35
 
 ## Directory Structure
 
@@ -92,7 +92,7 @@ Alternatively, run the evidence collection script directly:
 | **Output** | Pass/fail + diagnostic artifacts | Detailed behavioral evidence (command outputs, logs, metrics) |
 | **DRA GPU allocation test** | Deploys pod, verifies GPU access + isolation | Same + nvidia-smi output capture |
 | **Gang scheduling test** | Deploys PodGroup, verifies co-scheduling | Same + worker logs |
-| **HPA autoscaling** | Metrics API + scale-up/down validation | CUDA N-Body stress test + scale-up |
+| **HPA autoscaling** | Metrics API + scale-up validation | CUDA GPU stress test + scale-up |
 | **Metrics** | Custom metrics API data-path verification | DCGM exporter + Prometheus queries |
 | **Gateway** | Condition verification (Accepted, Programmed) | Same |
 | **Webhook test** | Rejection test with invalid CR | Same |
