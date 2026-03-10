@@ -20,7 +20,7 @@ aicr recipe \
 
 ```shell
 aicr validate \
-  --phase readiness \
+  --phase performance \
   --recipe recipe.yaml
 ```
 
@@ -51,7 +51,7 @@ cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 aicr validate \
   --recipe recipe.yaml \
   --output report.yaml \
-  --phase readiness \
+  --phase performance \
   --phase deployment \
   --phase conformance
 ```
