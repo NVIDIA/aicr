@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.2] - 2026-03-10
+
+### New Features
+
+- *(collector)* Add kubeletVersion to K8s node snapshot  by [@mchmarny](https://github.com/mchmarny)
+
+### Other Tasks
+
+- *(validator)* Add development and extension guides for validation system  by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.10.1] - 2026-03-10
 
 ### Bug Fixes

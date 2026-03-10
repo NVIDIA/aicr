@@ -23,6 +23,7 @@ on:
       - 'kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'
+      - '!**.md'
   pull_request:
     branches:
       - main
@@ -31,6 +32,7 @@ on:
       - 'kwok/**'
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'
+      - '!**.md'
   workflow_dispatch:
     inputs:
       recipe:

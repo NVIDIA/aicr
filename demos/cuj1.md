@@ -1,6 +1,20 @@
 # AICR - Critical User Journey (CUJ) 1
 
-> Assuming user is already authenticated to an EKS cluster with 2+ H100 node
+## Assumptions
+
+* Assuming user is already authenticated to an EKS cluster with 2+ H100 node.
+* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`, in `--system-node-toleration` flags are only for example purposes. Assuming user will update these to match their cluster. 
+
+## Snapshot
+
+```shell
+aicr snapshot \
+    --namespace aicr-validation \
+    --node-selector nodeGroup=gpu-worker \
+    --toleration dedicated=worker-workload:NoSchedule \
+    --toleration dedicated=worker-workload:NoExecute \
+    --output snapshot.yaml
+```
 
 ## Gen Recipe
 
@@ -16,27 +30,30 @@ aicr recipe \
 
 ## Validate Recipe Constraints
 
-> Setting additional `--namespace` or `--node-selector` flag to land the agent on on the right node is OK
-
 ```shell
 aicr validate \
-  --phase readiness \
-  --recipe recipe.yaml
+    --recipe recipe.yaml \
+    --snapshot snapshot.yaml \
+    --no-cluster \
+    --phase deployment \
+    --output dry-run.json
 ```
 
 ## Generate Bundle
 
-> Setting additional `--accelerated-node-selector`, `--accelerated-node-toleration`, or `--system-node-toleration` flags to land the agent on on the right node is OK
-
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --output bundle \
-  --accelerated-node-selector [key]=[value] \
-  --accelerated-node-toleration [key]=[value]:[operation] 
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --system-node-selector dedicated=system-workload \
+  --system-node-toleration dedicated=system-workload:NoSchedule \
+  --system-node-toleration dedicated=system-workload:NoExecute \
+  --output bundle
 ```
 
-Replace the values for `--accelerated-node-selector` and `--accelerated-node-toleration` with the appropriate ones to match your gpu pool(s). You do not want optimizations and training workloads to run across all nodes. Both options allow for comma delimination to supply multiple values. See the [aicr bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
+> Both options allow for comma delamination to supply multiple values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
 
 ## Install Bundle into the Cluster
 
@@ -48,11 +65,10 @@ cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 
 ```shell
 aicr validate \
-  --recipe recipe.yaml \
-  --output report.yaml \
-  --phase readiness \
-  --phase deployment \
-  --phase conformance
+    --recipe recipe.yaml \
+    --toleration dedicated=worker-workload:NoSchedule \
+    --toleration dedicated=worker-workload:NoExecute \
+    --output report.json
 ```
 
 ## Run Job
