@@ -80,11 +80,12 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 }
 
 // supportedNCCLCombinations maps each supported cloud service to the accelerator
-// types for which the NCCL all-reduce test has been implemented. The test uses
-// p5.48xlarge-specific templates with EFA networking and NVSwitch topology, so
-// only EKS+H100 is currently supported.
+// types for which the NCCL all-reduce test has been implemented.
+// - EKS+H100: uses p5.48xlarge templates with EFA networking
+// - GKE+H100: uses a3-megagpu-8g templates with GPUDirect TCPXO
 var supportedNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
+	recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
 }
 
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth by running a TrainJob.

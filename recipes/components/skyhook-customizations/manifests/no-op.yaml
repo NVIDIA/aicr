@@ -38,9 +38,11 @@ metadata:
   name: no-op
   namespace: {{ .Release.Namespace }}
 spec:
-  runtimeRequired: true
-  # Default: true. Disable with --set skyhookcustomizations:autoTaintNewNodes=false
-  autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
+  # Default: false for no-op. Set to true with --set skyhookcustomizations:runtimeRequired=true
+  # When true, skyhook taints GPU nodes until the package completes, blocking all GPU pods.
+  runtimeRequired: {{ eq (toString ($cust.runtimeRequired | default false)) "true" }}
+  # Default: false for no-op. Set to true with --set skyhookcustomizations:autoTaintNewNodes=true
+  autoTaintNewNodes: {{ eq (toString ($cust.autoTaintNewNodes | default false)) "true" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
   additionalTolerations:
     {{- if $cust.acceleratedTolerations }}
