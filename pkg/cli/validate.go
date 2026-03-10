@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -393,6 +394,18 @@ func validateCmdFlags() []cli.Flag {
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
 			Category: "Evidence",
 		},
+		&cli.BoolFlag{
+			Name:     "cncf-submission",
+			Usage:    "Collect detailed behavioral evidence for CNCF AI Conformance submission. Deploys GPU workloads, captures nvidia-smi output, Prometheus queries, and HPA scaling tests. Requires --evidence-dir. Takes ~15 minutes.",
+			Category: "Evidence",
+		},
+		&cli.StringSliceFlag{
+			Name:    "feature",
+			Aliases: []string{"f"},
+			Usage: "Evidence feature to collect (repeatable, default: all). Only used with --cncf-submission.\n" +
+				"Options: " + strings.Join(evidence.ValidFeatures, ", "),
+			Category: "Evidence",
+		},
 		dataFlag,
 		outputFlag,
 		kubeconfigFlag,
@@ -441,6 +454,24 @@ Run validation without failing on check errors (informational mode):
 
 			if err := initDataProvider(cmd); err != nil {
 				return err
+			}
+
+			evidenceDir := cmd.String("evidence-dir")
+			cncfSubmission := cmd.Bool("cncf-submission")
+			features := cmd.StringSlice("feature")
+
+			// Validate flag combinations.
+			if cncfSubmission && evidenceDir == "" {
+				return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
+			}
+			if len(features) > 0 && !cncfSubmission {
+				return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
+			}
+
+			// Short-circuit: --cncf-submission bypasses normal validation and runs
+			// the behavioral evidence collector directly.
+			if cncfSubmission {
+				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"))
 			}
 
 			phases, err := parseValidationPhases(cmd.StringSlice("phase"))
@@ -500,7 +531,33 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
-			return runValidation(ctx, rec, snap, phases, cmd.String("output"), serializer.FormatJSON, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, cmd.String("evidence-dir"))
+			return runValidation(ctx, rec, snap, phases, cmd.String("output"), serializer.FormatJSON, failOnError, validationNamespace, cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), tolerations, evidenceDir)
 		},
 	}
+}
+
+// runCNCFSubmission handles --cncf-submission: validates feature names and
+// runs the behavioral evidence collector against the live cluster.
+func runCNCFSubmission(ctx context.Context, evidenceDir string, features []string, kubeconfig string) error {
+	// Validate feature names.
+	for _, f := range features {
+		if !evidence.IsValidFeature(f) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unknown feature %q; valid features: %s",
+					f, strings.Join(evidence.ValidFeatures, ", ")))
+		}
+	}
+
+	cncfTimeout := 20 * time.Minute //nolint:mnd // CNCF submission deploys GPU workloads and runs HPA tests
+	ctx, cancel := context.WithTimeout(ctx, cncfTimeout)
+	defer cancel()
+
+	slog.Info("starting CNCF submission evidence collection",
+		"evidenceDir", evidenceDir, "features", features)
+
+	collector := evidence.NewCollector(evidenceDir,
+		evidence.WithFeatures(features),
+		evidence.WithKubeconfig(kubeconfig),
+	)
+	return collector.Run(ctx)
 }

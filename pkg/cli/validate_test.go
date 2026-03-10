@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/urfave/cli/v3"
+
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
@@ -173,4 +175,80 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 
 func hasFlag(flag interface{ Names() []string }, name string) bool {
 	return slices.Contains(flag.Names(), name)
+}
+
+func TestValidateCmd_CNCFSubmissionFlags(t *testing.T) {
+	cmd := validateCmd()
+
+	// Verify --cncf-submission and --feature flags exist
+	evidenceFlags := []string{"cncf-submission", "feature", "evidence-dir"}
+	for _, flagName := range evidenceFlags {
+		found := false
+		for _, flag := range cmd.Flags {
+			if hasFlag(flag, flagName) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing evidence flag: %s", flagName)
+		}
+	}
+
+	// Verify --feature has -f alias
+	for _, flag := range cmd.Flags {
+		if hasFlag(flag, "feature") && !hasFlag(flag, "f") {
+			t.Error("--feature flag missing -f alias")
+		}
+	}
+}
+
+func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name:       "cncf-submission without evidence-dir",
+			args:       []string{"aicr", "validate", "--cncf-submission"},
+			wantErr:    true,
+			errContain: "--cncf-submission requires --evidence-dir",
+		},
+		{
+			name:       "feature without cncf-submission",
+			args:       []string{"aicr", "validate", "--feature", "dra", "--evidence-dir", "/tmp/test"},
+			wantErr:    true,
+			errContain: "--feature requires --cncf-submission",
+		},
+		{
+			name:       "cncf-submission with invalid feature",
+			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--feature", "nonexistent"},
+			wantErr:    true,
+			errContain: "unknown feature",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := validateCmd()
+			// Wrap in a parent app so flag parsing works correctly.
+			app := &cli.Command{
+				Name:     "aicr",
+				Commands: []*cli.Command{cmd},
+			}
+			err := app.Run(t.Context(), tt.args)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.errContain != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("error = %v, want error containing %q", err, tt.errContain)
+				}
+			}
+		})
+	}
 }

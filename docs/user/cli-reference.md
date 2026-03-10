@@ -689,21 +689,21 @@ NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and sy
 
 ```bash
 aicr bundle --recipe recipe.yaml \
-  --accelerated-node-selector dedicated=gpu-workload \
-  --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
-  --accelerated-node-toleration dedicated=gpu-workload:NoExecute \
-  --system-node-selector dedicated=system-workload \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --system-node-selector nodeGroup=system-worker \
   --system-node-toleration dedicated=system-workload:NoSchedule \
   --system-node-toleration dedicated=system-workload:NoExecute \
   --output bundle
 ```
 
-> **Cluster node requirements:** This example assumes the cluster has nodes with the label `dedicated=system-workload` and matching taints for system infrastructure, plus GPU nodes with the label `dedicated=gpu-workload` and taints `dedicated=gpu-workload:NoSchedule,NoExecute`.
+> **Cluster node requirements:** This example assumes the cluster has nodes labeled `nodeGroup=system-worker` with taints `dedicated=system-workload:NoSchedule,NoExecute` for system infrastructure, and GPU nodes labeled `nodeGroup=gpu-worker` with taints `dedicated=worker-workload:NoSchedule,NoExecute`.
 
 This results in:
-- **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=dedicated=gpu-workload` + tolerations for `dedicated=gpu-workload` with both `NoSchedule` and `NoExecute`
-- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=gpu-workload` with both `NoSchedule` and `NoExecute`
-- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, kgateway proxy): `nodeSelector=dedicated=system-workload` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
+- **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, kgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
 **Behavior:**
 - All components from the recipe are bundled automatically
@@ -927,13 +927,13 @@ aicr bundle -r recipe.yaml \
 
 # Resolve accelerated selector warning
 aicr bundle -r recipe.yaml \
-  --accelerated-node-selector dedicated=gpu-workload \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   -o ./bundle
 
 # Resolve both warnings
 aicr bundle -r recipe.yaml \
   --workload-selector workload-type=training \
-  --accelerated-node-selector dedicated=gpu-workload \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   -o ./bundle
 ```
 

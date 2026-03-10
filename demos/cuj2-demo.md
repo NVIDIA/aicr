@@ -26,10 +26,10 @@
   │   files, Kubernetes manifests, installation scripts, and checksums.    │
   │                                                                        │
   │  $ aicr bundle --recipe recipe.yaml \                                  │
-  │      --accelerated-node-selector dedicated=gpu-workload \              │
-  │      --accelerated-node-toleration dedicated=gpu-workload:NoSchedule   │
-  │      --accelerated-node-toleration dedicated=gpu-workload:NoExecute    │
-  │      --system-node-selector dedicated=system-workload \                │
+  │      --accelerated-node-selector nodeGroup=gpu-worker \                │
+  │      --accelerated-node-toleration dedicated=worker-workload:NoSchedule│
+  │      --accelerated-node-toleration dedicated=worker-workload:NoExecute │
+  │      --system-node-selector nodeGroup=system-worker \                  │
   │      --system-node-toleration dedicated=system-workload:NoSchedule     │
   │      --system-node-toleration dedicated=system-workload:NoExecute      │
   │                                                                        │
@@ -76,7 +76,7 @@
   │ 4. VALIDATE — Verify conformance                                       │
   │                                                                        │
   │  $ aicr validate --recipe recipe.yaml \                                │
-  │      --phase readiness --phase deployment --phase conformance          │
+  │      --phase deployment --phase conformance                            │
   │                                                                        │
   │  ┌──────────────────────────────────────────────────────────────┐      │
   │  │ CNCF AI Conformance — All 9 Requirements PASS                │      │
@@ -143,9 +143,9 @@
 
 | Role | Instance | Label | Taint |
 |------|----------|-------|-------|
-| GPU worker | p5.48xlarge | `dedicated=gpu-workload` | `dedicated=gpu-workload:NoSchedule` + `:NoExecute` |
-| System | m4.16xlarge | `dedicated=system-workload` | `dedicated=system-workload:NoSchedule` + `:NoExecute` |
-| CPU worker | m4.16xlarge | `dedicated=cpu-workload` | `dedicated=cpu-workload:NoSchedule` + `:NoExecute` |
+| GPU worker | p5.48xlarge | `nodeGroup=gpu-worker` | `dedicated=worker-workload:NoSchedule` + `:NoExecute` |
+| System | m4.16xlarge | `nodeGroup=system-worker` | `dedicated=system-workload:NoSchedule` + `:NoExecute` |
+| CPU worker | m4.16xlarge | `nodeGroup=cpu-worker` | `dedicated=worker-workload:NoSchedule` + `:NoExecute` |
 
 - **GPU nodes**: Run GPU operator DaemonSets, DRA driver, skyhook tuning, and GPU workloads
 - **System nodes**: Run control-plane components (cert-manager, monitoring, schedulers, operators)
@@ -160,10 +160,10 @@
 ```
 ```
    aicr bundle --recipe recipe.yaml \
-    --accelerated-node-selector dedicated=gpu-workload \
-    --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
-    --accelerated-node-toleration dedicated=gpu-workload:NoExecute \
-    --system-node-selector dedicated=system-workload \
+    --accelerated-node-selector nodeGroup=gpu-worker \
+    --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+    --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+    --system-node-selector nodeGroup=system-worker \
     --system-node-toleration dedicated=system-workload:NoSchedule \
     --system-node-toleration dedicated=system-workload:NoExecute \
     --output bundle
