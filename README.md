@@ -10,7 +10,7 @@ AI Cluster Runtime (AICR) makes it easy to stand up GPU-accelerated Kubernetes c
 
 Running GPU-accelerated Kubernetes clusters reliably is hard. Small differences in kernel versions, drivers, container runtimes, operators, and Kubernetes releases can cause failures that are difficult to diagnose and expensive to reproduce.
 
-Historically, this knowledge has lived in internal validation pipelines and runbooks. AI Cluster Runtime makes it available to everyone. 
+Historically, this knowledge has lived in internal validation pipelines and runbooks. AI Cluster Runtime makes it available to everyone.
 
 Every AICR recipe is:
 

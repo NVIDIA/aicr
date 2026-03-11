@@ -40,7 +40,7 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 # Create namespace
 kubectl create namespace aicr
 
-# Deploy API server (see full manifest below)
+# Deploy API server (save the manifest from the Deployment section below as aicrd-deployment.yaml)
 kubectl apply -f aicrd-deployment.yaml
 
 # Check deployment
