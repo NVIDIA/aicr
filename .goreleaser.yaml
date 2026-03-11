@@ -193,5 +193,7 @@ brews:
                bin/"aicr"
         ohai "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
       end
-    post_install: |
-      system(bin/"aicr", "trust", "update") rescue opoo("could not fetch latest Sigstore trusted root; run 'aicr trust update' later")
+    caveats: |
+      To enable supply chain verification, update the bundle attestation root:
+
+        aicr trust update
