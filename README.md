@@ -67,15 +67,9 @@ Need a different combination? [Open an issue](https://github.com/NVIDIA/aicr/iss
 
 ## How It Works
 
-A **recipe** is a version-locked configuration for a specific environment. You describe your target (cloud, GPU, OS, workload intent), and the recipe engine matches it against a library of validated **overlays** — layered configurations that compose bottom-up from base defaults through cloud, accelerator, OS, and workload-specific tuning.
+![AICR end-to-end workflow](docs/images/aicr-end-to-end.png)
 
-```
-Overlays (many)  →  Recipe (one)  →  Bundle (deployable)
-                     version-locked     Helm charts,
-base + cloud +       YAML with all      manifests,
-accelerator + OS +   resolved values    scripts
-intent + platform
-```
+A **recipe** is a version-locked configuration for a specific environment. You describe your target (cloud, GPU, OS, workload intent), and the recipe engine matches it against a library of validated **overlays** — layered configurations that compose bottom-up from base defaults through cloud, accelerator, OS, and workload-specific tuning.
 
 The **bundler** materializes a recipe into deployment-ready artifacts: one folder per component, each with Helm values, checksums, and a README. The **validator** compares a recipe against a live cluster snapshot and flags anything out of spec.
 
