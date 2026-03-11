@@ -117,9 +117,40 @@ kubectl get pods -n kubeflow -l trainer.kubeflow.org/job-name=pytorch-mnist
 kubectl logs -f -n kubeflow -l trainer.kubeflow.org/job-name=pytorch-mnist
 ```
 
-## Run NCCL Performance Test (GPUDirect TCPXO)
+## Performance Validation
 
-For multi-node NCCL bandwidth testing with GPUDirect TCPXO (requires multi-NIC networking):
+> **Note:** `aicr validate --phase performance` is not yet automated for GKE.
+> The GKE NCCL test uses raw Pods with a TCPXO daemon sidecar (required for GPUDirect),
+> which differs from the EKS TrainJob-based approach. Run the test manually as shown below.
+> Automated support is tracked as a follow-up.
+
+### Option 1: Using testdata manifests (matches validator framework)
+
+```shell
+export NAMESPACE=nccl-perf
+export GPU_COUNT_PER_NODE=8
+export GPU_COUNT=16
+export WORKER_COUNT=2
+export TEST_TYPE=all_reduce_perf
+export MIN_MESSAGE_SIZE=1M
+export MAX_MESSAGE_SIZE=8G
+
+kubectl create ns $NAMESPACE
+envsubst < validators/performance/testdata/h100/gke/runtime.yaml | kubectl apply -f -
+
+# Wait for pods to be 2/2 Running
+kubectl get pods -n $NAMESPACE -o wide -w
+
+# Trigger the AllReduce benchmark from host-1
+kubectl exec nccl-test-host-1 -n $NAMESPACE -c nccl-test -- \
+  /scripts/allreduce.sh nccl-host-1 nccl-host-2
+
+# Expected: ~335 GB/s busBW at 8 GB (AllReduce), ~87 GB/s avg
+# Clean up
+kubectl delete ns $NAMESPACE
+```
+
+### Option 2: Using standalone demo manifest
 
 ```shell
 kubectl create ns nccl-test
@@ -139,6 +170,22 @@ kubectl exec nccl-test-host-1 -n nccl-test -c nccl-test -- bash -c '
 # Clean up
 kubectl delete ns nccl-test
 ```
+
+### Prerequisites
+
+- GKE cluster with multi-NIC networking (8 GPU NICs per a3-megagpu-8g node)
+- `Network` + `GKENetworkParamSet` CRs configured for GPU NICs
+- `nccl-tcpxo-installer` DaemonSet deployed on GPU nodes (included in AICR bundle)
+- Without multi-NIC, NCCL falls back to TCP (~4 GB/s vs ~335 GB/s with TCPXO)
+
+### Understanding the results
+
+Each pod runs two containers: a `tcpxo-daemon` sidecar (manages GPUDirect TCPX data path) and the `nccl-test` container. The TCPXO sidecar is required for any workload that needs high-speed inter-node GPU communication on GKE.
+
+| Metric | Without TCPXO | With TCPXO |
+|--------|--------------|------------|
+| AllReduce busBW (8 GB) | ~4 GB/s | ~335 GB/s |
+| AllReduce avg busBW | ~4 GB/s | ~87 GB/s |
 
 ## Success
 
