@@ -52,16 +52,11 @@ spec:
       dependencyRefs:
         - gpu-operator
 
-    # GKE COS uses skyhook no-op: COS has an immutable rootfs, so kernel
-    # tuning packages (nvidia-setup, nvidia-tuned) that require apt cannot
-    # be installed. Replace with a COS-specific tuning manifest if one
-    # becomes available.
     - name: skyhook-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/no-op.yaml
+        - components/skyhook-customizations/manifests/tuning-gke.yaml
       overrides:
-        service: gke
         accelerator: h100
         intent: multiNodeTraining
       dependencyRefs:
