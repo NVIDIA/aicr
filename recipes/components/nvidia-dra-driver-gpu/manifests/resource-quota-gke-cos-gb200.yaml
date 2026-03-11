@@ -1,0 +1,37 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# ResourceQuota for nvidia-dra-driver-gpu on GKE COS GB200 (A4X)
+# Ref: https://docs.cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom-a4x
+#
+# The DRA namespace requires a ResourceQuota for system-critical priority pods.
+# Default of 37 pods covers 18 A4X nodes (2x node count + 1).
+# Override via: --set nvidia-dra-driver-gpu.podQuota=<value>
+{{- $dra := index .Values "nvidia-dra-driver-gpu" }}
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: nvidia-dra-driver-gpu-quota
+  namespace: {{ .Release.Namespace }}
+spec:
+  hard:
+    pods: "{{ $dra.podQuota | default 37 }}"
+  scopeSelector:
+    matchExpressions:
+      - operator: In
+        scopeName: PriorityClass
+        values:
+          - system-node-critical
+          - system-cluster-critical

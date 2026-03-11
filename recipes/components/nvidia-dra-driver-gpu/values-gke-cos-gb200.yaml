@@ -1,0 +1,58 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA DRA Driver GPU Helm values
+# GKE COS GB200 (A4X) overrides
+# Ref: https://docs.cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom-a4x#install_the_nvidia_compute_domain_crd_and_dra_driver
+
+# COS installs the driver to this host path (not operator-managed)
+nvidiaDriverRoot: /home/kubernetes/bin/nvidia
+
+# Compute domains handle GPU allocation on A4X -- disable legacy GPU resource model
+resources:
+  gpus:
+    enabled: false
+
+controller:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: "nvidia.com/gpu"
+                operator: "DoesNotExist"
+
+kubeletPlugin:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: cloud.google.com/gke-accelerator
+                operator: In
+                values:
+                  - nvidia-gb200
+              - key: kubernetes.io/arch
+                operator: In
+                values:
+                  - arm64
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Equal
+      value: present
+      effect: NoSchedule
+    - key: kubernetes.io/arch
+      operator: Equal
+      value: arm64
+      effect: NoSchedule

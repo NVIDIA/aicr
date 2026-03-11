@@ -1,0 +1,136 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GCP GPUDirect RDMA (RoCE) GKE Network CRDs for GB200 (A4X)
+# Ref: https://docs.cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom-a4x#create-gke-network-objects
+#
+# A4X topology: 1 gvnic + 4 RDMA NICs (4-way rail-aligned)
+#   - gvnic-1: second CPU Titanium NIC in NetDevice mode, its own VPC
+#   - rdma-0..3: four CX-7 RDMA NICs sharing one HPC VPC, one subnet each
+#
+# VPCs and subnets must be pre-created by the user per GCP docs:
+#   gcloud networks create GVNIC_NETWORK_PREFIX-net ...
+#   gcloud networks create RDMA_NETWORK_PREFIX-net --network-profile=ZONE-vpc-roce ...
+#   gcloud networks subnets create RDMA_NETWORK_PREFIX-sub-{0..3} ...
+#
+# Configure via Helm values:
+#   --set gke-roce.rdmaNetworkPrefix=<prefix>   (e.g. a4x-rdma)
+#   --set gke-roce.gvnicNetworkPrefix=<prefix>  (e.g. a4x-gvnic)
+#
+# aicr/skip-hook-validation: "true"
+# GKENetworkParamSet and Network are GKE-native CRDs pre-installed by the multi-NIC feature;
+# standard Helm hook ordering does not apply here.
+{{- $cfg := index .Values "gke-roce" }}
+{{- $rdmaPrefix := index $cfg "rdmaNetworkPrefix" }}
+{{- $gvnicPrefix := index $cfg "gvnicNetworkPrefix" }}
+---
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: gvnic-1
+spec:
+  vpc: {{ $gvnicPrefix }}-net
+  vpcSubnet: {{ $gvnicPrefix }}-sub
+  deviceMode: NetDevice
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: gvnic-1
+spec:
+  type: "Device"
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: gvnic-1
+---
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: rdma-0
+spec:
+  vpc: {{ $rdmaPrefix }}-net
+  vpcSubnet: {{ $rdmaPrefix }}-sub-0
+  deviceMode: RDMA
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: rdma-0
+spec:
+  type: "Device"
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: rdma-0
+---
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: rdma-1
+spec:
+  vpc: {{ $rdmaPrefix }}-net
+  vpcSubnet: {{ $rdmaPrefix }}-sub-1
+  deviceMode: RDMA
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: rdma-1
+spec:
+  type: "Device"
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: rdma-1
+---
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: rdma-2
+spec:
+  vpc: {{ $rdmaPrefix }}-net
+  vpcSubnet: {{ $rdmaPrefix }}-sub-2
+  deviceMode: RDMA
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: rdma-2
+spec:
+  type: "Device"
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: rdma-2
+---
+apiVersion: networking.gke.io/v1
+kind: GKENetworkParamSet
+metadata:
+  name: rdma-3
+spec:
+  vpc: {{ $rdmaPrefix }}-net
+  vpcSubnet: {{ $rdmaPrefix }}-sub-3
+  deviceMode: RDMA
+---
+apiVersion: networking.gke.io/v1
+kind: Network
+metadata:
+  name: rdma-3
+spec:
+  type: "Device"
+  parametersRef:
+    group: networking.gke.io
+    kind: GKENetworkParamSet
+    name: rdma-3

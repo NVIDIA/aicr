@@ -1,0 +1,98 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Workload setup: Multi-node GPU workloads require a ComputeDomain resource
+# and Pod annotations for RDMA multi-networking. See:
+# https://docs.cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom-a4x#configure_your_workload_manifest
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: gb200-gke-cos-training
+
+spec:
+  # Inherits from gke-cos-training (GKE + COS + training)
+  base: gke-cos-training
+
+  criteria:
+    service: gke
+    accelerator: gb200
+    os: cos
+    intent: training
+
+  # DRA graduated to GA in K8s 1.34 -- no unstable API flags needed
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    # GB200 ARM64 tolerations + gdrcopy disabled + COS toolkit install path
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        gdrcopy:
+          enabled: false
+        toolkit:
+          installDir: /home/kubernetes/bin/nvidia
+        daemonsets:
+          tolerations:
+            - key: nvidia.com/gpu
+              operator: Equal
+              value: present
+              effect: NoSchedule
+            - key: kubernetes.io/arch
+              operator: Equal
+              value: arm64
+              effect: NoSchedule
+        node-feature-discovery:
+          worker:
+            tolerations:
+              - key: kubernetes.io/arch
+                operator: Equal
+                value: arm64
+                effect: NoSchedule
+              - key: "node-role.kubernetes.io/master"
+                operator: "Equal"
+                value: ""
+                effect: "NoSchedule"
+              - key: "node-role.kubernetes.io/control-plane"
+                operator: "Equal"
+                value: ""
+                effect: "NoSchedule"
+              - key: nvidia.com/gpu
+                operator: Exists
+                effect: NoSchedule
+
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      valuesFile: components/nvidia-dra-driver-gpu/values-gke-cos-gb200.yaml
+      manifestFiles:
+        - components/nvidia-dra-driver-gpu/manifests/resource-quota-gke-cos-gb200.yaml
+
+    - name: gke-roce
+      type: Helm
+      manifestFiles:
+        - components/gke-roce/manifests/gke-network-crds-gb200.yaml
+        - components/gke-roce/manifests/nccl-gib-installer-gb200.yaml
+
+    - name: skyhook-customizations
+      type: Helm
+      manifestFiles:
+        - components/skyhook-customizations/manifests/no-op.yaml
+      overrides:
+        service: gke
+        accelerator: gb200
+        intent: training
+      dependencyRefs:
+        - skyhook-operator

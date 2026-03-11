@@ -1,0 +1,89 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL gIB installer for GB200 (A4X) -- ARM64 architecture
+# Source: https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/gpudirect-rdma/nccl-rdma-installer-a4x.yaml
+# Installs NCCL gIB libraries to /home/kubernetes/bin/nvidia/lib64
+# and RDMA binaries to /home/kubernetes/bin/gib
+# Node affinity: nvidia-gb200 accelerator + arm64 architecture
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nccl-rdma-installer
+  namespace: kube-system
+  labels:
+    k8s-app: nccl-rdma-installer
+spec:
+  selector:
+    matchLabels:
+      k8s-app: nccl-rdma-installer
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nccl-rdma-installer
+        k8s-app: nccl-rdma-installer
+    spec:
+      priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cloud.google.com/gke-accelerator
+                    operator: In
+                    values:
+                      - nvidia-gb200
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values:
+                      - arm64
+      tolerations:
+        - operator: "Exists"
+      hostNetwork: true
+      hostPID: true
+      volumes:
+        - name: library-dir-host
+          hostPath:
+            path: /home/kubernetes/bin/nvidia/lib64
+            type: DirectoryOrCreate
+        - name: gib
+          hostPath:
+            path: /home/kubernetes/bin/gib
+      initContainers:
+        - image: us-docker.pkg.dev/gce-ai-infra/gpudirect-gib/nccl-plugin-gib-arm64:v1.0.7
+          name: nccl-rdma-installer
+          resources:
+            requests:
+              cpu: 150m
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: library-dir-host
+              mountPath: /usr/local/home/kubernetes/bin/nvidia/lib64
+            - name: gib
+              mountPath: /usr/local/home/kubernetes/bin/gib
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -ex
+              /scripts/container_entry.sh install --install-nccl
+              cp -r /var/lib/gib/lib64/. /usr/local/home/kubernetes/bin/nvidia/lib64
+              cp -r /var/lib/gib/. /usr/local/home/kubernetes/bin/gib
+              echo "installation finishes"
+      containers:
+        - image: "gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830"
+          name: pause

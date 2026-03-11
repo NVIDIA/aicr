@@ -426,3 +426,10 @@ components:
         tolerationPaths:
           - manager.tolerations
           - jobset.controller.tolerations
+
+  - name: gke-roce
+    displayName: gke-roce
+    valueOverrideKeys:
+      - gkeroce
+    manifest:
+      defaultNamespace: kube-system
