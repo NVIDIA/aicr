@@ -333,6 +333,8 @@ const roleLinks = [
             }">
               <div><span :style="{ color: 'rgba(255,255,255,0.35)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">brew tap</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">NVIDIA/aicr</span></div>
               <div><span :style="{ color: 'rgba(255,255,255,0.35)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">brew install</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">aicr</span></div>
+              <div :style="{ margin: '6px 0', color: 'rgba(255,255,255,0.2)', fontSize: '11px' }">or</div>
+              <div><span :style="{ color: 'rgba(255,255,255,0.35)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">curl -sfL</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">https://raw.githubusercontent.com/NVIDIA/aicr/main/install</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">| bash -s --</span></div>
             </div>
           </div>
         </div>
