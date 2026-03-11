@@ -58,7 +58,7 @@ spec:
         - nccl-all-reduce-bw
       constraints:
         - name: nccl-all-reduce-bw
-          value: ">= 100"
+          value: ">= 300"
     conformance:
       checks:
         - platform-health

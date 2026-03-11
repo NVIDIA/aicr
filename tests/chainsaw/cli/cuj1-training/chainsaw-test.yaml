@@ -20,7 +20,7 @@ metadata:
 spec:
   description: |
     CUJ1: Critical User Journey - Training Workload.
-    Tests the complete aicr workflow from demos/cuj1.md:
+    Tests the complete aicr workflow from demos/cuj1-eks.md:
       Step 1: recipe (with --platform kubeflow)
       Step 2: validate (deployment phase)
       Step 3: bundle (with node scheduling)

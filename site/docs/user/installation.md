@@ -21,7 +21,14 @@ This guide describes how to install the AI Cluster Runtime (AICR) CLI tool (`aic
 
 ## Install aicr CLI
 
-### Option 1: Automated Installation (Recommended)
+### Option 1: Homebrew (macOS/Linux)
+
+```shell
+brew tap NVIDIA/aicr
+brew install aicr
+```
+
+### Option 2: Automated Installation
 
 Install the latest version using the installation script:
 
@@ -46,7 +53,7 @@ This script:
 
 > **Supply Chain Security**: AICR includes SLSA Build Level 3 compliance with signed SBOMs and verifiable attestations. See [SECURITY](/docs/project/security) for verification instructions.
 
-### Option 2: Manual Installation
+### Option 3: Manual Installation
 
 1. **Download the latest release**
 
@@ -72,7 +79,7 @@ sudo chmod +x /usr/local/bin/aicr
 aicr --version
 ```
 
-### Option 3: Build from Source
+### Option 4: Build from Source
 
 **Requirements:**
 - Go 1.25 or higher

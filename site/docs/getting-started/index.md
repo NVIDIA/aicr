@@ -152,6 +152,11 @@ For engineers integrating AICR into CI/CD pipelines, GitOps workflows, or larger
 ### Install CLI
 
 ```shell
+# Homebrew (macOS/Linux)
+brew tap NVIDIA/aicr
+brew install aicr
+
+# Or use the install script
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 

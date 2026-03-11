@@ -20,7 +20,7 @@ metadata:
 spec:
   description: |
     UAT CUJ1: Training workload on live EKS cluster with GPU nodes.
-    Tests the aicr workflow from demos/cuj1.md against a real cluster:
+    Tests the aicr workflow from demos/cuj1-eks.md against a real cluster:
       Step 1: Snapshot the live cluster
       Step 2: Generate recipe (EKS/H100/training/kubeflow)
       Step 3: Validate deployment against live snapshot

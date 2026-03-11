@@ -30,7 +30,11 @@ This section is for users who:
 ## Quick Start
 
 ```shell
-# Install aicr CLI
+# Install aicr CLI (Homebrew)
+brew tap NVIDIA/aicr
+brew install aicr
+
+# Or use the install script
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 
 # Generate a recipe for your environment
