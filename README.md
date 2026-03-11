@@ -44,16 +44,16 @@ The `bundles/` directory contains per-component Helm charts with values files, c
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
-## Components
+## Features
 
-| Component | Description |
-|-----------|-------------|
+| Feature | Description |
+|---------|-------------|
 | **`aicr` CLI** | Single binary. Generate recipes, create bundles, capture snapshots, validate configs. |
 | **API Server (`aicrd`)** | REST API with the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
 | **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, OS, operators) into a ConfigMap for validation against recipes. |
 | **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (cosign), and checksum verification on every release. |
 
-## Supported Environments
+## Supported Components
 
 | Dimension | This Release |
 |-----------|-------------|
@@ -61,7 +61,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **GPUs** | NVIDIA H100, GB200 |
 | **OS** | Ubuntu |
 | **Workloads** | Training (Kubeflow), Inference (Dynamo) |
-| **Components** | GPU Operator, Network Operator, cert-manager, Prometheus stack, and others |
+| **Components** | GPU Operator, Network Operator, cert-manager, Prometheus stack, and [others](docs/user/component-catalog.md) |
 
 Need a different combination? [Open an issue](https://github.com/NVIDIA/aicr/issues) — that feedback directly shapes what gets validated next.
 
