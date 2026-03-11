@@ -15,7 +15,6 @@ The source of truth is [`recipes/registry.yaml`](../../recipes/registry.yaml). E
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **skyhook-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Skyhook](https://github.com/nvidia/skyhook) |
-| **skyhook-customizations** | Custom tuning profiles applied via Skyhook. Extends the operator with environment-specific node configurations (kernel params, hugepages, etc.). | — |
 | **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation driver for GPUs. Enables structured GPU device advertisement and claim-based allocation in Kubernetes 1.33+. | [NVIDIA DRA Driver](https://github.com/NVIDIA/k8s-dra-driver-gpu) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
@@ -23,9 +22,7 @@ The source of truth is [`recipes/registry.yaml`](../../recipes/registry.yaml). E
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **kai-scheduler** | DRA-aware gang scheduler with hierarchical queues and topology-aware placement. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/NVIDIA/KAI-Scheduler) |
-| **dynamo-crds** | Custom Resource Definitions for NVIDIA Dynamo inference serving. Installed separately from the platform to support CRD lifecycle management. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
-| **dynamo-platform** | NVIDIA Dynamo inference serving platform. Distributed inference with prefix-cache-aware routing and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
-| **kgateway-crds** | Custom Resource Definitions for kgateway (Kubernetes Gateway API implementation). | [kgateway](https://github.com/kgateway-dev/kgateway) |
+| **dynamo** | NVIDIA Dynamo inference serving platform. Distributed inference with prefix-cache-aware routing and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **kgateway** | Kubernetes Gateway API implementation. Provides model-aware ingress routing for inference workloads. | [kgateway](https://github.com/kgateway-dev/kgateway) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
 
