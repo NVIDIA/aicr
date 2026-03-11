@@ -42,6 +42,12 @@ type gatewayDataPlaneReport struct {
 // Verifies GatewayClass "kgateway" is accepted, Gateway "inference-gateway" is programmed,
 // and required Gateway API + InferencePool CRDs exist.
 func CheckInferenceGateway(ctx *validators.Context) error {
+	// Skip if the recipe does not include kgateway (inference gateway component).
+	// Training clusters typically don't have an inference gateway.
+	if !recipeHasComponent(ctx, "kgateway") {
+		return validators.Skip("kgateway not in recipe — inference gateway check applies to inference clusters only")
+	}
+
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
 		return err
