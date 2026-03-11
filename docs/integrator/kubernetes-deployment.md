@@ -15,7 +15,7 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 
 - Recipe generation from query parameters (query mode)
 - Does not capture snapshots (use agent Job or CLI)
-- Does not generate bundles (use CLI)
+- Generates bundles via `POST /v1/bundle`
 - Does not analyze snapshots (query mode only)
 
 **Agent deployment** (separate component):

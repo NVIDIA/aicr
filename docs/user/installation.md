@@ -67,7 +67,7 @@ aicr --version
 ### Option 3: Build from Source
 
 **Requirements:**
-- Go 1.25 or higher
+- Go 1.26 or higher
 
 ```shell
 go install github.com/NVIDIA/aicr/cmd/aicr@latest

@@ -1033,8 +1033,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/go-ci
         with:
-          go_version: '1.25'
-          golangci_lint_version: 'v2.6'
+          go_version: '1.26'
+          golangci_lint_version: 'v2.10.1'
 ```
 
 ### Adding New Tests

@@ -289,14 +289,28 @@ The request body is the recipe (RecipeResult) directly. No wrapper object needed
 
 **Supported Bundlers:**
 
+Bundler names correspond to component names in [`recipes/registry.yaml`](../../recipes/registry.yaml). Any component registered there can be passed as a bundler. Current components:
+
 | Bundler | Description |
 |---------|-------------|
-| `gpu-operator` | NVIDIA GPU Operator |
-| `network-operator` | NVIDIA Network Operator |
-| `cert-manager` | Certificate Manager |
-| `nvsentinel` | NVSentinel monitoring |
-| `skyhook-operator` | Skyhook node optimization |
-| `nvidia-dra-driver-gpu` | NVIDIA DRA (Dynamic Resource Allocation) Driver |
+| `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
+| `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
+| `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
+| `cert-manager` | TLS certificate management |
+| `skyhook-operator` | OS-level node tuning and kernel configuration |
+| `skyhook-customizations` | Environment-specific node tuning profiles |
+| `nvsentinel` | GPU health monitoring and automated remediation |
+| `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
+| `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |
+| `prometheus-adapter` | Custom metrics for HPA scaling |
+| `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
+| `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
+| `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
+| `dynamo-crds` | NVIDIA Dynamo inference serving CRDs |
+| `dynamo-platform` | NVIDIA Dynamo inference serving platform |
+| `kgateway-crds` | Kubernetes Gateway API CRDs |
+| `kgateway` | Kubernetes Gateway API implementation |
+| `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 
 **Examples:**
 
@@ -614,13 +628,12 @@ recipe = resp.json()
 
 print(f"Recipe has {len(recipe['componentRefs'])} components")
 
-# Generate bundles
-bundle_req = {
-    "recipe": recipe,
-    "bundlers": ["gpu-operator"]
-}
-
-resp = requests.post(f"{BASE_URL}/v1/bundle", json=bundle_req)
+# Generate bundles — recipe is the request body, bundlers are query params
+resp = requests.post(
+    f"{BASE_URL}/v1/bundle",
+    params={"bundlers": "gpu-operator"},
+    json=recipe,
+)
 resp.raise_for_status()
 
 # Extract zip
@@ -683,14 +696,11 @@ async function main() {
     
     console.log(`Recipe has ${recipe.componentRefs.length} components`);
     
-    // Generate bundles
-    const bundleResp = await fetch(`${BASE_URL}/v1/bundle`, {
+    // Generate bundles — recipe is the request body, bundlers are query params
+    const bundleResp = await fetch(`${BASE_URL}/v1/bundle?bundlers=gpu-operator`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            recipe: recipe,
-            bundlers: ["gpu-operator"]
-        })
+        body: JSON.stringify(recipe),
     });
     
     // Save zip

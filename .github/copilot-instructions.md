@@ -88,10 +88,10 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
 - **CLI (`aicr`)**: All four stages (snapshot/recipe/validate/bundle)
 - **API Server (`aicrd`)**: Recipe generation and bundle creation via REST API
 - **Agent**: Kubernetes Job for automated cluster snapshots → ConfigMaps
-- **Bundlers**: Plugin-based artifact generators (GPU Operator, Network Operator, Cert-Manager, NVSentinel, Skyhook, DRA Driver)
+- **Bundlers**: Plugin-based artifact generators — one per component in `recipes/registry.yaml`
 - **Deployers**: GitOps integration providers (helm, argocd) with deployment ordering
 
-**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.9, Container images via Ko
+**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10.1, Container images via Ko
 
 **Package Architecture (Critical Principle):**
 - **User Interaction Packages** (`pkg/cli`, `pkg/api`): Focus solely on capturing user intent, validating input, and formatting output. No business logic.
