@@ -40,8 +40,8 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 # Create namespace
 kubectl create namespace aicr
 
-# Deploy API server
-kubectl apply -k https://github.com/NVIDIA/aicr/deploy/aicrd
+# Deploy API server (see full manifest below)
+kubectl apply -f aicrd-deployment.yaml
 
 # Check deployment
 kubectl get pods -n aicr
@@ -542,8 +542,6 @@ kubectl apply -f servicemonitor.yaml
 ```
 
 ### Grafana Dashboard
-
-Import dashboard JSON from `docs/monitoring/grafana-dashboard.json`:
 
 **Key panels:**
 - Request rate (by status code)

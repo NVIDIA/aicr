@@ -50,7 +50,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 |-----------|-------------|
 | **`aicr` CLI** | Single binary. Generate recipes, create bundles, capture snapshots, validate configs. |
 | **API Server (`aicrd`)** | REST API with the same capabilities as the CLI. Run in-cluster for CI/CD integration or air-gapped environments. |
-| **Cluster Agent** | Optional Kubernetes agent for continuous state monitoring. Flags configuration drift as it happens. |
+| **Snapshot Agent** | Kubernetes Job that captures live cluster state (GPU hardware, drivers, OS, operators) into a ConfigMap for validation against recipes. |
 | **Supply Chain Security** | SLSA Level 3 provenance, signed SBOMs, image attestations (cosign), and checksum verification on every release. |
 
 ## Supported Environments
