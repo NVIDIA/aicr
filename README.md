@@ -61,9 +61,9 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 | **GPUs** | NVIDIA H100, GB200 |
 | **OS** | Ubuntu |
 | **Workloads** | Training (Kubeflow), Inference (Dynamo) |
-| **Components** | GPU Operator, Network Operator, cert-manager, Prometheus stack, and [others](docs/user/component-catalog.md) |
+| **Components** | GPU Operator, Network Operator, cert-manager, Prometheus stack, etc. |
 
-Need a different combination? [Open an issue](https://github.com/NVIDIA/aicr/issues) — that feedback directly shapes what gets validated next.
+See the full [Component Catalog](docs/user/component-catalog.md) for every component that can appear in a recipe. Don't see what you need? [Open an issue](https://github.com/NVIDIA/aicr/issues) — that feedback directly shapes what gets validated next.
 
 ## How It Works
 
