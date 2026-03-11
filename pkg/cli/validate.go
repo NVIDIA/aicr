@@ -95,6 +95,7 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	}
 
 	validPhases := map[string]validator.Phase{
+		"readiness":   validator.PhaseReadiness,
 		"deployment":  validator.PhaseDeployment,
 		"performance": validator.PhasePerformance,
 		"conformance": validator.PhaseConformance,
@@ -106,7 +107,7 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 		p, ok := validPhases[s]
 		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid phase %q: must be one of: deployment, performance, conformance, all", s))
+				fmt.Sprintf("invalid phase %q: must be one of: readiness, deployment, performance, conformance, all", s))
 		}
 		if !seen[p] {
 			phases = append(phases, p)
@@ -328,8 +329,9 @@ func validateCmdFlags() []cli.Flag {
 		&cli.StringSliceFlag{
 			Name: "phase",
 			Usage: `Validation phase(s) to run (can be repeated).
-	Options: "deployment", "performance", "conformance", "all".
+	Options: "readiness", "deployment", "performance", "conformance", "all".
 	Default: all phases.
+	Example: --phase readiness
 	Example: --phase deployment --phase conformance`,
 			Category: "Validation Control",
 		},

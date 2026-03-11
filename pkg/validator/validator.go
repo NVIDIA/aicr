@@ -41,29 +41,67 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 )
 
-// checkReadiness evaluates top-level recipe constraints against the snapshot.
-// Returns an error if any constraint fails, nil if all pass or no constraints exist.
-func checkReadiness(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) error {
-	if rec == nil || snap == nil || len(rec.Constraints) == 0 {
-		return nil
+// runReadinessPhase evaluates top-level recipe constraints and returns a PhaseResult
+// with a CTRF report. No cluster access is needed — this runs entirely from the
+// recipe and snapshot.
+func (v *Validator) runReadinessPhase(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) *PhaseResult {
+	start := time.Now()
+	builder := ctrf.NewBuilder("aicr", v.Version, string(PhaseReadiness))
+
+	if rec != nil && snap != nil {
+		for _, c := range rec.Constraints {
+			result := constraints.Evaluate(c, snap)
+			switch {
+			case result.Error != nil:
+				slog.Warn("readiness constraint skipped", "name", c.Name, "error", result.Error)
+				builder.AddSkipped(c.Name, string(PhaseReadiness), fmt.Sprintf("evaluation error: %v", result.Error))
+			case !result.Passed:
+				slog.Info("readiness constraint failed", "name", c.Name, "expected", c.Value, "actual", result.Actual)
+				builder.AddResult(&ctrf.ValidatorResult{
+					Name:           c.Name,
+					Phase:          string(PhaseReadiness),
+					ExitCode:       1,
+					TerminationMsg: fmt.Sprintf("expected %s, got %s", c.Value, result.Actual),
+					Stdout:         []string{fmt.Sprintf("Constraint: %s %s → false (actual: %s)", c.Name, c.Value, result.Actual)},
+				})
+			default:
+				slog.Info("readiness constraint passed", "name", c.Name, "expected", c.Value, "actual", result.Actual)
+				builder.AddResult(&ctrf.ValidatorResult{
+					Name:   c.Name,
+					Phase:  string(PhaseReadiness),
+					Stdout: []string{fmt.Sprintf("Constraint: %s %s → true (actual: %s)", c.Name, c.Value, result.Actual)},
+				})
+			}
+		}
 	}
 
-	slog.Info("readiness pre-flight", "constraints", len(rec.Constraints))
+	report := builder.Build()
 
-	for _, c := range rec.Constraints {
-		result := constraints.Evaluate(c, snap)
-		if result.Error != nil {
-			slog.Warn("readiness constraint skipped", "name", c.Name, "error", result.Error)
-			continue
-		}
-		if !result.Passed {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("readiness check failed: %s expected %s, got %s", c.Name, c.Value, result.Actual))
-		}
-		slog.Info("readiness constraint passed", "name", c.Name, "expected", c.Value, "actual", result.Actual)
+	var status string
+	switch {
+	case report.Results.Summary.Failed > 0:
+		status = ctrf.StatusFailed
+	case report.Results.Summary.Tests == 0:
+		status = ctrf.StatusSkipped
+	default:
+		status = ctrf.StatusPassed
 	}
 
-	return nil
+	duration := time.Since(start)
+	slog.Info("readiness phase completed",
+		"status", status,
+		"constraints", report.Results.Summary.Tests,
+		"passed", report.Results.Summary.Passed,
+		"failed", report.Results.Summary.Failed,
+		"skipped", report.Results.Summary.Skipped,
+		"duration", duration)
+
+	return &PhaseResult{
+		Phase:    PhaseReadiness,
+		Status:   status,
+		Report:   report,
+		Duration: duration,
+	}
 }
 
 // New creates a new Validator with the provided options.
@@ -158,10 +196,41 @@ func (v *Validator) ValidatePhases(
 
 	slog.Info("running validation phases", "runID", v.RunID, "phases", phases)
 
-	// Pre-flight: evaluate top-level recipe constraints against snapshot.
-	// Fails fast before deploying any Jobs if prerequisites aren't met.
-	if err := checkReadiness(recipeResult, snap); err != nil {
-		return nil, err
+	// Separate readiness from container-based phases.
+	hasReadiness := false
+	var containerPhases []Phase
+	for _, p := range phases {
+		if p == PhaseReadiness {
+			hasReadiness = true
+		} else {
+			containerPhases = append(containerPhases, p)
+		}
+	}
+
+	results := make([]*PhaseResult, 0, len(phases))
+	overallFailed := false
+
+	// Always run readiness. When explicitly requested, include the result in
+	// the report. When implicit (--phase all), fail fast with an error.
+	pr := v.runReadinessPhase(recipeResult, snap)
+	if hasReadiness {
+		results = append(results, pr)
+		if pr.Status == ctrf.StatusFailed {
+			overallFailed = true
+		}
+	} else if pr.Status == ctrf.StatusFailed {
+		for _, t := range pr.Report.Results.Tests {
+			if t.Status == ctrf.StatusFailed {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("readiness check failed: %s", t.Message))
+			}
+		}
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "readiness check failed")
+	}
+
+	// If readiness-only or no container phases remain, return early.
+	if len(containerPhases) == 0 {
+		return results, nil
 	}
 
 	cat, err := catalog.Load(v.Version)
@@ -171,7 +240,17 @@ func (v *Validator) ValidatePhases(
 
 	// --no-cluster: report all as skipped, no K8s calls
 	if v.NoCluster {
-		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
+		skipped := v.phasesSkipped(cat, containerPhases, "skipped - no-cluster mode")
+		return append(results, skipped...), nil
+	}
+
+	// Skip container phases if readiness failed.
+	if overallFailed {
+		for _, phase := range containerPhases {
+			pr := v.phaseSkipped(cat, phase, "skipped due to readiness phase failure")
+			results = append(results, pr)
+		}
+		return results, nil
 	}
 
 	cs, err := v.prepareCluster(ctx, recipeResult, snap)
@@ -181,10 +260,7 @@ func (v *Validator) ValidatePhases(
 	defer close(cs.stopCh)
 	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
-	results := make([]*PhaseResult, 0, len(phases))
-	overallFailed := false
-
-	for _, phase := range phases {
+	for _, phase := range containerPhases {
 		select {
 		case <-ctx.Done():
 			return results, ctx.Err()
@@ -192,7 +268,6 @@ func (v *Validator) ValidatePhases(
 		}
 
 		if overallFailed {
-			// Skip with a CTRF report showing all validators as skipped
 			pr := v.phaseSkipped(cat, phase, "skipped due to previous phase failure")
 			results = append(results, pr)
 			slog.Info("skipping phase due to previous failure", "phase", phase)

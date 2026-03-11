@@ -221,7 +221,8 @@ func TestValidatePhaseNoCluster(t *testing.T) {
 	}
 }
 
-func TestCheckReadinessNilInputs(t *testing.T) {
+func TestRunReadinessPhaseNilInputsVariants(t *testing.T) {
+	v := New(WithVersion("test"))
 	tests := []struct {
 		name string
 		rec  *recipe.RecipeResult
@@ -233,36 +234,68 @@ func TestCheckReadinessNilInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := checkReadiness(tt.rec, tt.snap); err != nil {
-				t.Errorf("checkReadiness() = %v, want nil", err)
+			pr := v.runReadinessPhase(tt.rec, tt.snap)
+			if pr.Status == ctrf.StatusFailed {
+				t.Errorf("runReadinessPhase() status = %q, want non-failed", pr.Status)
 			}
 		})
 	}
 }
 
-func TestCheckReadinessEmptyConstraints(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		Constraints: []recipe.Constraint{},
-	}
+func TestRunReadinessPhaseEmptyConstraints(t *testing.T) {
+	v := New(WithVersion("test"))
+	rec := &recipe.RecipeResult{}
 	snap := &snapshotter.Snapshot{}
-	if err := checkReadiness(rec, snap); err != nil {
-		t.Errorf("checkReadiness() = %v, want nil for empty constraints", err)
+
+	pr := v.runReadinessPhase(rec, snap)
+
+	if pr.Phase != PhaseReadiness {
+		t.Errorf("Phase = %q, want %q", pr.Phase, PhaseReadiness)
+	}
+	if pr.Status != "skipped" {
+		t.Errorf("Status = %q, want %q for empty constraints", pr.Status, "skipped")
+	}
+	if pr.Report.Results.Summary.Tests != 0 {
+		t.Errorf("Tests = %d, want 0", pr.Report.Results.Summary.Tests)
 	}
 }
 
-func TestCheckReadinessPassingConstraint(t *testing.T) {
-	// Use a constraint path that Evaluate can resolve.
-	// When the path cannot be parsed or value not found, Evaluate returns Error (skipped).
-	// A constraint with an unparseable name results in Error != nil -> skipped (not failure).
+func TestRunReadinessPhaseSkippedConstraint(t *testing.T) {
+	v := New(WithVersion("test"))
 	rec := &recipe.RecipeResult{
 		Constraints: []recipe.Constraint{
-			{Name: "invalid-path-that-will-be-skipped", Value: "anything"},
+			{Name: "invalid-path", Value: "anything"},
 		},
 	}
 	snap := &snapshotter.Snapshot{}
-	// Unparseable constraint path => skipped (warn), not failure.
-	if err := checkReadiness(rec, snap); err != nil {
-		t.Errorf("checkReadiness() = %v, want nil for skipped constraint", err)
+
+	pr := v.runReadinessPhase(rec, snap)
+
+	if pr.Phase != PhaseReadiness {
+		t.Errorf("Phase = %q, want %q", pr.Phase, PhaseReadiness)
+	}
+	// Skipped constraints still count as tests, but phase passes (no failures).
+	if pr.Report.Results.Summary.Tests != 1 {
+		t.Errorf("Tests = %d, want 1", pr.Report.Results.Summary.Tests)
+	}
+	if pr.Report.Results.Summary.Skipped != 1 {
+		t.Errorf("Skipped = %d, want 1", pr.Report.Results.Summary.Skipped)
+	}
+	if pr.Status != "passed" {
+		t.Errorf("Status = %q, want %q", pr.Status, "passed")
+	}
+}
+
+func TestRunReadinessPhaseNilInputs(t *testing.T) {
+	v := New(WithVersion("test"))
+
+	pr := v.runReadinessPhase(nil, nil)
+
+	if pr.Phase != PhaseReadiness {
+		t.Errorf("Phase = %q, want %q", pr.Phase, PhaseReadiness)
+	}
+	if pr.Status != "skipped" {
+		t.Errorf("Status = %q, want %q for nil inputs", pr.Status, "skipped")
 	}
 }
 

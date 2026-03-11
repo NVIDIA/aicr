@@ -18,6 +18,9 @@ package validator
 type Phase string
 
 const (
+	// PhaseReadiness evaluates recipe constraints against the snapshot (no containers).
+	PhaseReadiness Phase = "readiness"
+
 	// PhaseDeployment validates that components are deployed and healthy.
 	PhaseDeployment Phase = "deployment"
 

@@ -85,10 +85,9 @@ func TestParseValidationPhases(t *testing.T) {
 			errContain: "invalid phase",
 		},
 		{
-			name:       "readiness is invalid (not supported in v2)",
+			name:       "single readiness phase",
 			phaseStrs:  []string{"readiness"},
-			wantErr:    true,
-			errContain: "invalid phase",
+			wantPhases: []validator.Phase{validator.PhaseReadiness},
 		},
 	}
 
