@@ -321,13 +321,20 @@ spec:
         - cm://gpu-operator/aicr-snapshot
         
         securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          runAsUser: 65532
-          capabilities:
-            drop: ["ALL"]
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+      hostPID: true
+      hostNetwork: true
+      hostIPC: true
+      volumes:
+      - name: systemd
+        hostPath:
+          path: /run/systemd
+          type: Directory
 ```
+
+> **Note:** The agent defaults to privileged mode, which is required for GPU, SystemD, and OS collectors. For PSS-restricted namespaces where only the Kubernetes collector is needed, use `--privileged=false` when deploying via the CLI. See [Agent Deployment](../user/agent-deployment.md) for details.
 
 ```shell
 kubectl apply -f agent-job.yaml
