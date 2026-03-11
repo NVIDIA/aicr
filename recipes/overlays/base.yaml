@@ -54,7 +54,7 @@ spec:
     - name: skyhook-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia/skyhook
-      version: v0.13.1
+      version: v0.14.0
       valuesFile: components/skyhook-operator/values.yaml
 
     - name: kube-prometheus-stack

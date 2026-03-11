@@ -14,7 +14,7 @@
 
 # Assert Skyhook operator controller-manager is available.
 # fullnameOverride: skyhook-operator (from values.yaml)
-# Chart: skyhook-operator v0.13.1
+# Chart: skyhook-operator v0.14.0
 # Manages NodeConfiguration CRs for node-level customizations (sysctl, kmod, etc.)
 apiVersion: apps/v1
 kind: Deployment
