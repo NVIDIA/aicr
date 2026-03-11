@@ -18,6 +18,7 @@ This section is for users who:
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
+| [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 
 ## Quick Start
 

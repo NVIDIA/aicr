@@ -101,6 +101,7 @@ Choose the path that matches how you'll use the project.
 - **[CLI Reference](docs/user/cli-reference.md)** — Complete command reference with examples
 - **[API Reference](docs/user/api-reference.md)** — REST API quick start
 - **[Agent Deployment](docs/user/agent-deployment.md)** — Deploy the Kubernetes agent for automated snapshots
+- **[Component Catalog](docs/user/component-catalog.md)** — Every component that can appear in a recipe
 </details>
 
 <details>
