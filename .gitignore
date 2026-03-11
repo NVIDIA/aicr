@@ -138,3 +138,5 @@ pkg/validator/checks/**/*_recipe.yaml
 # KWOK
 kwok/logs/
 aicr-e2e.xml
+site/.vitepress/cache/
+site/node_modules/
