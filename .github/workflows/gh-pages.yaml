@@ -59,46 +59,24 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
-      - name: Setup Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: false
-
-      - name: Setup Hugo
-        run: |
-          HUGO_VERSION="${{ steps.versions.outputs.hugo }}"
-          wget -q "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.deb" -O hugo.deb
-          sudo dpkg -i hugo.deb
-          rm hugo.deb
-          hugo version
-
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
         with:
           node-version: ${{ steps.versions.outputs.node }}
 
-      # PR preview: fast single unversioned build
-      - name: Install dependencies (PR)
-        if: github.event_name == 'pull_request'
-        working-directory: site
-        run: npm ci
-
       - name: Build site (PR)
         if: github.event_name == 'pull_request'
-        working-directory: site
-        run: hugo --minify
+        run: cd site && npm ci && npx vitepress build
 
-      # Main/release: versioned multi-build
-      - name: Build versioned site
+      - name: Build site
         if: github.event_name != 'pull_request'
-        uses: ./.github/actions/build-versioned-site
+        run: cd site && npm ci && npx vitepress build
 
       - name: Upload artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3.0.1
         with:
-          path: versioned-site-output
+          path: site/.vitepress/dist
 
   deploy:
     name: Deploy
