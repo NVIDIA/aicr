@@ -123,12 +123,12 @@ const featureCards = [
   { title: 'Validated', description: 'Passes automated constraint and compatibility checks before publishing.', icon: 'check-circle', delay: 80 },
   { title: 'Reproducible', description: 'Same inputs produce identical deployments every time.', icon: 'copy', delay: 160 },
   { title: 'Composable', description: 'Recipes compose from layered overlays: base defaults, cloud, accelerator, OS, and workload-specific tuning.', icon: 'layers', delay: 240 },
-  { title: 'Secure', description: 'SLSA Level 3 provenance, signed SBOMs, image attestations, and checksum verification on every release.', icon: 'shield', delay: 320 },
-  { title: 'Deployer Agnostic', description: 'The same recipe works whether you deploy with Helm, ArgoCD, Flux, or a custom pipeline.', icon: 'git-branch', delay: 400 },
+  { title: 'Secure', description: 'SLSA Level 3 provenance, SPDX SBOMs, and Sigstore cosign attestations on every release.', icon: 'shield', delay: 320 },
+  { title: 'Standards Based', description: 'Built on existing standards. Recipes are YAML, bundles produce Helm charts, and deployment works through Helm, ArgoCD, or any CD pipeline.', icon: 'git-branch', delay: 400 },
 ]
 
 const environmentCols = [
-  { label: 'Cloud or On-Premises', items: 'Amazon EKS, GKE, self-managed (Kind)' },
+  { label: 'Cloud or On-Premises', items: 'Amazon EKS, GKE, self-managed' },
   { label: 'GPUs', items: 'NVIDIA H100, GB200' },
   { label: 'Workloads', items: 'Training (Kubeflow), Inference (Dynamo)' },
 ]
@@ -635,9 +635,8 @@ const roleLinks = [
             maxWidth: '640px',
             margin: '0 0 40px 0',
           }">
-            AICR generates recipes for managed Kubernetes services, on-premises deployments,
-            and bare metal. Current recipes are optimized for EKS, GKE, and self-managed clusters with
-            H100 and GB200 GPUs on Ubuntu. Support for AKS, OKE, OpenShift, and additional
+            AICR generates recipes for managed or self-hosted Kubernetes deployments. Current recipes are optimized for EKS, GKE, and self-managed clusters with
+            H100 and GB200 GPUs on Ubuntu and COS. Support for additional environments and
             accelerators is on the roadmap.
           </p>
         </div>
@@ -710,11 +709,11 @@ const roleLinks = [
             maxWidth: '640px',
           }">
             Copy an existing overlay, update the criteria and component
-            configuration, run <code :style="{ fontFamily: `'JetBrains Mono', monospace`, fontSize: '13px', color: NVIDIA_GREEN, background: 'rgba(118,185,0,0.1)', padding: '2px 6px', borderRadius: '4px' }">make test</code>,
+            configuration, run <code :style="{ fontFamily: `'JetBrains Mono', monospace`, fontSize: '13px', color: NVIDIA_GREEN, background: 'rgba(118,185,0,0.1)', padding: '2px 6px', borderRadius: '4px' }">make qualify</code>,
             and open a PR.
           </p>
           <div :style="{ display: 'flex', gap: '16px', flexWrap: 'wrap' }">
-            <a href="https://github.com/NVIDIA/aicr" :style="{
+            <a href="/docs/contributor/" :style="{
               background: NVIDIA_GREEN,
               color: '#000',
               padding: '14px 32px',
@@ -724,8 +723,8 @@ const roleLinks = [
               textDecoration: 'none',
               transition: 'opacity 0.2s',
               display: 'inline-block',
-            }" @mouseenter="greenBtnEnter" @mouseleave="greenBtnLeave">Contribute on GitHub</a>
-            <a href="https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md" :style="{
+            }" @mouseenter="greenBtnEnter" @mouseleave="greenBtnLeave">Contributor Docs</a>
+            <a href="https://github.com/NVIDIA/aicr" :style="{
               background: 'transparent',
               color: '#fff',
               padding: '14px 32px',
@@ -736,7 +735,7 @@ const roleLinks = [
               border: '1px solid rgba(255,255,255,0.15)',
               transition: 'border-color 0.2s',
               display: 'inline-block',
-            }" @mouseenter="outlineBtnEnter" @mouseleave="outlineBtnLeave">CONTRIBUTING.md</a>
+            }" @mouseenter="outlineBtnEnter" @mouseleave="outlineBtnLeave">GitHub</a>
           </div>
         </div>
       </div>
@@ -778,7 +777,9 @@ const roleLinks = [
           }">
             <div><span :style="{ color: 'rgba(255,255,255,0.3)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">brew tap</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">NVIDIA/aicr</span></div>
             <div><span :style="{ color: 'rgba(255,255,255,0.3)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">brew install</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">aicr</span></div>
-            <div :style="{ height: '8px' }" />
+            <div :style="{ margin: '4px 0', color: 'rgba(255,255,255,0.2)', fontSize: '11px' }">or</div>
+            <div><span :style="{ color: 'rgba(255,255,255,0.3)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">curl -sfL</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">https://raw.githubusercontent.com/NVIDIA/aicr/main/install</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">| bash -s --</span></div>
+            <div :style="{ margin: '4px 0', color: 'rgba(255,255,255,0.2)', fontSize: '11px' }">then</div>
             <div><span :style="{ color: 'rgba(255,255,255,0.3)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">aicr recipe</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--service</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">eks</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--accelerator</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">h100</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--intent</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">training</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--output</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">recipe.yaml</span></div>
             <div><span :style="{ color: 'rgba(255,255,255,0.3)' }">$</span> <span :style="{ color: 'rgba(255,255,255,0.7)' }">aicr bundle</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--recipe</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">recipe.yaml</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--deployer</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">helm</span> <span :style="{ color: 'rgba(118,185,0,0.7)' }">--output</span> <span :style="{ color: 'rgba(255,255,255,0.5)' }">./bundle</span></div>
           </div>
