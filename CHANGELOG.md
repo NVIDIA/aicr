@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.10] - 2026-03-11
+
+### Bug Fixes
+
+- *(install)* Detect outdated cosign before attestation verification   by [@lockwobr](https://github.com/lockwobr)
+- *(install)* Replace post_install with caveats to avoid Homebrew sandbox error  by [@lockwobr](https://github.com/lockwobr)
+
+## [0.10.9] - 2026-03-11
+
+### New Features
+
+- *(release)* Add supply chain verification to Homebrew formula  by [@lockwobr](https://github.com/lockwobr)
+
+### Other Tasks
+
+- Update skyhook to latest version  by [@lockwobr](https://github.com/lockwobr)
+- Add phase to the validation command by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.10.8] - 2026-03-10
 
 ### Bug Fixes

@@ -65,6 +65,13 @@ msg() {
   printf "  %s\n" "$1" >&2
 }
 
+# Compare semver: returns 0 if $1 >= $2
+version_gte() {
+  local highest
+  highest=$(printf '%s\n%s' "$1" "$2" | sort -V | tail -1)
+  [[ "$highest" == "$1" ]]
+}
+
 has_tools() {
   local missing=()
   for tool in "$@"; do
@@ -252,19 +259,38 @@ main() {
   tar -xzf "${temp_dir}/${archive_name}" -C "$temp_dir"
 
   # Optional: verify attestation if cosign is available
+  COSIGN_MIN_VERSION="v3.0.4"
   if command -v cosign &>/dev/null && [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
-    step "Verifying provenance attestation (Sigstore cosign)..."
-    info "Confirms this binary was built by NVIDIA/aicr CI — not a third-party rebuild"
-    if cosign verify-blob-attestation \
-      --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
-      --type https://slsa.dev/provenance/v1 \
-      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-      --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
-      "${temp_dir}/${BIN_NAME}" 2>/dev/null; then
-      ok "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
+    cosign_version=$(cosign version --json 2>/dev/null | grep -o '"gitVersion":"[^"]*"' | cut -d'"' -f4)
+    if [[ -z "$cosign_version" ]]; then
+      # Fallback: try text output
+      cosign_version=$(cosign version 2>/dev/null | grep -i 'gitversion' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
+    fi
+
+    if [[ -n "$cosign_version" ]] && ! version_gte "$cosign_version" "$COSIGN_MIN_VERSION"; then
+      warn "Installed cosign version ($cosign_version) is older than the minimum required ($COSIGN_MIN_VERSION)"
+      info "Update cosign to verify provenance: https://docs.sigstore.dev/cosign/system_config/installation/"
     else
-      warn "Attestation verification failed — cannot confirm binary provenance"
-      info "The binary may still be valid, but its build origin could not be cryptographically verified"
+      step "Verifying provenance attestation (Sigstore cosign)..."
+      info "Confirms this binary was built by NVIDIA/aicr CI — not a third-party rebuild"
+      cosign_stderr=$(mktemp)
+      if cosign verify-blob-attestation \
+        --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
+        --type https://slsa.dev/provenance/v1 \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
+        "${temp_dir}/${BIN_NAME}" 2>"${cosign_stderr}"; then
+        ok "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
+      else
+        warn "Attestation verification failed — cannot confirm binary provenance"
+        info "The binary may still be valid, but its build origin could not be cryptographically verified"
+        if [[ -s "${cosign_stderr}" ]]; then
+          while IFS= read -r line; do
+            info "cosign: $line"
+          done < "${cosign_stderr}"
+        fi
+      fi
+      rm -f "${cosign_stderr}"
     fi
   elif [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
     warn "cosign not found — skipping provenance verification"
