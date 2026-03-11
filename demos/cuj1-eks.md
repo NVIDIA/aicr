@@ -53,7 +53,7 @@ aicr bundle \
   --output bundle
 ```
 
-> Both options allow for comma delamination to supply multiple values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
+> Both options allow for comma-separated values to supply multiple values. See the [bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
 
 ## Install Bundle into the Cluster
 
