@@ -1,0 +1,73 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: aks
+
+spec:
+  # Inherits from base (implicit when spec.base is empty)
+  # This recipe contains AKS-specific settings shared by all AKS deployments
+
+  criteria:
+    service: aks
+
+  # AKS-specific constraints
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.28"
+
+  # AKS-specific components
+  componentRefs:
+    # No aws-ebs-csi-driver equivalent needed.
+    # Azure Disk CSI is a built-in AKS addon (enabled by default since AKS 1.21).
+
+    # No aws-efa equivalent needed.
+    # AKS ND-series VMs have native InfiniBand (400 Gb/s NVIDIA Quantum-2 CX7).
+    # Devices appear as mlx5_* interfaces, auto-configured within the VMSS.
+
+    # Prometheus persistent storage — Azure Disk Standard SSD
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        prometheus:
+          prometheusSpec:
+            storageSpec:
+              emptyDir: null
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: managed-csi
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi
+    # AKS has no control-plane nodes — remove the default nodeAffinity
+    # that requires node-role.kubernetes.io/control-plane
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        controller:
+          affinity:
+            nodeAffinity: null
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
