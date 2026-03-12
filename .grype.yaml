@@ -12,8 +12,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ignore:
-  - vulnerability: GHSA-67mh-4wv8-2f99 # esbuild <0.25.0, Medium, site dev dependency only
-
 exclude:
   - '**/.terraform/**'
