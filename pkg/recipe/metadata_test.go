@@ -286,6 +286,48 @@ func TestRecipeMetadataSpecMerge(t *testing.T) {
 	}
 }
 
+func TestComponentRefIsEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      ComponentRef
+		expected bool
+	}{
+		{
+			name:     "no overrides",
+			ref:      ComponentRef{Name: "gpu-operator"},
+			expected: true,
+		},
+		{
+			name:     "enabled true",
+			ref:      ComponentRef{Name: "gpu-operator", Overrides: map[string]any{"enabled": true}},
+			expected: true,
+		},
+		{
+			name:     "enabled false",
+			ref:      ComponentRef{Name: "aws-ebs-csi-driver", Overrides: map[string]any{"enabled": false}},
+			expected: false,
+		},
+		{
+			name:     "enabled string false is not recognized",
+			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"enabled": "false"}},
+			expected: true,
+		},
+		{
+			name:     "other overrides no enabled key",
+			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"replicas": 3}},
+			expected: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.IsEnabled()
+			if got != tt.expected {
+				t.Errorf("IsEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestComponentRefMergeInheritsFromBase verifies that when an overlay specifies
 // only partial fields for a component, the missing fields are inherited from base.
 func TestComponentRefMergeInheritsFromBase(t *testing.T) {
