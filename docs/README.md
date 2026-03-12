@@ -16,7 +16,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator, cert-manager). Components have versions, Helm sources, and configuration values. |
 | **ComponentRef** | A reference to a component in a recipe, including version, source repository, values file, and dependency references. |
 | **Constraint** | A validation rule in a recipe specifying required system conditions (e.g., `K8s.server.version >= 1.31`, `OS.release.ID == ubuntu`). Constraints can have severity (error/warning), remediation guidance, and units. |
-| **Validation Phase** | A stage of validation in the deployment lifecycle: readiness (infrastructure), deployment (components), performance (system), conformance (workloads). |
+| **Validation Phase** | A stage of validation in the deployment lifecycle: deployment (components), performance (system), conformance (workloads). Readiness constraints are evaluated implicitly before any phase. |
 | **ValidationConfig** | Configuration in a recipe defining phase-specific checks, constraints, expected resources, and node selection for validation. |
 | **Measurement** | A captured data point from the system organized by type (K8s, OS, GPU, SystemD), subtype, and key-value readings. |
 | **Specificity** | A score indicating how specific a recipe's criteria is (number of non-"any" fields). More specific recipes are applied later during merge. |
@@ -179,7 +179,7 @@ aicr recipe --snapshot snapshot.yaml --intent training --platform kubeflow
 ### Validate Configuration
 
 ```shell
-# Validate readiness phase (default)
+# Validate recipe against snapshot (readiness constraints run implicitly)
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Validate all phases

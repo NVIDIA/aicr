@@ -433,11 +433,10 @@ aicr validate [flags]
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
-| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (required) |
-| `--phase` | | string | Validation phase to run: readiness (default), deployment, performance, conformance, all |
+| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--phase` | | string | Validation phase to run: deployment, performance, conformance, all (default: all) |
 | `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
 | `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
-| `--format` | `-t` | string | Output format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs) |
 
 **Input Sources:**
@@ -451,11 +450,12 @@ Validation can be run in different phases to validate different aspects of the d
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `readiness` | Evaluates constraints inline against snapshot (K8s version, OS, kernel) -- no checks or Jobs | Before deploying any components |
 | `deployment` | Validates component deployment health and expected resources | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
 | `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
+
+> **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
 
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
@@ -488,7 +488,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 **Examples:**
 
 ```shell
-# Validate snapshot against recipe (default: readiness phase)
+# Validate snapshot against recipe (readiness constraints run implicitly)
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Validate specific phase
@@ -512,14 +512,7 @@ aicr validate \
 aicr validate \
   --recipe recipe.yaml \
   --snapshot cm://gpu-operator/aicr-snapshot \
-  --output validation-results.yaml
-
-# Validate readiness phase before installing components
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --phase readiness \
-  --fail-on-error
+  --output validation-results.json
 
 # Validate deployment phase after components are installed
 aicr validate \
@@ -533,12 +526,6 @@ aicr validate \
   --snapshot snapshot.yaml \
   --phase performance
 
-# JSON output format
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --format json
-
 # With custom kubeconfig
 aicr validate \
   --recipe recipe.yaml \
@@ -546,101 +533,88 @@ aicr validate \
   --kubeconfig ~/.kube/prod-cluster
 ```
 
-**Output Structure (Readiness Phase):**
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  timestamp: "2025-12-31T10:30:00Z"
-  version: v0.14.0
-recipeSource: recipe.yaml
-snapshotSource: cm://gpu-operator/aicr-snapshot
-summary:
-  passed: 5
-  failed: 0
-  skipped: 0
-  total: 5
-  status: pass
-  duration: 20.5µs
-phases:
-  readiness:
-    status: pass
-    constraints:
-      - name: K8s.server.version
-        expected: '>= 1.30'
-        actual: v1.30.14-eks-3025e55
-        status: passed
-      - name: OS.release.ID
-        expected: ubuntu
-        actual: ubuntu
-        status: passed
-    duration: 20.5µs
+**Output Structure ([CTRF](https://ctrf.io/) JSON):**
+
+Results are output in CTRF (Common Test Report Format) — an industry-standard schema for test reporting.
+
+```json
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.0.1",
+  "timestamp": "2026-03-10T20:10:44Z",
+  "generatedBy": "aicr",
+  "results": {
+    "tool": {
+      "name": "aicr",
+      "version": "v0.10.3-next"
+    },
+    "summary": {
+      "tests": 16,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 3,
+      "pending": 0,
+      "other": 0,
+      "start": 1773173400872,
+      "stop": 1773173799002
+    },
+    "tests": [
+      {
+        "name": "operator-health",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["Found 1 gpu-operator pod(s)", "Running: 1/1"]
+      },
+      {
+        "name": "expected-resources",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["All expected resources are healthy"]
+      },
+      {
+        "name": "nccl-all-reduce-bw",
+        "status": "passed",
+        "duration": 234000,
+        "suite": ["performance"],
+        "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
+      },
+      {
+        "name": "dra-support",
+        "status": "passed",
+        "duration": 8000,
+        "suite": ["conformance"],
+        "stdout": ["DRA GPU allocation successful"]
+      },
+      {
+        "name": "cluster-autoscaling",
+        "status": "skipped",
+        "duration": 0,
+        "suite": ["conformance"],
+        "stdout": ["SKIP reason=\"Karpenter not found\""]
+      }
+    ]
+  }
+}
 ```
 
-**Output Structure (All Phases):**
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  timestamp: "2025-12-31T10:30:00Z"
-  version: v0.14.0
-recipeSource: recipe.yaml
-snapshotSource: snapshot.yaml
-summary:
-  passed: 3
-  failed: 0
-  skipped: 1
-  total: 4
-  status: pass
-  duration: 58.4µs
-phases:
-  readiness:
-    status: pass
-    constraints:
-      - name: K8s.server.version
-        expected: '>= 1.32.4'
-        actual: v1.35.0
-        status: passed
-      - name: OS.release.ID
-        expected: ubuntu
-        actual: ubuntu
-        status: passed
-    duration: 20.7µs
-  deployment:
-    status: pass
-    checks:
-      - name: gpu-operator.version
-        status: pass
-      - name: expected-resources
-        status: pass
-    duration: 1.2µs
-  performance:
-    status: pass
-    checks:
-      - name: nccl-bandwidth-test
-        status: pass
-      - name: fabric-health-check
-        status: pass
-    duration: 1.2µs
-  conformance:
-    status: skipped
-    reason: conformance phase not configured in recipe
-    duration: 0.8µs
-```
+> **Note:** The `tests` array above is truncated for brevity. A full validation run produces one entry per check across all phases. Each entry includes `stdout` with detailed diagnostic output.
 
-**Validation Statuses:**
+**Test Statuses:**
 | Status | Description |
 |--------|-------------|
-| `passed` | Constraint satisfied |
-| `failed` | Constraint not satisfied |
-| `skipped` | Constraint could not be evaluated (missing data, invalid path) |
+| `passed` | Check or constraint passed |
+| `failed` | Check or constraint failed |
+| `skipped` | Check could not be evaluated (missing data, no-cluster mode) |
+| `other` | Unexpected outcome (crash, OOM, timeout) |
 
-**Summary Status:**
-| Status | Description |
-|--------|-------------|
-| `pass` | All constraints passed |
-| `fail` | One or more constraints failed |
-| `partial` | Some constraints skipped, none failed |
+**Exit Codes:**
+| Code | Description |
+|------|-------------|
+| `0` | All checks passed |
+| `2` | Invalid input (bad flags, missing recipe) |
+| `8` | One or more checks failed (when `--fail-on-error` is set) |
 
 ---
 
