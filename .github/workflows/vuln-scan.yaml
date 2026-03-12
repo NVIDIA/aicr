@@ -69,6 +69,7 @@ jobs:
           output: ${{ env.SARIF_OUTPUT }}
           severity: ${{ env.SEVERITY_LEVELS }}
           skip-dirs: 'vendor,node_modules,distros/kubernetes,tests,tilt'
+          trivyignores: '.trivyignore.yaml'
           limit-severities-for-sarif: true
 
       - name: Check SARIF file exists

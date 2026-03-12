@@ -1,0 +1,75 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Skyhook GKE Container-Optimized OS (COS) GPU Customization
+# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
+#
+# This customization configures GPU nodes on ContainerOptimized OS with:
+# - Sysctl kernel tuning parameters
+# NOTE: runtimeRequired is NOT used here because GKE COS is largely immutable and so
+# the optimizations that can be made are limited to those which are not disruptive.
+{{- $cust := index .Values "skyhook-customizations" }}
+{{- if ne (toString (index $cust "enabled")) "false" }}
+---
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  annotations:
+    # Helm hooks ensure this CR is applied after skyhook-operator CRD is installed
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
+  name: tuning
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Default: true. Disable with --set skyhookcustomizations:autoTaintNewNodes=false
+  autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
+  # Dynamic: Supports --accelerated-node-toleration CLI flag
+  additionalTolerations:
+    {{- if $cust.acceleratedTolerations }}
+    {{- toYaml $cust.acceleratedTolerations | nindent 4 }}
+    {{- else }}
+    - key: dedicated
+      operator: Exists
+    {{- end }}
+  # Dynamic: Supports --accelerated-node-selector CLI flag
+  {{- if $cust.acceleratedNodeSelector }}
+  nodeSelectors:
+    matchLabels:
+      {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
+  {{- end }}
+  # Dynamic: Supports --workload-selector CLI flag
+  {{- if $cust.workloadSelector }}
+  podNonInterruptLabels:
+    matchLabels:
+      {{- toYaml $cust.workloadSelector | nindent 6 }}
+  {{- end }}
+  # Tuning
+  packages:
+    tuning:
+      image: ghcr.io/nvidia/skyhook-packages/nvidia-tuning-gke
+      version: "0.1.1"
+      interrupt:
+        type: service
+        services:
+          - systemd-sysctl
+      configMap:
+        intent: {{ $cust.intent }}
+        accelerator: {{ $cust.accelerator }}
+{{- end }}

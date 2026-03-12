@@ -24,11 +24,65 @@ spec:
   criteria:
     service: gke
     os: cos
-    accelerator: any
-    intent: any
+
+  # GKE-specific constraints
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.28"
 
   componentRefs:
-    # GKE-COS-specific GPU Operator overrides (inherits source/version/dependencies from base; overrides valuesFile)
+    # GKE-COS-specific GPU Operator overrides
+    # GKE preinstalls NVIDIA drivers on COS; disable driver installation
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-gke-cos.yaml
+      manifestFiles:
+        - components/gpu-operator/manifests/dcgm-exporter.yaml
+        - components/gpu-operator/manifests/gke-resource-quota.yaml
+
+    # Enable Prometheus persistent storage for GKE (GKE PD CSI is built-in)
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        prometheus:
+          prometheusSpec:
+            storageSpec:
+              emptyDir: null
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: standard-rwo
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi
+
+    # GKE has no user-accessible control-plane nodes — remove the default
+    # nodeAffinity that requires node-role.kubernetes.io/control-plane
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /home/kubernetes/bin/nvidia
+        controller:
+          affinity:
+            nodeAffinity: null
+
+    - name: skyhook-operator
+      type: Helm
+      overrides:
+        controllerManager:
+          manager:
+            env:
+              # GKE COS has a read-only rootfs, so we need to use a different directory
+              # /etc is stateless so better represents the flag and history on reboot
+              copyDirRoot: /etc/skyhook
+              # Because what skyhook does is generally on /etc we need to reapply on reboot
+              reapplyOnReboot: "true"
+
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

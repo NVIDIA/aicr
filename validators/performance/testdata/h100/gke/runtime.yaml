@@ -1,0 +1,221 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL AllReduce performance test for GKE H100 (a3-megagpu-8g) with GPUDirect TCPXO
+#
+# Unlike EKS (which uses Kubeflow TrainJob with MPI), the GKE test uses raw Pods
+# with Google's built-in SSH and NCCL scripts. This is because:
+# - GPUDirect TCPXO requires a tcpxo-daemon sidecar per pod
+# - hostNetwork: true is required for TCPXO
+# - Google's NCCL plugin image has built-in SSH/MPI setup scripts
+#
+# Prerequisites:
+#   - GKE cluster with multi-NIC networking (8 GPU NICs per node)
+#   - nccl-tcpxo-installer DaemonSet deployed on GPU nodes
+#
+# Usage:
+#   envsubst < runtime.yaml | kubectl apply -f -
+#   # Wait for pods to be 2/2 Running, then:
+#   kubectl exec nccl-test-host-1 -n ${NAMESPACE} -c nccl-test -- bash -c \
+#     '/scripts/init_ssh.sh nccl-host-1 nccl-host-2 && \
+#      pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd && \
+#      BENCHMARK=${TEST_TYPE} NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
+#        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
+#
+# Expected results (a3-megagpu-8g, 2 nodes):
+#   AllReduce busBW: ~335 GB/s at 8 GB message size
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-host-1
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    name: nccl-host-1
+  clusterIP: None
+  publishNotReadyAddresses: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-host-2
+  namespace: ${NAMESPACE}
+spec:
+  selector:
+    name: nccl-host-2
+  clusterIP: None
+  publishNotReadyAddresses: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-test-host-1
+  namespace: ${NAMESPACE}
+  labels:
+    name: nccl-host-1
+    tcpxo: daemon
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: tcpxo
+                operator: In
+                values:
+                  - daemon
+          topologyKey: "kubernetes.io/hostname"
+  hostname: host1
+  subdomain: nccl-host-1
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  tolerations:
+    - operator: Exists
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
+  containers:
+    - name: tcpxo-daemon
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
+      imagePullPolicy: Always
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -ex
+          chmod 755 /fts/entrypoint_rxdm_container.sh
+          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+    - name: nccl-test
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
+      imagePullPolicy: Always
+      command:
+        - /bin/sh
+        - -c
+        - |
+          cat >/scripts/allreduce.sh <<'HEREDOC'
+          #!/bin/bash
+          /scripts/init_ssh.sh ${@};
+          pushd /scripts;
+          /scripts/gen_hostfiles.sh ${@};
+          popd;
+          BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="/usr/local/nvidia/lib64" LD_LIBRARY_PATH="/usr/local/nvidia/lib64" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
+          HEREDOC
+          chmod +x /scripts/allreduce.sh
+          service ssh restart;
+          sleep infinity;
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+        - name: shared-memory
+          mountPath: /dev/shm
+      resources:
+        limits:
+          nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+  volumes:
+    - name: nvidia-install-dir-host
+      hostPath:
+        path: /home/kubernetes/bin/nvidia
+    - name: shared-memory
+      emptyDir:
+        medium: "Memory"
+        sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-test-host-2
+  namespace: ${NAMESPACE}
+  labels:
+    name: nccl-host-2
+    tcpxo: daemon
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: tcpxo
+                operator: In
+                values:
+                  - daemon
+          topologyKey: "kubernetes.io/hostname"
+  hostname: host2
+  subdomain: nccl-host-2
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  tolerations:
+    - operator: Exists
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
+  containers:
+    - name: tcpxo-daemon
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
+      imagePullPolicy: Always
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -ex
+          chmod 755 /fts/entrypoint_rxdm_container.sh
+          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+    - name: nccl-test
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
+      imagePullPolicy: Always
+      command:
+        - /bin/sh
+        - -c
+        - |
+          service ssh restart;
+          sleep infinity;
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+        - name: shared-memory
+          mountPath: /dev/shm
+      resources:
+        limits:
+          nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+  volumes:
+    - name: nvidia-install-dir-host
+      hostPath:
+        path: /home/kubernetes/bin/nvidia
+    - name: shared-memory
+      emptyDir:
+        medium: "Memory"
+        sizeLimit: 1Gi

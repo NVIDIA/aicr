@@ -89,6 +89,13 @@ components:
         tolerationPaths:
           - operator.tolerations
 
+  - name: gke-nccl-tcpxo
+    displayName: gke-nccl-tcpxo
+    valueOverrideKeys:
+      - gkenccltcpxo
+    manifest:
+      defaultNamespace: kube-system
+
   - name: aws-efa
     displayName: aws-efa
     valueOverrideKeys:

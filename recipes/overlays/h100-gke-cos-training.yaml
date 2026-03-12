@@ -1,0 +1,88 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: h100-gke-cos-training
+
+spec:
+  # Inherits from gke-cos-training recipe (GKE COS + training settings)
+  base: gke-cos-training
+
+  criteria:
+    service: gke
+    accelerator: h100
+    os: cos
+    intent: training
+
+  # Specific constraints for H100 on GKE COS training workloads
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32"
+
+  componentRefs:
+    # H100-specific GPU Operator overrides (inherits valuesFile from gke-cos-training)
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - cert-manager
+        - kube-prometheus-stack
+        - skyhook-customizations
+      overrides:
+        cdi:
+          enabled: true
+
+    # GPUDirect TCPXO components for high-speed inter-node communication.
+    # Requires GKE cluster with multi-NIC networking configured for GPU node pool.
+    # - nccl-tcpxo-installer: installs NCCL TCPXO plugin on GPU nodes
+    # - nri-device-injector: injects GPU NIC devices into pods via NRI annotations
+    #   (required for non-privileged workloads; NRI framework enabled by default on GKE 1.29+)
+    - name: gke-nccl-tcpxo
+      type: Helm
+      manifestFiles:
+        - components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml
+        - components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml
+      dependencyRefs:
+        - gpu-operator
+
+    - name: skyhook-customizations
+      type: Helm
+      manifestFiles:
+        - components/skyhook-customizations/manifests/tuning-gke.yaml
+      overrides:
+        accelerator: h100
+        intent: multiNodeTraining
+      dependencyRefs:
+        - skyhook-operator
+
+  validation:
+    performance:
+      checks:
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 250"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

@@ -80,11 +80,17 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 }
 
 // supportedNCCLCombinations maps each supported cloud service to the accelerator
-// types for which the NCCL all-reduce test has been implemented. The test uses
-// p5.48xlarge-specific templates with EFA networking and NVSwitch topology, so
-// only EKS+H100 is currently supported.
+// types for which the automated NCCL all-reduce test has been implemented via
+// Kubeflow TrainJob. GKE+H100 testdata exists but requires a different execution
+// model (raw Pods + kubectl exec) that is not yet automated.
 var supportedNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
+}
+
+// pendingNCCLCombinations lists service+accelerator pairs that have testdata but
+// are not yet automated. These produce an informative warning instead of a silent skip.
+var pendingNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
+	recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
 }
 
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth by running a TrainJob.
@@ -102,6 +108,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 
 	service := ctx.Recipe.Criteria.Service
 	accelerator := ctx.Recipe.Criteria.Accelerator
+
+	// Check if this combination has testdata but is not yet automated.
+	if pendingAccelerators, ok := pendingNCCLCombinations[service]; ok {
+		for _, a := range pendingAccelerators {
+			if accelerator == a {
+				slog.Warn("NCCL All Reduce bandwidth validation not yet automated for this platform",
+					"service", service, "accelerator", accelerator,
+					"hint", "GKE NCCL performance test requires raw Pods with TCPXO sidecar; run manually with: envsubst < validators/performance/testdata/h100/gke/runtime.yaml | kubectl apply -f -")
+				return fmt.Sprintf("skipped - %s+%s NCCL performance test exists but automated execution is not yet implemented; run manually using testdata/h100/gke/", service, accelerator), true, nil
+			}
+		}
+	}
+
 	supported := false
 	if supportedAccelerators, ok := supportedNCCLCombinations[service]; ok {
 		for _, a := range supportedAccelerators {

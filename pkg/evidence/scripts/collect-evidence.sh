@@ -132,21 +132,48 @@ cleanup_ns() {
     kubectl delete namespace "$ns" --ignore-not-found --timeout=60s &>/dev/null || true
 }
 
+# Detect cluster info once and cache in global variables.
+# Sets: CLUSTER_DESC, CLUSTER_K8S_VERSION, CLUSTER_PLATFORM, CLUSTER_OS_IMAGE,
+#        CLUSTER_PROVIDER_ID, CLUSTER_INSTANCE_TYPE, CLUSTER_ACCELERATOR
+detect_cluster_info() {
+    # Guard: only detect once
+    if [ -n "${CLUSTER_INFO_DETECTED:-}" ]; then
+        return
+    fi
+    CLUSTER_INFO_DETECTED=1
+
+    CLUSTER_K8S_VERSION=$(kubectl version -o json 2>/dev/null | python3 -c "import sys,json; v=json.load(sys.stdin)['serverVersion']; print(f\"v{v['major']}.{v['minor']}\")" 2>/dev/null || echo "unknown")
+    CLUSTER_PLATFORM=$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.operatingSystem}/{.items[0].status.nodeInfo.architecture}' 2>/dev/null || echo "unknown")
+    CLUSTER_OS_IMAGE=$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.osImage}' 2>/dev/null || echo "unknown")
+
+    CLUSTER_PROVIDER_ID=$(kubectl get nodes -o jsonpath='{.items[0].spec.providerID}' 2>/dev/null || echo "")
+    CLUSTER_ACCELERATOR=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[0].metadata.labels.nvidia\.com/gpu\.product}' 2>/dev/null || echo "unknown")
+    CLUSTER_INSTANCE_TYPE=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[0].metadata.labels.node\.kubernetes\.io/instance-type}' 2>/dev/null || echo "unknown")
+
+    if [[ "${CLUSTER_PROVIDER_ID}" == aws://* ]]; then
+        CLUSTER_DESC="EKS / ${CLUSTER_INSTANCE_TYPE} / ${CLUSTER_ACCELERATOR}"
+    elif [[ "${CLUSTER_PROVIDER_ID}" == gce://* ]]; then
+        local gke_accel
+        gke_accel=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[0].metadata.labels.cloud\.google\.com/gke-accelerator}' 2>/dev/null || echo "${CLUSTER_ACCELERATOR}")
+        CLUSTER_DESC="GKE / ${CLUSTER_INSTANCE_TYPE} / ${gke_accel}"
+    else
+        CLUSTER_DESC="${CLUSTER_INSTANCE_TYPE} / ${CLUSTER_ACCELERATOR}"
+    fi
+}
+
 # Write a per-section evidence file header
 write_section_header() {
     local title="$1"
-    local k8s_version platform timestamp
+    local timestamp
     timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
-    k8s_version=$(kubectl version -o json 2>/dev/null | python3 -c "import sys,json; v=json.load(sys.stdin)['serverVersion']; print(f\"v{v['major']}.{v['minor']}\")" 2>/dev/null || echo "unknown")
-    platform=$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.operatingSystem}/{.items[0].status.nodeInfo.architecture}' 2>/dev/null || echo "unknown")
 
     cat > "${EVIDENCE_FILE}" <<EOF
 # ${title}
 
-**Recipe:** \`h100-eks-ubuntu-inference-dynamo\`
+**Cluster:** \`${CLUSTER_DESC}\`
 **Generated:** ${timestamp}
-**Kubernetes Version:** ${k8s_version}
-**Platform:** ${platform}
+**Kubernetes Version:** ${CLUSTER_K8S_VERSION}
+**Platform:** ${CLUSTER_PLATFORM}
 
 ---
 
@@ -626,8 +653,6 @@ collect_gateway() {
 
     # Skip if kgateway is not installed (training clusters don't have inference gateway)
     if ! kubectl get deploy -n kgateway-system --no-headers 2>/dev/null | grep -q .; then
-        write_section_header "Inference API Gateway (kgateway)"
-        echo "**Result: SKIP** — kgateway not installed. Inference gateway check applies to inference clusters only." >> "${EVIDENCE_FILE}"
         log_info "Inference gateway evidence collection skipped — kgateway not installed."
         return
     fi
@@ -734,8 +759,6 @@ collect_operator() {
     elif kubectl get deploy -n kubeflow kubeflow-trainer-controller-manager --no-headers 2>/dev/null | grep -q .; then
         collect_operator_kubeflow
     else
-        write_section_header "Robust AI Operator"
-        echo "**Result: SKIP** — No supported AI operator found (requires Dynamo or Kubeflow Trainer)." >> "${EVIDENCE_FILE}"
         log_info "Robust operator evidence collection skipped — no supported operator found."
         return
     fi
@@ -1153,8 +1176,9 @@ autoscaler that manages node pool scaling based on workload demand.
 EOF
         collect_gke_autoscaling_evidence
     else
-        log_warn "Unknown cluster provider (providerID=${provider_id}), collecting Kubernetes-level evidence only"
-        collect_k8s_autoscaling_evidence
+        log_info "Cluster autoscaling evidence collection skipped — unknown provider (providerID=${provider_id})."
+        rm -f "${EVIDENCE_FILE}"
+        return
     fi
 
     log_info "Cluster autoscaling evidence collection complete."
@@ -1409,6 +1433,9 @@ main() {
 
     mkdir -p "${EVIDENCE_DIR}"
 
+    # Detect cluster info once for use in headers and summary
+    detect_cluster_info
+
     case "${SECTION}" in
         dra)
             collect_dra
@@ -1459,6 +1486,49 @@ main() {
     done
 
     log_info "Evidence written to: ${EVIDENCE_DIR}/"
+
+    # Print summary using cached cluster info
+    echo ""
+    echo "=== Evidence Collection Summary ==="
+    echo ""
+    echo "  Cluster:    ${CLUSTER_DESC}"
+    echo "  K8s:        ${CLUSTER_K8S_VERSION}"
+    echo "  OS:         ${CLUSTER_OS_IMAGE}"
+    echo "  Evidence:   ${EVIDENCE_DIR}/"
+    echo ""
+    local checks=(
+        "dra-support:DRA Support"
+        "gang-scheduling:Gang Scheduling"
+        "secure-accelerator-access:Secure Accelerator Access"
+        "accelerator-metrics:Accelerator Metrics"
+        "inference-gateway:Inference Gateway"
+        "robust-operator:Robust AI Operator"
+        "pod-autoscaling:Pod Autoscaling (HPA)"
+        "cluster-autoscaling:Cluster Autoscaling"
+    )
+    local passed=0 failed=0 skipped=0
+    printf "  %-30s %s\n" "Check" "Status"
+    printf "  %-30s %s\n" "-----" "------"
+    for entry in "${checks[@]}"; do
+        local file="${entry%%:*}"
+        local name="${entry#*:}"
+        local evidence_path="${EVIDENCE_DIR}/${file}.md"
+        if [ ! -f "${evidence_path}" ]; then
+            printf "  %-30s %s\n" "${name}" "SKIP"
+            skipped=$((skipped + 1))
+        elif grep -q "Result: PASS" "${evidence_path}" 2>/dev/null; then
+            printf "  %-30s %s\n" "${name}" "PASS"
+            passed=$((passed + 1))
+        elif grep -q "Result: FAIL" "${evidence_path}" 2>/dev/null; then
+            printf "  %-30s %s\n" "${name}" "FAIL"
+            failed=$((failed + 1))
+        else
+            printf "  %-30s %s\n" "${name}" "UNKNOWN"
+        fi
+    done
+    echo ""
+    echo "  Total: $((passed + failed + skipped)) | Passed: ${passed} | Failed: ${failed} | Skipped: ${skipped}"
+    echo ""
 }
 
 main
