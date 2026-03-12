@@ -261,7 +261,7 @@ main() {
   # Optional: verify attestation if cosign is available
   COSIGN_MIN_VERSION="v3.0.4"
   if command -v cosign &>/dev/null && [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
-    cosign_version=$(cosign version --json 2>/dev/null | grep -o '"gitVersion":"[^"]*"' | cut -d'"' -f4)
+    cosign_version=$(cosign version --json 2>/dev/null | grep -o '"gitVersion":[[:space:]]*"[^"]*"' | cut -d'"' -f4) || true
     if [[ -z "$cosign_version" ]]; then
       # Fallback: try text output
       cosign_version=$(cosign version 2>/dev/null | grep -i 'gitversion' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
