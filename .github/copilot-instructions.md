@@ -762,11 +762,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/go-test
         with:
-          go_version: '1.25'
+          go_version: '1.26'
           coverage_report: 'true'
       - uses: ./.github/actions/go-lint
         with:
-          go_version: '1.25'
+          go_version: '1.26'
           golangci_lint_version: 'v2.9.0'
       - uses: ./.github/actions/security-scan
   integration:
