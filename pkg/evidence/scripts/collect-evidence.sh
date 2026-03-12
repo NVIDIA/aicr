@@ -135,15 +135,31 @@ cleanup_ns() {
 # Write a per-section evidence file header
 write_section_header() {
     local title="$1"
-    local k8s_version platform timestamp
+    local k8s_version platform timestamp cluster_desc provider_id accelerator instance_type
+
     timestamp=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
     k8s_version=$(kubectl version -o json 2>/dev/null | python3 -c "import sys,json; v=json.load(sys.stdin)['serverVersion']; print(f\"v{v['major']}.{v['minor']}\")" 2>/dev/null || echo "unknown")
     platform=$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.operatingSystem}/{.items[0].status.nodeInfo.architecture}' 2>/dev/null || echo "unknown")
 
+    # Auto-detect cluster description from node metadata
+    provider_id=$(kubectl get nodes -o jsonpath='{.items[0].spec.providerID}' 2>/dev/null || echo "")
+    accelerator=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[0].metadata.labels.nvidia\.com/gpu\.product}' 2>/dev/null || echo "unknown")
+    instance_type=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[0].metadata.labels.node\.kubernetes\.io/instance-type}' 2>/dev/null || echo "unknown")
+
+    if [[ "${provider_id}" == aws://* ]]; then
+        cluster_desc="EKS / ${instance_type} / ${accelerator}"
+    elif [[ "${provider_id}" == gce://* ]]; then
+        local gke_accel
+        gke_accel=$(kubectl get nodes -l nvidia.com/gpu.present=true -o jsonpath='{.items[0].metadata.labels.cloud\.google\.com/gke-accelerator}' 2>/dev/null || echo "${accelerator}")
+        cluster_desc="GKE / ${instance_type} / ${gke_accel}"
+    else
+        cluster_desc="${instance_type} / ${accelerator}"
+    fi
+
     cat > "${EVIDENCE_FILE}" <<EOF
 # ${title}
 
-**Recipe:** \`h100-eks-ubuntu-inference-dynamo\`
+**Cluster:** \`${cluster_desc}\`
 **Generated:** ${timestamp}
 **Kubernetes Version:** ${k8s_version}
 **Platform:** ${platform}
