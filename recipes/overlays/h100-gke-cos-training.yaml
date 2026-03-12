@@ -44,11 +44,15 @@ spec:
         cdi:
           enabled: true
 
-    # NCCL TCPXO installer for GPUDirect high-speed inter-node communication.
+    # GPUDirect TCPXO components for high-speed inter-node communication.
     # Requires GKE cluster with multi-NIC networking configured for GPU node pool.
+    # - nccl-tcpxo-installer: installs NCCL TCPXO plugin on GPU nodes
+    # - nri-device-injector: injects GPU NIC devices into pods via NRI annotations
+    #   (required for non-privileged workloads; NRI framework enabled by default on GKE 1.29+)
     - name: gke-nccl-tcpxo
       manifestFiles:
         - components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml
+        - components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml
       dependencyRefs:
         - gpu-operator
 

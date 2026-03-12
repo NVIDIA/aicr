@@ -174,9 +174,27 @@ kubectl delete ns nccl-test
 ### Prerequisites
 
 - GKE cluster with multi-NIC networking (8 GPU NICs per a3-megagpu-8g node)
-- `Network` + `GKENetworkParamSet` CRs configured for GPU NICs
+- `Network` + `GKENetworkParamSet` CRs configured for GPU NICs (infrastructure, cluster-specific)
 - `nccl-tcpxo-installer` DaemonSet deployed on GPU nodes (included in AICR bundle)
+- `nri-device-injector` DaemonSet deployed on GPU nodes (included in AICR bundle)
 - Without multi-NIC, NCCL falls back to TCP (~4 GB/s vs ~335 GB/s with TCPXO)
+
+### TCPXO Runtime Requirements
+
+Each workload pod that needs GPUDirect TCPXO must include a `tcpxo-daemon` sidecar container.
+
+**Recommended profile** (validated on GKE 1.35 / a3-megagpu-8g):
+- `hostNetwork: true` — required for PCI sysfs visibility
+- `privileged: false` — not needed with NRI device injection
+- NRI annotations on the pod: `devices.gke.io/container.tcpxo-daemon` (GPU devices) and `networking.gke.io/interfaces` (multi-NIC mapping with cluster-specific network names)
+- `securityContext.capabilities: [NET_ADMIN, NET_BIND_SERVICE]` on the tcpxo-daemon container
+- Requires NRI device injector DaemonSet deployed on GPU nodes
+
+**Fallback profile** (if NRI injector is not available):
+- `hostNetwork: true` + `privileged: true`
+- No annotations needed
+
+> **Known issue:** Without `hostNetwork: true`, the TCPXO daemon cannot enumerate all GPUs via PCI sysfs — the container runtime restricts sysfs visibility, causing the daemon to detect fewer GPUs in the PCI tree than CUDA reports, and exit. NRI annotations provide `/dev/nvidia*` device access but do not restore full PCI sysfs visibility. This is a GKE container runtime limitation.
 
 ### Understanding the results
 

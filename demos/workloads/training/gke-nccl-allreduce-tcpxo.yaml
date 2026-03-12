@@ -46,6 +46,23 @@
 # GPUDirect TCPX data path. This sidecar is required for any workload that
 # needs TCPXO bandwidth — without it, NCCL falls back to TCP (~4 GB/s).
 #
+# TCPXO Runtime Requirements (validated on GKE 1.35 / a3-megagpu-8g):
+#
+#   Recommended (default profile):
+#     - hostNetwork: true (required for PCI sysfs visibility)
+#     - privileged: false
+#     - NRI annotations: devices.gke.io/container.tcpxo-daemon (GPU devices)
+#       and networking.gke.io/interfaces (multi-NIC mapping)
+#     - securityContext.capabilities: [NET_ADMIN, NET_BIND_SERVICE]
+#     - NRI device injector DaemonSet deployed on GPU nodes
+#
+#   Fallback (if NRI injector is not available):
+#     - hostNetwork: true + privileged: true (original known-good)
+#     - No annotations needed
+#
+# This test uses the fallback profile for broad compatibility.
+# See: https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
+#
 # Source: adapted from https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/nccl-test.yaml
 
 ---
