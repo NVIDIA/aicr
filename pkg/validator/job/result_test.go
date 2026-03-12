@@ -16,6 +16,7 @@ package job
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -352,5 +353,101 @@ func TestHandleTimeoutContainerTerminated(t *testing.T) {
 	}
 	if result.TerminationMsg != "killed by deadline" {
 		t.Errorf("TerminationMsg = %q", result.TerminationMsg)
+	}
+}
+
+func TestFilterStdoutLines(t *testing.T) {
+	tests := []struct {
+		name       string
+		lines      []string
+		maxLineLen int
+		want       []string
+	}{
+		{
+			name:       "empty input",
+			lines:      []string{},
+			maxLineLen: 100,
+			want:       []string{},
+		},
+		{
+			name:       "nil input",
+			lines:      nil,
+			maxLineLen: 100,
+			want:       nil,
+		},
+		{
+			name: "lines below max length pass through",
+			lines: []string{
+				`time=2026-03-10T10:00:00Z level=INFO msg="check started"`,
+				`time=2026-03-10T10:00:01Z level=INFO msg="check completed"`,
+			},
+			maxLineLen: 512,
+			want: []string{
+				`time=2026-03-10T10:00:00Z level=INFO msg="check started"`,
+				`time=2026-03-10T10:00:01Z level=INFO msg="check completed"`,
+			},
+		},
+		{
+			name: "long line gets truncated with suffix",
+			lines: []string{
+				"short line",
+				strings.Repeat("x", 600),
+			},
+			maxLineLen: 100,
+			want: []string{
+				"short line",
+				strings.Repeat("x", 100) + "... [truncated 500 chars]",
+			},
+		},
+		{
+			name: "line exactly at max length not truncated",
+			lines: []string{
+				strings.Repeat("a", 100),
+			},
+			maxLineLen: 100,
+			want: []string{
+				strings.Repeat("a", 100),
+			},
+		},
+		{
+			name: "line one over max length truncated",
+			lines: []string{
+				strings.Repeat("b", 101),
+			},
+			maxLineLen: 100,
+			want: []string{
+				strings.Repeat("b", 100) + "... [truncated 1 chars]",
+			},
+		},
+		{
+			name: "multiple long lines all truncated",
+			lines: []string{
+				strings.Repeat("a", 200),
+				"ok",
+				strings.Repeat("b", 300),
+			},
+			maxLineLen: 50,
+			want: []string{
+				strings.Repeat("a", 50) + "... [truncated 150 chars]",
+				"ok",
+				strings.Repeat("b", 50) + "... [truncated 250 chars]",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterStdoutLines(tt.lines, tt.maxLineLen)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("filterStdoutLines() returned %d lines, want %d\ngot:  %v\nwant: %v",
+					len(got), len(tt.want), got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("line[%d]:\n  got:  %q\n  want: %q", i, got[i], tt.want[i])
+				}
+			}
+		})
 	}
 }

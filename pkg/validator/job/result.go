@@ -86,7 +86,10 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
 	} else if logs != "" {
-		result.Stdout = truncateLogLines(logs, defaults.ValidatorMaxStdoutLines)
+		result.Stdout = filterStdoutLines(
+			truncateLogLines(logs, defaults.ValidatorMaxStdoutLines),
+			defaults.ValidatorMaxStdoutLineLength,
+		)
 	}
 
 	return result
@@ -110,7 +113,10 @@ func (d *Deployer) HandleTimeout(ctx context.Context) *ctrf.ValidatorResult {
 
 	// Try to get logs
 	if logs, logErr := pod.GetPodLogs(ctx, d.clientset, d.namespace, jobPod.Name, ""); logErr == nil && logs != "" {
-		result.Stdout = truncateLogLines(logs, defaults.ValidatorMaxStdoutLines)
+		result.Stdout = filterStdoutLines(
+			truncateLogLines(logs, defaults.ValidatorMaxStdoutLines),
+			defaults.ValidatorMaxStdoutLineLength,
+		)
 	}
 
 	// Try to get container status
@@ -141,6 +147,24 @@ func truncateLogLines(logs string, maxLines int) []string {
 	if len(lines) > maxLines {
 		lines = lines[len(lines)-maxLines:]
 	}
+	return lines
+}
+
+// filterStdoutLines truncates lines that exceed maxLineLen characters.
+// Lines longer than maxLineLen are cut to maxLineLen with a
+// "... [truncated N chars]" suffix appended.
+func filterStdoutLines(lines []string, maxLineLen int) []string {
+	if len(lines) == 0 {
+		return lines
+	}
+
+	for i, line := range lines {
+		if len(line) > maxLineLen {
+			dropped := len(line) - maxLineLen
+			lines[i] = line[:maxLineLen] + fmt.Sprintf("... [truncated %d chars]", dropped)
+		}
+	}
+
 	return lines
 }
 
