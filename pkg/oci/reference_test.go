@@ -19,6 +19,8 @@ import (
 )
 
 func TestParseOutputTarget(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name      string
 		input     string
@@ -101,6 +103,8 @@ func TestParseOutputTarget(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			ref, err := ParseOutputTarget(tt.input)
 
 			if (err != nil) != tt.wantErr {
@@ -132,6 +136,8 @@ func TestParseOutputTarget(t *testing.T) {
 }
 
 func TestReference_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		ref  *Reference
@@ -169,6 +175,8 @@ func TestReference_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.ref.String(); got != tt.want {
 				t.Errorf("Reference.String() = %v, want %v", got, tt.want)
 			}
@@ -177,6 +185,8 @@ func TestReference_String(t *testing.T) {
 }
 
 func TestReference_WithTag(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		ref     *Reference
@@ -218,6 +228,8 @@ func TestReference_WithTag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result := tt.ref.WithTag(tt.newTag)
 			if result.Tag != tt.wantTag {
 				t.Errorf("Reference.WithTag() Tag = %v, want %v", result.Tag, tt.wantTag)

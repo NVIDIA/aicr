@@ -68,6 +68,10 @@ func (k *Collector) collectNode(ctx context.Context) (map[string]measurement.Rea
 		}
 	}
 
+	if status.NodeInfo.KubeletVersion != "" {
+		providerData["kubelet-version"] = measurement.Str(status.NodeInfo.KubeletVersion)
+	}
+
 	if status.NodeInfo.KernelVersion != "" {
 		providerData["kernel-version"] = measurement.Str(status.NodeInfo.KernelVersion)
 	}

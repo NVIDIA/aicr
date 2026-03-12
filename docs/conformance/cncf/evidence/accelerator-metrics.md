@@ -1,8 +1,8 @@
 # Accelerator & AI Service Metrics
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-06 19:38:56 UTC
-**Kubernetes Version:** v1.34
+**Generated:** 2026-03-10 03:41:11 UTC
+**Kubernetes Version:** v1.35
 **Platform:** linux/amd64
 
 ---
@@ -22,14 +22,14 @@ Demonstrates two CNCF AI Conformance observability requirements:
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus
 NAME                                      READY   STATUS    RESTARTS   AGE
-prometheus-kube-prometheus-prometheus-0   2/2     Running   0          47h
+prometheus-kube-prometheus-prometheus-0   2/2     Running   0          18m
 ```
 
 **Prometheus service**
 ```
 $ kubectl get svc kube-prometheus-prometheus -n monitoring
-NAME                         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
-kube-prometheus-prometheus   ClusterIP   172.20.243.81   <none>        9090/TCP,8080/TCP   47h
+NAME                         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
+kube-prometheus-prometheus   ClusterIP   172.20.135.224   <none>        9090/TCP,8080/TCP   18m
 ```
 
 ### Prometheus Adapter (Custom Metrics API)
@@ -38,14 +38,14 @@ kube-prometheus-prometheus   ClusterIP   172.20.243.81   <none>        9090/TCP,
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
 NAME                                  READY   STATUS    RESTARTS   AGE
-prometheus-adapter-585f5dfc99-cwwdj   1/1     Running   0          47h
+prometheus-adapter-78b8b8d75c-fh4cf   1/1     Running   0          17m
 ```
 
 **Prometheus adapter service**
 ```
 $ kubectl get svc prometheus-adapter -n monitoring
-NAME                 TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
-prometheus-adapter   ClusterIP   172.20.140.0   <none>        443/TCP   47h
+NAME                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+prometheus-adapter   ClusterIP   172.20.178.141   <none>        443/TCP   17m
 ```
 
 ### Grafana
@@ -54,7 +54,7 @@ prometheus-adapter   ClusterIP   172.20.140.0   <none>        443/TCP   47h
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=grafana
 NAME                       READY   STATUS    RESTARTS   AGE
-grafana-6494c6659c-rh2ck   3/3     Running   0          47h
+grafana-56fbffd7d7-r2htr   3/3     Running   0          18m
 ```
 
 ## Accelerator Metrics (DCGM Exporter)
@@ -67,15 +67,16 @@ temperature, power draw, and more in Prometheus exposition format.
 **DCGM exporter pod**
 ```
 $ kubectl get pods -n gpu-operator -l app=nvidia-dcgm-exporter -o wide
-NAME                         READY   STATUS    RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-nvidia-dcgm-exporter-zfgtq   1/1     Running   0          44h   10.0.0.10   node-a.example.internal   <none>           <none>
+NAME                         READY   STATUS    RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
+nvidia-dcgm-exporter-g2fjs   1/1     Running   0          15m   10.0.247.52    ip-10-0-206-2.ec2.internal     <none>           <none>
+nvidia-dcgm-exporter-wqqqn   1/1     Running   0          15m   10.0.172.246   ip-10-0-171-111.ec2.internal   <none>           <none>
 ```
 
 **DCGM exporter service**
 ```
 $ kubectl get svc -n gpu-operator -l app=nvidia-dcgm-exporter
-NAME                   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
-nvidia-dcgm-exporter   ClusterIP   172.20.81.36   <none>        9400/TCP   44h
+NAME                   TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+nvidia-dcgm-exporter   ClusterIP   172.20.181.11   <none>        9400/TCP   15m
 ```
 
 ### DCGM Metrics Endpoint
@@ -84,6 +85,36 @@ Query DCGM exporter directly to show raw GPU metrics in Prometheus format.
 
 **Key GPU metrics from DCGM exporter (sampled)**
 ```
+DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 30
+DCGM_FI_DEV_GPU_TEMP{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 29
+DCGM_FI_DEV_GPU_TEMP{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
+DCGM_FI_DEV_GPU_TEMP{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 29
+DCGM_FI_DEV_GPU_TEMP{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 28
+DCGM_FI_DEV_GPU_TEMP{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
+DCGM_FI_DEV_GPU_TEMP{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 28
+DCGM_FI_DEV_GPU_TEMP{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
+DCGM_FI_DEV_POWER_USAGE{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 113.611000
+DCGM_FI_DEV_POWER_USAGE{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 68.347000
+DCGM_FI_DEV_POWER_USAGE{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 65.709000
+DCGM_FI_DEV_POWER_USAGE{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 67.316000
+DCGM_FI_DEV_POWER_USAGE{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 68.717000
+DCGM_FI_DEV_POWER_USAGE{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 65.742000
+DCGM_FI_DEV_POWER_USAGE{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 67.328000
+DCGM_FI_DEV_POWER_USAGE{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 66.997000
+DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
 ```
 
 ### Prometheus Querying GPU Metrics
@@ -100,184 +131,368 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-81d79b08-40a0-40ae-3fc5-82b8ff8b8138",
-          "__name__": "DCGM_FI_DEV_GPU_UTIL",
-          "container": "nvidia-dcgm-exporter",
-          "device": "nvidia0",
-          "endpoint": "gpu-metrics",
-          "gpu": "0",
-          "instance": "10.0.0.10:9400",
-          "job": "nvidia-dcgm-exporter",
-          "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "gpu-operator",
-          "pci_bus_id": "00000000:53:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
-          "service": "nvidia-dcgm-exporter"
-        },
-        "value": [
-          1772826012.651,
-          "0"
-        ]
-      },
-      {
-        "metric": {
-          "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-4fc48812-c1c8-3bb7-1313-724533aa7df7",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia1",
           "endpoint": "gpu-metrics",
           "gpu": "1",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:64:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-8d76cfcf-a144-5e43-876b-a4b71f2aecd1",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
-          "container": "main",
+          "container": "nvidia-dcgm-exporter",
           "device": "nvidia2",
           "endpoint": "gpu-metrics",
           "gpu": "2",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "dynamo-workload",
+          "namespace": "gpu-operator",
           "pci_bus_id": "00000000:75:00.0",
-          "pod": "vllm-agg-0-vllmdecodeworker-wmvrk",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-e69a4117-e5f9-04a7-d170-aafac6a7e692",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia3",
           "endpoint": "gpu-metrics",
           "gpu": "3",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:86:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-eaef2c36-d7aa-5f60-37bc-3e0a53de34ff",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia4",
           "endpoint": "gpu-metrics",
           "gpu": "4",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:97:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-1af5cfae-1878-a06c-5dc0-c16e5cf11a20",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia5",
           "endpoint": "gpu-metrics",
           "gpu": "5",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:A8:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-a0e6d978-c416-5df8-1ab9-eb27b31eab35",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia6",
           "endpoint": "gpu-metrics",
           "gpu": "6",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:B9:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-bd2999a7-7982-6643-fa9e-2d1a2cd7be27",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia7",
           "endpoint": "gpu-metrics",
           "gpu": "7",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:CA:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.651,
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia1",
+          "endpoint": "gpu-metrics",
+          "gpu": "1",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:64:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia2",
+          "endpoint": "gpu-metrics",
+          "gpu": "2",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:75:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia3",
+          "endpoint": "gpu-metrics",
+          "gpu": "3",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:86:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia4",
+          "endpoint": "gpu-metrics",
+          "gpu": "4",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:97:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia5",
+          "endpoint": "gpu-metrics",
+          "gpu": "5",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:A8:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia6",
+          "endpoint": "gpu-metrics",
+          "gpu": "6",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:B9:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia7",
+          "endpoint": "gpu-metrics",
+          "gpu": "7",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:CA:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
+          "__name__": "DCGM_FI_DEV_GPU_UTIL",
+          "container": "main",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "dynamo-workload",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "vllm-agg-0-vllmdecodeworker-s65j5",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.184,
           "0"
         ]
       }
@@ -296,185 +511,369 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-81d79b08-40a0-40ae-3fc5-82b8ff8b8138",
-          "__name__": "DCGM_FI_DEV_FB_USED",
-          "container": "nvidia-dcgm-exporter",
-          "device": "nvidia0",
-          "endpoint": "gpu-metrics",
-          "gpu": "0",
-          "instance": "10.0.0.10:9400",
-          "job": "nvidia-dcgm-exporter",
-          "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "gpu-operator",
-          "pci_bus_id": "00000000:53:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
-          "service": "nvidia-dcgm-exporter"
-        },
-        "value": [
-          1772826012.9,
-          "0"
-        ]
-      },
-      {
-        "metric": {
-          "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-4fc48812-c1c8-3bb7-1313-724533aa7df7",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia1",
           "endpoint": "gpu-metrics",
           "gpu": "1",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:64:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
+          1773114089.444,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-8d76cfcf-a144-5e43-876b-a4b71f2aecd1",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_FB_USED",
-          "container": "main",
+          "container": "nvidia-dcgm-exporter",
           "device": "nvidia2",
           "endpoint": "gpu-metrics",
           "gpu": "2",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "dynamo-workload",
+          "namespace": "gpu-operator",
           "pci_bus_id": "00000000:75:00.0",
-          "pod": "vllm-agg-0-vllmdecodeworker-wmvrk",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
-          "74166"
+          1773114089.444,
+          "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-e69a4117-e5f9-04a7-d170-aafac6a7e692",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia3",
           "endpoint": "gpu-metrics",
           "gpu": "3",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:86:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
+          1773114089.444,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-eaef2c36-d7aa-5f60-37bc-3e0a53de34ff",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia4",
           "endpoint": "gpu-metrics",
           "gpu": "4",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:97:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
+          1773114089.444,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-1af5cfae-1878-a06c-5dc0-c16e5cf11a20",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia5",
           "endpoint": "gpu-metrics",
           "gpu": "5",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:A8:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
+          1773114089.444,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-a0e6d978-c416-5df8-1ab9-eb27b31eab35",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia6",
           "endpoint": "gpu-metrics",
           "gpu": "6",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:B9:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
+          1773114089.444,
           "0"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-bd2999a7-7982-6643-fa9e-2d1a2cd7be27",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia7",
           "endpoint": "gpu-metrics",
           "gpu": "7",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:CA:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826012.9,
+          1773114089.444,
           "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia1",
+          "endpoint": "gpu-metrics",
+          "gpu": "1",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:64:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia2",
+          "endpoint": "gpu-metrics",
+          "gpu": "2",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:75:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia3",
+          "endpoint": "gpu-metrics",
+          "gpu": "3",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:86:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia4",
+          "endpoint": "gpu-metrics",
+          "gpu": "4",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:97:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia5",
+          "endpoint": "gpu-metrics",
+          "gpu": "5",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:A8:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia6",
+          "endpoint": "gpu-metrics",
+          "gpu": "6",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:B9:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia7",
+          "endpoint": "gpu-metrics",
+          "gpu": "7",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:CA:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "0"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
+          "__name__": "DCGM_FI_DEV_FB_USED",
+          "container": "main",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "dynamo-workload",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "vllm-agg-0-vllmdecodeworker-s65j5",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.444,
+          "74166"
         ]
       }
     ]
@@ -492,185 +891,369 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-81d79b08-40a0-40ae-3fc5-82b8ff8b8138",
-          "__name__": "DCGM_FI_DEV_GPU_TEMP",
-          "container": "nvidia-dcgm-exporter",
-          "device": "nvidia0",
-          "endpoint": "gpu-metrics",
-          "gpu": "0",
-          "instance": "10.0.0.10:9400",
-          "job": "nvidia-dcgm-exporter",
-          "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "gpu-operator",
-          "pci_bus_id": "00000000:53:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
-          "service": "nvidia-dcgm-exporter"
-        },
-        "value": [
-          1772826013.126,
-          "27"
-        ]
-      },
-      {
-        "metric": {
-          "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-4fc48812-c1c8-3bb7-1313-724533aa7df7",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia1",
           "endpoint": "gpu-metrics",
           "gpu": "1",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:64:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.126,
+          1773114089.702,
           "29"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-8d76cfcf-a144-5e43-876b-a4b71f2aecd1",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
-          "container": "main",
+          "container": "nvidia-dcgm-exporter",
           "device": "nvidia2",
           "endpoint": "gpu-metrics",
           "gpu": "2",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "dynamo-workload",
+          "namespace": "gpu-operator",
           "pci_bus_id": "00000000:75:00.0",
-          "pod": "vllm-agg-0-vllmdecodeworker-wmvrk",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.126,
-          "30"
+          1773114089.702,
+          "26"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-e69a4117-e5f9-04a7-d170-aafac6a7e692",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia3",
           "endpoint": "gpu-metrics",
           "gpu": "3",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:86:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.126,
-          "30"
-        ]
-      },
-      {
-        "metric": {
-          "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-eaef2c36-d7aa-5f60-37bc-3e0a53de34ff",
-          "__name__": "DCGM_FI_DEV_GPU_TEMP",
-          "container": "nvidia-dcgm-exporter",
-          "device": "nvidia4",
-          "endpoint": "gpu-metrics",
-          "gpu": "4",
-          "instance": "10.0.0.10:9400",
-          "job": "nvidia-dcgm-exporter",
-          "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "gpu-operator",
-          "pci_bus_id": "00000000:97:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
-          "service": "nvidia-dcgm-exporter"
-        },
-        "value": [
-          1772826013.126,
+          1773114089.702,
           "29"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-1af5cfae-1878-a06c-5dc0-c16e5cf11a20",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia4",
+          "endpoint": "gpu-metrics",
+          "gpu": "4",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:97:00.0",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "28"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia5",
           "endpoint": "gpu-metrics",
           "gpu": "5",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:A8:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.126,
+          1773114089.702,
+          "26"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia6",
+          "endpoint": "gpu-metrics",
+          "gpu": "6",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:B9:00.0",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "28"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia7",
+          "endpoint": "gpu-metrics",
+          "gpu": "7",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:CA:00.0",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "26"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
           "27"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-a0e6d978-c416-5df8-1ab9-eb27b31eab35",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
-          "device": "nvidia6",
+          "device": "nvidia1",
           "endpoint": "gpu-metrics",
-          "gpu": "6",
-          "instance": "10.0.0.10:9400",
+          "gpu": "1",
+          "instance": "10.0.247.52:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
-          "pci_bus_id": "00000000:B9:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pci_bus_id": "00000000:64:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.126,
+          1773114089.702,
+          "29"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia2",
+          "endpoint": "gpu-metrics",
+          "gpu": "2",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:75:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
           "28"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-bd2999a7-7982-6643-fa9e-2d1a2cd7be27",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia3",
+          "endpoint": "gpu-metrics",
+          "gpu": "3",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:86:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "29"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia4",
+          "endpoint": "gpu-metrics",
+          "gpu": "4",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:97:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "29"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia5",
+          "endpoint": "gpu-metrics",
+          "gpu": "5",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:A8:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "27"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia6",
+          "endpoint": "gpu-metrics",
+          "gpu": "6",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:B9:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "30"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia7",
           "endpoint": "gpu-metrics",
           "gpu": "7",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.247.52:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:CA:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.126,
-          "28"
+          1773114089.702,
+          "27"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
+          "__name__": "DCGM_FI_DEV_GPU_TEMP",
+          "container": "main",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "dynamo-workload",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "vllm-agg-0-vllmdecodeworker-s65j5",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.702,
+          "30"
         ]
       }
     ]
@@ -688,185 +1271,369 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-81d79b08-40a0-40ae-3fc5-82b8ff8b8138",
-          "__name__": "DCGM_FI_DEV_POWER_USAGE",
-          "container": "nvidia-dcgm-exporter",
-          "device": "nvidia0",
-          "endpoint": "gpu-metrics",
-          "gpu": "0",
-          "instance": "10.0.0.10:9400",
-          "job": "nvidia-dcgm-exporter",
-          "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "gpu-operator",
-          "pci_bus_id": "00000000:53:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
-          "service": "nvidia-dcgm-exporter"
-        },
-        "value": [
-          1772826013.35,
-          "67.56"
-        ]
-      },
-      {
-        "metric": {
-          "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-4fc48812-c1c8-3bb7-1313-724533aa7df7",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia1",
           "endpoint": "gpu-metrics",
           "gpu": "1",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:64:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "71.226"
+          1773114089.943,
+          "68.347"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-8d76cfcf-a144-5e43-876b-a4b71f2aecd1",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
-          "container": "main",
+          "container": "nvidia-dcgm-exporter",
           "device": "nvidia2",
           "endpoint": "gpu-metrics",
           "gpu": "2",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
-          "namespace": "dynamo-workload",
+          "namespace": "gpu-operator",
           "pci_bus_id": "00000000:75:00.0",
-          "pod": "vllm-agg-0-vllmdecodeworker-wmvrk",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "116.381"
+          1773114089.943,
+          "65.709"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-e69a4117-e5f9-04a7-d170-aafac6a7e692",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia3",
           "endpoint": "gpu-metrics",
           "gpu": "3",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:86:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "67.94"
+          1773114089.943,
+          "67.316"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-eaef2c36-d7aa-5f60-37bc-3e0a53de34ff",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia4",
           "endpoint": "gpu-metrics",
           "gpu": "4",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:97:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "69.245"
+          1773114089.943,
+          "68.717"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-1af5cfae-1878-a06c-5dc0-c16e5cf11a20",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia5",
           "endpoint": "gpu-metrics",
           "gpu": "5",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:A8:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "66.621"
+          1773114089.943,
+          "65.742"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-a0e6d978-c416-5df8-1ab9-eb27b31eab35",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia6",
           "endpoint": "gpu-metrics",
           "gpu": "6",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:B9:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "67.478"
+          1773114089.943,
+          "67.328"
         ]
       },
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "node-a.example.internal",
-          "UUID": "GPU-bd2999a7-7982-6643-fa9e-2d1a2cd7be27",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
           "device": "nvidia7",
           "endpoint": "gpu-metrics",
           "gpu": "7",
-          "instance": "10.0.0.10:9400",
+          "instance": "10.0.172.246:9400",
           "job": "nvidia-dcgm-exporter",
           "modelName": "NVIDIA H100 80GB HBM3",
           "namespace": "gpu-operator",
           "pci_bus_id": "00000000:CA:00.0",
-          "pod": "nvidia-dcgm-exporter-zfgtq",
+          "pod": "nvidia-dcgm-exporter-wqqqn",
           "service": "nvidia-dcgm-exporter"
         },
         "value": [
-          1772826013.35,
-          "68.215"
+          1773114089.943,
+          "66.997"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "69.339"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia1",
+          "endpoint": "gpu-metrics",
+          "gpu": "1",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:64:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "68.754"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia2",
+          "endpoint": "gpu-metrics",
+          "gpu": "2",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:75:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "68.61"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia3",
+          "endpoint": "gpu-metrics",
+          "gpu": "3",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:86:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "66.499"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia4",
+          "endpoint": "gpu-metrics",
+          "gpu": "4",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:97:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "67.645"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia5",
+          "endpoint": "gpu-metrics",
+          "gpu": "5",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:A8:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "66.68"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia6",
+          "endpoint": "gpu-metrics",
+          "gpu": "6",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:B9:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "68.395"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "nvidia-dcgm-exporter",
+          "device": "nvidia7",
+          "endpoint": "gpu-metrics",
+          "gpu": "7",
+          "instance": "10.0.247.52:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "gpu-operator",
+          "pci_bus_id": "00000000:CA:00.0",
+          "pod": "nvidia-dcgm-exporter-g2fjs",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "69.523"
+        ]
+      },
+      {
+        "metric": {
+          "DCGM_FI_DRIVER_VERSION": "580.105.08",
+          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
+          "__name__": "DCGM_FI_DEV_POWER_USAGE",
+          "container": "main",
+          "device": "nvidia0",
+          "endpoint": "gpu-metrics",
+          "gpu": "0",
+          "instance": "10.0.172.246:9400",
+          "job": "nvidia-dcgm-exporter",
+          "modelName": "NVIDIA H100 80GB HBM3",
+          "namespace": "dynamo-workload",
+          "pci_bus_id": "00000000:53:00.0",
+          "pod": "vllm-agg-0-vllmdecodeworker-s65j5",
+          "service": "nvidia-dcgm-exporter"
+        },
+        "value": [
+          1773114089.943,
+          "113.611"
         ]
       }
     ]
@@ -881,13 +1648,13 @@ enabling HPA and other consumers to act on workload-specific metrics.
 
 **Custom metrics API available resources**
 ```
-$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | jq .resources[].name
-pods/gpu_power_usage
+$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | python3 -c "..." # extract resource names
 namespaces/gpu_utilization
 pods/gpu_utilization
 namespaces/gpu_memory_used
 pods/gpu_memory_used
 namespaces/gpu_power_usage
+pods/gpu_power_usage
 ```
 
 **Result: PASS** — DCGM exporter provides per-GPU metrics (utilization, memory, temperature, power). Prometheus actively scrapes and stores metrics. Custom metrics API available via prometheus-adapter.

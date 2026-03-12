@@ -47,6 +47,75 @@ helm_failed() {
 # all pods start successfully. These components are installed without --wait.
 ASYNC_COMPONENTS="kai-scheduler"
 
+# ==============================================================================
+# Pre-flight checks
+# ==============================================================================
+# Verify the cluster is clean before deploying. Stale webhooks, terminating
+# namespaces, and orphaned API services from a previous install can block pod
+# creation and namespace deletion, causing silent deployment failures.
+
+preflight_failed=false
+
+# Bundle namespace list (deduplicated)
+BUNDLE_NAMESPACES=$(echo "{{ range .Components }}{{ .Namespace }} {{ end }}" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+# Check for terminating namespaces that overlap with our components
+for ns in ${BUNDLE_NAMESPACES}; do
+  phase=$(kubectl get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  if [[ "${phase}" == "Terminating" ]]; then
+    echo "ERROR: namespace '${ns}' is still terminating from a previous install."
+    echo "  Wait for it to finish, or force-finalize with:"
+    echo "    kubectl get ns ${ns} -o json | jq '.spec.finalizers=[]' | kubectl replace --raw /api/v1/namespaces/${ns}/finalize -f -"
+    preflight_failed=true
+  fi
+done
+
+# Check for stale webhooks whose backing services no longer exist.
+# Scoped to bundle namespaces only to avoid false positives from unrelated
+# platform webhooks in shared clusters.
+if command -v jq &>/dev/null; then
+  for kind in mutatingwebhookconfigurations validatingwebhookconfigurations; do
+    while IFS=$'\t' read -r wh_name svc_ns svc_name; do
+      # Only check webhooks pointing to our bundle namespaces
+      is_bundle_ns=false
+      for ns in ${BUNDLE_NAMESPACES}; do
+        [[ "${svc_ns}" == "${ns}" ]] && is_bundle_ns=true && break
+      done
+      [[ "${is_bundle_ns}" == "false" ]] && continue
+
+      # Use explicit NotFound check to avoid false positives from transient errors
+      svc_check=$(kubectl get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
+      if echo "${svc_check}" | grep -q "NotFound\|not found"; then
+        echo "ERROR: ${kind} '${wh_name}' references non-existent service ${svc_ns}/${svc_name}."
+        echo "  This will block pod/resource creation. Delete with: kubectl delete ${kind} ${wh_name}"
+        preflight_failed=true
+      fi
+    done < <(kubectl get "${kind}" -o json 2>/dev/null | \
+      jq -r '.items[] | .metadata.name as $wh | .webhooks[]? | select(.clientConfig.service != null) | [$wh, .clientConfig.service.namespace, .clientConfig.service.name] | @tsv' 2>/dev/null || true)
+  done
+else
+  echo "NOTE: jq not found — skipping webhook pre-flight checks. Install jq for full pre-flight validation."
+fi
+
+# Check for stale API services (e.g., custom.metrics.k8s.io from prometheus-adapter)
+if command -v jq &>/dev/null; then
+  for api_svc in $(kubectl get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
+    echo "WARNING: API service '${api_svc}' is unavailable. This can block namespace deletion."
+    echo "  Delete with: kubectl delete apiservice ${api_svc}"
+    # API service issues are warnings, not hard failures — they don't block deployment directly
+  done
+else
+  echo "NOTE: jq not found — skipping API service pre-flight checks."
+fi
+
+if [[ "${preflight_failed}" == "true" ]]; then
+  echo ""
+  echo "Pre-flight checks failed. Fix the issues above before deploying."
+  echo "To skip pre-flight checks, run: ./undeploy.sh first, then retry."
+  exit 1
+fi
+
+echo "Pre-flight checks passed."
 echo "Deploying Cloud Native Stack components..."
 
 # Install components in order

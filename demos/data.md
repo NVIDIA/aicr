@@ -39,7 +39,9 @@ yq . recipes/overlays/base.yaml
 Based on measurements:
 
 ```shell
-yq . examples/snapshots/gb200.yaml | head -n 20
+# Capture a live snapshot, then inspect it
+aicr snapshot --output snapshot.yaml
+yq . snapshot.yaml | head -n 20
 ```
 
 Constraint format: `{MeasurementType}.{Subtype}.{Key}`

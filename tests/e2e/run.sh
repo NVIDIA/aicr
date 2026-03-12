@@ -1165,14 +1165,14 @@ RECIPE
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
     --output "$validation_result" \
-    --cleanup=false 2>&1 || validation_exit=$?
+    --no-cleanup 2>&1 || validation_exit=$?
 
   # Check if RBAC resources were created
   if kubectl get sa aicr-validator -n aicr-validation &>/dev/null; then
     detail "ServiceAccount created: aicr-validator"
     pass "validate/job-rbac-serviceaccount"
   else
-    fail "validate/job-rbac-serviceaccount" "ServiceAccount not found after --cleanup=false"
+    fail "validate/job-rbac-serviceaccount" "ServiceAccount not found after --no-cleanup"
   fi
 
   if kubectl get clusterrolebinding aicr-validator &>/dev/null; then
@@ -1181,7 +1181,7 @@ RECIPE
     detail "ClusterRoleBinding created: aicr-validator → ${role_ref}"
     pass "validate/job-rbac-role"
   else
-    fail "validate/job-rbac-role" "ClusterRoleBinding not found after --cleanup=false"
+    fail "validate/job-rbac-role" "ClusterRoleBinding not found after --no-cleanup"
   fi
 
   # Check if jobs were created (they may not exist if recipe has no checks)
@@ -1233,7 +1233,7 @@ RECIPE
 
   # Test 2: Validation with custom namespace
   msg "--- Test: Validation Job in custom namespace ---"
-  echo -e "${DIM}  \$ aicr validate --namespace custom-validation --cleanup=true${NC}"
+  echo -e "${DIM}  \$ aicr validate --namespace custom-validation${NC}"
 
   # Create custom validation namespace
   kubectl create namespace custom-validation 2>&1 || true
@@ -1246,7 +1246,7 @@ RECIPE
     --phase deployment \
     --namespace custom-validation \
     --output "$validation_custom" \
-    --cleanup=true 2>&1 || true  # Keep || true here as this is just testing namespace config
+    2>&1 || true  # Keep || true here as this is just testing namespace config
 
   # Check if RBAC was created in custom namespace
   if kubectl get sa aicr-validator -n custom-validation &>/dev/null; then
@@ -1257,9 +1257,9 @@ RECIPE
     pass "validate/job-custom-namespace"
   fi
 
-  # Test 3: Job cleanup (verify cleanup from default namespace run with --cleanup=false)
+  # Test 3: Job cleanup (verify cleanup from default namespace run with --no-cleanup)
   msg "--- Test: Validation Job cleanup ---"
-  echo -e "${DIM}  \$ aicr validate --cleanup=true${NC}"
+  echo -e "${DIM}  \$ aicr validate${NC}"
 
   # Count existing jobs before cleanup test
   local jobs_before
@@ -1270,7 +1270,7 @@ RECIPE
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    --cleanup=true 2>&1 || true  # Keep || true here as this is just testing cleanup
+    2>&1 || true  # Keep || true here as this is just testing cleanup
 
   # Wait for cleanup to complete
   kubectl wait --for=delete jobs -l app.kubernetes.io/name=aicr -n aicr-validation --timeout=30s 2>/dev/null || true

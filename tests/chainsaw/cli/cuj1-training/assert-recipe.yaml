@@ -54,11 +54,11 @@ deploymentOrder:
   - cert-manager
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
-  - kubeflow-trainer
   - prometheus-adapter
   - skyhook-operator
   - skyhook-customizations
   - gpu-operator
   - kai-scheduler
+  - kubeflow-trainer
   - nvidia-dra-driver-gpu
   - nvsentinel

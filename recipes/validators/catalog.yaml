@@ -122,7 +122,7 @@ validators:
     env: []
   - name: robust-controller
     phase: conformance
-    description: "Verify Dynamo operator controller and webhooks"
+    description: "Verify AI operator controller and webhooks (Dynamo or Kubeflow Trainer)"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 5m
     args: ["robust-controller"]

@@ -141,7 +141,7 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 		case <-ctx.Ctx.Done():
 			return errors.Wrap(errors.ErrCodeTimeout,
 				"timed out waiting for GPU custom metrics", ctx.Ctx.Err())
-		case <-time.After(10 * time.Second):
+		case <-time.After(defaults.HPAPollInterval):
 		}
 	}
 

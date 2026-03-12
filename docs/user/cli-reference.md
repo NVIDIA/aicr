@@ -84,7 +84,7 @@ aicr snapshot [flags]
 | `--node-selector` | | string[] | | Node selector for agent scheduling (key=value, repeatable) |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
-| `--cleanup` | | bool | true | Delete Job and RBAC resources on completion. Use `--cleanup=false` to keep resources for debugging. |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
@@ -144,7 +144,7 @@ aicr snapshot \
   --toleration nvidia.com/gpu:NoSchedule \
   --timeout 10m \
   --output cm://gpu-operator/aicr-snapshot \
-  --cleanup
+  --no-cleanup
 
 # Custom template formatting
 aicr snapshot --template examples/templates/snapshot-template.md.tmpl
@@ -200,7 +200,7 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 3. **Waits for completion**: Monitors Job status with configurable timeout
 4. **Retrieves snapshot**: Reads snapshot from ConfigMap after Job completes
 5. **Writes output**: Saves snapshot to specified output destination
-6. **Cleanup**: Deletes Job and RBAC resources (use `--cleanup=false` to keep for debugging)
+6. **Cleanup**: Deletes Job and RBAC resources (use `--no-cleanup` to keep for debugging)
 
 **Benefits of agent deployment:**
 - Capture configuration from actual cluster nodes (not local machine)
@@ -431,11 +431,10 @@ aicr validate [flags]
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
-| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (required) |
-| `--phase` | | string | Validation phase to run: readiness (default), deployment, performance, conformance, all |
+| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--phase` | | string | Validation phase to run: deployment, performance, conformance, all (default: all) |
 | `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
 | `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
-| `--format` | `-t` | string | Output format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs) |
 
 **Input Sources:**
@@ -449,11 +448,12 @@ Validation can be run in different phases to validate different aspects of the d
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `readiness` | Evaluates constraints inline against snapshot (K8s version, OS, kernel) — no checks or Jobs | Before deploying any components |
 | `deployment` | Validates component deployment health and expected resources | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
 | `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
+
+> **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
 
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
@@ -486,7 +486,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 **Examples:**
 
 ```shell
-# Validate snapshot against recipe (default: readiness phase)
+# Validate snapshot against recipe (readiness constraints run implicitly)
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Validate specific phase
@@ -510,14 +510,7 @@ aicr validate \
 aicr validate \
   --recipe recipe.yaml \
   --snapshot cm://gpu-operator/aicr-snapshot \
-  --output validation-results.yaml
-
-# Validate readiness phase before installing components
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --phase readiness \
-  --fail-on-error
+  --output validation-results.json
 
 # Validate deployment phase after components are installed
 aicr validate \
@@ -531,12 +524,6 @@ aicr validate \
   --snapshot snapshot.yaml \
   --phase performance
 
-# JSON output format
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --format json
-
 # With custom kubeconfig
 aicr validate \
   --recipe recipe.yaml \
@@ -544,101 +531,88 @@ aicr validate \
   --kubeconfig ~/.kube/prod-cluster
 ```
 
-**Output Structure (Readiness Phase):**
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  timestamp: "2025-12-31T10:30:00Z"
-  version: v0.14.0
-recipeSource: recipe.yaml
-snapshotSource: cm://gpu-operator/aicr-snapshot
-summary:
-  passed: 5
-  failed: 0
-  skipped: 0
-  total: 5
-  status: pass
-  duration: 20.5µs
-phases:
-  readiness:
-    status: pass
-    constraints:
-      - name: K8s.server.version
-        expected: '>= 1.30'
-        actual: v1.30.14-eks-3025e55
-        status: passed
-      - name: OS.release.ID
-        expected: ubuntu
-        actual: ubuntu
-        status: passed
-    duration: 20.5µs
+**Output Structure ([CTRF](https://ctrf.io/) JSON):**
+
+Results are output in CTRF (Common Test Report Format) — an industry-standard schema for test reporting.
+
+```json
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.0.1",
+  "timestamp": "2026-03-10T20:10:44Z",
+  "generatedBy": "aicr",
+  "results": {
+    "tool": {
+      "name": "aicr",
+      "version": "v0.10.3-next"
+    },
+    "summary": {
+      "tests": 16,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 3,
+      "pending": 0,
+      "other": 0,
+      "start": 1773173400872,
+      "stop": 1773173799002
+    },
+    "tests": [
+      {
+        "name": "operator-health",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["Found 1 gpu-operator pod(s)", "Running: 1/1"]
+      },
+      {
+        "name": "expected-resources",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["All expected resources are healthy"]
+      },
+      {
+        "name": "nccl-all-reduce-bw",
+        "status": "passed",
+        "duration": 234000,
+        "suite": ["performance"],
+        "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
+      },
+      {
+        "name": "dra-support",
+        "status": "passed",
+        "duration": 8000,
+        "suite": ["conformance"],
+        "stdout": ["DRA GPU allocation successful"]
+      },
+      {
+        "name": "cluster-autoscaling",
+        "status": "skipped",
+        "duration": 0,
+        "suite": ["conformance"],
+        "stdout": ["SKIP reason=\"Karpenter not found\""]
+      }
+    ]
+  }
+}
 ```
 
-**Output Structure (All Phases):**
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  timestamp: "2025-12-31T10:30:00Z"
-  version: v0.14.0
-recipeSource: recipe.yaml
-snapshotSource: snapshot.yaml
-summary:
-  passed: 3
-  failed: 0
-  skipped: 1
-  total: 4
-  status: pass
-  duration: 58.4µs
-phases:
-  readiness:
-    status: pass
-    constraints:
-      - name: K8s.server.version
-        expected: '>= 1.32.4'
-        actual: v1.35.0
-        status: passed
-      - name: OS.release.ID
-        expected: ubuntu
-        actual: ubuntu
-        status: passed
-    duration: 20.7µs
-  deployment:
-    status: pass
-    checks:
-      - name: gpu-operator.version
-        status: pass
-      - name: expected-resources
-        status: pass
-    duration: 1.2µs
-  performance:
-    status: pass
-    checks:
-      - name: nccl-bandwidth-test
-        status: pass
-      - name: fabric-health-check
-        status: pass
-    duration: 1.2µs
-  conformance:
-    status: skipped
-    reason: conformance phase not configured in recipe
-    duration: 0.8µs
-```
+> **Note:** The `tests` array above is truncated for brevity. A full validation run produces one entry per check across all phases. Each entry includes `stdout` with detailed diagnostic output.
 
-**Validation Statuses:**
+**Test Statuses:**
 | Status | Description |
 |--------|-------------|
-| `passed` | Constraint satisfied |
-| `failed` | Constraint not satisfied |
-| `skipped` | Constraint could not be evaluated (missing data, invalid path) |
+| `passed` | Check or constraint passed |
+| `failed` | Check or constraint failed |
+| `skipped` | Check could not be evaluated (missing data, no-cluster mode) |
+| `other` | Unexpected outcome (crash, OOM, timeout) |
 
-**Summary Status:**
-| Status | Description |
-|--------|-------------|
-| `pass` | All constraints passed |
-| `fail` | One or more constraints failed |
-| `partial` | Some constraints skipped, none failed |
+**Exit Codes:**
+| Code | Description |
+|------|-------------|
+| `0` | All checks passed |
+| `2` | Invalid input (bad flags, missing recipe) |
+| `8` | One or more checks failed (when `--fail-on-error` is set) |
 
 ---
 
@@ -689,21 +663,21 @@ NFD (Node Feature Discovery) workers must run on **all nodes** (GPU, CPU, and sy
 
 ```bash
 aicr bundle --recipe recipe.yaml \
-  --accelerated-node-selector dedicated=gpu-workload \
-  --accelerated-node-toleration dedicated=gpu-workload:NoSchedule \
-  --accelerated-node-toleration dedicated=gpu-workload:NoExecute \
-  --system-node-selector dedicated=system-workload \
+  --accelerated-node-selector nodeGroup=gpu-worker \
+  --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
+  --accelerated-node-toleration dedicated=worker-workload:NoExecute \
+  --system-node-selector nodeGroup=system-worker \
   --system-node-toleration dedicated=system-workload:NoSchedule \
   --system-node-toleration dedicated=system-workload:NoExecute \
   --output bundle
 ```
 
-> **Cluster node requirements:** This example assumes the cluster has nodes with the label `dedicated=system-workload` and matching taints for system infrastructure, plus GPU nodes with the label `dedicated=gpu-workload` and taints `dedicated=gpu-workload:NoSchedule,NoExecute`.
+> **Cluster node requirements:** This example assumes the cluster has nodes labeled `nodeGroup=system-worker` with taints `dedicated=system-workload:NoSchedule,NoExecute` for system infrastructure, and GPU nodes labeled `nodeGroup=gpu-worker` with taints `dedicated=worker-workload:NoSchedule,NoExecute`.
 
 This results in:
-- **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=dedicated=gpu-workload` + tolerations for `dedicated=gpu-workload` with both `NoSchedule` and `NoExecute`
-- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=gpu-workload` with both `NoSchedule` and `NoExecute`
-- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, kgateway proxy): `nodeSelector=dedicated=system-workload` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
+- **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, kgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
 **Behavior:**
 - All components from the recipe are bundled automatically
@@ -927,13 +901,13 @@ aicr bundle -r recipe.yaml \
 
 # Resolve accelerated selector warning
 aicr bundle -r recipe.yaml \
-  --accelerated-node-selector dedicated=gpu-workload \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   -o ./bundle
 
 # Resolve both warnings
 aicr bundle -r recipe.yaml \
   --workload-selector workload-type=training \
-  --accelerated-node-selector dedicated=gpu-workload \
+  --accelerated-node-selector nodeGroup=gpu-worker \
   -o ./bundle
 ```
 
@@ -1483,31 +1457,18 @@ Debug logs include:
 
 The `examples/` directory contains reference files for testing and learning:
 
-### Snapshots (`examples/snapshots/`)
-
-| File | Description |
-|------|-------------|
-| `gb200.yaml` | GB200 NVL72 system snapshot (Ubuntu 24.04, EKS 1.33, NVLink) |
-| `h100.yaml` | H100 GPU cluster snapshot (Ubuntu 22.04, GKE 1.32) |
-| `gb200-h100-comp.md` | Configuration comparison between GB200 and H100 |
-
-**Usage:**
-```shell
-# Generate recipe from example snapshot
-aicr recipe --snapshot examples/snapshots/gb200.yaml --intent training --platform kubeflow
-```
-
 ### Recipes (`examples/recipes/`)
 
 | File | Description |
 |------|-------------|
-| `eks-gb200-training.yaml` | GB200 training workload recipe for EKS |
-| `eks-h100-training.yaml` | H100 training workload recipe for EKS |
+| `kind.yaml` | Recipe for local Kind cluster with fake GPU |
+| `eks-training.yaml` | EKS recipe optimized for training workloads |
+| `eks-gb200-ubuntu-training-with-validation.yaml` | GB200 on EKS with Ubuntu and multi-phase validation |
 
 **Usage:**
 ```shell
 # Generate bundle from example recipe
-aicr bundle --recipe examples/recipes/eks-gb200-training.yaml --output ./bundles
+aicr bundle --recipe examples/recipes/eks-training.yaml --output ./bundles
 ```
 
 ### Templates (`examples/templates/`)

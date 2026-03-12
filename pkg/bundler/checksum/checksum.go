@@ -43,7 +43,7 @@ const ChecksumFileName = "checksums.txt"
 // or the checksums file cannot be written.
 func GenerateChecksums(ctx context.Context, bundleDir string, files []string) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeUnavailable, "context canceled before checksum generation", err)
 	}
 
 	checksums := make([]string, 0, len(files))
@@ -169,7 +169,7 @@ func CountEntries(bundleDir string) int {
 // SHA256Raw computes a file's SHA256 digest using streaming I/O and returns
 // the raw bytes. Does not load the entire file into memory.
 func SHA256Raw(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path)) //nolint:gosec // G703: path from internal callers only
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to open file for digest: %s", path), err)

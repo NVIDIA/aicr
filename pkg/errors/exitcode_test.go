@@ -20,6 +20,7 @@ import (
 )
 
 func TestExitCodeFromError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		err      error
@@ -84,6 +85,7 @@ func TestExitCodeFromError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ExitCodeFromError(tt.err)
 			if result != tt.expected {
 				t.Errorf("ExitCodeFromError() = %d, want %d", result, tt.expected)
@@ -93,6 +95,7 @@ func TestExitCodeFromError(t *testing.T) {
 }
 
 func TestExitCodeFromErrorCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code     ErrorCode
 		expected int
@@ -110,6 +113,7 @@ func TestExitCodeFromErrorCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.code), func(t *testing.T) {
+			t.Parallel()
 			result := exitCodeFromErrorCode(tt.code)
 			if result != tt.expected {
 				t.Errorf("exitCodeFromErrorCode(%s) = %d, want %d", tt.code, result, tt.expected)
@@ -119,6 +123,7 @@ func TestExitCodeFromErrorCode(t *testing.T) {
 }
 
 func TestExitCodeConstants(t *testing.T) {
+	t.Parallel()
 	// Verify exit codes follow conventions
 	if ExitSuccess != 0 {
 		t.Errorf("ExitSuccess should be 0, got %d", ExitSuccess)

@@ -24,8 +24,7 @@ AICR (AICR) provides supply chain security artifacts:
 Get latest release tag:
 
 ```shell
-TAG=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
-  https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
+TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 echo "Using tag: $TAG"
 ```
 Resolve tag to immutable digest:

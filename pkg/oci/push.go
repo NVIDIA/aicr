@@ -133,7 +133,7 @@ func validateRegistryReference(registry, repository string) error {
 
 // Package creates a local OCI artifact in OCI Image Layout format.
 // This stores the artifact locally without pushing to a remote registry.
-func Package(ctx context.Context, opts PackageOptions) (*PackageResult, error) {
+func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult, retErr error) {
 	if opts.Tag == "" {
 		return nil, apperrors.New(apperrors.ErrCodeInvalidRequest, "tag is required for OCI packaging")
 	}
@@ -197,7 +197,12 @@ func Package(ctx context.Context, opts PackageOptions) (*PackageResult, error) {
 	if err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create file store", err)
 	}
-	defer func() { _ = fs.Close() }()
+	defer func() {
+		closeErr := fs.Close()
+		if retErr == nil {
+			retErr = closeErr
+		}
+	}()
 
 	// Make tars deterministic for reproducible builds
 	fs.TarReproducible = true

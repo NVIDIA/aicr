@@ -278,6 +278,7 @@ ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
 GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
 GRYPE_VERSION=$(yq '.security_tools.grype' .settings.yaml)
 COSIGN_VERSION=$(yq '.security_tools.cosign' .settings.yaml)
+SYFT_VERSION=$(yq '.security_tools.syft' .settings.yaml)
 KIND_VERSION=$(yq '.testing_tools.kind' .settings.yaml)
 KUBECTL_VERSION=$(yq '.testing_tools.kubectl' .settings.yaml)
 CTLPTL_VERSION=$(yq '.testing_tools.ctlptl' .settings.yaml)
@@ -294,6 +295,7 @@ echo "  Go:              ${GO_VERSION}"
 echo "  golangci-lint:   ${GOLANGCI_LINT_VERSION}"
 echo "  grype:           ${GRYPE_VERSION}"
 echo "  cosign:          ${COSIGN_VERSION}"
+echo "  syft:            ${SYFT_VERSION}"
 echo "  kind:            ${KIND_VERSION}"
 echo "  kubectl:         ${KUBECTL_VERSION}"
 echo "  tilt:            ${TILT_VERSION}"
@@ -515,6 +517,32 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 fi
             fi
             log_success "cosign installed"
+        fi
+    fi
+
+    # syft (SBOM generator)
+    if command_exists syft && [[ "${UPGRADE}" != "true" ]]; then
+        log_success "syft already installed: $(syft version 2>/dev/null | grep -E '^Version:' | awk '{print $2}')"
+    else
+        log_info "Installing syft ${SYFT_VERSION}..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                brew install syft
+            elif [[ "${OS}" == "linux" ]]; then
+                SYFT_VER="${SYFT_VERSION#v}"
+                SYFT_TMP=$(mktemp -d)
+                SYFT_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VER}/syft_${SYFT_VER}_linux_${GO_ARCH}.tar.gz"
+                if verify_download_url "$SYFT_URL" "syft ${SYFT_VERSION} for Linux ${GO_ARCH}"; then
+                    curl -fsSL "$SYFT_URL" | tar -xzC "$SYFT_TMP"
+                    sudo mv "$SYFT_TMP/syft" /usr/local/bin/syft
+                    sudo chmod +x /usr/local/bin/syft
+                    rm -rf "$SYFT_TMP"
+                else
+                    log_error "Failed to install syft. Please install manually."
+                    rm -rf "$SYFT_TMP"
+                fi
+            fi
+            log_success "syft installed"
         fi
     fi
 
@@ -770,6 +798,7 @@ TOOLS=(
     "yamllint:yamllint --version 2>/dev/null | awk '{print \$2}'"
     "grype:grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\\[' || echo installed"
     "cosign:cosign version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+' | head -1"
+    "syft:syft version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}'"
     "tilt:tilt version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
     "kind:kind version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"
     "ctlptl:ctlptl version 2>/dev/null | grep -oE 'v[0-9]+\\.[0-9]+\\.[0-9]+'"

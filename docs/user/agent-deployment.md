@@ -75,7 +75,7 @@ This single command:
 3. Waits for Job completion (5m timeout by default)
 4. Retrieves snapshot from ConfigMap
 5. Writes snapshot to stdout (or specified output)
-6. Cleans up Job and RBAC resources (use `--cleanup=false` to keep for debugging)
+6. Cleans up Job and RBAC resources (use `--no-cleanup` to keep for debugging)
 
 ### 2. View Snapshot Output
 
@@ -128,7 +128,7 @@ aicr snapshot \
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--cleanup`: Delete Job and RBAC resources on completion. **Default: `true`**. Use `--cleanup=false` to keep resources for debugging.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active.
 
 ### 4. Check Agent Logs (Debugging)
 

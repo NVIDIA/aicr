@@ -13,6 +13,32 @@
 # limitations under the License.
 
 # NVIDIA DRA Driver GPU Helm values
+#
+# GPU Allocation Modes:
+#
+# The cluster supports two mutually exclusive GPU allocation mechanisms:
+#   1. Device-plugin (traditional): pods request nvidia.com/gpu in resources.limits
+#   2. DRA (Dynamic Resource Allocation): pods use ResourceClaim with gpu.nvidia.com
+#
+# IMPORTANT: Both are enabled by default, but only ONE should be used per node.
+# Using both concurrently on the same node risks GPU over-admission — both systems
+# advertise all GPUs independently, so the scheduler may admit more GPU pods than
+# physical GPUs available. The kubelet prevents actual double-binding, but pods
+# may fail to start.
+#
+# Future: KEP 5004 (DRAExtendedResource) adds support for dual-mode allocation,
+# allowing the DRA driver to honor nvidia.com/gpu extended resource requests
+# alongside ResourceClaims. This unifies accounting and obsoletes the device-plugin.
+# Available as a feature gate in K8s v1.35+; expected GA in a future release.
+# See: https://github.com/kubernetes/enhancements/issues/5004
+#
+# To enforce DRA-only (disable device-plugin):
+#   gpu-operator values: devicePlugin.enabled=false
+#
+# To enforce device-plugin-only (disable DRA GPU allocation):
+#   Set gpuResourcesEnabledOverride=false and resources.gpus.enabled=false below.
+#   The DRA driver remains installed for non-GPU DRA resources (compute-domain, etc.)
+#   but will not advertise GPU ResourceSlices.
 
 # Override release name prefix to avoid aicr-stack- prefix in resource names
 fullnameOverride: nvidia-dra-driver-gpu

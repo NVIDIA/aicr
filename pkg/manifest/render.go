@@ -23,6 +23,8 @@ import (
 	"text/template"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // RenderInput provides the data needed to render a manifest template.
@@ -62,7 +64,7 @@ type chartData struct {
 func Render(content []byte, input RenderInput) ([]byte, error) {
 	tmpl, err := template.New("manifest").Funcs(helmFuncMap()).Parse(string(content))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse manifest template", err)
 	}
 
 	data := templateData{
@@ -79,7 +81,7 @@ func Render(content []byte, input RenderInput) ([]byte, error) {
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to execute manifest template", err)
 	}
 	return []byte(buf.String()), nil
 }

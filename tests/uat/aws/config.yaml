@@ -14,76 +14,75 @@
 
 apiVersion: github.com/mchmarny/cluster/v1alpha1
 kind: Cluster
+
 deployment:
   id: aicr-uat
-  csp: AWS
+  provider: eks
   tenancy: "615299774277"
   location: us-east-1
+  state: tenancy
+  destroy: false
   tags:
-    owner: github-workflow
-    env: uat
-    # destroy: true
+    env: dev
+
 cluster:
-  name: aicr-uat
-  version: "1.34"
-  addOns:
-    coreDns: ""
-    vpcCni: ""
-    kubeProxy: ""
-  adminRoles: []
-  controlPlane:
-    allowedCidrs:
-      - 216.228.127.128/30 # CSV4
-      - 52.41.222.58/32 # US Northwest
-      - 54.68.11.139/32 # US Northwest
+  eks:
+    version: "1.35"
+    adminRoles:
+      - AWSReservedSSO_CS-Admin_55d42b5a9a2a8c35
+    controlPlane:
+      allowedCidrs:
+        - 216.228.127.128/30
+        - 52.41.222.58/32
+        - 54.68.11.139/32
+    addOns:
+      coreDns: ""
+      kubeProxy: ""
+      vpcCni: ""
+
 network:
-  cidrs:
-    host: 10.0.0.0/16
-    pod: 100.65.0.0/16
-  subnets:
-    public:
-      - cidr: 10.0.1.0/27
-        zone: us-east-1a
-      - cidr: 10.0.2.0/27
-        zone: us-east-1c
-    system:
-      - cidr: 10.0.4.0/22
-        zone: us-east-1a
-      - cidr: 10.0.8.0/22
-        zone: us-east-1c
-    worker:
-      - cidr: 10.0.128.0/17
-        zone: us-east-1e
-        disableEndpoints: true
-    pod:
-      - cidr: 100.65.0.0/16
-        zone: us-east-1e
-        disableEndpoints: true
+  eks:
+    cidrs:
+      host: 10.0.0.0/16
+      pod: 100.65.0.0/16
+    subnets:
+      public:
+        - cidr: 10.0.1.0/27
+          zone: us-east-1a
+        - cidr: 10.0.2.0/27
+          zone: us-east-1c
+      system:
+        - cidr: 10.0.4.0/22
+          zone: us-east-1a
+        - cidr: 10.0.8.0/22
+          zone: us-east-1c
+      worker:
+        - cidr: 10.0.128.0/17
+          zone: us-east-1e
+          disableEndpoints: true
+      pod:
+        - cidr: 100.65.0.0/16
+          zone: us-east-1e
+          disableEndpoints: true
+
 compute:
-  nodeGroups:
-    system:
-      instanceType: m7a.2xlarge
-      capacity:
-        desired: 2
-        min: 2
-        max: 4
-    workers:
-      - name: cpu-worker
-        instanceType: m4.16xlarge
+  eks:
+    nodeGroups:
+      system:
+        instanceType: m7i.xlarge
         capacity:
-          desired: 1
+          desired: 3
         labels:
-          nodeGroup: cpu-worker
-      - name: gpu-worker
-        instanceType: p5.48xlarge
-        architecture: arm64
-        accelerator: h100
-        imageId: ami-08c586949b8b85f80
-        capacity:
-          desired: 2
-          reservation:
-            preference: capacity-reservations-only
-            target: cr-0cbe491320188dfa6
-        labels:
-          nodeGroup: gpu-worker
-          gpu: "true"
+          nodeGroup: system-worker
+          dedicated: system-workload
+      workers:
+        - name: gpu-worker
+          instanceType: p5.48xlarge
+          capacity:
+            desired: 2
+            reservation:
+              preference: capacity-reservations-only
+              target: cr-0cbe491320188dfa6
+          labels:
+            nodeGroup: gpu-worker
+            dedicated: user-workload

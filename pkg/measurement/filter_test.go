@@ -17,6 +17,8 @@ package measurement
 import "testing"
 
 func TestFilterOut(t *testing.T) {
+	t.Parallel()
+
 	// Create test data
 	readings := map[string]Reading{
 		"root_user":       Str("admin"),
@@ -77,6 +79,8 @@ func TestFilterOut(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result := FilterOut(readings, tt.patterns)
 
 			// Check that result has the expected number of keys
@@ -109,6 +113,8 @@ func TestFilterOut(t *testing.T) {
 }
 
 func Test_filterIn(t *testing.T) {
+	t.Parallel()
+
 	// Create test data
 	readings := map[string]Reading{
 		"root_user":       Str("admin"),
@@ -169,6 +175,8 @@ func Test_filterIn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result := filterIn(readings, tt.patterns)
 
 			// Check that result has the expected number of keys
@@ -201,6 +209,8 @@ func Test_filterIn(t *testing.T) {
 }
 
 func TestMatchesPattern(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		key     string
@@ -241,6 +251,8 @@ func TestMatchesPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := matchesPattern(tt.key, tt.pattern)
 			if got != tt.want {
 				t.Errorf("matchesPattern(%q, %q) = %v, want %v", tt.key, tt.pattern, got, tt.want)

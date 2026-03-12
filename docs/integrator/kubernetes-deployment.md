@@ -15,7 +15,7 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 
 - Recipe generation from query parameters (query mode)
 - Does not capture snapshots (use agent Job or CLI)
-- Does not generate bundles (use CLI)
+- Generates bundles via `POST /v1/bundle`
 - Does not analyze snapshots (query mode only)
 
 **Agent deployment** (separate component):
@@ -40,8 +40,8 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 # Create namespace
 kubectl create namespace aicr
 
-# Deploy API server
-kubectl apply -k https://github.com/NVIDIA/aicr/deploy/aicrd
+# Deploy API server (save the manifest from the Deployment section below as aicrd-deployment.yaml)
+kubectl apply -f aicrd-deployment.yaml
 
 # Check deployment
 kubectl get pods -n aicr
@@ -321,13 +321,20 @@ spec:
         - cm://gpu-operator/aicr-snapshot
         
         securityContext:
-          allowPrivilegeEscalation: false
-          readOnlyRootFilesystem: true
-          runAsNonRoot: true
-          runAsUser: 65532
-          capabilities:
-            drop: ["ALL"]
+          privileged: true
+          runAsUser: 0
+          runAsGroup: 0
+      hostPID: true
+      hostNetwork: true
+      hostIPC: true
+      volumes:
+      - name: systemd
+        hostPath:
+          path: /run/systemd
+          type: Directory
 ```
+
+> **Note:** The agent defaults to privileged mode, which is required for GPU, SystemD, and OS collectors. For PSS-restricted namespaces where only the Kubernetes collector is needed, use `--privileged=false` when deploying via the CLI. See [Agent Deployment](../user/agent-deployment.md) for details.
 
 ```shell
 kubectl apply -f agent-job.yaml
@@ -535,8 +542,6 @@ kubectl apply -f servicemonitor.yaml
 ```
 
 ### Grafana Dashboard
-
-Import dashboard JSON from `docs/monitoring/grafana-dashboard.json`:
 
 **Key panels:**
 - Request rate (by status code)

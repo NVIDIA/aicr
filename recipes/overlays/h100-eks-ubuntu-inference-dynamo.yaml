@@ -59,6 +59,7 @@ spec:
         - dynamo-crds
         - cert-manager
         - kube-prometheus-stack
+        - gpu-operator
         - kai-scheduler
       overrides:
         etcd:

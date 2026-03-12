@@ -120,11 +120,10 @@ tags
 \#*\#
 .\#*
 
-# Hugo documentation site
-site/public/
-site/resources/
+# VitePress documentation site
+site/.vitepress/cache/
+site/.vitepress/dist/
 site/node_modules/
-site/.hugo_build.lock
 
 # Claude
 .claude/settings.local.json
@@ -138,3 +137,5 @@ pkg/validator/checks/**/*_recipe.yaml
 # KWOK
 kwok/logs/
 aicr-e2e.xml
+site/.vitepress/cache/
+site/node_modules/

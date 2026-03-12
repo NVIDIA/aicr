@@ -1,8 +1,8 @@
 # Pod Autoscaling (HPA with GPU Metrics)
 
 **Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-06 19:40:52 UTC
-**Kubernetes Version:** v1.34
+**Generated:** 2026-03-10 03:42:06 UTC
+**Kubernetes Version:** v1.35
 **Platform:** linux/amd64
 
 ---
@@ -27,27 +27,27 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
 NAME                                  READY   STATUS    RESTARTS   AGE
-prometheus-adapter-585f5dfc99-cwwdj   1/1     Running   0          47h
+prometheus-adapter-78b8b8d75c-fh4cf   1/1     Running   0          18m
 ```
 
 **Prometheus adapter service**
 ```
 $ kubectl get svc prometheus-adapter -n monitoring
-NAME                 TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
-prometheus-adapter   ClusterIP   172.20.140.0   <none>        443/TCP   47h
+NAME                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
+prometheus-adapter   ClusterIP   172.20.178.141   <none>        443/TCP   18m
 ```
 
 ## Custom Metrics API
 
 **Available custom metrics**
 ```
-$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | jq .resources[].name
-pods/gpu_memory_used
+$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | python3 -c "..." # extract resource names
+namespaces/gpu_memory_used
 namespaces/gpu_power_usage
 pods/gpu_power_usage
 pods/gpu_utilization
 namespaces/gpu_utilization
-namespaces/gpu_memory_used
+pods/gpu_memory_used
 ```
 
 ## GPU Stress Test Deployment
@@ -166,8 +166,8 @@ horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
 **GPU workload pod**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                            READY   STATUS    RESTARTS   AGE   IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-6d87f8c876-dk552   1/1     Running   0          58s   10.0.0.10   node-a.example.internal   <none>           <none>
+NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
+gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          3s    10.0.254.75   ip-10-0-206-2.ec2.internal   <none>           <none>
 ```
 
 ## HPA Status
@@ -176,7 +176,7 @@ gpu-workload-6d87f8c876-dk552   1/1     Running   0          58s   10.0.0.10   n
 ```
 $ kubectl get hpa -n hpa-test
 NAME               REFERENCE                 TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
-gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          116s
+gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          90s
 ```
 
 **HPA details**
@@ -186,10 +186,10 @@ Name:                         gpu-workload-hpa
 Namespace:                    hpa-test
 Labels:                       <none>
 Annotations:                  <none>
-CreationTimestamp:            Fri, 06 Mar 2026 11:41:01 -0800
+CreationTimestamp:            Mon, 09 Mar 2026 20:42:14 -0700
 Reference:                    Deployment/gpu-workload
 Metrics:                      ( current / target )
-  "gpu_utilization" on pods:  100 / 50
+  "gpu_utilization" on pods:  50 / 50
 Min replicas:                 1
 Max replicas:                 2
 Behavior:
@@ -212,22 +212,20 @@ Conditions:
   ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from pods metric gpu_utilization
   ScalingLimited  False   DesiredWithinRange  the desired count is within the acceptable range
 Events:
-  Type     Reason                        Age                From                       Message
-  ----     ------                        ----               ----                       -------
-  Warning  FailedGetPodsMetric           102s               horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Warning  FailedComputeMetricsReplicas  102s               horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Warning  FailedGetPodsMetric           71s (x2 over 86s)  horizontal-pod-autoscaler  did not receive metrics for targeted pods (pods might be unready)
-  Warning  FailedComputeMetricsReplicas  71s (x2 over 86s)  horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: did not receive metrics for targeted pods (pods might be unready)
-  Normal   SuccessfulRescale             26s                horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
+  Type     Reason                        Age   From                       Message
+  ----     ------                        ----  ----                       -------
+  Warning  FailedGetPodsMetric           76s   horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Warning  FailedComputeMetricsReplicas  76s   horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Normal   SuccessfulRescale             31s   horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
 ```
 
 ## GPU Utilization Evidence
 
 **GPU utilization (nvidia-smi)**
 ```
-$ kubectl exec -n hpa-test gpu-workload-6d87f8c876-64jdz -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
+$ kubectl exec -n hpa-test gpu-workload-86c75dcd97-2wk4f -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
 utilization.gpu [%], utilization.memory [%], power.draw [W]
-100 %, 0 %, 304.79 W
+100 %, 0 %, 290.28 W
 ```
 
 ## Pods After Scale-Up
@@ -235,9 +233,9 @@ utilization.gpu [%], utilization.memory [%], power.draw [W]
 **Pods after scale-up**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                            READY   STATUS    RESTARTS   AGE    IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-workload-6d87f8c876-64jdz   1/1     Running   0          30s    10.0.0.10    node-a.example.internal   <none>           <none>
-gpu-workload-6d87f8c876-dk552   1/1     Running   0          2m1s   10.0.0.10   node-a.example.internal   <none>           <none>
+NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
+gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          96s   10.0.254.75   ip-10-0-206-2.ec2.internal   <none>           <none>
+gpu-workload-86c75dcd97-4gbn8   1/1     Running   0          36s   10.0.219.76   ip-10-0-206-2.ec2.internal   <none>           <none>
 ```
 
 **Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold.

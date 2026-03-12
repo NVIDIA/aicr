@@ -30,12 +30,12 @@ Install utility for $BIN_NAME
 Usage: $0 [-d install_dir]
 
 Environment Variables:
-  GITHUB_TOKEN    GitHub token for private repo access (requires 'repo' scope)
+  GITHUB_TOKEN    GitHub token to avoid API rate limits (no special scopes required)
 
 Examples:
-  $0                    # Install to /usr/local/bin (public repo)
+  $0                    # Install to /usr/local/bin
   $0 -d ~/bin           # Install to custom directory
-  GITHUB_TOKEN=xyz $0   # Install from private repository
+  GITHUB_TOKEN=xyz $0   # Use token to avoid GitHub API rate limits
 EOF
   exit 1
 }
@@ -63,6 +63,13 @@ info() {
 
 msg() {
   printf "  %s\n" "$1" >&2
+}
+
+# Compare semver: returns 0 if $1 >= $2
+version_gte() {
+  local highest
+  highest=$(printf '%s\n%s' "$1" "$2" | sort -V | tail -1)
+  [[ "$highest" == "$1" ]]
 }
 
 has_tools() {
@@ -119,11 +126,7 @@ download_release_asset() {
   local curl_opts=(-# -L -o "$output" -w "%{http_code}")
   local http_code
 
-  # For private repos, we need to use the API URL with Accept header
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    curl_opts+=(-H "Authorization: token $GITHUB_TOKEN")
-    curl_opts+=(-H "Accept: application/octet-stream")
-  fi
+  [[ -n "${GITHUB_TOKEN:-}" ]] && curl_opts+=(-H "Authorization: token $GITHUB_TOKEN")
 
   step "Downloading $desc..."
   http_code=$(curl "${curl_opts[@]}" "$url" | tail -c 3)
@@ -131,24 +134,40 @@ download_release_asset() {
   [[ "$http_code" == "200" ]] || err "Failed to download $desc (HTTP $http_code): $url"
 }
 
-fetch_latest_release() {
-  local api_url="https://api.github.com/repos/${REPO}/releases/latest"
-  local response
+fetch_latest_version() {
+  local redirect_url version
 
   step "Fetching latest release from GitHub..."
-  response=$(github_api_curl "$api_url")
 
-  [[ -z "$response" ]] && err "Failed to fetch release information from GitHub API"
+  # Use the redirect from /releases/latest to extract the tag — no API call needed,
+  # so this works without GITHUB_TOKEN and is not subject to API rate limits.
+  redirect_url=$(curl -sI "https://github.com/${REPO}/releases/latest" | grep -i '^location:' | tr -d '\r' | awk '{print $2}')
 
-  if grep -q "API rate limit exceeded" <<< "$response"; then
-    err "GitHub API rate limit exceeded. Set GITHUB_TOKEN environment variable or try again later."
+  if [[ -z "$redirect_url" ]]; then
+    # Fallback to GitHub API (requires GITHUB_TOKEN if rate-limited)
+    local api_url="https://api.github.com/repos/${REPO}/releases/latest"
+    local response
+    response=$(github_api_curl "$api_url")
+
+    [[ -z "$response" ]] && err "Failed to fetch release information from GitHub"
+
+    if grep -q "API rate limit exceeded" <<< "$response"; then
+      err "GitHub API rate limit exceeded. Set GITHUB_TOKEN to avoid rate limits, or try again later."
+    fi
+
+    if grep -q "Not Found" <<< "$response"; then
+      err "Repository not found or no releases available."
+    fi
+
+    version=$(grep -m 1 '"tag_name"' <<< "$response" | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+  else
+    # Extract tag from redirect URL: https://github.com/NVIDIA/aicr/releases/tag/v1.2.3
+    version="${redirect_url##*/}"
   fi
 
-  if grep -q "Not Found" <<< "$response"; then
-    err "Repository not found or no releases available. For private repos, set GITHUB_TOKEN environment variable."
-  fi
+  [[ -z "$version" || "$version" == "null" ]] && err "Failed to determine latest version"
 
-  echo "$response"
+  echo "$version"
 }
 
 extract_version() {
@@ -163,11 +182,10 @@ extract_version() {
 }
 
 # Extract asset download URL from release JSON by asset name.
-# Works with both pretty-printed (authenticated) and compact (public) JSON.
 extract_asset_url() {
   local json="$1"
   local asset_name="$2"
-  local url=""
+  local url
 
   # Find the line number of the matching asset name
   local name_line
@@ -175,20 +193,8 @@ extract_asset_url() {
 
   [[ -z "$name_line" ]] && err "Asset '$asset_name' not found in release"
 
-  # For private repos with token, use the API URL (id-based).
-  # The asset "id" field appears a few lines before "name" in the JSON.
-  if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-    local asset_id
-    asset_id=$(echo "$json" | sed -n "$((name_line-10)),$((name_line))p" | grep -oE '"id"[[:space:]]*:[[:space:]]*[0-9]+' | tail -1 | grep -oE '[0-9]+')
-    if [[ -n "$asset_id" ]]; then
-      url="https://api.github.com/repos/${REPO}/releases/assets/${asset_id}"
-    fi
-  fi
-
-  # Fallback to browser_download_url (appears after "name" in the JSON)
-  if [[ -z "$url" ]]; then
-    url=$(echo "$json" | sed -n "${name_line},$((name_line+30))p" | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-  fi
+  # Extract browser_download_url (appears after "name" in the JSON)
+  url=$(echo "$json" | sed -n "${name_line},$((name_line+30))p" | grep -oE '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]+"' | head -1 | sed -E 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
 
   [[ -z "$url" ]] && err "Failed to extract download URL for '$asset_name'"
 
@@ -220,10 +226,9 @@ main() {
   [[ $arch == "amd64" || $arch == "arm64" ]] || err "Unsupported architecture: $arch"
   has_tools "${REQUIRED_TOOLS[@]}"
   
-  # Fetch release information
-  local release_json archive_name
-  release_json=$(fetch_latest_release)
-  version=$(extract_version "$release_json")
+  # Fetch latest version (uses redirect, no API rate limit)
+  local archive_name
+  version=$(fetch_latest_version)
   archive_name=$(get_archive_name "$version" "$os" "$arch")
 
   msg ""
@@ -231,13 +236,13 @@ main() {
   msg "Version:  $version"
   msg ""
 
-  # Download archive and checksums
+  # Download archive and checksums using predictable GitHub release URLs
   temp_dir=$(mktemp -d)
   trap "rm -rf $temp_dir" EXIT
 
-  local archive_url checksum_url
-  archive_url=$(extract_asset_url "$release_json" "$archive_name")
-  checksum_url=$(extract_asset_url "$release_json" "$CHECKSUMS_FILE")
+  local base_url="https://github.com/${REPO}/releases/download/${version}"
+  local archive_url="${base_url}/${archive_name}"
+  local checksum_url="${base_url}/${CHECKSUMS_FILE}"
 
   download_release_asset "$archive_url" "${temp_dir}/${archive_name}" "$archive_name"
   download_release_asset "$checksum_url" "${temp_dir}/checksums.txt" "checksums"
@@ -254,19 +259,38 @@ main() {
   tar -xzf "${temp_dir}/${archive_name}" -C "$temp_dir"
 
   # Optional: verify attestation if cosign is available
+  COSIGN_MIN_VERSION="v3.0.4"
   if command -v cosign &>/dev/null && [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
-    step "Verifying provenance attestation (Sigstore cosign)..."
-    info "Confirms this binary was built by NVIDIA/aicr CI — not a third-party rebuild"
-    if cosign verify-blob-attestation \
-      --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
-      --type https://slsa.dev/provenance/v1 \
-      --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-      --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
-      "${temp_dir}/${BIN_NAME}" 2>/dev/null; then
-      ok "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
+    cosign_version=$(cosign version --json 2>/dev/null | grep -o '"gitVersion":"[^"]*"' | cut -d'"' -f4)
+    if [[ -z "$cosign_version" ]]; then
+      # Fallback: try text output
+      cosign_version=$(cosign version 2>/dev/null | grep -i 'gitversion' | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+')
+    fi
+
+    if [[ -n "$cosign_version" ]] && ! version_gte "$cosign_version" "$COSIGN_MIN_VERSION"; then
+      warn "Installed cosign version ($cosign_version) is older than the minimum required ($COSIGN_MIN_VERSION)"
+      info "Update cosign to verify provenance: https://docs.sigstore.dev/cosign/system_config/installation/"
     else
-      warn "Attestation verification failed — cannot confirm binary provenance"
-      info "The binary may still be valid, but its build origin could not be cryptographically verified"
+      step "Verifying provenance attestation (Sigstore cosign)..."
+      info "Confirms this binary was built by NVIDIA/aicr CI — not a third-party rebuild"
+      cosign_stderr=$(mktemp)
+      if cosign verify-blob-attestation \
+        --bundle "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" \
+        --type https://slsa.dev/provenance/v1 \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.github/workflows/on-tag\.yaml@refs/tags/.*' \
+        "${temp_dir}/${BIN_NAME}" 2>"${cosign_stderr}"; then
+        ok "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
+      else
+        warn "Attestation verification failed — cannot confirm binary provenance"
+        info "The binary may still be valid, but its build origin could not be cryptographically verified"
+        if [[ -s "${cosign_stderr}" ]]; then
+          while IFS= read -r line; do
+            info "cosign: $line"
+          done < "${cosign_stderr}"
+        fi
+      fi
+      rm -f "${cosign_stderr}"
     fi
   elif [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]]; then
     warn "cosign not found — skipping provenance verification"

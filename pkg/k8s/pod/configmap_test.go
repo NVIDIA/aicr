@@ -22,6 +22,8 @@ import (
 )
 
 func TestParseConfigMapURI(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name          string
 		uri           string
@@ -67,6 +69,8 @@ func TestParseConfigMapURI(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			namespace, name, err := pod.ParseConfigMapURI(tt.uri)
 			if tt.wantErr {
 				assert.Error(t, err)

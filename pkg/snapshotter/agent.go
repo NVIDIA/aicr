@@ -117,7 +117,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 
 	//nolint:contextcheck // intentional: need fresh context for cleanup when parent is canceled
 	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cancel()
 
 		cleanupOpts := agent.CleanupOptions{Enabled: config.Cleanup}

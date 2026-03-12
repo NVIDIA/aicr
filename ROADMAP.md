@@ -1,12 +1,12 @@
 # AICR Roadmap
 
-This roadmap tracks remaining work for AICR v2 launch and future enhancements.
+This roadmap tracks remaining work for the AICR launch and future enhancements.
 
 ## Structure
 
 | Section | Description |
 |---------|-------------|
-| **Remaining MVP Work** | Tasks blocking v2 launch |
+| **Remaining MVP Work** | Tasks blocking launch |
 | **Backlog** | Post-launch enhancements by priority |
 | **Completed** | Delivered capabilities (reference only) |
 
@@ -98,7 +98,7 @@ Extend beyond MVP platforms and accelerators.
 
 #### New Bundlers
 
-Migrate capabilities from AICR v1 playbooks.
+Additional component bundlers.
 
 | Bundler | Description |
 |---------|-------------|

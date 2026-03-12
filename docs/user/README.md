@@ -18,11 +18,16 @@ This section is for users who:
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
+| [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 
 ## Quick Start
 
 ```shell
-# Install aicr CLI
+# Install aicr CLI (Homebrew)
+brew tap NVIDIA/aicr
+brew install aicr
+
+# Or use the install script
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 
 # Generate a recipe for your environment

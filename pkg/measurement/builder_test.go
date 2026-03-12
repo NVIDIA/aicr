@@ -19,7 +19,11 @@ import (
 )
 
 func TestSubtypeBuilder(t *testing.T) {
+	t.Parallel()
+
 	t.Run("basic build", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder(testSubtypeCluster).
 			SetString("version", testVersion).
 			SetInt("nodes", 3).
@@ -50,6 +54,8 @@ func TestSubtypeBuilder(t *testing.T) {
 	})
 
 	t.Run("all numeric types", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("metrics").
 			SetInt("int_val", 42).
 			SetInt64("int64_val", 9223372036854775807).
@@ -89,6 +95,8 @@ func TestSubtypeBuilder(t *testing.T) {
 	})
 
 	t.Run("using Set with Reading", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("test").
 			Set("version", Str("1.0.0")).
 			Set("count", Int(10)).
@@ -100,6 +108,8 @@ func TestSubtypeBuilder(t *testing.T) {
 	})
 
 	t.Run("empty builder", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("empty").Build()
 
 		if st.Name != "empty" {
@@ -111,6 +121,8 @@ func TestSubtypeBuilder(t *testing.T) {
 	})
 
 	t.Run("overwrite existing key", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("test").
 			SetString("key", "value1").
 			SetString("key", "value2").
@@ -124,7 +136,11 @@ func TestSubtypeBuilder(t *testing.T) {
 }
 
 func TestMeasurementBuilder(t *testing.T) {
+	t.Parallel()
+
 	t.Run("basic build", func(t *testing.T) {
+		t.Parallel()
+
 		m := NewMeasurement(TypeK8s).
 			WithSubtype(
 				NewSubtypeBuilder("cluster").
@@ -158,6 +174,8 @@ func TestMeasurementBuilder(t *testing.T) {
 	})
 
 	t.Run("using WithSubtypeBuilder", func(t *testing.T) {
+		t.Parallel()
+
 		builder := NewSubtypeBuilder("test").SetString("key", "value")
 
 		m := NewMeasurement(TypeGPU).
@@ -170,6 +188,8 @@ func TestMeasurementBuilder(t *testing.T) {
 	})
 
 	t.Run("empty measurement", func(t *testing.T) {
+		t.Parallel()
+
 		m := NewMeasurement(TypeOS).Build()
 
 		if m.Type != TypeOS {
@@ -181,6 +201,8 @@ func TestMeasurementBuilder(t *testing.T) {
 	})
 
 	t.Run("fluent API example", func(t *testing.T) {
+		t.Parallel()
+
 		m := NewMeasurement(TypeGPU).
 			WithSubtypeBuilder(
 				NewSubtypeBuilder("gpu0").

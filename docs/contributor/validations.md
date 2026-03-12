@@ -2,6 +2,8 @@
 
 Learn how to define and use component validations in AICR.
 
+> **Note:** This document covers **component validations** — condition-based checks that run during bundle generation (e.g., missing config, incompatible settings). For the **container-per-validator engine** used by `aicr validate`, see the [Validator Development Guide](validator.md) and [Validator Extension Guide](../integrator/validator-extension.md).
+
 ## Overview
 
 The component validation system allows components to register validation checks that run automatically during bundle generation. Validations can check for missing configuration, incompatible settings, or other conditions that might cause deployment issues.

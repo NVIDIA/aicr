@@ -196,9 +196,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	actualValue := fmt.Sprintf("%.2f GB/s", bandwidth)
 
 	if passed {
-		slog.Info("Bandwidth validation passed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "90%")
+		slog.Info("Bandwidth validation passed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "10%")
 	} else {
-		slog.Info("Bandwidth validation failed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "90%")
+		slog.Info("Bandwidth validation failed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "10%")
 	}
 
 	return actualValue, passed, nil

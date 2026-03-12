@@ -2,6 +2,146 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.12] - 2026-03-12
+
+### Bug Fixes
+
+- Brew formula follows Homebrew best practices  by [@mchmarny](https://github.com/mchmarny)
+- Upgrade esbuild to 0.25.x to resolve GHSA-67mh-4wv8-2f99  by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.11] - 2026-03-12
+
+### Bug Fixes
+
+- *(recipe)* Bump NCCL all-reduce bandwidth threshold to 300 Gbps  by [@xdu31](https://github.com/xdu31)
+- *(validator)* Truncate long stdout lines to prevent oversized reports  by [@xdu31](https://github.com/xdu31)
+- Wrap bare errors and check writable Close() returns by [@mchmarny](https://github.com/mchmarny)
+- Replace magic duration literals with named constants from pkg/defaults by [@mchmarny](https://github.com/mchmarny)
+- *(test)* Eliminate dead tests, non-deterministic skips, and flaky sleeps by [@mchmarny](https://github.com/mchmarny)
+- *(ci)* Use root directory for github-actions dependabot scanning by [@mchmarny](https://github.com/mchmarny)
+
+### New Features
+
+- *(validator)* Add Kubeflow Trainer to robust-controller and skip inference-gateway on training clusters  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(bundler)* Add pre-flight checks to deploy.sh and post-flight to undeploy.sh  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other Tasks
+
+- Image update by [@mchmarny](https://github.com/mchmarny)
+- *(install)* Add Homebrew installation option  by [@mchmarny](https://github.com/mchmarny)
+- *(site)* Align Go version requirements to 1.26  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Migrate from Hugo/Docsy to VitePress  by [@tabern](https://github.com/tabern)
+- Dep update by [@mchmarny](https://github.com/mchmarny)
+- *(api)* Add missing bundle params and document CLI-only gaps by [@mchmarny](https://github.com/mchmarny)
+- Ignore GHSA-67mh-4wv8-2f99 (esbuild) in grype scan by [@mchmarny](https://github.com/mchmarny)
+- *(ci)* Bump actions/cache to v5.0.3 and goreleaser-action to v7.0.0 by [@mchmarny](https://github.com/mchmarny)
+- Deps: bump aws-actions/configure-aws-credentials from 5.1.1 to 6.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/github-script from 7.0.1 to 8.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump docker/setup-buildx-action from 3.10.0 to 4.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump github/codeql-action from 4.32.0 to 4.32.6  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump docker/build-push-action from 6.15.0 to 7.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/setup-node from 4.4.0 to 6.3.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/download-artifact from 4.1.8 to 8.0.1  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/upload-artifact from 6.0.0 to 7.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/setup-go from 6.2.0 to 6.3.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump aquasecurity/trivy-action from 0.34.1 to 0.35.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: update hashicorp/aws requirement from ~> 5.0 to ~> 6.36 in /infra/uat-aws-account  by [@dependabot[bot]](https://github.com/dependabot[bot])
+
+## [0.10.10] - 2026-03-11
+
+### Bug Fixes
+
+- *(install)* Detect outdated cosign before attestation verification   by [@lockwobr](https://github.com/lockwobr)
+- *(install)* Replace post_install with caveats to avoid Homebrew sandbox error  by [@lockwobr](https://github.com/lockwobr)
+
+## [0.10.9] - 2026-03-11
+
+### New Features
+
+- *(release)* Add supply chain verification to Homebrew formula  by [@lockwobr](https://github.com/lockwobr)
+
+### Other Tasks
+
+- Update skyhook to latest version  by [@lockwobr](https://github.com/lockwobr)
+- Add phase to the validation command by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.8] - 2026-03-10
+
+### Bug Fixes
+
+- *(release)* Pass HOMEBREW_DEPLOY_KEY secret to goreleaser by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.7] - 2026-03-10
+
+### Bug Fixes
+
+- *(release)* Add owner/name to brew repository for goreleaser v2 by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.6] - 2026-03-10
+
+### Bug Fixes
+
+- *(tests)* Correct cuj1-training deployment order to match alphabetical sort by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.5] - 2026-03-10
+
+### Bug Fixes
+
+- *(tests)* Update cuj1-training deployment order for kubeflow-trainer deps by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.4] - 2026-03-10
+
+### Bug Fixes
+
+- Avoid GitHub API rate limit in install script  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(recipes)* Add missing gpu-operator dependency refs  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### New Features
+
+- Add Homebrew formula publishing to goreleaser by [@mchmarny](https://github.com/mchmarny)
+
+### Other Tasks
+
+- Add meta prompt by [@mchmarny](https://github.com/mchmarny)
+- *(recipes)* Add DRA vs device-plugin GPU allocation guidance  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+## [0.10.3] - 2026-03-10
+
+### Bug Fixes
+
+- *(ci)* Skip unnecessary checks on docs-only PRs  by [@mchmarny](https://github.com/mchmarny)
+- *(cli)* Replace --cleanup flag with --no-cleanup and warn on use  by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.2] - 2026-03-10
+
+### New Features
+
+- *(collector)* Add kubeletVersion to K8s node snapshot  by [@mchmarny](https://github.com/mchmarny)
+
+### Other Tasks
+
+- *(validator)* Add development and extension guides for validation system  by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.1] - 2026-03-10
+
+### Bug Fixes
+
+- *(install)* Widen JSON scan window to find browser_download_url on linux  by [@lockwobr](https://github.com/lockwobr)
+- *(tools)* Fix Linux setup-tools for yq, chainsaw, helm, yamllint, grype, crane, goreleaser  by [@lockwobr](https://github.com/lockwobr)
+- *(recipes)* Add global tolerate-all for nvsentinel GPU-node daemonsets  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(recipes)* Override deprecated gcr.io kube-rbac-proxy image for dynamo  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(uat)* Remove dead VALIDATOR_IMAGE env vars from UAT workflow by [@mchmarny](https://github.com/mchmarny)
+- *(validator)* Correct NCCL bandwidth tolerance log from 90% to 10%  by [@xdu31](https://github.com/xdu31)
+- *(evidence)* Restore --cncf-submission behavioral evidence collection  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other Tasks
+
+- Update go version  by [@lockwobr](https://github.com/lockwobr)
+- Update install by [@mchmarny](https://github.com/mchmarny)
+- *(conformance)* Refresh evidence from EKS v1.35 cluster  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(cli)* Replace runValidation positional params with config struct  by [@mchmarny](https://github.com/mchmarny)
+- *(install)* Remove private-repo references now that repo is public by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.10.0] - 2026-03-09
 
 ## [0.9.0] - 2026-03-09

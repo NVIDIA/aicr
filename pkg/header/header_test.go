@@ -23,6 +23,8 @@ import (
 const testAPIVersion = "aicr.nvidia.com/v1alpha1"
 
 func TestKind_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		kind Kind
@@ -47,6 +49,8 @@ func TestKind_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.kind.String(); got != tt.want {
 				t.Errorf("Kind.String() = %v, want %v", got, tt.want)
 			}
@@ -55,6 +59,8 @@ func TestKind_String(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
+	t.Parallel()
+
 	h := newHeader()
 	if h == nil {
 		t.Fatal("newHeader() returned nil")
@@ -68,6 +74,8 @@ func TestNew(t *testing.T) {
 }
 
 func TestHeader_Init(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		kind    Kind
@@ -119,6 +127,8 @@ func TestHeader_Init(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			h := &Header{}
 			h.Init(tt.kind, testAPIVersion, tt.version)
 			tt.check(t, h)
@@ -127,6 +137,8 @@ func TestHeader_Init(t *testing.T) {
 }
 
 func TestHeader_Init_TimestampFormat(t *testing.T) {
+	t.Parallel()
+
 	h := &Header{}
 	h.Init(KindSnapshot, testAPIVersion, "v1.0.0")
 
@@ -150,6 +162,8 @@ func TestHeader_Init_TimestampFormat(t *testing.T) {
 }
 
 func TestHeader_Init_OverwritesExistingData(t *testing.T) {
+	t.Parallel()
+
 	h := &Header{
 		Kind:       KindRecipe,
 		APIVersion: "old.example.com/v1",
@@ -180,6 +194,8 @@ func TestHeader_Init_OverwritesExistingData(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
+	t.Parallel()
+
 	// Verify constant values haven't changed
 	if KindSnapshot != "Snapshot" {
 		t.Errorf("KindSnapshot = %v, want Snapshot", KindSnapshot)

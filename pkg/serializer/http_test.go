@@ -446,8 +446,11 @@ func TestHTTPReader_Read_SetsUserAgent(t *testing.T) {
 
 func TestHTTPReader_ReadWithContext_Canceled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// If the request isn't canceled, block for long enough to fail the test.
-		time.Sleep(5 * time.Second)
+		// Block until request context is done (or short timeout as fallback)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(500 * time.Millisecond):
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

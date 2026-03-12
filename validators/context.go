@@ -116,8 +116,9 @@ func LoadContext() (*Context, error) {
 }
 
 // Timeout returns a child context with the specified timeout.
+// The caller is responsible for calling the returned CancelFunc.
 func (c *Context) Timeout(d time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(c.Ctx, d)
+	return context.WithTimeout(c.Ctx, d) //nolint:gosec // G118: cancel is returned to caller
 }
 
 func resolveNamespace() string {

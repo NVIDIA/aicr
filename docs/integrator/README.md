@@ -19,6 +19,7 @@ This section is for integrators who:
 | [Kubernetes Deployment](kubernetes-deployment.md) | Self-hosted API server deployment with Kubernetes manifests |
 | [EKS Dynamo Networking](eks-dynamo-networking.md) | Security group prerequisites for Dynamo overlays on EKS |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
+| [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
 
 ## Quick Start
 
