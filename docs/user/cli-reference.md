@@ -431,11 +431,10 @@ aicr validate [flags]
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
-| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (required) |
+| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (omit to capture live) |
 | `--phase` | | string | Validation phase to run: deployment, performance, conformance, all (default: all) |
 | `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
 | `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
-| `--format` | `-t` | string | Output format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs) |
 
 **Input Sources:**
@@ -525,12 +524,6 @@ aicr validate \
   --snapshot snapshot.yaml \
   --phase performance
 
-# JSON output format
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --format json
-
 # With custom kubeconfig
 aicr validate \
   --recipe recipe.yaml \
@@ -618,8 +611,8 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 | Code | Description |
 |------|-------------|
 | `0` | All checks passed |
-| `1` | One or more checks failed (when `--fail-on-error` is set) |
-| `2` | Invalid input (bad flags, missing recipe/snapshot) |
+| `2` | Invalid input (bad flags, missing recipe) |
+| `8` | One or more checks failed (when `--fail-on-error` is set) |
 
 ---
 
