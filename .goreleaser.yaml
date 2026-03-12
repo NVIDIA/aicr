@@ -181,19 +181,19 @@ brews:
     license: "Apache-2.0"
     install: |
       bin.install "aicr"
-      # Install attestation bundle next to binary (aicr looks for <binary>-attestation.sigstore.json)
       bin.install "aicr-attestation.sigstore.json" if File.exist? "aicr-attestation.sigstore.json"
-      # Verify provenance attestation if cosign is available
-      if File.exist?(bin/"aicr-attestation.sigstore.json") && which("cosign")
-        system "cosign", "verify-blob-attestation",
-               "--bundle", bin/"aicr-attestation.sigstore.json",
-               "--type", "https://slsa.dev/provenance/v1",
-               "--certificate-oidc-issuer", "https://token.actions.githubusercontent.com",
-               "--certificate-identity-regexp", "https://github.com/NVIDIA/aicr/.github/workflows/on-tag\\.yaml@refs/tags/.*",
-               bin/"aicr"
-        ohai "Provenance verified — binary built by github.com/NVIDIA/aicr CI pipeline"
-      end
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/aicr version")
     caveats: |
-      To enable supply chain verification, update the bundle attestation root:
+      To verify supply-chain provenance (requires cosign):
+
+        cosign verify-blob-attestation \
+          --bundle #{opt_bin}/aicr-attestation.sigstore.json \
+          --type https://slsa.dev/provenance/v1 \
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+          --certificate-identity-regexp "https://github.com/NVIDIA/aicr/.github/workflows/on-tag\\.yaml@refs/tags/.*" \
+          #{opt_bin}/aicr
+
+      To update the trust root for bundle attestation:
 
         aicr trust update
