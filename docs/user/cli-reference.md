@@ -639,7 +639,7 @@ aicr bundle [flags]
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable) |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
 | `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
-| `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
+| `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent, except in GKE with COS nodes. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
@@ -772,6 +772,8 @@ aicr bundle -r recipe.yaml \
 aicr bundle -r recipe.yaml --nodes 8 -o ./bundles
 
 # Day 2 options: workload-gate and workload-selector for skyhook
+# NOTE: For GKE Container Optimized OS (COS) this is not required as
+# the changes possible with COS are limited to non disruptive optimizations
 aicr bundle -r recipe.yaml \
   --workload-gate skyhook.io/runtime-required=true:NoSchedule \
   --workload-selector workload-type=training \
@@ -842,6 +844,8 @@ The `--workload-gate` and `--workload-selector` flags are day 2 operational opti
 
 - **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent skyhook from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
 
+NOTE: For GKE clusters using Container Optimized OS these are not required as COS is largely immutable and limits the optimizations to non disruptive ones.
+
 **Estimated node count (`--nodes`):**
 
 The `--nodes` flag is a **bundle-time** option: it is applied when you run `aicr bundle`, not when you run `aicr recipe`. The value is written to each component's Helm values at the paths declared in the registry under `nodeScheduling.nodeCountPaths`.
@@ -871,6 +875,8 @@ When generating bundles with skyhook-customizations enabled, validation warnings
 Warning: skyhook-customizations is enabled but --workload-selector is not set. 
 This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
 ```
+
+This can be safely ignored when targetting GKE with Container Optimized OS.
 
 2. **Accelerated Selector Warning**: When skyhook-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
 
