@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook EKS Ubuntu GPU Customization
+# Skyhook GKE Ubuntu GPU Customization
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
 #
-# This customization configures GPU nodes on Ubuntu with:
-# - GRUB parameters for hugepages and nokaslr
-# - Containerd service limits
+# This customization configures GPU nodes on ContainerOptimized OS with:
 # - Sysctl kernel tuning parameters
+# NOTE: runtimeRequired is NOT used here because GKE COS is largely immutable and so
+# the optimizations that can be made are limited to those which are not disruptive.
 {{- $cust := index .Values "skyhook-customizations" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
 ---
@@ -38,7 +38,6 @@ metadata:
   name: tuning
   namespace: {{ .Release.Namespace }}
 spec:
-  runtimeRequired: true
   # Default: true. Disable with --set skyhookcustomizations:autoTaintNewNodes=false
   autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
@@ -65,7 +64,7 @@ spec:
   packages:
     tuning:
       image: ghcr.io/nvidia/skyhook-packages/nvidia-tuning-gke
-      version: "0.1.0"
+      version: "0.1.1"
       interrupt:
         type: service
         services:
