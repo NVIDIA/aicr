@@ -103,12 +103,16 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync ## Lints the entire project (Go, YAML, and license headers)
+lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar ## Lints the entire project (Go, YAML, and license headers)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-agents-sync
 check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 	@./tools/check-agents-sync
+
+.PHONY: check-docs-sidebar
+check-docs-sidebar: ## Verifies all docs/ pages have sidebar entries in VitePress config
+	@./tools/check-docs-sidebar
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -226,19 +230,19 @@ docs: ## Serves Go documentation on http://localhost:6060
 .PHONY: site-serve
 site-serve: ## Serve documentation site locally
 	@set -e; \
-	echo "Starting documentation site on http://localhost:1313..."; \
-	cd site && npm install && hugo serve --baseURL http://localhost:1313/
+	echo "Starting documentation site on http://localhost:5173..."; \
+	cd site && npm install && npm run dev
 
 .PHONY: site-build
 site-build: ## Build documentation site
 	@set -e; \
 	echo "Building documentation site..."; \
-	cd site && npm install && hugo --minify; \
-	echo "Site built in site/public/"
+	cd site && npm install && npm run build; \
+	echo "Site built in site/.vitepress/dist/"
 
 .PHONY: site-clean
 site-clean: ## Clean documentation build artifacts
-	@rm -rf site/public site/resources
+	@rm -rf site/.vitepress/dist site/.vitepress/cache
 	@echo "Cleaned documentation build artifacts"
 
 .PHONY: build

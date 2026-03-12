@@ -2,7 +2,7 @@
 
 This guide describes how to install the AI Cluster Runtime (AICR) CLI tool (`aicr`) on Linux, macOS, or Windows.
 
-**What is AICR**: AICR generates validated configurations for GPU-accelerated Kubernetes deployments. See [README](../../README.md) for project overview.
+**What is AICR**: AICR generates validated configurations for GPU-accelerated Kubernetes deployments. See [README](https://github.com/NVIDIA/aicr#readme) for project overview.
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ This script:
 - Verifies the installation
 - Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 
-> **Supply Chain Security**: AICR includes SLSA Build Level 3 compliance with signed SBOMs and verifiable attestations. See [SECURITY](../../SECURITY.md#supply-chain-security) for verification instructions.
+> **Supply Chain Security**: AICR includes SLSA Build Level 3 compliance with signed SBOMs and verifiable attestations. See [SECURITY](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md#supply-chain-security) for verification instructions.
 
 ### Option 3: Manual Installation
 
@@ -186,6 +186,6 @@ sudo rm /usr/local/bin/aicr
 
 ## Getting Help
 
-- **Documentation**: [User Documentation](README.md)
+- **Documentation**: [User Documentation](index.md)
 - **Issues**: [GitHub Issues](https://github.com/NVIDIA/aicr/issues)
 - **API Server**: See [Kubernetes Deployment](../integrator/kubernetes-deployment.md)

@@ -124,6 +124,12 @@ tags
 site/.vitepress/cache/
 site/.vitepress/dist/
 site/node_modules/
+# Generated from docs/ by tools/sync-site-docs (do not edit directly)
+site/docs/user/
+site/docs/integrator/
+site/docs/contributor/
+site/docs/conformance/evidence/
+site/docs/conformance/index.md
 
 # Claude
 .claude/settings.local.json

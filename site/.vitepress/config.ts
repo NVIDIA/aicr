@@ -11,6 +11,7 @@ export default withMermaid(
     ignoreDeadLinks: [
       /localhost/,  // Example URLs in docs
       /\/index$/,   // VitePress resolves these automatically
+      /github\.com\/NVIDIA\/aicr\/(blob|tree)\/main\//,  // GitHub source links (valid but not local)
     ],
 
     markdown: {
@@ -54,6 +55,7 @@ export default withMermaid(
               { text: 'CLI Reference', link: '/docs/user/cli-reference' },
               { text: 'API Reference', link: '/docs/user/api-reference' },
               { text: 'Agent Deployment', link: '/docs/user/agent-deployment' },
+              { text: 'Component Catalog', link: '/docs/user/component-catalog' },
             ],
           },
           {
@@ -65,6 +67,7 @@ export default withMermaid(
               { text: 'Kubernetes Deployment', link: '/docs/integrator/kubernetes-deployment' },
               { text: 'EKS Dynamo Networking', link: '/docs/integrator/eks-dynamo-networking' },
               { text: 'Recipe Development', link: '/docs/integrator/recipe-development' },
+              { text: 'Validator Extension', link: '/docs/integrator/validator-extension' },
             ],
           },
           {
@@ -76,6 +79,7 @@ export default withMermaid(
               { text: 'Data Architecture', link: '/docs/contributor/data' },
               { text: 'Component Development', link: '/docs/contributor/component' },
               { text: 'Validations', link: '/docs/contributor/validations' },
+              { text: 'Validator Development', link: '/docs/contributor/validator' },
             ],
           },
           {
@@ -119,7 +123,21 @@ export default withMermaid(
       },
 
       editLink: {
-        pattern: 'https://github.com/NVIDIA/aicr/edit/main/site/:path',
+        // Symlinked docs resolve to docs/ in the repo, not site/docs/
+        pattern: ({ filePath }) => {
+          const symlinked = filePath.match(/^docs\/(user|integrator|contributor)\/(.+)/)
+          if (symlinked) {
+            return `https://github.com/NVIDIA/aicr/edit/main/docs/${symlinked[1]}/${symlinked[2]}`
+          }
+          const conformanceEvidence = filePath.match(/^docs\/conformance\/evidence\/(.+)/)
+          if (conformanceEvidence) {
+            return `https://github.com/NVIDIA/aicr/edit/main/docs/conformance/cncf/evidence/${conformanceEvidence[1]}`
+          }
+          if (filePath === 'docs/conformance/index.md') {
+            return 'https://github.com/NVIDIA/aicr/edit/main/docs/conformance/cncf/index.md'
+          }
+          return `https://github.com/NVIDIA/aicr/edit/main/site/${filePath}`
+        },
         text: 'Edit this page on GitHub',
       },
 

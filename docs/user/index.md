@@ -1,12 +1,4 @@
----
-title: "User Guide"
-
-weight: 20
-description: "Install, configure, and operate AICR"
----
-
-# User Guide
-
+# User Documentation
 
 Documentation for platform operators deploying and operating GPU-accelerated Kubernetes clusters using AI Cluster Runtime (AICR).
 
@@ -22,10 +14,11 @@ This section is for users who:
 
 | Document | Description |
 |----------|-------------|
-| [Installation](/docs/user/installation) | Install the `aicr` CLI (automated script, manual, or build from source) |
-| [CLI Reference](/docs/user/cli-reference) | Complete command reference with examples for all CLI operations |
-| [API Reference](/docs/user/api-reference) | REST API quick start and endpoint documentation |
-| [Agent Deployment](/docs/user/agent-deployment) | Deploy the Kubernetes agent for automated cluster snapshots |
+| [Installation](installation.md) | Install the `aicr` CLI (automated script, manual, or build from source) |
+| [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
+| [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
+| [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
+| [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 
 ## Quick Start
 
@@ -49,5 +42,5 @@ cd bundles && chmod +x deploy.sh && ./deploy.sh
 
 ## Related Documentation
 
-- **Integrators**: See [Integrator Documentation](/docs/integrator/) for CI/CD integration and API server deployment
-- **Contributors**: See [Contributor Documentation](/docs/contributor/) for architecture and development guides
+- **Integrators**: See [Integrator Documentation](../integrator/) for CI/CD integration and API server deployment
+- **Contributors**: See [Contributor Documentation](../contributor/) for architecture and development guides

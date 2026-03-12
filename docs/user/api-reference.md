@@ -289,7 +289,7 @@ The request body is the recipe (RecipeResult) directly. No wrapper object needed
 
 **Supported Bundlers:**
 
-Bundler names correspond to component names in [`recipes/registry.yaml`](../../recipes/registry.yaml). Any component registered there can be passed as a bundler. Current components:
+Bundler names correspond to component names in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). Any component registered there can be passed as a bundler. Current components:
 
 | Bundler | Description |
 |---------|-------------|
@@ -737,7 +737,7 @@ done
 ## OpenAPI Specification
 
 The full OpenAPI 3.1 specification is available at:
-[api/aicr/v1/server.yaml](../../api/aicr/v1/server.yaml)
+[api/aicr/v1/server.yaml](https://github.com/NVIDIA/aicr/blob/main/api/aicr/v1/server.yaml)
 
 Generate client SDKs:
 

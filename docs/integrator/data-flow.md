@@ -884,4 +884,4 @@ X-RateLimit-Reset: 1735650000
 - [Data Architecture](../contributor/data.md) - Recipe data architecture
 - [API Reference](../user/api-reference.md) - API endpoint details
 - [Automation](automation.md) - CI/CD integration patterns
-- [CONTRIBUTING.md](../../CONTRIBUTING.md) - Developer guide
+- [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) - Developer guide

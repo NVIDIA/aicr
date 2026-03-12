@@ -1,12 +1,4 @@
----
-title: "Contributor Guide"
-
-weight: 40
-description: "Architecture, internals, and development patterns"
----
-
-# Contributor Guide
-
+# AICR Architecture
 
 This directory contains architecture documentation for the AI Cluster Runtime (AICR) tooling.
 
@@ -46,18 +38,24 @@ This directory contains architecture documentation for the AI Cluster Runtime (A
 * The system provides validated configuration, not a new operational model.
 
 **Why:** If adoption requires retraining users on “the right way” then our design has failed.
+
+
 ## Components
 
-- **[CLI Architecture](/docs/contributor/cli)**: Command-line tool (`aicr`) implementing all four workflow stages
+- **[CLI Architecture](cli.md)**: Command-line tool (`aicr`) implementing all four workflow stages
   - Commands: `snapshot`, `recipe`, `validate`, `bundle`
   - Recipe generation modes: Query mode (direct parameters) and snapshot mode (analyze captured state)
   - Validation: Check recipe constraints against cluster snapshots
   - ConfigMap integration: Read and write operations using `cm://namespace/name` URI format
   - Testing: Chainsaw tests in `tests/chainsaw/cli/` validate complete workflow (`make e2e`)
-- **[API Server Architecture](/docs/contributor/api-server)**: HTTP REST API for recipe generation and bundle creation
+- **[API Server Architecture](api-server.md)**: HTTP REST API for recipe generation and bundle creation
   - Endpoints: `GET /v1/recipe` (query mode only), `POST /v1/bundle` (bundle generation)
   - Does not support snapshot capture or validation (use CLI or agent)
-- **[Component Validation System](/docs/contributor/validations)**: Component-driven validation framework
+- **[Validator Development Guide](validator.md)**: Container-per-validator engine for `aicr validate`
+  - Container contract (exit codes, I/O channels, mounted data)
+  - Quick start for adding upstream Go checks
+  - Catalog schema reference and testing patterns
+- **[Component Validation System](validations.md)**: Component-driven validation framework
   - Automatic validation execution during bundle generation
   - Condition-based validation (intent, service, accelerator, etc.)
   - Severity levels (warnings vs errors)
@@ -952,6 +950,8 @@ Components are configured in `recipes/registry.yaml`. The bundler automatically 
 
 **Per-Component Bundle Generation**:
 The bundler generates a per-component Helm bundle with individual values and manifests for each component, based on the recipe's `componentRefs`.
+
+
 ### Metrics and Observability
 
 **Bundler Metrics** (Prometheus):
@@ -1222,9 +1222,9 @@ cosign verify-attestation \
 - Source code in public repository
 - Attestations queryable via `rekor-cli`
 
-For detailed CI/CD documentation, see [.github/actions/README.md](https://github.com/NVIDIA/aicr/tree/main/.github/actions/README.md) and [CONTRIBUTING.md](/docs/project/contributing/#github-actions--cicd).
+For detailed CI/CD documentation, see [.github/actions](https://github.com/NVIDIA/aicr/tree/main/.github/actions) and [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#github-actions--cicd).
 
-For supply chain security verification, see [SECURITY.md](/docs/project/security).
+For supply chain security verification, see [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md).
 
 ## E2E Testing Architecture
 
@@ -1323,7 +1323,7 @@ steps:
 - **Agent Testing**: Validates RBAC permissions and Job execution
 - **Bundle Verification**: Ensures deployment artifacts are correct
 
-For detailed usage, see [.././docs/project/contributing.md#end-to-end-testing](/docs/project/contributing/#end-to-end-testing).
+For detailed usage, see [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#end-to-end-testing).
 
 ## References and Further Reading
 
