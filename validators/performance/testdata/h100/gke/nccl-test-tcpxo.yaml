@@ -30,7 +30,7 @@
 #   kubectl exec nccl-test-host-1 -n ${NAMESPACE} -c nccl-test -- bash -c \
 #     '/scripts/init_ssh.sh nccl-host-1 nccl-host-2 && \
 #      pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd && \
-#      BENCHMARK=${TEST_TYPE} NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
+#      BENCHMARK=${TEST_TYPE} NHOSTS=${WORKER_COUNT} NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
 #        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
 #
 # Expected results (a3-megagpu-8g, 2 nodes):
@@ -117,7 +117,7 @@ spec:
           pushd /scripts;
           /scripts/gen_hostfiles.sh ${@};
           popd;
-          BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="/usr/local/nvidia/lib64" LD_LIBRARY_PATH="/usr/local/nvidia/lib64" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
+          BENCHMARK=${TEST_TYPE} NHOSTS=${WORKER_COUNT} NCCL_LIB_DIR="/usr/local/nvidia/lib64" LD_LIBRARY_PATH="/usr/local/nvidia/lib64" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
           HEREDOC
           chmod +x /scripts/allreduce.sh
           service ssh restart;

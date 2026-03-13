@@ -181,6 +181,47 @@ func (p *PodLifecycle) ExecCommandInPod(ctx context.Context, pod *v1.Pod, comman
 	return stdout.String(), stderr.String(), nil
 }
 
+// ExecInContainer executes a command in a specific container of a pod with a caller-provided timeout.
+// Unlike ExecCommandInPod, this method targets a named container and accepts an explicit timeout,
+// which is necessary for long-running operations like NCCL benchmarks in multi-container pods.
+func (p *PodLifecycle) ExecInContainer(ctx context.Context, pod *v1.Pod, container string, command []string, timeout time.Duration) (string, string, error) {
+	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req := p.ClientSet.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(pod.Name).
+		Namespace(pod.Namespace).
+		SubResource("exec").
+		VersionedParams(&v1.PodExecOptions{
+			Container: container,
+			Command:   command,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(p.RESTConfig, "POST", req.URL())
+	if err != nil {
+		return "", "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create executor", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
+		Stdin:  nil,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Tty:    false,
+	})
+
+	if err != nil {
+		return stdout.String(), stderr.String(), aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "command execution failed", err)
+	}
+
+	return stdout.String(), stderr.String(), nil
+}
+
 // WaitForPodRunning waits for a pod to reach Running phase.
 func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
