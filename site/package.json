@@ -5,7 +5,10 @@
   "type": "module",
   "description": "NVIDIA AI Cluster Runtime documentation site",
   "scripts": {
+    "sync": "../tools/sync-site-docs",
+    "predev": "npm run sync",
     "dev": "vitepress dev",
+    "prebuild": "npm run sync",
     "build": "vitepress build",
     "preview": "vitepress preview"
   },

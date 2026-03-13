@@ -187,11 +187,11 @@ brews:
     caveats: |
       To verify supply-chain provenance (requires cosign):
 
-        cosign verify-blob-attestation \
-          --bundle #{opt_bin}/aicr-attestation.sigstore.json \
-          --type https://slsa.dev/provenance/v1 \
-          --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-          --certificate-identity-regexp "https://github.com/NVIDIA/aicr/.github/workflows/on-tag\\.yaml@refs/tags/.*" \
+        cosign verify-blob-attestation \\
+          --bundle #{opt_bin}/aicr-attestation.sigstore.json \\
+          --type https://slsa.dev/provenance/v1 \\
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+          --certificate-identity-regexp "https://github.com/NVIDIA/aicr/.github/workflows/on-tag\\.yaml@refs/tags/.*" \\
           #{opt_bin}/aicr
 
       To update the trust root for bundle attestation:

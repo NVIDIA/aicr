@@ -1,11 +1,4 @@
----
-title: "Integrator Guide"
-
-weight: 30
-description: "Embed AICR in automation pipelines and CI/CD workflows"
----
-
-# Integrator Guide
+# Integrator Documentation
 
 
 Documentation for engineers integrating AI Cluster Runtime (AICR) into CI/CD pipelines, GitOps workflows, or larger platforms.
@@ -22,11 +15,12 @@ This section is for integrators who:
 
 | Document | Description |
 |----------|-------------|
-| [Automation](/docs/integrator/automation) | CI/CD integration patterns for GitHub Actions, GitLab CI, Jenkins, and Terraform |
-| [Data Flow](/docs/integrator/data-flow) | Understanding snapshots, recipes, validation, and bundles data transformations |
-| [Kubernetes Deployment](/docs/integrator/kubernetes-deployment) | Self-hosted API server deployment with Kubernetes manifests |
-| [EKS Dynamo Networking](/docs/integrator/eks-dynamo-networking) | Security group prerequisites for Dynamo overlays on EKS |
-| [Recipe Development](/docs/integrator/recipe-development) | Creating and modifying recipe metadata for custom environments |
+| [Automation](automation.md) | CI/CD integration patterns for GitHub Actions, GitLab CI, Jenkins, and Terraform |
+| [Data Flow](data-flow.md) | Understanding snapshots, recipes, validation, and bundles data transformations |
+| [Kubernetes Deployment](kubernetes-deployment.md) | Self-hosted API server deployment with Kubernetes manifests |
+| [EKS Dynamo Networking](eks-dynamo-networking.md) | Security group prerequisites for Dynamo overlays on EKS |
+| [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
+| [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
 
 ## Quick Start
 
@@ -59,5 +53,5 @@ curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
 
 ## Related Documentation
 
-- **Users**: See [User Documentation](/docs/user/) for CLI usage and installation
-- **Contributors**: See [Contributor Documentation](/docs/contributor/) for architecture and development guides
+- **Users**: See [User Documentation](../user/) for CLI usage and installation
+- **Contributors**: See [Contributor Documentation](../contributor/) for architecture and development guides

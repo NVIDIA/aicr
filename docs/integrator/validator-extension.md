@@ -202,6 +202,6 @@ The secret must exist in the validation namespace and be of type `kubernetes.io/
 ## See Also
 
 - [Validator Development Guide](../contributor/validator.md) — Writing upstream Go checks
-- [Validator Catalog Reference](../../recipes/validators/README.md) — Catalog schema
+- [Validator Catalog Reference](https://github.com/NVIDIA/aicr/tree/main/recipes/validators) — Catalog schema
 - [CLI Reference](../user/cli-reference.md#aicr-validate) — Validate command flags
 - [Data Architecture](../contributor/data.md) — External data provider system

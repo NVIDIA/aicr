@@ -364,7 +364,7 @@ componentRefs:
 
 ### Automated Tests
 
-Tests in [`pkg/recipe/yaml_test.go`](../../pkg/recipe/yaml_test.go) validate:
+Tests in [`pkg/recipe/yaml_test.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/yaml_test.go) validate:
 - Schema conformance (YAML structure)
 - Criteria enum values (service, accelerator, intent, OS, platform)
 - File references (valuesFile, dependencyRefs)

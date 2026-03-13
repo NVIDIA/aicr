@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verify every docs/ markdown file has a corresponding sidebar entry in the
+# VitePress config. This prevents pages from being added to docs/ but forgotten
+# in the site navigation.
+#
+# Sections checked: user, integrator, contributor, conformance/cncf/evidence
+# Excluded: index.md files (section landing pages), design/ (internal ADRs)
+
+set -euo pipefail
+
+CONFIG="site/.vitepress/config.ts"
+ERRORS=0
+
+if [[ ! -f "${CONFIG}" ]]; then
+  echo "ERROR: VitePress config ${CONFIG} not found"
+  exit 1
+fi
+
+check_section() {
+  local docs_dir="$1"
+  local sidebar_prefix="$2"
+
+  for file in "${docs_dir}"/*.md; do
+    [[ -f "${file}" ]] || continue
+    local basename
+    basename=$(basename "${file}" .md)
+
+    # Skip index/landing pages — they're section headers, not sidebar items
+    [[ "${basename}" == "index" ]] && continue
+
+    local sidebar_link="${sidebar_prefix}/${basename}"
+    if ! grep -q "'${sidebar_link}'" "${CONFIG}"; then
+      echo "MISSING: ${file} has no sidebar entry (expected: ${sidebar_link})"
+      ERRORS=$((ERRORS + 1))
+    fi
+  done
+}
+
+echo "Checking docs/ files against sidebar in ${CONFIG}..."
+
+check_section "docs/user" "/docs/user"
+check_section "docs/integrator" "/docs/integrator"
+check_section "docs/contributor" "/docs/contributor"
+check_section "docs/conformance/cncf/evidence" "/docs/conformance/evidence"
+
+if [[ ${ERRORS} -gt 0 ]]; then
+  echo ""
+  echo "ERROR: ${ERRORS} docs file(s) missing from sidebar."
+  echo "Fix: add sidebar entries in ${CONFIG} for the files listed above."
+  exit 1
+fi
+
+echo "OK: all docs files have sidebar entries"

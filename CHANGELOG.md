@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.15] - 2026-03-13
+
+### Other Tasks
+
+- Add Slack webhook test workflow by [@mchmarny](https://github.com/mchmarny)
+- Add Slack release notification to on-tag workflow by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.14] - 2026-03-13
+
+### Bug Fixes
+
+- *(bundler)* Clean up kai-resource-reservation namespace on undeploy  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(brew)* Escape backslashes in caveats for proper multiline display  by [@mchmarny](https://github.com/mchmarny)
+- *(evidence)* Track check results at runtime instead of scanning directory  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other Tasks
+
+- Deps: bump actions/stale from 10.1.1 to 10.2.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/upload-pages-artifact from 3.0.1 to 4.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump sigstore/cosign-installer from 4.0.0 to 4.1.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Eliminate docs duplication with build-time sync  by [@tabern](https://github.com/tabern)
+
 ## [0.10.13] - 2026-03-13
 
 ### Bug Fixes

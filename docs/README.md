@@ -132,7 +132,7 @@ For developers contributing code, extending functionality, or working on AICR in
 
 | Document | Description |
 |----------|-------------|
-| [Architecture Overview](contributor/README.md) | System design, patterns, and deployment topologies |
+| [Architecture Overview](contributor/index.md) | System design, patterns, and deployment topologies |
 | [CLI Architecture](contributor/cli.md) | Detailed CLI implementation and workflow diagrams |
 | [API Server Architecture](contributor/api-server.md) | HTTP server design, middleware, and endpoints |
 | [Data Architecture](contributor/data.md) | Recipe metadata system, criteria matching, and inheritance |
