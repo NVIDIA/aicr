@@ -41,7 +41,7 @@ func TestGenerate_Success(t *testing.T) {
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
-				"installCRDs": true,
+				"crds": map[string]any{"enabled": true},
 			},
 			"gpu-operator": {
 				"driver": map[string]any{
@@ -78,13 +78,13 @@ func TestGenerate_Success(t *testing.T) {
 		}
 	}
 
-	// Verify cert-manager values contain installCRDs
+	// Verify cert-manager values contain crds.enabled
 	cmValues, err := os.ReadFile(filepath.Join(outputDir, "cert-manager", "values.yaml"))
 	if err != nil {
 		t.Fatalf("failed to read cert-manager values: %v", err)
 	}
-	if !strings.Contains(string(cmValues), "installCRDs") {
-		t.Error("cert-manager/values.yaml missing installCRDs")
+	if !strings.Contains(string(cmValues), "crds") {
+		t.Error("cert-manager/values.yaml missing crds section")
 	}
 
 	// Verify gpu-operator values contain driver
@@ -157,7 +157,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	input := &GeneratorInput{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
-			"cert-manager": {"installCRDs": true},
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
 			"gpu-operator": {"enabled": true},
 		},
 		Version:          "v1.0.0",
@@ -383,6 +383,18 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "set -euo pipefail") {
 		t.Error("deploy.sh missing strict mode")
+	}
+	if !strings.Contains(string(content), "MAX_RETRIES=5") {
+		t.Error("deploy.sh missing default MAX_RETRIES")
+	}
+	if !strings.Contains(string(content), "backoff_seconds()") {
+		t.Error("deploy.sh missing backoff_seconds function")
+	}
+	if !strings.Contains(string(content), "retry()") {
+		t.Error("deploy.sh missing retry function")
+	}
+	if !strings.Contains(string(content), "--retries") {
+		t.Error("deploy.sh missing --retries flag handling")
 	}
 }
 
@@ -861,7 +873,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	input := &GeneratorInput{
 		RecipeResult: createMixedRecipeResult(),
 		ComponentValues: map[string]map[string]any{
-			"cert-manager":     {"installCRDs": true},
+			"cert-manager":     {"crds": map[string]any{"enabled": true}},
 			"my-kustomize-app": {},
 		},
 		Version: "v1.0.0",
@@ -1157,7 +1169,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
-				"installCRDs": true,
+				"crds": map[string]any{"enabled": true},
 			},
 			"gpu-operator": {
 				"driver": map[string]any{

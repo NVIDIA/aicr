@@ -58,17 +58,6 @@ aicr validate \
 
 ## Run Inference Workload
 
-### Create namespace and HuggingFace secret
-
-> Set HF_TOKEN env var first
-
-```shell
-kubectl create ns dynamo-workload
-
-sed "s/<your-hf-token>/$HF_TOKEN/" \
-  demos/workloads/inference/hf-token-secret.yaml | kubectl apply -f -
-```
-
 ### Deploy the DynamoGraphDeployment
 
 ```shell
@@ -79,7 +68,7 @@ Monitor deployment, until all pods are `Running` and ready:
 
 ```shell
 kubectl get dynamographdeployments -n dynamo-workload
-kubectl get pods -n dynamo-workload -w
+kubectl wait --for=condition=ready pod --all -n dynamo-workload --timeout=300s
 ```
 
 ### Test the endpoint
