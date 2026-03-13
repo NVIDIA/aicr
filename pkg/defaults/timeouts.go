@@ -182,6 +182,18 @@ const (
 	GangTestPodTimeout = 5 * time.Minute
 )
 
+// AI service metrics conformance validation.
+const (
+	// AIServiceMetricsWaitTimeout is the maximum time to wait for GPU metrics
+	// to appear in Prometheus. DCGM exporter may not have scraped yet when
+	// the validator runs, especially on fresh deployments.
+	AIServiceMetricsWaitTimeout = 2 * time.Minute
+
+	// AIServiceMetricsPollInterval is the polling interval between Prometheus
+	// queries when waiting for GPU metric time series to appear.
+	AIServiceMetricsPollInterval = 10 * time.Second
+)
+
 // HPA behavioral test timeouts for conformance validation.
 const (
 	// HPAScaleTimeout is the timeout for waiting for HPA to report scaling intent.
