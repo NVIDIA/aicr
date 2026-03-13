@@ -110,6 +110,29 @@ wait_for_port() {
     return 1
 }
 
+# Runtime results tracker — records check name and status as they execute.
+# Format: "name:status" entries separated by newlines.
+CHECK_RESULTS=""
+
+# Run a collector and record its result based on the evidence file it produces.
+# Usage: run_check "DRA Support" "dra-support" collect_dra
+run_check() {
+    local display_name="$1" file_key="$2" collector_fn="$3"
+    local evidence_path="${EVIDENCE_DIR}/${file_key}.md"
+
+    "${collector_fn}"
+
+    if [ ! -f "${evidence_path}" ]; then
+        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:SKIP\n"
+    elif grep -q "Result: PASS" "${evidence_path}" 2>/dev/null; then
+        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:PASS\n"
+    elif grep -q "Result: FAIL" "${evidence_path}" 2>/dev/null; then
+        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:FAIL\n"
+    else
+        CHECK_RESULTS="${CHECK_RESULTS}${display_name}:UNKNOWN\n"
+    fi
+}
+
 # Clean up a test namespace properly: pods → resourceclaims → namespace
 # This order prevents stale DRA kubelet checkpoint issues caused by
 # orphaned ResourceClaims with delete-protection finalizers.
@@ -1438,38 +1461,38 @@ main() {
 
     case "${SECTION}" in
         dra)
-            collect_dra
+            run_check "DRA Support" "dra-support" collect_dra
             ;;
         gang)
-            collect_gang
+            run_check "Gang Scheduling" "gang-scheduling" collect_gang
             ;;
         secure)
-            collect_secure
+            run_check "Secure Accelerator Access" "secure-accelerator-access" collect_secure
             ;;
         metrics)
-            collect_metrics
+            run_check "Accelerator Metrics" "accelerator-metrics" collect_metrics
             ;;
         gateway)
-            collect_gateway
+            run_check "Inference Gateway" "inference-gateway" collect_gateway
             ;;
         operator)
-            collect_operator
+            run_check "Robust AI Operator" "robust-operator" collect_operator
             ;;
         hpa)
-            collect_hpa
+            run_check "Pod Autoscaling (HPA)" "pod-autoscaling" collect_hpa
             ;;
         cluster-autoscaling)
-            collect_cluster_autoscaling
+            run_check "Cluster Autoscaling" "cluster-autoscaling" collect_cluster_autoscaling
             ;;
         all)
-            collect_dra
-            collect_gang
-            collect_secure
-            collect_metrics
-            collect_gateway
-            collect_operator
-            collect_hpa
-            collect_cluster_autoscaling
+            run_check "DRA Support" "dra-support" collect_dra
+            run_check "Gang Scheduling" "gang-scheduling" collect_gang
+            run_check "Secure Accelerator Access" "secure-accelerator-access" collect_secure
+            run_check "Accelerator Metrics" "accelerator-metrics" collect_metrics
+            run_check "Inference Gateway" "inference-gateway" collect_gateway
+            run_check "Robust AI Operator" "robust-operator" collect_operator
+            run_check "Pod Autoscaling (HPA)" "pod-autoscaling" collect_hpa
+            run_check "Cluster Autoscaling" "cluster-autoscaling" collect_cluster_autoscaling
             ;;
         *)
             log_error "Unknown section: ${SECTION}"
@@ -1496,36 +1519,20 @@ main() {
     echo "  OS:         ${CLUSTER_OS_IMAGE}"
     echo "  Evidence:   ${EVIDENCE_DIR}/"
     echo ""
-    local checks=(
-        "dra-support:DRA Support"
-        "gang-scheduling:Gang Scheduling"
-        "secure-accelerator-access:Secure Accelerator Access"
-        "accelerator-metrics:Accelerator Metrics"
-        "inference-gateway:Inference Gateway"
-        "robust-operator:Robust AI Operator"
-        "pod-autoscaling:Pod Autoscaling (HPA)"
-        "cluster-autoscaling:Cluster Autoscaling"
-    )
     local passed=0 failed=0 skipped=0
     printf "  %-30s %s\n" "Check" "Status"
     printf "  %-30s %s\n" "-----" "------"
-    for entry in "${checks[@]}"; do
-        local file="${entry%%:*}"
-        local name="${entry#*:}"
-        local evidence_path="${EVIDENCE_DIR}/${file}.md"
-        if [ ! -f "${evidence_path}" ]; then
-            printf "  %-30s %s\n" "${name}" "SKIP"
-            skipped=$((skipped + 1))
-        elif grep -q "Result: PASS" "${evidence_path}" 2>/dev/null; then
-            printf "  %-30s %s\n" "${name}" "PASS"
-            passed=$((passed + 1))
-        elif grep -q "Result: FAIL" "${evidence_path}" 2>/dev/null; then
-            printf "  %-30s %s\n" "${name}" "FAIL"
-            failed=$((failed + 1))
-        else
-            printf "  %-30s %s\n" "${name}" "UNKNOWN"
-        fi
-    done
+    while IFS= read -r line; do
+        [ -z "${line}" ] && continue
+        local name="${line%%:*}"
+        local status="${line#*:}"
+        printf "  %-30s %s\n" "${name}" "${status}"
+        case "${status}" in
+            PASS*) passed=$((passed + 1)) ;;
+            FAIL*) failed=$((failed + 1)) ;;
+            SKIP)  skipped=$((skipped + 1)) ;;
+        esac
+    done < <(printf '%b' "${CHECK_RESULTS}")
     echo ""
     echo "  Total: $((passed + failed + skipped)) | Passed: ${passed} | Failed: ${failed} | Skipped: ${skipped}"
     echo ""
