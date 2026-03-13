@@ -66,11 +66,11 @@ jobs:
 
       - name: Build site (PR)
         if: github.event_name == 'pull_request'
-        run: cd site && npm ci && npx vitepress build
+        run: cd site && npm ci && npm run build
 
       - name: Build site
         if: github.event_name != 'pull_request'
-        run: cd site && npm ci && npx vitepress build
+        run: cd site && npm ci && npm run build
 
       - name: Upload artifact
         if: github.event_name != 'pull_request'
