@@ -454,14 +454,16 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// Apply user value overrides from --set flags.
 		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
 		if overrides := b.getValueOverridesForComponent(ref.Name); len(overrides) > 0 {
-			filtered := make(map[string]string, len(overrides))
-			for k, v := range overrides {
-				if k == "enabled" {
-					continue
+			if _, has := overrides["enabled"]; has {
+				filtered := make(map[string]string, len(overrides)-1)
+				for k, v := range overrides {
+					if k == "enabled" {
+						continue
+					}
+					filtered[k] = v
 				}
-				filtered[k] = v
+				overrides = filtered
 			}
-			overrides = filtered
 			if applyErr := component.ApplyMapOverrides(values, overrides); applyErr != nil {
 				slog.Warn("failed to apply some value overrides",
 					"component", ref.Name,

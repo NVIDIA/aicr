@@ -411,8 +411,9 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 				DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
 			}
 
+			ctx := context.Background()
 			tmpDir := t.TempDir()
-			_, makeErr := bundler.Make(context.Background(), recipeResult, tmpDir)
+			_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
 			if makeErr != nil {
 				t.Fatalf("Make() error = %v", makeErr)
 			}
@@ -451,8 +452,9 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 		DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
 	}
 
+	ctx := context.Background()
 	tmpDir := t.TempDir()
-	_, makeErr := bundler.Make(context.Background(), recipeResult, tmpDir)
+	_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
 	if makeErr != nil {
 		t.Fatalf("Make() error = %v", makeErr)
 	}
