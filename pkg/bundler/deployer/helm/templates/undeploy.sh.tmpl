@@ -164,6 +164,10 @@ fi
 delete_orphaned_webhooks_for_ns "{{ . }}"
 delete_namespace "{{ . }}"
 {{ end }}
+# Clean up companion namespaces created at runtime by components.
+# These are not in the bundle's namespace list but are created by operators.
+delete_namespace "kai-resource-reservation"
+
 # Wait for terminating namespaces to finish
 echo "Waiting for namespaces to terminate..."
 for i in $(seq 1 60); do
