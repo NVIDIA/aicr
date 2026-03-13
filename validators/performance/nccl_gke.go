@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"os"
 	"strconv"
@@ -28,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/yaml"
@@ -38,13 +38,20 @@ const (
 	// Must stay in sync with testdata/h100/gke/nccl-test-tcpxo.yaml.
 	gkeNCCLHost1PodName = "nccl-test-host-1"
 
+	// gkeNCCLHost2PodName is the name of the second NCCL test pod.
+	// Must stay in sync with testdata/h100/gke/nccl-test-tcpxo.yaml.
+	gkeNCCLHost2PodName = "nccl-test-host-2"
+
 	// gkeNCCLContainerName is the container that runs the NCCL benchmark.
+	// Must stay in sync with testdata/h100/gke/nccl-test-tcpxo.yaml.
 	gkeNCCLContainerName = "nccl-test"
 
 	// gkeNCCLHost1ServiceName is the headless service for DNS resolution of host-1.
+	// Must stay in sync with testdata/h100/gke/nccl-test-tcpxo.yaml.
 	gkeNCCLHost1ServiceName = "nccl-host-1"
 
 	// gkeNCCLHost2ServiceName is the headless service for DNS resolution of host-2.
+	// Must stay in sync with testdata/h100/gke/nccl-test-tcpxo.yaml.
 	gkeNCCLHost2ServiceName = "nccl-host-2"
 )
 
@@ -65,6 +72,15 @@ func runGKENCCLTest(ctx *validators.Context, gpuConfig *gpuConfiguration,
 
 	slog.Info("Running GKE NCCL test with TCPXO sidecar pods")
 
+	// Best-effort pre-cleanup: remove stale resources from a prior failed run.
+	// Pods are immutable (can't Update), so delete-before-create is the correct
+	// idempotency strategy for re-runs after partial failure.
+	cleanupGKEResources(ctx.Clientset, &gkeResources{
+		PodNames:     []string{gkeNCCLHost1PodName, gkeNCCLHost2PodName},
+		ServiceNames: []string{gkeNCCLHost1ServiceName, gkeNCCLHost2ServiceName},
+		Namespace:    gpuConfig.Namespace,
+	})
+
 	// Apply Services + Pods from the multi-doc template.
 	pods, resources, err := applyGKEResources(ctx.Ctx, ctx.Clientset, gpuConfig, accelerator, service)
 	if err != nil {
@@ -78,13 +94,15 @@ func runGKENCCLTest(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		Namespace:  ctx.Namespace,
 	}
 
-	// Wait for both pods to reach Running state (TCPXO sidecar + nccl-test ready).
+	// Wait for both pods to be Ready (all containers initialized).
+	// Running phase alone doesn't guarantee the TCPXO sidecar is initialized;
+	// the Ready condition confirms all containers are ready for traffic.
 	for _, pod := range pods {
-		slog.Info("Waiting for pod to be Running", "name", pod.Name)
-		if waitErr := podHelper.WaitForPodRunning(ctx.Ctx, pod, defaults.NCCLGKEPodReadyTimeout); waitErr != nil {
-			return "", aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "GKE NCCL pod failed to reach Running", waitErr)
+		slog.Info("Waiting for pod to be Ready", "name", pod.Name)
+		if waitErr := podHelper.WaitForPodReady(ctx.Ctx, pod, defaults.NCCLGKEPodReadyTimeout); waitErr != nil {
+			return "", aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "GKE NCCL pod failed to reach Ready", waitErr)
 		}
-		slog.Info("Pod is Running", "name", pod.Name)
+		slog.Info("Pod is Ready", "name", pod.Name)
 	}
 
 	// Exec the NCCL all-reduce benchmark from host-1.
@@ -116,6 +134,13 @@ func runGKENCCLTest(ctx *validators.Context, gpuConfig *gpuConfiguration,
 // and creates Services and Pods via the typed Kubernetes client.
 func applyGKEResources(ctx context.Context, clientset kubernetes.Interface, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) ([]*v1.Pod, *gkeResources, error) {
+
+	// Ensure namespace exists. The EKS path handles this implicitly through
+	// Kubeflow Trainer, but the GKE raw-Pod path must create it explicitly.
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: gpuConfig.Namespace}}
+	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return nil, nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to ensure namespace", err)
+	}
 
 	templateFile := templatePath(accelerator, service, "nccl-test-tcpxo.yaml")
 	content, err := os.ReadFile(templateFile)
@@ -203,19 +228,25 @@ func cleanupGKEResources(clientset kubernetes.Interface, resources *gkeResources
 
 	for _, name := range resources.PodNames {
 		err := clientset.CoreV1().Pods(resources.Namespace).Delete(cleanupCtx, name, metav1.DeleteOptions{})
-		if err != nil {
-			slog.Error("Failed to delete Pod", "name", name, "error", err)
-		} else {
+		switch {
+		case err == nil:
 			slog.Info("Deleted Pod", "name", name)
+		case apierrors.IsNotFound(err):
+			// Already gone — expected during pre-cleanup on first run.
+		default:
+			slog.Error("Failed to delete Pod", "name", name, "error", err)
 		}
 	}
 
 	for _, name := range resources.ServiceNames {
 		err := clientset.CoreV1().Services(resources.Namespace).Delete(cleanupCtx, name, metav1.DeleteOptions{})
-		if err != nil {
-			slog.Error("Failed to delete Service", "name", name, "error", err)
-		} else {
+		switch {
+		case err == nil:
 			slog.Info("Deleted Service", "name", name)
+		case apierrors.IsNotFound(err):
+			// Already gone — expected during pre-cleanup on first run.
+		default:
+			slog.Error("Failed to delete Service", "name", name, "error", err)
 		}
 	}
 }
@@ -247,21 +278,17 @@ func splitYAMLDocuments(content string) []string {
 	return docs
 }
 
-// peekKind extracts the "kind" field from a YAML document without full unmarshalling.
+// peekKind extracts the "kind" field from a YAML document by scanning for the
+// top-level "kind:" line, avoiding a full parse of the entire document.
 func peekKind(doc string) (string, error) {
-	var partial struct {
-		Kind string `json:"kind"`
+	for _, line := range strings.SplitN(doc, "\n", 20) {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "kind:") {
+			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "kind:"))
+			if value != "" {
+				return value, nil
+			}
+		}
 	}
-	// yaml.Unmarshal handles YAML→JSON conversion.
-	jsonBytes, err := yaml.YAMLToJSON([]byte(doc))
-	if err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to convert YAML to JSON", err)
-	}
-	if err := json.Unmarshal(jsonBytes, &partial); err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse kind", err)
-	}
-	if partial.Kind == "" {
-		return "", aicrErrors.New(aicrErrors.ErrCodeInternal, "document has no kind field")
-	}
-	return partial.Kind, nil
+	return "", aicrErrors.New(aicrErrors.ErrCodeInternal, "document has no kind field")
 }

@@ -145,12 +145,17 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Dispatch to the appropriate test runner based on cloud service.
+	// Each service requires a dedicated runner; unknown services fail explicitly
+	// to catch missing implementations early.
 	var logs string
-	switch service { //nolint:exhaustive // default handles all other supported services via EKS path
+	switch service { //nolint:exhaustive // default returns explicit error for unimplemented services
 	case recipe.CriteriaServiceGKE:
 		logs, err = runGKENCCLTest(ctx, gpuConfig, accelerator, service)
-	default:
+	case recipe.CriteriaServiceEKS:
 		logs, err = runEKSNCCLTest(ctx, gpuConfig, accelerator, service)
+	default:
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("no NCCL test runner implemented for service %q", service))
 	}
 	if err != nil {
 		return "", false, err
@@ -423,7 +428,7 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 }
 
 // parseBandwidthFromLogs extracts the bus bandwidth value from NCCL test logs.
-// It finds all data rows and returns the in-place busbw from the last row
+// It finds all data rows and returns the out-of-place busbw from the last row
 // (largest message size). This works regardless of max message size:
 // EKS uses 16G (17179869184), GKE uses 8G (8589934592).
 func parseBandwidthFromLogs(logs string) (float64, error) {

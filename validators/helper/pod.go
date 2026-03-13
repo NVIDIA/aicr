@@ -222,24 +222,25 @@ func (p *PodLifecycle) ExecInContainer(ctx context.Context, pod *v1.Pod, contain
 	return stdout.String(), stderr.String(), nil
 }
 
-// WaitForPodRunning waits for a pod to reach Running phase.
-func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+// podPredicate checks whether a pod has reached the desired state.
+// Returns (done, error): done=true means stop watching, error non-nil means failure.
+type podPredicate func(pod *v1.Pod) (bool, error)
 
-	slog.Info("Waiting for pod to reach Running state", "name", pod.Name)
-
-	// Fast path: check current phase.
-	currentPod, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(waitCtx, pod.Name, metav1.GetOptions{})
+// watchPodUntil watches a pod until the predicate returns done=true or the context expires.
+// It handles the standard watch lifecycle: fast-path check, watch creation, channel closure
+// recovery, and deletion detection.
+func (p *PodLifecycle) watchPodUntil(ctx context.Context, pod *v1.Pod, description string, check podPredicate) error {
+	// Fast path: pod may already satisfy the predicate.
+	currentPod, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get pod", err)
 	}
-	if done, phaseErr := checkPodRunningOrTerminal(currentPod); done {
+	if done, phaseErr := check(currentPod); done {
 		return phaseErr
 	}
 
 	// Watch for state changes.
-	watcher, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Watch(waitCtx, metav1.ListOptions{
+	watcher, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Watch(ctx, metav1.ListOptions{
 		FieldSelector:   "metadata.name=" + pod.Name,
 		ResourceVersion: currentPod.ResourceVersion,
 	})
@@ -250,34 +251,75 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 
 	for {
 		select {
-		case <-waitCtx.Done():
-			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod to reach Running state", waitCtx.Err())
+		case <-ctx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod to be "+description, ctx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				// Watch channel closed — re-check pod directly.
-				recheck, recheckErr := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(waitCtx, pod.Name, metav1.GetOptions{})
+				recheck, recheckErr := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 				if recheckErr != nil {
 					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "watch closed and failed to get pod", recheckErr)
 				}
-				if done, phaseErr := checkPodRunningOrTerminal(recheck); done {
+				if done, phaseErr := check(recheck); done {
 					return phaseErr
 				}
-				return aicrErrors.New(aicrErrors.ErrCodeInternal, "watch channel closed, pod still not Running")
+				return aicrErrors.New(aicrErrors.ErrCodeInternal, "watch channel closed, pod still not "+description)
 			}
 
 			if event.Type == watch.Deleted {
-				return aicrErrors.New(aicrErrors.ErrCodeInternal, "pod was deleted while waiting for Running state")
+				return aicrErrors.New(aicrErrors.ErrCodeInternal, "pod was deleted while waiting for "+description)
 			}
 
 			watchedPod, ok := event.Object.(*v1.Pod)
 			if !ok {
 				continue
 			}
-			if done, phaseErr := checkPodRunningOrTerminal(watchedPod); done {
+			if done, phaseErr := check(watchedPod); done {
 				return phaseErr
 			}
 		}
 	}
+}
+
+// WaitForPodReady waits for a pod to have all containers Ready (condition type=Ready, status=True).
+// Unlike WaitForPodRunning (which only checks phase), this ensures all containers — including
+// sidecars — are fully initialized before returning.
+func (p *PodLifecycle) WaitForPodReady(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	slog.Info("Waiting for pod to be Ready", "name", pod.Name)
+	return p.watchPodUntil(waitCtx, pod, "Ready", checkPodReadyOrTerminal)
+}
+
+// checkPodReadyOrTerminal returns true if the pod has the Ready condition set to True,
+// or is in a terminal phase (Succeeded/Failed). For terminal failure it returns an error.
+func checkPodReadyOrTerminal(pod *v1.Pod) (bool, error) {
+	switch pod.Status.Phase { //nolint:exhaustive // Pending, Running, Unknown continue watching
+	case v1.PodSucceeded:
+		slog.Info("Pod reached Succeeded state", "name", pod.Name)
+		return true, nil
+	case v1.PodFailed:
+		return true, aicrErrors.New(aicrErrors.ErrCodeInternal, "pod entered Failed phase while waiting for Ready")
+	}
+
+	// Check Ready condition.
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == v1.PodReady && cond.Status == v1.ConditionTrue {
+			slog.Info("Pod is Ready (all containers ready)", "name", pod.Name)
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// WaitForPodRunning waits for a pod to reach Running phase.
+func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	slog.Info("Waiting for pod to reach Running state", "name", pod.Name)
+	return p.watchPodUntil(waitCtx, pod, "Running", checkPodRunningOrTerminal)
 }
 
 // checkPodRunningOrTerminal returns true if the pod is in Running, Succeeded, or Failed phase.
