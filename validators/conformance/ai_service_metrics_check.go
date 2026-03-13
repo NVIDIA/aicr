@@ -15,10 +15,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -95,24 +99,52 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
-	// 1. Query Prometheus for GPU metric time series
+	// 1. Query Prometheus for GPU metric time series, retrying until DCGM
+	//    exporter metrics appear or the timeout expires.
 	queryURL := fmt.Sprintf("%s/api/v1/query?query=DCGM_FI_DEV_GPU_UTIL", promBaseURL)
-	body, err := httpGet(ctx.Ctx, queryURL)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable,
-			fmt.Sprintf("Prometheus unreachable at %s — verify network connectivity "+
-				"(security groups, network policies) between validator pod and Prometheus service",
-				promBaseURL), err)
-	}
+	retryCtx, retryCancel := context.WithTimeout(ctx.Ctx, defaults.AIServiceMetricsWaitTimeout)
+	defer retryCancel()
 
+	var body []byte
 	var promResp struct {
 		Status string `json:"status"`
 		Data   struct {
 			Result []json.RawMessage `json:"result"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal(body, &promResp); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse Prometheus response", err)
+
+	for {
+		var err error
+		body, err = httpGet(retryCtx, queryURL)
+		if err != nil {
+			// Distinguish retry-timeout from genuine connectivity failure.
+			// When retryCtx expires during httpGet, the error is a context
+			// deadline, not a network issue.
+			if retryCtx.Err() != nil {
+				return metricsWaitTimeoutError(ctx.Ctx)
+			}
+			return errors.Wrap(errors.ErrCodeUnavailable,
+				fmt.Sprintf("Prometheus unreachable at %s — verify network connectivity "+
+					"(security groups, network policies) between validator pod and Prometheus service",
+					promBaseURL), err)
+		}
+
+		if err := json.Unmarshal(body, &promResp); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to parse Prometheus response", err)
+		}
+
+		if len(promResp.Data.Result) > 0 {
+			break
+		}
+
+		slog.Info("DCGM_FI_DEV_GPU_UTIL not yet available, retrying",
+			"poll_interval", defaults.AIServiceMetricsPollInterval)
+
+		select {
+		case <-retryCtx.Done():
+			return metricsWaitTimeoutError(ctx.Ctx)
+		case <-time.After(defaults.AIServiceMetricsPollInterval):
+		}
 	}
 
 	recordRawTextArtifact(ctx, "Prometheus Query: DCGM_FI_DEV_GPU_UTIL",
@@ -120,11 +152,6 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 		fmt.Sprintf("Status:            %s\nTime series count: %d", valueOrUnknown(promResp.Status), len(promResp.Data.Result)))
 	recordRawTextArtifact(ctx, "Prometheus query response (GPU util)",
 		fmt.Sprintf("curl -sf '%s'", queryURL), string(body))
-
-	if len(promResp.Data.Result) == 0 {
-		return errors.New(errors.ErrCodeNotFound,
-			"no DCGM_FI_DEV_GPU_UTIL time series in Prometheus — verify DCGM exporter is running and scraping GPU metrics")
-	}
 
 	// 2. Custom metrics API available
 	rawURL := "/apis/custom.metrics.k8s.io/v1beta1"
@@ -171,4 +198,18 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 			statusCode, valueOrUnknown(customMetricsResp.GroupVersion), len(customMetricsResp.Resources), resources.String()))
 
 	return nil
+}
+
+// metricsWaitTimeoutError returns the appropriate error when the retry context
+// expires. It distinguishes parent-context cancellation (upstream timeout or
+// shutdown) from the local retry timeout expiring while waiting for metrics.
+func metricsWaitTimeoutError(parentCtx context.Context) error {
+	if parentCtx.Err() != nil {
+		return errors.Wrap(errors.ErrCodeTimeout,
+			"parent context canceled while waiting for GPU metrics", parentCtx.Err())
+	}
+	return errors.New(errors.ErrCodeNotFound,
+		"no DCGM_FI_DEV_GPU_UTIL time series in Prometheus after "+
+			defaults.AIServiceMetricsWaitTimeout.String()+
+			" — verify DCGM exporter is running and scraping GPU metrics")
 }
