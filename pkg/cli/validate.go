@@ -301,6 +301,26 @@ func runValidation(
 		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
 	}
 
+	// Clean up the validation namespace when cleanup is enabled.
+	// Only delete the default ephemeral namespace to avoid accidentally removing
+	// user-supplied namespaces (e.g., gpu-operator, default) that may contain
+	// other workloads.
+	if cfg.cleanup && !cfg.noCluster && cfg.validationNamespace == "aicr-validation" {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
+		defer cleanupCancel()
+
+		clientset, _, clientErr := k8sclient.GetKubeClient()
+		if clientErr != nil {
+			slog.Warn("failed to get kube client for namespace cleanup", "error", clientErr)
+		} else {
+			if delErr := clientset.CoreV1().Namespaces().Delete(cleanupCtx, cfg.validationNamespace, metav1.DeleteOptions{}); delErr != nil {
+				if !apierrors.IsNotFound(delErr) {
+					slog.Warn("failed to delete validation namespace", "namespace", cfg.validationNamespace, "error", delErr)
+				}
+			}
+		}
+	}
+
 	if cfg.failOnError && anyFailed {
 		return errors.New(errors.ErrCodeInternal, "validation failed: one or more phases did not pass")
 	}
