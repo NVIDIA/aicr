@@ -32,17 +32,14 @@ spec:
 
   # EKS-specific components
   componentRefs:
-    # Disabled by default: EKS clusters typically have EBS CSI driver
-    # installed as a managed addon. Deploying it again causes ClusterRole
-    # conflicts ("managed-by: EKS" vs "managed-by: Helm").
-    # Users can re-enable with: --set aws-ebs-csi-driver.enabled=true
+    # EBS CSI driver for persistent volume provisioning on EKS.
+    # Enabled by default since EKS does not include it as a managed addon.
+    # Disable with: --set awsebscsidriver:enabled=false (if installed as EKS addon)
     - name: aws-ebs-csi-driver
       type: Helm
       source: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       version: 2.55.0
       valuesFile: components/aws-ebs-csi-driver/values.yaml
-      overrides:
-        enabled: false
 
     # Enable Prometheus persistent storage for EKS (requires EBS CSI driver)
     - name: kube-prometheus-stack

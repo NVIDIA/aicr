@@ -188,11 +188,21 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 			"recipe must contain at least one component reference")
 	}
 
-	// Filter out disabled components (overrides.enabled: false)
+	// Filter out disabled components.
+	// Check order: --set overrides take precedence over recipe overrides.
+	// This allows users to enable/disable components at bundle time:
+	//   --set awsebscsidriver:enabled=false  (disable)
+	//   --set awsebscsidriver:enabled=true   (re-enable)
 	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
 	enabledSet := make(map[string]struct{})
 	for _, ref := range recipeResult.ComponentRefs {
-		if !ref.IsEnabled() {
+		if setEnabled, ok := b.getSetEnabledOverride(ref.Name); ok {
+			if !setEnabled {
+				slog.Info("skipping component disabled via --set", "component", ref.Name)
+				continue
+			}
+			// --set enabled=true overrides recipe-level disabled
+		} else if !ref.IsEnabled() {
 			slog.Info("skipping disabled component", "component", ref.Name)
 			continue
 		}
@@ -504,6 +514,27 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map
 	}
 
 	return nil
+}
+
+// getSetEnabledOverride checks if --set overrides contain an "enabled" key
+// for the given component. Returns (value, true) if found, (false, false) otherwise.
+// This allows --set awsebscsidriver:enabled=false to disable a component at bundle time.
+func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool) {
+	overrides := b.getValueOverridesForComponent(componentName)
+	if overrides == nil {
+		return false, false
+	}
+	val, ok := overrides["enabled"]
+	if !ok {
+		return false, false
+	}
+	parsed, parseErr := strconv.ParseBool(val)
+	if parseErr != nil {
+		slog.Warn("invalid --set enabled value, ignoring override",
+			"component", componentName, "value", val, "error", parseErr)
+		return false, false
+	}
+	return parsed, true
 }
 
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.
