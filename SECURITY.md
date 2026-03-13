@@ -207,6 +207,16 @@ This verifies:
 aicr verify ./my-bundle --min-trust-level verified
 ```
 
+### Why Binary and Bundle Verification Is Offline
+
+Container image verification uses GitHub's attestation API (`gh attestation verify`)
+because images are already fetched from a registry — an inherently online context.
+Binary and bundle verification uses `sigstore-go` with a local trusted root instead.
+Verification is a read operation that may run frequently — in CI pipelines, in clusters
+verifying deployed bundles, or by audit tools — and must not be coupled to external API
+availability or rate limits. Cryptographic security is identical in both cases; the Rekor
+inclusion proof is embedded in every `.sigstore.json` bundle and verified locally.
+
 ### Trusted Root Management
 
 Bundle verification uses a Sigstore trusted root to validate attestation signatures
