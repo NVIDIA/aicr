@@ -258,7 +258,9 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringSliceFlag{
 				Name: "set",
 				Usage: `Override values in generated bundle files
-	(format: bundler:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true)`,
+	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
+	Use the special 'enabled' key to include/exclude components at bundle time
+	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver)`,
 				Category: "Deployment",
 			},
 			&cli.StringSliceFlag{

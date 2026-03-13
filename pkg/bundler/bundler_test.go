@@ -363,6 +363,12 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			expectIncluded: false,
 		},
 		{
+			name:           "recipe enabled (default) + no --set => included",
+			recipeEnabled:  nil,
+			setEnabled:     "",
+			expectIncluded: true,
+		},
+		{
 			name:           "invalid --set value ignored => falls back to recipe",
 			recipeEnabled:  boolPtr(false),
 			setEnabled:     "ture",
@@ -418,6 +424,54 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 				t.Errorf("aws-ebs-csi-driver included=%v, want %v", included, tt.expectIncluded)
 			}
 		})
+	}
+}
+
+func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewConfig(
+		config.WithValueOverrides(map[string]map[string]string{
+			"awsebscsidriver": {"enabled": "true", "controller.replicaCount": "2"},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+			{Name: "aws-ebs-csi-driver", Version: "2.55.0", Type: "helm", Source: "https://kubernetes-sigs.github.io/aws-ebs-csi-driver"},
+		},
+		DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
+	}
+
+	tmpDir := t.TempDir()
+	_, makeErr := bundler.Make(context.Background(), recipeResult, tmpDir)
+	if makeErr != nil {
+		t.Fatalf("Make() error = %v", makeErr)
+	}
+
+	valuesPath := filepath.Join(tmpDir, "aws-ebs-csi-driver", "values.yaml")
+	valuesData, readErr := os.ReadFile(valuesPath)
+	if readErr != nil {
+		t.Fatalf("failed to read values.yaml: %v", readErr)
+	}
+
+	// "enabled" must not appear as a top-level key in the values file
+	valuesStr := string(valuesData)
+	if strings.Contains(valuesStr, "enabled: true") {
+		t.Errorf("enabled key leaked into Helm values:\n%s", valuesStr)
+	}
+
+	// Other overrides should still be applied
+	if !strings.Contains(valuesStr, "replicaCount") {
+		t.Errorf("expected controller.replicaCount override in values, got:\n%s", valuesStr)
 	}
 }
 

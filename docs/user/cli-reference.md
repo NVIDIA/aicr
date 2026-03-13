@@ -632,7 +632,7 @@ aicr bundle [flags]
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | | string | Deployment method: helm (default), argocd |
 | `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
-| `--set` | | string[] | Override values in bundle files (repeatable) |
+| `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -717,6 +717,7 @@ Override any value in the generated bundle files using dot notation:
 - **Duplicate keys**: When the same `bundler:path` is specified multiple times, the **last value wins**
 - **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). Arrays can only be replaced entirely via recipe overrides, not via `--set` flags. Use recipe-level overrides in `componentRefs[].overrides` if you need to replace an entire array.
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
+- **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes the component; `--set <component>:enabled=true` re-enables a recipe-disabled component. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 
 **Examples:**
 ```shell
@@ -746,6 +747,11 @@ aicr bundle -r recipe.yaml \
 aicr bundle -r recipe.yaml \
   --set skyhook-operator:manager.resources.cpu.limit=500m \
   --set skyhook-operator:manager.resources.memory.limit=256Mi \
+  -o ./bundles
+
+# Disable a component at bundle time (e.g., EBS CSI already installed as EKS addon)
+aicr bundle -r recipe.yaml \
+  --set awsebscsidriver:enabled=false \
   -o ./bundles
 
 # Schedule system components on specific node pool
