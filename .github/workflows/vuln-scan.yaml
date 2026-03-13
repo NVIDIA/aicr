@@ -58,7 +58,7 @@ jobs:
 
       - name: Scan Repo
         continue-on-error: true
-        uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518  # v0.34.1
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -69,6 +69,7 @@ jobs:
           output: ${{ env.SARIF_OUTPUT }}
           severity: ${{ env.SEVERITY_LEVELS }}
           skip-dirs: 'vendor,node_modules,distros/kubernetes,tests,tilt'
+          trivyignores: '.trivyignore.yaml'
           limit-severities-for-sarif: true
 
       - name: Check SARIF file exists
@@ -82,7 +83,7 @@ jobs:
 
       - name: Upload Report
         if: steps.check_sarif.outputs.exists == 'true'
-        uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
+        uses: github/codeql-action/upload-sarif@0d579ffd059c29b07949a3cce3983f0780820c98  # v4.32.6
         with:
           sarif_file: ${{ env.SARIF_OUTPUT }}
 

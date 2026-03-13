@@ -1,5 +1,6 @@
 # User Documentation
 
+
 Documentation for platform operators deploying and operating GPU-accelerated Kubernetes clusters using AI Cluster Runtime (AICR).
 
 ## Audience

@@ -327,6 +327,12 @@ const (
 	// to prevent ConfigMap overflow.
 	ValidatorMaxStdoutLines = 1000
 
+	// ValidatorMaxStdoutLineLength is the maximum length of a single stdout
+	// line. Lines exceeding this are truncated with a suffix indicating the
+	// number of dropped characters. Prevents oversized report output from
+	// inline JSON payloads (e.g., Prometheus metric scrapes).
+	ValidatorMaxStdoutLineLength = 512
+
 	// ValidatorDefaultCPU is the default CPU request/limit for validator containers
 	// when not specified in the catalog entry.
 	ValidatorDefaultCPU = "1"

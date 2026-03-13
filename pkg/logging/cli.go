@@ -86,8 +86,10 @@ func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 		msg = colorGreen + msg + colorReset
 	}
 
-	_, err := fmt.Fprintln(h.writer, msg)
-	return err
+	if _, err := fmt.Fprintln(h.writer, msg); err != nil {
+		return fmt.Errorf("failed to write log output: %w", err)
+	}
+	return nil
 }
 
 // WithAttrs returns a new handler with the given attributes.

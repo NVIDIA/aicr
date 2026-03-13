@@ -85,7 +85,6 @@ jobs:
 
   cli-e2e:
     name: CLI E2E
-    if: github.event.pull_request.head.repo.full_name == github.repository || github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

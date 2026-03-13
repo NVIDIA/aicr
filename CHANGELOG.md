@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.12] - 2026-03-12
+
+### Bug Fixes
+
+- Brew formula follows Homebrew best practices  by [@mchmarny](https://github.com/mchmarny)
+- Upgrade esbuild to 0.25.x to resolve GHSA-67mh-4wv8-2f99  by [@mchmarny](https://github.com/mchmarny)
+
+## [0.10.11] - 2026-03-12
+
+### Bug Fixes
+
+- *(recipe)* Bump NCCL all-reduce bandwidth threshold to 300 Gbps  by [@xdu31](https://github.com/xdu31)
+- *(validator)* Truncate long stdout lines to prevent oversized reports  by [@xdu31](https://github.com/xdu31)
+- Wrap bare errors and check writable Close() returns by [@mchmarny](https://github.com/mchmarny)
+- Replace magic duration literals with named constants from pkg/defaults by [@mchmarny](https://github.com/mchmarny)
+- *(test)* Eliminate dead tests, non-deterministic skips, and flaky sleeps by [@mchmarny](https://github.com/mchmarny)
+- *(ci)* Use root directory for github-actions dependabot scanning by [@mchmarny](https://github.com/mchmarny)
+
+### New Features
+
+- *(validator)* Add Kubeflow Trainer to robust-controller and skip inference-gateway on training clusters  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(bundler)* Add pre-flight checks to deploy.sh and post-flight to undeploy.sh  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other Tasks
+
+- Image update by [@mchmarny](https://github.com/mchmarny)
+- *(install)* Add Homebrew installation option  by [@mchmarny](https://github.com/mchmarny)
+- *(site)* Align Go version requirements to 1.26  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Migrate from Hugo/Docsy to VitePress  by [@tabern](https://github.com/tabern)
+- Dep update by [@mchmarny](https://github.com/mchmarny)
+- *(api)* Add missing bundle params and document CLI-only gaps by [@mchmarny](https://github.com/mchmarny)
+- Ignore GHSA-67mh-4wv8-2f99 (esbuild) in grype scan by [@mchmarny](https://github.com/mchmarny)
+- *(ci)* Bump actions/cache to v5.0.3 and goreleaser-action to v7.0.0 by [@mchmarny](https://github.com/mchmarny)
+- Deps: bump aws-actions/configure-aws-credentials from 5.1.1 to 6.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/github-script from 7.0.1 to 8.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump docker/setup-buildx-action from 3.10.0 to 4.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump github/codeql-action from 4.32.0 to 4.32.6  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump docker/build-push-action from 6.15.0 to 7.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/setup-node from 4.4.0 to 6.3.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/download-artifact from 4.1.8 to 8.0.1  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/upload-artifact from 6.0.0 to 7.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump actions/setup-go from 6.2.0 to 6.3.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump aquasecurity/trivy-action from 0.34.1 to 0.35.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: update hashicorp/aws requirement from ~> 5.0 to ~> 6.36 in /infra/uat-aws-account  by [@dependabot[bot]](https://github.com/dependabot[bot])
+
 ## [0.10.10] - 2026-03-11
 
 ### Bug Fixes

@@ -1,5 +1,6 @@
 # AICR Architecture
 
+
 This directory contains architecture documentation for the AI Cluster Runtime (AICR) tooling.
 
 ## First Principles
@@ -38,8 +39,6 @@ This directory contains architecture documentation for the AI Cluster Runtime (A
 * The system provides validated configuration, not a new operational model.
 
 **Why:** If adoption requires retraining users on “the right way” then our design has failed.
-
-
 ## Components
 
 - **[CLI Architecture](cli.md)**: Command-line tool (`aicr`) implementing all four workflow stages
@@ -950,8 +949,6 @@ Components are configured in `recipes/registry.yaml`. The bundler automatically 
 
 **Per-Component Bundle Generation**:
 The bundler generates a per-component Helm bundle with individual values and manifests for each component, based on the recipe's `componentRefs`.
-
-
 ### Metrics and Observability
 
 **Bundler Metrics** (Prometheus):

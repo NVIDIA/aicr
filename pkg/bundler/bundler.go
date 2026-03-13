@@ -188,6 +188,33 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 			"recipe must contain at least one component reference")
 	}
 
+	// Filter out disabled components (overrides.enabled: false)
+	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
+	enabledSet := make(map[string]struct{})
+	for _, ref := range recipeResult.ComponentRefs {
+		if !ref.IsEnabled() {
+			slog.Info("skipping disabled component", "component", ref.Name)
+			continue
+		}
+		enabledRefs = append(enabledRefs, ref)
+		enabledSet[ref.Name] = struct{}{}
+	}
+	recipeResult.ComponentRefs = enabledRefs
+
+	// Filter DeploymentOrder to match enabled components
+	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
+	for _, name := range recipeResult.DeploymentOrder {
+		if _, ok := enabledSet[name]; ok {
+			filteredOrder = append(filteredOrder, name)
+		}
+	}
+	recipeResult.DeploymentOrder = filteredOrder
+
+	if len(enabledRefs) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"recipe has no enabled components after filtering")
+	}
+
 	// Set default output directory
 	if dir == "" {
 		dir = "."

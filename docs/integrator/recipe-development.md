@@ -275,7 +275,7 @@ validation:
     checks: [nccl-bandwidth-test]
 ```
 
-**Phases:** `readiness`, `deployment`, `performance`, `conformance`
+**Phases:** `deployment`, `performance`, `conformance` (readiness constraints are evaluated implicitly)
 
 ### Testing
 

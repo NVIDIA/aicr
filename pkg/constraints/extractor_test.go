@@ -22,6 +22,8 @@ import (
 )
 
 func TestParseConstraintPath(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		path        string
@@ -88,6 +90,8 @@ func TestParseConstraintPath(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result, err := ParseConstraintPath(tt.path)
 			if tt.expectError {
 				if err == nil {
@@ -112,6 +116,8 @@ func TestParseConstraintPath(t *testing.T) {
 }
 
 func TestConstraintPath_ExtractValue(t *testing.T) {
+	t.Parallel()
+
 	// Create a test snapshot with sample measurements
 	snapshot := &snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
@@ -250,6 +256,8 @@ func TestConstraintPath_ExtractValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result, err := tt.path.ExtractValue(snapshot)
 			if tt.expectError {
 				if err == nil {
@@ -268,6 +276,8 @@ func TestConstraintPath_ExtractValue(t *testing.T) {
 }
 
 func TestConstraintPath_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		path ConstraintPath
@@ -295,6 +305,8 @@ func TestConstraintPath_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result := tt.path.String()
 			if result != tt.want {
 				t.Errorf("String() = %q, want %q", result, tt.want)

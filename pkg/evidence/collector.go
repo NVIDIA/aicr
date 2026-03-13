@@ -231,14 +231,17 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "evidence collection command failed", err)
+	}
+	return nil
 }
 
 // writeEmbeddedManifests extracts the embedded manifests to the target directory.
 func writeEmbeddedManifests(targetDir string) error {
 	return fs.WalkDir(manifestsFS, "scripts/manifests", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return errors.Wrap(errors.ErrCodeInternal, "failed to walk embedded manifests", err)
 		}
 
 		// Compute relative path from "scripts/manifests" prefix.
@@ -251,7 +254,7 @@ func writeEmbeddedManifests(targetDir string) error {
 
 		data, err := manifestsFS.ReadFile(path)
 		if err != nil {
-			return err
+			return errors.Wrap(errors.ErrCodeInternal, "failed to read embedded manifest", err)
 		}
 		return os.WriteFile(targetPath, data, 0o600)
 	})

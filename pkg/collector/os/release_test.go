@@ -28,48 +28,36 @@ import (
 const releaseSubtypeName = "release"
 
 func TestReleaseCollector_Collect_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
-	cancel() // Cancel immediately
+	// Use an already-expired context to ensure deterministic cancellation
+	ctx, cancel := context.WithDeadline(context.TODO(), time.Now().Add(-time.Second))
+	defer cancel()
 
 	collector := &Collector{}
 	m, err := collector.Collect(ctx)
 
 	if err == nil {
-		// On some systems, the read may complete before context check
-		t.Skip("Context cancellation timing dependent")
+		t.Fatal("expected error from canceled context")
 	}
 
 	if m != nil {
 		t.Error("Expected nil measurement on error")
 	}
-
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("Expected context.Canceled, got %v", err)
-	}
 }
 
 func TestReleaseCollector_Collect_ContextTimeout(t *testing.T) {
-	// Create a context with very short timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	// Use an already-expired context to ensure deterministic timeout
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
 	defer cancel()
-
-	// Wait for context to timeout
-	time.Sleep(10 * time.Millisecond)
 
 	collector := &Collector{}
 	m, err := collector.Collect(ctx)
 
 	if err == nil {
-		// On some systems, the read may complete before context check
-		t.Skip("Context timeout timing dependent")
+		t.Fatal("expected error from expired context")
 	}
 
 	if m != nil {
 		t.Error("Expected nil measurement on timeout")
-	}
-
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("Expected context.DeadlineExceeded, got %v", err)
 	}
 }
 
@@ -279,7 +267,6 @@ func TestReleaseCollector_HandlesQuotedValues(t *testing.T) {
 }
 
 func TestReleaseCollector_HandlesEmptyLines(t *testing.T) {
-	// Create a temporary test file with empty lines and comments
 	tmpDir := t.TempDir()
 	testFile := filepath.Join(tmpDir, "os-release")
 
@@ -295,20 +282,68 @@ PRETTY_NAME="Test OS 1.0"
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 
-	// This test would need to mock the file reading, which is not easily done
-	// with the current implementation. The integration tests above cover
-	// the empty line handling via real /etc/os-release files.
+	originalPrimary := filePathReleasePrimary
+	filePathReleasePrimary = testFile
+	defer func() { filePathReleasePrimary = originalPrimary }()
 
-	t.Skip("Unit test requires refactoring for dependency injection")
+	collector := &Collector{}
+	m, err := collector.Collect(context.TODO())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sub *measurement.Subtype
+	for i := range m.Subtypes {
+		if m.Subtypes[i].Name == releaseSubtypeName {
+			sub = &m.Subtypes[i]
+			break
+		}
+	}
+	if sub == nil {
+		t.Fatal("expected release subtype")
+	}
+	if len(sub.Data) != 4 {
+		t.Errorf("expected 4 readings (empty lines skipped), got %d", len(sub.Data))
+	}
 }
 
 func TestReleaseCollector_HandlesMalformedLines(t *testing.T) {
-	// Test that malformed lines (no '=' separator) are skipped gracefully
-	// This is implicitly tested by the integration tests since real
-	// /etc/os-release files are generally well-formed, but the code
-	// handles this case by checking len(parts) != 2
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "os-release")
 
-	t.Skip("Unit test requires refactoring for dependency injection")
+	content := `NAME="Test OS"
+this line has no separator
+ID=testos
+also malformed
+`
+
+	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	originalPrimary := filePathReleasePrimary
+	filePathReleasePrimary = testFile
+	defer func() { filePathReleasePrimary = originalPrimary }()
+
+	collector := &Collector{}
+	m, err := collector.Collect(context.TODO())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var sub *measurement.Subtype
+	for i := range m.Subtypes {
+		if m.Subtypes[i].Name == releaseSubtypeName {
+			sub = &m.Subtypes[i]
+			break
+		}
+	}
+	if sub == nil {
+		t.Fatal("expected release subtype")
+	}
+	if len(sub.Data) != 2 {
+		t.Errorf("expected 2 readings (malformed lines skipped), got %d", len(sub.Data))
+	}
 }
 
 func TestReleaseCollector_ValidatesCommonFields(t *testing.T) {

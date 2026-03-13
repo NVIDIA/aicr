@@ -19,6 +19,8 @@ import (
 )
 
 func TestParseConstraintExpression(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		expression  string
@@ -58,6 +60,8 @@ func TestParseConstraintExpression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result, err := ParseConstraintExpression(tt.expression)
 			if tt.expectError {
 				if err == nil {
@@ -79,6 +83,8 @@ func TestParseConstraintExpression(t *testing.T) {
 }
 
 func TestParsedConstraint_Evaluate(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		constraint  ParsedConstraint
@@ -287,6 +293,8 @@ func TestParsedConstraint_Evaluate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result, err := tt.constraint.Evaluate(tt.actual)
 			if tt.expectError {
 				if err == nil {
@@ -305,6 +313,8 @@ func TestParsedConstraint_Evaluate(t *testing.T) {
 }
 
 func TestLooksLikeVersion(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name  string
 		input string
@@ -323,6 +333,8 @@ func TestLooksLikeVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := looksLikeVersion(tt.input)
 			if got != tt.want {
 				t.Errorf("looksLikeVersion(%q) = %v, want %v", tt.input, got, tt.want)
@@ -332,6 +344,8 @@ func TestLooksLikeVersion(t *testing.T) {
 }
 
 func TestParsedConstraint_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		constraint ParsedConstraint
@@ -381,6 +395,8 @@ func TestParsedConstraint_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := tt.constraint.String()
 			if got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)

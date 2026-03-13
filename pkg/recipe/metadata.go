@@ -17,6 +17,7 @@ package recipe
 
 import (
 	"fmt"
+	"log/slog"
 	"maps"
 	"sort"
 	"strings"
@@ -117,6 +118,23 @@ type ComponentRef struct {
 	// expected-resources check runs Chainsaw CLI to evaluate assertions instead of
 	// the default auto-discovery + typed replica checks.
 	HealthCheckAsserts string `json:"healthCheckAsserts,omitempty" yaml:"healthCheckAsserts,omitempty"`
+}
+
+// IsEnabled returns whether this component is enabled for deployment.
+// A component is disabled when its Overrides map contains enabled: false.
+// Components without an explicit enabled override are enabled by default.
+func (c ComponentRef) IsEnabled() bool {
+	v, ok := c.Overrides["enabled"]
+	if !ok {
+		return true
+	}
+	enabled, ok := v.(bool)
+	if !ok {
+		slog.Warn("overrides.enabled is not a bool, treating component as enabled",
+			"component", c.Name, "value", v)
+		return true
+	}
+	return enabled
 }
 
 // ExpectedResource represents a Kubernetes resource that should exist after deployment.

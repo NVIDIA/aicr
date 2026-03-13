@@ -35,6 +35,7 @@ sync_section "${DOCS}/integrator" "${SITE_DOCS}/integrator"
 sync_section "${DOCS}/contributor" "${SITE_DOCS}/contributor"
 
 # Conformance: flatten cncf/ prefix (docs/conformance/cncf/ → site/docs/conformance/)
+mkdir -p "${SITE_DOCS}/conformance"
 rm -rf "${SITE_DOCS}/conformance/evidence" "${SITE_DOCS}/conformance/index.md"
 cp -R "${DOCS}/conformance/cncf/evidence" "${SITE_DOCS}/conformance/evidence"
 cp "${DOCS}/conformance/cncf/index.md" "${SITE_DOCS}/conformance/index.md"

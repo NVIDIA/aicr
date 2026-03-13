@@ -380,6 +380,6 @@ To use these actions in other repositories:
 ```yaml
 - uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
-    go_version: '1.25'
+    go_version: '1.26'
     coverage_report: 'true'
 ```

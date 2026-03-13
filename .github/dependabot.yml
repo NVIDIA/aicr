@@ -40,8 +40,7 @@ updates:
           - "github.com/opencontainers/*"
 
   - package-ecosystem: "github-actions"
-    directories:
-      - "/.github/**"
+    directory: "/"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 10

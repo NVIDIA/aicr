@@ -188,4 +188,50 @@ done
 {{ range .Namespaces -}}
 delete_orphaned_webhooks_for_ns "{{ . }}"
 {{ end }}
+# ==============================================================================
+# Post-flight verification
+# ==============================================================================
+# Verify the cluster is clean after undeployment. Warn about any stale
+# resources that could block a subsequent deploy.
+
+postflight_issues=false
+
+# Check for remaining terminating namespaces
+TERMINATING=$(kubectl get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{" "}{end}' 2>/dev/null || true)
+if [[ -n "${TERMINATING}" ]]; then
+  echo "WARNING: namespaces still terminating: ${TERMINATING}"
+  echo "  A subsequent deploy.sh may fail. Wait or force-finalize these namespaces."
+  postflight_issues=true
+fi
+
+# Check for stale webhooks
+if command -v jq &>/dev/null; then
+  stale_wh=$(kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o json 2>/dev/null | \
+    jq -r '.items[] | .metadata.name as $wh | .webhooks[]? | select(.clientConfig.service != null) | [$wh, .clientConfig.service.namespace, .clientConfig.service.name] | @tsv' 2>/dev/null | \
+    while IFS=$'\t' read -r wh_name svc_ns svc_name; do
+      kubectl get svc "${svc_name}" -n "${svc_ns}" &>/dev/null || echo "${wh_name}"
+    done || true)
+  if [[ -n "${stale_wh}" ]]; then
+    echo "WARNING: stale webhooks found (backing service missing): ${stale_wh}"
+    postflight_issues=true
+  fi
+fi
+
+# Check for stale API services
+if command -v jq &>/dev/null; then
+  stale_apis=$(kubectl get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true)
+  if [[ -n "${stale_apis}" ]]; then
+    echo "WARNING: unavailable API services found: ${stale_apis}"
+    echo "  These can block namespace deletion. Delete with: kubectl delete apiservice <name>"
+    postflight_issues=true
+  fi
+fi
+
+if [[ "${postflight_issues}" == "true" ]]; then
+  echo ""
+  echo "Post-flight: some stale resources remain. Run deploy.sh pre-flight checks to verify before redeploying."
+else
+  echo "Post-flight: cluster is clean."
+fi
+
 echo "Undeployment complete."

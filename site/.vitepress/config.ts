@@ -123,11 +123,11 @@ export default withMermaid(
       },
 
       editLink: {
-        // Symlinked docs resolve to docs/ in the repo, not site/docs/
+        // Synced docs come from docs/ in the repo, not site/docs/
         pattern: ({ filePath }) => {
-          const symlinked = filePath.match(/^docs\/(user|integrator|contributor)\/(.+)/)
-          if (symlinked) {
-            return `https://github.com/NVIDIA/aicr/edit/main/docs/${symlinked[1]}/${symlinked[2]}`
+          const synced = filePath.match(/^docs\/(user|integrator|contributor)\/(.+)/)
+          if (synced) {
+            return `https://github.com/NVIDIA/aicr/edit/main/docs/${synced[1]}/${synced[2]}`
           }
           const conformanceEvidence = filePath.match(/^docs\/conformance\/evidence\/(.+)/)
           if (conformanceEvidence) {

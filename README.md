@@ -42,7 +42,11 @@ aicr recipe --service eks --accelerator h100 --os ubuntu \
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Render into deployment-ready Helm charts
-aicr bundle --recipe recipe.yaml -o ./bundles
+aicr bundle --recipe recipe.yaml --output ./bundles
+
+# Validate your cluster (deployment, performance, conformance)
+aicr validate --recipe recipe.yaml --phase all --output report.json
+
 ```
 
 The `bundles/` directory contains per-component Helm charts with values files, checksums, and deployer configs. Deploy with `helm install`, commit to a GitOps repo, or use the built-in ArgoCD deployer.

@@ -1,0 +1,100 @@
+misconfigurations:
+  - id: AVD-KSV-0009
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "GPUDirect TCPXO/NRI requires hostNetwork on GKE for PCI/sysfs visibility and runtime networking behavior."
+
+  - id: AVD-KSV-0010
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+    statement: "Host PID namespace is required for nsenter and host runtime/device integration in TCPXO/NRI daemonsets."
+
+  - id: AVD-KSV-0017
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "Privileged mode is required by the upstream GPUDirect TCPXO/NRI setup and validation workloads."
+
+  - id: AVD-KSV-0014
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "These installer/test containers write runtime files and cannot run with readOnlyRootFilesystem=true."
+
+  - id: AVD-KSV-0118
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "Root/default security context is required by current GPUDirect TCPXO/NRI images and bootstrap flow."
+
+  - id: AVD-KSV-0121
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+    statement: "/dev hostPath mount is required for NRI device injection."
+
+  - id: AVD-KSV-0023
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "hostPath mounts are required for GPUDirect library/device access and installer behavior."
+
+  - id: AVD-KSV-0037
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+    statement: "These are node-level system daemonsets and must run in kube-system."
+
+  - id: AVD-KSV-0001
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "allowPrivilegeEscalation=false is not compatible with these upstream GPUDirect setup/test images."
+
+  - id: AVD-KSV-0012
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "runAsNonRoot is not currently compatible with required GPUDirect setup/test operations."
+
+  - id: AVD-KSV-0013
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+    statement: "Upstream images currently use unpinned/latest tags in these manifests."
+
+  - id: AVD-KSV-0104
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "seccomp profile hardening is deferred for these compatibility-sensitive upstream GPUDirect manifests."
+
+  - id: AVD-KSV-0125
+    paths:
+      - "recipes/components/gke-nccl-tcpxo/manifests/nccl-tcpxo-installer.yaml"
+      - "validators/performance/testdata/h100/gke/runtime.yaml"
+      - "validators/performance/testdata/h100/gke/trainjob.yaml"
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "Image sources are inherited from upstream GKE GPUDirect TCPXO examples."

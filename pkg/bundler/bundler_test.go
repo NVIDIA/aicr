@@ -271,6 +271,70 @@ func TestMake_Success(t *testing.T) {
 	}
 }
 
+func TestMake_DisabledComponentsFiltered(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Version: "v25.3.3",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:      "aws-ebs-csi-driver",
+				Version:   "2.55.0",
+				Type:      "helm",
+				Source:    "https://kubernetes-sigs.github.io/aws-ebs-csi-driver",
+				Overrides: map[string]any{"enabled": false},
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
+	}
+
+	output, err := bundler.Make(ctx, recipeResult, tmpDir)
+	if err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+
+	if output == nil {
+		t.Fatal("Make() returned nil output")
+	}
+
+	// Enabled component should have a directory
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
+		t.Error("expected gpu-operator/values.yaml to be created")
+	}
+
+	// Disabled component should NOT have a directory
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver")); !os.IsNotExist(statErr) {
+		t.Error("expected aws-ebs-csi-driver directory to NOT be created")
+	}
+
+	// deploy.sh should not reference the disabled component
+	deployScript, readErr := os.ReadFile(filepath.Join(tmpDir, "deploy.sh"))
+	if readErr != nil {
+		t.Fatalf("failed to read deploy.sh: %v", readErr)
+	}
+	if strings.Contains(string(deployScript), "aws-ebs-csi-driver") {
+		t.Error("deploy.sh should not contain aws-ebs-csi-driver")
+	}
+}
+
 func TestMake_WithValueOverrides(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithValueOverrides(map[string]map[string]string{

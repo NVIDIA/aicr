@@ -401,30 +401,39 @@ aicr validate \
 
 ### Validation Output
 
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  created: "2025-01-15T10:30:00Z"
-summary:
-  total: 5
-  passed: 4
-  failed: 1
-  skipped: 0
-results:
-  - constraint: "K8s.server.version>=1.28"
-    status: passed
-    expected: ">=1.28"
-    actual: "1.33.5"
-  - constraint: "OS.release.ID==ubuntu"
-    status: passed
-    expected: "ubuntu"
-    actual: "ubuntu"
-  - constraint: "GPU.driver.version>=570.00"
-    status: failed
-    expected: ">=570.00"
-    actual: "560.28.03"
-    message: "version 560.28.03 does not satisfy >=570.00"
+Results are output in [CTRF](https://ctrf.io/) (Common Test Report Format) JSON:
+
+```json
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.0.1",
+  "timestamp": "2026-03-10T20:10:44Z",
+  "generatedBy": "aicr",
+  "results": {
+    "tool": { "name": "aicr", "version": "v0.10.3-next" },
+    "summary": {
+      "tests": 16, "passed": 13, "failed": 0, "skipped": 3,
+      "pending": 0, "other": 0,
+      "start": 1773173400872, "stop": 1773173799002
+    },
+    "tests": [
+      {
+        "name": "operator-health",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["Found 1 gpu-operator pod(s)", "Running: 1/1"]
+      },
+      {
+        "name": "nccl-all-reduce-bw",
+        "status": "passed",
+        "duration": 234000,
+        "suite": ["performance"],
+        "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
+      }
+    ]
+  }
+}
 ```
 
 ### CI/CD Integration

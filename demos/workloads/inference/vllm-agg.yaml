@@ -64,15 +64,15 @@ spec:
           value: zmq
       extraPodSpec:
         nodeSelector:
-          dedicated: cpu-workload
+          nodeGroup: cpu-worker
         tolerations:
           - key: dedicated
             operator: Equal
-            value: cpu-workload
+            value: worker-workload
             effect: NoSchedule
           - key: dedicated
             operator: Equal
-            value: cpu-workload
+            value: worker-workload
             effect: NoExecute
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
@@ -89,15 +89,15 @@ spec:
           gpu: "1"
       extraPodSpec:
         nodeSelector:
-          dedicated: gpu-workload
+          nodeGroup: gpu-worker
         tolerations:
           - key: dedicated
             operator: Equal
-            value: gpu-workload
+            value: worker-workload
             effect: NoSchedule
           - key: dedicated
             operator: Equal
-            value: gpu-workload
+            value: worker-workload
             effect: NoExecute
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
