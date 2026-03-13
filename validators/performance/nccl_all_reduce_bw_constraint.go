@@ -69,9 +69,10 @@ var (
 	}
 )
 
-// ncclBandwidthRe matches the 16G (17179869184 bytes) row in NCCL all-reduce output
-// and captures the first busbw column (in-place measurement).
-var ncclBandwidthRe = regexp.MustCompile(`\s+17179869184\s+\d+\s+\w+\s+\w+\s+-?\d+\s+[\d.]+\s+[\d.]+\s+([\d.]+)`)
+// ncclBandwidthRe matches any data row in NCCL all-reduce output and captures the
+// out-of-place busbw column. parseBandwidthFromLogs uses the last match (largest message size).
+// EKS max is 16G (17179869184), GKE max is 8G (8589934592) — this regex handles both.
+var ncclBandwidthRe = regexp.MustCompile(`\s+(\d+)\s+\d+\s+\w+\s+\w+\s+-?\d+\s+[\d.]+\s+[\d.]+\s+([\d.]+)`)
 
 // templatePath returns the path to a testdata template file for the given
 // accelerator and service combination: testdata/{accelerator}/{service}/{filename}
@@ -80,22 +81,18 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 }
 
 // supportedNCCLCombinations maps each supported cloud service to the accelerator
-// types for which the automated NCCL all-reduce test has been implemented via
-// Kubeflow TrainJob. GKE+H100 testdata exists but requires a different execution
-// model (raw Pods + kubectl exec) that is not yet automated.
+// types for which the automated NCCL all-reduce test has been implemented.
+// EKS uses Kubeflow TrainJob + MPI; GKE uses raw Pods with TCPXO sidecar + exec.
 var supportedNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
-}
-
-// pendingNCCLCombinations lists service+accelerator pairs that have testdata but
-// are not yet automated. These produce an informative warning instead of a silent skip.
-var pendingNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
 }
 
-// validateNcclAllReduceBw validates NCCL All Reduce bandwidth by running a TrainJob.
-// It applies the runtime and trainjob YAML templates, waits for completion,
-// and extracts bandwidth metrics from the launcher pod logs.
+// validateNcclAllReduceBw validates NCCL All Reduce bandwidth by dispatching to
+// the appropriate test runner based on the cloud service:
+//   - EKS: Kubeflow TrainJob + MPI launcher
+//   - GKE: raw Pods with TCPXO sidecar + kubectl exec
+//
 // Returns actual bandwidth value, whether it passed the threshold, and any error.
 func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint) (string, bool, error) {
 	slog.Info("Starting NCCL All Reduce bandwidth validation")
@@ -108,18 +105,6 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 
 	service := ctx.Recipe.Criteria.Service
 	accelerator := ctx.Recipe.Criteria.Accelerator
-
-	// Check if this combination has testdata but is not yet automated.
-	if pendingAccelerators, ok := pendingNCCLCombinations[service]; ok {
-		for _, a := range pendingAccelerators {
-			if accelerator == a {
-				slog.Warn("NCCL All Reduce bandwidth validation not yet automated for this platform",
-					"service", service, "accelerator", accelerator,
-					"hint", "GKE NCCL performance test requires raw Pods with TCPXO sidecar; run manually with: envsubst < validators/performance/testdata/h100/gke/runtime.yaml | kubectl apply -f -")
-				return fmt.Sprintf("skipped - %s+%s NCCL performance test exists but automated execution is not yet implemented; run manually using testdata/h100/gke/", service, accelerator), true, nil
-			}
-		}
-	}
 
 	supported := false
 	if supportedAccelerators, ok := supportedNCCLCombinations[service]; ok {
@@ -144,29 +129,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 	slog.Info("Target bandwidth threshold", "threshold", threshold, "tolerance", "10%")
 
-	// Use the dynamic client from context for CRD operations.
-	dynamicClient := ctx.DynamicClient
-
-	// Ensure Kubeflow Trainer is installed.  If it is already present we leave it
-	// alone; if we install it we clean it up after the test completes.
-	trainerInstalled, err := isTrainerInstalled(ctx.Ctx, dynamicClient)
-	if err != nil {
-		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check Kubeflow Trainer installation", err)
-	}
-	if !trainerInstalled {
-		slog.Info("Kubeflow Trainer not found, installing...")
-		var installedResources []trainerResourceRef
-		installedResources, err = installTrainer(ctx.Ctx, dynamicClient, ctx.Clientset.Discovery())
-		if err != nil {
-			return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to install Kubeflow Trainer", err)
-		}
-		defer deleteTrainer(dynamicClient, installedResources)
-		slog.Info("Kubeflow Trainer installed", "resources", len(installedResources))
-	} else {
-		slog.Info("Kubeflow Trainer already installed, proceeding")
-	}
-
-	// Determine GPU configuration from snapshot
+	// Determine GPU configuration from cluster.
 	gpuConfig, err := determineGPUConfig(ctx)
 	if err != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
@@ -181,28 +144,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "skipped - requires at least 2 GPU nodes for EW fabric test", true, nil
 	}
 
-	// Apply runtime and trainjob resources
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service); applyErr != nil {
-		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL resources", applyErr)
+	// Dispatch to the appropriate test runner based on cloud service.
+	var logs string
+	switch service { //nolint:exhaustive // default handles all other supported services via EKS path
+	case recipe.CriteriaServiceGKE:
+		logs, err = runGKENCCLTest(ctx, gpuConfig, accelerator, service)
+	default:
+		logs, err = runEKSNCCLTest(ctx, gpuConfig, accelerator, service)
 	}
-
-	// Ensure cleanup
-	defer cleanupNCCLResources(dynamicClient, gpuConfig.Namespace)
-
-	// Create pod helper for launcher pod operations
-	podHelper := &helper.PodLifecycle{
-		ClientSet:  ctx.Clientset,
-		RESTConfig: ctx.RESTConfig,
-		Namespace:  ctx.Namespace,
-	}
-
-	// Wait for launcher pod and get logs
-	logs, err := waitForLauncherPodAndGetLogs(ctx, podHelper)
 	if err != nil {
-		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
+		return "", false, err
 	}
 
-	// Parse bandwidth from logs
+	// Parse bandwidth from logs (shared across all service types).
 	bandwidth, err := parseBandwidthFromLogs(logs)
 	if err != nil {
 		return logs, false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse bandwidth from logs", err)
@@ -221,6 +175,52 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	return actualValue, passed, nil
+}
+
+// runEKSNCCLTest runs the NCCL all-reduce benchmark on EKS using Kubeflow TrainJob + MPI.
+func runEKSNCCLTest(ctx *validators.Context, gpuConfig *gpuConfiguration,
+	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) (string, error) {
+
+	dynamicClient := ctx.DynamicClient
+
+	// Ensure Kubeflow Trainer is installed. If it is already present we leave it
+	// alone; if we install it we clean it up after the test completes.
+	trainerInstalled, err := isTrainerInstalled(ctx.Ctx, dynamicClient)
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check Kubeflow Trainer installation", err)
+	}
+	if !trainerInstalled {
+		slog.Info("Kubeflow Trainer not found, installing...")
+		var installedResources []trainerResourceRef
+		installedResources, err = installTrainer(ctx.Ctx, dynamicClient, ctx.Clientset.Discovery())
+		if err != nil {
+			return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to install Kubeflow Trainer", err)
+		}
+		defer deleteTrainer(dynamicClient, installedResources)
+		slog.Info("Kubeflow Trainer installed", "resources", len(installedResources))
+	} else {
+		slog.Info("Kubeflow Trainer already installed, proceeding")
+	}
+
+	// Apply runtime and trainjob resources.
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service); applyErr != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL resources", applyErr)
+	}
+	defer cleanupNCCLResources(dynamicClient, gpuConfig.Namespace)
+
+	podHelper := &helper.PodLifecycle{
+		ClientSet:  ctx.Clientset,
+		RESTConfig: ctx.RESTConfig,
+		Namespace:  ctx.Namespace,
+	}
+
+	// Wait for launcher pod and get logs.
+	logs, err := waitForLauncherPodAndGetLogs(ctx, podHelper)
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
+	}
+
+	return logs, nil
 }
 
 // gpuConfiguration holds GPU node and count information
@@ -422,23 +422,26 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 	}
 }
 
-// parseBandwidthFromLogs extracts the bus bandwidth value from NCCL test logs
+// parseBandwidthFromLogs extracts the bus bandwidth value from NCCL test logs.
+// It finds all data rows and returns the in-place busbw from the last row
+// (largest message size). This works regardless of max message size:
+// EKS uses 16G (17179869184), GKE uses 8G (8589934592).
 func parseBandwidthFromLogs(logs string) (float64, error) {
 	// NCCL test output format example:
 	// #       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
 	// #        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)
-	//  17179869184    4294967296     float     sum      -1   123456   139.2   450.3      0   123456   139.2   450.3      0
+	//  8589934592    2147483648     float     sum      -1   48298   177.85  333.47      0   48292   177.87  333.51      0
 
-	// Look for the row corresponding to maxMessageSize (16G = 17179869184 bytes).
-	// NCCL output has two measurement sets (in-place and out-of-place); we capture the
-	// first busbw column (in-place), which is the standard benchmark metric for NCCL.
-	matches := ncclBandwidthRe.FindStringSubmatch(logs)
-
-	if len(matches) < 2 {
+	allMatches := ncclBandwidthRe.FindAllStringSubmatch(logs, -1)
+	if len(allMatches) == 0 {
 		return 0, aicrErrors.New(aicrErrors.ErrCodeInternal, "could not find bandwidth value in logs")
 	}
 
-	bandwidth, err := strconv.ParseFloat(matches[1], 64)
+	// Last match = largest message size row.
+	lastMatch := allMatches[len(allMatches)-1]
+	slog.Info("Parsing bandwidth from largest message size row", "bytes", lastMatch[1])
+
+	bandwidth, err := strconv.ParseFloat(lastMatch[2], 64)
 	if err != nil {
 		return 0, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse bandwidth value", err)
 	}

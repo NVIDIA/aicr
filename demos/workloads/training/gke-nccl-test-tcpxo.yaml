@@ -40,7 +40,7 @@
 #   kubectl exec nccl-test-host-1 -n nccl-test -c nccl-test -- bash -c '
 #     /scripts/init_ssh.sh nccl-host-1 nccl-host-2
 #     pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd
-#     BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
+#     DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
 #       LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
 #
 # Expected results (a3-megagpu-8g, 2 nodes):
@@ -148,7 +148,7 @@ spec:
           pushd /scripts;
           /scripts/gen_hostfiles.sh \${@};
           popd;
-          BENCHMARK=all_gather_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
+          DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_gather_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
           EOF
           chmod +x /scripts/allgather.sh
           service ssh restart;
@@ -232,7 +232,7 @@ spec:
           pushd /scripts;
           /scripts/gen_hostfiles.sh \${@};
           popd;
-          BENCHMARK=all_gather_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
+          DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_gather_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
           EOF
           chmod +x /scripts/allgather.sh
           service ssh restart;
