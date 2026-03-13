@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.15] - 2026-03-13
+
+### Other Tasks
+
+- Add Slack webhook test workflow by [@mchmarny](https://github.com/mchmarny)
+- Add Slack release notification to on-tag workflow by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.10.14] - 2026-03-13
 
 ### Bug Fixes
