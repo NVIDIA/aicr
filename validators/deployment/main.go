@@ -19,7 +19,6 @@
 //
 //	deployment operator-health
 //	deployment expected-resources
-//	deployment helm-values
 //	deployment gpu-operator-version
 //	deployment check-nvidia-smi
 package main
@@ -32,7 +31,6 @@ func main() {
 	validators.Run(map[string]validators.CheckFunc{
 		"operator-health":      checkOperatorHealth,
 		"expected-resources":   checkExpectedResources,
-		"helm-values":          checkHelmValues,
 		"gpu-operator-version": checkGPUOperatorVersion,
 		"check-nvidia-smi":     checkNvidiaSMI,
 	})

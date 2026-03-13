@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.13] - 2026-03-13
+
+### Bug Fixes
+
+- *(bundler)* Skip components with overrides.enabled: false  by [@xdu31](https://github.com/xdu31)
+- *(test)* Update offline e2e to skip disabled aws-ebs-csi-driver by [@mchmarny](https://github.com/mchmarny)
+- *(install)* Cosign version grep fails silently due to pipefail  by [@lockwobr](https://github.com/lockwobr)
+- *(validator)* Remove helm-values check (Helm values stored in secrets, never available in snapshot)  by [@xdu31](https://github.com/xdu31)
+
+### New Features
+
+- *(recipes)* Add GKE COS training overlays for H100  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### Other Tasks
+
+- Add validate cluster command by [@mchmarny](https://github.com/mchmarny)
+
 ## [0.10.12] - 2026-03-12
 
 ### Bug Fixes

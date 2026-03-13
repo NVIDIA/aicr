@@ -39,7 +39,6 @@ Applied by `catalog.Load` in order:
 |------|-------------|---------|
 | `operator-health` | Verify GPU operator pods are running and healthy | 2m |
 | `expected-resources` | Verify expected Kubernetes resources exist and are healthy | 5m |
-| `helm-values` | Verify deployed Helm values match recipe configuration | 2m |
 | `gpu-operator-version` | Validate GPU Operator version against recipe constraints | 2m |
 | `check-nvidia-smi` | Verify nvidia-smi works on all GPU nodes | 10m |
 

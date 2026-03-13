@@ -41,13 +41,6 @@ validators:
     timeout: 5m
     args: ["expected-resources"]
     env: []
-  - name: helm-values
-    phase: deployment
-    description: "Verify deployed Helm values match recipe configuration"
-    image: ghcr.io/nvidia/aicr-validators/deployment:latest
-    timeout: 2m
-    args: ["helm-values"]
-    env: []
   - name: gpu-operator-version
     phase: deployment
     description: "Validate GPU Operator version against recipe constraints"
