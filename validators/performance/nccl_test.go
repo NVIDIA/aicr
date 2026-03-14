@@ -115,8 +115,8 @@ func TestParseThreshold(t *testing.T) {
 }
 
 func TestParseBandwidthFromLogs(t *testing.T) {
-	// Realistic NCCL all-reduce output snippet with 16G row.
-	validLogs := `# nThread 1 nGpus 1 minBytes 1024 maxBytes 17179869184 step: 2(factor) warmup iters: 5 iters: 20 agg iters: 1 validation: 1 graph: 0
+	// Realistic NCCL all-reduce output snippet with 16G row (EKS).
+	eksLogs := `# nThread 1 nGpus 1 minBytes 1024 maxBytes 17179869184 step: 2(factor) warmup iters: 5 iters: 20 agg iters: 1 validation: 1 graph: 0
 #
 # Using devices
 #  Rank  0 Group  0 Pid 123 on node1 device  0 [0x00] NVIDIA H100 80GB HBM3
@@ -129,6 +129,16 @@ func TestParseBandwidthFromLogs(t *testing.T) {
 # Out of bounds values : 0 OK
 # Avg bus bandwidth    : 225.15`
 
+	// Realistic NCCL all-reduce output with 8G max (GKE TCPXO).
+	gkeLogs := `# nccl-tests version 2.17.6 nccl-headers=22807 nccl-library=22807
+#                                                              out-of-place                       in-place
+#       size         count      type   redop    root     time   algbw   busbw #wrong     time   algbw   busbw #wrong
+#        (B)    (elements)                               (us)  (GB/s)  (GB/s)            (us)  (GB/s)  (GB/s)
+  4294967296    1073741824     float     sum      -1  24547.5  174.97  328.06      0  24635.5  174.34  326.89      0
+  8589934592    2147483648     float     sum      -1  48292.9  177.87  333.51      0  48298.2  177.85  333.47      0
+# Out of bounds values : 0 OK
+# Avg bus bandwidth    : 87.0675`
+
 	noMatchLogs := `some random output
 no bandwidth data here
 completed successfully`
@@ -140,9 +150,14 @@ completed successfully`
 		wantErr bool
 	}{
 		{
-			name: "valid NCCL output",
-			logs: validLogs,
+			name: "EKS 16G max message size",
+			logs: eksLogs,
 			want: 450.30,
+		},
+		{
+			name: "GKE 8G max message size",
+			logs: gkeLogs,
+			want: 333.51,
 		},
 		{
 			name:    "no match in logs",

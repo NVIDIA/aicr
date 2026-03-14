@@ -12,6 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Shared NCCL All-Reduce TrainJob — platform-agnostic.
+#
+# References a per-platform TrainingRuntime that contains all platform-specific
+# configuration (image, mpirun command/args, resources, sidecars, nodeSelector).
+# This TrainJob only sets the worker count.
+#
+# Must stay in sync with ncclTrainJobName in nccl_all_reduce_bw_constraint.go.
+
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainJob
 metadata:
@@ -22,8 +30,5 @@ spec:
     name: nccl-all-reduce-runtime
     apiGroup: trainer.kubeflow.org
     kind: TrainingRuntime
-
-  # High-level abstraction: The operator injects these into the Runtime
   trainer:
-    # Override node replica count (maps to replicatedJobs[node].replicas in the JobSet)
     numNodes: ${WORKER_COUNT}

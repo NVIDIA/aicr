@@ -15,7 +15,6 @@
 package helper
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -32,17 +31,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/yaml"
 )
 
 // PodLifecycle handles creation, verification, and cleanup of a pod.
 type PodLifecycle struct {
-	ClientSet  kubernetes.Interface
-	RESTConfig *rest.Config
-	Namespace  string
+	ClientSet kubernetes.Interface
+	Namespace string
 }
 
 // CreatePodFromTemplate creates a pod from a YAML template file.
@@ -143,62 +138,25 @@ func (p *PodLifecycle) CleanupPod(ctx context.Context, pod *v1.Pod) error {
 	return p.ClientSet.CoreV1().Pods(p.Namespace).Delete(cleanupCtx, pod.Name, metav1.DeleteOptions{})
 }
 
-// ExecCommandInPod executes a command in a pod and returns stdout, stderr, and any error.
-func (p *PodLifecycle) ExecCommandInPod(ctx context.Context, pod *v1.Pod, command []string) (string, string, error) {
-	execCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
-	defer cancel()
+// podPredicate checks whether a pod has reached the desired state.
+// Returns (done, error): done=true means stop watching, error non-nil means failure.
+type podPredicate func(pod *v1.Pod) (bool, error)
 
-	req := p.ClientSet.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(pod.Name).
-		Namespace(pod.Namespace).
-		SubResource("exec").
-		VersionedParams(&v1.PodExecOptions{
-			Command: command,
-			Stdin:   false,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     false,
-		}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(p.RESTConfig, "POST", req.URL())
-	if err != nil {
-		return "", "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create executor", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
-		Stdin:  nil,
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Tty:    false,
-	})
-
-	if err != nil {
-		return stdout.String(), stderr.String(), aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "command execution failed", err)
-	}
-
-	return stdout.String(), stderr.String(), nil
-}
-
-// WaitForPodRunning waits for a pod to reach Running phase.
-func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	slog.Info("Waiting for pod to reach Running state", "name", pod.Name)
-
-	// Fast path: check current phase.
-	currentPod, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(waitCtx, pod.Name, metav1.GetOptions{})
+// watchPodUntil watches a pod until the predicate returns done=true or the context expires.
+// It handles the standard watch lifecycle: fast-path check, watch creation, channel closure
+// recovery, and deletion detection.
+func (p *PodLifecycle) watchPodUntil(ctx context.Context, pod *v1.Pod, description string, check podPredicate) error {
+	// Fast path: pod may already satisfy the predicate.
+	currentPod, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get pod", err)
 	}
-	if done, phaseErr := checkPodRunningOrTerminal(currentPod); done {
+	if done, phaseErr := check(currentPod); done {
 		return phaseErr
 	}
 
 	// Watch for state changes.
-	watcher, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Watch(waitCtx, metav1.ListOptions{
+	watcher, err := p.ClientSet.CoreV1().Pods(pod.Namespace).Watch(ctx, metav1.ListOptions{
 		FieldSelector:   "metadata.name=" + pod.Name,
 		ResourceVersion: currentPod.ResourceVersion,
 	})
@@ -209,34 +167,42 @@ func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeo
 
 	for {
 		select {
-		case <-waitCtx.Done():
-			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod to reach Running state", waitCtx.Err())
+		case <-ctx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timeout waiting for pod to be "+description, ctx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
-				// Watch channel closed — re-check pod directly.
-				recheck, recheckErr := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(waitCtx, pod.Name, metav1.GetOptions{})
+				recheck, recheckErr := p.ClientSet.CoreV1().Pods(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 				if recheckErr != nil {
 					return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "watch closed and failed to get pod", recheckErr)
 				}
-				if done, phaseErr := checkPodRunningOrTerminal(recheck); done {
+				if done, phaseErr := check(recheck); done {
 					return phaseErr
 				}
-				return aicrErrors.New(aicrErrors.ErrCodeInternal, "watch channel closed, pod still not Running")
+				return aicrErrors.New(aicrErrors.ErrCodeInternal, "watch channel closed, pod still not "+description)
 			}
 
 			if event.Type == watch.Deleted {
-				return aicrErrors.New(aicrErrors.ErrCodeInternal, "pod was deleted while waiting for Running state")
+				return aicrErrors.New(aicrErrors.ErrCodeInternal, "pod was deleted while waiting for "+description)
 			}
 
 			watchedPod, ok := event.Object.(*v1.Pod)
 			if !ok {
 				continue
 			}
-			if done, phaseErr := checkPodRunningOrTerminal(watchedPod); done {
+			if done, phaseErr := check(watchedPod); done {
 				return phaseErr
 			}
 		}
 	}
+}
+
+// WaitForPodRunning waits for a pod to reach Running phase.
+func (p *PodLifecycle) WaitForPodRunning(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	slog.Info("Waiting for pod to reach Running state", "name", pod.Name)
+	return p.watchPodUntil(waitCtx, pod, "Running", checkPodRunningOrTerminal)
 }
 
 // checkPodRunningOrTerminal returns true if the pod is in Running, Succeeded, or Failed phase.

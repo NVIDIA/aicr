@@ -178,10 +178,10 @@ spec:
                   command: ["/usr/sbin/sshd", "-De"]
                   resources:
                     limits:
-                      nvidia.com/gpu: "8"
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
                       vpc.amazonaws.com/efa: "32"
                     requests:
-                      nvidia.com/gpu: "8"
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
                       vpc.amazonaws.com/efa: "32"
                   securityContext:
                     capabilities:
@@ -199,3 +199,7 @@ spec:
                 - name: dshm
                   emptyDir:
                     medium: Memory
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

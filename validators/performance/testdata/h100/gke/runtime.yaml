@@ -12,210 +12,258 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NCCL AllReduce performance test for GKE H100 (a3-megagpu-8g) with GPUDirect TCPXO
+# GKE NCCL All-Reduce TrainingRuntime — TCPXO FastRak + a3-megagpu-8g.
 #
-# Unlike EKS (which uses Kubeflow TrainJob with MPI), the GKE test uses raw Pods
-# with Google's built-in SSH and NCCL scripts. This is because:
-# - GPUDirect TCPXO requires a tcpxo-daemon sidecar per pod
-# - hostNetwork: true is required for TCPXO
-# - Google's NCCL plugin image has built-in SSH/MPI setup scripts
+# Full runtime with TCPXO sidecar, FastRak mpirun args, GKE multi-NIC
+# and GPU device annotations, and a3-megagpu-8g node selector.
 #
-# Prerequisites:
-#   - GKE cluster with multi-NIC networking (8 GPU NICs per node)
-#   - nccl-tcpxo-installer DaemonSet deployed on GPU nodes
+# TCPXO sidecar uses native sidecar pattern (initContainer + restartPolicy: Always).
 #
-# Usage:
-#   envsubst < runtime.yaml | kubectl apply -f -
-#   # Wait for pods to be 2/2 Running, then:
-#   kubectl exec nccl-test-host-1 -n ${NAMESPACE} -c nccl-test -- bash -c \
-#     '/scripts/init_ssh.sh nccl-host-1 nccl-host-2 && \
-#      pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd && \
-#      BENCHMARK=${TEST_TYPE} NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
-#        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
-#
-# Expected results (a3-megagpu-8g, 2 nodes):
-#   AllReduce busBW: ~335 GB/s at 8 GB message size
+# Must stay in sync with ncclTrainingRuntimeName in nccl_all_reduce_bw_constraint.go.
 
----
-apiVersion: v1
-kind: Service
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
 metadata:
-  name: nccl-host-1
-  namespace: ${NAMESPACE}
-spec:
-  selector:
-    name: nccl-host-1
-  clusterIP: None
-  publishNotReadyAddresses: true
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: nccl-host-2
-  namespace: ${NAMESPACE}
-spec:
-  selector:
-    name: nccl-host-2
-  clusterIP: None
-  publishNotReadyAddresses: true
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: nccl-test-host-1
+  name: nccl-all-reduce-runtime
   namespace: ${NAMESPACE}
   labels:
-    name: nccl-host-1
-    tcpxo: daemon
+    trainer.kubeflow.org/framework: mpi
 spec:
-  affinity:
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-              - key: tcpxo
-                operator: In
-                values:
-                  - daemon
-          topologyKey: "kubernetes.io/hostname"
-  hostname: host1
-  subdomain: nccl-host-1
-  hostNetwork: true
-  dnsPolicy: ClusterFirstWithHostNet
-  tolerations:
-    - operator: Exists
-  nodeSelector:
-    cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
-  containers:
-    - name: tcpxo-daemon
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
-      imagePullPolicy: Always
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          set -ex
-          chmod 755 /fts/entrypoint_rxdm_container.sh
-          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: nvidia-install-dir-host
-          mountPath: /usr/local/nvidia
-      env:
-        - name: LD_LIBRARY_PATH
-          value: /usr/local/nvidia/lib64
-    - name: nccl-test
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
-      imagePullPolicy: Always
-      command:
-        - /bin/sh
-        - -c
-        - |
-          cat >/scripts/allreduce.sh <<'HEREDOC'
-          #!/bin/bash
-          /scripts/init_ssh.sh ${@};
-          pushd /scripts;
-          /scripts/gen_hostfiles.sh ${@};
-          popd;
-          BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="/usr/local/nvidia/lib64" LD_LIBRARY_PATH="/usr/local/nvidia/lib64" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
-          HEREDOC
-          chmod +x /scripts/allreduce.sh
-          service ssh restart;
-          sleep infinity;
-      env:
-        - name: LD_LIBRARY_PATH
-          value: /usr/local/nvidia/lib64
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: nvidia-install-dir-host
-          mountPath: /usr/local/nvidia
-        - name: shared-memory
-          mountPath: /dev/shm
-      resources:
-        limits:
-          nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-  volumes:
-    - name: nvidia-install-dir-host
-      hostPath:
-        path: /home/kubernetes/bin/nvidia
-    - name: shared-memory
-      emptyDir:
-        medium: "Memory"
-        sizeLimit: 1Gi
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: nccl-test-host-2
-  namespace: ${NAMESPACE}
-  labels:
-    name: nccl-host-2
-    tcpxo: daemon
-spec:
-  affinity:
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchExpressions:
-              - key: tcpxo
-                operator: In
-                values:
-                  - daemon
-          topologyKey: "kubernetes.io/hostname"
-  hostname: host2
-  subdomain: nccl-host-2
-  hostNetwork: true
-  dnsPolicy: ClusterFirstWithHostNet
-  tolerations:
-    - operator: Exists
-  nodeSelector:
-    cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
-  containers:
-    - name: tcpxo-daemon
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
-      imagePullPolicy: Always
-      command: ["/bin/sh", "-c"]
-      args:
-        - |
-          set -ex
-          chmod 755 /fts/entrypoint_rxdm_container.sh
-          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: nvidia-install-dir-host
-          mountPath: /usr/local/nvidia
-      env:
-        - name: LD_LIBRARY_PATH
-          value: /usr/local/nvidia/lib64
-    - name: nccl-test
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
-      imagePullPolicy: Always
-      command:
-        - /bin/sh
-        - -c
-        - |
-          service ssh restart;
-          sleep infinity;
-      env:
-        - name: LD_LIBRARY_PATH
-          value: /usr/local/nvidia/lib64
-      securityContext:
-        privileged: true
-      volumeMounts:
-        - name: nvidia-install-dir-host
-          mountPath: /usr/local/nvidia
-        - name: shared-memory
-          mountPath: /dev/shm
-      resources:
-        limits:
-          nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
-  volumes:
-    - name: nvidia-install-dir-host
-      hostPath:
-        path: /home/kubernetes/bin/nvidia
-    - name: shared-memory
-      emptyDir:
-        medium: "Memory"
-        sizeLimit: 1Gi
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: launcher
+        replicas: 1
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    set -x
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  command:
+                  - /usr/local/mpi/bin/mpirun
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10 -p 2222
+                  # Restrict MPI OOB and UCX to control NIC — with hostNetwork,
+                  # UCX discovers GPU NIC link-local addresses which aren't
+                  # routable cross-node. On a3-megagpu-8g with hostNetwork,
+                  # the control NIC is eth1 (eth0 on launcher without hostNetwork).
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0,eth1
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0,eth1
+                  - -x
+                  - UCX_NET_DEVICES=eth1
+                  # TCPXO FastRak NCCL environment variables.
+                  # Source: nccl-env-profile.sh (installed by nccl-tcpxo-installer DaemonSet).
+                  # NIC names are for hostNetwork mode on a3-megagpu-8g:
+                  #   eth1 = host control NIC, eth2-eth9 = 8 GPU NICs.
+                  - -x
+                  - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64
+                  - -x
+                  - CUDA_DEVICE_MAX_CONNECTIONS=1
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  - -x
+                  - NCCL_BUFFSIZE=8388608
+                  - -x
+                  - NCCL_CROSS_NIC=0
+                  - -x
+                  - NCCL_FASTRAK_CTRL_DEV=eth1
+                  - -x
+                  - NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL=0
+                  - -x
+                  - NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING=0
+                  - -x
+                  - "NCCL_FASTRAK_IFNAME=eth2,eth3,eth4,eth5,eth6,eth7,eth8,eth9"
+                  - -x
+                  - NCCL_FASTRAK_NUM_FLOWS=2
+                  - -x
+                  - NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS=600000
+                  - -x
+                  - NCCL_FASTRAK_USE_SNAP=1
+                  - -x
+                  - NCCL_FASTRAK_USE_LLCM=1
+                  - -x
+                  - NCCL_MIN_NCHANNELS=4
+                  - -x
+                  - NCCL_NET_GDR_LEVEL=PIX
+                  - -x
+                  - NCCL_P2P_NET_CHUNKSIZE=524288
+                  - -x
+                  - NCCL_P2P_NVL_CHUNKSIZE=1048576
+                  - -x
+                  - NCCL_P2P_PCI_CHUNKSIZE=524288
+                  - -x
+                  - NCCL_PROTO=Simple,LL128
+                  - -x
+                  - NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/usr/local/nvidia/lib64/a3plus_guest_config.textproto
+                  - -x
+                  - NCCL_TUNER_PLUGIN=libnccl-tuner.so
+                  - -x
+                  - NCCL_TUNER_CONFIG_PATH=/usr/local/nvidia/lib64/a3plus_tuner_config.textproto
+                  - -x
+                  - NCCL_NVLSTREE_MAX_CHUNKSIZE=131072
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth1
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      - name: node
+        template:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  # Multi-NIC for 8 GPU NICs (GPUDirect TCPXO).
+                  # Network names are cluster-specific (e.g., "aicr-demo2-gpu-nic-0");
+                  # discovered at runtime by discoverGKEGPUNICNetworks().
+                  networking.gke.io/default-interface: eth0
+                  networking.gke.io/interfaces: '${GKE_NETWORK_INTERFACES}'
+              spec:
+                hostNetwork: true
+                dnsPolicy: ClusterFirstWithHostNet
+                nodeSelector:
+                  cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
+                tolerations:
+                - operator: Exists
+                - key: nvidia.com/gpu
+                  operator: Equal
+                  value: present
+                  effect: NoSchedule
+                initContainers:
+                # TCPXO FastRak native sidecar — runs fastrak_gpumem_manager
+                # alongside the worker. Requires hostNetwork: true for full
+                # PCI sysfs visibility (GKE upstream issue #580).
+                - name: tcpxo-daemon
+                  image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
+                  imagePullPolicy: Always
+                  restartPolicy: Always
+                  command: ["/bin/sh", "-c"]
+                  args:
+                  - |
+                    set -ex
+                    chmod 755 /fts/entrypoint_rxdm_container.sh
+                    /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                  - name: nvtcpxo-libraries
+                    mountPath: /usr/local/nvidia
+                    readOnly: true
+                  - name: nvtcpxo-sys
+                    mountPath: /hostsysfs
+                  - name: nvtcpxo-proc-sys
+                    mountPath: /hostprocsysfs
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64"
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command: ["sh", "-c"]
+                  args:
+                  - |
+                    set -x &&
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server  &&
+                    mkdir -p /var/run/sshd  &&
+                    chmod 0755 /var/run/sshd  &&
+                    mkdir -p /root/.ssh &&
+                    chmod 700 /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 600 /root/.ssh/id_rsa &&
+                    chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De -p 2222
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                  securityContext:
+                    privileged: true
+                  volumeMounts:
+                  - name: dshm
+                    mountPath: /dev/shm
+                  - name: nvtcpxo-libraries
+                    mountPath: /usr/local/nvidia
+                    readOnly: true
+                  - name: nvtcpxo-aperture-devices
+                    mountPath: /dev/aperture_devices
+                volumes:
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+                - name: nvtcpxo-libraries
+                  hostPath:
+                    path: /home/kubernetes/bin/nvidia
+                - name: nvtcpxo-sys
+                  hostPath:
+                    path: /sys
+                - name: nvtcpxo-proc-sys
+                  hostPath:
+                    path: /proc/sys
+                - name: nvtcpxo-aperture-devices
+                  hostPath:
+                    path: /dev/aperture_devices
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher
