@@ -65,7 +65,7 @@ func TestGenerate_Success(t *testing.T) {
 		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
-				"installCRDs": true,
+				"crds": map[string]any{"enabled": true},
 			},
 			"gpu-operator": {
 				"driver": map[string]any{
@@ -646,7 +646,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	input := &GeneratorInput{
 		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{
-			"cert-manager":     {"installCRDs": true},
+			"cert-manager":     {"crds": map[string]any{"enabled": true}},
 			"my-kustomize-app": {},
 		},
 		Version: "v0.9.0",
@@ -728,7 +728,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
-				"installCRDs": true,
+				"crds": map[string]any{"enabled": true},
 			},
 			"gpu-operator": {
 				"driver": map[string]any{

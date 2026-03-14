@@ -980,8 +980,15 @@ The deploy script installs components in the order specified by `deploymentOrder
 |------|-------------|
 | `--no-wait` | Skip `helm --wait` for each component (faster, no readiness check) |
 | `--best-effort` | Continue past individual component failures instead of exiting |
+| `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 
 Unknown flags are rejected with an error to catch typos (e.g., `--best-effrot`).
+
+**Retry behavior:**
+
+The deploy script retries failed `helm upgrade --install` and `kubectl apply` operations with exponential backoff. By default, each operation is retried up to 5 times (6 total attempts). The backoff delay increases quadratically: 5s, 20s, 45s, 80s, 120s (capped) between retries.
+
+Use `--retries 0` to disable retries (fail-fast behavior). When `--best-effort` is also set, retries are exhausted first before falling through to best-effort handling.
 
 **Pre-install manifests and CRD ordering:**
 
