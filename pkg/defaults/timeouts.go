@@ -225,14 +225,6 @@ const (
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
 	// standard HTTPClientTimeout is appropriate.
 	NCCLTrainerArchiveDownloadTimeout = 5 * time.Minute
-
-	// NCCLGKEPodReadyTimeout is the maximum time to wait for GKE NCCL test pods
-	// (with TCPXO sidecar) to reach Running state with all containers ready.
-	NCCLGKEPodReadyTimeout = 5 * time.Minute
-
-	// NCCLGKEExecTimeout is the maximum time for the NCCL benchmark exec on GKE.
-	// The test runs via kubectl exec into a pod, not via a TrainJob launcher.
-	NCCLGKEExecTimeout = 30 * time.Minute
 )
 
 // Deployment and pod scheduling test timeouts for conformance validation.

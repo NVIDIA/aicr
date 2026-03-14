@@ -15,7 +15,6 @@
 package helper
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"os"
@@ -32,17 +31,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/remotecommand"
 	"sigs.k8s.io/yaml"
 )
 
 // PodLifecycle handles creation, verification, and cleanup of a pod.
 type PodLifecycle struct {
-	ClientSet  kubernetes.Interface
-	RESTConfig *rest.Config
-	Namespace  string
+	ClientSet kubernetes.Interface
+	Namespace string
 }
 
 // CreatePodFromTemplate creates a pod from a YAML template file.
@@ -143,85 +138,6 @@ func (p *PodLifecycle) CleanupPod(ctx context.Context, pod *v1.Pod) error {
 	return p.ClientSet.CoreV1().Pods(p.Namespace).Delete(cleanupCtx, pod.Name, metav1.DeleteOptions{})
 }
 
-// ExecCommandInPod executes a command in a pod and returns stdout, stderr, and any error.
-func (p *PodLifecycle) ExecCommandInPod(ctx context.Context, pod *v1.Pod, command []string) (string, string, error) {
-	execCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
-	defer cancel()
-
-	req := p.ClientSet.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(pod.Name).
-		Namespace(pod.Namespace).
-		SubResource("exec").
-		VersionedParams(&v1.PodExecOptions{
-			Command: command,
-			Stdin:   false,
-			Stdout:  true,
-			Stderr:  true,
-			TTY:     false,
-		}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(p.RESTConfig, "POST", req.URL())
-	if err != nil {
-		return "", "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create executor", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
-		Stdin:  nil,
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Tty:    false,
-	})
-
-	if err != nil {
-		return stdout.String(), stderr.String(), aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "command execution failed", err)
-	}
-
-	return stdout.String(), stderr.String(), nil
-}
-
-// ExecInContainer executes a command in a specific container of a pod with a caller-provided timeout.
-// Unlike ExecCommandInPod, this method targets a named container and accepts an explicit timeout,
-// which is necessary for long-running operations like NCCL benchmarks in multi-container pods.
-func (p *PodLifecycle) ExecInContainer(ctx context.Context, pod *v1.Pod, container string, command []string, timeout time.Duration) (string, string, error) {
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	req := p.ClientSet.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(pod.Name).
-		Namespace(pod.Namespace).
-		SubResource("exec").
-		VersionedParams(&v1.PodExecOptions{
-			Container: container,
-			Command:   command,
-			Stdin:     false,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       false,
-		}, scheme.ParameterCodec)
-
-	exec, err := remotecommand.NewSPDYExecutor(p.RESTConfig, "POST", req.URL())
-	if err != nil {
-		return "", "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create executor", err)
-	}
-
-	var stdout, stderr bytes.Buffer
-	err = exec.StreamWithContext(execCtx, remotecommand.StreamOptions{
-		Stdin:  nil,
-		Stdout: &stdout,
-		Stderr: &stderr,
-		Tty:    false,
-	})
-
-	if err != nil {
-		return stdout.String(), stderr.String(), aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "command execution failed", err)
-	}
-
-	return stdout.String(), stderr.String(), nil
-}
-
 // podPredicate checks whether a pod has reached the desired state.
 // Returns (done, error): done=true means stop watching, error non-nil means failure.
 type podPredicate func(pod *v1.Pod) (bool, error)
@@ -278,39 +194,6 @@ func (p *PodLifecycle) watchPodUntil(ctx context.Context, pod *v1.Pod, descripti
 			}
 		}
 	}
-}
-
-// WaitForPodReady waits for a pod to have all containers Ready (condition type=Ready, status=True).
-// Unlike WaitForPodRunning (which only checks phase), this ensures all containers — including
-// sidecars — are fully initialized before returning.
-func (p *PodLifecycle) WaitForPodReady(ctx context.Context, pod *v1.Pod, timeout time.Duration) error {
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	slog.Info("Waiting for pod to be Ready", "name", pod.Name)
-	return p.watchPodUntil(waitCtx, pod, "Ready", checkPodReadyOrTerminal)
-}
-
-// checkPodReadyOrTerminal returns true if the pod has the Ready condition set to True,
-// or is in a terminal phase (Succeeded/Failed). For terminal failure it returns an error.
-func checkPodReadyOrTerminal(pod *v1.Pod) (bool, error) {
-	switch pod.Status.Phase { //nolint:exhaustive // Pending, Running, Unknown continue watching
-	case v1.PodSucceeded:
-		slog.Info("Pod reached Succeeded state", "name", pod.Name)
-		return true, nil
-	case v1.PodFailed:
-		return true, aicrErrors.New(aicrErrors.ErrCodeInternal, "pod entered Failed phase while waiting for Ready")
-	}
-
-	// Check Ready condition.
-	for _, cond := range pod.Status.Conditions {
-		if cond.Type == v1.PodReady && cond.Status == v1.ConditionTrue {
-			slog.Info("Pod is Ready (all containers ready)", "name", pod.Name)
-			return true, nil
-		}
-	}
-
-	return false, nil
 }
 
 // WaitForPodRunning waits for a pod to reach Running phase.

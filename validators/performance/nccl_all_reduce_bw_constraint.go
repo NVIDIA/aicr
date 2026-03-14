@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -82,17 +83,15 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 
 // supportedNCCLCombinations maps each supported cloud service to the accelerator
 // types for which the automated NCCL all-reduce test has been implemented.
-// EKS uses Kubeflow TrainJob + MPI; GKE uses raw Pods with TCPXO sidecar + exec.
+// All platforms use Kubeflow TrainJob + MPI with per-platform TrainingRuntimes
+// and a shared TrainJob.
 var supportedNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
 	recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
 }
 
-// validateNcclAllReduceBw validates NCCL All Reduce bandwidth by dispatching to
-// the appropriate test runner based on the cloud service:
-//   - EKS: Kubeflow TrainJob + MPI launcher
-//   - GKE: raw Pods with TCPXO sidecar + kubectl exec
-//
+// validateNcclAllReduceBw validates NCCL All Reduce bandwidth using Kubeflow TrainJob + MPI.
+// Each platform has its own TrainingRuntime; the TrainJob is shared (just runtimeRef + numNodes).
 // Returns actual bandwidth value, whether it passed the threshold, and any error.
 func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint) (string, bool, error) {
 	slog.Info("Starting NCCL All Reduce bandwidth validation")
@@ -144,19 +143,10 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "skipped - requires at least 2 GPU nodes for EW fabric test", true, nil
 	}
 
-	// Dispatch to the appropriate test runner based on cloud service.
-	// Each service requires a dedicated runner; unknown services fail explicitly
-	// to catch missing implementations early.
-	var logs string
-	switch service { //nolint:exhaustive // default returns explicit error for unimplemented services
-	case recipe.CriteriaServiceGKE:
-		logs, err = runGKENCCLTest(ctx, gpuConfig, accelerator, service)
-	case recipe.CriteriaServiceEKS:
-		logs, err = runEKSNCCLTest(ctx, gpuConfig, accelerator, service)
-	default:
-		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal,
-			fmt.Sprintf("no NCCL test runner implemented for service %q", service))
-	}
+	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
+	// Each platform has a per-platform TrainingRuntime with all platform-specific
+	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, accelerator, service)
 	if err != nil {
 		return "", false, err
 	}
@@ -182,8 +172,10 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	return actualValue, passed, nil
 }
 
-// runEKSNCCLTest runs the NCCL all-reduce benchmark on EKS using Kubeflow TrainJob + MPI.
-func runEKSNCCLTest(ctx *validators.Context, gpuConfig *gpuConfiguration,
+// runNCCLTrainJob runs the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
+// It applies the per-platform TrainingRuntime and shared TrainJob, waits for the launcher
+// pod to complete, and returns the benchmark logs.
+func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) (string, error) {
 
 	dynamicClient := ctx.DynamicClient
@@ -214,9 +206,8 @@ func runEKSNCCLTest(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	defer cleanupNCCLResources(dynamicClient, gpuConfig.Namespace)
 
 	podHelper := &helper.PodLifecycle{
-		ClientSet:  ctx.Clientset,
-		RESTConfig: ctx.RESTConfig,
-		Namespace:  ctx.Namespace,
+		ClientSet: ctx.Clientset,
+		Namespace: ctx.Namespace,
 	}
 
 	// Wait for launcher pod and get logs.
@@ -295,9 +286,53 @@ func determineGPUConfig(ctx *validators.Context) (*gpuConfiguration, error) {
 	}, nil
 }
 
-// applyNCCLResources applies the runtime and trainjob YAML files with template substitution using dynamic client
+// discoverGKEGPUNICNetworks lists networks.networking.gke.io and returns
+// GPU NIC network names (those containing "gpu-nic"), sorted alphabetically.
+// GKE clusters provision these with cluster-specific prefixes (e.g.,
+// "aicr-demo2-gpu-nic-0"); the names cannot be hardcoded.
+func discoverGKEGPUNICNetworks(ctx context.Context, dynamicClient dynamic.Interface) ([]string, error) {
+	networkGVR := schema.GroupVersionResource{
+		Group: "networking.gke.io", Version: "v1", Resource: "networks",
+	}
+
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	networks, err := dynamicClient.Resource(networkGVR).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list GKE networks", err)
+	}
+
+	var gpuNICs []string
+	for _, n := range networks.Items {
+		name := n.GetName()
+		if strings.Contains(name, "gpu-nic") {
+			gpuNICs = append(gpuNICs, name)
+		}
+	}
+
+	sort.Strings(gpuNICs)
+	return gpuNICs, nil
+}
+
+// buildGKENetworkInterfacesAnnotation builds the networking.gke.io/interfaces
+// annotation value from discovered GPU NIC network names.
+// Maps eth0 → default, eth1 → gpuNICs[0], eth2 → gpuNICs[1], etc.
+func buildGKENetworkInterfacesAnnotation(gpuNICs []string) string {
+	interfaces := make([]string, 0, len(gpuNICs)+1)
+	interfaces = append(interfaces, `{"interfaceName":"eth0","network":"default"}`)
+	for i, nic := range gpuNICs {
+		interfaces = append(interfaces, fmt.Sprintf(`{"interfaceName":"eth%d","network":"%s"}`, i+1, nic))
+	}
+	return "[" + strings.Join(interfaces, ",") + "]"
+}
+
+// applyNCCLResources applies the per-platform TrainingRuntime and shared TrainJob
+// YAML files with template substitution using the dynamic client.
+// Runtime: testdata/{accelerator}/{service}/runtime.yaml (per-platform, contains all config)
+// TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
 func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) error {
-	slog.Info("Applying NCCL test resources...")
+	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service)
 
 	templateData := map[string]string{
 		"NAMESPACE":          config.Namespace,
@@ -309,14 +344,36 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		"MAX_MESSAGE_SIZE":   maxMessageSize,
 	}
 
-	// Apply runtime first
+	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
+	if service == recipe.CriteriaServiceGKE {
+		gpuNICs, err := discoverGKEGPUNICNetworks(ctx.Ctx, dynamicClient)
+		if err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to discover GKE GPU NIC networks", err)
+		}
+		if len(gpuNICs) < 8 {
+			return aicrErrors.New(aicrErrors.ErrCodeInternal,
+				fmt.Sprintf("expected 8 GPU NIC networks, found %d — cluster may not have multi-NIC networking configured", len(gpuNICs)))
+		}
+		templateData["GKE_NETWORK_INTERFACES"] = buildGKENetworkInterfacesAnnotation(gpuNICs)
+		slog.Info("Discovered GKE GPU NIC networks", "count", len(gpuNICs), "networks", gpuNICs)
+	}
+
+	// Apply per-platform runtime: testdata/{accelerator}/{service}/runtime.yaml
 	if err := applyYAMLWithDynamicClient(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, templatePath(accelerator, service, "runtime.yaml"), templateData); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
 	}
-	slog.Info("Applied TrainingRuntime")
+	slog.Info("Applied TrainingRuntime", "service", service)
 
-	// Apply trainjob
-	if err := applyYAMLWithDynamicClient(ctx.Ctx, dynamicClient, trainJobGVR, config.Namespace, templatePath(accelerator, service, "trainjob.yaml"), templateData); err != nil {
+	// Wait for the runtime to be visible to the Trainer admission webhook.
+	// The webhook validates that the referenced runtime exists before allowing
+	// TrainJob creation; without this wait we hit a race condition.
+	if err := waitForTrainingRuntime(ctx.Ctx, dynamicClient, config.Namespace); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "TrainingRuntime not ready", err)
+	}
+
+	// Apply shared trainjob: testdata/trainjob.yaml
+	trainjobPath := filepath.Join("testdata", "trainjob.yaml")
+	if err := applyYAMLWithDynamicClient(ctx.Ctx, dynamicClient, trainJobGVR, config.Namespace, trainjobPath, templateData); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply train job", err)
 	}
 	slog.Info("Applied TrainJob")
@@ -391,6 +448,26 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 	}
 
 	return logs, nil
+}
+
+// waitForTrainingRuntime polls until the TrainingRuntime is visible via GET.
+// The Trainer admission webhook validates that the referenced runtime exists
+// before allowing TrainJob creation; a brief propagation delay can cause a race.
+func waitForTrainingRuntime(ctx context.Context, dynamicClient dynamic.Interface, namespace string) error {
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	for {
+		_, err := dynamicClient.Resource(trainingRuntimeGVR).Namespace(namespace).Get(waitCtx, ncclTrainingRuntimeName, metav1.GetOptions{})
+		if err == nil {
+			return nil
+		}
+		select {
+		case <-waitCtx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for TrainingRuntime to be visible", waitCtx.Err())
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 // waitForPodByLabelSelector waits for a pod matching the label selector to be created.
