@@ -21,6 +21,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -114,6 +116,10 @@ func TestGenerate_Success(t *testing.T) {
 			t.Errorf("Expected file %s does not exist", relPath)
 		}
 	}
+
+	// Verify generated application.yaml files are valid YAML
+	assertValidYAML(t, filepath.Join(outputDir, "cert-manager", "application.yaml"))
+	assertValidYAML(t, filepath.Join(outputDir, "gpu-operator", "application.yaml"))
 
 	// Verify cert-manager application has sync-wave 0
 	certManagerApp := filepath.Join(outputDir, "cert-manager", "application.yaml")
@@ -570,6 +576,9 @@ func TestGenerate_KustomizeOnly(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
+	// Verify generated application.yaml is valid YAML
+	assertValidYAML(t, filepath.Join(outputDir, "my-kustomize-app", "application.yaml"))
+
 	// Verify application.yaml uses source (not sources) with path
 	appPath := filepath.Join(outputDir, "my-kustomize-app", "application.yaml")
 	content, err := os.ReadFile(appPath)
@@ -656,6 +665,10 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
+
+	// Verify generated application.yaml files are valid YAML
+	assertValidYAML(t, filepath.Join(outputDir, "cert-manager", "application.yaml"))
+	assertValidYAML(t, filepath.Join(outputDir, "my-kustomize-app", "application.yaml"))
 
 	// Helm component should have chart-based application.yaml
 	certApp, err := os.ReadFile(filepath.Join(outputDir, "cert-manager", "application.yaml"))
@@ -795,6 +808,131 @@ func TestGenerate_Reproducible(t *testing.T) {
 	}
 
 	t.Logf("ArgoCD reproducibility verified: both iterations produced %d identical files", len(fileContents[0]))
+}
+
+// assertValidYAML reads the file at path and fails the test if it is not valid YAML.
+func assertValidYAML(t *testing.T, path string) {
+	t.Helper()
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", path, err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		t.Errorf("invalid YAML in %s: %v\n--- content ---\n%s", path, err, string(content))
+	}
+}
+
+// TestGenerate_ApplicationYAMLStructure verifies that generated application.yaml files
+// are valid YAML with the expected ArgoCD Application structure (issue #410).
+func TestGenerate_ApplicationYAMLStructure(t *testing.T) {
+	tests := []struct {
+		name       string
+		refs       []recipe.ComponentRef
+		assertFunc func(t *testing.T, doc map[string]any)
+	}{
+		{
+			name: "helm component has spec.sources",
+			refs: []recipe.ComponentRef{
+				{
+					Name:      "gpu-operator",
+					Namespace: "gpu-operator",
+					Chart:     "gpu-operator",
+					Version:   "v25.3.3",
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "https://helm.ngc.nvidia.com/nvidia",
+				},
+			},
+			assertFunc: func(t *testing.T, doc map[string]any) {
+				t.Helper()
+				spec, ok := doc["spec"].(map[string]any)
+				if !ok {
+					t.Fatal("spec is not a map")
+				}
+				if _, hasSources := spec["sources"]; !hasSources {
+					t.Error("spec.sources missing for helm component")
+				}
+				dest, destOK := spec["destination"].(map[string]any)
+				if !destOK {
+					t.Fatal("spec.destination is not a map")
+				}
+				if dest["server"] != "https://kubernetes.default.svc" {
+					t.Errorf("unexpected destination server: %v", dest["server"])
+				}
+			},
+		},
+		{
+			name: "kustomize component has spec.source with path",
+			refs: []recipe.ComponentRef{
+				{
+					Name:      "my-kustomize-app",
+					Namespace: "my-app",
+					Type:      recipe.ComponentTypeKustomize,
+					Source:    "https://github.com/example/repo",
+					Tag:       "v2.0.0",
+					Path:      "deploy/production",
+				},
+			},
+			assertFunc: func(t *testing.T, doc map[string]any) {
+				t.Helper()
+				spec, ok := doc["spec"].(map[string]any)
+				if !ok {
+					t.Fatal("spec is not a map")
+				}
+				source, sourceOK := spec["source"].(map[string]any)
+				if !sourceOK {
+					t.Fatal("spec.source is not a map for kustomize component")
+				}
+				if source["path"] != "deploy/production" {
+					t.Errorf("unexpected source path: %v", source["path"])
+				}
+				dest, destOK := spec["destination"].(map[string]any)
+				if !destOK {
+					t.Fatal("spec.destination is not a map")
+				}
+				if dest["server"] != "https://kubernetes.default.svc" {
+					t.Errorf("unexpected destination server: %v", dest["server"])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewGenerator()
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = tt.refs
+			recipeResult.DeploymentOrder = []string{tt.refs[0].Name}
+
+			input := &GeneratorInput{
+				RecipeResult:    recipeResult,
+				ComponentValues: map[string]map[string]any{tt.refs[0].Name: {}},
+				Version:         "v0.9.0",
+			}
+
+			_, err := g.Generate(ctx, input, outputDir)
+			if err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			appPath := filepath.Join(outputDir, tt.refs[0].Name, "application.yaml")
+			assertValidYAML(t, appPath)
+
+			content, err := os.ReadFile(appPath)
+			if err != nil {
+				t.Fatalf("failed to read application.yaml: %v", err)
+			}
+			var doc map[string]any
+			if err := yaml.Unmarshal(content, &doc); err != nil {
+				t.Fatalf("failed to parse application.yaml: %v", err)
+			}
+			tt.assertFunc(t, doc)
+		})
+	}
 }
 
 // TestGenerate_NoTimestampInOutput verifies that generated files don't contain timestamps.

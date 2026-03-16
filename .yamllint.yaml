@@ -21,6 +21,8 @@ ignore: |
   # Build and vendor directories
   vendor/
   dist/
+  bundle/
+  bundles/
   node_modules/
 
   # Generated snapshot output files (machine-generated, not hand-written)

@@ -181,6 +181,12 @@ spec:
                 fi
               done
               [ "$found" = "true" ] || { echo "No component with sync-wave found" >&2; exit 1; }
+              # Validate all generated YAML files are structurally valid (issue #410)
+              for yamlfile in "${WORK}"/argocd/*.yaml "${WORK}"/argocd/*/*.yaml; do
+                [ -f "$yamlfile" ] || continue
+                yamllint -d '{extends: relaxed, rules: {trailing-spaces: disable}}' "$yamlfile" \
+                  || { echo "yamllint failed on $yamlfile" >&2; exit 1; }
+              done
             check:
               ($error == null): true
       cleanup:

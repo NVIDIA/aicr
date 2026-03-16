@@ -7,12 +7,12 @@ metadata:
     argocd.argoproj.io/sync-wave: "{{ .SyncWave }}"
 spec:
   project: default
-{{ if .IsKustomize -}}
+{{- if .IsKustomize }}
   source:
     repoURL: {{ .Repository }}
     targetRevision: {{ .Tag }}
     path: {{ .Path }}
-{{ else -}}
+{{- else }}
   sources:
     - repoURL: {{ .Repository }}
       chart: {{ .Chart }}
@@ -23,7 +23,7 @@ spec:
     - repoURL: '{{ `{{ .RepoURL }}` }}'
       targetRevision: main
       ref: values
-{{ end -}}
+{{- end }}
   destination:
     server: https://kubernetes.default.svc
     namespace: {{ .Namespace }}
