@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.16] - 2026-03-16
+
+### Bug Fixes
+
+- *(bundler)* Re-enable aws-ebs-csi-driver by default and support --set disable  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Deploy.sh retry logic, CUJ2 doc cleanup, and test reporting guide  by [@lockwobr](https://github.com/lockwobr)
+
+### Other Tasks
+
+- *(validator)* Unify GKE NCCL to TrainJob+MPI, match EKS pattern  by [@xdu31](https://github.com/xdu31)
+
 ## [0.10.15] - 2026-03-13
 
 ### Other Tasks
