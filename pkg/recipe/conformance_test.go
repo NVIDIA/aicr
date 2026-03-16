@@ -170,6 +170,44 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			wantDRAConstraint: false,
 		},
+		{
+			name: "h100-gke-cos-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceGKE
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSCOS
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kgateway-crds",
+				"kgateway",
+				"dynamo-crds",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
 	}
 
 	for _, tt := range tests {
