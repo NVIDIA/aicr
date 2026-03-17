@@ -194,6 +194,18 @@ else
   echo "NOTE: jq not found — skipping API service pre-flight checks."
 fi
 
+# Check for orphaned CRDs from previous deployments.
+# KAI scheduler and Kubeflow Trainer CRDs are created outside Helm management
+# and survive undeploy if cleanup was incomplete.
+ORPHANED_CRD_GROUPS="kai.scheduler trainer.kubeflow.org"
+for group in ${ORPHANED_CRD_GROUPS}; do
+  orphaned=$(kubectl get crd -o name 2>/dev/null | grep "\.${group}$" || true)
+  if [[ -n "${orphaned}" ]]; then
+    echo "WARNING: orphaned CRDs from previous deployment: ${orphaned}"
+    echo "  These may cause conflicts. Delete with: kubectl delete ${orphaned}"
+  fi
+done
+
 if [[ "${preflight_failed}" == "true" ]]; then
   echo ""
   echo "Pre-flight checks failed. Fix the issues above before deploying."
