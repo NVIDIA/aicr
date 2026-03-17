@@ -35,7 +35,7 @@ curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s -
 aicr snapshot --output snapshot.yaml
 
 # Generate a validated recipe for your environment
-aicr recipe --service eks --accelerator h100 --os ubuntu \
+aicr recipe --service aks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
 # Validate the recipe against your cluster
@@ -66,7 +66,7 @@ See the [Installation Guide](docs/user/installation.md) for manual installation,
 
 | Dimension | This Release |
 |-----------|-------------|
-| **Kubernetes** | Amazon EKS, GKE, self-managed (Kind) |
+| **Kubernetes** | Amazon EKS, Azure AKS (1.34+), GKE, self-managed (Kind) |
 | **GPUs** | NVIDIA H100, GB200 |
 | **OS** | Ubuntu |
 | **Workloads** | Training (Kubeflow), Inference (Dynamo) |
