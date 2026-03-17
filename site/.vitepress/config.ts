@@ -81,6 +81,7 @@ export default withMermaid(
               { text: 'Automation', link: '/docs/integrator/automation' },
               { text: 'Data Flow', link: '/docs/integrator/data-flow' },
               { text: 'Kubernetes Deployment', link: '/docs/integrator/kubernetes-deployment' },
+              { text: 'AKS GPU Setup', link: '/docs/integrator/aks-gpu-setup' },
               { text: 'EKS Dynamo Networking', link: '/docs/integrator/eks-dynamo-networking' },
               { text: 'Recipe Development', link: '/docs/integrator/recipe-development' },
               { text: 'Validator Extension', link: '/docs/integrator/validator-extension' },

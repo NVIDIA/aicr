@@ -32,14 +32,13 @@ spec:
     - name: K8s.server.version
       value: ">= 1.32.4"
 
+  # Skyhook customizations omitted — Skyhook packages do not support
+  # service: aks. The skyhook-operator itself is inherited from base
+  # and still deploys. This follows the same pattern as Kind overlays
+  # (h100-kind-inference.yaml) which also omit Skyhook tuning.
   componentRefs:
     - name: gpu-operator
       type: Helm
       dependencyRefs:
         - cert-manager
         - kube-prometheus-stack
-
-    # Skyhook customizations omitted — Skyhook packages do not support
-    # service: aks. The skyhook-operator itself is inherited from base
-    # and still deploys. This follows the same pattern as Kind overlays
-    # (h100-kind-inference.yaml) which also omit Skyhook tuning.

@@ -32,6 +32,10 @@ spec:
     - name: K8s.server.version
       value: ">= 1.32.4"
 
+  # Skyhook customizations omitted — Skyhook packages do not support
+  # service: aks. The skyhook-operator itself is inherited from base
+  # and still deploys. This follows the same pattern as Kind overlays
+  # (h100-kind-training.yaml) which also omit Skyhook tuning.
   componentRefs:
     # H100-specific GPU Operator overrides (inherits valuesFile from aks-training)
     - name: gpu-operator
@@ -42,8 +46,3 @@ spec:
       overrides:
         gdrcopy:
           enabled: true
-
-    # Skyhook customizations omitted — Skyhook packages do not support
-    # service: aks. The skyhook-operator itself is inherited from base
-    # and still deploys. This follows the same pattern as Kind overlays
-    # (h100-kind-training.yaml) which also omit Skyhook tuning.

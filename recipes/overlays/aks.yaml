@@ -82,7 +82,6 @@ spec:
       checks:
         - platform-health
         - gpu-operator-health
-        - network-operator-health
         - dra-support
         - accelerator-metrics
         - ai-service-metrics

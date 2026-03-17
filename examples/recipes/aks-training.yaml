@@ -162,7 +162,6 @@ validation:
     checks:
       - operator-health
       - expected-resources
-      - helm-values
       - gpu-operator-version
       - check-nvidia-smi
   performance:

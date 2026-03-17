@@ -48,3 +48,7 @@ spec:
       valuesFile: components/kubeflow-trainer/values.yaml
       manifestFiles:
         - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
+      dependencyRefs:
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
