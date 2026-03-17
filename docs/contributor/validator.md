@@ -349,6 +349,55 @@ echo $?  # 0=pass, 1=fail, 2=skip
 
 Note: K8s API calls will fail locally unless you mount a kubeconfig. For checks that only read snapshot/recipe data, this works without cluster access.
 
+## Testing with Custom Images
+
+When developing validators, you can build and push a custom image to test on a live cluster before merging.
+
+Edit the embedded catalog to point at your custom image and rebuild the CLI:
+
+```yaml
+# recipes/validators/catalog.yaml
+  - name: nccl-all-reduce-bw
+    phase: performance
+    image: my-registry.example.com/my-validator:dev  # custom image
+    timeout: 30m
+    args: ["nccl-all-reduce-bw"]
+```
+
+```shell
+make build
+./dist/aicr_*/aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --image-pull-secret my-registry-secret
+```
+
+The catalog is embedded in the binary at build time, so a rebuild is required. Revert before pushing:
+
+```shell
+git checkout -- recipes/validators/catalog.yaml
+```
+
+### Private Registry Authentication
+
+If your image is in a private registry, create an image pull secret in the validation namespace and pass it to the CLI with `--image-pull-secret`:
+
+```shell
+# Create the secret (use --dry-run=client | apply for idempotent create-or-update)
+kubectl create secret docker-registry my-registry-secret \
+  --docker-server=nvcr.io \
+  --docker-username='$oauthtoken' \
+  --docker-password=$NGC_API_KEY \
+  -n aicr-validation \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Run validation with the secret
+aicr validate \
+  --recipe recipe.yaml \
+  --snapshot snapshot.yaml \
+  --image-pull-secret my-registry-secret
+```
+
+The secret must be of type `kubernetes.io/dockerconfigjson` and exist in the validation namespace. The `--image-pull-secret` flag can be repeated for multiple registries.
+
 ## Checklist
 
 When adding a new upstream check:
