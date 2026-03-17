@@ -16,9 +16,29 @@
 
 import { defineConfig } from 'vitepress'
 import { withMermaid } from 'vitepress-plugin-mermaid'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 export default withMermaid(
   defineConfig({
+    vite: {
+      resolve: {
+        alias: {
+          // Stub out dompurify — mermaid imports it statically but
+          // vitepress-plugin-mermaid uses securityLevel:'loose' which
+          // bypasses sanitization. Safe for author-controlled docs content.
+          dompurify: path.resolve(__dirname, 'dompurify-stub.mjs'),
+        },
+      },
+      ssr: {
+        // Force mermaid through Vite's pipeline during SSR so the
+        // dompurify alias above is applied (Node native resolution
+        // would bypass it).
+        noExternal: ['mermaid'],
+      },
+    },
     title: 'NVIDIA AI Cluster Runtime',
     description: 'Optimized, validated, and reproducible Kubernetes configurations for GPU infrastructure',
     base: '/',
