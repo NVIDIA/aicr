@@ -83,70 +83,34 @@ spec:
                   - --mca
                   - plm_rsh_args
                   - -o StrictHostKeyChecking=no -o ConnectionAttempts=10 -p 2222
-                  # Restrict MPI OOB and UCX to control NIC — with hostNetwork,
-                  # UCX discovers GPU NIC link-local addresses which aren't
-                  # routable cross-node. On a3-megagpu-8g with hostNetwork,
-                  # the control NIC is eth1 (eth0 on launcher without hostNetwork).
+                  # Restrict MPI OOB and UCX to control NIC — UCX discovers GPU
+                  # NIC link-local addresses which aren't routable cross-node.
                   - --mca
                   - oob_tcp_if_include
-                  - eth0,eth1
+                  - eth0
                   - --mca
                   - btl_tcp_if_include
-                  - eth0,eth1
+                  - eth0
                   - -x
-                  - UCX_NET_DEVICES=eth1
-                  # TCPXO FastRak NCCL environment variables.
-                  # Source: nccl-env-profile.sh (installed by nccl-tcpxo-installer DaemonSet).
-                  # NIC names are for hostNetwork mode on a3-megagpu-8g:
-                  #   eth1 = host control NIC, eth2-eth9 = 8 GPU NICs.
+                  - UCX_NET_DEVICES=eth0
+                  # NCCL tuning variables are NOT hardcoded here. Workers source
+                  # nccl-env-profile.sh from the host (installed by nccl-tcpxo-installer
+                  # DaemonSet) and export NCCL_*/CUDA_* vars via ~/.ssh/environment
+                  # so values always match the installed TCPXO version.
+                  #
+                  # The following vars are NOT in the profile (it assumes privileged
+                  # mode where FastRak discovers devices automatically). They are
+                  # set explicitly for compatibility with non-privileged environments.
                   - -x
                   - LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64
                   - -x
+                  - NCCL_DEBUG=WARN
+                  - -x
+                  - NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY=/dev/aperture_devices
+                  - -x
+                  - NCCL_DYNAMIC_CHUNK_SIZE=524288
+                  - -x
                   - CUDA_DEVICE_MAX_CONNECTIONS=1
-                  - -x
-                  - NCCL_DEBUG=INFO
-                  - -x
-                  - NCCL_BUFFSIZE=8388608
-                  - -x
-                  - NCCL_CROSS_NIC=0
-                  - -x
-                  - NCCL_FASTRAK_CTRL_DEV=eth1
-                  - -x
-                  - NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL=0
-                  - -x
-                  - NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING=0
-                  - -x
-                  - "NCCL_FASTRAK_IFNAME=eth2,eth3,eth4,eth5,eth6,eth7,eth8,eth9"
-                  - -x
-                  - NCCL_FASTRAK_NUM_FLOWS=2
-                  - -x
-                  - NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS=600000
-                  - -x
-                  - NCCL_FASTRAK_USE_SNAP=1
-                  - -x
-                  - NCCL_FASTRAK_USE_LLCM=1
-                  - -x
-                  - NCCL_MIN_NCHANNELS=4
-                  - -x
-                  - NCCL_NET_GDR_LEVEL=PIX
-                  - -x
-                  - NCCL_P2P_NET_CHUNKSIZE=524288
-                  - -x
-                  - NCCL_P2P_NVL_CHUNKSIZE=1048576
-                  - -x
-                  - NCCL_P2P_PCI_CHUNKSIZE=524288
-                  - -x
-                  - NCCL_PROTO=Simple,LL128
-                  - -x
-                  - NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE=/usr/local/nvidia/lib64/a3plus_guest_config.textproto
-                  - -x
-                  - NCCL_TUNER_PLUGIN=libnccl-tuner.so
-                  - -x
-                  - NCCL_TUNER_CONFIG_PATH=/usr/local/nvidia/lib64/a3plus_tuner_config.textproto
-                  - -x
-                  - NCCL_NVLSTREE_MAX_CHUNKSIZE=131072
-                  - -x
-                  - NCCL_SOCKET_IFNAME=eth1
                   - /usr/local/bin/${TEST_TYPE}_mpi
                   - -b
                   - ${MIN_MESSAGE_SIZE}
@@ -231,6 +195,9 @@ spec:
                     cp /tmp/mpi-keys/* /root/.ssh/ &&
                     chmod 600 /root/.ssh/id_rsa &&
                     chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys &&
+                    NCCL_LIB_DIR=/usr/local/nvidia/lib64 . /usr/local/nvidia/lib64/nccl-env-profile.sh &&
+                    env | grep -E '^NCCL_|^CUDA_' > /root/.ssh/environment &&
+                    echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config &&
                     /usr/sbin/sshd -De -p 2222
                   resources:
                     limits:
