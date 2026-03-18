@@ -205,7 +205,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/nvsentinel
-      defaultVersion: v0.10.1
+      defaultVersion: v1.1.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
