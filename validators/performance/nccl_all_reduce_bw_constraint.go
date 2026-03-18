@@ -334,7 +334,7 @@ func buildGKENetworkInterfacesAnnotation(gpuNICs []string) string {
 // template indentation at the ${NRI_DEVICE_ANNOTATION} placeholder.
 func buildNRIDeviceAnnotation(gpuCount int) string {
 	const indent = "                    " // 20 spaces — matches template position
-	var lines []string
+	lines := make([]string, 0, gpuCount+3)
 	for i := range gpuCount {
 		lines = append(lines, fmt.Sprintf("- path: /dev/nvidia%d", i))
 	}
