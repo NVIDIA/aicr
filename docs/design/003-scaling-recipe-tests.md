@@ -16,12 +16,14 @@ Each job:
 3. Creates simulated GPU nodes matching the overlay's topology
 4. Generates a bundle and validates scheduling
 
-This runs on every PR that touches `recipes/**`, `kwok/**`, or the workflow itself.
+This runs on every PR that touches `recipes/**`, `kwok/**`, `.github/actions/kwok-test/**`,
+or the workflow itself.
 
 ### Current scale
 
 The discovery step finds every overlay where `spec.criteria.service` is set and is
-not `any`. As of this writing, that produces **36 parallel jobs**:
+not `any` — this includes cloud services (EKS, AKS, GKE) and local environments
+(Kind). As of this writing, that produces **36 parallel jobs**:
 
 | Service | Generic (accel=any) | H100 | GB200 | Total |
 |---------|---------------------|------|-------|-------|
@@ -101,6 +103,19 @@ Run the complete set of overlays on:
 
 This is the existing behavior, unchanged, but no longer blocking PRs.
 
+**Concurrency policy for Tier 3:** The current workflow uses `cancel-in-progress: true`,
+which means rapid successive merges to `main` can cancel in-flight Tier 3 runs. To
+guarantee full coverage on every merge, Tier 3 must use a separate concurrency group
+with `cancel-in-progress: false`. The nightly schedule provides a backstop — if a
+merge run is lost due to operational issues, the nightly run catches it.
+
+```yaml
+# Tier 3 concurrency: never cancel main runs
+concurrency:
+  group: kwok-tier3-${{ github.sha }}
+  cancel-in-progress: false
+```
+
 ### Workflow structure
 
 The single `kwok-recipes.yaml` workflow splits into three jobs:
@@ -126,8 +141,16 @@ summary
 
 ### Required checks
 
-Only `test-tier1` and `test-tier2` are required for PR merge. `test-tier3` is
-informational on main and nightly runs.
+Branch protection requires a **stable aggregate check**, not individual matrix job
+names (which drift as overlays are added or removed). The `summary` job serves this
+role — it already aggregates results from all tiers.
+
+- **Required check:** `KWOK Test Summary` (the `summary` job)
+- **Not required:** Individual `KWOK (recipe-name)` matrix jobs
+
+The `summary` job gates on Tier 1 and Tier 2 for PRs, and on all three tiers for
+pushes to `main`. This avoids branch protection brittleness when the overlay set
+changes.
 
 ## Consequences
 
@@ -138,7 +161,7 @@ informational on main and nightly runs.
 - **Runner time drops ~70% on typical PRs.** From 36 jobs to ~11 (Tier 1) plus
   a handful of diff-affected overlays (Tier 2).
 - **Full coverage is preserved.** Every overlay is tested on every merge to main
-  and on a nightly schedule.
+  (with `cancel-in-progress: false`) and on a nightly schedule.
 - **Diff-aware selection keeps targeted PRs fast.** A change to a single overlay
   tests only that overlay plus generics — not 36 jobs.
 - **No overlay refactoring required.** The overlay files and naming conventions
