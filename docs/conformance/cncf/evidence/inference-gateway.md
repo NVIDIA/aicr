@@ -1,9 +1,9 @@
 # Inference API Gateway (kgateway)
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:49:45 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:49:45 UTC
 
 ---
 
@@ -15,7 +15,7 @@ with an implementation for advanced traffic management for inference services.
 1. **kgateway controller** — Running in `kgateway-system`
 2. **inference-gateway deployment** — Running (the inference extension controller)
 3. **Gateway API CRDs** — All present (GatewayClass, Gateway, HTTPRoute, GRPCRoute, ReferenceGrant)
-4. **Active Gateway** — `inference-gateway` with class `kgateway`, programmed with an AWS ELB address
+4. **Active Gateway** — `inference-gateway` with class `kgateway`, programmed with a load balancer address
 5. **Inference Extension CRDs** — InferencePool, InferenceModelRewrite, InferenceObjective installed
 6. **Result: PASS**
 
@@ -67,7 +67,7 @@ referencegrants.gateway.networking.k8s.io              2026-03-10T03:21:06Z
 ```
 $ kubectl get gateways -A
 NAMESPACE         NAME                CLASS      ADDRESS                                                                   PROGRAMMED   AGE
-kgateway-system   inference-gateway   kgateway   <elb-redacted>.elb.amazonaws.com   True         28m
+kgateway-system   inference-gateway   kgateway   <load-balancer-address>   True         28m
 ```
 
 **Gateway details**
@@ -105,7 +105,7 @@ spec:
 status:
   addresses:
   - type: Hostname
-    value: <elb-redacted>.elb.amazonaws.com
+    value: <load-balancer-address>
   conditions:
   - lastTransitionTime: "2026-03-10T03:21:40Z"
     message: ""

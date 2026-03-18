@@ -10,9 +10,12 @@ recipe meets the Must-have requirements for Kubernetes v1.35.
 > tool itself. The recipe determines which components are deployed and how they are
 > configured. Different recipes may produce clusters with different conformance profiles.
 
-**Recipe used:** `h100-eks-ubuntu-inference-dynamo`
-**Cluster:** EKS with 2x p5.48xlarge (8x NVIDIA H100 80GB HBM3 each)
 **Kubernetes:** v1.35
+**Product:** Kubernetes clusters with NVIDIA AI Cluster Runtime (AICR)
+
+AICR deploys the runtime components that make a Kubernetes cluster AI conformant.
+All conformance requirements are platform-agnostic except cluster autoscaling,
+which relies on the underlying platform's node group scaling mechanism.
 
 ## Directory Structure
 
@@ -96,7 +99,7 @@ Alternatively, run the evidence collection script directly:
 | **Metrics** | Custom metrics API data-path verification | DCGM exporter + Prometheus queries |
 | **Gateway** | Condition verification (Accepted, Programmed) | Same |
 | **Webhook test** | Rejection test with invalid CR | Same |
-| **Cluster autoscaling** | Karpenter NodePools or EKS node group validation | EKS ASG via AWS API |
+| **Cluster autoscaling** | Cloud node group validation | Cloud-provider autoscaler API |
 
 ## Evidence
 

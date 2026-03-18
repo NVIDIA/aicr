@@ -1178,7 +1178,7 @@ of scaling GPU node groups based on workload demand.
 2. **Capacity Reservation** — Dedicated GPU capacity available for scale-up
 3. **Scalable Configuration** — ASG min/max configurable for demand-based scaling
 4. **Kubernetes Integration** — ASG nodes auto-join the EKS cluster with GPU labels
-5. **Autoscaler Compatibility** — Cluster Autoscaler and Karpenter supported via ASG tag discovery
+5. **Autoscaler Compatibility** — Cluster Autoscaler supported via ASG tag discovery
 
 ---
 

@@ -13,19 +13,25 @@
 # limitations under the License.
 
 metadata:
-  kubernetesVersion: v1.34
-  platformName: "Kubernetes Platforms Powered by NVIDIA AI Cluster Runtime (AICR)"
+  kubernetesVersion: v1.35
+  platformName: "NVIDIA AI Cluster Runtime"
   platformVersion: "0.8.0"
   vendorName: "NVIDIA"
   websiteUrl: "https://github.com/NVIDIA/aicr"
   repoUrl: "https://github.com/NVIDIA/aicr"
   documentationUrl: "https://github.com/NVIDIA/aicr/blob/main/README.md"
-  productLogoUrl: "https://www.nvidia.com/favicon.ico"
+  productLogoUrl: "https://raw.githubusercontent.com/cncf/landscape/master/hosted_logos/nvidia-member.svg"
   description: >-
-    Kubernetes platforms powered by NVIDIA AI Cluster Runtime (AICR) are CNCF AI
-    Conformant. AICR generates validated, GPU-accelerated Kubernetes
-    configurations that satisfy all CNCF AI Conformance requirements.
+    NVIDIA AI Cluster Runtime (AICR) generates validated, GPU-accelerated
+    Kubernetes configurations and deploys runtime components that satisfy all
+    CNCF AI Conformance requirements.
   contactEmailAddress: "aicr-maintainers@nvidia.com"
+  # AICR is not a Kubernetes distribution — it deploys AI runtime components on
+  # existing conformant platforms. We reference EKS's k8s-conformance entry
+  # because evidence was collected on a conformant EKS cluster. AICR is
+  # validated on multiple conformant platforms.
+  # Also validated on GKE: https://github.com/cncf/k8s-conformance/tree/master/v1.35/gke
+  k8sConformanceUrl: "https://github.com/cncf/k8s-conformance/tree/master/v1.35/eks"
 
 spec:
   accelerators:
@@ -42,6 +48,63 @@ spec:
         individual H100 GPU devices via ResourceSlices with unique UUIDs, PCI
         bus IDs, CUDA compute capability, and memory capacity. GPU allocation to
         pods is mediated through ResourceClaims.
+    - id: driver_runtime_management
+      description: >-
+        Provide a verifiable mechanism for ensuring that compatible accelerator
+        drivers and corresponding container runtime configurations are correctly
+        installed and maintained on nodes with accelerators. Once the accelerator
+        supports exposing driver and runtime version information as part of DRA,
+        then the platform should use the DRA mechanism for verification.
+      level: SHOULD
+      status: "Implemented"
+      evidence:
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/dra-support.md"
+      notes: >-
+        GPU Operator manages the full driver and runtime lifecycle: driver
+        installation, container toolkit configuration, device plugin, and DRA
+        driver. The nvidia-operator-validator pod verifies driver, toolkit, and
+        device-plugin health on each GPU node. DRA ResourceSlices expose driver
+        version and device attributes for verification.
+    - id: gpu_sharing
+      description: >-
+        For accelerators that support static GPU sharing, provide well-defined
+        mechanisms for at least one GPU sharing strategy to improve utilization
+        for workloads that do not require a full dedicated GPU. If
+        hardware-level partitioning is supported, then these fractional GPU
+        resources should be exposed as schedulable resources. If software-based
+        sharing (e.g. time-slicing) is supported, then oversubscription of GPUs
+        should be allowed. Forward-looking: Once the accelerator supports
+        static GPU sharing as part of DRA, the platform should expose the DRA
+        mechanism to allow users to leverage static GPU sharing. Once the
+        accelerator supports dynamic GPU sharing as part of DRA and the
+        partitionable devices feature is GA, the platform should expose the DRA
+        mechanism to allow users to leverage dynamic GPU sharing.
+      level: SHOULD
+      status: "Implemented"
+      evidence:
+        - "https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html"
+      notes: >-
+        GPU Operator supports MIG (Multi-Instance GPU) partitioning for hardware-level
+        GPU sharing on supported accelerators (A100, H100). MIG profiles are managed
+        via the nvidia-mig-manager DaemonSet. Time-slicing is also supported for
+        software-based GPU sharing across workloads.
+    - id: virtualized_accelerator
+      description: >-
+        For accelerators that support virtualized accelerator technologies
+        (e.g. vGPU), provide well-defined mechanisms for these to be exposed
+        and managed, maintaining consistency with physical fractional GPUs.
+        Forward-looking: Once the accelerator supports virtualized accelerator
+        technologies as part of DRA, then the platform should use the DRA
+        mechanism.
+      level: SHOULD
+      status: "Implemented"
+      evidence:
+        - "https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-operator-vgpu.html"
+      notes: >-
+        GPU Operator supports vGPU deployments where the hypervisor exposes
+        virtual GPU devices to Kubernetes nodes. vGPU resources are managed
+        through the same device plugin and DRA framework as physical GPUs,
+        maintaining a consistent management experience.
   networking:
     - id: ai_inference
       description: >-
@@ -90,10 +153,9 @@ spec:
         - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/cluster-autoscaling.md"
       notes: >-
         Demonstrated on EKS with a GPU Auto Scaling Group (p5.48xlarge, 8x H100
-        per node). The ASG is tagged for Cluster Autoscaler discovery
-        (k8s.io/cluster-autoscaler/enabled,
-        k8s.io/cluster-autoscaler/<cluster>=owned) and supports scaling from
-        min=1 to max=2 GPU nodes based on pending pod demand.
+        per node) tagged for Cluster Autoscaler discovery, and on GKE with the
+        built-in cluster autoscaler managing a3-megagpu-8g node pools. Both
+        platforms support scaling GPU nodes based on pending pod demand.
     - id: pod_autoscaling
       description: >-
         If the platform supports the HorizontalPodAutoscaler, it must function
@@ -180,10 +242,9 @@ spec:
       evidence:
         - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/robust-operator.md"
       notes: >-
-        NVIDIA Dynamo operator is deployed with 6 CRDs (DynamoGraphDeployment,
-        DynamoComponentDeployment, DynamoGraphDeploymentRequest,
-        DynamoGraphDeploymentScalingAdapter, DynamoModel, DynamoWorkerMetadata).
-        Validating webhooks are active and verified via rejection test (invalid
-        CR correctly denied). A DynamoGraphDeployment custom resource is
-        reconciled with frontend and GPU-enabled worker pods running
-        successfully.
+        Two operators validated: (1) NVIDIA Dynamo for inference — 6 CRDs,
+        4 validating webhooks, DynamoGraphDeployment reconciled into running
+        workload pods; (2) Kubeflow Trainer for training — 3 CRDs, 3 validating
+        webhooks, TrainJob reconciled into distributed training pods. Both
+        operators verified via webhook rejection tests (invalid CRs correctly
+        denied).

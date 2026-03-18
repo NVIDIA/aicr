@@ -1,9 +1,9 @@
 # Gang Scheduling (KAI Scheduler)
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:39:53 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:39:53 UTC
 
 ---
 
@@ -164,8 +164,8 @@ pg-gang-worker-1-f04dd44d-819f-4069-b367-df05c6685404   12s
 ```
 $ kubectl get pods -n gang-scheduling-test -o wide
 NAME            READY   STATUS      RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
-gang-worker-0   0/1     Completed   0          13s   10.0.162.59    ip-10-0-171-111.ec2.internal   <none>           <none>
-gang-worker-1   0/1     Completed   0          13s   10.0.144.109   ip-10-0-171-111.ec2.internal   <none>           <none>
+gang-worker-0   0/1     Completed   0          13s   10.0.162.59    gpu-node-1   <none>           <none>
+gang-worker-1   0/1     Completed   0          13s   10.0.144.109   gpu-node-1   <none>           <none>
 ```
 
 **gang-worker-0 logs**

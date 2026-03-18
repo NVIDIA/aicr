@@ -1,9 +1,9 @@
 # Accelerator & AI Service Metrics
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:41:11 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:41:11 UTC
 
 ---
 
@@ -68,8 +68,8 @@ temperature, power draw, and more in Prometheus exposition format.
 ```
 $ kubectl get pods -n gpu-operator -l app=nvidia-dcgm-exporter -o wide
 NAME                         READY   STATUS    RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
-nvidia-dcgm-exporter-g2fjs   1/1     Running   0          15m   10.0.247.52    ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-dcgm-exporter-wqqqn   1/1     Running   0          15m   10.0.172.246   ip-10-0-171-111.ec2.internal   <none>           <none>
+nvidia-dcgm-exporter-g2fjs   1/1     Running   0          15m   10.0.247.52    gpu-node-2     <none>           <none>
+nvidia-dcgm-exporter-wqqqn   1/1     Running   0          15m   10.0.172.246   gpu-node-1   <none>           <none>
 ```
 
 **DCGM exporter service**
@@ -85,36 +85,36 @@ Query DCGM exporter directly to show raw GPU metrics in Prometheus format.
 
 **Key GPU metrics from DCGM exporter (sampled)**
 ```
-DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 30
-DCGM_FI_DEV_GPU_TEMP{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 29
-DCGM_FI_DEV_GPU_TEMP{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
-DCGM_FI_DEV_GPU_TEMP{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 29
-DCGM_FI_DEV_GPU_TEMP{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 28
-DCGM_FI_DEV_GPU_TEMP{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
-DCGM_FI_DEV_GPU_TEMP{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 28
-DCGM_FI_DEV_GPU_TEMP{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
-DCGM_FI_DEV_POWER_USAGE{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 113.611000
-DCGM_FI_DEV_POWER_USAGE{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 68.347000
-DCGM_FI_DEV_POWER_USAGE{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 65.709000
-DCGM_FI_DEV_POWER_USAGE{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 67.316000
-DCGM_FI_DEV_POWER_USAGE{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 68.717000
-DCGM_FI_DEV_POWER_USAGE{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 65.742000
-DCGM_FI_DEV_POWER_USAGE{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 67.328000
-DCGM_FI_DEV_POWER_USAGE{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 66.997000
-DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_GPU_UTIL{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_MEM_COPY_UTIL{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 0
-DCGM_FI_DEV_MEM_COPY_UTIL{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_MEM_COPY_UTIL{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_MEM_COPY_UTIL{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_MEM_COPY_UTIL{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
-DCGM_FI_DEV_MEM_COPY_UTIL{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="ip-10-0-171-111.ec2.internal",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_TEMP{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 30
+DCGM_FI_DEV_GPU_TEMP{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 29
+DCGM_FI_DEV_GPU_TEMP{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
+DCGM_FI_DEV_GPU_TEMP{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 29
+DCGM_FI_DEV_GPU_TEMP{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 28
+DCGM_FI_DEV_GPU_TEMP{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
+DCGM_FI_DEV_GPU_TEMP{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 28
+DCGM_FI_DEV_GPU_TEMP{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 26
+DCGM_FI_DEV_POWER_USAGE{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 113.611000
+DCGM_FI_DEV_POWER_USAGE{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 68.347000
+DCGM_FI_DEV_POWER_USAGE{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 65.709000
+DCGM_FI_DEV_POWER_USAGE{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 67.316000
+DCGM_FI_DEV_POWER_USAGE{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 68.717000
+DCGM_FI_DEV_POWER_USAGE{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 65.742000
+DCGM_FI_DEV_POWER_USAGE{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 67.328000
+DCGM_FI_DEV_POWER_USAGE{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 66.997000
+DCGM_FI_DEV_GPU_UTIL{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="6",UUID="GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",pci_bus_id="00000000:B9:00.0",device="nvidia6",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_GPU_UTIL{gpu="7",UUID="GPU-04d228d3-3b5a-3534-f5cf-969706647d56",pci_bus_id="00000000:CA:00.0",device="nvidia7",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="0",UUID="GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",pci_bus_id="00000000:53:00.0",device="nvidia0",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08",container="main",namespace="dynamo-workload",pod="vllm-agg-0-vllmdecodeworker-s65j5",pod_uid=""} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="1",UUID="GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",pci_bus_id="00000000:64:00.0",device="nvidia1",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="2",UUID="GPU-fbc2c554-4d37-8938-0032-f923bad0f716",pci_bus_id="00000000:75:00.0",device="nvidia2",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="3",UUID="GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",pci_bus_id="00000000:86:00.0",device="nvidia3",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="4",UUID="GPU-82e45d1b-1618-559f-144c-eab51545030b",pci_bus_id="00000000:97:00.0",device="nvidia4",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
+DCGM_FI_DEV_MEM_COPY_UTIL{gpu="5",UUID="GPU-39e28159-8c62-ee71-64db-b748edd61e15",pci_bus_id="00000000:A8:00.0",device="nvidia5",modelName="NVIDIA H100 80GB HBM3",Hostname="gpu-node-1",DCGM_FI_DRIVER_VERSION="580.105.08"} 0
 ```
 
 ### Prometheus Querying GPU Metrics
@@ -131,7 +131,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -154,7 +154,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -177,7 +177,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -200,7 +200,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -223,7 +223,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -246,7 +246,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -269,7 +269,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -292,7 +292,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -315,7 +315,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -338,7 +338,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -361,7 +361,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -384,7 +384,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -407,7 +407,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -430,7 +430,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -453,7 +453,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "nvidia-dcgm-exporter",
@@ -476,7 +476,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
           "__name__": "DCGM_FI_DEV_GPU_UTIL",
           "container": "main",
@@ -511,7 +511,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -534,7 +534,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -557,7 +557,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -580,7 +580,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -603,7 +603,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -626,7 +626,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -649,7 +649,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -672,7 +672,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -695,7 +695,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -718,7 +718,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -741,7 +741,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -764,7 +764,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -787,7 +787,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -810,7 +810,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -833,7 +833,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "nvidia-dcgm-exporter",
@@ -856,7 +856,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
           "__name__": "DCGM_FI_DEV_FB_USED",
           "container": "main",
@@ -891,7 +891,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -914,7 +914,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -937,7 +937,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -960,7 +960,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -983,7 +983,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1006,7 +1006,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1029,7 +1029,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1052,7 +1052,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1075,7 +1075,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1098,7 +1098,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1121,7 +1121,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1144,7 +1144,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1167,7 +1167,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1190,7 +1190,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1213,7 +1213,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "nvidia-dcgm-exporter",
@@ -1236,7 +1236,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
           "__name__": "DCGM_FI_DEV_GPU_TEMP",
           "container": "main",
@@ -1271,7 +1271,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-bc5610b9-79c8-fedd-8899-07539c7f868a",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1294,7 +1294,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-fbc2c554-4d37-8938-0032-f923bad0f716",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1317,7 +1317,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1340,7 +1340,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-82e45d1b-1618-559f-144c-eab51545030b",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1363,7 +1363,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-39e28159-8c62-ee71-64db-b748edd61e15",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1386,7 +1386,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1409,7 +1409,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-04d228d3-3b5a-3534-f5cf-969706647d56",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1432,7 +1432,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-92da0328-2f33-b563-d577-9d2b9f21f280",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1455,7 +1455,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-184dab49-47ce-eeec-2239-3e03fbd4c002",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1478,7 +1478,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1501,7 +1501,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1524,7 +1524,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-95085215-739e-e7c6-4011-8dbe004af8c3",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1547,7 +1547,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-a7b658ad-f23e-cea9-2523-569d521700bf",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1570,7 +1570,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1593,7 +1593,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-206-2.ec2.internal",
+          "Hostname": "gpu-node-2",
           "UUID": "GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "nvidia-dcgm-exporter",
@@ -1616,7 +1616,7 @@ Query Prometheus to verify it is actively scraping and storing DCGM metrics.
       {
         "metric": {
           "DCGM_FI_DRIVER_VERSION": "580.105.08",
-          "Hostname": "ip-10-0-171-111.ec2.internal",
+          "Hostname": "gpu-node-1",
           "UUID": "GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005",
           "__name__": "DCGM_FI_DEV_POWER_USAGE",
           "container": "main",
