@@ -56,7 +56,8 @@ misconfigurations:
   - id: AVD-KSV-0121
     paths:
       - "recipes/components/gke-nccl-tcpxo/manifests/nri-device-injector.yaml"
-    statement: "/dev hostPath mount is required for NRI device injection."
+      - "demos/workloads/training/gke-nccl-test-tcpxo.yaml"
+    statement: "/dev and /sys hostPath mounts are required for NRI device injection and TCPXO PCI sysfs visibility."
 
   - id: AVD-KSV-0023
     paths:
