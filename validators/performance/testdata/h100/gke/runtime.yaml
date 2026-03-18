@@ -17,7 +17,8 @@
 # Full runtime with TCPXO sidecar, FastRak mpirun args, GKE multi-NIC
 # and GPU device annotations, and a3-megagpu-8g node selector.
 #
-# TCPXO sidecar uses native sidecar pattern (initContainer + restartPolicy: Always).
+# TCPXO sidecar uses native sidecar pattern (initContainer + restartPolicy: Always)
+# with NRI device injection (devices.gke.io annotation) instead of privileged mode.
 #
 # Must stay in sync with ncclTrainingRuntimeName in nccl_all_reduce_bw_constraint.go.
 
@@ -82,9 +83,9 @@ spec:
                   - --allow-run-as-root
                   - --mca
                   - plm_rsh_args
-                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10 -p 2222
-                  # Restrict MPI OOB and UCX to control NIC — UCX discovers GPU
-                  # NIC link-local addresses which aren't routable cross-node.
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  # Restrict MPI OOB and UCX to control NIC — without hostNetwork,
+                  # eth0 is the default/control NIC, eth1-eth8 are GPU NICs.
                   - --mca
                   - oob_tcp_if_include
                   - eth0
@@ -136,14 +137,17 @@ spec:
             template:
               metadata:
                 annotations:
+                  # NRI device injection: expose GPU and DMA devices to the tcpxo-daemon
+                  # sidecar without requiring privileged mode. Device list is generated
+                  # by buildNRIDeviceAnnotation() based on GPU count per node.
+                  devices.gke.io/container.tcpxo-daemon: |
+                    ${NRI_DEVICE_ANNOTATION}
                   # Multi-NIC for 8 GPU NICs (GPUDirect TCPXO).
                   # Network names are cluster-specific (e.g., "aicr-demo2-gpu-nic-0");
                   # discovered at runtime by discoverGKEGPUNICNetworks().
                   networking.gke.io/default-interface: eth0
                   networking.gke.io/interfaces: '${GKE_NETWORK_INTERFACES}'
               spec:
-                hostNetwork: true
-                dnsPolicy: ClusterFirstWithHostNet
                 nodeSelector:
                   cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
                 tolerations:
@@ -154,8 +158,8 @@ spec:
                   effect: NoSchedule
                 initContainers:
                 # TCPXO FastRak native sidecar — runs fastrak_gpumem_manager
-                # alongside the worker. Requires hostNetwork: true for full
-                # PCI sysfs visibility (GKE upstream issue #580).
+                # alongside the worker. Uses NRI device injection (devices.gke.io
+                # annotation) for GPU device access instead of privileged mode.
                 - name: tcpxo-daemon
                   image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
                   imagePullPolicy: Always
@@ -165,9 +169,10 @@ spec:
                   - |
                     set -ex
                     chmod 755 /fts/entrypoint_rxdm_container.sh
-                    /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+                    /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics=${GPU_COUNT_PER_NODE} --uid= --alsologtostderr
                   securityContext:
-                    privileged: true
+                    capabilities:
+                      add: ["CAP_NET_ADMIN", "CAP_NET_BIND_SERVICE"]
                   volumeMounts:
                   - name: nvtcpxo-libraries
                     mountPath: /usr/local/nvidia
@@ -198,14 +203,15 @@ spec:
                     NCCL_LIB_DIR=/usr/local/nvidia/lib64 . /usr/local/nvidia/lib64/nccl-env-profile.sh &&
                     env | grep -E '^NCCL_|^CUDA_' > /root/.ssh/environment &&
                     echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config &&
-                    /usr/sbin/sshd -De -p 2222
+                    /usr/sbin/sshd -De
                   resources:
                     limits:
                       nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
                     requests:
                       nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
                   securityContext:
-                    privileged: true
+                    capabilities:
+                      add: ["IPC_LOCK"]
                   volumeMounts:
                   - name: dshm
                     mountPath: /dev/shm
