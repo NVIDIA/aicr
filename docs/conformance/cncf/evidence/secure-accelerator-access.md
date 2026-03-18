@@ -1,9 +1,9 @@
 # Secure Accelerator Access
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:40:33 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:40:33 UTC
 
 ---
 
@@ -28,30 +28,30 @@ cluster-policy   ready    2026-03-10T03:25:45Z
 ```
 $ kubectl get pods -n gpu-operator -o wide
 NAME                                             READY   STATUS      RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
-gpu-feature-discovery-6rcxf                      1/1     Running     0          14m   10.0.224.30    ip-10-0-206-2.ec2.internal     <none>           <none>
-gpu-feature-discovery-8jhh7                      1/1     Running     0          14m   10.0.224.179   ip-10-0-171-111.ec2.internal   <none>           <none>
-gpu-operator-6bf99d6478-r55t5                    1/1     Running     0          14m   10.0.6.44      ip-10-0-6-165.ec2.internal     <none>           <none>
-node-feature-discovery-gc-5495c9b5c9-5jhtb       1/1     Running     0          14m   10.0.4.105     ip-10-0-6-165.ec2.internal     <none>           <none>
-node-feature-discovery-master-6f876b9c85-97zcw   1/1     Running     0          14m   10.0.6.62      ip-10-0-6-165.ec2.internal     <none>           <none>
-node-feature-discovery-worker-7z8fm              1/1     Running     0          14m   10.0.230.31    ip-10-0-196-144.ec2.internal   <none>           <none>
-node-feature-discovery-worker-9s5tc              1/1     Running     0          14m   10.0.154.69    ip-10-0-171-111.ec2.internal   <none>           <none>
-node-feature-discovery-worker-vb62k              1/1     Running     0          14m   10.0.189.91    ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-container-toolkit-daemonset-c49gs         1/1     Running     0          14m   10.0.201.217   ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-container-toolkit-daemonset-lr895         1/1     Running     0          14m   10.0.182.110   ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-cuda-validator-9866n                      0/1     Completed   0          12m   10.0.247.169   ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-cuda-validator-f42hd                      0/1     Completed   0          12m   10.0.143.223   ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-dcgm-4bq8l                                1/1     Running     0          14m   10.0.145.214   ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-dcgm-exporter-g2fjs                       1/1     Running     0          14m   10.0.247.52    ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-dcgm-exporter-wqqqn                       1/1     Running     0          14m   10.0.172.246   ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-dcgm-xjsqq                                1/1     Running     0          14m   10.0.159.246   ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-device-plugin-daemonset-5884b             1/1     Running     0          14m   10.0.255.120   ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-device-plugin-daemonset-kx2zg             1/1     Running     0          14m   10.0.185.249   ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-driver-daemonset-qc7cg                    3/3     Running     0          14m   10.0.198.38    ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-driver-daemonset-vvlsc                    3/3     Running     0          14m   10.0.166.43    ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-mig-manager-4gn76                         1/1     Running     0          14m   10.0.135.89    ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-mig-manager-8s9wj                         1/1     Running     0          14m   10.0.253.166   ip-10-0-206-2.ec2.internal     <none>           <none>
-nvidia-operator-validator-twprm                  1/1     Running     0          14m   10.0.231.53    ip-10-0-171-111.ec2.internal   <none>           <none>
-nvidia-operator-validator-vwnsb                  1/1     Running     0          14m   10.0.194.119   ip-10-0-206-2.ec2.internal     <none>           <none>
+gpu-feature-discovery-6rcxf                      1/1     Running     0          14m   10.0.224.30    gpu-node-2     <none>           <none>
+gpu-feature-discovery-8jhh7                      1/1     Running     0          14m   10.0.224.179   gpu-node-1   <none>           <none>
+gpu-operator-6bf99d6478-r55t5                    1/1     Running     0          14m   10.0.6.44      system-node-1     <none>           <none>
+node-feature-discovery-gc-5495c9b5c9-5jhtb       1/1     Running     0          14m   10.0.4.105     system-node-1     <none>           <none>
+node-feature-discovery-master-6f876b9c85-97zcw   1/1     Running     0          14m   10.0.6.62      system-node-1     <none>           <none>
+node-feature-discovery-worker-7z8fm              1/1     Running     0          14m   10.0.230.31    system-node-2   <none>           <none>
+node-feature-discovery-worker-9s5tc              1/1     Running     0          14m   10.0.154.69    gpu-node-1   <none>           <none>
+node-feature-discovery-worker-vb62k              1/1     Running     0          14m   10.0.189.91    gpu-node-2     <none>           <none>
+nvidia-container-toolkit-daemonset-c49gs         1/1     Running     0          14m   10.0.201.217   gpu-node-1   <none>           <none>
+nvidia-container-toolkit-daemonset-lr895         1/1     Running     0          14m   10.0.182.110   gpu-node-2     <none>           <none>
+nvidia-cuda-validator-9866n                      0/1     Completed   0          12m   10.0.247.169   gpu-node-2     <none>           <none>
+nvidia-cuda-validator-f42hd                      0/1     Completed   0          12m   10.0.143.223   gpu-node-1   <none>           <none>
+nvidia-dcgm-4bq8l                                1/1     Running     0          14m   10.0.145.214   gpu-node-1   <none>           <none>
+nvidia-dcgm-exporter-g2fjs                       1/1     Running     0          14m   10.0.247.52    gpu-node-2     <none>           <none>
+nvidia-dcgm-exporter-wqqqn                       1/1     Running     0          14m   10.0.172.246   gpu-node-1   <none>           <none>
+nvidia-dcgm-xjsqq                                1/1     Running     0          14m   10.0.159.246   gpu-node-2     <none>           <none>
+nvidia-device-plugin-daemonset-5884b             1/1     Running     0          14m   10.0.255.120   gpu-node-1   <none>           <none>
+nvidia-device-plugin-daemonset-kx2zg             1/1     Running     0          14m   10.0.185.249   gpu-node-2     <none>           <none>
+nvidia-driver-daemonset-qc7cg                    3/3     Running     0          14m   10.0.198.38    gpu-node-1   <none>           <none>
+nvidia-driver-daemonset-vvlsc                    3/3     Running     0          14m   10.0.166.43    gpu-node-2     <none>           <none>
+nvidia-mig-manager-4gn76                         1/1     Running     0          14m   10.0.135.89    gpu-node-1   <none>           <none>
+nvidia-mig-manager-8s9wj                         1/1     Running     0          14m   10.0.253.166   gpu-node-2     <none>           <none>
+nvidia-operator-validator-twprm                  1/1     Running     0          14m   10.0.231.53    gpu-node-1   <none>           <none>
+nvidia-operator-validator-vwnsb                  1/1     Running     0          14m   10.0.194.119   gpu-node-2     <none>           <none>
 ```
 
 ### GPU Operator DaemonSets
@@ -84,10 +84,10 @@ GPU devices via ResourceSlices, and pods request access through ResourceClaims.
 ```
 $ kubectl get resourceslices -o wide
 NAME                                                           NODE                           DRIVER                      POOL                           AGE
-ip-10-0-171-111.ec2.internal-compute-domain.nvidia.com-q9xqc   ip-10-0-171-111.ec2.internal   compute-domain.nvidia.com   ip-10-0-171-111.ec2.internal   11m
-ip-10-0-171-111.ec2.internal-gpu.nvidia.com-7cbz2              ip-10-0-171-111.ec2.internal   gpu.nvidia.com              ip-10-0-171-111.ec2.internal   11m
-ip-10-0-206-2.ec2.internal-compute-domain.nvidia.com-2n2cq     ip-10-0-206-2.ec2.internal     compute-domain.nvidia.com   ip-10-0-206-2.ec2.internal     11m
-ip-10-0-206-2.ec2.internal-gpu.nvidia.com-79gvw                ip-10-0-206-2.ec2.internal     gpu.nvidia.com              ip-10-0-206-2.ec2.internal     11m
+gpu-node-1-compute-domain.nvidia.com-q9xqc   gpu-node-1   compute-domain.nvidia.com   gpu-node-1   11m
+gpu-node-1-gpu.nvidia.com-7cbz2              gpu-node-1   gpu.nvidia.com              gpu-node-1   11m
+gpu-node-2-compute-domain.nvidia.com-2n2cq     gpu-node-2     compute-domain.nvidia.com   gpu-node-2     11m
+gpu-node-2-gpu.nvidia.com-79gvw                gpu-node-2     gpu.nvidia.com              gpu-node-2     11m
 ```
 
 ### GPU Device Details
@@ -101,14 +101,14 @@ items:
   kind: ResourceSlice
   metadata:
     creationTimestamp: "2026-03-10T03:29:20Z"
-    generateName: ip-10-0-171-111.ec2.internal-compute-domain.nvidia.com-
+    generateName: gpu-node-1-compute-domain.nvidia.com-
     generation: 2
-    name: ip-10-0-171-111.ec2.internal-compute-domain.nvidia.com-q9xqc
+    name: gpu-node-1-compute-domain.nvidia.com-q9xqc
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-10-0-171-111.ec2.internal
+      name: gpu-node-1
       uid: fef55be3-f566-47c8-8bb8-52c117cb3855
     resourceVersion: "1169500"
     uid: 8087c1b4-71e0-42c3-9f74-12629e2ee5b5
@@ -127,23 +127,23 @@ items:
           string: channel
       name: channel-0
     driver: compute-domain.nvidia.com
-    nodeName: ip-10-0-171-111.ec2.internal
+    nodeName: gpu-node-1
     pool:
       generation: 1
-      name: ip-10-0-171-111.ec2.internal
+      name: gpu-node-1
       resourceSliceCount: 1
 - apiVersion: resource.k8s.io/v1
   kind: ResourceSlice
   metadata:
     creationTimestamp: "2026-03-10T03:29:22Z"
-    generateName: ip-10-0-171-111.ec2.internal-gpu.nvidia.com-
+    generateName: gpu-node-1-gpu.nvidia.com-
     generation: 2
-    name: ip-10-0-171-111.ec2.internal-gpu.nvidia.com-7cbz2
+    name: gpu-node-1-gpu.nvidia.com-7cbz2
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-10-0-171-111.ec2.internal
+      name: gpu-node-1
       uid: fef55be3-f566-47c8-8bb8-52c117cb3855
     resourceVersion: "1169562"
     uid: 3441669c-08c4-43ff-9b83-42c5f3dddcff
@@ -366,23 +366,23 @@ items:
           value: 81559Mi
       name: gpu-0
     driver: gpu.nvidia.com
-    nodeName: ip-10-0-171-111.ec2.internal
+    nodeName: gpu-node-1
     pool:
       generation: 1
-      name: ip-10-0-171-111.ec2.internal
+      name: gpu-node-1
       resourceSliceCount: 1
 - apiVersion: resource.k8s.io/v1
   kind: ResourceSlice
   metadata:
     creationTimestamp: "2026-03-10T03:29:19Z"
-    generateName: ip-10-0-206-2.ec2.internal-compute-domain.nvidia.com-
+    generateName: gpu-node-2-compute-domain.nvidia.com-
     generation: 1
-    name: ip-10-0-206-2.ec2.internal-compute-domain.nvidia.com-2n2cq
+    name: gpu-node-2-compute-domain.nvidia.com-2n2cq
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-10-0-206-2.ec2.internal
+      name: gpu-node-2
       uid: b171b90a-eb8f-4662-bd0d-2055b634dc98
     resourceVersion: "1168846"
     uid: 3eca27ae-5231-4845-8407-1e24fd9b5683
@@ -401,23 +401,23 @@ items:
           string: daemon
       name: daemon-0
     driver: compute-domain.nvidia.com
-    nodeName: ip-10-0-206-2.ec2.internal
+    nodeName: gpu-node-2
     pool:
       generation: 1
-      name: ip-10-0-206-2.ec2.internal
+      name: gpu-node-2
       resourceSliceCount: 1
 - apiVersion: resource.k8s.io/v1
   kind: ResourceSlice
   metadata:
     creationTimestamp: "2026-03-10T03:29:21Z"
-    generateName: ip-10-0-206-2.ec2.internal-gpu.nvidia.com-
+    generateName: gpu-node-2-gpu.nvidia.com-
     generation: 2
-    name: ip-10-0-206-2.ec2.internal-gpu.nvidia.com-79gvw
+    name: gpu-node-2-gpu.nvidia.com-79gvw
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-10-0-206-2.ec2.internal
+      name: gpu-node-2
       uid: b171b90a-eb8f-4662-bd0d-2055b634dc98
     resourceVersion: "1169576"
     uid: 0b3dc1d8-a1ba-4fae-894b-cb90e62ed783
@@ -640,10 +640,10 @@ items:
           value: 81559Mi
       name: gpu-1
     driver: gpu.nvidia.com
-    nodeName: ip-10-0-206-2.ec2.internal
+    nodeName: gpu-node-2
     pool:
       generation: 1
-      name: ip-10-0-206-2.ec2.internal
+      name: gpu-node-2
       resourceSliceCount: 1
 kind: List
 metadata:
