@@ -60,7 +60,7 @@ spec:
       image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
       securityContext:
         capabilities:
-          add: [CAP_NET_ADMIN, CAP_NET_BIND_SERVICE]
+          add: [NET_ADMIN, NET_BIND_SERVICE]
       volumeMounts:
         - name: nvtcpxo-libraries
           mountPath: /usr/local/nvidia
@@ -94,7 +94,7 @@ spec:
 
 Key properties:
 - `hostNetwork: false` — workloads get proper pod networking
-- `privileged: false` — tcpxo-daemon uses only `CAP_NET_ADMIN` and `CAP_NET_BIND_SERVICE`
+- `privileged: false` — tcpxo-daemon uses only `NET_ADMIN` and `NET_BIND_SERVICE`
 - `/sys` mounted as `/hostsysfs` — provides PCI sysfs visibility for GPU enumeration
 - `/proc/sys` mounted as `/hostprocsysfs` — allows kernel network tuning
 - NRI annotations inject GPU devices and multi-NIC interfaces

@@ -137,7 +137,7 @@ spec:
           /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
       securityContext:
         capabilities:
-          add: ["CAP_NET_ADMIN", "CAP_NET_BIND_SERVICE"]
+          add: ["NET_ADMIN", "NET_BIND_SERVICE"]
       volumeMounts:
         - name: nvtcpxo-libraries
           mountPath: /usr/local/nvidia
@@ -252,7 +252,7 @@ spec:
           /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
       securityContext:
         capabilities:
-          add: ["CAP_NET_ADMIN", "CAP_NET_BIND_SERVICE"]
+          add: ["NET_ADMIN", "NET_BIND_SERVICE"]
       volumeMounts:
         - name: nvtcpxo-libraries
           mountPath: /usr/local/nvidia
