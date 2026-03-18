@@ -1,9 +1,9 @@
 # Pod Autoscaling (HPA with GPU Metrics)
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:42:06 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:42:06 UTC
 
 ---
 
@@ -167,7 +167,7 @@ horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
 ```
 $ kubectl get pods -n hpa-test -o wide
 NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
-gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          3s    10.0.254.75   ip-10-0-206-2.ec2.internal   <none>           <none>
+gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          3s    10.0.254.75   gpu-node-2   <none>           <none>
 ```
 
 ## HPA Status
@@ -234,8 +234,8 @@ utilization.gpu [%], utilization.memory [%], power.draw [W]
 ```
 $ kubectl get pods -n hpa-test -o wide
 NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
-gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          96s   10.0.254.75   ip-10-0-206-2.ec2.internal   <none>           <none>
-gpu-workload-86c75dcd97-4gbn8   1/1     Running   0          36s   10.0.219.76   ip-10-0-206-2.ec2.internal   <none>           <none>
+gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          96s   10.0.254.75   gpu-node-2   <none>           <none>
+gpu-workload-86c75dcd97-4gbn8   1/1     Running   0          36s   10.0.219.76   gpu-node-2   <none>           <none>
 ```
 
 **Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold.

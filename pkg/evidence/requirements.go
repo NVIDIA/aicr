@@ -71,8 +71,8 @@ var requirements = map[string]requirementMeta{
 	},
 	"cluster-autoscaling": {
 		RequirementID: "cluster_autoscaling",
-		Title:         "Cluster Autoscaling (Karpenter)",
-		Description:   "Demonstrates that the cluster supports GPU-aware autoscaling via Karpenter with NodePools configured for nvidia.com/gpu limits.",
+		Title:         "Cluster Autoscaling",
+		Description:   "Demonstrates that the cluster supports GPU-aware autoscaling with node groups configured for GPU instances.",
 		File:          "cluster-autoscaling.md",
 	},
 	"robust-controller": {

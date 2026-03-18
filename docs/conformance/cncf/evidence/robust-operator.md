@@ -1,9 +1,8 @@
-# Robust AI Operator (Dynamo Platform)
+# Robust AI Operator
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:41:48 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
 
 ---
 
@@ -13,16 +12,20 @@ webhooks operational, and custom resources reconciled.
 
 ## Summary
 
-1. **Dynamo Operator** — Controller manager running in `dynamo-system`
-2. **Custom Resource Definitions** — 6 Dynamo CRDs registered (DynamoGraphDeployment, DynamoComponentDeployment, etc.)
-3. **Webhooks Operational** — Validating webhook configured and active
-4. **Custom Resource Reconciled** — `DynamoGraphDeployment/vllm-agg` reconciled into running workload pods via PodCliques
-5. **Supporting Services** — etcd and NATS running for Dynamo platform state management
-6. **Result: PASS**
+Two operators validated across inference and training intents:
+
+| Operator | Intent | CRDs | Webhooks | CR Reconciled | Result |
+|----------|--------|------|----------|---------------|--------|
+| **Dynamo Platform** | Inference | 6 CRDs | 4 validating webhooks | DynamoGraphDeployment → PodCliques | **PASS** |
+| **Kubeflow Trainer** | Training | 3 CRDs | 3 validating webhooks | TrainJob → distributed training pods | **PASS** |
 
 ---
 
-## Dynamo Operator Health
+## Inference: Dynamo Platform
+
+**Generated:** 2026-03-10 03:41:48 UTC
+
+### Dynamo Operator Health
 
 **Dynamo operator deployments**
 ```
@@ -42,7 +45,7 @@ dynamo-platform-dynamo-operator-webhook-cert-gen-1-bnqwh          0/1     Comple
 grove-operator-7c69b46ddf-mxgtz                                   1/1     Running     1 (13m ago)   13m
 ```
 
-## Custom Resource Definitions
+### Custom Resource Definitions
 
 **Dynamo CRDs**
 ```
@@ -54,7 +57,7 @@ dynamomodels.nvidia.com                                2026-03-10T03:20:42Z
 dynamoworkermetadatas.nvidia.com                       2026-03-10T03:20:42Z
 ```
 
-## Webhooks
+### Webhooks
 
 **Validating webhooks**
 ```
@@ -63,12 +66,7 @@ NAME                                         WEBHOOKS   AGE
 dynamo-platform-dynamo-operator-validating   4          13m
 ```
 
-**Dynamo validating webhooks**
-```
-dynamo-platform-dynamo-operator-validating   4          13m
-```
-
-## Custom Resource Reconciliation
+### Custom Resource Reconciliation
 
 A `DynamoGraphDeployment` defines an inference serving graph. The operator reconciles
 it into workload pods managed via PodCliques.
@@ -80,120 +78,13 @@ NAMESPACE         NAME       AGE
 dynamo-workload   vllm-agg   5m33s
 ```
 
-**DynamoGraphDeployment details**
-```
-$ kubectl get dynamographdeployment vllm-agg -n dynamo-workload -o yaml
-apiVersion: nvidia.com/v1alpha1
-kind: DynamoGraphDeployment
-metadata:
-  annotations:
-    kubectl.kubernetes.io/last-applied-configuration: |
-      {"apiVersion":"nvidia.com/v1alpha1","kind":"DynamoGraphDeployment","metadata":{"annotations":{},"name":"vllm-agg","namespace":"dynamo-workload"},"spec":{"services":{"Frontend":{"componentType":"frontend","envs":[{"name":"SERVED_MODEL_NAME","value":"Qwen/Qwen3-0.6B"},{"name":"DYN_STORE_KV","value":"mem"},{"name":"DYN_EVENT_PLANE","value":"zmq"}],"extraPodSpec":{"mainContainer":{"image":"nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0"},"nodeSelector":{"nodeGroup":"cpu-worker"},"tolerations":[{"effect":"NoSchedule","key":"dedicated","operator":"Equal","value":"worker-workload"},{"effect":"NoExecute","key":"dedicated","operator":"Equal","value":"worker-workload"}]},"replicas":1},"VllmDecodeWorker":{"componentType":"worker","envs":[{"name":"DYN_STORE_KV","value":"mem"},{"name":"DYN_EVENT_PLANE","value":"zmq"}],"extraPodSpec":{"mainContainer":{"args":["--model","Qwen/Qwen3-0.6B"],"command":["python3","-m","dynamo.vllm"],"image":"nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0","workingDir":"/workspace/examples/backends/vllm"},"nodeSelector":{"nodeGroup":"gpu-worker"},"tolerations":[{"effect":"NoSchedule","key":"dedicated","operator":"Equal","value":"worker-workload"},{"effect":"NoExecute","key":"dedicated","operator":"Equal","value":"worker-workload"}]},"replicas":1,"resources":{"limits":{"gpu":"1"}}}}}}
-  creationTimestamp: "2026-03-10T03:36:25Z"
-  finalizers:
-  - nvidia.com/finalizer
-  generation: 2
-  name: vllm-agg
-  namespace: dynamo-workload
-  resourceVersion: "1196446"
-  uid: c38afc11-ad45-41af-aca9-6cdabfeb456d
-spec:
-  services:
-    Frontend:
-      componentType: frontend
-      envs:
-      - name: SERVED_MODEL_NAME
-        value: Qwen/Qwen3-0.6B
-      - name: DYN_STORE_KV
-        value: mem
-      - name: DYN_EVENT_PLANE
-        value: zmq
-      extraPodSpec:
-        mainContainer:
-          image: nvcr.io/nvidia/ai-dynamo/dynamo-frontend:0.9.0
-          name: ""
-          resources: {}
-        nodeSelector:
-          nodeGroup: cpu-worker
-        tolerations:
-        - effect: NoSchedule
-          key: dedicated
-          operator: Equal
-          value: worker-workload
-        - effect: NoExecute
-          key: dedicated
-          operator: Equal
-          value: worker-workload
-      replicas: 1
-    VllmDecodeWorker:
-      componentType: worker
-      envs:
-      - name: DYN_STORE_KV
-        value: mem
-      - name: DYN_EVENT_PLANE
-        value: zmq
-      extraPodSpec:
-        mainContainer:
-          args:
-          - --model
-          - Qwen/Qwen3-0.6B
-          command:
-          - python3
-          - -m
-          - dynamo.vllm
-          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
-          name: ""
-          resources: {}
-          workingDir: /workspace/examples/backends/vllm
-        nodeSelector:
-          nodeGroup: gpu-worker
-        tolerations:
-        - effect: NoSchedule
-          key: dedicated
-          operator: Equal
-          value: worker-workload
-        - effect: NoExecute
-          key: dedicated
-          operator: Equal
-          value: worker-workload
-      replicas: 1
-      resources:
-        limits:
-          gpu: "1"
-status:
-  conditions:
-  - lastTransitionTime: "2026-03-10T03:38:07Z"
-    message: All resources are ready
-    reason: all_resources_are_ready
-    status: "True"
-    type: Ready
-  services:
-    Frontend:
-      componentKind: PodClique
-      componentName: vllm-agg-0-frontend
-      readyReplicas: 1
-      replicas: 1
-      updatedReplicas: 1
-    VllmDecodeWorker:
-      componentKind: PodClique
-      componentName: vllm-agg-0-vllmdecodeworker
-      readyReplicas: 1
-      replicas: 1
-      updatedReplicas: 1
-  state: successful
-```
-
-### Workload Pods Created by Operator
-
-**Dynamo workload pods**
+**Workload Pods Created by Operator**
 ```
 $ kubectl get pods -n dynamo-workload -l nvidia.com/dynamo-graph-deployment-name -o wide
 NAME                                READY   STATUS    RESTARTS   AGE     IP             NODE                           NOMINATED NODE   READINESS GATES
-vllm-agg-0-frontend-kkmpd           1/1     Running   0          5m35s   10.0.222.55    ip-10-0-196-144.ec2.internal   <none>           <none>
-vllm-agg-0-vllmdecodeworker-s65j5   1/1     Running   0          5m35s   10.0.235.180   ip-10-0-171-111.ec2.internal   <none>           <none>
+vllm-agg-0-frontend-kkmpd           1/1     Running   0          5m35s   10.0.222.55    system-node-2   <none>           <none>
+vllm-agg-0-vllmdecodeworker-s65j5   1/1     Running   0          5m35s   10.0.235.180   gpu-node-1   <none>           <none>
 ```
-
-### PodCliques
 
 **PodCliques**
 ```
@@ -203,7 +94,7 @@ vllm-agg-0-frontend           5m36s
 vllm-agg-0-vllmdecodeworker   5m36s
 ```
 
-## Webhook Rejection Test
+### Webhook Rejection Test
 
 Submit an invalid DynamoGraphDeployment to verify the validating webhook
 actively rejects malformed resources.
@@ -216,3 +107,78 @@ Error from server (Forbidden): error when creating "STDIN": admission webhook "v
 Webhook correctly rejected the invalid resource.
 
 **Result: PASS** — Dynamo operator running, webhooks operational (rejection verified), CRDs registered, DynamoGraphDeployment reconciled with 2 healthy workload pod(s).
+
+---
+
+## Training: Kubeflow Trainer
+
+**Generated:** 2026-03-16 21:48:55 UTC
+
+### Kubeflow Trainer Health
+
+**Kubeflow Trainer deployments**
+```
+$ kubectl get deploy -n kubeflow
+NAME                                  READY   UP-TO-DATE   AVAILABLE   AGE
+jobset-controller                     1/1     1            1           13m
+kubeflow-trainer-controller-manager   1/1     1            1           13m
+```
+
+**Kubeflow Trainer pods**
+```
+$ kubectl get pods -n kubeflow -o wide
+NAME                                                   READY   STATUS      RESTARTS      AGE   IP             NODE                                                 NOMINATED NODE   READINESS GATES
+jobset-controller-75f94fdfb7-r7lqd                     1/1     Running     1 (13m ago)   13m   10.100.1.52    system-node-1       <none>           <none>
+kubeflow-trainer-controller-manager-677b98f74f-8dvgj   1/1     Running     1 (13m ago)   13m   10.100.5.60    system-node-2       <none>           <none>
+pytorch-mnist-node-0-0-9wkj5                           0/1     Completed   0             12m   10.100.2.169   gpu-node-1   <none>           <none>
+```
+
+### Custom Resource Definitions
+
+**Kubeflow Trainer CRDs**
+```
+clustertrainingruntimes.trainer.kubeflow.org                2026-03-16T20:45:34Z
+trainingruntimes.trainer.kubeflow.org                       2026-03-16T20:45:36Z
+trainjobs.trainer.kubeflow.org                              2026-03-16T20:45:36Z
+```
+
+### Webhooks
+
+**Validating webhooks**
+```
+$ kubectl get validatingwebhookconfigurations validator.trainer.kubeflow.org
+NAME                             WEBHOOKS   AGE
+validator.trainer.kubeflow.org   3          13m
+```
+
+**Webhook endpoint verification**
+```
+NAME                                  ENDPOINTS                           AGE
+jobset-metrics-service                10.100.1.52:8443                    13m
+jobset-webhook-service                10.100.1.52:9443                    13m
+kubeflow-trainer-controller-manager   10.100.5.60:8080,10.100.5.60:9443   13m
+pytorch-mnist                         10.100.2.169                        12m
+```
+
+### ClusterTrainingRuntimes
+
+**ClusterTrainingRuntimes**
+```
+$ kubectl get clustertrainingruntimes
+NAME                AGE
+torch-distributed   13m
+```
+
+### Webhook Rejection Test
+
+Submit an invalid TrainJob (referencing a non-existent runtime) to verify the
+validating webhook actively rejects malformed resources.
+
+**Invalid TrainJob rejection**
+```
+Error from server (Forbidden): error when creating "STDIN": admission webhook "validator.trainjob.trainer.kubeflow.org" denied the request: spec.RuntimeRef: Invalid value: {"name":"nonexistent-runtime","apiGroup":"trainer.kubeflow.org","kind":"ClusterTrainingRuntime"}: ClusterTrainingRuntime.trainer.kubeflow.org "nonexistent-runtime" not found: specified clusterTrainingRuntime must be created before the TrainJob is created
+```
+
+Webhook correctly rejected the invalid resource.
+
+**Result: PASS** — Kubeflow Trainer running, webhooks operational (rejection verified), 3 CRDs registered.

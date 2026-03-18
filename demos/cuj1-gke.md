@@ -145,12 +145,14 @@ kubectl get pods -n $NAMESPACE -o wide -w
 kubectl exec nccl-test-host-1 -n $NAMESPACE -c nccl-test -- \
   /scripts/allreduce.sh nccl-host-1 nccl-host-2
 
-# Expected: ~335 GB/s busBW at 8 GB (AllReduce), ~87 GB/s avg
+# Expected: ~340 GB/s busBW at 16 GB (AllReduce), ~100 GB/s avg
 # Clean up
 kubectl delete ns $NAMESPACE
 ```
 
-### Option 2: Using standalone demo manifest
+### Option 2: Using standalone demo manifests
+
+**NRI profile (recommended, no hostNetwork):**
 
 ```shell
 kubectl create ns nccl-test
@@ -163,10 +165,11 @@ kubectl get pods -n nccl-test -o wide -w
 kubectl exec nccl-test-host-1 -n nccl-test -c nccl-test -- bash -c '
   /scripts/init_ssh.sh nccl-host-1 nccl-host-2 &&
   pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd &&
-  BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="/usr/local/nvidia/lib64" \
-    LD_LIBRARY_PATH="/usr/local/nvidia/lib64" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
+  DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_reduce_perf NHOSTS=2 \
+    NCCL_LIB_DIR="/usr/local/nvidia/lib64" LD_LIBRARY_PATH="/usr/local/nvidia/lib64" \
+    /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
 
-# Expected: ~335 GB/s busBW at 8 GB (AllReduce), ~87 GB/s avg
+# Expected: ~340 GB/s busBW at 16 GB (AllReduce), ~100 GB/s avg
 # Clean up
 kubectl delete ns nccl-test
 ```
@@ -174,27 +177,24 @@ kubectl delete ns nccl-test
 ### Prerequisites
 
 - GKE cluster with multi-NIC networking (8 GPU NICs per a3-megagpu-8g node)
+- GPU node pool must **not** have a gVNIC additional network (it takes a GPU NIC PCI slot)
 - `Network` + `GKENetworkParamSet` CRs configured for GPU NICs (infrastructure, cluster-specific)
 - `nccl-tcpxo-installer` DaemonSet deployed on GPU nodes (included in AICR bundle)
 - `nri-device-injector` DaemonSet deployed on GPU nodes (included in AICR bundle)
-- Without multi-NIC, NCCL falls back to TCP (~4 GB/s vs ~335 GB/s with TCPXO)
+- Without multi-NIC, NCCL falls back to TCP (~4 GB/s vs ~340 GB/s with TCPXO)
 
 ### TCPXO Runtime Requirements
 
 Each workload pod that needs GPUDirect TCPXO must include a `tcpxo-daemon` sidecar container.
+The NRI profile is used (no `hostNetwork`, no `privileged` for tcpxo-daemon):
 
-**Recommended profile** (validated on GKE 1.35 / a3-megagpu-8g):
-- `hostNetwork: true` — required for PCI sysfs visibility
-- `privileged: false` — not needed with NRI device injection
-- NRI annotations on the pod: `devices.gke.io/container.tcpxo-daemon` (GPU devices) and `networking.gke.io/interfaces` (multi-NIC mapping with cluster-specific network names)
-- `securityContext.capabilities: [NET_ADMIN, NET_BIND_SERVICE]` on the tcpxo-daemon container
+- `hostNetwork: false` — preserves pod networking (DNS, network policies)
+- `privileged: false` — tcpxo-daemon uses only `CAP_NET_ADMIN` and `CAP_NET_BIND_SERVICE`
+- Host `/sys` mounted as `/hostsysfs` and `/proc/sys` as `/hostprocsysfs` for PCI sysfs visibility
+- NRI annotations: `devices.gke.io/container.tcpxo-daemon` (GPU devices) and `networking.gke.io/interfaces` (multi-NIC mapping with cluster-specific network names)
 - Requires NRI device injector DaemonSet deployed on GPU nodes
 
-**Fallback profile** (if NRI injector is not available):
-- `hostNetwork: true` + `privileged: true`
-- No annotations needed
-
-> **Known issue:** Without `hostNetwork: true`, the TCPXO daemon cannot enumerate all GPUs via PCI sysfs — the container runtime restricts sysfs visibility, causing the daemon to detect fewer GPUs in the PCI tree than CUDA reports, and exit. NRI annotations provide `/dev/nvidia*` device access but do not restore full PCI sysfs visibility. This is a GKE container runtime limitation.
+See [GKE TCPXO Networking](../docs/integrator/gke-tcpxo-networking.md) for details and troubleshooting.
 
 ### Understanding the results
 
@@ -202,8 +202,15 @@ Each pod runs two containers: a `tcpxo-daemon` sidecar (manages GPUDirect TCPX d
 
 | Metric | Without TCPXO | With TCPXO |
 |--------|--------------|------------|
-| AllReduce busBW (8 GB) | ~4 GB/s | ~335 GB/s |
-| AllReduce avg busBW | ~4 GB/s | ~87 GB/s |
+| AllReduce busBW (16 GB) | ~4 GB/s | ~340 GB/s |
+| AllReduce avg busBW | ~4 GB/s | ~100 GB/s |
+
+> **Note:** The NCCL test container image must match the cluster's installed TCPXO plugin version. Check with:
+> ```shell
+> kubectl get ds nccl-tcpxo-installer -n kube-system \
+>   -o jsonpath='{.spec.template.spec.containers[?(@.name=="nccl-tcpxo-installer")].image}'
+> ```
+> Update the `nccl-plugin-gpudirecttcpx-dev` image tag in the demo manifest to match.
 
 ## Success
 

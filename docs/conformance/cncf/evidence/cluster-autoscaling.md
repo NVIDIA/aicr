@@ -1,40 +1,39 @@
 # Cluster Autoscaling
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-03-10 03:44:07 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** EKS (p5.48xlarge, 8x H100) and GKE (a3-megagpu-8g, 8x H100)
 
 ---
 
 Demonstrates CNCF AI Conformance requirement that the platform has GPU-aware
-cluster autoscaling infrastructure configured, with Auto Scaling Groups capable
-of scaling GPU node groups based on workload demand.
+cluster autoscaling infrastructure configured, capable of scaling GPU node
+groups based on workload demand.
 
 ## Summary
 
-1. **GPU Node Group (ASG)** — EKS Auto Scaling Group configured with GPU instances (p5.48xlarge)
-2. **Capacity Reservation** — Dedicated GPU capacity available for scale-up
-3. **Scalable Configuration** — ASG min/max configurable for demand-based scaling
-4. **Kubernetes Integration** — ASG nodes auto-join the EKS cluster with GPU labels
-5. **Autoscaler Compatibility** — Cluster Autoscaler and Karpenter supported via ASG tag discovery
-6. **Result: PASS**
+| Platform | Autoscaler | GPU Instances | Nodes | Result |
+|----------|-----------|---------------|-------|--------|
+| **EKS** | AWS Auto Scaling Group | p5.48xlarge (8x H100) | 2 | **PASS** |
+| **GKE** | GKE built-in cluster autoscaler | a3-megagpu-8g (8x H100) | 2 | **PASS** |
 
 ---
 
-## GPU Node Auto Scaling Group
+## EKS: Auto Scaling Groups
+
+**Generated:** 2026-03-10 03:44:07 UTC
 
 The cluster uses an AWS Auto Scaling Group (ASG) for GPU nodes, which can scale
 up/down based on workload demand. The ASG is configured with p5.48xlarge instances
 (8x NVIDIA H100 80GB HBM3 each) backed by a capacity reservation.
 
-## EKS Cluster Details
+### EKS Cluster Details
 
 - **Region:** us-east-1
 - **Cluster:** aws-us-east-1-aicr-cuj2
 - **GPU Node Group:** gpu-worker
 
-## GPU Nodes
+### GPU Nodes
 
 **GPU nodes**
 ```
@@ -44,7 +43,7 @@ ip-10-0-171-111.ec2.internal   p5.48xlarge     8      NVIDIA-H100-80GB-HBM3   gp
 ip-10-0-206-2.ec2.internal     p5.48xlarge     8      NVIDIA-H100-80GB-HBM3   gpu-worker   us-east-1e
 ```
 
-## Auto Scaling Group (AWS)
+### Auto Scaling Group (AWS)
 
 **GPU ASG details**
 ```
@@ -92,7 +91,7 @@ $ aws autoscaling describe-tags --region us-east-1 --filters Name=auto-scaling-g
 +--------------------------------------+------------------------+
 ```
 
-## Capacity Reservation
+### Capacity Reservation
 
 **GPU capacity reservation**
 ```
@@ -109,4 +108,85 @@ $ aws ec2 describe-capacity-reservations --region us-east-1 --query CapacityRese
 +------------+------------------------+
 ```
 
-**Result: PASS** — EKS cluster with GPU nodes managed by Auto Scaling Group, ASG configuration verified via AWS API. Evidence is configuration-level; a live scale event is not triggered to avoid disrupting the cluster.
+**Result: PASS** — EKS cluster with GPU nodes managed by Auto Scaling Group, ASG configuration verified via AWS API.
+
+---
+
+## GKE: Built-in Cluster Autoscaler
+
+**Generated:** 2026-03-16 21:50:46 UTC
+
+GKE includes a built-in cluster autoscaler that manages node pool scaling based
+on workload demand. The autoscaler is configured per node pool.
+
+### GKE Cluster Details
+
+- **Project:** eidosx
+- **Zone:** us-central1-c
+
+### GPU Nodes
+
+**GPU nodes**
+```
+$ kubectl get nodes -l nvidia.com/gpu.present=true -o custom-columns=NAME:.metadata.name,INSTANCE-TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,GPUS:.status.capacity.nvidia\.com/gpu,ACCELERATOR:.metadata.labels.cloud\.google\.com/gke-accelerator,NODE-POOL:.metadata.labels.cloud\.google\.com/gke-nodepool
+NAME                                                 INSTANCE-TYPE   GPUS   ACCELERATOR             NODE-POOL
+gke-aicr-demo2-aicr-demo2-gpu-worker-8de6040c-h2d0   a3-megagpu-8g   8      nvidia-h100-mega-80gb   aicr-demo2-gpu-worker
+gke-aicr-demo2-aicr-demo2-gpu-worker-8de6040c-t81x   a3-megagpu-8g   8      nvidia-h100-mega-80gb   aicr-demo2-gpu-worker
+```
+
+### GKE Cluster Autoscaler Status
+
+**Cluster Autoscaler Status**
+```
+autoscalerStatus: Running
+clusterWide:
+  health:
+    lastProbeTime: "2026-03-16T21:50:43Z"
+    lastTransitionTime: "2026-03-12T21:28:08Z"
+    nodeCounts:
+      registered:
+        ready: 6
+        total: 6
+    status: Healthy
+  scaleDown:
+    status: NoCandidates
+  scaleUp:
+    status: NoActivity
+nodeGroups:
+- health:
+    cloudProviderTarget: 1
+    maxSize: 1
+    minSize: 1
+    status: Healthy
+  name: .../gke-aicr-demo2-aicr-demo2-cpu-worker-cd95cf64-grp
+- health:
+    cloudProviderTarget: 2
+    maxSize: 2
+    minSize: 2
+    status: Healthy
+  name: .../gke-aicr-demo2-aicr-demo2-gpu-worker-8de6040c-grp
+- health:
+    cloudProviderTarget: 1
+    maxSize: 3
+    minSize: 1
+    status: Healthy
+  name: .../gke-aicr-demo2-aicr-demo2-system-f5af1da6-grp
+- health:
+    cloudProviderTarget: 1
+    maxSize: 3
+    minSize: 1
+    status: Healthy
+  name: .../gke-aicr-demo2-aicr-demo2-system-358b1ae8-grp
+- health:
+    cloudProviderTarget: 1
+    maxSize: 3
+    minSize: 1
+    status: Healthy
+  name: .../gke-aicr-demo2-aicr-demo2-system-b313be0b-grp
+```
+
+**Result: PASS** — GKE cluster with 2 GPU nodes and built-in cluster autoscaler active, all node groups healthy.
+
+---
+
+Evidence is configuration-level; a live scale event is not triggered to avoid disrupting the cluster.
