@@ -80,6 +80,12 @@ make validate-local RECIPE=recipe.yaml  # Full pipeline in Kind
 7. **Context timeouts** — All I/O operations need context with timeout
 8. **Check context in loops** — Always check `ctx.Done()` in long-running operations
 
+## Review Output Links
+
+When providing review findings, use global GitHub file links by default
+(`https://github.com/<org>/<repo>/blob/<sha>/<path>#L<line>`) instead of local
+workspace paths. Use local file paths only when explicitly requested.
+
 ## Git Configuration
 
 - Commit to `main` branch (not `master`)
