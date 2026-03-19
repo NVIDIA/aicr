@@ -327,6 +327,23 @@ func buildGKENetworkInterfacesAnnotation(gpuNICs []string) string {
 	return "[" + strings.Join(interfaces, ",") + "]"
 }
 
+// buildNRIDeviceAnnotation builds the devices.gke.io/container.tcpxo-daemon
+// annotation value for NRI device injection. Lists /dev/nvidia0..N-1 plus
+// the control and DMA devices the tcpxo-daemon needs without privileged mode.
+// Each line after the first is indented with 20 spaces to match the YAML
+// template indentation at the ${NRI_DEVICE_ANNOTATION} placeholder.
+func buildNRIDeviceAnnotation(gpuCount int) string {
+	const indent = "                    " // 20 spaces — matches template position
+	lines := make([]string, 0, gpuCount+3)
+	for i := range gpuCount {
+		lines = append(lines, fmt.Sprintf("- path: /dev/nvidia%d", i))
+	}
+	lines = append(lines, "- path: /dev/nvidiactl")
+	lines = append(lines, "- path: /dev/nvidia-uvm")
+	lines = append(lines, "- path: /dev/dmabuf_import_helper")
+	return strings.Join(lines, "\n"+indent)
+}
+
 // applyNCCLResources applies the per-platform TrainingRuntime and shared TrainJob
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime.yaml (per-platform, contains all config)
@@ -355,6 +372,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 				fmt.Sprintf("expected 8 GPU NIC networks, found %d — cluster may not have multi-NIC networking configured", len(gpuNICs)))
 		}
 		templateData["GKE_NETWORK_INTERFACES"] = buildGKENetworkInterfacesAnnotation(gpuNICs)
+		templateData["NRI_DEVICE_ANNOTATION"] = buildNRIDeviceAnnotation(config.GPUCountPerNode)
 		slog.Info("Discovered GKE GPU NIC networks", "count", len(gpuNICs), "networks", gpuNICs)
 	}
 
