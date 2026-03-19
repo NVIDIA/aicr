@@ -33,6 +33,9 @@ on:
       - '.github/workflows/kwok-recipes.yaml'
       - '.github/actions/kwok-test/**'
       - '!**.md'
+  schedule:
+    # Nightly at 03:00 UTC — Tier 3 full matrix backstop
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       recipe:
@@ -43,64 +46,183 @@ on:
 permissions:
   contents: read
 
+# PR concurrency: cancel in-progress runs for the same PR
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   discover:
     name: Discover Recipes
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 5
     outputs:
-      recipes: ${{ steps.find.outputs.recipes }}
+      tier1: ${{ steps.classify.outputs.tier1 }}
+      tier2: ${{ steps.classify.outputs.tier2 }}
+      tier3: ${{ steps.classify.outputs.tier3 }}
     steps:
-      - name: Checkout overlays
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
-          sparse-checkout: |
-            recipes/overlays
-          sparse-checkout-cone-mode: false
+          # Full checkout needed for diff-aware Tier 2 discovery
+          fetch-depth: 0
 
-      - name: Find testable recipes
-        id: find
+      - name: Classify recipes into tiers
+        id: classify
         shell: bash
         run: |
           set -euo pipefail
 
-          # If a specific recipe was requested via workflow_dispatch, use it
+          # --- workflow_dispatch: test exactly the requested recipe ---
           if [[ -n "${{ github.event.inputs.recipe }}" ]]; then
-            recipes=$(jq -nc '[$recipe]' --arg recipe "${{ github.event.inputs.recipe }}")
-            echo "recipes=${recipes}" >> "$GITHUB_OUTPUT"
-            echo "Using specific recipe: ${{ github.event.inputs.recipe }}"
+            single=$(jq -nc '[$r]' --arg r "${{ github.event.inputs.recipe }}")
+            echo "tier1=${single}" >> "$GITHUB_OUTPUT"
+            echo "tier2=[]"       >> "$GITHUB_OUTPUT"
+            echo "tier3=[]"       >> "$GITHUB_OUTPUT"
+            echo "Manual dispatch: ${{ github.event.inputs.recipe }}"
             exit 0
           fi
 
-          # Scan overlays for recipes with a cloud service criteria
-          recipes="[]"
+          # --- Scan all overlays and classify ---
+          tier1="[]"   # generic overlays (no accelerator specialization)
+          all="[]"     # every testable overlay
+
           for overlay in recipes/overlays/*.yaml; do
             name=$(basename "$overlay" .yaml)
-            # yq is pre-installed on ubuntu-latest runners
             service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
-            if [[ -n "$service" && "$service" != "null" && "$service" != "any" ]]; then
-              recipes=$(echo "$recipes" | jq -c --arg r "$name" '. + [$r]')
+
+            # Skip overlays without a concrete service
+            if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+              continue
+            fi
+
+            all=$(echo "$all" | jq -c --arg r "$name" '. + [$r]')
+
+            accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
+            if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
+              tier1=$(echo "$tier1" | jq -c --arg r "$name" '. + [$r]')
             fi
           done
 
-          echo "recipes=${recipes}" >> "$GITHUB_OUTPUT"
-          echo "Discovered $(echo "$recipes" | jq 'length') recipe(s): $(echo "$recipes" | jq -c '.')"
+          # --- Tier 2: diff-aware accelerator tests (PR only) ---
+          tier2="[]"
 
-  test:
-    name: KWOK (${{ matrix.recipe }})
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base_ref="${{ github.event.pull_request.base.sha }}"
+            head_ref="${{ github.event.pull_request.head.sha }}"
+            changed_files=$(git diff --name-only "${base_ref}..${head_ref}" 2>/dev/null || true)
+
+            # If registry.yaml or base.yaml changed, skip Tier 2 — Tier 3 catches it
+            skip_tier2=false
+            if echo "$changed_files" | grep -qE '^recipes/(registry\.yaml|overlays/base\.yaml)$'; then
+              skip_tier2=true
+              echo "registry.yaml or base.yaml changed — Tier 2 skipped (Tier 3 covers full matrix)"
+            fi
+
+            if [[ "$skip_tier2" == "false" ]]; then
+              # Build set of affected accelerator-specific overlays
+              for overlay in recipes/overlays/*.yaml; do
+                name=$(basename "$overlay" .yaml)
+                service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
+                accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
+
+                # Only accelerator-specific overlays belong in Tier 2
+                if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+                  continue
+                fi
+                if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
+                  continue
+                fi
+
+                include=false
+
+                # Rule 1: overlay file itself changed
+                if echo "$changed_files" | grep -qF "recipes/overlays/${name}.yaml"; then
+                  include=true
+                fi
+
+                # Rule 2: check if any ancestor overlay in the base chain changed
+                if [[ "$include" == "false" ]]; then
+                  current="$overlay"
+                  while true; do
+                    parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
+                    if [[ -z "$parent" || "$parent" == "null" ]]; then
+                      break
+                    fi
+                    if echo "$changed_files" | grep -qF "recipes/overlays/${parent}.yaml"; then
+                      include=true
+                      break
+                    fi
+                    current="recipes/overlays/${parent}.yaml"
+                    if [[ ! -f "$current" ]]; then
+                      break
+                    fi
+                  done
+                fi
+
+                # Rule 3: a component values file referenced by this overlay changed
+                if [[ "$include" == "false" ]]; then
+                  # Collect valuesFile references from this overlay and its base chain
+                  values_files=""
+                  current="$overlay"
+                  while true; do
+                    vf=$(yq eval '.spec.componentRefs[].valuesFile // ""' "$current" 2>/dev/null | grep -v '^$' || true)
+                    if [[ -n "$vf" ]]; then
+                      values_files="${values_files}"$'\n'"${vf}"
+                    fi
+                    parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
+                    if [[ -z "$parent" || "$parent" == "null" ]]; then
+                      break
+                    fi
+                    current="recipes/overlays/${parent}.yaml"
+                    if [[ ! -f "$current" ]]; then
+                      break
+                    fi
+                  done
+
+                  # Check if any referenced values file changed
+                  for vf in $values_files; do
+                    # valuesFile paths are relative to recipes/
+                    if echo "$changed_files" | grep -qF "recipes/${vf}"; then
+                      include=true
+                      break
+                    fi
+                  done
+                fi
+
+                if [[ "$include" == "true" ]]; then
+                  tier2=$(echo "$tier2" | jq -c --arg r "$name" '. + [$r]')
+                fi
+              done
+            fi
+          fi
+
+          # --- Tier 3: full matrix (all testable overlays) ---
+          tier3="$all"
+
+          # --- Output ---
+          echo "tier1=${tier1}" >> "$GITHUB_OUTPUT"
+          echo "tier2=${tier2}" >> "$GITHUB_OUTPUT"
+          echo "tier3=${tier3}" >> "$GITHUB_OUTPUT"
+
+          echo "Tier 1 (generic):      $(echo "$tier1" | jq 'length') recipe(s)"
+          echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s)"
+          echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s)"
+
+  # ── Tier 1: PR gate — generic overlays (always runs on PR + push) ──
+  test-tier1:
+    name: 'Tier 1: ${{ matrix.recipe }}'
     needs: discover
-    if: ${{ needs.discover.outputs.recipes != '[]' && needs.discover.outputs.recipes != '' }}
+    if: >-
+      needs.discover.outputs.tier1 != '[]' &&
+      needs.discover.outputs.tier1 != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        recipe: ${{ fromJSON(needs.discover.outputs.recipes) }}
+        recipe: ${{ fromJSON(needs.discover.outputs.tier1) }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -123,9 +245,87 @@ jobs:
           yq_version: ${{ steps.versions.outputs.yq }}
           kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
 
+  # ── Tier 2: diff-aware accelerator tests (PR only, conditional) ──
+  test-tier2:
+    name: 'Tier 2: ${{ matrix.recipe }}'
+    needs: discover
+    if: >-
+      github.event_name == 'pull_request' &&
+      needs.discover.outputs.tier2 != '[]' &&
+      needs.discover.outputs.tier2 != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.discover.outputs.tier2) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run KWOK test
+        uses: ./.github/actions/kwok-test
+        with:
+          recipe: ${{ matrix.recipe }}
+          go_version: ${{ steps.versions.outputs.go }}
+          kind_version: ${{ steps.versions.outputs.kind }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          kwok_version: ${{ steps.versions.outputs.kwok }}
+          kubectl_version: ${{ steps.versions.outputs.kubectl }}
+          yq_version: ${{ steps.versions.outputs.yq }}
+          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
+
+  # ── Tier 3: full matrix (push to main + nightly schedule) ──
+  # Per ADR-003: separate concurrency group per SHA so successive merges
+  # to main never cancel in-flight Tier 3 runs.
+  test-tier3:
+    name: 'Tier 3: ${{ matrix.recipe }}'
+    needs: discover
+    concurrency:
+      group: kwok-tier3-${{ github.sha }}
+      cancel-in-progress: false
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'schedule') &&
+      needs.discover.outputs.tier3 != '[]' &&
+      needs.discover.outputs.tier3 != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        recipe: ${{ fromJSON(needs.discover.outputs.tier3) }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Run KWOK test
+        uses: ./.github/actions/kwok-test
+        with:
+          recipe: ${{ matrix.recipe }}
+          go_version: ${{ steps.versions.outputs.go }}
+          kind_version: ${{ steps.versions.outputs.kind }}
+          helm_version: ${{ steps.versions.outputs.helm }}
+          kwok_version: ${{ steps.versions.outputs.kwok }}
+          kubectl_version: ${{ steps.versions.outputs.kubectl }}
+          yq_version: ${{ steps.versions.outputs.yq }}
+          kind_node_image: ${{ steps.versions.outputs.kind_node_image }}
+
+  # ── Summary: aggregate all tiers ──
   summary:
     name: KWOK Test Summary
-    needs: test
+    needs: [test-tier1, test-tier2, test-tier3]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -135,14 +335,39 @@ jobs:
           echo "## KWOK Cluster Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ needs.test.result }}" == "success" ]]; then
-            echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.test.result }}" == "skipped" ]]; then
-            echo "No recipes to test" >> $GITHUB_STEP_SUMMARY
-          elif [[ "${{ needs.test.result }}" == "cancelled" ]]; then
-            echo "Recipe validations were cancelled" >> $GITHUB_STEP_SUMMARY
-            exit 1
-          else
-            echo "Some recipe validations failed - check job logs" >> $GITHUB_STEP_SUMMARY
+          tier1="${{ needs.test-tier1.result }}"
+          tier2="${{ needs.test-tier2.result }}"
+          tier3="${{ needs.test-tier3.result }}"
+
+          echo "| Tier | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier 1 (generic) | ${tier1} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier 2 (diff-aware) | ${tier2} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tier 3 (full matrix) | ${tier3} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          failed=false
+
+          # Tier 1 must pass (unless skipped on schedule-only with no recipes)
+          if [[ "$tier1" == "failure" || "$tier1" == "cancelled" ]]; then
+            echo "Tier 1 (generic) failed or was cancelled" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          # Tier 2 must pass when it runs (skipped is OK — means no diff-affected overlays)
+          if [[ "$tier2" == "failure" || "$tier2" == "cancelled" ]]; then
+            echo "Tier 2 (diff-aware) failed or was cancelled" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          # Tier 3 must pass on push/schedule (skipped is OK on PR)
+          if [[ "$tier3" == "failure" || "$tier3" == "cancelled" ]]; then
+            echo "Tier 3 (full matrix) failed or was cancelled" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
+
+          if [[ "$failed" == "true" ]]; then
             exit 1
           fi
+
+          echo "All recipe validations passed" >> $GITHUB_STEP_SUMMARY
