@@ -516,6 +516,28 @@ func TestWaitForCompletionJobNotFound(t *testing.T) {
 	}
 }
 
+func TestImagePullPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		image  string
+		expect corev1.PullPolicy
+	}{
+		{"latest tag uses Always", "ghcr.io/nvidia/aicr-validators/conformance:latest", corev1.PullAlways},
+		{"versioned tag uses IfNotPresent", "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0", corev1.PullIfNotPresent},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entry := testEntry()
+			entry.Image = tt.image
+			d := &Deployer{entry: entry}
+			got := d.imagePullPolicy()
+			if got != tt.expect {
+				t.Errorf("imagePullPolicy() = %q, want %q", got, tt.expect)
+			}
+		})
+	}
+}
+
 func TestWaitForCompletionTimeout(t *testing.T) {
 	ns := createUniqueNamespace(t)
 

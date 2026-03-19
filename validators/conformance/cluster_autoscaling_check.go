@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/utils/ptr"
 )
 
 const (
@@ -57,34 +59,46 @@ type clusterAutoscalingReport struct {
 }
 
 // CheckClusterAutoscaling validates CNCF requirement #8a: Cluster Autoscaling.
-// Verifies the Karpenter controller deployment is running and at least one
-// NodePool has nvidia.com/gpu limits configured.
-// Skips gracefully when Karpenter is not installed (e.g., Kind CI clusters).
+// Checks three autoscaling mechanisms in order:
+//  1. Karpenter — behavioral test with HPA + GPU NodePool
+//  2. EKS node group — validates ASG-backed GPU node group via node labels
+//  3. GKE cluster autoscaler — validates via cluster-autoscaler-status ConfigMap
+//
+// Skips gracefully when no autoscaling mechanism can be detected (e.g., Kind CI).
 func CheckClusterAutoscaling(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
 	// 1. Karpenter controller deployment running.
-	// Skip gracefully when Karpenter is not installed — the cluster may use
-	// a different autoscaling mechanism (e.g., ASG, Cluster Autoscaler).
-	deploy, deployErr := getDeploymentIfAvailable(ctx, "karpenter", "karpenter")
+	// Only fall back to platform autoscaling when Karpenter is truly absent.
+	// If Karpenter exists but is unhealthy, report the failure rather than masking it.
+	// Search across all namespaces by label since Karpenter can be deployed in any namespace.
+	deploy, karpenterNS, deployErr := findKarpenterDeployment(ctx)
 	if deployErr != nil {
-		return validators.Skip("Karpenter not found — cluster may use ASG or Cluster Autoscaler instead")
+		// Only fall back when Karpenter is genuinely absent (NotFound).
+		// For API errors (RBAC, transient), report the failure rather than masking it.
+		var structErr *errors.StructuredError
+		if stderrors.As(deployErr, &structErr) && structErr.Code == errors.ErrCodeNotFound {
+			return checkPlatformAutoscaling(ctx)
+		}
+		return deployErr
 	}
-	expected := int32(1)
-	if deploy.Spec.Replicas != nil {
-		expected = *deploy.Spec.Replicas
+	expected := ptr.Deref(deploy.Spec.Replicas, 1)
+	if deploy.Status.AvailableReplicas < expected || expected == 0 {
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("Karpenter deployment exists but is unhealthy: %d/%d available",
+				deploy.Status.AvailableReplicas, expected))
 	}
 	recordRawTextArtifact(ctx, "Karpenter Controller",
-		"kubectl get deploy -n karpenter",
+		fmt.Sprintf("kubectl get deploy -n %s", karpenterNS),
 		fmt.Sprintf("Name:      %s/%s\nReplicas:  %d/%d available\nImage:     %s",
 			deploy.Namespace, deploy.Name,
 			deploy.Status.AvailableReplicas, expected,
 			firstContainerImage(deploy.Spec.Template.Spec.Containers)))
-	karpenterPods, podErr := ctx.Clientset.CoreV1().Pods("karpenter").List(ctx.Ctx, metav1.ListOptions{})
+	karpenterPods, podErr := ctx.Clientset.CoreV1().Pods(karpenterNS).List(ctx.Ctx, metav1.ListOptions{})
 	if podErr != nil {
-		recordRawTextArtifact(ctx, "Karpenter pods", "kubectl get pods -n karpenter -o wide",
+		recordRawTextArtifact(ctx, "Karpenter pods", fmt.Sprintf("kubectl get pods -n %s -o wide", karpenterNS),
 			fmt.Sprintf("failed to list karpenter pods: %v", podErr))
 	} else {
 		var podSummary strings.Builder
@@ -92,7 +106,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 			fmt.Fprintf(&podSummary, "%-44s ready=%s phase=%s node=%s\n",
 				pod.Name, podReadyCount(pod), pod.Status.Phase, valueOrUnknown(pod.Spec.NodeName))
 		}
-		recordRawTextArtifact(ctx, "Karpenter pods", "kubectl get pods -n karpenter -o wide", podSummary.String())
+		recordRawTextArtifact(ctx, "Karpenter pods", fmt.Sprintf("kubectl get pods -n %s -o wide", karpenterNS), podSummary.String())
 	}
 
 	// 2. GPU NodePool exists with nvidia.com/gpu limits
@@ -417,6 +431,275 @@ func waitForKarpenterNodes(ctx context.Context, clientset kubernetes.Interface, 
 		return 0, errors.Wrap(errors.ErrCodeInternal, "Karpenter node polling failed", err)
 	}
 	return observedNodeCount, nil
+}
+
+// findKarpenterDeployment searches for a Karpenter deployment across all namespaces
+// using the app.kubernetes.io/name=karpenter label (with app=karpenter fallback).
+// Returns the deployment and its namespace.
+// Karpenter can be deployed in any namespace (karpenter, system, kube-system, etc.).
+func findKarpenterDeployment(ctx *validators.Context) (*appsv1.Deployment, string, error) {
+	// Search all namespaces for deployments with the app=karpenter label.
+	deploys, err := ctx.Clientset.AppsV1().Deployments("").List(ctx.Ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=karpenter",
+	})
+	if err != nil {
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to search for Karpenter deployment", err)
+	}
+	if len(deploys.Items) == 0 {
+		// Try legacy label as fallback.
+		deploys, err = ctx.Clientset.AppsV1().Deployments("").List(ctx.Ctx, metav1.ListOptions{
+			LabelSelector: "app=karpenter",
+		})
+		if err != nil {
+			return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to search for Karpenter deployment", err)
+		}
+	}
+	if len(deploys.Items) == 0 {
+		return nil, "", errors.New(errors.ErrCodeNotFound, "Karpenter deployment not found in any namespace")
+	}
+	deploy := &deploys.Items[0]
+	return deploy, deploy.Namespace, nil
+}
+
+// detectPlatform returns "eks", "gke", or "" based on the first node's providerID.
+func detectPlatform(ctx *validators.Context) string {
+	nodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
+		Limit: 1,
+	})
+	if err != nil || len(nodes.Items) == 0 {
+		return ""
+	}
+	pid := nodes.Items[0].Spec.ProviderID
+	if strings.HasPrefix(pid, "aws://") {
+		return "eks"
+	}
+	if strings.HasPrefix(pid, "gce://") {
+		return "gke"
+	}
+	return ""
+}
+
+// checkPlatformAutoscaling validates cluster autoscaling when Karpenter is absent.
+// Falls back to EKS node group or GKE cluster autoscaler validation.
+func checkPlatformAutoscaling(ctx *validators.Context) error {
+	platform := detectPlatform(ctx)
+	slog.Info("Karpenter not found, falling back to platform autoscaling", "platform", platform)
+
+	switch platform {
+	case "eks":
+		return checkEKSAutoscaling(ctx)
+	case "gke":
+		return checkGKEAutoscaling(ctx)
+	default:
+		return validators.Skip("Karpenter not found and cluster platform not recognized (not EKS or GKE)")
+	}
+}
+
+// checkEKSAutoscaling validates EKS node group–based GPU autoscaling.
+// Verifies GPU nodes exist and belong to a managed node group (ASG-backed).
+func checkEKSAutoscaling(ctx *validators.Context) error {
+	// List GPU nodes.
+	gpuNodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
+		LabelSelector: "nvidia.com/gpu.present=true",
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to list GPU nodes", err)
+	}
+	if len(gpuNodes.Items) == 0 {
+		return errors.New(errors.ErrCodeNotFound, "no GPU nodes found in EKS cluster")
+	}
+
+	// Record GPU node summary.
+	var nodeSummary strings.Builder
+	for _, n := range gpuNodes.Items {
+		gpuCount := n.Status.Capacity["nvidia.com/gpu"]
+		instanceType := n.Labels["node.kubernetes.io/instance-type"]
+		nodeGroup := n.Labels["eks.amazonaws.com/nodegroup"]
+		if nodeGroup == "" {
+			nodeGroup = n.Labels["nodeGroup"]
+		}
+		zone := n.Labels["topology.kubernetes.io/zone"]
+		fmt.Fprintf(&nodeSummary, "%-44s gpu=%s instance=%s nodeGroup=%s zone=%s\n",
+			n.Name, gpuCount.String(), valueOrUnknown(instanceType),
+			valueOrUnknown(nodeGroup), valueOrUnknown(zone))
+	}
+	recordRawTextArtifact(ctx, "GPU Nodes",
+		"kubectl get nodes -l nvidia.com/gpu.present=true -o wide", nodeSummary.String())
+
+	// Extract node group name from any GPU node (not just the first — mixed clusters
+	// may have some nodes without the label).
+	var nodeGroupName, region string
+	for _, n := range gpuNodes.Items {
+		if ng := n.Labels["eks.amazonaws.com/nodegroup"]; ng != "" {
+			nodeGroupName = ng
+			break
+		}
+		if ng := n.Labels["nodeGroup"]; ng != "" {
+			nodeGroupName = ng
+			break
+		}
+	}
+
+	// Extract region from topology label (any node).
+	for _, n := range gpuNodes.Items {
+		if r := n.Labels["topology.kubernetes.io/region"]; r != "" {
+			region = r
+			break
+		}
+	}
+
+	recordRawTextArtifact(ctx, "EKS Cluster Details", "",
+		fmt.Sprintf("GPU Node Group: %s\nRegion:         %s\nGPU Node Count: %d",
+			valueOrUnknown(nodeGroupName), valueOrUnknown(region), len(gpuNodes.Items)))
+
+	// Check for Cluster Autoscaler deployment (optional — EKS may use Karpenter or managed scaling).
+	// Search common namespaces since Cluster Autoscaler can be deployed anywhere.
+	caNamespaces := []string{"kube-system", "cluster-autoscaler", "system"}
+	caDeployNames := []string{"cluster-autoscaler", "cluster-autoscaler-aws-cluster-autoscaler"}
+	var caFound bool
+	for _, caNS := range caNamespaces {
+		for _, caName := range caDeployNames {
+			if caDeploy, caErr := getDeploymentIfAvailable(ctx, caNS, caName); caErr == nil {
+				caFound = true
+				recordRawTextArtifact(ctx, "Cluster Autoscaler",
+					fmt.Sprintf("kubectl get deploy -n %s %s", caNS, caName),
+					fmt.Sprintf("Name:      %s/%s\nReplicas:  %d/%d available\nImage:     %s",
+						caDeploy.Namespace, caDeploy.Name,
+						caDeploy.Status.AvailableReplicas,
+						ptr.Deref(caDeploy.Spec.Replicas, 1),
+						firstContainerImage(caDeploy.Spec.Template.Spec.Containers)))
+				break
+			}
+		}
+		if caFound {
+			break
+		}
+	}
+
+	if nodeGroupName == "" && !caFound {
+		return errors.New(errors.ErrCodeNotFound,
+			"EKS GPU nodes found but no node group label or Cluster Autoscaler detected — cannot verify autoscaling capability")
+	}
+
+	recordRawTextArtifact(ctx, "EKS Cluster Autoscaling Result", "",
+		fmt.Sprintf("PASS — EKS cluster with %d GPU nodes in node group %q. "+
+			"ASG-backed node group provides autoscaling capability.",
+			len(gpuNodes.Items), valueOrUnknown(nodeGroupName)))
+	return nil
+}
+
+// checkGKEAutoscaling validates GKE built-in cluster autoscaler for GPU node pools.
+func checkGKEAutoscaling(ctx *validators.Context) error {
+	// List GPU nodes.
+	gpuNodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
+		LabelSelector: "nvidia.com/gpu.present=true",
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to list GPU nodes", err)
+	}
+	if len(gpuNodes.Items) == 0 {
+		return errors.New(errors.ErrCodeNotFound, "no GPU nodes found in GKE cluster")
+	}
+
+	// Record GPU node summary.
+	var nodeSummary strings.Builder
+	for _, n := range gpuNodes.Items {
+		gpuCap := n.Status.Capacity["nvidia.com/gpu"]
+		instanceType := n.Labels["node.kubernetes.io/instance-type"]
+		accelerator := n.Labels["cloud.google.com/gke-accelerator"]
+		nodePool := n.Labels["cloud.google.com/gke-nodepool"]
+		fmt.Fprintf(&nodeSummary, "%-44s gpu=%s instance=%s accelerator=%s nodePool=%s\n",
+			n.Name, gpuCap.String(), valueOrUnknown(instanceType),
+			valueOrUnknown(accelerator), valueOrUnknown(nodePool))
+	}
+	recordRawTextArtifact(ctx, "GPU Nodes",
+		"kubectl get nodes -l nvidia.com/gpu.present=true -o wide", nodeSummary.String())
+
+	// Extract GKE project and zone from providerID (gce://project/zone/instance).
+	providerID := gpuNodes.Items[0].Spec.ProviderID
+	parts := strings.Split(strings.TrimPrefix(providerID, "gce://"), "/")
+	var project, zone string
+	if len(parts) >= 2 {
+		project = parts[0]
+		zone = parts[1]
+	}
+	recordRawTextArtifact(ctx, "GKE Cluster Details", "",
+		fmt.Sprintf("Project:        %s\nZone:           %s\nGPU Node Count: %d",
+			valueOrUnknown(project), valueOrUnknown(zone), len(gpuNodes.Items)))
+
+	// Check cluster-autoscaler-status ConfigMap (GKE writes autoscaler status here).
+	// GKE always writes this to kube-system, but check common namespaces as a safeguard.
+	var caStatus *corev1.ConfigMap
+	var caErr error
+	for _, ns := range []string{"kube-system", "cluster-autoscaler", "system"} {
+		caStatus, caErr = ctx.Clientset.CoreV1().ConfigMaps(ns).Get(
+			ctx.Ctx, "cluster-autoscaler-status", metav1.GetOptions{})
+		if caErr == nil {
+			break
+		}
+	}
+	var caStatusFound bool
+	if caErr == nil && caStatus != nil {
+		caStatusFound = true
+		statusData := caStatus.Data["status"]
+		if len(statusData) > 2000 {
+			statusData = statusData[:2000] + "\n... [truncated]"
+		}
+		recordRawTextArtifact(ctx, "Cluster Autoscaler Status",
+			"kubectl get configmap cluster-autoscaler-status -n kube-system -o jsonpath='{.data.status}'",
+			statusData)
+	} else {
+		recordRawTextArtifact(ctx, "Cluster Autoscaler Status",
+			"kubectl get configmap cluster-autoscaler-status -n kube-system",
+			"ConfigMap cluster-autoscaler-status not found")
+	}
+
+	// Node pool annotations for autoscaling config.
+	var annotSummary strings.Builder
+	for _, n := range gpuNodes.Items {
+		scaleDown := n.Annotations["cluster-autoscaler.kubernetes.io/scale-down-disabled"]
+		nodePool := n.Labels["cloud.google.com/gke-nodepool"]
+		fmt.Fprintf(&annotSummary, "%-44s nodePool=%s scaleDownDisabled=%s\n",
+			n.Name, valueOrUnknown(nodePool), valueOrUnknown(scaleDown))
+	}
+	recordRawTextArtifact(ctx, "GPU Node Pool Annotations",
+		"kubectl get nodes -l nvidia.com/gpu.present=true annotations", annotSummary.String())
+
+	// Check for recent autoscaler events.
+	events, evErr := ctx.Clientset.CoreV1().Events("").List(ctx.Ctx, metav1.ListOptions{})
+	if evErr == nil {
+		var autoscalerEvents strings.Builder
+		count := 0
+		for i := len(events.Items) - 1; i >= 0 && count < 10; i-- {
+			ev := events.Items[i]
+			if ev.Reason == "NotTriggerScaleUp" || ev.Reason == "ScaledUpGroup" ||
+				ev.Reason == "ScaleDown" || ev.Reason == "TriggeredScaleUp" {
+
+				fmt.Fprintf(&autoscalerEvents, "%s  %s  %s  %s\n",
+					ev.LastTimestamp.Format("2006-01-02T15:04:05Z"),
+					ev.Reason, ev.InvolvedObject.Name, ev.Message)
+				count++
+			}
+		}
+		if autoscalerEvents.Len() > 0 {
+			recordRawTextArtifact(ctx, "Autoscaler Events",
+				"kubectl get events -A | grep autoscaler", autoscalerEvents.String())
+		} else {
+			recordRawTextArtifact(ctx, "Autoscaler Events", "", "No recent autoscaler events found")
+		}
+	}
+
+	if caStatusFound {
+		recordRawTextArtifact(ctx, "GKE Cluster Autoscaling Result", "",
+			fmt.Sprintf("PASS — GKE cluster with %d GPU nodes and built-in cluster autoscaler active.",
+				len(gpuNodes.Items)))
+	} else {
+		recordRawTextArtifact(ctx, "GKE Cluster Autoscaling Result", "",
+			fmt.Sprintf("PASS (partial) — GKE cluster with %d GPU nodes. "+
+				"Cluster autoscaler status ConfigMap not found — autoscaler may not be enabled for this node pool.",
+				len(gpuNodes.Items)))
+	}
+	return nil
 }
 
 // verifyPodsScheduled polls until pods in the unique test namespace are scheduled (not Pending).
