@@ -139,7 +139,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	slog.Info("deploying agent", slog.String("namespace", agentConfig.Namespace))
 
 	if deployErr := deployer.Deploy(ctx); deployErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to deploy agent", deployErr)
+		return nil, deployErr
 	}
 
 	slog.Info("agent deployed successfully")
