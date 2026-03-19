@@ -88,7 +88,18 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 				}
 			}
 
-		case measurement.TypeSystemD, measurement.TypeNodeTopology:
+		case measurement.TypeNodeTopology:
+			for _, st := range m.Subtypes {
+				if st.Name == "label" {
+					for key := range st.Data {
+						if strings.HasPrefix(key, "node-role.together.ai/") {
+							criteria.Service = CriteriaServiceTogetherAI
+						}
+					}
+				}
+			}
+
+		case measurement.TypeSystemD:
 			continue
 		}
 	}
