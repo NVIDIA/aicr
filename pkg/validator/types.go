@@ -48,6 +48,9 @@ type Validator struct {
 
 	// Tolerations are applied to validator Jobs for scheduling.
 	Tolerations []corev1.Toleration
+
+	// NodeSelector constrains validator Jobs to nodes matching these labels.
+	NodeSelector map[string]string
 }
 
 // PhaseResult is the outcome of running all validators in a single phase.

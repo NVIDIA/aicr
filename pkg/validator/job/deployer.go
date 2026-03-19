@@ -49,6 +49,7 @@ type Deployer struct {
 	jobName          string // Unique name generated client-side (set by DeployJob)
 	imagePullSecrets []string
 	tolerations      []corev1.Toleration
+	nodeSelector     map[string]string
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -60,6 +61,7 @@ func NewDeployer(
 	entry catalog.ValidatorEntry,
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
+	nodeSelector map[string]string,
 ) *Deployer {
 
 	return &Deployer{
@@ -70,6 +72,7 @@ func NewDeployer(
 		entry:            entry,
 		imagePullSecrets: imagePullSecrets,
 		tolerations:      tolerations,
+		nodeSelector:     nodeSelector,
 	}
 }
 
@@ -149,13 +152,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 					labels.Component: labels.ValueValidation,
 					labels.Validator: d.entry.Name,
 				}).
-				WithSpec(applycorev1.PodSpec().
-					WithServiceAccountName(ServiceAccountName).
-					WithRestartPolicy(corev1.RestartPolicyNever).
-					WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
-					WithImagePullSecrets(d.buildImagePullSecretsApply()...).
-					WithTolerations(d.buildTolerationsApply()...).
-					WithAffinity(preferCPUNodeAffinityApply()).
+				WithSpec(d.buildPodSpecApply().
 					WithContainers(applycorev1.Container().
 						WithName("validator").
 						WithImage(d.entry.Image).
@@ -225,6 +222,22 @@ func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectRefere
 		refs = append(refs, applycorev1.LocalObjectReference().WithName(name))
 	}
 	return refs
+}
+
+func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
+	spec := applycorev1.PodSpec().
+		WithServiceAccountName(ServiceAccountName).
+		WithRestartPolicy(corev1.RestartPolicyNever).
+		WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
+		WithImagePullSecrets(d.buildImagePullSecretsApply()...).
+		WithTolerations(d.buildTolerationsApply()...).
+		WithAffinity(preferCPUNodeAffinityApply())
+
+	if len(d.nodeSelector) > 0 {
+		spec = spec.WithNodeSelector(d.nodeSelector)
+	}
+
+	return spec
 }
 
 func (d *Deployer) buildTolerationsApply() []*applycorev1.TolerationApplyConfiguration {

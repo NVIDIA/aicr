@@ -210,7 +210,8 @@ type validationConfig struct {
 	noCluster           bool
 
 	// Scheduling
-	tolerations []corev1.Toleration
+	nodeSelector map[string]string
+	tolerations  []corev1.Toleration
 
 	// Behavior
 	failOnError bool
@@ -236,6 +237,7 @@ func runValidation(
 		validator.WithImagePullSecrets(cfg.imagePullSecrets),
 		validator.WithNoCluster(cfg.noCluster),
 		validator.WithTolerations(cfg.tolerations),
+		validator.WithNodeSelector(cfg.nodeSelector),
 	)
 
 	results, err := v.ValidatePhases(ctx, cfg.phases, rec, snap)
@@ -379,13 +381,13 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Node selector for snapshot agent Job scheduling (format: key=value, can be repeated).",
-			Category: "Agent Deployment",
+			Usage:    "Node selector for snapshot agent and validation Job scheduling (format: key=value, can be repeated).",
+			Category: "Scheduling",
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
 			Usage:    "Toleration for snapshot agent and validation Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
-			Category: "Agent Deployment",
+			Category: "Scheduling",
 		},
 		&cli.DurationFlag{
 			Name:     "timeout",
@@ -540,6 +542,11 @@ Run validation without failing on check errors (informational mode):
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
 			}
 
+			nodeSelector, nsErr := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
+			if nsErr != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", nsErr)
+			}
+
 			// Validate that requested phases are defined in the recipe.
 			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
 				return err
@@ -561,6 +568,7 @@ Run validation without failing on check errors (informational mode):
 				cleanup:             !noCleanup,
 				imagePullSecrets:    cmd.StringSlice("image-pull-secret"),
 				noCluster:           cmd.Bool("no-cluster"),
+				nodeSelector:        nodeSelector,
 				tolerations:         tolerations,
 				evidenceDir:         evidenceDir,
 			})
