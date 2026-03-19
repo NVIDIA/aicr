@@ -13,22 +13,38 @@ the fully hydrated value at that path, not a reference to an external file.
 
 ## Context
 
-`aicr recipe` returns a `RecipeResult` that describes the desired cluster
-configuration for a given set of criteria. Component entries in that result
-contain **references** — chart names, repository URLs, version strings, and
-`ValuesFile` paths — but the actual Helm values those references resolve to are
-not visible in the output. To inspect a specific value today, a user must:
+AICR embeds a significant amount of curated metadata into the binary at build
+time — component registries, overlay definitions, Helm values, version matrices,
+and constraint rules. This metadata is the product of extensive validation and
+testing, but **users have no way to inspect it directly**. The only path to see
+actual resolved configuration today is to run `aicr bundle`, which generates a
+full deployment artifact (Helm values files, Kustomize manifests, etc.) on disk.
+There is no read-only introspection path.
 
-1. Run `aicr recipe` to get the `RecipeResult`
-2. Find the component of interest in `componentRefs`
-3. Locate the referenced `ValuesFile` on disk
-4. Manually merge base values, overlay values, and inline overrides
-5. Navigate the resulting YAML to the desired key
+`aicr recipe` gets partway there — it returns a `RecipeResult` that describes
+the desired cluster configuration for a given set of criteria. However, the
+recipe output is deliberately abstract: component entries contain **references**,
+not resolved content. A `ComponentRef` lists a chart name, repository URL,
+version string, and `ValuesFile` path, but the actual Helm values those
+references resolve to are absent from the output. The recipe describes *what*
+should be deployed, not *how it is configured*.
 
-This is error-prone and opaque, especially when overlays stack multiple layers of
-value overrides. There is no programmatic way to answer "what driver version does
-the GPU operator use for H100 on EKS with Ubuntu?" without reproducing the full
-merge pipeline externally.
+This means that to answer a simple question like "what driver version does the
+GPU operator use for H100 on EKS with Ubuntu?", a user must either:
+
+1. Run `aicr bundle` to generate the full deployment artifact, then dig through
+   the output files to find the value — a heavyweight, write-to-disk operation
+   for a read-only question
+2. Or manually reconstruct the merge pipeline:
+   a. Run `aicr recipe` to get the `RecipeResult`
+   b. Find the component of interest in `componentRefs`
+   c. Locate the referenced `ValuesFile` on disk (embedded in the binary)
+   d. Manually merge base values, overlay values, and inline overrides
+   e. Navigate the resulting YAML to the desired key
+
+Both paths are error-prone and opaque, especially when overlays stack multiple
+layers of value overrides. The embedded metadata — the most valuable part of
+AICR — is effectively a black box until bundle time.
 
 ### Requirements
 
