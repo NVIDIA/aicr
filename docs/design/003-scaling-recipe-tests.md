@@ -4,6 +4,17 @@
 
 **Proposed** — 2026-03-18
 
+## Scope
+
+This ADR applies exclusively to **KWOK scheduling simulation tests** — lightweight
+tests that verify recipe overlays produce correct Kubernetes scheduling topology
+(node selectors, taints, tolerations, resource requests) using simulated nodes.
+
+KWOK simulates node topology but **not** GPU hardware, operator pod health, or NCCL
+fabrics. This tiered strategy must not be generalized to hardware-dependent validation
+(GPU operator health checks, NCCL bandwidth tests, real-cluster conformance) where
+a post-merge failure gap carries significantly higher risk.
+
 ## Context
 
 AICR validates every recipe overlay in CI using KWOK-simulated Kubernetes clusters.
@@ -102,6 +113,11 @@ Run the complete set of overlays on:
 - A nightly schedule (catch regressions from external dependency updates)
 
 This is the existing behavior, unchanged, but no longer blocking PRs.
+
+**Release qualification:** Nightly Tier 3 runs double as a qualification gate for
+release candidates. This separates recipe correctness (KWOK — will it schedule?)
+from runtime correctness (real clusters — does it work?). Only SHAs where the
+nightly full-matrix run passes are eligible for promotion as release candidates.
 
 **Concurrency policy for Tier 3:** The current workflow uses `cancel-in-progress: true`,
 which means rapid successive merges to `main` can cancel in-flight Tier 3 runs. To
