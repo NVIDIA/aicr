@@ -14,3 +14,4 @@
 
 exclude:
   - '**/.terraform/**'
+  - '**/node_modules/**'
