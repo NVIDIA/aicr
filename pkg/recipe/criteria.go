@@ -78,6 +78,7 @@ const (
 	CriteriaAcceleratorAny   CriteriaAcceleratorType = "any"
 	CriteriaAcceleratorH100  CriteriaAcceleratorType = "h100"
 	CriteriaAcceleratorGB200 CriteriaAcceleratorType = "gb200"
+	CriteriaAcceleratorB200  CriteriaAcceleratorType = "b200"
 	CriteriaAcceleratorA100  CriteriaAcceleratorType = "a100"
 	CriteriaAcceleratorL40   CriteriaAcceleratorType = "l40"
 )
@@ -91,6 +92,8 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 		return CriteriaAcceleratorH100, nil
 	case "gb200":
 		return CriteriaAcceleratorGB200, nil
+	case "b200":
+		return CriteriaAcceleratorB200, nil
 	case "a100":
 		return CriteriaAcceleratorA100, nil
 	case "l40":
@@ -102,7 +105,7 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 
 // GetCriteriaAcceleratorTypes returns all supported accelerator types sorted alphabetically.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "gb200", "h100", "l40"}
+	return []string{"a100", "b200", "gb200", "h100", "l40"}
 }
 
 // CriteriaIntentType represents the workload intent.

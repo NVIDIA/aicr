@@ -101,6 +101,8 @@ func matchAccelerator(model string) CriteriaAcceleratorType {
 	switch {
 	case strings.Contains(lower, "gb200"):
 		return CriteriaAcceleratorGB200
+	case strings.Contains(lower, "b200"):
+		return CriteriaAcceleratorB200
 	case strings.Contains(lower, "h100"):
 		return CriteriaAcceleratorH100
 	case strings.Contains(lower, "a100"):
