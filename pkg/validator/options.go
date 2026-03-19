@@ -72,3 +72,11 @@ func WithTolerations(tolerations []corev1.Toleration) Option {
 		v.Tolerations = tolerations
 	}
 }
+
+// WithNodeSelector sets node selector labels for validator Jobs.
+// When set, validator Jobs will only be scheduled on nodes matching these labels.
+func WithNodeSelector(nodeSelector map[string]string) Option {
+	return func(v *Validator) {
+		v.NodeSelector = nodeSelector
+	}
+}
