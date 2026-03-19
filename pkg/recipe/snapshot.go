@@ -101,6 +101,8 @@ func matchAccelerator(model string) CriteriaAcceleratorType {
 	switch {
 	case strings.Contains(lower, "gb200"):
 		return CriteriaAcceleratorGB200
+	// b200 must be checked after gb200 to avoid false-matching GB200 models.
+	// Follow this pattern when adding future Blackwell variants (e.g., check "gb300" before "b300").
 	case strings.Contains(lower, "b200"):
 		return CriteriaAcceleratorB200
 	case strings.Contains(lower, "h100"):
