@@ -91,6 +91,10 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 		case measurement.TypeNodeTopology:
 			for _, st := range m.Subtypes {
 				if st.Name == "label" {
+					// TogetherAI detection heuristic: look for the provider-specific node-role
+					// label prefix "node-role.together.ai/" across all cluster node labels.
+					// This is a best-effort match; a future improvement could use a dedicated
+					// provider field in the snapshot if TogetherAI exposes one.
 					for key := range st.Data {
 						if strings.HasPrefix(key, "node-role.together.ai/") {
 							criteria.Service = CriteriaServiceTogetherAI

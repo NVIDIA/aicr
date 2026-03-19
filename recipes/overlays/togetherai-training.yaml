@@ -24,11 +24,13 @@ spec:
     service: togetherai
     intent: training
 
-  constraints:
-    - name: K8s.server.version
-      value: ">= 1.34"
-
   componentRefs:
+    # Inherits valuesFile from togetherai base; only override validator plugin env.
     - name: gpu-operator
       type: Helm
-      valuesFile: components/gpu-operator/values-togetherai-training.yaml
+      overrides:
+        validator:
+          plugin:
+            env:
+              - name: WITH_WORKLOAD
+                value: "false"
