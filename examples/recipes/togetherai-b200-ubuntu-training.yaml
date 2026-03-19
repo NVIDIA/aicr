@@ -83,6 +83,7 @@ componentRefs:
     chart: network-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
+    version: 25.10.0
     valuesFile: components/network-operator/values-togetherai.yaml
     dependencyRefs:
       - cert-manager

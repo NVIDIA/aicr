@@ -37,6 +37,8 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"gke", "gke", CriteriaServiceGKE, false},
 		{"aks", "aks", CriteriaServiceAKS, false},
 		{"oke", "oke", CriteriaServiceOKE, false},
+		{"togetherai", "togetherai", CriteriaServiceTogetherAI, false},
+		{"together", "together", CriteriaServiceTogetherAI, false},
 		{"self-managed", "self-managed", CriteriaServiceAny, false},
 		{"self", "self", CriteriaServiceAny, false},
 		{"vanilla", "vanilla", CriteriaServiceAny, false},

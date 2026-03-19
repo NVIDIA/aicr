@@ -56,25 +56,18 @@ get_profiles() {
     # System profile: {service}/system-*.yaml
     local system_profile=""
     case "$service" in
-        eks) system_profile="eks/system-m7i.yaml" ;;
-        gke) system_profile="eks/system-m7i.yaml" ;;  # Fallback to EKS for now
+        eks|gke|aks|oke|togetherai) system_profile="eks/system-m7i.yaml" ;; # Fallback to EKS profile for now
         *)   system_profile="eks/system-m7i.yaml" ;;  # Default
     esac
 
     # GPU profile: based on accelerator
     local gpu_profile=""
     case "$service" in
-        eks)
+        eks|gke|aks|oke|togetherai)
             case "$accelerator" in
                 gb200) gpu_profile="eks/p6-gb200.yaml" ;;
+                b200)  gpu_profile="eks/p5-h100.yaml" ;; # Fallback to h100 profile for b200 for now
                 *)     gpu_profile="eks/p5-h100.yaml" ;;  # h100 or default
-            esac
-            ;;
-        gke)
-            # GKE uses same profiles for now
-            case "$accelerator" in
-                gb200) gpu_profile="eks/p6-gb200.yaml" ;;
-                *)     gpu_profile="eks/p5-h100.yaml" ;;
             esac
             ;;
         *)
