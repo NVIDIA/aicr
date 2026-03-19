@@ -363,6 +363,104 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 			},
 		},
 		{
+			name: "TogetherAI detected from node topology labels",
+			snapshot: &snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					{
+						Type: measurement.TypeNodeTopology,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "label",
+								Data: map[string]measurement.Reading{
+									"node-role.together.ai/worker":     measurement.Str("true"),
+									"kubernetes.io/hostname":           measurement.Str("gpu-node-1"),
+									"node.kubernetes.io/instance-type": measurement.Str("gpu.b200.8x"),
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, c *Criteria) {
+				if c.Service != CriteriaServiceTogetherAI {
+					t.Errorf("Service = %v, want %v", c.Service, CriteriaServiceTogetherAI)
+				}
+			},
+		},
+		{
+			// Regression: on TogetherAI clusters built on managed K8s infrastructure the
+			// version string may contain provider suffixes (e.g. "-eks-"). The label-based
+			// signal must win regardless of measurement order.
+			name: "TogetherAI label wins over EKS version heuristic (label first)",
+			snapshot: &snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					{
+						Type: measurement.TypeNodeTopology,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "label",
+								Data: map[string]measurement.Reading{
+									"node-role.together.ai/gpu-worker": measurement.Str("true"),
+								},
+							},
+						},
+					},
+					{
+						Type: measurement.TypeK8s,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "server",
+								Data: map[string]measurement.Reading{
+									"version": measurement.Str("v1.34.4-eks-a0123b4"),
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, c *Criteria) {
+				if c.Service != CriteriaServiceTogetherAI {
+					t.Errorf("Service = %v, want %v (label must take precedence over version heuristic)", c.Service, CriteriaServiceTogetherAI)
+				}
+			},
+		},
+		{
+			// Same as above but with measurements in the opposite order to verify
+			// that precedence is independent of measurement arrival order.
+			name: "TogetherAI label wins over EKS version heuristic (version first)",
+			snapshot: &snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					{
+						Type: measurement.TypeK8s,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "server",
+								Data: map[string]measurement.Reading{
+									"version": measurement.Str("v1.34.4-eks-a0123b4"),
+								},
+							},
+						},
+					},
+					{
+						Type: measurement.TypeNodeTopology,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "label",
+								Data: map[string]measurement.Reading{
+									"node-role.together.ai/gpu-worker": measurement.Str("true"),
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, c *Criteria) {
+				if c.Service != CriteriaServiceTogetherAI {
+					t.Errorf("Service = %v, want %v (label must take precedence over version heuristic)", c.Service, CriteriaServiceTogetherAI)
+				}
+			},
+		},
+		{
 			name: "systemd measurement skipped",
 			snapshot: &snapshotter.Snapshot{
 				Measurements: []*measurement.Measurement{

@@ -23,12 +23,26 @@ import (
 
 // ExtractCriteriaFromSnapshot extracts criteria from a snapshot.
 // This maps snapshot measurements to criteria fields.
+//
+// Service detection precedence (highest to lowest):
+//  1. Node topology labels (e.g., node-role.together.ai/) — explicit, provider-managed signal
+//  2. K8s server.service field — explicit API field set by the snapshot agent
+//  3. K8s server.version string heuristics (-eks-, -gke, -aks) — brittle fallback
+//
+// Precedence is applied after all measurements are scanned, making classification
+// deterministic regardless of the order in which parallel collectors complete.
 func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 	criteria := NewCriteria()
 
 	if snap == nil {
 		return criteria
 	}
+
+	// Collect service signals from independent sources during the scan.
+	// Precedence is applied after the loop to avoid sensitivity to measurement order.
+	serviceFromLabel := CriteriaServiceAny   // node topology labels (highest priority)
+	serviceFromField := CriteriaServiceAny   // K8s server.service explicit field
+	serviceFromVersion := CriteriaServiceAny // K8s server.version heuristic (lowest priority)
 
 	for _, m := range snap.Measurements {
 		if m == nil {
@@ -41,7 +55,7 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 				if st.Name == "server" {
 					if svcType, ok := st.Data["service"]; ok {
 						if parsed, err := ParseCriteriaServiceType(svcType.String()); err == nil {
-							criteria.Service = parsed
+							serviceFromField = parsed
 						}
 					}
 
@@ -49,11 +63,11 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 						versionStr := version.String()
 						switch {
 						case strings.Contains(versionStr, "-eks-"):
-							criteria.Service = CriteriaServiceEKS
+							serviceFromVersion = CriteriaServiceEKS
 						case strings.Contains(versionStr, "-gke"):
-							criteria.Service = CriteriaServiceGKE
+							serviceFromVersion = CriteriaServiceGKE
 						case strings.Contains(versionStr, "-aks"):
-							criteria.Service = CriteriaServiceAKS
+							serviceFromVersion = CriteriaServiceAKS
 						}
 					}
 				}
@@ -97,7 +111,7 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 					// provider field in the snapshot if TogetherAI exposes one.
 					for key := range st.Data {
 						if strings.HasPrefix(key, "node-role.together.ai/") {
-							criteria.Service = CriteriaServiceTogetherAI
+							serviceFromLabel = CriteriaServiceTogetherAI
 						}
 					}
 				}
@@ -106,6 +120,16 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 		case measurement.TypeSystemD:
 			continue
 		}
+	}
+
+	// Apply explicit precedence: label > service field > version heuristic.
+	switch {
+	case serviceFromLabel != CriteriaServiceAny:
+		criteria.Service = serviceFromLabel
+	case serviceFromField != CriteriaServiceAny:
+		criteria.Service = serviceFromField
+	case serviceFromVersion != CriteriaServiceAny:
+		criteria.Service = serviceFromVersion
 	}
 
 	return criteria
