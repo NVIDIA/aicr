@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -158,7 +159,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 					WithContainers(applycorev1.Container().
 						WithName("validator").
 						WithImage(d.entry.Image).
-						WithImagePullPolicy(corev1.PullIfNotPresent).
+						WithImagePullPolicy(d.imagePullPolicy()).
 						WithArgs(d.entry.Args...).
 						WithEnv(d.buildEnvApply()...).
 						WithResources(applycorev1.ResourceRequirements().
@@ -206,6 +207,16 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 		env = append(env, applycorev1.EnvVar().WithName(e.Name).WithValue(e.Value))
 	}
 	return env
+}
+
+// imagePullPolicy returns Always when the image uses :latest tag (dev builds),
+// PullIfNotPresent otherwise. This ensures dev builds always pull fresh images
+// and avoids exec format errors from stale cached images on cluster nodes.
+func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
+	if strings.HasSuffix(d.entry.Image, ":latest") {
+		return corev1.PullAlways
+	}
+	return corev1.PullIfNotPresent
 }
 
 func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectReferenceApplyConfiguration {
