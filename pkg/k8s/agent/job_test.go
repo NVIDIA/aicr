@@ -114,10 +114,8 @@ func TestBuildPodSpec_RuntimeClassName(t *testing.T) {
 				if *spec.RuntimeClassName != tt.runtimeClassName {
 					t.Errorf("RuntimeClassName = %q, want %q", *spec.RuntimeClassName, tt.runtimeClassName)
 				}
-			} else {
-				if spec.RuntimeClassName != nil {
-					t.Errorf("RuntimeClassName = %q, want nil", *spec.RuntimeClassName)
-				}
+			} else if spec.RuntimeClassName != nil {
+				t.Errorf("RuntimeClassName = %q, want nil", *spec.RuntimeClassName)
 			}
 		})
 	}
