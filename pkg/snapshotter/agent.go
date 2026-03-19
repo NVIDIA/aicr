@@ -86,6 +86,12 @@ type AgentConfig struct {
 	// are only injected when explicitly requested.
 	RequireGPU bool
 
+	// RuntimeClassName sets runtimeClassName on the agent pod and injects
+	// NVIDIA_VISIBLE_DEVICES=all. Use instead of RequireGPU when all GPUs
+	// are allocated — gives the agent nvidia-smi access without consuming
+	// a GPU from the Device Plugin.
+	RuntimeClassName string
+
 	// TemplatePath is the path to a Go template file for custom output formatting.
 	// When set, the snapshot output will be processed through this template.
 	TemplatePath string
@@ -110,6 +116,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		Debug:              config.Debug,
 		Privileged:         config.Privileged,
 		RequireGPU:         config.RequireGPU,
+		RuntimeClassName:   config.RuntimeClassName,
 		MaxNodesPerEntry:   config.MaxNodesPerEntry,
 	}
 

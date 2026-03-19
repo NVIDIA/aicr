@@ -498,6 +498,20 @@ func TestAgentOutputURILogic(t *testing.T) {
 	}
 }
 
+func TestAgentConfigWithRuntimeClassName(t *testing.T) {
+	cfg := AgentConfig{
+		Namespace:        "default",
+		RuntimeClassName: "nvidia",
+	}
+
+	if cfg.RuntimeClassName != "nvidia" {
+		t.Errorf("AgentConfig.RuntimeClassName = %q, want %q", cfg.RuntimeClassName, "nvidia")
+	}
+	if cfg.RequireGPU {
+		t.Error("AgentConfig.RequireGPU should default to false")
+	}
+}
+
 func TestAgentConfigWithTemplatePath(t *testing.T) {
 	// Test that AgentConfig can hold TemplatePath
 	cfg := AgentConfig{
