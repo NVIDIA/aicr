@@ -21,7 +21,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Deploy deploys the agent with all required resources (RBAC + Job).
@@ -35,6 +38,13 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 				"cannot reach Kubernetes API server\n\nCheck your network connectivity:\n  - Is your VPN connected?\n  - Is the cluster endpoint correct in your kubeconfig?\n  - Are firewall rules allowing egress to the API server?", err)
 		}
 		return aicrerrors.Wrap(aicrerrors.ErrCodeUnauthorized, "insufficient permissions to deploy agent\n\nTo deploy the agent, you need cluster admin privileges.\nRun: aicr snapshot", err)
+	}
+
+	// Step 0.5: Validate RuntimeClass exists if configured
+	if d.config.RuntimeClassName != "" {
+		if err := d.validateRuntimeClass(ctx); err != nil {
+			return err
+		}
 	}
 
 	// Step 1: Ensure namespace exists
@@ -143,5 +153,27 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 		return aicrerrors.New(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to delete %d resource(s):\n  - %s", len(errs), strings.Join(errs, "\n  - ")))
 	}
 
+	return nil
+}
+
+// validateRuntimeClass checks that the specified RuntimeClass exists in the cluster.
+func (d *Deployer) validateRuntimeClass(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, defaults.K8sJobCreationTimeout)
+	defer cancel()
+
+	_, err := d.clientset.NodeV1().RuntimeClasses().Get(ctx, d.config.RuntimeClassName, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return aicrerrors.New(aicrerrors.ErrCodeNotFound,
+			fmt.Sprintf("RuntimeClass %q not found in cluster; the GPU Operator may not be installed yet.\n\n"+
+				"The --runtime-class flag requires a RuntimeClass to be registered in the cluster.\n"+
+				"If GPU Operator is not yet installed, omit --runtime-class and use --node-selector\n"+
+				"to target a GPU node instead.", d.config.RuntimeClassName))
+	}
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+			fmt.Sprintf("failed to check RuntimeClass %q", d.config.RuntimeClassName), err)
+	}
+
+	slog.Debug("RuntimeClass validated", slog.String("runtimeClass", d.config.RuntimeClassName))
 	return nil
 }

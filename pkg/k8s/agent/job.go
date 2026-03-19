@@ -137,6 +137,10 @@ func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 		},
 	}
 
+	if d.config.RuntimeClassName != "" {
+		spec.RuntimeClassName = ptr.To(d.config.RuntimeClassName)
+	}
+
 	if d.config.Privileged {
 		d.applyPrivilegedSettings(&spec)
 	} else {
@@ -285,6 +289,13 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "AICR_MAX_NODES_PER_ENTRY",
 			Value: strconv.Itoa(d.config.MaxNodesPerEntry),
+		})
+	}
+
+	if d.config.RuntimeClassName != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "all",
 		})
 	}
 
