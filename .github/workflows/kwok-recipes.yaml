@@ -111,91 +111,100 @@ jobs:
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             base_ref="${{ github.event.pull_request.base.sha }}"
             head_ref="${{ github.event.pull_request.head.sha }}"
-            changed_files=$(git diff --name-only "${base_ref}..${head_ref}" 2>/dev/null || true)
+            if ! changed_files=$(git diff --name-only "${base_ref}..${head_ref}" 2>&1); then
+              echo "::error::git diff failed — cannot compute Tier 2 affected overlays"
+              echo "git diff output: ${changed_files}"
+              exit 1
+            fi
 
-            # If registry.yaml or base.yaml changed, skip Tier 2 — Tier 3 catches it
-            skip_tier2=false
+            # If registry.yaml or base.yaml changed, all accelerator overlays are
+            # potentially affected — promote the full accelerator set to Tier 2.
+            promote_all=false
             if echo "$changed_files" | grep -qE '^recipes/(registry\.yaml|overlays/base\.yaml)$'; then
-              skip_tier2=true
-              echo "registry.yaml or base.yaml changed — Tier 2 skipped (Tier 3 covers full matrix)"
+              promote_all=true
+              echo "registry.yaml or base.yaml changed — all accelerator overlays promoted to Tier 2"
             fi
 
-            if [[ "$skip_tier2" == "false" ]]; then
-              # Build set of affected accelerator-specific overlays
-              for overlay in recipes/overlays/*.yaml; do
-                name=$(basename "$overlay" .yaml)
-                service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
-                accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
+            # Build set of affected accelerator-specific overlays
+            for overlay in recipes/overlays/*.yaml; do
+              name=$(basename "$overlay" .yaml)
+              service=$(yq eval '.spec.criteria.service // ""' "$overlay" 2>/dev/null || true)
+              accel=$(yq eval '.spec.criteria.accelerator // ""' "$overlay" 2>/dev/null || true)
 
-                # Only accelerator-specific overlays belong in Tier 2
-                if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
-                  continue
-                fi
-                if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
-                  continue
-                fi
+              # Only accelerator-specific overlays belong in Tier 2
+              if [[ -z "$service" || "$service" == "null" || "$service" == "any" ]]; then
+                continue
+              fi
+              if [[ -z "$accel" || "$accel" == "null" || "$accel" == "any" ]]; then
+                continue
+              fi
 
-                include=false
+              # If registry.yaml or base.yaml changed, include all accelerator overlays
+              if [[ "$promote_all" == "true" ]]; then
+                tier2=$(echo "$tier2" | jq -c --arg r "$name" '. + [$r]')
+                continue
+              fi
 
-                # Rule 1: overlay file itself changed
-                if echo "$changed_files" | grep -qF "recipes/overlays/${name}.yaml"; then
-                  include=true
-                fi
+              include=false
 
-                # Rule 2: check if any ancestor overlay in the base chain changed
-                if [[ "$include" == "false" ]]; then
-                  current="$overlay"
-                  while true; do
-                    parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
-                    if [[ -z "$parent" || "$parent" == "null" ]]; then
-                      break
-                    fi
-                    if echo "$changed_files" | grep -qF "recipes/overlays/${parent}.yaml"; then
-                      include=true
-                      break
-                    fi
-                    current="recipes/overlays/${parent}.yaml"
-                    if [[ ! -f "$current" ]]; then
-                      break
-                    fi
-                  done
-                fi
+              # Rule 1: overlay file itself changed
+              if echo "$changed_files" | grep -qF "recipes/overlays/${name}.yaml"; then
+                include=true
+              fi
 
-                # Rule 3: a component values file referenced by this overlay changed
-                if [[ "$include" == "false" ]]; then
-                  # Collect valuesFile references from this overlay and its base chain
-                  values_files=""
-                  current="$overlay"
-                  while true; do
-                    vf=$(yq eval '.spec.componentRefs[].valuesFile // ""' "$current" 2>/dev/null | grep -v '^$' || true)
-                    if [[ -n "$vf" ]]; then
-                      values_files="${values_files}"$'\n'"${vf}"
-                    fi
-                    parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
-                    if [[ -z "$parent" || "$parent" == "null" ]]; then
-                      break
-                    fi
-                    current="recipes/overlays/${parent}.yaml"
-                    if [[ ! -f "$current" ]]; then
-                      break
-                    fi
-                  done
+              # Rule 2: check if any ancestor overlay in the base chain changed
+              if [[ "$include" == "false" ]]; then
+                current="$overlay"
+                while true; do
+                  parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
+                  if [[ -z "$parent" || "$parent" == "null" ]]; then
+                    break
+                  fi
+                  if echo "$changed_files" | grep -qF "recipes/overlays/${parent}.yaml"; then
+                    include=true
+                    break
+                  fi
+                  current="recipes/overlays/${parent}.yaml"
+                  if [[ ! -f "$current" ]]; then
+                    break
+                  fi
+                done
+              fi
 
-                  # Check if any referenced values file changed
-                  for vf in $values_files; do
-                    # valuesFile paths are relative to recipes/
-                    if echo "$changed_files" | grep -qF "recipes/${vf}"; then
-                      include=true
-                      break
-                    fi
-                  done
-                fi
+              # Rule 3: a component values file referenced by this overlay changed
+              if [[ "$include" == "false" ]]; then
+                # Collect valuesFile references from this overlay and its base chain
+                values_files=""
+                current="$overlay"
+                while true; do
+                  vf=$(yq eval '.spec.componentRefs[].valuesFile // ""' "$current" 2>/dev/null | grep -v '^$' || true)
+                  if [[ -n "$vf" ]]; then
+                    values_files="${values_files}"$'\n'"${vf}"
+                  fi
+                  parent=$(yq eval '.spec.base // ""' "$current" 2>/dev/null || true)
+                  if [[ -z "$parent" || "$parent" == "null" ]]; then
+                    break
+                  fi
+                  current="recipes/overlays/${parent}.yaml"
+                  if [[ ! -f "$current" ]]; then
+                    break
+                  fi
+                done
 
-                if [[ "$include" == "true" ]]; then
-                  tier2=$(echo "$tier2" | jq -c --arg r "$name" '. + [$r]')
-                fi
-              done
-            fi
+                # Check if any referenced values file changed
+                for vf in $values_files; do
+                  # valuesFile paths are relative to recipes/
+                  if echo "$changed_files" | grep -qF "recipes/${vf}"; then
+                    include=true
+                    break
+                  fi
+                done
+              fi
+
+              if [[ "$include" == "true" ]]; then
+                tier2=$(echo "$tier2" | jq -c --arg r "$name" '. + [$r]')
+              fi
+            done
           fi
 
           # --- Tier 3: full matrix (all testable overlays) ---
@@ -210,11 +219,12 @@ jobs:
           echo "Tier 2 (diff-aware):   $(echo "$tier2" | jq 'length') recipe(s)"
           echo "Tier 3 (full matrix):  $(echo "$tier3" | jq 'length') recipe(s)"
 
-  # ── Tier 1: PR gate — generic overlays (always runs on PR + push) ──
+  # ── Tier 1: PR gate — generic overlays (PR + push, skip on schedule) ──
   test-tier1:
     name: 'Tier 1: ${{ matrix.recipe }}'
     needs: discover
     if: >-
+      github.event_name != 'schedule' &&
       needs.discover.outputs.tier1 != '[]' &&
       needs.discover.outputs.tier1 != ''
     runs-on: ubuntu-latest
