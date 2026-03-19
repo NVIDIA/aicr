@@ -207,7 +207,7 @@ type Criteria struct {
 	// Service is the Kubernetes service type (eks, gke, aks, oke, self-managed).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, gb200, a100, l40).
+	// Accelerator is the GPU/accelerator type (h100, gb200, b200, a100, l40).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
