@@ -292,6 +292,10 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		})
 	}
 
+	// NVIDIA_VISIBLE_DEVICES=all is set explicitly here because no GPU resource is
+	// requested (we rely on runtimeClassName to get container-runtime access to the
+	// driver). On CDI-enabled clusters the runtime would normally inject this via the
+	// CDI spec; setting it explicitly is intentional for this non-allocation path.
 	if d.config.RuntimeClassName != "" {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
