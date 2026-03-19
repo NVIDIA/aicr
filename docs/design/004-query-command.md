@@ -154,6 +154,9 @@ aicr query --service eks --accelerator h100 --intent training \
 aicr query --service eks --accelerator h100 --intent training \
   --selector 'criteria.service'
 # stdout: eks
+
+# All
+aicr query --service eks --accelerator h100 --intent training --selector ''
 ```
 
 Path resolution rules:
