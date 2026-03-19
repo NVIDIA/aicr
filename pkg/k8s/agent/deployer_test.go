@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
@@ -925,6 +926,92 @@ func TestDeployer_Deploy_NetworkError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "VPN") {
 		t.Errorf("expected VPN hint in message, got: %s", err.Error())
+	}
+}
+
+func TestDeployer_ValidateRuntimeClass(t *testing.T) {
+	tests := []struct {
+		name             string
+		runtimeClassName string
+		createRC         bool
+		wantErr          bool
+		wantCode         aicrerrors.ErrorCode
+	}{
+		{
+			name:             "exists",
+			runtimeClassName: "nvidia",
+			createRC:         true,
+			wantErr:          false,
+		},
+		{
+			name:             "not found",
+			runtimeClassName: "nvidia",
+			createRC:         false,
+			wantErr:          true,
+			wantCode:         aicrerrors.ErrCodeNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientset := fake.NewClientset()
+
+			if tt.createRC {
+				rc := &nodev1.RuntimeClass{
+					ObjectMeta: metav1.ObjectMeta{Name: tt.runtimeClassName},
+					Handler:    tt.runtimeClassName,
+				}
+				if _, err := clientset.NodeV1().RuntimeClasses().Create(
+					context.Background(), rc, metav1.CreateOptions{},
+				); err != nil {
+					t.Fatalf("failed to create RuntimeClass: %v", err)
+				}
+			}
+
+			deployer := NewDeployer(clientset, Config{RuntimeClassName: tt.runtimeClassName})
+			err := deployer.validateRuntimeClass(context.Background())
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateRuntimeClass() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				var structErr *aicrerrors.StructuredError
+				if !errors.As(err, &structErr) {
+					t.Fatalf("expected StructuredError, got %T: %v", err, err)
+				}
+				if structErr.Code != tt.wantCode {
+					t.Errorf("error code = %q, want %q", structErr.Code, tt.wantCode)
+				}
+			}
+		})
+	}
+}
+
+func TestDeployer_Deploy_RuntimeClassNotFound(t *testing.T) {
+	clientset := fake.NewClientset()
+
+	clientset.PrependReactor("create", "selfsubjectaccessreviews", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SelfSubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{Allowed: true},
+		}, nil
+	})
+
+	deployer := NewDeployer(clientset, Config{
+		Namespace:          "test-namespace",
+		ServiceAccountName: testName,
+		JobName:            testName,
+		Image:              "ghcr.io/nvidia/aicr-validator:latest",
+		Output:             "cm://test-namespace/aicr-snapshot",
+		RuntimeClassName:   "nvidia",
+	})
+
+	err := deployer.Deploy(context.Background())
+	if err == nil {
+		t.Fatal("Deploy() should fail when RuntimeClass does not exist")
+	}
+
+	if !strings.Contains(err.Error(), "RuntimeClass") {
+		t.Errorf("expected RuntimeClass in error message, got: %s", err.Error())
 	}
 }
 
