@@ -197,6 +197,29 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 			},
 		},
 		{
+			name: "GPU B200",
+			snapshot: &snapshotter.Snapshot{
+				Measurements: []*measurement.Measurement{
+					{
+						Type: measurement.TypeGPU,
+						Subtypes: []measurement.Subtype{
+							{
+								Name: "device",
+								Data: map[string]measurement.Reading{
+									"model": measurement.Str("NVIDIA-B200"),
+								},
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, c *Criteria) {
+				if c.Accelerator != CriteriaAcceleratorB200 {
+					t.Errorf("Accelerator = %v, want %v", c.Accelerator, CriteriaAcceleratorB200)
+				}
+			},
+		},
+		{
 			name: "GPU A100",
 			snapshot: &snapshotter.Snapshot{
 				Measurements: []*measurement.Measurement{
@@ -384,6 +407,7 @@ func TestMatchAccelerator(t *testing.T) {
 		{"H100 lowercase", "h100-sxm", CriteriaAcceleratorH100},
 		{"A100", "A100-SXM4-80GB", CriteriaAcceleratorA100},
 		{"GB200", "NVIDIA GB200", CriteriaAcceleratorGB200},
+		{"B200", "NVIDIA-B200", CriteriaAcceleratorB200},
 		{"L40", "NVIDIA L40S", CriteriaAcceleratorL40},
 		{"unknown model", "NVIDIA T4", ""},
 		{"empty string", "", ""},

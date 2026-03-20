@@ -137,6 +137,10 @@ func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 		},
 	}
 
+	if d.config.RuntimeClassName != "" {
+		spec.RuntimeClassName = ptr.To(d.config.RuntimeClassName)
+	}
+
 	if d.config.Privileged {
 		d.applyPrivilegedSettings(&spec)
 	} else {
@@ -285,6 +289,17 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "AICR_MAX_NODES_PER_ENTRY",
 			Value: strconv.Itoa(d.config.MaxNodesPerEntry),
+		})
+	}
+
+	// NVIDIA_VISIBLE_DEVICES=all is set explicitly here because no GPU resource is
+	// requested (we rely on runtimeClassName to get container-runtime access to the
+	// driver). On CDI-enabled clusters the runtime would normally inject this via the
+	// CDI spec; setting it explicitly is intentional for this non-allocation path.
+	if d.config.RuntimeClassName != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "all",
 		})
 	}
 

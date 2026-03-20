@@ -138,6 +138,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Category: "Agent Deployment",
 		},
 		&cli.StringFlag{
+			Name:     "runtime-class",
+			Sources:  cli.EnvVars("AICR_RUNTIME_CLASS"),
+			Usage:    "Set runtimeClassName on the agent pod for nvidia-smi access without consuming a GPU. Use with --node-selector to target GPU nodes.",
+			Category: "Agent Deployment",
+		},
+		&cli.StringFlag{
 			Name:     "template",
 			Usage:    "Path to Go template file for custom output formatting (requires YAML format)",
 			Category: "Output",
@@ -206,6 +212,12 @@ Combined node selector and custom tolerations:
     --toleration dedicated=user-workload:NoSchedule \
     --output cm://default/aicr-snapshot
 
+CDI environment where all GPUs are allocated (use runtime class instead of requesting a GPU):
+  aicr snapshot \
+    --runtime-class nvidia \
+    --node-selector nvidia.com/gpu.present=true \
+    --output snapshot.yaml
+
 Custom output formatting with Go templates:
   aicr snapshot --template my-template.tmpl --output report.md
 
@@ -221,8 +233,15 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format"); err != nil {
 				return err
+			}
+
+			// Mutual exclusion: --require-gpu and --runtime-class cannot be used together
+			if cmd.Bool("require-gpu") && cmd.String("runtime-class") != "" {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					"--require-gpu and --runtime-class are mutually exclusive; "+
+						"prefer --runtime-class, which provides nvidia-smi access via the container runtime without consuming a GPU allocation")
 			}
 
 			// Parse output format
@@ -293,6 +312,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				Debug:              cmd.Bool("debug"),
 				Privileged:         cmd.Bool("privileged"),
 				RequireGPU:         cmd.Bool("require-gpu"),
+				RuntimeClassName:   cmd.String("runtime-class"),
 				TemplatePath:       tmplOpts.templatePath,
 				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
 			}
