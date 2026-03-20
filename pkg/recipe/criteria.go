@@ -327,6 +327,48 @@ func MatchesCriteriaField(recipeValue, queryValue string) bool {
 	return recipeValue == queryValue
 }
 
+// Validate checks that all non-empty criteria fields contain valid values.
+// This runs the same parsing/normalization as ParseCriteriaFromValues,
+// ensuring POST request bodies are validated the same as GET query parameters.
+func (c *Criteria) Validate() error {
+	if c.Service != "" {
+		parsed, err := ParseCriteriaServiceType(string(c.Service))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid service", err)
+		}
+		c.Service = parsed
+	}
+	if c.Accelerator != "" {
+		parsed, err := ParseCriteriaAcceleratorType(string(c.Accelerator))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerator", err)
+		}
+		c.Accelerator = parsed
+	}
+	if c.Intent != "" {
+		parsed, err := ParseCriteriaIntentType(string(c.Intent))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid intent", err)
+		}
+		c.Intent = parsed
+	}
+	if c.OS != "" {
+		parsed, err := ParseCriteriaOSType(string(c.OS))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid os", err)
+		}
+		c.OS = parsed
+	}
+	if c.Platform != "" {
+		parsed, err := ParseCriteriaPlatformType(string(c.Platform))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid platform", err)
+		}
+		c.Platform = parsed
+	}
+	return nil
+}
+
 // Specificity returns a score indicating how specific this criteria is.
 // Higher scores mean more specific criteria (fewer "any" fields).
 // Used for ordering overlay application - more specific overlays are applied later.

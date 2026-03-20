@@ -418,6 +418,88 @@ constraints:
 
 ---
 
+### aicr query
+
+Query a specific value from the fully hydrated recipe configuration. Resolves a recipe
+from criteria (same as `aicr recipe`), merges all base, overlay, and inline value
+overrides, then extracts the value at the given dot-path selector.
+
+**Synopsis:**
+```shell
+aicr query --selector <path> [flags]
+```
+
+**Flags:**
+
+All `aicr recipe` flags are supported, plus:
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--selector` | string | **Required.** Dot-path to the configuration value to extract |
+
+**Selector Syntax:**
+
+Uses dot-delimited paths consistent with Helm `--set` and `yq`:
+
+| Selector | Returns |
+|----------|---------|
+| `components.<name>.values.<path>` | Hydrated Helm value (scalar or subtree) |
+| `components.<name>.chart` | Component metadata field |
+| `components.<name>` | Entire hydrated component block |
+| `criteria.<field>` | Recipe criteria field |
+| `deploymentOrder` | Component deployment order list |
+| `constraints` | Merged constraint list |
+| `.` or empty | Entire hydrated recipe |
+
+Leading dots are optional (yq-style): `.components.gpu-operator.chart` and
+`components.gpu-operator.chart` are equivalent.
+
+**Output:**
+
+- **Scalar values** (string, number, bool) are printed as plain text — no YAML wrapper
+- **Complex values** (maps, lists) are printed as YAML (default) or JSON (`--format json`)
+
+**Examples:**
+```shell
+# Get a specific Helm value
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version
+# stdout: 570.86.16
+
+# Get a value subtree
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver
+# stdout:
+#   version: "570.86.16"
+#   repository: nvcr.io/nvidia
+
+# Get the full hydrated component
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator
+
+# Get deployment order
+aicr query --service eks --accelerator h100 --intent training \
+  --selector deploymentOrder
+
+# Use in shell scripts
+VERSION=$(aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version)
+echo "Driver version: $VERSION"
+
+# JSON output for complex values
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values --format json
+
+# Query from snapshot
+aicr query --snapshot snapshot.yaml \
+  --selector components.gpu-operator.values.driver.version
+
+# Full hydrated recipe
+aicr query --service eks --accelerator h100 --intent training --selector .
+```
+
+---
+
 ### aicr validate
 
 Validate a system snapshot against the constraints defined in a recipe to verify cluster compatibility. Supports multi-phase validation with different validation stages.

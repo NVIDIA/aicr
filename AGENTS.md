@@ -519,6 +519,10 @@ aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --pla
 # Create deployment bundle
 aicr bundle --recipe recipe.yaml --output ./bundles
 
+# Query a specific hydrated value from a recipe
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version
+
 # Validate recipe against snapshot
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 

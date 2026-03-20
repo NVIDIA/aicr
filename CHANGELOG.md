@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-03-20
+
+### Bug Fixes
+
+- *(validator)* Add retry for ai-service-metrics Prometheus query  by [@yuanchen8911](https://github.com/yuanchen8911)
+- ArgoCD deployer generates valid YAML, add structural validation   by [@lockwobr](https://github.com/lockwobr)
+- *(bundler)* Clean up orphaned KAI and Kubeflow Trainer CRDs on undeploy  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(validator)* Source NCCL env from host profile instead of hardcoding  by [@xdu31](https://github.com/xdu31)
+- *(gke)* Update TCPXO to NRI profile without hostNetwork  by [@yuanchen8911](https://github.com/yuanchen8911)
+- *(validator)* Remove hostNetwork and privileged from GKE NCCL runtime, use NRI device injection  by [@xdu31](https://github.com/xdu31)
+- *(gke)* Remove CAP_ prefix from capability names in TCPXO manifests  by [@yuanchen8911](https://github.com/yuanchen8911)
+
+### New Features
+
+- *(recipes)* Add GKE COS inference and Dynamo overlay recipes  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Add AKS (Azure Kubernetes Service) H100 recipe overlays  by [@Jont828](https://github.com/Jont828)
+- *(validator)* Add EKS/GKE cluster autoscaling fallback  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Add B200 accelerator type support  by [@atif1996](https://github.com/atif1996)
+- *(snapshot)* Add --runtime-class flag for CDI environments  by [@atif1996](https://github.com/atif1996)
+- Add query command for hydrated recipe value extraction  by [@mchmarny](https://github.com/mchmarny)
+
+### Other Tasks
+
+- Ignore movies by [@mchmarny](https://github.com/mchmarny)
+- Deps: bump github/codeql-action from 4.32.6 to 4.33.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- *(validator)* Add custom image testing and private registry guide  by [@xdu31](https://github.com/xdu31)
+- Build and publish validator images on merge to main  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Bump nvsentinel from v0.10.x to v1.1.0  by [@mchmarny](https://github.com/mchmarny)
+- *(conformance)* Update CNCF evidence for multi-platform and training  by [@yuanchen8911](https://github.com/yuanchen8911)
+- Deps: bump github.com/in-toto/attestation from 1.1.2 to 1.2.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- Deps: bump google.golang.org/grpc from 1.79.2 to 1.79.3  by [@dependabot[bot]](https://github.com/dependabot[bot])
+- *(kwok)* Implement tiered testing strategy per ADR-003  by [@mchmarny](https://github.com/mchmarny)
+- Deps: bump the kubernetes group with 3 updates  by [@dependabot[bot]](https://github.com/dependabot[bot])
+
 ## [0.10.16] - 2026-03-16
 
 ### Bug Fixes

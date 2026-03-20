@@ -90,6 +90,7 @@ func Serve() error {
 
 	r := map[string]http.HandlerFunc{
 		"/v1/recipe": rb.HandleRecipes,
+		"/v1/query":  rb.HandleQuery,
 		"/v1/bundle": bb.HandleBundles,
 	}
 

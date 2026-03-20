@@ -446,6 +446,260 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
+  /v1/query:
+    get:
+      tags: [Recipes]
+      summary: Query a specific value from a hydrated recipe
+      operationId: getQuery
+      description: >
+        Resolves a recipe from criteria, hydrates all component values (merging
+        base, overlay, and inline overrides), and returns the value at the given
+        selector path. Scalar values are returned as plain JSON values; complex
+        values are returned as JSON objects/arrays.
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Client-provided request ID for tracing
+        - name: service
+          in: query
+          required: false
+          description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
+          schema:
+            type: string
+            enum: [eks, gke, aks, oke, any]
+            default: any
+        - name: accelerator
+          in: query
+          required: false
+          description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
+          schema:
+            type: string
+            enum: [h100, gb200, a100, l40, any]
+            default: any
+        - name: gpu
+          in: query
+          required: false
+          description: Alias for accelerator parameter (backwards compatibility).
+          schema:
+            type: string
+            enum: [h100, gb200, a100, l40, any]
+            default: any
+        - name: intent
+          in: query
+          required: false
+          description: Workload intent. If omitted, treated as "any" (wildcard).
+          schema:
+            type: string
+            enum: [training, inference, any]
+            default: any
+        - name: os
+          in: query
+          required: false
+          description: GPU node operating system. If omitted, treated as "any" (wildcard).
+          schema:
+            type: string
+            enum: [ubuntu, rhel, cos, amazonlinux, any]
+            default: any
+        - name: platform
+          in: query
+          required: false
+          description: Platform/framework type. If omitted, treated as "any" (wildcard).
+          schema:
+            type: string
+            enum: [kubeflow, any]
+            default: any
+        - name: nodes
+          in: query
+          required: false
+          description: Number of GPU nodes (0 = any/unspecified).
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: selector
+          in: query
+          required: true
+          description: >
+            Dot-delimited path to the value to extract. Uses the same notation as
+            Helm --set (e.g. components.gpu-operator.values.driver.version).
+            An empty string returns the entire hydrated recipe.
+          schema:
+            type: string
+          examples:
+            scalarValue:
+              summary: Query a specific Helm value
+              value: "components.gpu-operator.values.driver.version"
+            subtree:
+              summary: Query a component subtree
+              value: "components.gpu-operator.values.driver"
+            deploymentOrder:
+              summary: Query deployment order
+              value: "deploymentOrder"
+      responses:
+        "200":
+          description: The selected value from the hydrated recipe
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
+          content:
+            application/json:
+              schema:
+                description: The value at the selector path (scalar, object, or array)
+              examples:
+                scalar:
+                  summary: Scalar value (driver version)
+                  value: "580.105.08"
+                object:
+                  summary: Object value (driver config)
+                  value:
+                    version: "580.105.08"
+                    enabled: true
+                    useOpenKernelModules: true
+        "400":
+          description: Invalid request parameters or criteria
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Selector path not found in hydrated recipe
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                notFound:
+                  summary: Selector path not found
+                  value:
+                    code: NOT_FOUND
+                    message: "Selector path not found"
+                    details:
+                      selector: "components.gpu-operator.values.invalid.path"
+                      error: "key 'invalid' not found"
+                    requestId: "550e8400-e29b-41d4-a716-446655440000"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    retryable: false
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags: [Recipes]
+      summary: Query a hydrated recipe value from criteria body
+      operationId: createQuery
+      description: >
+        Alternative to GET with query parameters. Accepts criteria and selector
+        as JSON or YAML in the request body.
+      parameters:
+        - name: X-Request-Id
+          in: header
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Client-provided request ID for tracing
+      requestBody:
+        required: true
+        description: Query request with criteria and selector
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/QueryRequest"
+            examples:
+              simple:
+                summary: Query driver version
+                value:
+                  criteria:
+                    service: eks
+                    accelerator: h100
+                    intent: training
+                  selector: "components.gpu-operator.values.driver.version"
+          application/x-yaml:
+            schema:
+              $ref: "#/components/schemas/QueryRequest"
+      responses:
+        "200":
+          description: The selected value from the hydrated recipe
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
+          content:
+            application/json:
+              schema:
+                description: The value at the selector path (scalar, object, or array)
+        "400":
+          description: Invalid request body or criteria values
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Selector path not found in hydrated recipe
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: Rate limit exceeded
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Seconds until retry allowed
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Internal server error
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestIdResponse"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
   /v1/bundle:
     post:
       tags: [Bundles]
@@ -1060,6 +1314,22 @@ components:
           type: object
           description: Deployment constraints (driver versions, etc.)
           additionalProperties: true
+
+    QueryRequest:
+      type: object
+      description: Query request with criteria and dot-path selector
+      required: [selector]
+      properties:
+        criteria:
+          $ref: "#/components/schemas/Criteria"
+          description: Recipe criteria for resolution
+        selector:
+          type: string
+          description: >
+            Dot-delimited path to the value to extract
+            (e.g. components.gpu-operator.values.driver.version).
+            An empty string returns the entire hydrated recipe.
+          example: "components.gpu-operator.values.driver.version"
 
     BundleRequest:
       type: object

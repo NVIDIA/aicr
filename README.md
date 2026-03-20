@@ -38,6 +38,10 @@ aicr snapshot --output snapshot.yaml
 aicr recipe --service aks --accelerator h100 --os ubuntu \
   --intent training --platform kubeflow -o recipe.yaml
 
+# Query a specific hydrated config value
+aicr query --service aks --accelerator h100 --os ubuntu --intent training \
+  --selector components.gpu-operator.values.driver.version
+
 # Validate the recipe against your cluster
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 

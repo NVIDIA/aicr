@@ -149,6 +149,7 @@ func Execute() {
 		Commands: []*cli.Command{
 			snapshotCmd(),
 			recipeCmd(),
+			queryCmd(),
 			bundleCmd(),
 			bundleVerifyCmd(),
 			validateCmd(),
