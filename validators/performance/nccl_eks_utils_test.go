@@ -124,6 +124,44 @@ func TestDiscoverEKSNodeConfig(t *testing.T) {
 	}
 }
 
+func TestWarnIfHeterogeneousNodes(t *testing.T) {
+	tests := []struct {
+		name  string
+		nodes []v1.Node
+	}{
+		{
+			name: "homogeneous nodes",
+			nodes: []v1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "n2", Labels: map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"}}},
+			},
+		},
+		{
+			name: "heterogeneous nodes",
+			nodes: []v1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"}}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "n2", Labels: map[string]string{"node.kubernetes.io/instance-type": "p4d.24xlarge"}}},
+			},
+		},
+		{
+			name: "single node",
+			nodes: []v1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"}}},
+			},
+		},
+		{
+			name:  "empty",
+			nodes: []v1.Node{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// warnIfHeterogeneousNodes should never panic.
+			warnIfHeterogeneousNodes(tt.nodes)
+		})
+	}
+}
+
 func TestBuildEFAResourceLine(t *testing.T) {
 	tests := []struct {
 		name     string

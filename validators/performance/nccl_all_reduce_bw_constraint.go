@@ -327,6 +327,7 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// For EKS, discover instance type and EFA adapter count from GPU nodes.
 	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
 	if service == recipe.CriteriaServiceEKS {
+		warnIfHeterogeneousNodes(config.Nodes)
 		instanceType, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
 		if err != nil {
 			return err

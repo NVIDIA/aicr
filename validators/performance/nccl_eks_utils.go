@@ -16,10 +16,28 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 )
+
+// warnIfHeterogeneousNodes logs a warning if GPU nodes have different instance
+// types. NCCL all-reduce requires homogeneous nodes for optimal performance.
+// TODO: Add GPU product compatibility layer (nvidia.com/gpu.product family grouping).
+func warnIfHeterogeneousNodes(nodes []v1.Node) {
+	if len(nodes) < 2 {
+		return
+	}
+	firstInstance := nodes[0].Labels["node.kubernetes.io/instance-type"]
+	for _, node := range nodes[1:] {
+		nodeInstance := node.Labels["node.kubernetes.io/instance-type"]
+		if nodeInstance != firstInstance {
+			slog.Warn("Heterogeneous GPU node instance types detected — NCCL requires homogeneous nodes",
+				"expected", firstInstance, "found", nodeInstance, "node", node.Name)
+		}
+	}
+}
 
 // discoverEKSNodeConfig reads the instance type label and EFA adapter count
 // from a GPU node. Returns an error if the label is missing. EFA count of 0
