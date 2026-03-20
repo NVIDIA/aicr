@@ -8,7 +8,7 @@ AICR uses a container-per-validator model. Each validation check runs as an isol
 
 | Phase | Purpose | Example |
 |-------|---------|---------|
-| `deployment` | Verify components are installed and healthy | GPU operator pods running, Helm values match recipe |
+| `deployment` | Verify components are installed and healthy | GPU operator pods running, expected resources present |
 | `performance` | Verify system meets performance thresholds | NCCL bandwidth, GPU utilization |
 | `conformance` | Verify workload-specific requirements | DRA support, gang scheduling, autoscaling |
 
