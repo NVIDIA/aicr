@@ -32,7 +32,17 @@ import (
 
 func queryCmdFlags() []cli.Flag {
 	flags := recipeCmdFlags()
-	return append(flags, &cli.StringFlag{
+
+	// Filter out --output flag: query always prints to stdout.
+	filtered := make([]cli.Flag, 0, len(flags))
+	for _, f := range flags {
+		if sf, ok := f.(*cli.StringFlag); ok && sf.Name == "output" {
+			continue
+		}
+		filtered = append(filtered, f)
+	}
+
+	return append(filtered, &cli.StringFlag{
 		Name:     "selector",
 		Usage:    "Dot-path to the configuration value to extract (e.g. components.gpu-operator.values.driver.version)",
 		Category: "Query Parameters",
@@ -85,7 +95,7 @@ Use in shell scripts:
     --selector components.gpu-operator.values.driver.version)`,
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "output", "format", "selector"); err != nil {
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -183,6 +193,10 @@ func buildRecipeFromCmd(ctx context.Context, cmd *cli.Command) (*recipe.RecipeRe
 
 // writeQueryResult formats and prints the selected value to stdout.
 func writeQueryResult(val any, format serializer.Format) error {
+	if format == serializer.FormatJSON {
+		return writeComplexValue(val, format)
+	}
+
 	switch v := val.(type) {
 	case string:
 		fmt.Println(v)

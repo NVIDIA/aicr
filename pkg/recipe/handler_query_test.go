@@ -187,6 +187,21 @@ func TestHandleQuery_GET_CacheHeaders(t *testing.T) {
 	}
 }
 
+func TestHandleQuery_POST_InvalidCriteria(t *testing.T) {
+	builder := NewBuilder()
+
+	body := `{"criteria":{"service":"invalid-service"},"selector":"criteria.service"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/query", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	builder.HandleQuery(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusBadRequest, w.Body.String())
+	}
+}
+
 func TestParseQueryRequestFromBody_NilBody(t *testing.T) {
 	_, err := parseQueryRequestFromBody(nil, "application/json")
 	if err == nil {

@@ -1476,6 +1476,64 @@ func TestWithCriteriaNodes(t *testing.T) {
 	}
 }
 
+func TestCriteriaValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		c       *Criteria
+		wantErr bool
+	}{
+		{
+			name:    "valid criteria",
+			c:       &Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+			wantErr: false,
+		},
+		{
+			name:    "empty criteria is valid",
+			c:       &Criteria{},
+			wantErr: false,
+		},
+		{
+			name:    "invalid service",
+			c:       &Criteria{Service: "invalid-service"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid accelerator",
+			c:       &Criteria{Accelerator: "invalid-gpu"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid intent",
+			c:       &Criteria{Intent: "invalid-intent"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid os",
+			c:       &Criteria{OS: "windows"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid platform",
+			c:       &Criteria{Platform: "invalid-platform"},
+			wantErr: true,
+		},
+		{
+			name:    "normalizes case",
+			c:       &Criteria{Service: "EKS", Accelerator: "H100"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.c.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 // writeTestFile is a helper to create test files.
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
