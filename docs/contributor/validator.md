@@ -9,7 +9,7 @@ AICR uses a container-per-validator model. Each validation check runs as an isol
 | Phase | Purpose | Example |
 |-------|---------|---------|
 | `deployment` | Verify components are installed and healthy | GPU operator pods running, expected resources present |
-| `performance` | Verify system meets performance thresholds | NCCL bandwidth, GPU utilization |
+| `performance` | Verify system meets performance thresholds | NCCL all-reduce bandwidth (training), AIPerf inference throughput & TTFT p99 (inference+Dynamo) |
 | `conformance` | Verify workload-specific requirements | DRA support, gang scheduling, autoscaling |
 
 **Architecture:**
@@ -230,6 +230,51 @@ Each entry in `recipes/validators/catalog.yaml`:
 2. Explicit version tags (e.g., `:v1.2.3`) are never modified
 3. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix
 
+**Performance phase example — inference perf:**
+
+```yaml
+- name: inference-perf
+  phase: performance
+  description: "Verify inference throughput and TTFT p99 meet thresholds using AIPerf"
+  image: ghcr.io/nvidia/aicr-validators/performance:latest
+  timeout: 50m
+  args: ["inference-perf"]
+```
+
+Paired constraints in an overlay (one per metric the check produces):
+
+```yaml
+validation:
+  performance:
+    checks: [inference-perf]
+    constraints:
+      - name: inference-throughput   # output tokens/sec, >= threshold
+        value: ">= 5000"
+      - name: inference-ttft-p99     # time-to-first-token p99 in ms, <= threshold
+        value: "<= 200"
+```
+
+## Performance Validators
+
+Two performance checks ship today, both registered in `validators/performance/main.go`:
+
+| Check | Intent | Workload | Constraints |
+|-------|--------|----------|-------------|
+| `nccl-all-reduce-bw` | training | NCCL `all_reduce_perf` under a Kubeflow `TrainJob` | `nccl-all-reduce-bw >= N GB/s` |
+| `inference-perf` | inference+Dynamo | `DynamoGraphDeployment` (vLLM, Qwen/Qwen3-0.6B) + AIPerf Job | `inference-throughput >= N tok/s`, `inference-ttft-p99 <= N ms` |
+
+Both follow a consistent lifecycle:
+
+1. **Deploy** a fresh benchmark workload. `inference-perf` always provisions its own `DynamoGraphDeployment` into a per-run namespace (`aicr-inference-perf-<hash>`) derived from `AICR_RUN_ID`, so two concurrent runs cannot collide and a prior run's leftovers cannot be silently adopted. An earlier design sketch had a "discover existing frontend" path — it was intentionally dropped because it admitted ambiguity about which service was being benchmarked on shared clusters.
+2. **Wait for readiness** via the watch API (not polling) on the workload CR's status.
+3. **Run the benchmark** in a K8s Job, capturing stdout with sentinels that survive noisy logs.
+4. **Parse and evaluate** against recipe constraints with a 10% tolerance.
+5. **Defer cleanup** — the per-run namespace is torn down on both success and failure so leaked workloads from interrupted prior runs are reaped on the next invocation.
+
+The inference check injects pod-scheduling (nodeSelector, tolerations, DRA `resourceClaims`) into the unstructured `DynamoGraphDeployment` programmatically rather than via text substitution, to avoid YAML-escape issues with taint values.
+
+**AIPerf runner image.** The benchmark Job spawned by `inference-perf` pulls a pre-built image (`ghcr.io/nvidia/aicr-validators/aiperf-bench:<tag>`) with `aiperf` already `pip install`-ed. The image is published by the same `on-tag.yaml` workflow that publishes the three Go validator images; its Dockerfile at `validators/performance/aiperf-bench.Dockerfile` pins the `AIPERF_VERSION` build arg. Baking the install at release time (rather than `pip install` on every benchmark pod) removes the PyPI runtime dependency, eliminates a ~30 s warmup, and keeps the check air-gap-friendly on clusters with only ghcr.io access.
+
 ## Code Walkthrough
 
 The `operator_health.go` check demonstrates the standard pattern:
@@ -286,9 +331,14 @@ validators/
 │   ├── expected_resources.go
 │   └── ...
 ├── performance/            # Performance phase validators
-│   ├── main.go
+│   ├── main.go                       # Registers nccl-all-reduce-bw, inference-perf
 │   ├── Dockerfile
-│   └── ...
+│   ├── nccl_all_reduce_bw.go             # Training: NCCL CheckFunc wrapper
+│   ├── nccl_all_reduce_bw_constraint.go  # Training: NCCL pipeline (deploy → bench → parse)
+│   ├── inference_perf.go                 # Inference: AIPerf CheckFunc wrapper (constraint eval)
+│   ├── inference_perf_constraint.go      # Inference: Dynamo deploy → AIPerf → parse pipeline
+│   ├── aiperf-bench.Dockerfile           # Pre-built AIPerf benchmark runner image
+│   └── testdata/                         # Workload YAML templates (NCCL TrainJob, Dynamo CR, DRA claim)
 ├── conformance/            # Conformance phase validators
 │   ├── main.go
 │   ├── Dockerfile
@@ -398,6 +448,8 @@ The catalog is embedded in the binary at build time, so a rebuild is required. R
 ```shell
 git checkout -- recipes/validators/catalog.yaml
 ```
+
+**Use a unique tag for every rebuild.** Catalog entries use pinned image tags, which Kubernetes resolves with `imagePullPolicy: IfNotPresent` by default — so re-pushing the same tag (e.g., `:dev`) leaves previously-pulled nodes running the stale image. In dev loops, suffix the tag per iteration (`:dev-v1`, `:dev-v2`, or `:dev-$(git rev-parse --short HEAD)`) so every rebuild forces a fresh pull cluster-wide. Release builds avoid this entirely because `on-tag.yaml` publishes semver tags that are never reused.
 
 ### Private Registry Authentication
 

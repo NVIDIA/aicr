@@ -173,10 +173,23 @@ const (
 // Conformance test timeouts for DRA and gang scheduling validation.
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running
-	// inside a K8s Job. Must be long enough for behavioral checks (DRA pod
-	// creation + image pull + GPU allocation + isolation verification) and
-	// shorter than the Job-level ValidateConformanceTimeout.
-	CheckExecutionTimeout = 10 * time.Minute
+	// inside a K8s Job. Must be long enough for the slowest behavioral check
+	// and shorter than the catalog-level Job timeout (activeDeadlineSeconds).
+	//
+	// The ceiling is set by the cold-start inference benchmark, which runs
+	// the following phases serially under the parent ctx:
+	//   InferenceNamespaceTerminationWait ( 5m, prior run's namespace drain)
+	// + InferenceWorkloadReadyTimeout     (10m, image pull + model load)
+	// + InferenceHealthTimeout            ( 5m, endpoint readiness probe)
+	// + InferencePerfPodTimeout           ( 5m, AIPerf pod scheduling)
+	// + InferencePerfJobTimeout           (15m, AIPerf benchmark runtime)
+	// ──────────────────────────────────────
+	// = 40m worst-case phase sum; 45m ceiling gives 5m headroom for slow
+	//   image registries and slog/K8s API round-trips between phases.
+	// Deferred cleanup (K8sCleanupTimeout, ~30s) runs under a fresh
+	// context.Background and doesn't consume this budget — but see the
+	// inference-perf catalog entry for the corresponding Job-level bump.
+	CheckExecutionTimeout = 45 * time.Minute
 
 	// DRATestPodTimeout is the timeout for the DRA test pod to complete.
 	// The pod runs a simple CUDA device check but may need time for image pull.
@@ -246,6 +259,38 @@ const (
 	// source archive from GitHub. The archive is several MB, so a longer timeout than the
 	// standard HTTPClientTimeout is appropriate.
 	NCCLTrainerArchiveDownloadTimeout = 5 * time.Minute
+)
+
+// Inference performance validation timeouts.
+const (
+	// InferenceHealthTimeout is the maximum time to wait for the inference
+	// endpoint to become healthy before running the benchmark.
+	InferenceHealthTimeout = 5 * time.Minute
+
+	// InferenceHealthPollInterval is the polling interval for health checks.
+	InferenceHealthPollInterval = 10 * time.Second
+
+	// InferencePerfJobTimeout is the maximum time for the AIPerf benchmark Job
+	// to complete. AIPerf with 100 requests at concurrency 16 typically finishes
+	// in a few minutes; this provides headroom for model loading and warmup.
+	InferencePerfJobTimeout = 15 * time.Minute
+
+	// InferencePerfPodTimeout is the maximum time to wait for the AIPerf pod
+	// to be created and scheduled.
+	InferencePerfPodTimeout = 5 * time.Minute
+
+	// InferenceWorkloadReadyTimeout is the maximum time to wait for the
+	// DynamoGraphDeployment to reach the "successful" state. Includes image
+	// pull, model loading, and health check readiness for all workers.
+	InferenceWorkloadReadyTimeout = 10 * time.Minute
+
+	// InferenceNamespaceTerminationWait is the maximum time to wait for a
+	// prior run's benchmark namespace to finish terminating before a new run
+	// re-creates it. Dynamo CRs with finalizers can hold the namespace in
+	// Terminating state for 2-3 minutes while cascade deletion propagates;
+	// waiting avoids the "... forbidden: ... because it is being terminated"
+	// race on subsequent resource creates.
+	InferenceNamespaceTerminationWait = 5 * time.Minute
 )
 
 // Deployment and pod scheduling test timeouts for conformance validation.

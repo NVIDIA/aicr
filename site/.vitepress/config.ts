@@ -71,6 +71,7 @@ export default withMermaid(
               { text: 'CLI Reference', link: '/docs/user/cli-reference' },
               { text: 'API Reference', link: '/docs/user/api-reference' },
               { text: 'Agent Deployment', link: '/docs/user/agent-deployment' },
+              { text: 'Validation', link: '/docs/user/validation' },
               { text: 'Component Catalog', link: '/docs/user/component-catalog' },
             ],
           },

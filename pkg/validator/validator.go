@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -321,7 +322,7 @@ func (v *Validator) runPhase(
 		slog.Info("running validator", "name", entry.Name, "phase", phase)
 
 		deployer := job.NewDeployer(
-			clientset, factory, v.Namespace, v.RunID, entry,
+			clientset, factory, v.Namespace, v.RunID, v.Version, entry,
 			v.ImagePullSecrets, v.Tolerations, v.NodeSelector,
 		)
 
@@ -358,6 +359,13 @@ func (v *Validator) runPhase(
 
 		builder.AddResult(result)
 		slog.Info("validator completed", "name", entry.Name, "status", result.CTRFStatus())
+
+		// Surface per-check summary lines to the CLI's own output. The preceding
+		// "validator completed" line already names the validator, so echoed
+		// summaries are emitted without a redundant key.
+		for _, summary := range extractResultSummaries(result.Stdout) {
+			slog.Info(summary)
+		}
 
 		// Cleanup Job
 		if v.Cleanup {
@@ -405,6 +413,28 @@ func (v *Validator) runPhase(
 		Report:   report,
 		Duration: duration,
 	}, nil
+}
+
+// resultSummaryPrefix marks check stdout lines that should be surfaced to the
+// CLI's own output (not only the CTRF stdout array). Any check may emit one
+// or more lines like `RESULT: <human-readable summary>` and the validator
+// runtime will echo the trailing text at INFO level so users see key metrics
+// (throughput, bandwidth, TTFT, etc.) in the live CLI output. Non-prefixed
+// stdout stays in the CTRF report only.
+const resultSummaryPrefix = "RESULT: "
+
+// extractResultSummaries returns the trailing text of every stdout line that
+// begins with resultSummaryPrefix, preserving order and de-duplicating empty
+// leftovers. Pure function — extracted so the echo behavior is unit-testable
+// without a full validator run.
+func extractResultSummaries(stdout []string) []string {
+	summaries := make([]string, 0, len(stdout))
+	for _, line := range stdout {
+		if summary, ok := strings.CutPrefix(line, resultSummaryPrefix); ok && summary != "" {
+			summaries = append(summaries, summary)
+		}
+	}
+	return summaries
 }
 
 func (v *Validator) phasesSkipped(cat *catalog.ValidatorCatalog, phases []Phase, reason string) []*PhaseResult {

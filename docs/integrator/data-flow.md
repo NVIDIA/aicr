@@ -387,6 +387,17 @@ Constraints use fully qualified paths: `{Type}.{Subtype}.{Key}`
 | `!=` | Not equal | `OS.release.ID!=rhel` |
 | (none) | Exact match | `GPU.driver.version` |
 
+**Narrower subsets per validator.** A small number of validators accept
+only a subset of these operators when that's the only form the evaluator
+actually honors — using a broader operator would be silently reinterpreted
+as the honored form, so the validator rejects it with
+`ErrCodeInvalidRequest` at parse time instead. Current narrowings:
+
+| Validator / metric | Accepted operator | Rationale |
+|--------------------|-------------------|-----------|
+| `inference-throughput` | `>=` only | Evaluator enforces `throughput >= threshold * 0.9` (10% tolerance); strict `>`, `==`, `!=`, bare, and inverted forms are all coerced to the same check and would mislead recipe authors. |
+| `inference-ttft-p99` | `<=` only | Evaluator enforces `ttftP99 <= threshold * 1.1`; same rationale as throughput, opposite direction. |
+
 ### Input Sources
 
 **File-based:**
@@ -439,6 +450,18 @@ Results are output in [CTRF](https://ctrf.io/) (Common Test Report Format) JSON:
         "duration": 234000,
         "suite": ["performance"],
         "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
+      },
+      {
+        "name": "inference-perf",
+        "status": "passed",
+        "duration": 612000,
+        "suite": ["performance"],
+        "stdout": [
+          "RESULT: Inference throughput: 37961.24 tokens/sec",
+          "RESULT: Inference TTFT p99: 146.30 ms",
+          "Throughput constraint: >= 5000 → PASS",
+          "TTFT p99 constraint: <= 200 → PASS"
+        ]
       }
     ]
   }

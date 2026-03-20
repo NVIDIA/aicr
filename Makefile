@@ -268,7 +268,14 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 			docker push $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG); \
 		fi; \
-	done
+	done; \
+	echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
+	docker build -f validators/performance/aiperf-bench.Dockerfile \
+		-t $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG) .; \
+	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
+		echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
+		docker push $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG); \
+	fi
 
 .PHONY: check-health
 check-health: ## Runs chainsaw health check directly against Kind cluster (COMPONENT=<name>)
@@ -311,7 +318,7 @@ check-health-all: ## Runs all chainsaw health checks against Kind cluster
 	echo "All health checks passed"
 
 .PHONY: validate-local
-validate-local: image-validator ## Builds validator image and runs validation in Kind (RECIPE=<path>)
+validate-local: image-validators ## Builds validator images and runs validation in Kind (RECIPE=<path>)
 	@set -e; \
 	if [ -z "$(RECIPE)" ]; then \
 		echo "Usage: make validate-local RECIPE=<path-to-recipe.yaml>"; \
@@ -322,7 +329,7 @@ validate-local: image-validator ## Builds validator image and runs validation in
 		exit 1; \
 	fi; \
 	echo "Loading validator images into Kind cluster..."; \
-	for phase in deployment performance conformance; do \
+	for phase in deployment performance conformance aiperf-bench; do \
 		kind load docker-image $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) --name kind-aicr; \
 	done; \
 	echo "Running validation with local images..."; \

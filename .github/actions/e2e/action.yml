@@ -97,6 +97,13 @@ runs:
         DOCKERFILE
             docker push "localhost:5001/aicr-validators/${phase}:latest"
           done
+          # aiperf-bench is an ancillary Python image (not a Go validator),
+          # required at runtime by the inference-perf check. Build from its
+          # own Dockerfile and push to the local registry so any future e2e
+          # test that exercises inference-perf can resolve the inner image.
+          docker build -t "localhost:5001/aicr-validators/aiperf-bench:latest" \
+            -f validators/performance/aiperf-bench.Dockerfile .
+          docker push "localhost:5001/aicr-validators/aiperf-bench:latest"
         ) &
         pid_validators=$!
         go build -o dist/e2e/aicr ./cmd/aicr &
@@ -111,6 +118,7 @@ runs:
         curl -sf http://localhost:5001/v2/aicr-validators/deployment/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/performance/tags/list
         curl -sf http://localhost:5001/v2/aicr-validators/conformance/tags/list
+        curl -sf http://localhost:5001/v2/aicr-validators/aiperf-bench/tags/list
 
     - name: Set up fake GPU environment
       shell: bash
