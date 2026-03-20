@@ -498,6 +498,44 @@ aicr query --snapshot snapshot.yaml \
 aicr query --service eks --accelerator h100 --intent training --selector .
 ```
 
+**Advanced Examples:**
+
+```shell
+# Cross-cloud comparison: how Prometheus storage differs between EKS and GKE
+# EKS provisions a 50Gi persistent EBS volume (gp2)
+aicr query --service eks --intent training \
+  --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
+# GKE uses a 10Gi ephemeral emptyDir (GMP handles long-term retention)
+aicr query --service gke --intent training \
+  --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
+
+# Compare deployment order across clouds
+# EKS deploys 12 components (includes aws-ebs-csi-driver, aws-efa, skyhook-customizations)
+aicr query --service eks --accelerator h100 --intent training --selector deploymentOrder
+# GKE deploys 9 components (storage and networking are platform-managed)
+aicr query --service gke --accelerator h100 --intent training --selector deploymentOrder
+
+# Pin the exact driver version into Terraform/Pulumi variables
+DRIVER_VERSION=$(aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version)
+echo "gpu_driver_version = \"${DRIVER_VERSION}\""
+
+# Compare skyhook tuning parameters across accelerators
+# H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.skyhook-customizations.values
+# GB200: same value structure, but manifest renders a no-op (ARM64 packages pending)
+aicr query --service eks --accelerator gb200 --intent training \
+  --selector components.skyhook-customizations.values
+
+# Watch constraints tighten as you add specificity
+# Just "EKS" → 1 constraint (K8s >= 1.28)
+aicr query --service eks --selector constraints
+# Add GPU + intent + OS → 4 constraints (K8s >= 1.32.4, Ubuntu 24.04, kernel >= 6.8)
+aicr query --service eks --accelerator h100 --intent training --os ubuntu \
+  --selector constraints
+```
+
 ---
 
 ### aicr validate
