@@ -1,12 +1,4 @@
-## Flox Environment Manifest -----------------------------------------
-##
-##   _Everything_ you need to know about the _manifest_ is here:
-##
-##   https://flox.dev/docs/reference/command-reference/manifest.toml/
-##
-## -------------------------------------------------------------------
-# Flox manifest version managed by Flox CLI
-version = 1
+schema-version = "1.10.0"
 
 
 ## Install Packages --------------------------------------------------
@@ -23,6 +15,7 @@ goreleaser.version = "^2"
 ko.pkg-path = "ko"
 ko.version = "^0.18"
 crane.pkg-path = "crane"
+crane.outputs = "all"
 # crane 0.21 not yet in nixpkgs; unpinned to get latest available
 git-cliff.pkg-path = "git-cliff"
 git-cliff.version = "^2"
@@ -32,6 +25,7 @@ golangci-lint.pkg-path = "golangci-lint"
 golangci-lint.version = "^2"
 yamllint.pkg-path = "yamllint"
 yamllint.version = "^1"
+yamllint.outputs = "all"
 addlicense.pkg-path = "addlicense"
 go-licenses.pkg-path = "go-licenses"
 
@@ -40,10 +34,13 @@ grype.pkg-path = "grype"
 # grype 0.107 not yet in nixpkgs; unpinned to get latest available
 cosign.pkg-path = "cosign"
 cosign.version = "^3"
+syft.pkg-path = "syft"
+syft.version = "^1"
 
 # Kubernetes / testing tools
 kubectl.pkg-path = "kubectl"
 kubectl.version = "^1"
+kubectl.outputs = "all"
 kubernetes-helm.pkg-path = "kubernetes-helm"
 # helm 4 not yet in nixpkgs; unpinned to get latest available (v3.x)
 kind.pkg-path = "kind"
@@ -51,7 +48,7 @@ kind.version = "^0.31"
 ctlptl.pkg-path = "ctlptl"
 ctlptl.version = "^0.9"
 tilt.pkg-path = "tilt"
-tilt.version = "^0.36"
+# tilt 0.37 not yet in nixpkgs; unpinned to get latest available (v0.36.x)
 chainsaw.pkg-path = "kyverno-chainsaw"
 chainsaw.version = "^0.2"
 kwok.pkg-path = "kwok"
