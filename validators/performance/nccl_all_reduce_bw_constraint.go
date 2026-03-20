@@ -21,7 +21,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -44,6 +43,11 @@ const (
 	testType       = "all_reduce_perf"
 	minMessageSize = "1K"
 	maxMessageSize = "16G"
+
+	// maxMessageSizeTCP is a reduced upper bound for clusters without
+	// high-bandwidth interconnect (e.g. EFA). Multi-GB all_reduce over TCP
+	// can hang or take unreasonably long with 16+ ranks.
+	maxMessageSizeTCP = "4G"
 
 	// ncclTrainJobName is the name used for both the TrainJob resource and the label
 	// selector when waiting for the launcher pod. Must stay in sync with trainjob.yaml.
@@ -225,6 +229,7 @@ type gpuConfiguration struct {
 	GPUCountPerNode int
 	TotalGPUCount   int
 	Namespace       string
+	Nodes           []v1.Node
 }
 
 // parseThreshold extracts the numeric threshold value from a constraint value.
@@ -283,65 +288,8 @@ func determineGPUConfig(ctx *validators.Context) (*gpuConfiguration, error) {
 		GPUCountPerNode: gpuCountPerNode,
 		TotalGPUCount:   totalGPUs,
 		Namespace:       ctx.Namespace,
+		Nodes:           gpuNodes,
 	}, nil
-}
-
-// discoverGKEGPUNICNetworks lists networks.networking.gke.io and returns
-// GPU NIC network names (those containing "gpu-nic"), sorted alphabetically.
-// GKE clusters provision these with cluster-specific prefixes (e.g.,
-// "aicr-demo2-gpu-nic-0"); the names cannot be hardcoded.
-func discoverGKEGPUNICNetworks(ctx context.Context, dynamicClient dynamic.Interface) ([]string, error) {
-	networkGVR := schema.GroupVersionResource{
-		Group: "networking.gke.io", Version: "v1", Resource: "networks",
-	}
-
-	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
-	defer cancel()
-
-	networks, err := dynamicClient.Resource(networkGVR).List(listCtx, metav1.ListOptions{})
-	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list GKE networks", err)
-	}
-
-	var gpuNICs []string
-	for _, n := range networks.Items {
-		name := n.GetName()
-		if strings.Contains(name, "gpu-nic") {
-			gpuNICs = append(gpuNICs, name)
-		}
-	}
-
-	sort.Strings(gpuNICs)
-	return gpuNICs, nil
-}
-
-// buildGKENetworkInterfacesAnnotation builds the networking.gke.io/interfaces
-// annotation value from discovered GPU NIC network names.
-// Maps eth0 → default, eth1 → gpuNICs[0], eth2 → gpuNICs[1], etc.
-func buildGKENetworkInterfacesAnnotation(gpuNICs []string) string {
-	interfaces := make([]string, 0, len(gpuNICs)+1)
-	interfaces = append(interfaces, `{"interfaceName":"eth0","network":"default"}`)
-	for i, nic := range gpuNICs {
-		interfaces = append(interfaces, fmt.Sprintf(`{"interfaceName":"eth%d","network":"%s"}`, i+1, nic))
-	}
-	return "[" + strings.Join(interfaces, ",") + "]"
-}
-
-// buildNRIDeviceAnnotation builds the devices.gke.io/container.tcpxo-daemon
-// annotation value for NRI device injection. Lists /dev/nvidia0..N-1 plus
-// the control and DMA devices the tcpxo-daemon needs without privileged mode.
-// Each line after the first is indented with 20 spaces to match the YAML
-// template indentation at the ${NRI_DEVICE_ANNOTATION} placeholder.
-func buildNRIDeviceAnnotation(gpuCount int) string {
-	const indent = "                    " // 20 spaces — matches template position
-	lines := make([]string, 0, gpuCount+3)
-	for i := range gpuCount {
-		lines = append(lines, fmt.Sprintf("- path: /dev/nvidia%d", i))
-	}
-	lines = append(lines, "- path: /dev/nvidiactl")
-	lines = append(lines, "- path: /dev/nvidia-uvm")
-	lines = append(lines, "- path: /dev/dmabuf_import_helper")
-	return strings.Join(lines, "\n"+indent)
 }
 
 // applyNCCLResources applies the per-platform TrainingRuntime and shared TrainJob
@@ -374,6 +322,28 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		templateData["GKE_NETWORK_INTERFACES"] = buildGKENetworkInterfacesAnnotation(gpuNICs)
 		templateData["NRI_DEVICE_ANNOTATION"] = buildNRIDeviceAnnotation(config.GPUCountPerNode)
 		slog.Info("Discovered GKE GPU NIC networks", "count", len(gpuNICs), "networks", gpuNICs)
+	}
+
+	// For EKS, discover instance type and EFA adapter count from GPU nodes.
+	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
+	if service == recipe.CriteriaServiceEKS {
+		warnIfHeterogeneousNodes(config.Nodes)
+		instanceType, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
+		if err != nil {
+			return err
+		}
+		templateData["INSTANCE_TYPE"] = instanceType
+		// Indentation matches the resource block position in runtime.yaml.
+		const efaIndent = "                      "
+		templateData["EFA_RESOURCE_LIMITS"] = buildEFAResourceLine(efaCount, efaIndent)
+		templateData["EFA_RESOURCE_REQUESTS"] = buildEFAResourceLine(efaCount, efaIndent)
+		if efaCount == 0 {
+			templateData["MAX_MESSAGE_SIZE"] = maxMessageSizeTCP
+			slog.Warn("No EFA adapters found — NCCL will use TCP (reduced bandwidth)",
+				"instanceType", instanceType, "maxMessageSize", maxMessageSizeTCP)
+		} else {
+			slog.Info("Discovered EKS node configuration", "instanceType", instanceType, "efaCount", efaCount)
+		}
 	}
 
 	// Apply per-platform runtime: testdata/{accelerator}/{service}/runtime.yaml
