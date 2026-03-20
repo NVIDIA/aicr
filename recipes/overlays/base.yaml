@@ -82,13 +82,7 @@ spec:
     - name: kai-scheduler
       type: Helm
       source: oci://ghcr.io/nvidia/kai-scheduler
-      version: v0.12.17
+      version: v0.13.0
       valuesFile: components/kai-scheduler/values.yaml
-      # Workaround: KAI scheduler v0.12.x injects runtimeClassName: nvidia
-      # into GPU pods, which fails with GPU Operator v25.10.0+ CDI defaults.
-      # This manifest patches the KAI Config CR to disable the injection.
-      # Remove once KAI-Scheduler#1035 is backported to v0.12.
-      manifestFiles:
-        - components/kai-scheduler/manifests/disable-runtime-class-injection.yaml
       dependencyRefs:
         - gpu-operator

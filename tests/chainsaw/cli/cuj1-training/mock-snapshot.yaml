@@ -40,7 +40,7 @@ measurements:
           k8s-ephemeral-storage-metrics.version: 1.19.2
           k8s-ephemeral-storage-metrics.namespace: monitoring
           kai-scheduler.chart: kai-scheduler
-          kai-scheduler.version: v0.12.17
+          kai-scheduler.version: v0.13.0
           kai-scheduler.namespace: kai-scheduler
           kube-prometheus-stack.chart: kube-prometheus-stack
           kube-prometheus-stack.version: 82.8.0

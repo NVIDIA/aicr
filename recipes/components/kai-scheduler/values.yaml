@@ -21,6 +21,14 @@ global:
   tolerations:
     - operator: Exists
 
+# Disable runtimeClassName injection into GPU pods.
+# GPU Operator v25.10.0+ sets nvidia as the default containerd runtime,
+# so explicit runtimeClassName injection activates the CDI path and fails
+# with "unresolvable CDI devices". Fixed in KAI v0.13.0 (chart now respects
+# empty string instead of falling back to "nvidia").
+admission:
+  gpuPodRuntimeClassName: ""
+
 # Disable post-delete hook job — it does not inherit global.tolerations
 # and will hang Pending on clusters with tainted nodes.
 # Helm uninstall already removes the deployments this hook would delete.

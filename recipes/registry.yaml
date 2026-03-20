@@ -338,7 +338,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/kai-scheduler
       defaultChart: kai-scheduler
-      defaultVersion: v0.12.17
+      defaultVersion: v0.13.0
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:
