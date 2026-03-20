@@ -20,7 +20,7 @@ aicr recipe \
 
 ```shell
 aicr validate \
-  --phase readiness \
+  --phase performance \
   --recipe recipe.yaml
 ```
 
@@ -31,7 +31,12 @@ aicr validate \
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --output bundle
+  --output bundle \
+  --accelerated-node-selector [key]=[value] \
+  --accelerated-node-toleration [key]=[value]:[operation] 
+```
+
+Replace the values for `--accelerated-node-selector` and `--accelerated-node-toleration` with the appropriate ones to match your gpu pool(s). You do not want optimizations and inference workloads to run across all nodes. Both options allow for comma delimination to supply multiple values. See the [aicr bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
 ```
 
 ## Install Bundle into the Cluster
@@ -46,23 +51,12 @@ cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 aicr validate \
   --recipe recipe.yaml \
   --output report.yaml \
-  --phase readiness \
+  --phase performance \
   --phase deployment \
   --phase conformance
 ```
 
 ## Run Inference Workload
-
-### Create namespace and HuggingFace secret
-
-> Set HF_TOKEN env var first
-
-```shell
-kubectl create ns dynamo-workload
-
-sed "s/<your-hf-token>/$HF_TOKEN/" \
-  demos/workloads/inference/hf-token-secret.yaml | kubectl apply -f -
-```
 
 ### Deploy the DynamoGraphDeployment
 
@@ -74,7 +68,7 @@ Monitor deployment, until all pods are `Running` and ready:
 
 ```shell
 kubectl get dynamographdeployments -n dynamo-workload
-kubectl get pods -n dynamo-workload -w
+kubectl wait --for=condition=ready pod --all -n dynamo-workload --timeout=300s
 ```
 
 ### Test the endpoint

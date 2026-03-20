@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,25 +43,24 @@ const ChecksumFileName = "checksums.txt"
 // or the checksums file cannot be written.
 func GenerateChecksums(ctx context.Context, bundleDir string, files []string) error {
 	if err := ctx.Err(); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeUnavailable, "context canceled before checksum generation", err)
 	}
 
 	checksums := make([]string, 0, len(files))
 
 	for _, file := range files {
-		data, err := os.ReadFile(file)
+		digest, err := SHA256Raw(file)
 		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to read %s for checksum", file), err)
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to compute checksum for %s", file), err)
 		}
 
-		hash := sha256.Sum256(data)
 		relPath, err := filepath.Rel(bundleDir, file)
 		if err != nil {
 			// If relative path fails, use absolute path
 			relPath = file
 		}
 
-		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(hash[:]), relPath))
+		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(digest), relPath))
 	}
 
 	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
@@ -135,14 +134,13 @@ func VerifyChecksumsFromData(bundleDir string, data []byte) []string {
 			continue
 		}
 
-		fileData, readErr := os.ReadFile(filePath)
+		digest, readErr := SHA256Raw(filePath)
 		if readErr != nil {
 			errs = append(errs, fmt.Sprintf("failed to read %s: %v", relativePath, readErr))
 			continue
 		}
 
-		hash := sha256.Sum256(fileData)
-		actualDigest := hex.EncodeToString(hash[:])
+		actualDigest := hex.EncodeToString(digest)
 		if actualDigest != expectedDigest {
 			errs = append(errs, fmt.Sprintf("checksum mismatch: %s (expected %s, got %s)", relativePath, expectedDigest, actualDigest))
 		}
@@ -171,7 +169,7 @@ func CountEntries(bundleDir string) int {
 // SHA256Raw computes a file's SHA256 digest using streaming I/O and returns
 // the raw bytes. Does not load the entire file into memory.
 func SHA256Raw(path string) ([]byte, error) {
-	f, err := os.Open(path)
+	f, err := os.Open(filepath.Clean(path)) //nolint:gosec // G703: path from internal callers only
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to open file for digest: %s", path), err)

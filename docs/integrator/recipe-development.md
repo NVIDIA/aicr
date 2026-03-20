@@ -269,13 +269,13 @@ componentRefs:
 validation:
   # Readiness phase has no checks — constraints are evaluated inline from snapshot.
   deployment:
-    checks: [operator-health, expected-resources]
+    checks: [expected-resources]
   performance:
     infrastructure: nccl-doctor
     checks: [nccl-bandwidth-test]
 ```
 
-**Phases:** `readiness`, `deployment`, `performance`, `conformance`
+**Phases:** `deployment`, `performance`, `conformance` (readiness constraints are evaluated implicitly)
 
 ### Testing
 
@@ -364,7 +364,7 @@ componentRefs:
 
 ### Automated Tests
 
-Tests in [`pkg/recipe/yaml_test.go`](../../pkg/recipe/yaml_test.go) validate:
+Tests in [`pkg/recipe/yaml_test.go`](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/yaml_test.go) validate:
 - Schema conformance (YAML structure)
 - Criteria enum values (service, accelerator, intent, OS, platform)
 - File references (valuesFile, dependencyRefs)

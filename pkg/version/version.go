@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ var (
 	ErrTooManyComponents = errors.New("version has more than 3 components")
 	ErrNonNumeric        = errors.New("version component is not numeric")
 	ErrNegativeComponent = errors.New("version component cannot be negative")
-	ErrInvalidPrecision  = errors.New("version precision must be 1, 2, or 3")
 )
 
 // Version represents a semantic version number with Major, Minor, and Patch components.
@@ -192,9 +191,9 @@ func (v Version) EqualsOrNewer(other Version) bool {
 	return v.Patch >= other.Patch
 }
 
-// IsNewer returns true if v is strictly newer than other (not equal).
+// isNewer returns true if v is strictly newer than other (not equal).
 // Respects precision like EqualsOrNewer.
-func (v Version) IsNewer(other Version) bool {
+func (v Version) isNewer(other Version) bool {
 	// Always compare Major
 	if v.Major > other.Major {
 		return true

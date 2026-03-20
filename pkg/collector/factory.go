@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/collector/os"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
+	"github.com/NVIDIA/aicr/pkg/collector/topology"
 )
 
 // Factory defines the interface for creating collector instances.
@@ -29,6 +30,7 @@ type Factory interface {
 	CreateOSCollector() Collector
 	CreateKubernetesCollector() Collector
 	CreateGPUCollector() Collector
+	CreateNodeTopologyCollector() Collector
 }
 
 // Option defines a configuration option for DefaultFactory.
@@ -41,19 +43,19 @@ func WithSystemDServices(services []string) Option {
 	}
 }
 
-// WithHelmNamespaces configures the namespaces for Helm release collection.
-// nil/empty = skip, ["*"] = all namespaces, ["ns1","ns2"] = scoped.
-func WithHelmNamespaces(namespaces []string) Option {
+// WithMaxNodesPerEntry configures the maximum number of node names stored per
+// taint/label entry in the topology collector. 0 = no limit.
+func WithMaxNodesPerEntry(max int) Option {
 	return func(f *DefaultFactory) {
-		f.HelmNamespaces = namespaces
+		f.MaxNodesPerEntry = max
 	}
 }
 
 // DefaultFactory is the standard implementation of Factory that creates collectors
 // with production dependencies. It configures default systemd services to monitor.
 type DefaultFactory struct {
-	SystemDServices []string
-	HelmNamespaces  []string
+	SystemDServices  []string
+	MaxNodesPerEntry int
 }
 
 // NewDefaultFactory creates a new DefaultFactory with default configuration.
@@ -95,7 +97,13 @@ func (f *DefaultFactory) CreateOSCollector() Collector {
 
 // CreateKubernetesCollector creates a Kubernetes API collector.
 func (f *DefaultFactory) CreateKubernetesCollector() Collector {
-	return &k8s.Collector{
-		HelmNamespaces: f.HelmNamespaces,
+	return &k8s.Collector{}
+}
+
+// CreateNodeTopologyCollector creates a node topology collector that gathers
+// taint and label information across all cluster nodes.
+func (f *DefaultFactory) CreateNodeTopologyCollector() Collector {
+	return &topology.Collector{
+		MaxNodesPerEntry: f.MaxNodesPerEntry,
 	}
 }

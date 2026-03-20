@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ func TestGenerate_Success(t *testing.T) {
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
-				"installCRDs": true,
+				"crds": map[string]any{"enabled": true},
 			},
 			"gpu-operator": {
 				"driver": map[string]any{
@@ -78,13 +78,13 @@ func TestGenerate_Success(t *testing.T) {
 		}
 	}
 
-	// Verify cert-manager values contain installCRDs
+	// Verify cert-manager values contain crds.enabled
 	cmValues, err := os.ReadFile(filepath.Join(outputDir, "cert-manager", "values.yaml"))
 	if err != nil {
 		t.Fatalf("failed to read cert-manager values: %v", err)
 	}
-	if !strings.Contains(string(cmValues), "installCRDs") {
-		t.Error("cert-manager/values.yaml missing installCRDs")
+	if !strings.Contains(string(cmValues), "crds") {
+		t.Error("cert-manager/values.yaml missing crds section")
 	}
 
 	// Verify gpu-operator values contain driver
@@ -157,7 +157,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	input := &GeneratorInput{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
-			"cert-manager": {"installCRDs": true},
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
 			"gpu-operator": {"enabled": true},
 		},
 		Version:          "v1.0.0",
@@ -384,6 +384,18 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	if !strings.Contains(string(content), "set -euo pipefail") {
 		t.Error("deploy.sh missing strict mode")
 	}
+	if !strings.Contains(string(content), "MAX_RETRIES=5") {
+		t.Error("deploy.sh missing default MAX_RETRIES")
+	}
+	if !strings.Contains(string(content), "backoff_seconds()") {
+		t.Error("deploy.sh missing backoff_seconds function")
+	}
+	if !strings.Contains(string(content), "retry()") {
+		t.Error("deploy.sh missing retry function")
+	}
+	if !strings.Contains(string(content), "--retries") {
+		t.Error("deploy.sh missing --retries flag handling")
+	}
 }
 
 func TestGenerate_UndeployScriptExecutable(t *testing.T) {
@@ -442,6 +454,112 @@ func TestGenerate_UndeployScriptExecutable(t *testing.T) {
 	}
 	if gpuIdx > certIdx {
 		t.Error("undeploy.sh components not in reverse order: gpu-operator should come before cert-manager")
+	}
+
+	// Verify --delete-pvcs flag defaults to off
+	if !strings.Contains(script, "DELETE_PVCS=false") {
+		t.Error("undeploy.sh missing DELETE_PVCS=false default")
+	}
+	if !strings.Contains(script, "--delete-pvcs") {
+		t.Error("undeploy.sh missing --delete-pvcs flag handling")
+	}
+
+	// Verify PVC deletion is guarded by the flag
+	if !strings.Contains(script, `"${DELETE_PVCS}" == "true"`) {
+		t.Error("undeploy.sh PVC deletion not guarded by DELETE_PVCS flag")
+	}
+
+	// Verify no unconditional PVC deletion inside per-component loop
+	// PVC deletion should only appear in the namespace cleanup section
+	lines := strings.Split(script, "\n")
+	inComponentLoop := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.Contains(trimmed, "Uninstalling") && strings.Contains(trimmed, "echo") {
+			inComponentLoop = true
+		}
+		if strings.Contains(trimmed, "Clean up namespaces") {
+			inComponentLoop = false
+		}
+		if inComponentLoop && strings.Contains(trimmed, "kubectl delete pvc") {
+			t.Error("undeploy.sh has unconditional PVC deletion inside per-component loop")
+		}
+	}
+
+	// Verify webhook cleanup runs both before and after namespace deletion
+	nsCleanupIdx := strings.Index(script, "Clean up namespaces")
+	nsTermIdx := strings.Index(script, "Waiting for namespaces to terminate")
+	finalWebhookIdx := strings.Index(script, "Final webhook cleanup")
+	if nsCleanupIdx < 0 || nsTermIdx < 0 || finalWebhookIdx < 0 {
+		t.Fatal("undeploy.sh missing expected section markers")
+	}
+
+	// Webhook cleanup should appear in namespace cleanup section (before delete_namespace)
+	betweenCleanupAndTerm := script[nsCleanupIdx:nsTermIdx]
+	if !strings.Contains(betweenCleanupAndTerm, "delete_orphaned_webhooks_for_ns") {
+		t.Error("undeploy.sh missing pre-namespace-deletion webhook cleanup")
+	}
+
+	// Final webhook cleanup should appear after namespace termination wait
+	if finalWebhookIdx < nsTermIdx {
+		t.Error("undeploy.sh final webhook cleanup should run after namespace termination wait")
+	}
+	afterTermWait := script[nsTermIdx:]
+	if !strings.Contains(afterTermWait, "delete_orphaned_webhooks_for_ns") {
+		t.Error("undeploy.sh missing post-namespace-deletion webhook cleanup")
+	}
+}
+
+func TestUniqueNamespaces(t *testing.T) {
+	tests := []struct {
+		name       string
+		components []ComponentData
+		expected   []string
+	}{
+		{
+			name: "deduplicates shared namespaces",
+			components: []ComponentData{
+				{Name: "prometheus-adapter", Namespace: "monitoring", HasChart: true},
+				{Name: "k8s-ephemeral", Namespace: "monitoring", HasChart: true},
+				{Name: "kube-prometheus", Namespace: "monitoring", HasChart: true},
+				{Name: "gpu-operator", Namespace: "gpu-operator", HasChart: true},
+			},
+			expected: []string{"monitoring", "gpu-operator"},
+		},
+		{
+			name: "excludes manifest-only components",
+			components: []ComponentData{
+				{Name: "my-manifests", Namespace: "custom-ns", HasManifests: true},
+				{Name: "gpu-operator", Namespace: "gpu-operator", HasChart: true},
+			},
+			expected: []string{"gpu-operator"},
+		},
+		{
+			name: "includes kustomize components",
+			components: []ComponentData{
+				{Name: "my-kustomize", Namespace: "kustomize-ns", IsKustomize: true},
+				{Name: "gpu-operator", Namespace: "gpu-operator", HasChart: true},
+			},
+			expected: []string{"kustomize-ns", "gpu-operator"},
+		},
+		{
+			name:       "empty input",
+			components: []ComponentData{},
+			expected:   nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := uniqueNamespaces(tt.components)
+			if len(result) != len(tt.expected) {
+				t.Fatalf("got %v, want %v", result, tt.expected)
+			}
+			for i, ns := range result {
+				if ns != tt.expected[i] {
+					t.Errorf("index %d: got %q, want %q", i, ns, tt.expected[i])
+				}
+			}
+		})
 	}
 }
 
@@ -755,7 +873,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	input := &GeneratorInput{
 		RecipeResult: createMixedRecipeResult(),
 		ComponentValues: map[string]map[string]any{
-			"cert-manager":     {"installCRDs": true},
+			"cert-manager":     {"crds": map[string]any{"enabled": true}},
 			"my-kustomize-app": {},
 		},
 		Version: "v1.0.0",
@@ -1051,7 +1169,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
-				"installCRDs": true,
+				"crds": map[string]any{"enabled": true},
 			},
 			"gpu-operator": {
 				"driver": map[string]any{

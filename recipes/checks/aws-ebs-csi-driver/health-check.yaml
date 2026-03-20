@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# AWS EBS CSI Driver Health Check
+#
+# Validates that the AWS EBS CSI Driver is running and healthy in the
+# kube-system namespace. Checks that the ebs-csi-controller deployment has
+# at least one available replica and that no EBS CSI driver pods (selected
+# by label) are stuck in Pending, Failed, or Unknown phases. Label selectors
+# are used because kube-system is a shared namespace.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: aws-ebs-csi-driver-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-deployment-exists
+      try:
+        # Guard against vacuous pass: verify the ebs-csi-controller
+        # deployment exists and has at least one ready replica.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: ebs-csi-controller
+                namespace: kube-system
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Assert no EBS CSI driver pods are in unhealthy phases.
+        # Uses label selector because kube-system is a shared namespace.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  app.kubernetes.io/name: aws-ebs-csi-driver
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  app.kubernetes.io/name: aws-ebs-csi-driver
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  app.kubernetes.io/name: aws-ebs-csi-driver
+              status:
+                phase: Unknown

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -274,7 +274,7 @@ func TestMeasurement_GetSubtype(t *testing.T) {
 	})
 }
 
-func TestMeasurement_HasSubtype(t *testing.T) {
+func Test_hasSubtype(t *testing.T) {
 	m := &Measurement{
 		Type: TypeK8s,
 		Subtypes: []Subtype{
@@ -295,14 +295,14 @@ func TestMeasurement_HasSubtype(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := m.HasSubtype(tt.st); got != tt.want {
+			if got := m.hasSubtype(tt.st); got != tt.want {
 				t.Errorf("HasSubtype(%q) = %v, want %v", tt.st, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestMeasurement_SubtypeNames(t *testing.T) {
+func Test_subtypeNames(t *testing.T) {
 	m := &Measurement{
 		Type: TypeK8s,
 		Subtypes: []Subtype{
@@ -312,7 +312,7 @@ func TestMeasurement_SubtypeNames(t *testing.T) {
 		},
 	}
 
-	names := m.SubtypeNames()
+	names := m.subtypeNames()
 	if len(names) != 3 {
 		t.Fatalf("SubtypeNames() returned %d names, want 3", len(names))
 	}
@@ -420,7 +420,7 @@ func TestSubtype_Get(t *testing.T) {
 	})
 }
 
-func TestSubtype_Keys(t *testing.T) {
+func Test_keys(t *testing.T) {
 	st := &Subtype{
 		Name: "test",
 		Data: map[string]Reading{
@@ -430,7 +430,7 @@ func TestSubtype_Keys(t *testing.T) {
 		},
 	}
 
-	keys := st.Keys()
+	keys := st.keys()
 	if len(keys) != 3 {
 		t.Fatalf("Keys() returned %d keys, want 3", len(keys))
 	}
@@ -516,7 +516,7 @@ func TestSubtype_GetInt64(t *testing.T) {
 	}
 }
 
-func TestSubtype_GetUint64(t *testing.T) {
+func Test_getUint64(t *testing.T) {
 	st := &Subtype{
 		Name: "test",
 		Data: map[string]Reading{
@@ -539,7 +539,7 @@ func TestSubtype_GetUint64(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := st.GetUint64(tt.key)
+			got, err := st.getUint64(tt.key)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetUint64(%q) error = %v, wantErr %v", tt.key, err, tt.wantErr)
 				return
@@ -551,7 +551,7 @@ func TestSubtype_GetUint64(t *testing.T) {
 	}
 }
 
-func TestSubtype_GetFloat64(t *testing.T) {
+func Test_getFloat64(t *testing.T) {
 	st := &Subtype{
 		Name: "test",
 		Data: map[string]Reading{
@@ -572,7 +572,7 @@ func TestSubtype_GetFloat64(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := st.GetFloat64(tt.key)
+			got, err := st.getFloat64(tt.key)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetFloat64(%q) error = %v, wantErr %v", tt.key, err, tt.wantErr)
 				return
@@ -584,7 +584,7 @@ func TestSubtype_GetFloat64(t *testing.T) {
 	}
 }
 
-func TestSubtype_GetBool(t *testing.T) {
+func Test_getBool(t *testing.T) {
 	st := &Subtype{
 		Name: "test",
 		Data: map[string]Reading{
@@ -607,7 +607,7 @@ func TestSubtype_GetBool(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := st.GetBool(tt.key)
+			got, err := st.getBool(tt.key)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("GetBool(%q) error = %v, wantErr %v", tt.key, err, tt.wantErr)
 				return
@@ -774,7 +774,7 @@ func TestMeasurement_YAML(t *testing.T) {
 		}
 
 		// Check bool value
-		ready, err := restored.Subtypes[0].GetBool("ready")
+		ready, err := restored.Subtypes[0].getBool("ready")
 		if err != nil {
 			t.Errorf("Failed to get ready bool: %v", err)
 		} else if !ready {
@@ -789,7 +789,7 @@ func TestMeasurement_YAML(t *testing.T) {
 	}
 }
 
-func TestMeasurement_GetOrCreateSubtype(t *testing.T) {
+func Test_getOrCreateSubtype(t *testing.T) {
 	t.Run("get existing subtype", func(t *testing.T) {
 		m := &Measurement{
 			Type: TypeK8s,
@@ -798,7 +798,7 @@ func TestMeasurement_GetOrCreateSubtype(t *testing.T) {
 			},
 		}
 
-		st := m.GetOrCreateSubtype("cluster")
+		st := m.getOrCreateSubtype("cluster")
 		if st == nil {
 			t.Fatal("GetOrCreateSubtype() returned nil")
 			return
@@ -817,7 +817,7 @@ func TestMeasurement_GetOrCreateSubtype(t *testing.T) {
 			Subtypes: []Subtype{},
 		}
 
-		st := m.GetOrCreateSubtype("new_subtype")
+		st := m.getOrCreateSubtype("new_subtype")
 		if st == nil {
 			t.Fatal("GetOrCreateSubtype() returned nil")
 			return
@@ -839,7 +839,7 @@ func TestMeasurement_GetOrCreateSubtype(t *testing.T) {
 			Subtypes: []Subtype{},
 		}
 
-		st := m.GetOrCreateSubtype("test")
+		st := m.getOrCreateSubtype("test")
 		st.Data["key"] = Str("value")
 
 		// Verify the change is reflected in the measurement
@@ -879,7 +879,7 @@ func TestMeasurement_Merge(t *testing.T) {
 			t.Errorf("Subtypes length = %d, want 2", len(m1.Subtypes))
 		}
 
-		if !m1.HasSubtype("cluster") || !m1.HasSubtype("pod") {
+		if !m1.hasSubtype("cluster") || !m1.hasSubtype("pod") {
 			t.Error("Expected both cluster and pod subtypes")
 		}
 	})
@@ -959,7 +959,7 @@ func TestMeasurement_Merge(t *testing.T) {
 	})
 }
 
-func TestToReadingWithType(t *testing.T) {
+func Test_toReadingWithType(t *testing.T) {
 	tests := []struct {
 		name       string
 		value      any
@@ -981,25 +981,25 @@ func TestToReadingWithType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, exactType := ToReadingWithType(tt.value)
+			got, exactType := toReadingWithType(tt.value)
 			if got == nil {
-				t.Fatal("ToReadingWithType() returned nil")
+				t.Fatal("toReadingWithType() returned nil")
 			}
 
 			gotValue := got.Any()
 			if tt.wantLossy {
 				// For lossy conversions, just check it's a string
 				if _, ok := gotValue.(string); !ok {
-					t.Errorf("ToReadingWithType(%v) returned %T, want string", tt.value, gotValue)
+					t.Errorf("toReadingWithType(%v) returned %T, want string", tt.value, gotValue)
 				}
 			} else {
 				if gotValue != tt.wantValue {
-					t.Errorf("ToReadingWithType(%v) = %v, want %v", tt.value, gotValue, tt.wantValue)
+					t.Errorf("toReadingWithType(%v) = %v, want %v", tt.value, gotValue, tt.wantValue)
 				}
 			}
 
 			if exactType != tt.wantLossed {
-				t.Errorf("ToReadingWithType(%v) exactType = %v, want %v", tt.value, exactType, tt.wantLossed)
+				t.Errorf("toReadingWithType(%v) exactType = %v, want %v", tt.value, exactType, tt.wantLossed)
 			}
 		})
 	}
@@ -1008,10 +1008,10 @@ func TestToReadingWithType(t *testing.T) {
 func TestConstants(t *testing.T) {
 	// Just verify constants are defined and unique
 	constants := []string{
-		KeyVersion, KeyNodes, KeyPods, KeyNamespace, KeyClusterName, KeyReady,
-		KeyGPUDriver, KeyGPUModel, KeyGPUCount, KeyGPUMemory, KeyGPUTemp, KeyGPUPower, KeyGPUUUID,
-		KeyOSName, KeyOSVersion, KeyKernel, KeyArch, KeyHostname,
-		KeyServiceName, KeyServiceState, KeyServiceStatus, KeyEnabled, KeyActive,
+		KeyVersion, keyNodes, keyPods, keyNamespace, keyClusterName, keyReady,
+		KeyGPUDriver, KeyGPUModel, KeyGPUCount, keyGPUMemory, keyGPUTemp, keyGPUPower, keyGPUUUID,
+		keyOSName, keyOSVersion, keyKernel, keyArch, keyHostname,
+		keyServiceName, keyServiceState, keyServiceStatus, keyEnabled, keyActive,
 	}
 
 	seen := make(map[string]bool)

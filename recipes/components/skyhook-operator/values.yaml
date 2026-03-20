@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,11 +18,13 @@
 # Override release name prefix to avoid aicr-stack- prefix in resource names
 fullnameOverride: skyhook-operator
 
-# Disable the namespace-wide LimitRange. The upstream default (512Mi) was too low
-# for GPU driver compilation, requiring inflated values that bloated every pod.
-# Components that need high resources (e.g. gpu-operator driver) set them explicitly.
-# Requires skyhook chart with nil guard in cleanup-webhook-job.yaml (>= v0.12.0).
-limitRange: null
+limitRange:
+  default:
+    cpu: "1"
+    memory: "1Gi"
+  defaultRequest:
+    cpu: "500m"
+    memory: "512Mi"
 
 controllerManager:
   manager:

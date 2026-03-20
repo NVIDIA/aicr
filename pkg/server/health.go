@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// HealthResponse represents health check response
-type HealthResponse struct {
+// healthResponse represents health check response
+type healthResponse struct {
 	Status    string    `json:"status" yaml:"status"`
 	Timestamp time.Time `json:"timestamp" yaml:"timestamp"`
 	Reason    string    `json:"reason,omitempty" yaml:"reason,omitempty"`
@@ -35,7 +35,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := HealthResponse{
+	resp := healthResponse{
 		Status:    "healthy",
 		Timestamp: time.Now(),
 	}
@@ -55,7 +55,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 
 	if !ready {
-		resp := HealthResponse{
+		resp := healthResponse{
 			Status:    "not_ready",
 			Timestamp: time.Now(),
 			Reason:    "service is initializing",
@@ -64,7 +64,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := HealthResponse{
+	resp := healthResponse{
 		Status:    "ready",
 		Timestamp: time.Now(),
 	}

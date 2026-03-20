@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,8 +33,8 @@ func TestKubernetesCollector_Collect(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
-	// Should have 6 subtypes: server, image, policy, node, helm, and argocd
-	assert.Len(t, m.Subtypes, 6)
+	// Should have 4 subtypes: server, image, policy, node
+	assert.Len(t, m.Subtypes, 4)
 
 	// Find the server subtype
 	var serverSubtype *measurement.Subtype
@@ -107,7 +107,7 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// All subtypes should be present but with empty data
-	assert.Len(t, m.Subtypes, 6)
+	assert.Len(t, m.Subtypes, 4)
 }
 
 // Helper function defined in image_test.go

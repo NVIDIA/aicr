@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 	"context"
 	"io"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
@@ -27,10 +28,13 @@ import (
 
 // StreamLogs streams pod logs to the provided writer in real-time.
 // Logs are written line-by-line as they are received from the pod.
-func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, podName string, logWriter io.Writer) error {
-	req := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
-		Follow: true,
-	})
+// When containerName is empty, Kubernetes defaults to the first container.
+func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string, logWriter io.Writer) error {
+	opts := &corev1.PodLogOptions{Follow: true}
+	if containerName != "" {
+		opts.Container = containerName
+	}
+	req := client.CoreV1().Pods(namespace).GetLogs(podName, opts)
 
 	stream, err := req.Stream(ctx)
 	if err != nil {
@@ -39,6 +43,7 @@ func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 	defer stream.Close()
 
 	scanner := bufio.NewScanner(stream)
+	scanner.Buffer(make([]byte, defaults.LogScannerBufferSize), defaults.LogScannerBufferSize)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
@@ -59,8 +64,13 @@ func StreamLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 
 // GetPodLogs retrieves all logs from a pod as a string.
 // This function is suitable for completed pods or when you need the full log history.
-func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, podName string) (string, error) {
-	req := client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{})
+// When containerName is empty, Kubernetes defaults to the first container.
+func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, podName, containerName string) (string, error) {
+	opts := &corev1.PodLogOptions{}
+	if containerName != "" {
+		opts.Container = containerName
+	}
+	req := client.CoreV1().Pods(namespace).GetLogs(podName, opts)
 
 	stream, err := req.Stream(ctx)
 	if err != nil {
@@ -70,7 +80,13 @@ func GetPodLogs(ctx context.Context, client kubernetes.Interface, namespace, pod
 
 	var logBuffer bytes.Buffer
 	scanner := bufio.NewScanner(stream)
+	scanner.Buffer(make([]byte, defaults.LogScannerBufferSize), defaults.LogScannerBufferSize)
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return "", errors.Wrap(errors.ErrCodeTimeout, "log collection cancelled", ctx.Err())
+		default:
+		}
 		logBuffer.WriteString(scanner.Text())
 		logBuffer.WriteByte('\n')
 	}

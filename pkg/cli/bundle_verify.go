@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
@@ -140,61 +142,68 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 
 	// Output results with final verdict
 	if format == "json" {
-		if jsonErr := outputJSON(result); jsonErr != nil {
+		if jsonErr := outputJSON(os.Stdout, result); jsonErr != nil {
 			return jsonErr
 		}
 	} else {
-		outputText(result, policyFailure)
+		outputText(os.Stdout, result, policyFailure)
 	}
 
 	if policyFailure != "" {
 		return errors.New(errors.ErrCodeInvalidRequest, policyFailure)
 	}
 
+	if len(result.Errors) > 0 {
+		return errors.New(errors.ErrCodeUnauthorized, "bundle verification failed: "+result.Errors[0])
+	}
+
 	return nil
 }
 
-func outputText(r *verifier.VerifyResult, policyFailure string) {
+func outputText(w io.Writer, r *verifier.VerifyResult, policyFailure string) {
 	if r.ChecksumsPassed {
-		fmt.Printf("  ✓ Checksums verified (%d files)\n", r.ChecksumFiles)
+		fmt.Fprintf(w, "  ✓ Checksums verified (%d files)\n", r.ChecksumFiles)
 	} else {
-		fmt.Printf("  ✗ Checksum verification failed\n")
+		fmt.Fprintf(w, "  ✗ Checksum verification failed\n")
 	}
 
 	if r.BundleAttested {
-		fmt.Printf("  ✓ Bundle attested by: %s\n", r.BundleCreator)
+		fmt.Fprintf(w, "  ✓ Bundle attested by: %s\n", r.BundleCreator)
 	}
 
 	if r.BinaryAttested {
-		fmt.Printf("  ✓ Binary built by: %s\n", r.BinaryBuilder)
+		fmt.Fprintf(w, "  ✓ Binary built by: %s\n", r.BinaryBuilder)
 	}
 
 	if r.IdentityPinned {
-		fmt.Printf("  ✓ Identity pinned to NVIDIA CI\n")
+		fmt.Fprintf(w, "  ✓ Identity pinned to NVIDIA CI\n")
 	}
 
-	fmt.Printf("  Trust level: %s\n", r.TrustLevel)
+	fmt.Fprintf(w, "  Trust level: %s\n", r.TrustLevel)
 
 	if len(r.Errors) > 0 {
-		fmt.Printf("\nDetails:\n")
+		fmt.Fprintf(w, "\nDetails:\n")
 		for _, e := range r.Errors {
-			fmt.Printf("  - %s\n", e)
+			fmt.Fprintf(w, "  - %s\n", e)
 		}
 	}
 
-	if policyFailure != "" {
-		fmt.Printf("\nBundle verification: FAILED\n")
-		fmt.Printf("  %s\n", policyFailure)
-	} else {
-		fmt.Printf("\nBundle verification: PASSED\n")
+	switch {
+	case policyFailure != "":
+		fmt.Fprintf(w, "\nBundle verification: FAILED\n")
+		fmt.Fprintf(w, "  %s\n", policyFailure)
+	case len(r.Errors) > 0:
+		fmt.Fprintf(w, "\nBundle verification: FAILED\n")
+	default:
+		fmt.Fprintf(w, "\nBundle verification: PASSED\n")
 	}
 }
 
-func outputJSON(r *verifier.VerifyResult) error {
+func outputJSON(w io.Writer, r *verifier.VerifyResult) error {
 	data, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal verification result", err)
 	}
-	fmt.Println(string(data))
+	fmt.Fprintln(w, string(data))
 	return nil
 }

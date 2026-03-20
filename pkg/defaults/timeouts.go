@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,18 @@ const (
 	CollectorTimeout = 10 * time.Second
 
 	// CollectorK8sTimeout is the timeout for Kubernetes API calls in collectors.
-	CollectorK8sTimeout = 30 * time.Second
+	// Covers 6 sequential sub-collectors (server, image, policy, node, helm, argocd).
+	CollectorK8sTimeout = 60 * time.Second
+)
+
+// Node topology collector constants.
+const (
+	// CollectorTopologyTimeout is the timeout for node topology collection.
+	// Longer than standard K8s collector because of paginated node listing.
+	CollectorTopologyTimeout = 90 * time.Second
+
+	// TopologyListPageSize is the number of nodes per List API page.
+	TopologyListPageSize = int64(500)
 )
 
 // Handler timeouts for HTTP request processing.
@@ -67,13 +78,21 @@ const (
 	K8sJobCreationTimeout = 30 * time.Second
 
 	// K8sPodReadyTimeout is the timeout for waiting for pods to be ready.
-	K8sPodReadyTimeout = 60 * time.Second
+	// Needs headroom for image pull + scheduling in large clusters.
+	K8sPodReadyTimeout = 2 * time.Minute
 
 	// K8sJobCompletionTimeout is the default timeout for job completion.
 	K8sJobCompletionTimeout = 5 * time.Minute
 
 	// K8sCleanupTimeout is the timeout for cleanup operations.
 	K8sCleanupTimeout = 30 * time.Second
+
+	// K8sPodTerminationWaitTimeout is the maximum time to wait for a Job pod
+	// to fully terminate after the Job is deleted. Prevents race conditions
+	// where RBAC resources are cleaned up while the pod is still running
+	// cleanup operations (e.g., chainsaw namespace deletion).
+	// Must exceed the default Kubernetes terminationGracePeriodSeconds (30s).
+	K8sPodTerminationWaitTimeout = 60 * time.Second
 )
 
 // HTTP client timeouts for outbound requests.
@@ -118,21 +137,8 @@ const (
 )
 
 // Validation phase timeouts for validation phase operations.
-// These are used when the recipe does not specify a timeout.
+// Validation phase timeouts.
 const (
-	// ValidateReadinessTimeout is the default timeout for readiness validation.
-	ValidateReadinessTimeout = 5 * time.Minute
-
-	// ValidateDeploymentTimeout is the default timeout for deployment validation.
-	ValidateDeploymentTimeout = 10 * time.Minute
-
-	// ValidatePerformanceTimeout is the default timeout for performance validation.
-	// Performance tests may take longer due to GPU benchmarks.
-	ValidatePerformanceTimeout = 30 * time.Minute
-
-	// ValidateConformanceTimeout is the default timeout for conformance validation.
-	ValidateConformanceTimeout = 15 * time.Minute
-
 	// ResourceVerificationTimeout is the timeout for verifying individual
 	// expected resources exist and are healthy during deployment validation.
 	ResourceVerificationTimeout = 10 * time.Second
@@ -176,6 +182,18 @@ const (
 	GangTestPodTimeout = 5 * time.Minute
 )
 
+// AI service metrics conformance validation.
+const (
+	// AIServiceMetricsWaitTimeout is the maximum time to wait for GPU metrics
+	// to appear in Prometheus. DCGM exporter may not have scraped yet when
+	// the validator runs, especially on fresh deployments.
+	AIServiceMetricsWaitTimeout = 2 * time.Minute
+
+	// AIServiceMetricsPollInterval is the polling interval between Prometheus
+	// queries when waiting for GPU metric time series to appear.
+	AIServiceMetricsPollInterval = 10 * time.Second
+)
+
 // HPA behavioral test timeouts for conformance validation.
 const (
 	// HPAScaleTimeout is the timeout for waiting for HPA to report scaling intent.
@@ -201,12 +219,6 @@ const (
 	// for gang-scheduled pods. If pods are scheduled further apart than this,
 	// they are not considered co-scheduled.
 	CoScheduleWindow = 30 * time.Second
-)
-
-// Evidence rendering timeouts.
-const (
-	// EvidenceRenderTimeout is the timeout for rendering conformance evidence markdown.
-	EvidenceRenderTimeout = 30 * time.Second
 )
 
 // Kubeflow Trainer install timeouts for NCCL performance validation.
@@ -257,17 +269,6 @@ const (
 	PodReadyTimeout = 2 * time.Minute
 )
 
-// Artifact limits for conformance evidence capture.
-const (
-	// ArtifactMaxDataSize is the maximum size in bytes of a single artifact's Data field.
-	// Ensures each base64-encoded ARTIFACT: line stays well under the bufio.Scanner
-	// default 64KB limit (base64 expands ~4/3, so 8KB → ~11KB encoded).
-	ArtifactMaxDataSize = 8 * 1024
-
-	// ArtifactMaxPerCheck is the maximum number of artifacts a single check can record.
-	ArtifactMaxPerCheck = 20
-)
-
 // HTTP response limits for conformance checks.
 const (
 	// HTTPResponseBodyLimit is the maximum size in bytes for HTTP response bodies
@@ -285,6 +286,10 @@ const (
 	// JobTTLAfterFinished is the time-to-live for completed Jobs.
 	// Jobs are kept for debugging purposes before automatic cleanup.
 	JobTTLAfterFinished = 1 * time.Hour
+
+	// AgentJobActiveDeadline is the active deadline for K8s agent Jobs.
+	// Prevents runaway Jobs from consuming cluster resources indefinitely.
+	AgentJobActiveDeadline = 5 * time.Hour
 )
 
 // Server size limits.
@@ -292,6 +297,67 @@ const (
 	// ServerMaxHeaderBytes is the maximum size of request headers (64KB).
 	// Prevents header-based attacks.
 	ServerMaxHeaderBytes = 1 << 16
+)
+
+// Server rate limiting constants.
+const (
+	// ServerDefaultRateLimit is the default requests per second for the rate limiter.
+	ServerDefaultRateLimit = 100
+
+	// ServerDefaultRateLimitBurst is the maximum burst size for the rate limiter.
+	ServerDefaultRateLimitBurst = 200
+
+	// ServerRetryAfterSeconds is the Retry-After header value when rate limited.
+	ServerRetryAfterSeconds = "1"
+)
+
+// Log scanner buffer sizes.
+const (
+	// LogScannerBufferSize is the maximum line size for reading pod logs.
+	// Larger than the default 64KB to handle container runtime line splitting
+	// and long go test -json output events.
+	LogScannerBufferSize = 1 << 20 // 1MB
+)
+
+// Validator constants.
+const (
+	// ValidatorWaitBuffer is added to the catalog timeout when waiting for Job
+	// completion. Accounts for pod scheduling, image pull, and graceful termination.
+	ValidatorWaitBuffer = 30 * time.Second
+
+	// ValidatorDefaultTimeout is the default per-validator timeout if not
+	// specified in the catalog. Used as fallback only.
+	ValidatorDefaultTimeout = 5 * time.Minute
+
+	// ValidatorTerminationGracePeriod is the time between SIGTERM and SIGKILL
+	// for validator containers. Validators should trap SIGTERM and write partial
+	// results within this window.
+	ValidatorTerminationGracePeriod = 30 * time.Second
+
+	// ValidatorMaxStdoutLines is the maximum number of stdout lines captured
+	// per validator. Lines beyond this are truncated (keeping the last N lines)
+	// to prevent ConfigMap overflow.
+	ValidatorMaxStdoutLines = 1000
+
+	// ValidatorMaxStdoutLineLength is the maximum length of a single stdout
+	// line. Lines exceeding this are truncated with a suffix indicating the
+	// number of dropped characters. Prevents oversized report output from
+	// inline JSON payloads (e.g., Prometheus metric scrapes).
+	ValidatorMaxStdoutLineLength = 512
+
+	// ValidatorDefaultCPU is the default CPU request/limit for validator containers
+	// when not specified in the catalog entry.
+	ValidatorDefaultCPU = "1"
+
+	// ValidatorDefaultMemory is the default memory request/limit for validator
+	// containers when not specified in the catalog entry.
+	ValidatorDefaultMemory = "1Gi"
+)
+
+// File parser limits.
+const (
+	// FileParserMaxSize is the maximum file size in bytes for the file collector parser.
+	FileParserMaxSize = 1 << 20 // 1MB
 )
 
 // Attestation file size limits.

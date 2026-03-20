@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -152,14 +152,48 @@ changelog:
       - "^chore: readme"
       - "^chore: bump version"
   groups:
-    - title: Features
+    - title: "New Features"
       regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
       order: 0
-    - title: "Tasks"
-      regexp: '^.*?chore(\([[:word:]]+\))??!?:.+$'
+    - title: "Bug Fixes"
+      regexp: '^.*?(fix|bug)(\([[:word:]]+\))??!?:.+$'
       order: 1
-    - title: "Bug fixes"
-      regexp: '^.*?bug(\([[:word:]]+\))??!?:.+$'
-      order: 1
-    - title: Others
+    - title: "Other Tasks"
       order: 999
+
+brews:
+  - ids:
+      - aicr
+    repository:
+      owner: NVIDIA
+      name: homebrew-aicr
+      git:
+        url: "ssh://git@github.com/NVIDIA/homebrew-aicr.git"
+        private_key: "{{ .Env.HOMEBREW_DEPLOY_KEY }}"
+    skip_upload: "{{ if .Env.HOMEBREW_DEPLOY_KEY }}false{{ else }}true{{ end }}"
+    commit_author:
+      name: github-actions
+      email: github-actions@github.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    directory: Formula
+    homepage: "https://github.com/NVIDIA/aicr"
+    description: "Tooling for deploying optimized, validated, and reproducible GPU-accelerated AI runtime in Kubernetes."
+    license: "Apache-2.0"
+    install: |
+      bin.install "aicr"
+      bin.install "aicr-attestation.sigstore.json" if File.exist? "aicr-attestation.sigstore.json"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/aicr version")
+    caveats: |
+      To verify supply-chain provenance (requires cosign):
+
+        cosign verify-blob-attestation \\
+          --bundle #{opt_bin}/aicr-attestation.sigstore.json \\
+          --type https://slsa.dev/provenance/v1 \\
+          --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+          --certificate-identity-regexp "https://github.com/NVIDIA/aicr/.github/workflows/on-tag\\.yaml@refs/tags/.*" \\
+          #{opt_bin}/aicr
+
+      To update the trust root for bundle attestation:
+
+        aicr trust update

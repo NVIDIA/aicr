@@ -16,7 +16,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator, cert-manager). Components have versions, Helm sources, and configuration values. |
 | **ComponentRef** | A reference to a component in a recipe, including version, source repository, values file, and dependency references. |
 | **Constraint** | A validation rule in a recipe specifying required system conditions (e.g., `K8s.server.version >= 1.31`, `OS.release.ID == ubuntu`). Constraints can have severity (error/warning), remediation guidance, and units. |
-| **Validation Phase** | A stage of validation in the deployment lifecycle: readiness (infrastructure), deployment (components), performance (system), conformance (workloads). |
+| **Validation Phase** | A stage of validation in the deployment lifecycle: deployment (components), performance (system), conformance (workloads). Readiness constraints are evaluated implicitly before any phase. |
 | **ValidationConfig** | Configuration in a recipe defining phase-specific checks, constraints, expected resources, and node selection for validation. |
 | **Measurement** | A captured data point from the system organized by type (K8s, OS, GPU, SystemD), subtype, and key-value readings. |
 | **Specificity** | A score indicating how specific a recipe's criteria is (number of non-"any" fields). More specific recipes are applied later during merge. |
@@ -100,6 +100,17 @@ AICR prioritizes trust in the software supply chain.
 *   **Verifiable Builds:** Every release includes provenance data showing exactly how and where it was built (SLSA Level 3).
 *   **SBOMs:** Complete inventories of all dependencies are provided for both binaries and container images, enabling automated vulnerability scanning.
 
+## Project Structure
+
+- `api/` — OpenAPI specifications for the REST API
+- `cmd/` — Entry points for CLI (`aicr`) and API server (`aicrd`)
+- `recipes/` — Recipe overlays, component values, and validation checks
+- `docs/` — User-facing documentation, guides, and architecture docs
+- `examples/` — Example snapshots, recipes, and comparisons
+- `infra/` — Infrastructure as code (Terraform) for deployments
+- `pkg/` — Core Go packages (collectors, recipe engine, bundlers, serializers)
+- `tools/` — Build scripts, E2E testing, and utilities
+
 ## Documentation
 
 Documentation is organized by persona to help you find what you need quickly.
@@ -121,7 +132,7 @@ For developers contributing code, extending functionality, or working on AICR in
 
 | Document | Description |
 |----------|-------------|
-| [Architecture Overview](contributor/README.md) | System design, patterns, and deployment topologies |
+| [Architecture Overview](contributor/index.md) | System design, patterns, and deployment topologies |
 | [CLI Architecture](contributor/cli.md) | Detailed CLI implementation and workflow diagrams |
 | [API Server Architecture](contributor/api-server.md) | HTTP server design, middleware, and endpoints |
 | [Data Architecture](contributor/data.md) | Recipe metadata system, criteria matching, and inheritance |
@@ -143,11 +154,13 @@ For engineers integrating AICR into CI/CD pipelines, GitOps workflows, or larger
 
 ### Install CLI
 
-> Note: Temporally, while the repo is private, make sure to include your GitHub token first:
-
 ```shell
-curl -sfL -H "Authorization: token $GITHUB_TOKEN" \
-  https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+# Homebrew (macOS/Linux)
+brew tap NVIDIA/aicr
+brew install aicr
+
+# Or use the install script
+curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 
 See [Installation Guide](user/installation.md) for manual installation, building from source, and container images.
@@ -166,7 +179,7 @@ aicr recipe --snapshot snapshot.yaml --intent training --platform kubeflow
 ### Validate Configuration
 
 ```shell
-# Validate readiness phase (default)
+# Validate recipe against snapshot (readiness constraints run implicitly)
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Validate all phases

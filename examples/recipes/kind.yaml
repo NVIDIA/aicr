@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,14 +37,14 @@ componentRefs:
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
-    version: 0.11.1
+    version: 0.14.0
     valuesFile: components/skyhook-operator/values.yaml
   - name: kube-prometheus-stack
     namespace: nvidia-system
     chart: kube-prometheus-stack
     type: Helm
     source: https://prometheus-community.github.io/helm-charts
-    version: 81.2.2
+    version: 82.8.0
     valuesFile: components/kube-prometheus-stack/values.yaml
   - name: k8s-ephemeral-storage-metrics
     namespace: nvidia-system

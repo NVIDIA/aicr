@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,12 +21,15 @@ on:
     paths:
       - 'site/**'
       - '.github/workflows/gh-pages.yaml'
+      - '.github/actions/build-versioned-site/**'
   pull_request:
     branches:
       - main
     paths:
       - 'site/**'
       - '.github/workflows/gh-pages.yaml'
+      - '.github/actions/build-versioned-site/**'
+  workflow_call: {}
   workflow_dispatch: {}
 
 permissions:
@@ -34,7 +37,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
 
@@ -56,42 +59,28 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
-      - name: Setup Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
-        with:
-          go-version: ${{ steps.versions.outputs.go }}
-          cache: false
-
-      - name: Setup Hugo
-        run: |
-          HUGO_VERSION="${{ steps.versions.outputs.hugo }}"
-          wget -q "https://github.com/gohugoio/hugo/releases/download/v${HUGO_VERSION}/hugo_extended_${HUGO_VERSION}_linux-amd64.deb" -O hugo.deb
-          sudo dpkg -i hugo.deb
-          rm hugo.deb
-          hugo version
-
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
         with:
           node-version: ${{ steps.versions.outputs.node }}
 
-      - name: Install dependencies
-        working-directory: site
-        run: npm ci
+      - name: Build site (PR)
+        if: github.event_name == 'pull_request'
+        run: cd site && npm ci && npm run build
 
       - name: Build site
-        working-directory: site
-        run: hugo --minify
+        if: github.event_name != 'pull_request'
+        run: cd site && npm ci && npm run build
 
       - name: Upload artifact
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3.0.1
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b  # v4.0.0
         with:
-          path: site/public
+          path: site/.vitepress/dist
 
   deploy:
     name: Deploy
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

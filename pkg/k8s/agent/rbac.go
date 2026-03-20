@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@ package agent
 
 import (
 	"context"
-	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
@@ -25,6 +24,21 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// ensureNamespace creates the namespace if it does not exist.
+// Uses create-or-ignore since namespaces are immutable.
+func (d *Deployer) ensureNamespace(ctx context.Context) error {
+	ns := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: d.config.Namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "aicr",
+			},
+		},
+	}
+	_, err := d.clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+	return k8s.IgnoreAlreadyExists(err)
+}
 
 // ensureServiceAccount creates the ServiceAccount for the agent.
 // If the ServiceAccount already exists, this is a no-op (idempotent).
@@ -69,7 +83,10 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create Role", err)
+	}
+	return nil
 }
 
 // ensureRoleBinding creates or updates the RoleBinding to bind the Role to the ServiceAccount.
@@ -101,14 +118,13 @@ func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create RoleBinding", err)
+	}
+	return nil
 }
 
-// helmSecretRoleName is the name used for per-namespace Helm secrets Roles and RoleBindings.
-const helmSecretRoleName = "aicr-helm-secrets"
-
 // ensureClusterRole creates or updates the ClusterRole for node and cluster-wide resource access.
-// Secrets access is only included when HelmAllNamespaces is true.
 func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 	rules := []rbacv1.PolicyRule{
 		{
@@ -126,19 +142,6 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 			Resources: []string{"clusterpolicies"},
 			Verbs:     []string{"get", "list"},
 		},
-		{
-			APIGroups: []string{""},
-			Resources: []string{"services"},
-			Verbs:     []string{"get", "list"},
-		},
-	}
-
-	if d.config.HelmAllNamespaces {
-		rules = append(rules, rbacv1.PolicyRule{
-			APIGroups: []string{""},
-			Resources: []string{"secrets"},
-			Verbs:     []string{"get", "list"},
-		})
 	}
 
 	cr := &rbacv1.ClusterRole{
@@ -156,106 +159,8 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
-}
-
-// ensureHelmSecretRoles creates per-namespace Roles and RoleBindings for Helm secrets access.
-// Each namespace gets a Role with secrets get/list and a RoleBinding to the agent ServiceAccount.
-// Namespaces that do not exist are skipped so validation can run before all recipe components are installed.
-func (d *Deployer) ensureHelmSecretRoles(ctx context.Context) error {
-	for _, ns := range d.config.HelmNamespaces {
-		_, err := d.clientset.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
-		if err != nil {
-			if apierrors.IsNotFound(err) {
-				slog.Debug("skipping Helm secrets RBAC for non-existent namespace", "namespace", ns)
-				continue
-			}
-			return errors.Wrap(errors.ErrCodeInternal, "failed to check namespace existence", err)
-		}
-		if err := d.ensureHelmSecretRole(ctx, ns); err != nil {
-			return err
-		}
-		if err := d.ensureHelmSecretRoleBinding(ctx, ns); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (d *Deployer) ensureHelmSecretRole(ctx context.Context, namespace string) error {
-	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      helmSecretRoleName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/name":      "aicr",
-				"app.kubernetes.io/component": "helm-secrets",
-			},
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups: []string{""},
-				Resources: []string{"secrets"},
-				Verbs:     []string{"get", "list"},
-			},
-		},
-	}
-
-	_, err := d.clientset.RbacV1().Roles(namespace).Create(ctx, role, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().Roles(namespace).Update(ctx, role, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update Helm secret Role", err)
-		}
-		return nil
-	}
-	return err
-}
-
-func (d *Deployer) ensureHelmSecretRoleBinding(ctx context.Context, namespace string) error {
-	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      helmSecretRoleName,
-			Namespace: namespace,
-			Labels: map[string]string{
-				"app.kubernetes.io/name":      "aicr",
-				"app.kubernetes.io/component": "helm-secrets",
-			},
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      d.config.ServiceAccountName,
-				Namespace: d.config.Namespace,
-			},
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "Role",
-			Name:     helmSecretRoleName,
-		},
-	}
-
-	_, err := d.clientset.RbacV1().RoleBindings(namespace).Create(ctx, rb, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().RoleBindings(namespace).Update(ctx, rb, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update Helm secret RoleBinding", err)
-		}
-		return nil
-	}
-	return err
-}
-
-// deleteHelmSecretRoles removes per-namespace Roles and RoleBindings for Helm secrets.
-func (d *Deployer) deleteHelmSecretRoles(ctx context.Context) error {
-	for _, ns := range d.config.HelmNamespaces {
-		if err := d.clientset.RbacV1().Roles(ns).Delete(ctx, helmSecretRoleName, metav1.DeleteOptions{}); k8s.IgnoreNotFound(err) != nil {
-			return err
-		}
-		if err := d.clientset.RbacV1().RoleBindings(ns).Delete(ctx, helmSecretRoleName, metav1.DeleteOptions{}); k8s.IgnoreNotFound(err) != nil {
-			return err
-		}
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRole", err)
 	}
 	return nil
 }
@@ -276,7 +181,7 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     "aicr-node-reader",
+			Name:     clusterRoleName,
 		},
 	}
 
@@ -288,7 +193,10 @@ func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
 		}
 		return nil
 	}
-	return err
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
+	}
+	return nil
 }
 
 // deleteServiceAccount deletes the ServiceAccount.
@@ -319,7 +227,7 @@ func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
 // If the ClusterRole doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 	err := d.clientset.RbacV1().ClusterRoles().
-		Delete(ctx, "aicr-node-reader", metav1.DeleteOptions{})
+		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }
 
@@ -327,6 +235,6 @@ func (d *Deployer) deleteClusterRole(ctx context.Context) error {
 // If the ClusterRoleBinding doesn't exist, this is a no-op (idempotent).
 func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
 	err := d.clientset.RbacV1().ClusterRoleBindings().
-		Delete(ctx, "aicr-node-reader", metav1.DeleteOptions{})
+		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
 	return k8s.IgnoreNotFound(err)
 }

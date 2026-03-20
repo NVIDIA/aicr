@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
 package snapshotter
 
 const (
-	// APIDomain is the API domain for snapshot resources
-	APIDomain = "aicr.nvidia.com"
+	// apiDomain is the API domain for snapshot resources
+	apiDomain = "aicr.nvidia.com"
 
-	// APIVersion is the current API version for snapshots
-	APIVersion = "v1alpha1"
+	// apiVersion is the current API version for snapshots
+	apiVersion = "v1alpha1"
 
 	// FullAPIVersion is the complete API version string
-	FullAPIVersion = APIDomain + "/" + APIVersion
+	FullAPIVersion = apiDomain + "/" + apiVersion
 )

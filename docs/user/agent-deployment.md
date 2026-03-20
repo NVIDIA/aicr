@@ -75,7 +75,7 @@ This single command:
 3. Waits for Job completion (5m timeout by default)
 4. Retrieves snapshot from ConfigMap
 5. Writes snapshot to stdout (or specified output)
-6. Cleans up Job and RBAC resources (use `--cleanup=false` to keep for debugging)
+6. Cleans up Job and RBAC resources (use `--no-cleanup` to keep for debugging)
 
 ### 2. View Snapshot Output
 
@@ -122,13 +122,13 @@ aicr snapshot \
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
 - `--namespace`: Deployment namespace (default: `gpu-operator`)
-- `--image`: Container image (default: `ghcr.io/nvidia/aicr-validator:latest`)
+- `--image`: Container image (default: `ghcr.io/nvidia/aicr:latest`)
 - `--job-name`: Job name (default: `aicr`)
 - `--service-account-name`: ServiceAccount name (default: `aicr`)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
-- `--cleanup`: Delete Job and RBAC resources on completion. **Default: `true`**. Use `--cleanup=false` to keep resources for debugging.
+- `--no-cleanup`: Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active.
 
 ### 4. Check Agent Logs (Debugging)
 
@@ -368,7 +368,7 @@ kubectl get serviceaccount aicr -n gpu-operator
 ### RBAC Permissions
 
 The agent requires these permissions (created automatically by the CLI):
-- **ClusterRole** (`aicr-node-reader`): Read access to nodes, pods, secrets (Helm releases), services, ClusterPolicy CRDs (nvidia.com), and Application CRDs (argoproj.io)
+- **ClusterRole** (`aicr-node-reader`): Read access to nodes, pods, and ClusterPolicy CRDs (nvidia.com)
 - **Role** (`aicr`): Create/update ConfigMaps and list pods in the deployment namespace
 
 ### Pod Security Context

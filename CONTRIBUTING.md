@@ -24,6 +24,7 @@ Before contributing:
 2. Check existing [issues](https://github.com/NVIDIA/aicr/issues) to avoid duplicates
 3. Review the [security policy](SECURITY.md) for security-related contributions
 4. Set up your development environment following [DEVELOPMENT.md](DEVELOPMENT.md)
+5. If using coding assistants, review [AGENTS.md](AGENTS.md) for project rules and workflows
 
 ## How to Contribute
 
@@ -81,7 +82,7 @@ This creates three files with TODOs guiding implementation:
 3. Run `make test` - registration validation ensures completeness
 4. Submit PR - CI enforces all requirements
 
-**See [pkg/validator/checks/README.md](pkg/validator/checks/README.md) for complete guide with examples, architecture overview, and troubleshooting.**
+**See [docs/contributor/validator.md](docs/contributor/validator.md) for complete guide with examples, architecture overview, and troubleshooting.**
 
 ## Design Principles
 
@@ -149,8 +150,9 @@ Trust is established through evidence, not assertions. Every released artifact c
    - DEVELOPMENT.md for developer workflow changes
    - Code comments and godoc for API changes
 
-3. **Commit with DCO sign-off:**
+3. **Commit with required provenance:**
    ```bash
+   # External contributors (DCO sign-off required)
    git commit -s -m "feat: add network collector
 
    - Implement NetworkCollector interface
@@ -158,9 +160,12 @@ Trust is established through evidence, not assertions. Every released artifact c
    - Update factory registration
 
    Fixes #123"
+
+   # NVIDIA org members / automation (DCO sign-off exempt)
+   git commit -S -m "feat: add network collector"
    ```
 
-   **Important**: Always use `-s` flag for DCO sign-off.
+   External contributors must use `-s`. NVIDIA organization members are exempt from DCO bot sign-off checks and should use cryptographic signing (`-S`).
 
 ### Creating the Pull Request
 
@@ -177,7 +182,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - Go tests with race detector
    - golangci-lint
    - YAML linting
-   - Security scan (Trivy)
+   - Security scans (Trivy in CI, Grype in `make scan`)
    - Coverage tracking
    - E2E tests
 
@@ -189,7 +194,9 @@ Trust is established through evidence, not assertions. Every released artifact c
 
 3. **Address Feedback** by pushing new commits:
    ```bash
-   git commit -s -m "address review: improve error handling"
+   git commit -s -m "address review: improve error handling"   # external contributors
+   # or
+   git commit -S -m "address review: improve error handling"   # NVIDIA org members / automation
    git push origin your-branch
    ```
 
@@ -225,9 +232,9 @@ git push origin --delete your-branch
 
 ## Developer Certificate of Origin
 
-All contributions must include a DCO sign-off to certify that you have the right to submit the contribution under the project's license.
+Contributions must satisfy Developer Certificate of Origin (DCO) policy. External contributors (non-NVIDIA organization members) must include a DCO sign-off on each commit. NVIDIA organization members are exempt from DCO bot sign-off checks and should use cryptographic signing (`-S`).
 
-### How to Sign Off
+### How to Sign Off (External Contributors)
 
 Add the `-s` flag to your commit:
 
@@ -255,6 +262,14 @@ If you forget to sign off:
 ```bash
 git commit --amend --signoff
 git push --force-with-lease origin your-branch
+```
+
+### NVIDIA Org Members and Automation
+
+NVIDIA organization members are exempt from DCO bot sign-off checks (`.github/dco.yml`). Use cryptographic commit signing:
+
+```bash
+git commit -S -m "Your commit message"
 ```
 
 ### What You're Certifying

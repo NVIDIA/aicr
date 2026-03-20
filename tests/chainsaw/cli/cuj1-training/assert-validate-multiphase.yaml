@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,21 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert the multi-phase validation result contains all requested phases.
-#
-# NOTE: chainsaw assert --resource requires apiVersion/kind. The validate
-# output doesn't include these, so the test prepends them before asserting.
-kind: ValidationResult
-apiVersion: aicr.nvidia.com/v1alpha1
-phases:
-  readiness:
-    status: pass
-  deployment:
-    status: pass
-    checks:
-      - name: expected-resources
-        status: skipped
-    (components[?name == 'gpu-operator'] | [0].status): pass
-    (components[?name == 'cert-manager'] | [0].status): pass
-  conformance:
-    status: pass
+# Assert the multi-phase validation result is a valid CTRF report.
+# The output is now CTRF JSON — this assertion verifies the top-level structure.
+# Full field-level assertions depend on which validators ran and cluster state.
+reportFormat: CTRF
+results:
+  tool:
+    name: aicr
+  summary:
+    tests: (@ > 0)

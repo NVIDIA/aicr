@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ func snapshotCmdFlags() []cli.Flag {
 			Name:     "image",
 			Usage:    "Container image for agent Job",
 			Sources:  cli.EnvVars("AICR_IMAGE"),
-			Value:    "ghcr.io/nvidia/aicr-validator:latest",
+			Value:    defaultAgentImage(),
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{
@@ -106,7 +106,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated)",
+			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated). Recommended in heterogeneous clusters to target GPU nodes",
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{
@@ -121,9 +121,8 @@ func snapshotCmdFlags() []cli.Flag {
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
-			Name:     "cleanup",
-			Value:    true,
-			Usage:    "Remove Job and RBAC resources on completion",
+			Name:     "no-cleanup",
+			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
@@ -143,15 +142,11 @@ func snapshotCmdFlags() []cli.Flag {
 			Usage:    "Path to Go template file for custom output formatting (requires YAML format)",
 			Category: "Output",
 		},
-		&cli.StringSliceFlag{
-			Name:     "helm-namespaces",
-			Usage:    "Namespaces for Helm release collection (creates scoped RBAC for secrets access). Mutually exclusive with --helm-all-namespaces.",
-			Category: "Helm Collection",
-		},
-		&cli.BoolFlag{
-			Name:     "helm-all-namespaces",
-			Usage:    "Grant cluster-wide secrets access for Helm release collection. Mutually exclusive with --helm-namespaces.",
-			Category: "Helm Collection",
+		&cli.IntFlag{
+			Name:     "max-nodes-per-entry",
+			Usage:    "Maximum node names per taint/label entry in topology collection (0 = unlimited)",
+			Value:    0,
+			Category: "Output",
 		},
 		outputFlag,
 		formatFlag,
@@ -169,8 +164,6 @@ func snapshotCmd() *cli.Command {
   - CPU and GPU settings
   - GRUB boot parameters
   - Kubernetes cluster configuration (server, nodes, images, policies)
-  - Helm releases installed via helm install/upgrade
-  - ArgoCD Application CRDs (if ArgoCD is installed)
   - Loaded kernel modules
   - Sysctl kernel parameters
   - SystemD service configurations
@@ -186,13 +179,23 @@ The snapshot process:
   5. Save it to the target output location
   6. Clean up the Job (optionally keep RBAC for reuse)
 
+The snapshot Job must run on a GPU node to collect GPU hardware information
+(nvidia-smi, device properties, driver version). In heterogeneous clusters
+with both CPU and GPU nodes, use --node-selector to ensure the Job lands
+on a GPU node. Before GPU Operator is installed, use the node name or a
+user-defined label; after installation, nvidia.com/gpu.present=true is
+available.
+
 Examples:
 
-Basic snapshot:
+Basic snapshot (homogeneous GPU cluster):
   aicr snapshot --output cm://default/aicr-snapshot
 
-Target specific GPU nodes with node selector:
-  aicr snapshot --node-selector nodeGroup=customer-gpu
+Target a GPU node before GPU Operator installation:
+  aicr snapshot --node-selector kubernetes.io/hostname=gpu-node-1
+
+Target GPU nodes after GPU Operator installation:
+  aicr snapshot --node-selector nvidia.com/gpu.present=true
 
 Override default tolerations (by default, all taints are tolerated):
   aicr snapshot --toleration dedicated=user-workload:NoSchedule
@@ -218,7 +221,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "output", "format"); err != nil {
 				return err
 			}
 
@@ -235,7 +238,9 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			}
 
 			// Create factory
-			factory := collector.NewDefaultFactory()
+			factory := collector.NewDefaultFactory(
+				collector.WithMaxNodesPerEntry(cmd.Int("max-nodes-per-entry")),
+			)
 
 			// Create output serializer
 			ser, err := createSnapshotSerializer(tmplOpts)
@@ -263,16 +268,12 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 			}
 
-			// Validate mutual exclusivity of helm flags
-			helmNamespaces := cmd.StringSlice("helm-namespaces")
-			helmAllNamespaces := cmd.Bool("helm-all-namespaces")
-			if len(helmNamespaces) > 0 && helmAllNamespaces {
-				return errors.New(errors.ErrCodeInvalidRequest, "--helm-namespaces and --helm-all-namespaces are mutually exclusive")
-			}
-
 			// When running inside an agent Job, collect locally instead of
 			// deploying another agent (prevents infinite nesting).
+			// Clear pre-created factory so measure() rebuilds it from env vars
+			// (AICR_MAX_NODES_PER_ENTRY).
 			if os.Getenv("AICR_AGENT_MODE") == "true" {
+				ns.Factory = nil
 				return ns.Measure(ctx)
 			}
 
@@ -287,14 +288,13 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				NodeSelector:       nodeSelector,
 				Tolerations:        tolerations,
 				Timeout:            cmd.Duration("timeout"),
-				Cleanup:            cmd.Bool("cleanup"),
+				Cleanup:            !cmd.Bool("no-cleanup"),
 				Output:             tmplOpts.outputPath,
 				Debug:              cmd.Bool("debug"),
 				Privileged:         cmd.Bool("privileged"),
 				RequireGPU:         cmd.Bool("require-gpu"),
 				TemplatePath:       tmplOpts.templatePath,
-				HelmNamespaces:     helmNamespaces,
-				HelmAllNamespaces:  helmAllNamespaces,
+				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
 			}
 
 			return ns.Measure(ctx)

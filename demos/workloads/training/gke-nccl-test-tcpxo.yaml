@@ -1,0 +1,316 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Standalone NCCL benchmark with GPUDirect TCPXO on GKE (NRI profile)
+#
+# 2-node, 16-GPU (8 per node) NCCL test using GPUDirect TCPXO
+# for high-speed inter-node GPU communication on GKE a3-megagpu-8g instances.
+# Uses the NRI profile: no hostNetwork, no privileged for tcpxo-daemon.
+#
+# Important: The GPU node pool must NOT have a gVNIC additional network.
+# A gVNIC network takes a GPU NIC PCI slot, leaving only 7/8 GPUs available.
+# The node pool should have only the 8 GPU NIC networks (gpu-nic-0 through gpu-nic-7).
+#
+# Default script runs AllGather; AllReduce instructions in comments below.
+#
+# Prerequisites:
+#   - GKE cluster with multi-NIC networking (8 GPU NICs per node)
+#   - Network + GKENetworkParamSet CRs configured for GPU NICs
+#   - nccl-tcpxo-installer DaemonSet deployed on GPU nodes
+#   - NRI device-injector DaemonSet deployed on GPU nodes
+#   - GPU Operator with driver.enabled=false (GKE COS manages drivers)
+#
+# Image version note:
+#   The nccl-test container image must match the cluster's installed TCPXO
+#   plugin version. Check with:
+#     kubectl get ds nccl-tcpxo-installer -n kube-system \
+#       -o jsonpath='{.spec.template.spec.containers[?(@.name=="nccl-tcpxo-installer")].image}'
+#   Then update the nccl-plugin-gpudirecttcpx-dev tag below to match.
+#
+# Usage:
+#   kubectl create ns nccl-test
+#   kubectl apply -f gke-nccl-test-tcpxo.yaml -n nccl-test
+#
+#   # Wait for pods to be 2/2 Running, then trigger the test:
+#   kubectl exec nccl-test-host-1 -n nccl-test -c nccl-test -- \
+#     /scripts/allgather.sh nccl-host-1 nccl-host-2
+#
+#   # For AllReduce instead of AllGather:
+#   kubectl exec nccl-test-host-1 -n nccl-test -c nccl-test -- bash -c '
+#     /scripts/init_ssh.sh nccl-host-1 nccl-host-2
+#     pushd /scripts && /scripts/gen_hostfiles.sh nccl-host-1 nccl-host-2 && popd
+#     DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_reduce_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" \
+#       LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh'
+#
+# Expected results (a3-megagpu-8g, 2 nodes):
+#   AllReduce busBW: ~340 GB/s at 16 GB message size
+#   AllGather busBW: ~188 GB/s at 8 GB message size
+#
+# Note: Each pod includes a tcpxo-daemon sidecar container that manages the
+# GPUDirect TCPX data path. This sidecar is required for any workload that
+# needs TCPXO bandwidth — without it, NCCL falls back to TCP (~4 GB/s).
+#
+# See: https://cloud.google.com/kubernetes-engine/docs/how-to/gpu-bandwidth-gpudirect-tcpx
+# Source: adapted from https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/nccl-test.yaml
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-host-1
+spec:
+  selector:
+    name: nccl-host-1
+  clusterIP: None
+  publishNotReadyAddresses: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nccl-host-2
+spec:
+  selector:
+    name: nccl-host-2
+  clusterIP: None
+  publishNotReadyAddresses: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-test-host-1
+  labels:
+    name: nccl-host-1
+    tcpxo: daemon
+  annotations:
+    devices.gke.io/container.tcpxo-daemon: |
+      - path: /dev/nvidia0
+      - path: /dev/nvidia1
+      - path: /dev/nvidia2
+      - path: /dev/nvidia3
+      - path: /dev/nvidia4
+      - path: /dev/nvidia5
+      - path: /dev/nvidia6
+      - path: /dev/nvidia7
+      - path: /dev/nvidiactl
+      - path: /dev/nvidia-uvm
+      - path: /dev/dmabuf_import_helper
+    networking.gke.io/default-interface: eth0
+    networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"},{"interfaceName":"eth1","network":"gpu-nic0"},{"interfaceName":"eth2","network":"gpu-nic1"},{"interfaceName":"eth3","network":"gpu-nic2"},{"interfaceName":"eth4","network":"gpu-nic3"},{"interfaceName":"eth5","network":"gpu-nic4"},{"interfaceName":"eth6","network":"gpu-nic5"},{"interfaceName":"eth7","network":"gpu-nic6"},{"interfaceName":"eth8","network":"gpu-nic7"}]'
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: tcpxo
+                operator: In
+                values:
+                  - daemon
+          topologyKey: "kubernetes.io/hostname"
+  hostname: host1
+  subdomain: nccl-host-1
+  hostNetwork: false
+  tolerations:
+    - operator: Exists
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
+  containers:
+    - name: tcpxo-daemon
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
+      imagePullPolicy: Always
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -ex
+          chmod 755 /fts/entrypoint_rxdm_container.sh
+          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+      securityContext:
+        capabilities:
+          add: ["NET_ADMIN", "NET_BIND_SERVICE"]
+      volumeMounts:
+        - name: nvtcpxo-libraries
+          mountPath: /usr/local/nvidia
+          readOnly: true
+        - name: nvtcpxo-sys
+          mountPath: /hostsysfs
+        - name: nvtcpxo-proc-sys
+          mountPath: /hostprocsysfs
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+    - name: nccl-test
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.14
+      imagePullPolicy: Always
+      command:
+        - /bin/sh
+        - -c
+        - |
+          cat >/scripts/allgather.sh <<EOF
+          #!/bin/bash
+          /scripts/init_ssh.sh \${@};
+          pushd /scripts;
+          /scripts/gen_hostfiles.sh \${@};
+          popd;
+          DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_gather_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
+          EOF
+          chmod +x /scripts/allgather.sh
+          service ssh restart;
+          sleep infinity;
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: nvtcpxo-libraries
+          mountPath: /usr/local/nvidia
+        - name: shared-memory
+          mountPath: /dev/shm
+        - name: nvtcpxo-aperture-devices
+          mountPath: /dev/aperture_devices
+      resources:
+        limits:
+          nvidia.com/gpu: 8
+  volumes:
+    - name: nvtcpxo-libraries
+      hostPath:
+        path: /home/kubernetes/bin/nvidia
+    - name: nvtcpxo-sys
+      hostPath:
+        path: /sys
+    - name: nvtcpxo-proc-sys
+      hostPath:
+        path: /proc/sys
+    - name: nvtcpxo-aperture-devices
+      hostPath:
+        path: /dev/aperture_devices
+    - name: shared-memory
+      emptyDir:
+        medium: "Memory"
+        sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nccl-test-host-2
+  labels:
+    name: nccl-host-2
+    tcpxo: daemon
+  annotations:
+    devices.gke.io/container.tcpxo-daemon: |
+      - path: /dev/nvidia0
+      - path: /dev/nvidia1
+      - path: /dev/nvidia2
+      - path: /dev/nvidia3
+      - path: /dev/nvidia4
+      - path: /dev/nvidia5
+      - path: /dev/nvidia6
+      - path: /dev/nvidia7
+      - path: /dev/nvidiactl
+      - path: /dev/nvidia-uvm
+      - path: /dev/dmabuf_import_helper
+    networking.gke.io/default-interface: eth0
+    networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"},{"interfaceName":"eth1","network":"gpu-nic0"},{"interfaceName":"eth2","network":"gpu-nic1"},{"interfaceName":"eth3","network":"gpu-nic2"},{"interfaceName":"eth4","network":"gpu-nic3"},{"interfaceName":"eth5","network":"gpu-nic4"},{"interfaceName":"eth6","network":"gpu-nic5"},{"interfaceName":"eth7","network":"gpu-nic6"},{"interfaceName":"eth8","network":"gpu-nic7"}]'
+spec:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: tcpxo
+                operator: In
+                values:
+                  - daemon
+          topologyKey: "kubernetes.io/hostname"
+  hostname: host2
+  subdomain: nccl-host-2
+  hostNetwork: false
+  tolerations:
+    - operator: Exists
+  nodeSelector:
+    cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
+  containers:
+    - name: tcpxo-daemon
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
+      imagePullPolicy: Always
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          set -ex
+          chmod 755 /fts/entrypoint_rxdm_container.sh
+          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+      securityContext:
+        capabilities:
+          add: ["NET_ADMIN", "NET_BIND_SERVICE"]
+      volumeMounts:
+        - name: nvtcpxo-libraries
+          mountPath: /usr/local/nvidia
+          readOnly: true
+        - name: nvtcpxo-sys
+          mountPath: /hostsysfs
+        - name: nvtcpxo-proc-sys
+          mountPath: /hostprocsysfs
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+    - name: nccl-test
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.14
+      imagePullPolicy: Always
+      command:
+        - /bin/sh
+        - -c
+        - |
+          cat >/scripts/allgather.sh <<EOF
+          #!/bin/bash
+          /scripts/init_ssh.sh \${@};
+          pushd /scripts;
+          /scripts/gen_hostfiles.sh \${@};
+          popd;
+          DATA_MIN=1K DATA_MAX=16G BENCHMARK=all_gather_perf NHOSTS=2 NCCL_LIB_DIR="${LD_LIBRARY_PATH}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" /scripts/demo-run-nccl-test-tcpxo-via-mpi.sh
+          EOF
+          chmod +x /scripts/allgather.sh
+          service ssh restart;
+          sleep infinity;
+      env:
+        - name: LD_LIBRARY_PATH
+          value: /usr/local/nvidia/lib64
+      securityContext:
+        privileged: true
+      volumeMounts:
+        - name: nvtcpxo-libraries
+          mountPath: /usr/local/nvidia
+        - name: shared-memory
+          mountPath: /dev/shm
+        - name: nvtcpxo-aperture-devices
+          mountPath: /dev/aperture_devices
+      resources:
+        limits:
+          nvidia.com/gpu: 8
+  volumes:
+    - name: nvtcpxo-libraries
+      hostPath:
+        path: /home/kubernetes/bin/nvidia
+    - name: nvtcpxo-sys
+      hostPath:
+        path: /sys
+    - name: nvtcpxo-proc-sys
+      hostPath:
+        path: /proc/sys
+    - name: nvtcpxo-aperture-devices
+      hostPath:
+        path: /dev/aperture_devices
+    - name: shared-memory
+      emptyDir:
+        medium: "Memory"
+        sizeLimit: 1Gi

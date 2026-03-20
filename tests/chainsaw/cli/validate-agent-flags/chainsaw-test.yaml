@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ spec:
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               help_output=$(${AICR_BIN} validate --help 2>&1)
               missing=""
-              for flag in namespace node-selector toleration image job-name timeout cleanup privileged; do
+              for flag in namespace node-selector toleration image job-name timeout cleanup; do
                 echo "$help_output" | grep -q "$flag" || missing="$missing $flag"
               done
               if [ -n "$missing" ]; then

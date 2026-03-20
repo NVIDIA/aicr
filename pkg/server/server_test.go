@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,7 +130,7 @@ func TestRateLimiting(t *testing.T) {
 	cfg.RateLimitBurst = 1 // burst of 1
 	cfg.Handlers = routes
 
-	s := New(WithConfig(cfg))
+	s := New(withConfig(cfg))
 
 	handler := s.withMiddleware(s.config.Handlers["/test"])
 
@@ -246,7 +246,7 @@ func TestGracefulShutdown(t *testing.T) {
 	cfg.ShutdownTimeout = 100 * time.Millisecond
 	cfg.Handlers = routes
 
-	s := New(WithConfig(cfg))
+	s := New(withConfig(cfg))
 
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
@@ -408,13 +408,13 @@ func TestWithHandler(t *testing.T) {
 	}
 }
 
-func TestWithConfig(t *testing.T) {
+func TestWithConfigOption(t *testing.T) {
 	cfg := parseConfig()
 	cfg.Name = "test-server"
 	cfg.Port = 9090
 	cfg.RateLimit = 500
 
-	s := New(WithConfig(cfg))
+	s := New(withConfig(cfg))
 
 	if s.config.Name != "test-server" {
 		t.Errorf("expected name test-server, got %s", s.config.Name)

@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,13 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert all three validation phases are present.
-kind: ValidationResult
-apiVersion: aicr.nvidia.com/v1alpha1
-phases:
-  readiness:
-    (status == 'pass' || status == 'fail'): true
-  deployment:
-    (status == 'pass' || status == 'fail' || status == 'skipped'): true
-  conformance:
-    (status == 'pass' || status == 'fail' || status == 'skipped'): true
+# Assert the validation result is a valid CTRF report.
+reportFormat: CTRF
+results:
+  tool:
+    name: aicr
+  summary:
+    tests: (@ > 0)

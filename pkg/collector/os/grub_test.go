@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
@@ -26,23 +27,19 @@ import (
 const grubSubtypeName = "grub"
 
 func TestGrubCollector_Collect_ContextCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.TODO())
-	cancel() // Cancel immediately
+	// Use an already-expired context to ensure deterministic cancellation
+	ctx, cancel := context.WithDeadline(context.TODO(), time.Now().Add(-time.Second))
+	defer cancel()
 
 	collector := &Collector{}
 	m, err := collector.Collect(ctx)
 
 	if err == nil {
-		// On some systems, the read may complete before context check
-		t.Skip("Context cancellation timing dependent")
+		t.Fatal("expected error from canceled context")
 	}
 
 	if m != nil {
 		t.Error("Expected nil measurement on error")
-	}
-
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("Expected context.Canceled, got %v", err)
 	}
 }
 

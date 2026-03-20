@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package evidence renders CNCF AI Conformance evidence markdown from validation results.
-// Evidence includes both structural validation and behavioral test outputs.
+// Package evidence renders CNCF AI Conformance evidence markdown from CTRF reports.
 package evidence
 
 import (
@@ -26,11 +25,16 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/checks"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
-// Renderer generates CNCF conformance evidence documents from validation results.
+// Parsed templates cached at package level to avoid re-parsing on every render call.
+var (
+	parsedEvidenceTemplate = template.Must(template.New("evidence").Funcs(templateFuncs()).Parse(evidenceTemplate))
+	parsedIndexTemplate    = template.Must(template.New("index").Funcs(templateFuncs()).Parse(indexTemplate))
+)
+
+// Renderer generates CNCF conformance evidence documents from CTRF reports.
 type Renderer struct {
 	outputDir string
 }
@@ -54,38 +58,33 @@ func New(opts ...Option) *Renderer {
 	return r
 }
 
-// Render generates evidence markdown files from a validation result.
-// Only checks with SubmissionRequirement=true produce evidence files.
-// Checks with status "skipped" are excluded from evidence output.
-func (r *Renderer) Render(ctx context.Context, result *validator.ValidationResult) error {
+// Render generates evidence markdown files from a CTRF report.
+// Groups test results by CNCF requirement. Only submission-required
+// checks produce evidence. Skipped tests are excluded.
+func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 	if r.outputDir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "evidence output directory not set")
 	}
 
-	conformance, ok := result.Phases["conformance"]
-	if !ok {
-		slog.Warn("no conformance phase in validation result, skipping evidence rendering")
+	if report == nil || len(report.Results.Tests) == 0 {
+		slog.Warn("no tests in CTRF report, skipping evidence rendering")
 		return nil
 	}
 
-	// Build evidence entries grouped by EvidenceFile.
-	entries := r.buildEntries(conformance)
-
-	if len(entries) == 0 {
-		slog.Warn("no submission checks found in conformance results, skipping evidence rendering")
-		return nil
-	}
-
-	// Create output directory.
 	if err := os.MkdirAll(r.outputDir, 0o755); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence directory", err)
 	}
 
-	// Render per-requirement evidence files.
+	entries := r.buildEntries(report)
+	if len(entries) == 0 {
+		slog.Warn("no submission-required checks found, skipping evidence rendering")
+		return nil
+	}
+
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering cancelled", ctx.Err())
+			return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering canceled", ctx.Err())
 		default:
 		}
 		if err := r.renderEvidence(entry); err != nil {
@@ -93,98 +92,79 @@ func (r *Renderer) Render(ctx context.Context, result *validator.ValidationResul
 		}
 	}
 
-	// Render index.
-	select {
-	case <-ctx.Done():
-		return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering cancelled", ctx.Err())
-	default:
-	}
-	return r.renderIndex(entries, result.RunID)
+	return r.renderIndex(entries)
 }
 
-// buildEntries groups check results by EvidenceFile.
-func (r *Renderer) buildEntries(conformance *validator.PhaseResult) []EvidenceEntry {
+// buildEntries groups CTRF test results by requirement.
+func (r *Renderer) buildEntries(report *ctrf.Report) []evidenceEntry {
 	now := time.Now().UTC()
 
-	// Group by EvidenceFile, preserving order of first appearance.
+	// Group by evidence file, preserving order of first appearance.
 	type fileGroup struct {
-		check   *checks.Check
-		checks  []CheckEntry
+		meta    *requirementMeta
+		checks  []checkEntry
 		hasFail bool
 	}
 	groupOrder := make([]string, 0)
 	groups := make(map[string]*fileGroup)
 
-	for _, cr := range conformance.Checks {
-		// Skip checks with "skipped" status — never emit evidence for unexecuted checks.
-		if cr.Status == validator.ValidationStatusSkipped {
-			slog.Debug("skipping evidence for unexecuted check", "check", cr.Name)
+	for _, test := range report.Results.Tests {
+		if test.Status == ctrf.StatusSkipped {
 			continue
 		}
 
-		// Dual-lookup: try check name first, then test name.
-		check, ok := checks.ResolveCheck(cr.Name)
-		if !ok {
-			slog.Debug("check not found in registry, skipping evidence", "name", cr.Name)
+		meta := GetRequirement(test.Name)
+		if meta == nil {
+			// Not a submission-required check — skip.
 			continue
 		}
 
-		// Only include submission requirements.
-		if !check.SubmissionRequirement || check.EvidenceFile == "" {
-			continue
+		ce := checkEntry{
+			Name:     test.Name,
+			Status:   test.Status,
+			Message:  test.Message,
+			Stdout:   test.Stdout,
+			Duration: test.Duration,
 		}
 
-		entry := CheckEntry{
-			Name:      check.Name,
-			Status:    cr.Status,
-			Reason:    cr.Reason,
-			Duration:  cr.Duration,
-			Artifacts: cr.Artifacts,
-		}
-
-		g, exists := groups[check.EvidenceFile]
+		g, exists := groups[meta.File]
 		if !exists {
-			g = &fileGroup{check: check}
-			groups[check.EvidenceFile] = g
-			groupOrder = append(groupOrder, check.EvidenceFile)
+			g = &fileGroup{meta: meta}
+			groups[meta.File] = g
+			groupOrder = append(groupOrder, meta.File)
 		}
-		g.checks = append(g.checks, entry)
-		if cr.Status == validator.ValidationStatusFail {
+		g.checks = append(g.checks, ce)
+		if test.Status == ctrf.StatusFailed {
 			g.hasFail = true
 		}
 	}
 
-	entries := make([]EvidenceEntry, 0, len(groupOrder))
+	entries := make([]evidenceEntry, 0, len(groupOrder))
 	for _, filename := range groupOrder {
 		g := groups[filename]
-		status := validator.ValidationStatusPass
+		status := ctrf.StatusPassed
 		if g.hasFail {
-			status = validator.ValidationStatusFail
+			status = ctrf.StatusFailed
 		}
-		entries = append(entries, EvidenceEntry{
-			RequirementID: g.check.RequirementID,
-			Title:         g.check.EvidenceTitle,
-			Description:   g.check.EvidenceDescription,
+		entries = append(entries, evidenceEntry{
+			RequirementID: g.meta.RequirementID,
+			Title:         g.meta.Title,
+			Description:   g.meta.Description,
 			Filename:      filename,
 			Checks:        g.checks,
 			Status:        status,
 			GeneratedAt:   now,
 		})
 	}
+
 	return entries
 }
 
-// renderEvidence writes a single evidence markdown file.
-func (r *Renderer) renderEvidence(entry EvidenceEntry) (err error) {
-	tmpl, err := template.New("evidence").Funcs(templateFuncs()).Parse(evidenceTemplate)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse evidence template", err)
-	}
-
+func (r *Renderer) renderEvidence(entry evidenceEntry) (err error) {
 	path := filepath.Join(r.outputDir, entry.Filename)
-	f, err := os.Create(path)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence file", err)
+	f, createErr := os.Create(path)
+	if createErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence file", createErr)
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil && err == nil {
@@ -192,24 +172,18 @@ func (r *Renderer) renderEvidence(entry EvidenceEntry) (err error) {
 		}
 	}()
 
-	if err := tmpl.Execute(f, entry); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to render evidence template", err)
+	if execErr := parsedEvidenceTemplate.Execute(f, entry); execErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to render evidence template", execErr)
 	}
 	slog.Debug("evidence file written", "file", path)
 	return nil
 }
 
-// renderIndex writes the index.md summary file.
-func (r *Renderer) renderIndex(entries []EvidenceEntry, runID string) (err error) {
-	tmpl, err := template.New("index").Funcs(templateFuncs()).Parse(indexTemplate)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse index template", err)
-	}
-
+func (r *Renderer) renderIndex(entries []evidenceEntry) (err error) {
 	path := filepath.Join(r.outputDir, "index.md")
-	f, err := os.Create(path)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create index file", err)
+	f, createErr := os.Create(path)
+	if createErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create index file", createErr)
 	}
 	defer func() {
 		if closeErr := f.Close(); closeErr != nil && err == nil {
@@ -219,25 +193,23 @@ func (r *Renderer) renderIndex(entries []EvidenceEntry, runID string) (err error
 
 	data := struct {
 		GeneratedAt time.Time
-		RunID       string
-		Entries     []EvidenceEntry
+		Entries     []evidenceEntry
 	}{
 		GeneratedAt: time.Now().UTC(),
-		RunID:       runID,
 		Entries:     entries,
 	}
 
-	if err := tmpl.Execute(f, data); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to render index template", err)
+	if execErr := parsedIndexTemplate.Execute(f, data); execErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to render index template", execErr)
 	}
 	slog.Debug("evidence index written", "file", path)
 	return nil
 }
 
-// templateFuncs returns the template function map.
 func templateFuncs() template.FuncMap {
 	return template.FuncMap{
-		"upper": func(s validator.ValidationStatus) string { return strings.ToUpper(string(s)) },
-		"inc":   func(i int) int { return i + 1 },
+		"upper": strings.ToUpper,
+		"add":   func(a, b int) int { return a + b },
+		"join":  strings.Join,
 	}
 }

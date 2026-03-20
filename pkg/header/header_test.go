@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import (
 const testAPIVersion = "aicr.nvidia.com/v1alpha1"
 
 func TestKind_String(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		kind Kind
@@ -47,6 +49,8 @@ func TestKind_String(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tt.kind.String(); got != tt.want {
 				t.Errorf("Kind.String() = %v, want %v", got, tt.want)
 			}
@@ -55,9 +59,11 @@ func TestKind_String(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	h := New()
+	t.Parallel()
+
+	h := newHeader()
 	if h == nil {
-		t.Fatal("New() returned nil")
+		t.Fatal("newHeader() returned nil")
 	}
 	if h.Metadata == nil {
 		t.Error("Metadata should be initialized")
@@ -68,6 +74,8 @@ func TestNew(t *testing.T) {
 }
 
 func TestHeader_Init(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		kind    Kind
@@ -119,6 +127,8 @@ func TestHeader_Init(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			h := &Header{}
 			h.Init(tt.kind, testAPIVersion, tt.version)
 			tt.check(t, h)
@@ -127,6 +137,8 @@ func TestHeader_Init(t *testing.T) {
 }
 
 func TestHeader_Init_TimestampFormat(t *testing.T) {
+	t.Parallel()
+
 	h := &Header{}
 	h.Init(KindSnapshot, testAPIVersion, "v1.0.0")
 
@@ -150,6 +162,8 @@ func TestHeader_Init_TimestampFormat(t *testing.T) {
 }
 
 func TestHeader_Init_OverwritesExistingData(t *testing.T) {
+	t.Parallel()
+
 	h := &Header{
 		Kind:       KindRecipe,
 		APIVersion: "old.example.com/v1",
@@ -180,6 +194,8 @@ func TestHeader_Init_OverwritesExistingData(t *testing.T) {
 }
 
 func TestConstants(t *testing.T) {
+	t.Parallel()
+
 	// Verify constant values haven't changed
 	if KindSnapshot != "Snapshot" {
 		t.Errorf("KindSnapshot = %v, want Snapshot", KindSnapshot)
@@ -190,9 +206,7 @@ func TestConstants(t *testing.T) {
 	if KindRecipeResult != "RecipeResult" {
 		t.Errorf("KindRecipeResult = %v, want RecipeResult", KindRecipeResult)
 	}
-	if KindValidationResult != "ValidationResult" {
-		t.Errorf("KindValidationResult = %v, want ValidationResult", KindValidationResult)
-	}
+
 	// Note: API version constants moved to resource-specific packages
 	// - snapshotter.FullAPIVersion for Snapshot resources
 	// - recipe.FullAPIVersion for Recipe resources

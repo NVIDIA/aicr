@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Sync docs/ (source of truth) into site/docs/ for VitePress.
+# This eliminates manual duplication — docs/ is the single source.
+#
+# Synced sections: user, integrator, contributor, conformance
+# Site-only content (getting-started, project, index.md) is NOT touched.
+#
+# Run before: site dev, site build
+# Wired into: site/package.json (predev, prebuild)
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DOCS="${REPO_ROOT}/docs"
+SITE_DOCS="${REPO_ROOT}/site/docs"
+
+# Sync a docs section into site/docs
+sync_section() {
+  local src="$1"
+  local dst="$2"
+
+  rm -rf "${dst}"
+  mkdir -p "${dst}"
+  cp -R "${src}/"* "${dst}/"
+}
+
+echo "Syncing docs/ → site/docs/..."
+
+# Direct section copies
+sync_section "${DOCS}/user" "${SITE_DOCS}/user"
+sync_section "${DOCS}/integrator" "${SITE_DOCS}/integrator"
+sync_section "${DOCS}/contributor" "${SITE_DOCS}/contributor"
+
+# Conformance: flatten cncf/ prefix (docs/conformance/cncf/ → site/docs/conformance/)
+mkdir -p "${SITE_DOCS}/conformance"
+rm -rf "${SITE_DOCS}/conformance/evidence" "${SITE_DOCS}/conformance/index.md"
+cp -R "${DOCS}/conformance/cncf/evidence" "${SITE_DOCS}/conformance/evidence"
+cp "${DOCS}/conformance/cncf/index.md" "${SITE_DOCS}/conformance/index.md"
+
+echo "OK: synced docs/ → site/docs/"

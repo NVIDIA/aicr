@@ -1,0 +1,72 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA DRA Driver GPU Health Check
+#
+# Validates that the NVIDIA DRA (Dynamic Resource Allocation) GPU driver is
+# running and healthy in the nvidia-dra-driver namespace. Checks that the
+# nvidia-dra-driver-gpu-kubelet-plugin DaemonSet has at least one ready pod
+# and that no pods in the namespace are stuck in Pending, Failed, or Unknown
+# phases.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nvidia-dra-driver-gpu-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-deployment-exists
+      try:
+        # Guard against vacuous pass on empty namespace: verify the
+        # nvidia-dra-driver-gpu-kubelet-plugin DaemonSet exists and has
+        # at least one ready pod.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nvidia-dra-driver-gpu-kubelet-plugin
+                namespace: nvidia-dra-driver
+              status:
+                (numberReady > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Assert no pods are in unhealthy phases.
+        # Pods must be Running (long-lived) or Succeeded (completed jobs).
+        # This catches Pending (init containers, scheduling), Failed, and Unknown.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvidia-dra-driver
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvidia-dra-driver
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvidia-dra-driver
+              status:
+                phase: Unknown

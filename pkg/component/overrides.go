@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -642,10 +642,10 @@ func TolerationsToPodSpec(tolerations []corev1.Toleration) []map[string]any {
 	return result
 }
 
-// NodeSelectorToMatchExpressions converts a map of node selectors to matchExpressions format.
+// nodeSelectorToMatchExpressions converts a map of node selectors to matchExpressions format.
 // This format is used by some CRDs like Skyhook that use label selector syntax.
 // Each key=value pair becomes a matchExpression with operator "In" and single value.
-func NodeSelectorToMatchExpressions(nodeSelector map[string]string) []map[string]any {
+func nodeSelectorToMatchExpressions(nodeSelector map[string]string) []map[string]any {
 	if len(nodeSelector) == 0 {
 		return nil
 	}

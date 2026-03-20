@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ func BenchmarkToReading(b *testing.B) {
 	}
 }
 
-func BenchmarkToReadingWithType(b *testing.B) {
+func Benchmark_toReadingWithType(b *testing.B) {
 	values := []any{
 		42,
 		int64(9223372036854775807),
@@ -54,7 +54,7 @@ func BenchmarkToReadingWithType(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, v := range values {
-			_, _ = ToReadingWithType(v)
+			_, _ = toReadingWithType(v)
 		}
 	}
 }
@@ -153,7 +153,7 @@ func BenchmarkMeasurementGetOrCreateSubtype(b *testing.B) {
 
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = m.GetOrCreateSubtype("cluster")
+			_ = m.getOrCreateSubtype("cluster")
 		}
 	})
 
@@ -161,7 +161,7 @@ func BenchmarkMeasurementGetOrCreateSubtype(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			m := &Measurement{Type: TypeK8s, Subtypes: []Subtype{}}
-			_ = m.GetOrCreateSubtype("new_subtype")
+			_ = m.getOrCreateSubtype("new_subtype")
 		}
 	})
 }

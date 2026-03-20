@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
 )
 
@@ -65,6 +64,7 @@ func TestDefaultCollectorFactory_AllCollectors(t *testing.T) {
 		factory.CreateOSCollector,
 		factory.CreateGPUCollector,
 		factory.CreateKubernetesCollector,
+		factory.CreateNodeTopologyCollector,
 	}
 
 	for i, createFunc := range collectorFuncs {
@@ -85,50 +85,6 @@ func TestWithSystemDServices(t *testing.T) {
 
 	if factory.SystemDServices[0] != "custom1.service" {
 		t.Errorf("expected custom1.service, got %s", factory.SystemDServices[0])
-	}
-}
-
-func TestWithHelmNamespaces(t *testing.T) {
-	tests := []struct {
-		name       string
-		namespaces []string
-		wantLen    int
-	}{
-		{
-			name:       "nil namespaces",
-			namespaces: nil,
-			wantLen:    0,
-		},
-		{
-			name:       "all namespaces",
-			namespaces: []string{"*"},
-			wantLen:    1,
-		},
-		{
-			name:       "scoped namespaces",
-			namespaces: []string{"gpu-operator", "network-operator"},
-			wantLen:    2,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			factory := NewDefaultFactory(WithHelmNamespaces(tt.namespaces))
-
-			if len(factory.HelmNamespaces) != tt.wantLen {
-				t.Errorf("expected %d namespaces, got %d", tt.wantLen, len(factory.HelmNamespaces))
-			}
-
-			// Verify K8s collector gets the namespaces
-			col := factory.CreateKubernetesCollector()
-			k8sCol, ok := col.(*k8s.Collector)
-			if !ok {
-				t.Fatal("expected *k8s.Collector")
-			}
-			if len(k8sCol.HelmNamespaces) != tt.wantLen {
-				t.Errorf("K8s collector expected %d namespaces, got %d", tt.wantLen, len(k8sCol.HelmNamespaces))
-			}
-		})
 	}
 }
 

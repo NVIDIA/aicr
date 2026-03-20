@@ -8,8 +8,6 @@ This directory contains example recipe files demonstrating various configuration
 
 - **`kind.yaml`** - Recipe for local Kind cluster with fake GPU
 - **`eks-training.yaml`** - EKS recipe optimized for training workloads
-- **`eks-gb200-training.yaml`** - EKS recipe for GB200 hardware with training optimizations
-- **`eks-gb200-ubuntu-training.yaml`** - Complete recipe for GB200 on EKS with Ubuntu
 
 ### Advanced Examples
 
@@ -24,11 +22,11 @@ This directory contains example recipe files demonstrating various configuration
 
 ```shell
 # Generate deployment bundle
-aicr bundle --recipe eks-gb200-ubuntu-training.yaml --output ./bundles
+aicr bundle --recipe eks-gb200-ubuntu-training-with-validation.yaml --output ./bundles
 
 # Generate bundle with value overrides
 aicr bundle \
-  --recipe eks-gb200-ubuntu-training.yaml \
+  --recipe eks-gb200-ubuntu-training-with-validation.yaml \
   --set gpuoperator:driver.version=580.82.07 \
   --output ./bundles
 ```

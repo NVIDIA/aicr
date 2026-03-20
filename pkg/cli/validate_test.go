@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/urfave/cli/v3"
+
 	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
@@ -27,102 +28,65 @@ func TestParseValidationPhases(t *testing.T) {
 	tests := []struct {
 		name       string
 		phaseStrs  []string
-		wantPhases []validator.ValidationPhaseName
+		wantPhases []validator.Phase
 		wantErr    bool
 		errContain string
 	}{
 		{
-			name:       "empty defaults to readiness",
+			name:       "empty defaults to all (nil)",
 			phaseStrs:  []string{},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseReadiness},
-			wantErr:    false,
+			wantPhases: nil,
 		},
 		{
-			name:       "single readiness phase",
-			phaseStrs:  []string{"readiness"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseReadiness},
-			wantErr:    false,
+			name:       "all returns nil",
+			phaseStrs:  []string{"all"},
+			wantPhases: nil,
 		},
 		{
 			name:       "single deployment phase",
 			phaseStrs:  []string{"deployment"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseDeployment},
-			wantErr:    false,
+			wantPhases: []validator.Phase{validator.PhaseDeployment},
 		},
 		{
 			name:       "single performance phase",
 			phaseStrs:  []string{"performance"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhasePerformance},
-			wantErr:    false,
+			wantPhases: []validator.Phase{validator.PhasePerformance},
 		},
 		{
 			name:       "single conformance phase",
 			phaseStrs:  []string{"conformance"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseConformance},
-			wantErr:    false,
-		},
-		{
-			name:       "all phases",
-			phaseStrs:  []string{"all"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseAll},
-			wantErr:    false,
+			wantPhases: []validator.Phase{validator.PhaseConformance},
 		},
 		{
 			name:      "multiple phases",
-			phaseStrs: []string{"readiness", "deployment", "conformance"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
+			phaseStrs: []string{"deployment", "conformance"},
+			wantPhases: []validator.Phase{
 				validator.PhaseDeployment,
 				validator.PhaseConformance,
 			},
-			wantErr: false,
-		},
-		{
-			name:      "out of order phases reordered to canonical order",
-			phaseStrs: []string{"conformance", "readiness", "performance"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
-				validator.PhasePerformance,
-				validator.PhaseConformance,
-			},
-			wantErr: false,
 		},
 		{
 			name:      "duplicate phases deduplicated",
-			phaseStrs: []string{"readiness", "readiness", "deployment", "readiness"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
+			phaseStrs: []string{"deployment", "deployment", "conformance"},
+			wantPhases: []validator.Phase{
 				validator.PhaseDeployment,
+				validator.PhaseConformance,
 			},
-			wantErr: false,
 		},
 		{
-			name:      "duplicates with out of order",
-			phaseStrs: []string{"performance", "readiness", "performance", "deployment"},
-			wantPhases: []validator.ValidationPhaseName{
-				validator.PhaseReadiness,
-				validator.PhaseDeployment,
-				validator.PhasePerformance,
-			},
-			wantErr: false,
-		},
-		{
-			name:       "all with other phases returns just all",
-			phaseStrs:  []string{"readiness", "all", "deployment"},
-			wantPhases: []validator.ValidationPhaseName{validator.PhaseAll},
-			wantErr:    false,
+			name:       "all with other phases returns nil",
+			phaseStrs:  []string{"deployment", "all", "conformance"},
+			wantPhases: nil,
 		},
 		{
 			name:       "invalid phase",
 			phaseStrs:  []string{"invalid"},
-			wantPhases: nil,
 			wantErr:    true,
 			errContain: "invalid phase",
 		},
 		{
-			name:       "mixed valid and invalid",
-			phaseStrs:  []string{"readiness", "bogus"},
-			wantPhases: nil,
+			name:       "readiness is invalid (not supported in v2)",
+			phaseStrs:  []string{"readiness"},
 			wantErr:    true,
 			errContain: "invalid phase",
 		},
@@ -161,12 +125,10 @@ func TestParseValidationPhases(t *testing.T) {
 func TestValidateCmd_CommandStructure(t *testing.T) {
 	cmd := validateCmd()
 
-	// Verify command name
 	if cmd.Name != "validate" {
 		t.Errorf("command name = %q, want %q", cmd.Name, "validate")
 	}
 
-	// Verify required flags exist
 	requiredFlags := []string{"recipe", "phase", "namespace", "node-selector", "toleration", "timeout"}
 	for _, flagName := range requiredFlags {
 		found := false
@@ -185,10 +147,8 @@ func TestValidateCmd_CommandStructure(t *testing.T) {
 func TestValidateCmd_AgentFlags(t *testing.T) {
 	cmd := validateCmd()
 
-	// Verify agent deployment flags exist
 	agentFlags := []string{
 		"namespace",
-		"validation-namespace",
 		"image",
 		"image-pull-secret",
 		"job-name",
@@ -196,8 +156,7 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 		"node-selector",
 		"toleration",
 		"timeout",
-		"cleanup",
-		"privileged",
+		"no-cleanup",
 	}
 
 	for _, flagName := range agentFlags {
@@ -214,85 +173,82 @@ func TestValidateCmd_AgentFlags(t *testing.T) {
 	}
 }
 
-func TestHelmNamespacesFromRecipe(t *testing.T) {
+func hasFlag(flag interface{ Names() []string }, name string) bool {
+	return slices.Contains(flag.Names(), name)
+}
+
+func TestValidateCmd_CNCFSubmissionFlags(t *testing.T) {
+	cmd := validateCmd()
+
+	// Verify --cncf-submission and --feature flags exist
+	evidenceFlags := []string{"cncf-submission", "feature", "evidence-dir"}
+	for _, flagName := range evidenceFlags {
+		found := false
+		for _, flag := range cmd.Flags {
+			if hasFlag(flag, flagName) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing evidence flag: %s", flagName)
+		}
+	}
+
+	// Verify --feature has -f alias
+	for _, flag := range cmd.Flags {
+		if hasFlag(flag, "feature") && !hasFlag(flag, "f") {
+			t.Error("--feature flag missing -f alias")
+		}
+	}
+}
+
+func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 	tests := []struct {
-		name     string
-		rec      *recipe.RecipeResult
-		expected []string
+		name       string
+		args       []string
+		wantErr    bool
+		errContain string
 	}{
 		{
-			name:     "nil recipe",
-			rec:      &recipe.RecipeResult{},
-			expected: nil,
+			name:       "cncf-submission without evidence-dir",
+			args:       []string{"aicr", "validate", "--cncf-submission"},
+			wantErr:    true,
+			errContain: "--cncf-submission requires --evidence-dir",
 		},
 		{
-			name: "no helm components",
-			rec: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: "app", Type: recipe.ComponentTypeKustomize, Namespace: "default"},
-				},
-			},
-			expected: nil,
+			name:       "feature without cncf-submission",
+			args:       []string{"aicr", "validate", "--feature", "dra", "--evidence-dir", "/tmp/test"},
+			wantErr:    true,
+			errContain: "--feature requires --cncf-submission",
 		},
 		{
-			name: "helm components with namespaces",
-			rec: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
-					{Name: "network-operator", Type: recipe.ComponentTypeHelm, Namespace: "network-operator"},
-				},
-			},
-			expected: []string{"gpu-operator", "network-operator"},
-		},
-		{
-			name: "deduplicates namespaces",
-			rec: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
-					{Name: "gpu-feature-discovery", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
-				},
-			},
-			expected: []string{"gpu-operator"},
-		},
-		{
-			name: "skips helm without namespace",
-			rec: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
-					{Name: "orphan", Type: recipe.ComponentTypeHelm, Namespace: ""},
-				},
-			},
-			expected: []string{"gpu-operator"},
-		},
-		{
-			name: "mixed helm and kustomize",
-			rec: &recipe.RecipeResult{
-				ComponentRefs: []recipe.ComponentRef{
-					{Name: "gpu-operator", Type: recipe.ComponentTypeHelm, Namespace: "gpu-operator"},
-					{Name: "kustomize-app", Type: recipe.ComponentTypeKustomize, Namespace: "default"},
-					{Name: "network-operator", Type: recipe.ComponentTypeHelm, Namespace: "network-operator"},
-				},
-			},
-			expected: []string{"gpu-operator", "network-operator"},
+			name:       "cncf-submission with invalid feature",
+			args:       []string{"aicr", "validate", "--cncf-submission", "--evidence-dir", "/tmp/test", "--feature", "nonexistent"},
+			wantErr:    true,
+			errContain: "unknown feature",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := helmNamespacesFromRecipe(tt.rec)
-			if len(got) != len(tt.expected) {
-				t.Fatalf("got %d namespaces, want %d: %v", len(got), len(tt.expected), got)
+			cmd := validateCmd()
+			// Wrap in a parent app so flag parsing works correctly.
+			app := &cli.Command{
+				Name:     "aicr",
+				Commands: []*cli.Command{cmd},
 			}
-			for i, ns := range got {
-				if ns != tt.expected[i] {
-					t.Errorf("namespace[%d] = %q, want %q", i, ns, tt.expected[i])
+			err := app.Run(t.Context(), tt.args)
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && tt.errContain != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("error = %v, want error containing %q", err, tt.errContain)
 				}
 			}
 		})
 	}
-}
-
-// hasFlag checks if a cli.Flag has the given name
-func hasFlag(flag interface{ Names() []string }, name string) bool {
-	return slices.Contains(flag.Names(), name)
 }

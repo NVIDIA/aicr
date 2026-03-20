@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 )
 
 func TestExitCodeFromError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		err      error
@@ -84,6 +85,7 @@ func TestExitCodeFromError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ExitCodeFromError(tt.err)
 			if result != tt.expected {
 				t.Errorf("ExitCodeFromError() = %d, want %d", result, tt.expected)
@@ -93,6 +95,7 @@ func TestExitCodeFromError(t *testing.T) {
 }
 
 func TestExitCodeFromErrorCode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code     ErrorCode
 		expected int
@@ -110,48 +113,23 @@ func TestExitCodeFromErrorCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.code), func(t *testing.T) {
-			result := ExitCodeFromErrorCode(tt.code)
+			t.Parallel()
+			result := exitCodeFromErrorCode(tt.code)
 			if result != tt.expected {
-				t.Errorf("ExitCodeFromErrorCode(%s) = %d, want %d", tt.code, result, tt.expected)
-			}
-		})
-	}
-}
-
-func TestExitCodeFromSignal(t *testing.T) {
-	tests := []struct {
-		signal   int
-		expected int
-	}{
-		{2, 130},  // SIGINT
-		{15, 143}, // SIGTERM
-		{9, 137},  // SIGKILL
-		{1, 129},  // SIGHUP
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("signal_%d", tt.signal), func(t *testing.T) {
-			result := ExitCodeFromSignal(tt.signal)
-			if result != tt.expected {
-				t.Errorf("ExitCodeFromSignal(%d) = %d, want %d", tt.signal, result, tt.expected)
+				t.Errorf("exitCodeFromErrorCode(%s) = %d, want %d", tt.code, result, tt.expected)
 			}
 		})
 	}
 }
 
 func TestExitCodeConstants(t *testing.T) {
+	t.Parallel()
 	// Verify exit codes follow conventions
 	if ExitSuccess != 0 {
 		t.Errorf("ExitSuccess should be 0, got %d", ExitSuccess)
 	}
 	if ExitError != 1 {
 		t.Errorf("ExitError should be 1, got %d", ExitError)
-	}
-	if ExitFlagError != 125 {
-		t.Errorf("ExitFlagError should be 125 (Docker convention), got %d", ExitFlagError)
-	}
-	if ExitSignalBase != 128 {
-		t.Errorf("ExitSignalBase should be 128, got %d", ExitSignalBase)
 	}
 
 	// Verify application codes are in valid range (2-63)

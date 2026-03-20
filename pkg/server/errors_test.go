@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
-func TestHTTPStatusFromCode(t *testing.T) {
+func TestHTTPStatusFromCodeMapping(t *testing.T) {
 	tests := []struct {
 		name string
 		code aicrerrors.ErrorCode
@@ -44,8 +44,8 @@ func TestHTTPStatusFromCode(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := HTTPStatusFromCode(tt.code); got != tt.want {
-				t.Fatalf("HTTPStatusFromCode(%q) = %d, want %d", tt.code, got, tt.want)
+			if got := httpStatusFromCode(tt.code); got != tt.want {
+				t.Fatalf("httpStatusFromCode(%q) = %d, want %d", tt.code, got, tt.want)
 			}
 		})
 	}
@@ -107,7 +107,7 @@ func TestMergeDetails(t *testing.T) {
 	})
 }
 
-func TestWriteError_WritesErrorResponse(t *testing.T) {
+func TestWriteError_WriteserrorResponse(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req = req.WithContext(context.WithValue(req.Context(), contextKeyRequestID, "req-123"))
 	w := httptest.NewRecorder()
@@ -118,7 +118,7 @@ func TestWriteError_WritesErrorResponse(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 
-	var resp ErrorResponse
+	var resp errorResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestWriteErrorFromErr_StructuredErrorMapsStatusAndDetails(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
 	}
 
-	var resp ErrorResponse
+	var resp errorResponse
 	if uerr := json.Unmarshal(w.Body.Bytes(), &resp); uerr != nil {
 		t.Fatalf("failed to unmarshal response: %v", uerr)
 	}
@@ -191,7 +191,7 @@ func TestWriteErrorFromErr_NilError(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
 	}
 
-	var resp ErrorResponse
+	var resp errorResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestWriteErrorFromErr_StructuredErrorEmptyMessage(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, w.Code)
 	}
 
-	var resp ErrorResponse
+	var resp errorResponse
 	if uerr := json.Unmarshal(w.Body.Bytes(), &resp); uerr != nil {
 		t.Fatalf("failed to unmarshal: %v", uerr)
 	}
@@ -230,7 +230,7 @@ func TestWriteErrorFromErr_NonStructuredFallsBackToInternal(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
 	}
 
-	var resp ErrorResponse
+	var resp errorResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,8 @@ import (
 )
 
 func TestGetTrustedMaterial(t *testing.T) {
+	t.Parallel()
+
 	material, err := GetTrustedMaterial()
 	if err != nil {
 		t.Fatalf("GetTrustedMaterial() error: %v", err)
@@ -47,6 +49,8 @@ func TestGetTrustedMaterial(t *testing.T) {
 // infrastructure with high availability — if it's down, Sigstore keyless signing
 // is also down globally.
 func TestUpdate_Success(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
@@ -74,6 +78,8 @@ func TestUpdate_Success(t *testing.T) {
 }
 
 func TestUpdate_CancelledContext(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 

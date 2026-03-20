@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,8 +24,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PermissionCheck represents a single permission check result.
-type PermissionCheck struct {
+// permissionCheck represents a single permission check result.
+type permissionCheck struct {
 	Resource  string
 	Verb      string
 	Namespace string
@@ -36,8 +36,8 @@ type PermissionCheck struct {
 // CheckPermissions verifies if the current user has the required permissions
 // to deploy the agent. Returns a list of permission checks and an error if any
 // required permissions are missing.
-func (d *Deployer) CheckPermissions(ctx context.Context) ([]PermissionCheck, error) {
-	checks := []PermissionCheck{}
+func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, error) {
+	checks := []permissionCheck{}
 
 	type permCheck struct {
 		resource  string
@@ -46,30 +46,21 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]PermissionCheck, err
 	}
 
 	// Required permissions for deployment
-	requiredChecks := make([]permCheck, 0, 9+len(d.config.HelmNamespaces)*2)
-	requiredChecks = append(requiredChecks,
+	requiredChecks := []permCheck{
 		// Namespace-scoped resources
-		permCheck{"serviceaccounts", "create", d.config.Namespace},
-		permCheck{"roles", "create", d.config.Namespace},
-		permCheck{"rolebindings", "create", d.config.Namespace},
-		permCheck{"jobs", "create", d.config.Namespace},
-		permCheck{"configmaps", "get", d.config.Namespace},
-		permCheck{"configmaps", "list", d.config.Namespace},
+		{"serviceaccounts", "create", d.config.Namespace},
+		{"roles", "create", d.config.Namespace},
+		{"rolebindings", "create", d.config.Namespace},
+		{"jobs", "create", d.config.Namespace},
+		{"configmaps", "get", d.config.Namespace},
+		{"configmaps", "list", d.config.Namespace},
 
 		// Cluster-scoped resources
-		permCheck{"clusterroles", "create", ""},
-		permCheck{"clusterrolebindings", "create", ""},
+		{"clusterroles", "create", ""},
+		{"clusterrolebindings", "create", ""},
 
 		// Cleanup permissions
-		permCheck{"jobs", "delete", d.config.Namespace},
-	)
-
-	// Add per-namespace permission checks for Helm secrets RBAC
-	for _, ns := range d.config.HelmNamespaces {
-		requiredChecks = append(requiredChecks,
-			permCheck{"roles", "create", ns},
-			permCheck{"rolebindings", "create", ns},
-		)
+		{"jobs", "delete", d.config.Namespace},
 	}
 
 	var missingPermissions []string
@@ -77,10 +68,14 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]PermissionCheck, err
 	for _, check := range requiredChecks {
 		allowed, reason, err := d.checkPermission(ctx, check.resource, check.verb, check.namespace)
 		if err != nil {
-			return checks, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to check permission for %s %s", check.verb, check.resource), err)
+			code := errors.ErrCodeInternal
+			if errors.IsNetworkError(err) {
+				code = errors.ErrCodeUnavailable
+			}
+			return checks, errors.Wrap(code, fmt.Sprintf("failed to check permission for %s %s", check.verb, check.resource), err)
 		}
 
-		result := PermissionCheck{
+		result := permissionCheck{
 			Resource:  check.resource,
 			Verb:      check.verb,
 			Namespace: check.namespace,

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 	// Find all ClusterPolicy resources across all API groups
 	for _, apiResourceList := range apiResourceLists {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
 		}
 
 		if apiResourceList == nil {
@@ -105,7 +105,7 @@ func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]meas
 			for _, policy := range policies.Items {
 				// Check for context cancellation
 				if err := ctx.Err(); err != nil {
-					return nil, err
+					return nil, errors.Wrap(errors.ErrCodeTimeout, "policy collection cancelled", err)
 				}
 
 				// Extract spec for detailed information

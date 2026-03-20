@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	err := New(ErrCodeNotFound, "resource not found")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -37,6 +38,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestWrap(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("underlying error")
 	err := Wrap(ErrCodeInternal, "operation failed", cause)
 
@@ -49,6 +51,7 @@ func TestWrap(t *testing.T) {
 }
 
 func TestWrapWithContext(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("timeout")
 	ctx := map[string]any{
 		"command": "nvidia-smi",
@@ -69,6 +72,7 @@ func TestWrapWithContext(t *testing.T) {
 }
 
 func TestError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		err      *StructuredError
@@ -88,6 +92,7 @@ func TestError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := tt.err.Error()
 			if got != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, got)
@@ -97,6 +102,7 @@ func TestError(t *testing.T) {
 }
 
 func TestUnwrap(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("root cause")
 	err := Wrap(ErrCodeInternal, "wrapped", cause)
 
@@ -111,6 +117,7 @@ func TestUnwrap(t *testing.T) {
 }
 
 func TestNewWithContext(t *testing.T) {
+	t.Parallel()
 	ctx := map[string]any{
 		"component": "gpu-collector",
 		"timeout":   "10s",
@@ -141,6 +148,7 @@ func TestNewWithContext(t *testing.T) {
 }
 
 func TestErrorCodes(t *testing.T) {
+	t.Parallel()
 	codes := []ErrorCode{
 		ErrCodeNotFound,
 		ErrCodeUnauthorized,

@@ -18,7 +18,7 @@ aicr recipe \
   --accelerator gb200 \
   --os ubuntu \
   --intent training \
-  --data ./examples/data \
+  --data ./my-data \
   --output recipe.yaml
 ```
 
@@ -32,7 +32,7 @@ Now generate bundles:
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --data ./examples/data \
+  --data ./my-data \
   --deployer argocd \
   --output oci://ghcr.io/nvidia/aicr-bundle \
   --system-node-selector nodeGroup=system-pool \
@@ -48,7 +48,7 @@ The `--debug` flag shows which files are loaded from external vs embedded source
 aicr --debug recipe \
   --service eks \
   --accelerator gb200 \
-  --data ./examples/data
+  --data ./my-data
 ```
 
 ## Links

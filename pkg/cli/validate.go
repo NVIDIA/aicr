@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,19 +18,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"strings"
 	"time"
 
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
 // validateAgentConfig holds parsed agent configuration for validate command.
@@ -46,10 +51,7 @@ type validateAgentConfig struct {
 	timeout            time.Duration
 	cleanup            bool
 	debug              bool
-	privileged         bool
 	requireGPU         bool
-	helmNamespaces     []string
-	helmAllNamespaces  bool
 }
 
 // parseValidateAgentConfig parses agent deployment flags from the command.
@@ -74,55 +76,99 @@ func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 		nodeSelector:       nodeSelector,
 		tolerations:        tolerations,
 		timeout:            cmd.Duration("timeout"),
-		cleanup:            cmd.Bool("cleanup"),
+		cleanup:            !cmd.Bool("no-cleanup"),
 		debug:              cmd.Bool("debug"),
-		privileged:         cmd.Bool("privileged"),
 		requireGPU:         cmd.Bool("require-gpu"),
-		helmNamespaces:     cmd.StringSlice("helm-namespaces"),
-		helmAllNamespaces:  cmd.Bool("helm-all-namespaces"),
 	}, nil
 }
 
-// parseValidationPhases parses phase strings into ValidationPhaseName values.
-// It deduplicates phases and returns them in canonical order (readiness → deployment → performance → conformance).
-func parseValidationPhases(phaseStrs []string) ([]validator.ValidationPhaseName, error) {
+// parseValidationPhases parses phase strings into Phase values.
+func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	if len(phaseStrs) == 0 {
-		return []validator.ValidationPhaseName{validator.PhaseReadiness}, nil
+		return nil, nil // nil = all phases
 	}
 
-	// Parse and collect requested phases into a set for deduplication
-	requested := make(map[validator.ValidationPhaseName]bool)
-	for _, phaseStr := range phaseStrs {
-		switch phaseStr {
-		case "readiness":
-			requested[validator.PhaseReadiness] = true
-		case "deployment":
-			requested[validator.PhaseDeployment] = true
-		case "performance":
-			requested[validator.PhasePerformance] = true
-		case "conformance":
-			requested[validator.PhaseConformance] = true
-		case "all":
-			// "all" means all phases - return PhaseAll which is handled specially by validator
-			return []validator.ValidationPhaseName{validator.PhaseAll}, nil
-		default:
-			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid phase %q: must be one of: readiness, deployment, performance, conformance, all", phaseStr))
+	for _, s := range phaseStrs {
+		if s == "all" {
+			return nil, nil
 		}
 	}
 
-	// Build result in canonical order using validator.PhaseOrder
-	var phases []validator.ValidationPhaseName
-	for _, phase := range validator.PhaseOrder {
-		if requested[phase] {
-			phases = append(phases, phase)
+	validPhases := map[string]validator.Phase{
+		"deployment":  validator.PhaseDeployment,
+		"performance": validator.PhasePerformance,
+		"conformance": validator.PhaseConformance,
+	}
+
+	seen := make(map[validator.Phase]bool)
+	var phases []validator.Phase
+	for _, s := range phaseStrs {
+		p, ok := validPhases[s]
+		if !ok {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid phase %q: must be one of: deployment, performance, conformance, all", s))
+		}
+		if !seen[p] {
+			phases = append(phases, p)
+			seen[p] = true
 		}
 	}
 
 	return phases, nil
 }
 
+// validatePhasesAgainstRecipe warns when a requested phase has no checks
+// defined in the recipe. The phase will still run but produce 0 tests
+// in the CTRF report.
+func validatePhasesAgainstRecipe(phases []validator.Phase, rec *recipe.RecipeResult) error {
+	if rec.Validation == nil {
+		if len(phases) > 0 {
+			slog.Warn("recipe has no validation section; requested phases will have no checks",
+				"phases", phases)
+		}
+		return nil
+	}
+
+	if len(phases) == 0 {
+		return nil
+	}
+
+	defined := make(map[validator.Phase]bool)
+	if rec.Validation.Deployment != nil && len(rec.Validation.Deployment.Checks) > 0 {
+		defined[validator.PhaseDeployment] = true
+	}
+	if rec.Validation.Performance != nil && len(rec.Validation.Performance.Checks) > 0 {
+		defined[validator.PhasePerformance] = true
+	}
+	if rec.Validation.Conformance != nil && len(rec.Validation.Conformance.Checks) > 0 {
+		defined[validator.PhaseConformance] = true
+	}
+
+	for _, p := range phases {
+		if !defined[p] {
+			slog.Warn("phase requested but no checks defined in recipe; phase will be empty",
+				"phase", p)
+		}
+	}
+
+	return nil
+}
+
 // deployAgentForValidation deploys an agent to capture a snapshot and returns the Snapshot.
+// Creates the namespace if it does not exist.
 func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*snapshotter.Snapshot, string, error) {
+	// Ensure namespace exists before deploying the agent Job.
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
+	}
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.namespace}}
+	if _, nsErr := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); nsErr != nil {
+		if !apierrors.IsAlreadyExists(nsErr) {
+			return nil, "", errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", nsErr)
+		}
+	}
+
 	agentConfig := &snapshotter.AgentConfig{
 		Kubeconfig:         cfg.kubeconfig,
 		Namespace:          cfg.namespace,
@@ -135,10 +181,8 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 		Timeout:            cfg.timeout,
 		Cleanup:            cfg.cleanup,
 		Debug:              cfg.debug,
-		Privileged:         cfg.privileged,
+		Privileged:         true,
 		RequireGPU:         cfg.requireGPU,
-		HelmNamespaces:     cfg.helmNamespaces,
-		HelmAllNamespaces:  cfg.helmAllNamespaces,
 	}
 
 	snap, err := snapshotter.DeployAndGetSnapshot(ctx, agentConfig)
@@ -150,67 +194,66 @@ func deployAgentForValidation(ctx context.Context, cfg *validateAgentConfig) (*s
 	return snap, source, nil
 }
 
-// runValidation runs validation and handles result serialization.
+// validationConfig holds all parameters for a validation run.
+type validationConfig struct {
+	// Input
+	phases []validator.Phase
+
+	// Output
+	output    string
+	outFormat serializer.Format
+
+	// Validator deployment
+	validationNamespace string
+	cleanup             bool
+	imagePullSecrets    []string
+	noCluster           bool
+
+	// Scheduling
+	tolerations []corev1.Toleration
+
+	// Behavior
+	failOnError bool
+
+	// Evidence
+	evidenceDir string
+}
+
+// runValidation runs validation using the container-per-validator engine.
 func runValidation(
 	ctx context.Context,
 	rec *recipe.RecipeResult,
 	snap *snapshotter.Snapshot,
-	phases []validator.ValidationPhaseName,
-	recipeSource, snapshotSource, output string,
-	outFormat serializer.Format,
-	failOnError bool,
-	validationNamespace string,
-	resumeRunID string,
-	validatorImage string,
-	cleanup bool,
-	imagePullSecrets []string,
-	noCluster bool,
-	evidenceDir string,
-	evidenceResultPath string,
-	tolerations []corev1.Toleration,
-	nodeSelector map[string]string,
+	cfg validationConfig,
 ) error {
 
-	slog.Info("running validation",
-		"recipe", recipeSource,
-		"snapshot", snapshotSource,
-		"phases", phases,
-		"constraints", len(rec.Constraints),
-		"validation_namespace", validationNamespace,
-		"validator_image", validatorImage,
-		"resume", resumeRunID,
-		"cleanup", cleanup)
+	slog.Info("running validation", "phases", cfg.phases)
 
-	// Create validator with optional RunID for resume
-	opts := []validator.Option{
+	v := validator.New(
 		validator.WithVersion(version),
-		validator.WithNamespace(validationNamespace),
-		validator.WithImage(validatorImage),
-		validator.WithCleanup(cleanup),
-		validator.WithImagePullSecrets(imagePullSecrets),
-		validator.WithNoCluster(noCluster),
-		validator.WithTolerations(tolerations),
-		validator.WithNodeSelector(nodeSelector),
-	}
-	if resumeRunID != "" {
-		opts = append(opts, validator.WithRunID(resumeRunID))
-	}
-	v := validator.New(opts...)
+		validator.WithNamespace(cfg.validationNamespace),
+		validator.WithCleanup(cfg.cleanup),
+		validator.WithImagePullSecrets(cfg.imagePullSecrets),
+		validator.WithNoCluster(cfg.noCluster),
+		validator.WithTolerations(cfg.tolerations),
+	)
 
-	// Validate with phase support
-	result, err := v.ValidatePhases(ctx, phases, rec, snap)
+	results, err := v.ValidatePhases(ctx, cfg.phases, rec, snap)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}
 
-	// Set source information
-	result.RecipeSource = recipeSource
-	result.SnapshotSource = snapshotSource
+	// Extract CTRF reports from phase results and merge into a single report.
+	reports := make([]*ctrf.Report, 0, len(results))
+	for _, pr := range results {
+		reports = append(reports, pr.Report)
+	}
+	combined := ctrf.MergeReports("aicr", version, reports)
 
-	// Serialize output
-	ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
+	// Serialize combined report
+	ser, serErr := serializer.NewFileWriterOrStdout(cfg.outFormat, cfg.output)
+	if serErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", serErr)
 	}
 	defer func() {
 		if closer, ok := ser.(interface{ Close() error }); ok {
@@ -220,107 +263,48 @@ func runValidation(
 		}
 	}()
 
-	if err := ser.Serialize(ctx, result); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation result", err)
+	if writeErr := ser.Serialize(ctx, combined); writeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize CTRF report", writeErr)
 	}
 
-	slog.Info("validation completed",
-		"status", result.Summary.Status,
-		"passed", result.Summary.Passed,
-		"failed", result.Summary.Failed,
-		"skipped", result.Summary.Skipped,
-		"duration", result.Summary.Duration)
-
-	// Generate evidence if requested. Strict: failure is an error.
-	if evidenceDir != "" {
-		// Use a saved result file for evidence when --result is provided,
-		// otherwise use the result from the validation run we just completed.
-		evidenceSource := result
-		if evidenceResultPath != "" {
-			slog.Info("loading saved result for evidence rendering", "path", evidenceResultPath)
-			slog.Warn("saved results do not include diagnostic artifacts; evidence output will contain check status only")
-			saved, loadErr := serializer.FromFile[validator.ValidationResult](evidenceResultPath)
-			if loadErr != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to load evidence result", loadErr)
-			}
-			evidenceSource = saved
+	// Log per-phase summary
+	anyFailed := false
+	for _, pr := range results {
+		slog.Info("phase result",
+			"phase", pr.Phase,
+			"status", pr.Status,
+			"duration", pr.Duration)
+		if pr.Status == "failed" {
+			anyFailed = true
 		}
-
-		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
-		defer evidenceCancel()
-
-		renderer := evidence.New(evidence.WithOutputDir(evidenceDir))
-		if err := renderer.Render(evidenceCtx, evidenceSource); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", err)
-		}
-		slog.Info("conformance evidence written", "dir", evidenceDir)
 	}
 
 	// If cleanup is disabled, provide helpful debugging info
-	if !cleanup {
+	if !cfg.cleanup {
 		slog.Info("cleanup disabled - Jobs and RBAC kept for debugging",
-			"namespace", validationNamespace,
+			"namespace", cfg.validationNamespace,
 			"runID", v.RunID)
-		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + validationNamespace)
-		slog.Info("to list Jobs: kubectl get jobs -n " + validationNamespace)
-		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + validationNamespace)
+		slog.Info("to inspect Job logs: kubectl logs -l aicr.nvidia.com/job -n " + cfg.validationNamespace)
+		slog.Info("to list Jobs: kubectl get jobs -n " + cfg.validationNamespace)
+		slog.Info("to cleanup manually: kubectl delete jobs -l app.kubernetes.io/name=aicr -n " + cfg.validationNamespace)
 	}
 
-	// Check if we should fail on validation errors
-	if failOnError && result.Summary.Status == validator.ValidationStatusFail {
-		return errors.New(errors.ErrCodeInternal, fmt.Sprintf("validation failed: %d constraint(s) did not pass", result.Summary.Failed))
-	}
+	// Generate conformance evidence if requested.
+	if cfg.evidenceDir != "" {
+		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, 30*time.Second) //nolint:mnd // Evidence rendering is fast, 30s is generous
+		defer evidenceCancel()
 
-	return nil
-}
-
-// helmNamespacesFromRecipe extracts unique namespaces from Helm ComponentRefs.
-func helmNamespacesFromRecipe(rec *recipe.RecipeResult) []string {
-	seen := make(map[string]bool)
-	for _, ref := range rec.ComponentRefs {
-		if ref.Type == recipe.ComponentTypeHelm && ref.Namespace != "" {
-			seen[ref.Namespace] = true
+		renderer := evidence.New(evidence.WithOutputDir(cfg.evidenceDir))
+		if renderErr := renderer.Render(evidenceCtx, combined); renderErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", renderErr)
 		}
-	}
-	if len(seen) == 0 {
-		return nil
-	}
-	namespaces := make([]string, 0, len(seen))
-	for ns := range seen {
-		namespaces = append(namespaces, ns)
-	}
-	sort.Strings(namespaces)
-	return namespaces
-}
-
-// runCNCFSubmission handles --cncf-submission: validates feature names and
-// runs behavioral evidence collection.
-func runCNCFSubmission(ctx context.Context, cmd *cli.Command, evidenceDir string, features []string) error {
-	for _, f := range features {
-		if !evidence.IsValidFeature(f) {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("unknown feature %q; valid features: %v", f, evidence.ValidFeatures))
-		}
+		slog.Info("conformance evidence written", "dir", cfg.evidenceDir)
 	}
 
-	slog.Info("collecting behavioral conformance evidence",
-		"dir", evidenceDir, "features", features)
-
-	// Use a longer timeout for behavioral evidence (default 5m is too short).
-	evidenceTimeout := cmd.Duration("timeout")
-	if evidenceTimeout <= 5*time.Minute {
-		evidenceTimeout = 20 * time.Minute
+	if cfg.failOnError && anyFailed {
+		return errors.New(errors.ErrCodeInternal, "validation failed: one or more phases did not pass")
 	}
-	evidenceCtx, evidenceCancel := context.WithTimeout(ctx, evidenceTimeout)
-	defer evidenceCancel()
 
-	collector := evidence.NewCollector(evidenceDir,
-		evidence.WithFeatures(features),
-	)
-	if runErr := collector.Run(evidenceCtx); runErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "evidence collection failed", runErr)
-	}
-	slog.Info("conformance evidence written", "dir", evidenceDir)
 	return nil
 }
 
@@ -341,51 +325,39 @@ func validateCmdFlags() []cli.Flag {
 	If not provided, an agent will be deployed to capture a fresh snapshot.`,
 			Category: "Input",
 		},
-		&cli.StringFlag{
-			Name:     "resume",
-			Usage:    "Resume a previous validation run by RunID (format: YYYYMMDD-HHMMSS-XXXX). Skips phases that previously passed.",
-			Category: "Input",
-		},
 		&cli.StringSliceFlag{
 			Name: "phase",
 			Usage: `Validation phase(s) to run (can be repeated).
-	Options: "readiness", "deployment", "performance", "conformance", "all".
-	Default: "readiness" (quick readiness check).
-	Example: --phase readiness --phase deployment`,
+	Options: "deployment", "performance", "conformance", "all".
+	Default: all phases.
+	Example: --phase deployment --phase conformance`,
 			Category: "Validation Control",
 		},
 		&cli.BoolFlag{
 			Name:     "fail-on-error",
 			Value:    true,
-			Usage:    "Exit with non-zero status if any constraint fails validation",
+			Usage:    "Exit with non-zero status if any check fails validation",
 			Category: "Validation Control",
 		},
 		&cli.BoolFlag{
 			Name:     "no-cluster",
-			Usage:    "Run validation without cluster access (dry-run mode). Skips checks that require cluster operations.",
+			Usage:    "Run validation without cluster access (dry-run mode). Reports all checks as skipped.",
 			Category: "Validation Control",
 		},
 		// Agent deployment flags (used when --snapshot is not provided)
 		&cli.StringFlag{
 			Name:     "namespace",
 			Aliases:  []string{"n"},
-			Usage:    "Kubernetes namespace for snapshot agent deployment (enables agent mode when set without --snapshot)",
+			Usage:    "Kubernetes namespace for snapshot agent and validation Jobs",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
-			Value:    "default",
-			Category: "Agent Deployment",
-		},
-		&cli.StringFlag{
-			Name:     "validation-namespace",
-			Usage:    "Kubernetes namespace where validation jobs will run. If not set via this flag or AICR_VALIDATION_NAMESPACE, defaults to the --namespace value.",
-			Sources:  cli.EnvVars("AICR_VALIDATION_NAMESPACE"),
 			Value:    "aicr-validation",
-			Category: "Agent Deployment",
+			Category: "Deployment",
 		},
 		&cli.StringFlag{
 			Name:     "image",
-			Usage:    "Container image for validation Jobs (must include Go toolchain)",
+			Usage:    "Container image for snapshot agent",
 			Sources:  cli.EnvVars("AICR_VALIDATOR_IMAGE"),
-			Value:    "ghcr.io/nvidia/aicr-validator:latest",
+			Value:    defaultAgentImage(),
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{
@@ -407,12 +379,12 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
-			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated)",
+			Usage:    "Node selector for snapshot agent Job scheduling (format: key=value, can be repeated).",
 			Category: "Agent Deployment",
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
-			Usage:    "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
+			Usage:    "Toleration for snapshot agent and validation Job scheduling (format: key=value:effect). By default, all taints are tolerated.",
 			Category: "Agent Deployment",
 		},
 		&cli.DurationFlag{
@@ -422,65 +394,35 @@ func validateCmdFlags() []cli.Flag {
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
-			Name:     "cleanup",
-			Value:    true,
-			Usage:    "Remove Job and RBAC resources on completion",
-			Category: "Agent Deployment",
-		},
-		&cli.BoolFlag{
-			Name:     "privileged",
-			Value:    true,
-			Usage:    "Run agent in privileged mode (required for GPU/SystemD collectors)",
+			Name:     "no-cleanup",
+			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
 			Category: "Agent Deployment",
 		},
 		&cli.BoolFlag{
 			Name:     "require-gpu",
 			Sources:  cli.EnvVars("AICR_REQUIRE_GPU"),
-			Usage:    "Request nvidia.com/gpu resource for the agent pod. Required in CDI environments where GPU devices are only injected when explicitly requested.",
+			Usage:    "Request nvidia.com/gpu resource for the agent pod.",
 			Category: "Agent Deployment",
 		},
 		&cli.StringFlag{
 			Name:     "evidence-dir",
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
-			Category: "Evidence & Conformance",
+			Category: "Evidence",
 		},
 		&cli.BoolFlag{
 			Name:     "cncf-submission",
 			Usage:    "Collect detailed behavioral evidence for CNCF AI Conformance submission. Deploys GPU workloads, captures nvidia-smi output, Prometheus queries, and HPA scaling tests. Requires --evidence-dir. Takes ~15 minutes.",
-			Category: "Evidence & Conformance",
+			Category: "Evidence",
 		},
 		&cli.StringSliceFlag{
 			Name:    "feature",
 			Aliases: []string{"f"},
 			Usage: "Evidence feature to collect (repeatable, default: all). Only used with --cncf-submission.\n" +
-				"Available features: dra-support, gang-scheduling, secure-access, accelerator-metrics,\n" +
-				"inference-gateway, robust-operator, pod-autoscaling, cluster-autoscaling.\n" +
-				"Short aliases also accepted: dra, gang, secure, metrics, gateway, operator, hpa.",
-			Category: "Evidence & Conformance",
-		},
-		&cli.StringFlag{
-			Name:     "result",
-			Usage:    "Use a saved validation result file as the source for evidence rendering (live validation still runs). Note: saved results do not include diagnostic artifacts captured during live runs. Requires --phase conformance and --evidence-dir.",
-			Category: "Evidence & Conformance",
-		},
-		&cli.BoolFlag{
-			Name:     "skip-helm-check",
-			Usage:    "Skip Helm values deployment check and don't create secrets RBAC",
-			Category: "Helm Collection",
-		},
-		&cli.StringSliceFlag{
-			Name:     "helm-namespaces",
-			Usage:    "Override namespaces for Helm release collection (creates scoped RBAC). Mutually exclusive with --helm-all-namespaces.",
-			Category: "Helm Collection",
-		},
-		&cli.BoolFlag{
-			Name:     "helm-all-namespaces",
-			Usage:    "Grant cluster-wide secrets access for Helm release collection. Mutually exclusive with --helm-namespaces.",
-			Category: "Helm Collection",
+				"Options: " + strings.Join(evidence.ValidFeatures, ", "),
+			Category: "Evidence",
 		},
 		dataFlag,
 		outputFlag,
-		formatFlag,
 		kubeconfigFlag,
 	}
 }
@@ -490,175 +432,96 @@ func validateCmd() *cli.Command {
 		Name:                  "validate",
 		Category:              functionalCategoryName,
 		EnableShellCompletion: true,
-		Usage:                 "Validate cluster using specific recipe.",
-		Description: `Validate a system snapshot against the constraints defined in a recipe.
+		Usage:                 "Validate cluster against recipe constraints using containerized validators.",
+		Description: `Run validation checks against a cluster snapshot using the constraints and
+checks defined in a recipe. Each validator runs as an isolated Kubernetes Job.
 
-This command compares actual system measurements from a snapshot against the
-expected constraints defined in a recipe file. It reports which constraints
-pass, fail, or cannot be evaluated.
+Results are output in CTRF (Common Test Report Format) JSON — an industry-standard
+schema for test reporting (https://ctrf.io/). Output goes to stdout or the file
+specified by --output.
 
-You can either provide an existing snapshot file or deploy an agent to capture
-a fresh snapshot from the cluster.
+You can either provide an existing snapshot file or let the command deploy an
+agent to capture a fresh snapshot from the cluster.
 
 # Examples
 
-Validate using an existing snapshot file:
+Validate using an existing snapshot:
   aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
-Load snapshot from ConfigMap:
-  aicr validate --recipe recipe.yaml --snapshot cm://default/aicr-snapshot
-
 Deploy agent to capture and validate in one step:
-  aicr validate --recipe recipe.yaml --namespace default
+  aicr validate --recipe recipe.yaml
 
-Target specific GPU nodes with node selector:
-  aicr validate --recipe recipe.yaml \
-    --namespace default \
-    --node-selector nodeGroup=customer-gpu
-
-Run multiple validation phases:
+Run specific phases:
   aicr validate -r recipe.yaml -s snapshot.yaml \
-    --phase readiness --phase deployment --phase conformance
+    --phase deployment --phase conformance
 
-Run all validation phases:
-  aicr validate -r recipe.yaml -s snapshot.yaml --phase all
+Save CTRF report to file:
+  aicr validate -r recipe.yaml -s snapshot.yaml --output report.json
 
-Run validation jobs in custom namespace:
-  aicr validate -r recipe.yaml -s snapshot.yaml \
-    --validation-namespace my-validation-ns
-
-Run validation without failing on constraint errors (informational mode):
+Run validation without failing on check errors (informational mode):
   aicr validate -r recipe.yaml -s snapshot.yaml --fail-on-error=false
-
-Resume a previous validation run from where it left off:
-  aicr validate -r recipe.yaml -s snapshot.yaml --resume 20260206-140523-a3f9
-
-Generate conformance evidence alongside validation:
-  aicr validate -r recipe.yaml -s snapshot.yaml \
-    --phase conformance --evidence-dir ./evidence
-
-Use a saved result file for evidence instead of the live run:
-  aicr validate -r recipe.yaml -s snapshot.yaml \
-    --phase conformance --evidence-dir ./evidence \
-    --result validation-result.yaml
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// Validate single-value flags are not duplicated
-			// Note: --phase allows multiple values so it's not included here
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "format", "namespace", "validation-namespace", "image", "job-name", "service-account-name", "timeout", "resume", "result", "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
 				return err
 			}
 
-			// Initialize external data provider if --data flag is set
 			if err := initDataProvider(cmd); err != nil {
 				return err
 			}
 
 			evidenceDir := cmd.String("evidence-dir")
-			resultPath := cmd.String("result")
-
-			// Parse phases (default to readiness if none specified)
-			phases, err := parseValidationPhases(cmd.StringSlice("phase"))
-			if err != nil {
-				return err
-			}
-
-			// Validate evidence flag constraints.
-			hasConformance := false
-			for _, p := range phases {
-				if p == validator.PhaseConformance || p == validator.PhaseAll {
-					hasConformance = true
-					break
-				}
-			}
-			if evidenceDir != "" && !hasConformance {
-				return errors.New(errors.ErrCodeInvalidRequest, "--evidence-dir requires --phase conformance")
-			}
-			if resultPath != "" && evidenceDir == "" {
-				return errors.New(errors.ErrCodeInvalidRequest, "--result requires --evidence-dir")
-			}
-
 			cncfSubmission := cmd.Bool("cncf-submission")
+			features := cmd.StringSlice("feature")
+
+			// Validate flag combinations.
 			if cncfSubmission && evidenceDir == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
 			}
-			features := cmd.StringSlice("feature")
 			if len(features) > 0 && !cncfSubmission {
 				return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
 			}
+
+			// Short-circuit: --cncf-submission bypasses normal validation and runs
+			// the behavioral evidence collector directly.
 			if cncfSubmission {
-				return runCNCFSubmission(ctx, cmd, evidenceDir, features)
+				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"))
+			}
+
+			phases, err := parseValidationPhases(cmd.StringSlice("phase"))
+			if err != nil {
+				return err
 			}
 
 			recipeFilePath := cmd.String("recipe")
 			snapshotFilePath := cmd.String("snapshot")
 			kubeconfig := cmd.String("kubeconfig")
 
-			// If validation-namespace is not explicitly set, default to namespace value,
-			// but only when still at its default (to avoid overriding env var values).
-			validationNamespace := cmd.String("validation-namespace")
-			if !cmd.IsSet("validation-namespace") && validationNamespace == "aicr-validation" {
-				validationNamespace = cmd.String("namespace")
-			}
+			validationNamespace := cmd.String("namespace")
 
-			// Recipe is always required
 			if recipeFilePath == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required")
-			}
-
-			// Parse output format
-			outFormat, err := parseOutputFormat(cmd)
-			if err != nil {
-				return err
 			}
 
 			failOnError := cmd.Bool("fail-on-error")
 
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
-			// Load recipe
 			rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](recipeFilePath, kubeconfig)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load recipe from %q", recipeFilePath), err)
 			}
 
-			// Resolve helm namespace config for agent RBAC
-			skipHelmCheck := cmd.Bool("skip-helm-check")
-			helmNamespaces := cmd.StringSlice("helm-namespaces")
-			helmAllNamespaces := cmd.Bool("helm-all-namespaces")
-
-			if len(helmNamespaces) > 0 && helmAllNamespaces {
-				return errors.New(errors.ErrCodeInvalidRequest, "--helm-namespaces and --helm-all-namespaces are mutually exclusive")
-			}
-
-			if !skipHelmCheck && !cmd.IsSet("helm-namespaces") && !helmAllNamespaces {
-				// Auto-derive from recipe ComponentRefs
-				helmNamespaces = helmNamespacesFromRecipe(rec)
-				if len(helmNamespaces) > 0 {
-					slog.Info("auto-derived helm namespaces from recipe", "namespaces", helmNamespaces)
-				}
-			}
-
-			if skipHelmCheck {
-				helmNamespaces = nil
-				helmAllNamespaces = false
-			}
-
-			// Get snapshot - either from file or by deploying an agent
 			var snap *snapshotter.Snapshot
-			var snapshotSource string
 
 			if snapshotFilePath != "" {
-				// Load snapshot from file/URL/ConfigMap
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
 				snap, err = serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapshotFilePath, kubeconfig)
 				if err != nil {
 					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapshotFilePath), err)
 				}
-				snapshotSource = snapshotFilePath
 			} else {
-				// Deploy agent to capture snapshot
 				slog.Info("deploying agent to capture snapshot")
 
 				agentCfg, cfgErr := parseValidateAgentConfig(cmd)
@@ -666,29 +529,68 @@ Use a saved result file for evidence instead of the live run:
 					return cfgErr
 				}
 
-				// Apply resolved helm namespace config
-				agentCfg.helmNamespaces = helmNamespaces
-				agentCfg.helmAllNamespaces = helmAllNamespaces
-
 				var deployErr error
-				snap, snapshotSource, deployErr = deployAgentForValidation(ctx, agentCfg)
+				snap, _, deployErr = deployAgentForValidation(ctx, agentCfg)
 				if deployErr != nil {
 					return deployErr
 				}
 			}
 
-			// Parse tolerations and node selectors for validation phase Jobs.
-			// These are always needed regardless of snapshot source.
 			tolerations, tolErr := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 			if tolErr != nil {
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
 			}
-			nodeSelector, nsErr := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
-			if nsErr != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", nsErr)
+
+			// Validate that requested phases are defined in the recipe.
+			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
+				return err
 			}
 
-			return runValidation(ctx, rec, snap, phases, recipeFilePath, snapshotSource, cmd.String("output"), outFormat, failOnError, validationNamespace, cmd.String("resume"), cmd.String("image"), cmd.Bool("cleanup"), cmd.StringSlice("image-pull-secret"), cmd.Bool("no-cluster"), evidenceDir, resultPath, tolerations, nodeSelector)
+			noCleanup := cmd.Bool("no-cleanup")
+			if noCleanup {
+				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
+					"namespace", validationNamespace,
+					"binding", "aicr-validator")
+			}
+
+			return runValidation(ctx, rec, snap, validationConfig{
+				phases:              phases,
+				output:              cmd.String("output"),
+				outFormat:           serializer.FormatJSON,
+				failOnError:         failOnError,
+				validationNamespace: validationNamespace,
+				cleanup:             !noCleanup,
+				imagePullSecrets:    cmd.StringSlice("image-pull-secret"),
+				noCluster:           cmd.Bool("no-cluster"),
+				tolerations:         tolerations,
+				evidenceDir:         evidenceDir,
+			})
 		},
 	}
+}
+
+// runCNCFSubmission handles --cncf-submission: validates feature names and
+// runs the behavioral evidence collector against the live cluster.
+func runCNCFSubmission(ctx context.Context, evidenceDir string, features []string, kubeconfig string) error {
+	// Validate feature names.
+	for _, f := range features {
+		if !evidence.IsValidFeature(f) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unknown feature %q; valid features: %s",
+					f, strings.Join(evidence.ValidFeatures, ", ")))
+		}
+	}
+
+	cncfTimeout := 20 * time.Minute //nolint:mnd // CNCF submission deploys GPU workloads and runs HPA tests
+	ctx, cancel := context.WithTimeout(ctx, cncfTimeout)
+	defer cancel()
+
+	slog.Info("starting CNCF submission evidence collection",
+		"evidenceDir", evidenceDir, "features", features)
+
+	collector := evidence.NewCollector(evidenceDir,
+		evidence.WithFeatures(features),
+		evidence.WithKubeconfig(kubeconfig),
+	)
+	return collector.Run(ctx)
 }

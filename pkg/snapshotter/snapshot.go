@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,11 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"strings"
+	"strconv"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
@@ -65,25 +67,27 @@ func (n *NodeSnapshotter) Measure(ctx context.Context) error {
 	return n.measure(ctx)
 }
 
-// parseHelmNamespacesEnv reads the AICR_HELM_NAMESPACES env var set by the agent Job.
-// Returns nil for empty (skip), ["*"] for all, or split namespaces for scoped.
-func parseHelmNamespacesEnv() []string {
-	val := os.Getenv("AICR_HELM_NAMESPACES")
+// parseMaxNodesPerEntryEnv reads the AICR_MAX_NODES_PER_ENTRY env var set by the agent Job.
+// Returns 0 (no limit) when unset or invalid.
+func parseMaxNodesPerEntryEnv() int {
+	val := os.Getenv("AICR_MAX_NODES_PER_ENTRY")
 	if val == "" {
-		return nil
+		return 0
 	}
-	if val == "*" {
-		return []string{"*"}
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		slog.Warn("invalid AICR_MAX_NODES_PER_ENTRY value, using 0", slog.String("value", val))
+		return 0
 	}
-	return strings.Split(val, ",")
+	return n
 }
 
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	if n.Factory == nil {
 		var opts []collector.Option
-		if helmNS := parseHelmNamespacesEnv(); len(helmNS) > 0 {
-			opts = append(opts, collector.WithHelmNamespaces(helmNS))
+		if maxNodes := parseMaxNodesPerEntryEnv(); maxNodes > 0 {
+			opts = append(opts, collector.WithMaxNodesPerEntry(maxNodes))
 		}
 		n.Factory = collector.NewDefaultFactory(opts...)
 	}
@@ -96,37 +100,35 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 		snapshotCollectionDuration.Observe(time.Since(start).Seconds())
 	}()
 
-	var (
-		mu sync.Mutex
-		wg sync.WaitGroup
-	)
+	var mu sync.Mutex
 
 	// Initialize snapshot structure
 	snap := NewSnapshot()
-	snap.Measurements = make([]*measurement.Measurement, 0, 5)
+	snap.Measurements = make([]*measurement.Measurement, 0, 6)
 
 	// collectSafe runs a named collector, appending its measurement on success
 	// and logging a warning on failure. Snapshot collection never fails due to
-	// an individual collector error.
-	collectSafe := func(name string, c collector.Collector) {
-		defer wg.Done()
+	// an individual collector error — returns nil to maintain non-fatal semantics.
+	collectSafe := func(name string, c collector.Collector) func() error {
+		return func() error {
+			collectorStart := time.Now()
+			defer func() {
+				snapshotCollectorDuration.WithLabelValues(name).Observe(time.Since(collectorStart).Seconds())
+			}()
 
-		collectorStart := time.Now()
-		defer func() {
-			snapshotCollectorDuration.WithLabelValues(name).Observe(time.Since(collectorStart).Seconds())
-		}()
+			m, err := c.Collect(ctx)
+			if err != nil {
+				slog.Warn("failed to collect "+name+" - skipping",
+					slog.String("collector", name),
+					slog.String("error", err.Error()))
+				return nil
+			}
 
-		m, err := c.Collect(ctx)
-		if err != nil {
-			slog.Warn("failed to collect "+name+" - skipping",
-				slog.String("collector", name),
-				slog.String("error", err.Error()))
-			return
+			mu.Lock()
+			defer mu.Unlock()
+			snap.Measurements = append(snap.Measurements, m)
+			return nil
 		}
-
-		mu.Lock()
-		defer mu.Unlock()
-		snap.Measurements = append(snap.Measurements, m)
 	}
 
 	// Collect metadata (synchronous — needed before parallel collectors)
@@ -138,13 +140,14 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
 
 	// Launch all collectors in parallel — each degrades gracefully on error
-	wg.Add(4)
-	go collectSafe("k8s", n.Factory.CreateKubernetesCollector())
-	go collectSafe("systemd", n.Factory.CreateSystemDCollector())
-	go collectSafe("os", n.Factory.CreateOSCollector())
-	go collectSafe("gpu", n.Factory.CreateGPUCollector())
+	g, _ := errgroup.WithContext(ctx)
+	g.Go(collectSafe("k8s", n.Factory.CreateKubernetesCollector()))
+	g.Go(collectSafe("systemd", n.Factory.CreateSystemDCollector()))
+	g.Go(collectSafe("os", n.Factory.CreateOSCollector()))
+	g.Go(collectSafe("gpu", n.Factory.CreateGPUCollector()))
+	g.Go(collectSafe("topology", n.Factory.CreateNodeTopologyCollector()))
 
-	wg.Wait()
+	_ = g.Wait() // Individual collector errors are logged and swallowed; group always returns nil.
 
 	// Enforce GPU requirement if requested
 	if n.RequireGPU {

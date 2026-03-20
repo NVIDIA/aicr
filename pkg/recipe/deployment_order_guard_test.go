@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,10 +73,69 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"dynamo-crds", "cert-manager", "kube-prometheus-stack", "kai-scheduler"},
+				"dynamo-platform": {"dynamo-crds", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
+				{"gpu-operator", "dynamo-platform"},
 				{"kai-scheduler", "dynamo-platform"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
+			name: "gb200-eks-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.Intent = CriteriaIntentInference
+				c.OS = CriteriaOSUbuntu
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"dynamo-platform": {"dynamo-crds", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
+			},
+			requiredOrdering: [][2]string{
+				{"gpu-operator", "dynamo-platform"},
+				{"kai-scheduler", "dynamo-platform"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
+			name: "h100-eks-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.Intent = CriteriaIntentTraining
+				c.OS = CriteriaOSUbuntu
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+			},
+			requiredOrdering: [][2]string{
+				{"gpu-operator", "kubeflow-trainer"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
+			name: "gb200-eks-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.Intent = CriteriaIntentTraining
+				c.OS = CriteriaOSUbuntu
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+			},
+			requiredOrdering: [][2]string{
+				{"gpu-operator", "kubeflow-trainer"},
 				{"gpu-operator", "nvsentinel"},
 			},
 		},

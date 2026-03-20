@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,6 +113,29 @@ func New(opts ...Option) (*DefaultBundler, error) {
 		opt(db)
 	}
 
+	// Fail fast: if attestation is requested, verify that the binary attestation
+	// file exists before any expensive work (OIDC auth, recipe resolution, bundle
+	// generation). Binaries installed via "go install" or manual download won't
+	// have the attestation file that is included in release archives.
+	if db.Config.Attest() {
+		binaryPath, err := os.Executable()
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"could not resolve executable path; remove --attest to skip", err)
+		}
+		if _, err := attestation.FindBinaryAttestation(binaryPath); err != nil {
+			return nil, errors.New(errors.ErrCodeNotFound,
+				fmt.Sprintf("binary attestation not found at %s\n\n"+
+					"The --attest flag requires a binary installed using the install script, which\n"+
+					"includes a cryptographic attestation from NVIDIA. Binaries installed via\n"+
+					"\"go install\" or manual download do not include this file.\n\n"+
+					"To fix:\n"+
+					"  - Reinstall using the install script\n"+
+					"  - Or remove --attest to generate bundles without attestation",
+					binaryPath+attestation.AttestationFileSuffix))
+		}
+	}
+
 	return db, nil
 }
 
@@ -163,6 +186,43 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	if len(recipeResult.ComponentRefs) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"recipe must contain at least one component reference")
+	}
+
+	// Filter out disabled components.
+	// Check order: --set overrides take precedence over recipe overrides.
+	// This allows users to enable/disable components at bundle time:
+	//   --set awsebscsidriver:enabled=false  (disable)
+	//   --set awsebscsidriver:enabled=true   (re-enable)
+	enabledRefs := make([]recipe.ComponentRef, 0, len(recipeResult.ComponentRefs))
+	enabledSet := make(map[string]struct{})
+	for _, ref := range recipeResult.ComponentRefs {
+		if setEnabled, ok := b.getSetEnabledOverride(ref.Name); ok {
+			if !setEnabled {
+				slog.Info("skipping component disabled via --set", "component", ref.Name)
+				continue
+			}
+			// --set enabled=true overrides recipe-level disabled
+		} else if !ref.IsEnabled() {
+			slog.Info("skipping disabled component", "component", ref.Name)
+			continue
+		}
+		enabledRefs = append(enabledRefs, ref)
+		enabledSet[ref.Name] = struct{}{}
+	}
+	recipeResult.ComponentRefs = enabledRefs
+
+	// Filter DeploymentOrder to match enabled components
+	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
+	for _, name := range recipeResult.DeploymentOrder {
+		if _, ok := enabledSet[name]; ok {
+			filteredOrder = append(filteredOrder, name)
+		}
+	}
+	recipeResult.DeploymentOrder = filteredOrder
+
+	if len(enabledRefs) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"recipe has no enabled components after filtering")
 	}
 
 	// Set default output directory
@@ -391,8 +451,19 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			values = make(map[string]any)
 		}
 
-		// Apply user value overrides from --set flags
+		// Apply user value overrides from --set flags.
+		// Strip "enabled" key — it controls component inclusion, not Helm chart values.
 		if overrides := b.getValueOverridesForComponent(ref.Name); len(overrides) > 0 {
+			if _, has := overrides["enabled"]; has {
+				filtered := make(map[string]string, len(overrides)-1)
+				for k, v := range overrides {
+					if k == "enabled" {
+						continue
+					}
+					filtered[k] = v
+				}
+				overrides = filtered
+			}
 			if applyErr := component.ApplyMapOverrides(values, overrides); applyErr != nil {
 				slog.Warn("failed to apply some value overrides",
 					"component", ref.Name,
@@ -454,6 +525,27 @@ func (b *DefaultBundler) getValueOverridesForComponent(componentName string) map
 	}
 
 	return nil
+}
+
+// getSetEnabledOverride checks if --set overrides contain an "enabled" key
+// for the given component. Returns (value, true) if found, (false, false) otherwise.
+// This allows --set awsebscsidriver:enabled=false to disable a component at bundle time.
+func (b *DefaultBundler) getSetEnabledOverride(componentName string) (bool, bool) {
+	overrides := b.getValueOverridesForComponent(componentName)
+	if overrides == nil {
+		return false, false
+	}
+	val, ok := overrides["enabled"]
+	if !ok {
+		return false, false
+	}
+	parsed, parseErr := strconv.ParseBool(val)
+	if parseErr != nil {
+		slog.Warn("invalid --set enabled value, ignoring override",
+			"component", componentName, "value", val, "error", parseErr)
+		return false, false
+	}
+	return parsed, true
 }
 
 // applyNodeSchedulingOverrides applies node selectors and tolerations to component values.

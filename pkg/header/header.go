@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,9 @@ type Kind string
 
 // Valid Kind constants for all AICR resource types.
 const (
-	KindSnapshot         Kind = "Snapshot"
-	KindRecipe           Kind = "Recipe"
-	KindRecipeResult     Kind = "RecipeResult"
-	KindValidationResult Kind = "ValidationResult"
+	KindSnapshot     Kind = "Snapshot"
+	KindRecipe       Kind = "Recipe"
+	KindRecipeResult Kind = "RecipeResult"
 )
 
 // String returns the string representation of the Kind.
@@ -35,8 +34,8 @@ func (k Kind) String() string {
 	return string(k)
 }
 
-// New creates a new Header instance with an initialized Metadata map.
-func New() *Header {
+// newHeader creates a new Header instance with an initialized Metadata map.
+func newHeader() *Header {
 	return &Header{
 		Metadata: make(map[string]string),
 	}

@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ spec:
     - name: prometheus-adapter
       type: Helm
       source: https://prometheus-community.github.io/helm-charts
-      version: 4.14.0
+      version: 5.3.0
       valuesFile: components/prometheus-adapter/values.yaml
       dependencyRefs:
         - kube-prometheus-stack

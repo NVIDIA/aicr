@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@
 //
 // # Collected Data
 //
-// The collector returns a measurement with 6 subtypes:
+// The collector returns a measurement with 4 subtypes:
 //
 // 1. node - Node information:
 //   - provider: Cloud provider (EKS, GKE, AKS, etc.) detected from node labels
@@ -49,20 +49,6 @@
 //   - DCGM exporter configuration
 //   - MIG manager settings (mode, strategy)
 //   - Node feature discovery configuration
-//
-// 5. helm - Helm releases installed via helm install/upgrade:
-//   - Release metadata (name, namespace, revision, status, chart, version)
-//   - User-supplied values flattened to dot-notation (e.g., driver.version)
-//   - Deduplicated to latest revision per release name+namespace
-//
-// 6. argocd - ArgoCD Application CRDs (argoproj.io/v1alpha1):
-//   - Application metadata (name, namespace, project)
-//   - Destination (target namespace, server URL)
-//   - Source configuration (repoURL, chart, path, targetRevision)
-//   - Multi-source apps indexed by position (sources.0, sources.1, etc.)
-//   - Helm parameters and values from Application spec
-//   - Sync status (Synced/OutOfSync) and health status (Healthy/Degraded/Progressing)
-//   - Gracefully skipped if ArgoCD is not installed
 //
 // # Usage
 //
@@ -143,13 +129,10 @@
 //	  name: aicr-collector
 //	rules:
 //	- apiGroups: [""]
-//	  resources: ["nodes", "pods", "secrets"]
+//	  resources: ["nodes", "pods"]
 //	  verbs: ["get", "list"]
 //	- apiGroups: ["nvidia.com"]
 //	  resources: ["clusterpolicies"]
-//	  verbs: ["get", "list"]
-//	- apiGroups: ["argoproj.io"]
-//	  resources: ["applications"]
 //	  verbs: ["get", "list"]
 //
 // # Use in Recipes

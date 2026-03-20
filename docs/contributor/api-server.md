@@ -1048,7 +1048,7 @@ export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | 
 gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --owner nvidia
 ```
 
-For detailed CI/CD architecture, see [../CONTRIBUTING.md#github-actions--cicd](../../CONTRIBUTING.md#github-actions--cicd) and [README.md](README.md#cicd-architecture).
+For detailed CI/CD architecture, see [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md#github-actions--cicd) and [Architecture Overview](index.md#cicd-architecture).
 
 ### Local Build Configuration
 

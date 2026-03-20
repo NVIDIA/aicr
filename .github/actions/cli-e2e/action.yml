@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,30 +40,16 @@ runs:
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
 
     - name: Install GoReleaser
-      uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a  # v6.4.0
+      uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29  # v7.0.0
       with:
         install-only: true
 
     - name: Install Chainsaw
-      shell: bash
-      run: |
-        set -euo pipefail
-        VERSION="${{ inputs.chainsaw_version }}"
-        VERSION="${VERSION#v}"
-        TAR="chainsaw_linux_amd64.tar.gz"
-        URL="https://github.com/kyverno/chainsaw/releases/download/v${VERSION}/${TAR}"
-        EXPECTED="${{ inputs.chainsaw_sha256 }}"
-        TMP="$(mktemp -d)"
-        curl -fsSL -o "${TMP}/${TAR}" "${URL}"
-        ACTUAL=$(sha256sum "${TMP}/${TAR}" | awk '{print $1}')
-        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
-          echo "::error::chainsaw checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
-          exit 1
-        fi
-        tar -xzf "${TMP}/${TAR}" -C "${TMP}"
-        sudo mv "${TMP}/chainsaw" /usr/local/bin/chainsaw
-        sudo chmod +x /usr/local/bin/chainsaw
-        rm -rf "${TMP}"
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_chainsaw: 'true'
+        chainsaw_version: '${{ inputs.chainsaw_version }}'
+        chainsaw_sha256: '${{ inputs.chainsaw_sha256 }}'
 
     - name: Generate SLSA predicate
       if: github.event.pull_request.head.repo.fork == false

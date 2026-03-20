@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -183,7 +183,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 }
 
 // streamZipResponse creates a zip archive from the output directory and streams it to the response.
-func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output) error {
+func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output) (retErr error) {
 	// Set response headers before writing body
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"bundles.zip\"")
@@ -193,7 +193,12 @@ func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output)
 
 	// Create zip writer directly to response
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer func() {
+		closeErr := zw.Close()
+		if retErr == nil {
+			retErr = closeErr
+		}
+	}()
 
 	// Walk the directory and add all files to zip
 	return filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -235,15 +240,14 @@ func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output)
 		}
 
 		// Open and copy file content
-		file, err := os.Open(path)
+		file, err := os.Open(filepath.Clean(path)) //nolint:gosec // G122: path from internal os.MkdirTemp, not user input
 		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to open file", err)
 		}
-		defer file.Close()
-
-		_, err = io.Copy(writer, file)
-		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to copy file content", err)
+		_, copyErr := io.Copy(writer, file)
+		file.Close()
+		if copyErr != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to copy file content", copyErr)
 		}
 
 		return nil

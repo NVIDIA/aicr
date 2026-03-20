@@ -78,15 +78,16 @@ aicr snapshot [flags]
 | `--format` | `-f` | string | yaml | Output format: json, yaml, table |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
 | `--namespace` | `-n` | string | gpu-operator | Kubernetes namespace for agent deployment |
-| `--image` | | string | ghcr.io/nvidia/aicr-validator:latest | Container image for agent Job |
+| `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
 | `--node-selector` | | string[] | | Node selector for agent scheduling (key=value, repeatable) |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
-| `--cleanup` | | bool | true | Delete Job and RBAC resources on completion. Use `--cleanup=false` to keep resources for debugging. |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
+| `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
 
 **Output Destinations:**
 - **stdout**: Default when no `-o` flag specified
@@ -98,6 +99,7 @@ aicr snapshot [flags]
 - **OS Configuration**: grub, kmod, sysctl, release info
 - **Kubernetes**: server version, images, ClusterPolicy
 - **GPU**: driver version, CUDA, MIG settings, hardware info
+- **NodeTopology**: node topology (cluster-wide taints and labels across all nodes)
 
 **Examples:**
 
@@ -142,7 +144,7 @@ aicr snapshot \
   --toleration nvidia.com/gpu:NoSchedule \
   --timeout 10m \
   --output cm://gpu-operator/aicr-snapshot \
-  --cleanup
+  --no-cleanup
 
 # Custom template formatting
 aicr snapshot --template examples/templates/snapshot-template.md.tmpl
@@ -167,10 +169,14 @@ The `--template` flag enables custom output formatting using Go templates with [
 .APIVersion     # API version string
 .Metadata       # Map of key-value pairs (timestamp, version, source-node)
 .Measurements   # Array of Measurement objects
-  .Type         # Measurement type (K8s, GPU, OS, SystemD)
+  .Type         # Measurement type (K8s, GPU, OS, SystemD, NodeTopology)
   .Subtypes     # Array of Subtype objects
     .Name       # Subtype name (e.g., "server", "smi", "grub")
     .Data       # Map of readings (key -> Reading with .String method)
+
+# NodeTopology measurement type has subtypes: summary, taint, label
+# Taint encoding: effect|value|node1,node2,...  (parseable with Sprig splitList "|")
+# Label encoding: value|node1,node2,...
 ```
 
 Example template extracting key cluster info:
@@ -194,7 +200,7 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 3. **Waits for completion**: Monitors Job status with configurable timeout
 4. **Retrieves snapshot**: Reads snapshot from ConfigMap after Job completes
 5. **Writes output**: Saves snapshot to specified output destination
-6. **Cleanup**: Deletes Job and RBAC resources (use `--cleanup=false` to keep for debugging)
+6. **Cleanup**: Deletes Job and RBAC resources (use `--no-cleanup` to keep for debugging)
 
 **Benefits of agent deployment:**
 - Capture configuration from actual cluster nodes (not local machine)
@@ -425,11 +431,10 @@ aicr validate [flags]
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
-| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (required) |
-| `--phase` | | string | Validation phase to run: readiness (default), deployment, performance, conformance, all |
+| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--phase` | | string | Validation phase to run: deployment, performance, conformance, all (default: all) |
 | `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
 | `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
-| `--format` | `-t` | string | Output format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs) |
 
 **Input Sources:**
@@ -443,11 +448,12 @@ Validation can be run in different phases to validate different aspects of the d
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `readiness` | Evaluates constraints inline against snapshot (K8s version, OS, kernel) — no checks or Jobs | Before deploying any components |
 | `deployment` | Validates component deployment health and expected resources | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
 | `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
+
+> **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
 
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
@@ -480,7 +486,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 **Examples:**
 
 ```shell
-# Validate snapshot against recipe (default: readiness phase)
+# Validate snapshot against recipe (readiness constraints run implicitly)
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 
 # Validate specific phase
@@ -504,14 +510,7 @@ aicr validate \
 aicr validate \
   --recipe recipe.yaml \
   --snapshot cm://gpu-operator/aicr-snapshot \
-  --output validation-results.yaml
-
-# Validate readiness phase before installing components
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --phase readiness \
-  --fail-on-error
+  --output validation-results.json
 
 # Validate deployment phase after components are installed
 aicr validate \
@@ -525,12 +524,6 @@ aicr validate \
   --snapshot snapshot.yaml \
   --phase performance
 
-# JSON output format
-aicr validate \
-  --recipe recipe.yaml \
-  --snapshot snapshot.yaml \
-  --format json
-
 # With custom kubeconfig
 aicr validate \
   --recipe recipe.yaml \
@@ -538,103 +531,88 @@ aicr validate \
   --kubeconfig ~/.kube/prod-cluster
 ```
 
-**Output Structure (Readiness Phase):**
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  timestamp: "2025-12-31T10:30:00Z"
-  version: v0.14.0
-recipeSource: recipe.yaml
-snapshotSource: cm://gpu-operator/aicr-snapshot
-summary:
-  passed: 5
-  failed: 0
-  skipped: 0
-  total: 5
-  status: pass
-  duration: 20.5µs
-phases:
-  readiness:
-    status: pass
-    constraints:
-      - name: K8s.server.version
-        expected: '>= 1.30'
-        actual: v1.30.14-eks-3025e55
-        status: passed
-      - name: OS.release.ID
-        expected: ubuntu
-        actual: ubuntu
-        status: passed
-    duration: 20.5µs
+**Output Structure ([CTRF](https://ctrf.io/) JSON):**
+
+Results are output in CTRF (Common Test Report Format) — an industry-standard schema for test reporting.
+
+```json
+{
+  "reportFormat": "CTRF",
+  "specVersion": "0.0.1",
+  "timestamp": "2026-03-10T20:10:44Z",
+  "generatedBy": "aicr",
+  "results": {
+    "tool": {
+      "name": "aicr",
+      "version": "v0.10.3-next"
+    },
+    "summary": {
+      "tests": 16,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 3,
+      "pending": 0,
+      "other": 0,
+      "start": 1773173400872,
+      "stop": 1773173799002
+    },
+    "tests": [
+      {
+        "name": "operator-health",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["Found 1 gpu-operator pod(s)", "Running: 1/1"]
+      },
+      {
+        "name": "expected-resources",
+        "status": "passed",
+        "duration": 0,
+        "suite": ["deployment"],
+        "stdout": ["All expected resources are healthy"]
+      },
+      {
+        "name": "nccl-all-reduce-bw",
+        "status": "passed",
+        "duration": 234000,
+        "suite": ["performance"],
+        "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
+      },
+      {
+        "name": "dra-support",
+        "status": "passed",
+        "duration": 8000,
+        "suite": ["conformance"],
+        "stdout": ["DRA GPU allocation successful"]
+      },
+      {
+        "name": "cluster-autoscaling",
+        "status": "skipped",
+        "duration": 0,
+        "suite": ["conformance"],
+        "stdout": ["SKIP reason=\"Karpenter not found\""]
+      }
+    ]
+  }
+}
 ```
 
-**Output Structure (All Phases):**
-```yaml
-apiVersion: aicr.nvidia.com/v1alpha1
-kind: ValidationResult
-metadata:
-  timestamp: "2025-12-31T10:30:00Z"
-  version: v0.14.0
-recipeSource: recipe.yaml
-snapshotSource: snapshot.yaml
-summary:
-  passed: 3
-  failed: 0
-  skipped: 1
-  total: 4
-  status: pass
-  duration: 58.4µs
-phases:
-  readiness:
-    status: pass
-    constraints:
-      - name: K8s.server.version
-        expected: '>= 1.32.4'
-        actual: v1.35.0
-        status: passed
-      - name: OS.release.ID
-        expected: ubuntu
-        actual: ubuntu
-        status: passed
-    duration: 20.7µs
-  deployment:
-    status: pass
-    checks:
-      - name: gpu-operator.version
-        status: pass
-      - name: operator-health
-        status: pass
-      - name: expected-resources
-        status: pass
-    duration: 1.2µs
-  performance:
-    status: pass
-    checks:
-      - name: nccl-bandwidth-test
-        status: pass
-      - name: fabric-health-check
-        status: pass
-    duration: 1.2µs
-  conformance:
-    status: skipped
-    reason: conformance phase not configured in recipe
-    duration: 0.8µs
-```
+> **Note:** The `tests` array above is truncated for brevity. A full validation run produces one entry per check across all phases. Each entry includes `stdout` with detailed diagnostic output.
 
-**Validation Statuses:**
+**Test Statuses:**
 | Status | Description |
 |--------|-------------|
-| `passed` | Constraint satisfied |
-| `failed` | Constraint not satisfied |
-| `skipped` | Constraint could not be evaluated (missing data, invalid path) |
+| `passed` | Check or constraint passed |
+| `failed` | Check or constraint failed |
+| `skipped` | Check could not be evaluated (missing data, no-cluster mode) |
+| `other` | Unexpected outcome (crash, OOM, timeout) |
 
-**Summary Status:**
-| Status | Description |
-|--------|-------------|
-| `pass` | All constraints passed |
-| `fail` | One or more constraints failed |
-| `partial` | Some constraints skipped, none failed |
+**Exit Codes:**
+| Code | Description |
+|------|-------------|
+| `0` | All checks passed |
+| `2` | Invalid input (bad flags, missing recipe) |
+| `8` | One or more checks failed (when `--fail-on-error` is set) |
 
 ---
 
@@ -654,7 +632,7 @@ aicr bundle [flags]
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | | string | Deployment method: helm (default), argocd |
 | `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
-| `--set` | | string[] | Override values in bundle files (repeatable) |
+| `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -663,6 +641,8 @@ aicr bundle [flags]
 | `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
+| `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
+| `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 
 **Node Scheduling:**
 
@@ -686,18 +666,18 @@ aicr bundle --recipe recipe.yaml \
   --accelerated-node-selector nodeGroup=gpu-worker \
   --accelerated-node-toleration dedicated=worker-workload:NoSchedule \
   --accelerated-node-toleration dedicated=worker-workload:NoExecute \
-  --system-node-selector dedicated=system-workload \
+  --system-node-selector nodeGroup=system-worker \
   --system-node-toleration dedicated=system-workload:NoSchedule \
   --system-node-toleration dedicated=system-workload:NoExecute \
   --output bundle
 ```
 
-> **Cluster node requirements:** This example assumes the cluster has nodes with the label `dedicated=system-workload` and matching taints for system infrastructure, plus GPU nodes with the label `nodeGroup=gpu-worker` and taints `dedicated=worker-workload:NoSchedule,NoExecute`.
+> **Cluster node requirements:** This example assumes the cluster has nodes labeled `nodeGroup=system-worker` with taints `dedicated=system-workload:NoSchedule,NoExecute` for system infrastructure, and GPU nodes labeled `nodeGroup=gpu-worker` with taints `dedicated=worker-workload:NoSchedule,NoExecute`.
 
 This results in:
 - **GPU daemonsets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
 - **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
-- **System components** (gpu-operator controller, NFD gc/master, dynamo etcd/nats/grove, kgateway proxy): `nodeSelector=dedicated=system-workload` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
+- **System components** (gpu-operator controller, NFD gc/master, dynamo grove, kgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 
 **Behavior:**
 - All components from the recipe are bundled automatically
@@ -737,6 +717,7 @@ Override any value in the generated bundle files using dot notation:
 - **Duplicate keys**: When the same `bundler:path` is specified multiple times, the **last value wins**
 - **Array values**: Individual array elements cannot be overridden (no `[0]` index syntax). Arrays can only be replaced entirely via recipe overrides, not via `--set` flags. Use recipe-level overrides in `componentRefs[].overrides` if you need to replace an entire array.
 - **Type conversion**: String values are automatically converted to appropriate types (`true`/`false` → bool, numeric strings → numbers)
+- **Component enable/disable**: The special `enabled` key controls whether a component is included in the bundle. `--set <component>:enabled=false` excludes the component; `--set <component>:enabled=true` re-enables a recipe-disabled component. The `enabled` key is consumed by the bundler and not passed to Helm chart values.
 
 **Examples:**
 ```shell
@@ -768,6 +749,11 @@ aicr bundle -r recipe.yaml \
   --set skyhook-operator:manager.resources.memory.limit=256Mi \
   -o ./bundles
 
+# Disable a component at bundle time (e.g., EBS CSI already installed as EKS addon)
+aicr bundle -r recipe.yaml \
+  --set awsebscsidriver:enabled=false \
+  -o ./bundles
+
 # Schedule system components on specific node pool
 aicr bundle -r recipe.yaml \
   --system-node-selector nodeGroup=system-pool \
@@ -797,6 +783,12 @@ aicr bundle -r recipe.yaml \
   --workload-selector workload-type=training \
   -o ./bundles
 
+# Generate an attested bundle (opens browser for OIDC auth)
+aicr bundle -r recipe.yaml --attest -o ./bundles
+
+# In GitHub Actions (OIDC token detected automatically)
+aicr bundle -r recipe.yaml --attest -o ./bundles
+
 # Generate ArgoCD Application manifests for GitOps
 aicr bundle -r recipe.yaml --deployer argocd -o ./bundles
 
@@ -817,7 +809,10 @@ bundles/
 ├── README.md                      # Deployment guide with ordered steps
 ├── deploy.sh                      # One-command deployment script
 ├── recipe.yaml                    # Recipe used to generate bundle
-├── checksums.txt                  # SHA256 checksums (optional)
+├── checksums.txt                  # SHA256 checksums
+├── attestation/                   # Present when --attest is used
+│   ├── bundle-attestation.sigstore.json   # SLSA Build Provenance v1
+│   └── aicr-attestation.sigstore.json     # Binary SLSA provenance chain
 ├── gpu-operator/
 │   ├── values.yaml                # Component-specific Helm values
 │   ├── README.md                  # Per-component install/upgrade/uninstall
@@ -943,6 +938,20 @@ ArgoCD Applications use multi-source to:
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)
 
+#### Bundle Attestation
+
+> **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
+
+When `--attest` is passed, the bundle command performs four steps:
+
+1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
+2. **Acquires an OIDC token** — In GitHub Actions the ambient OIDC token is used automatically. Locally, a browser window opens for Sigstore OIDC authentication.
+3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the bundle content (via `checksums.txt` digest) and the binary that produced it.
+5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
+
+Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
+
 **Deploying a bundle:**
 ```shell
 # Navigate to bundle
@@ -957,6 +966,162 @@ sha256sum -c checksums.txt
 
 # Deploy to cluster
 chmod +x deploy.sh && ./deploy.sh
+```
+
+> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each component subdirectory contains a `README.md` with the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
+
+#### Deploy Script Behavior (`deploy.sh`)
+
+The deploy script installs components in the order specified by `deploymentOrder` in the recipe.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--no-wait` | Skip `helm --wait` for each component (faster, no readiness check) |
+| `--best-effort` | Continue past individual component failures instead of exiting |
+| `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
+
+Unknown flags are rejected with an error to catch typos (e.g., `--best-effrot`).
+
+**Retry behavior:**
+
+The deploy script retries failed `helm upgrade --install` and `kubectl apply` operations with exponential backoff. By default, each operation is retried up to 5 times (6 total attempts). The backoff delay increases quadratically: 5s, 20s, 45s, 80s, 120s (capped) between retries.
+
+Use `--retries 0` to disable retries (fail-fast behavior). When `--best-effort` is also set, retries are exhausted first before falling through to best-effort handling.
+
+**Pre-install manifests and CRD ordering:**
+
+Some components have pre-install manifests (CRDs, namespaces, ConfigMaps) that must exist before `helm install`. The script applies these with `kubectl apply` before the Helm install. On first deploy, CRD-dependent resources may produce `no matches for kind` warnings because the CRD hasn't been registered yet — these warnings are suppressed. All other `kubectl apply` errors (auth failures, webhook denials, bad manifests) fail the script immediately.
+
+After `helm install`, the same manifests are re-applied as post-install to ensure CRD-dependent resources are created.
+
+**Async components:**
+
+Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness.
+
+**DRA kubelet plugin registration:**
+
+After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin daemonset. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
+
+If DRA pods fail with this error after redeployment, the daemonset restart alone may not be sufficient — a **node reboot** is required to reset the kubelet's plugin registration state. To reboot GPU nodes:
+
+```bash
+# Cordon, drain, and reboot the affected node
+kubectl cordon <node-name>
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+# Reboot via cloud provider (e.g., AWS EC2 console or CLI)
+aws ec2 reboot-instances --instance-ids <instance-id>
+# Uncordon after node returns
+kubectl uncordon <node-name>
+```
+
+#### Undeploy Script Behavior (`undeploy.sh`)
+
+The undeploy script removes components in reverse deployment order.
+
+**Flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--keep-namespaces` | Skip namespace deletion after component removal |
+| `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
+| `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
+
+**PVC preservation (default):**
+
+PVCs are **not deleted** by default. This preserves historical data (Prometheus metrics, Alertmanager state, etcd data) across redeploys. If an EBS-backed PV has an AZ mismatch after redeployment, the PVC will stay Pending with a clear error — the operator can then decide to delete it manually.
+
+Pass `--delete-pvcs` to delete all PVCs. Protected namespaces (`kube-system`, `kube-public`, `kube-node-lease`, `default`) are always excluded from PVC deletion to prevent accidental removal of non-bundle PVCs.
+
+**Shared namespace ordering:**
+
+When multiple components share a namespace (e.g., `monitoring` contains `kube-prometheus-stack`, `prometheus-adapter`, and `k8s-ephemeral-storage-metrics`), all components are uninstalled first, then PVC and namespace cleanup runs once. This prevents hangs caused by `kubernetes.io/pvc-protection` finalizers — if a StatefulSet owner is still running when PVC deletion is attempted, the delete blocks indefinitely.
+
+**Stuck release handling:**
+
+If a Helm release is in a `pending-install` or `pending-upgrade` state (from an interrupted deploy), the script retries with `--no-hooks` to force removal.
+
+**Orphaned webhook cleanup:**
+
+After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
+
+---
+
+### aicr verify
+
+Verify the integrity and attestation chain of a bundle. Verification is fully offline — no network calls are made.
+
+**Synopsis:**
+```shell
+aicr verify <bundle-dir> [flags]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--min-trust-level` | string | `max` | Minimum required trust level. `max` auto-detects the highest achievable level and verifies against it. Explicit levels: `verified`, `attested`, `unverified`, `unknown`. |
+| `--require-creator` | string | | Require a specific creator identity, matched against the bundle attestation signing certificate. |
+| `--cli-version-constraint` | string | | Version constraint for the aicr CLI version in the attestation predicate. Supports `>=`, `>`, `<=`, `<`, `==`, `!=`. A bare version (e.g. `"0.8.0"`) defaults to `>=`. |
+| `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
+| `--format` | string | `text` | Output format: `text` or `json`. |
+
+**Trust Levels:**
+
+| Level | Name | Criteria |
+|-------|------|----------|
+| 4 | `verified` | Full chain: checksums + bundle attestation + binary attestation pinned to NVIDIA CI |
+| 3 | `attested` | Chain verified but binary attestation missing or external data (`--data`) was used |
+| 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
+| 1 | `unknown` | Missing or invalid checksums |
+
+**Verification steps:**
+
+1. **Checksums** — verifies all content files match `checksums.txt`
+2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
+3. **Binary attestation** — provenance chain verified with identity pinned to NVIDIA CI (`on-tag.yaml` workflow)
+
+**Examples:**
+```shell
+# Auto-detect maximum trust level
+aicr verify ./my-bundle
+
+# Enforce a minimum trust level
+aicr verify ./my-bundle --min-trust-level verified
+
+# Require a specific bundle creator
+aicr verify ./my-bundle --require-creator jdoe@company.com
+
+# Require minimum CLI version used to create the bundle
+aicr verify ./my-bundle --cli-version-constraint ">= 0.8.0"
+
+# JSON output for CI pipelines
+aicr verify ./my-bundle --format json
+```
+
+> **Stale root:** If verification fails with certificate chain errors, run `aicr trust update` to refresh the Sigstore trusted root.
+
+---
+
+### aicr trust update
+
+Fetch the latest Sigstore trusted root from the TUF CDN and update the local cache at `~/.sigstore/root/`. This is needed when Sigstore rotates signing keys (a few times per year).
+
+**Synopsis:**
+```shell
+aicr trust update
+```
+
+**No flags.** This command contacts `tuf-repo-cdn.sigstore.dev`, verifies the update chain against the embedded TUF root, and writes the result to `~/.sigstore/root/`.
+
+**When to run:**
+- After initial installation (the install script runs this automatically)
+- When `aicr verify` reports a stale or expired trusted root
+- When Sigstore announces key rotation
+
+**Example:**
+```shell
+aicr trust update
 ```
 
 ---
@@ -1305,31 +1470,18 @@ Debug logs include:
 
 The `examples/` directory contains reference files for testing and learning:
 
-### Snapshots (`examples/snapshots/`)
-
-| File | Description |
-|------|-------------|
-| `gb200.yaml` | GB200 NVL72 system snapshot (Ubuntu 24.04, EKS 1.33, NVLink) |
-| `h100.yaml` | H100 GPU cluster snapshot (Ubuntu 22.04, GKE 1.32) |
-| `gb200-h100-comp.md` | Configuration comparison between GB200 and H100 |
-
-**Usage:**
-```shell
-# Generate recipe from example snapshot
-aicr recipe --snapshot examples/snapshots/gb200.yaml --intent training --platform kubeflow
-```
-
 ### Recipes (`examples/recipes/`)
 
 | File | Description |
 |------|-------------|
-| `eks-gb200-training.yaml` | GB200 training workload recipe for EKS |
-| `eks-h100-training.yaml` | H100 training workload recipe for EKS |
+| `kind.yaml` | Recipe for local Kind cluster with fake GPU |
+| `eks-training.yaml` | EKS recipe optimized for training workloads |
+| `eks-gb200-ubuntu-training-with-validation.yaml` | GB200 on EKS with Ubuntu and multi-phase validation |
 
 **Usage:**
 ```shell
 # Generate bundle from example recipe
-aicr bundle --recipe examples/recipes/eks-gb200-training.yaml --output ./bundles
+aicr bundle --recipe examples/recipes/eks-training.yaml --output ./bundles
 ```
 
 ### Templates (`examples/templates/`)
@@ -1349,5 +1501,5 @@ aicr snapshot --template examples/templates/snapshot-template.md.tmpl --output r
 - [Installation Guide](installation.md) - Install aicr
 - [Agent Deployment](agent-deployment.md) - Kubernetes agent setup
 - [API Reference](api-reference.md) - Programmatic access
-- [Architecture Docs](../contributor/README.md) - Internal architecture
+- [Architecture Docs](../contributor/) - Internal architecture
 - [Data Architecture](../contributor/data.md) - Recipe data system details

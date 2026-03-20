@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,6 +24,10 @@ inputs:
     description: 'ko version (e.g. v0.18.0)'
     required: false
     default: 'v0.18.0'
+  homebrew_deploy_key:
+    description: 'SSH deploy key for pushing Homebrew formula'
+    required: false
+    default: ''
 
 outputs:
   release_outcome:
@@ -52,6 +56,7 @@ runs:
       env:
         GITHUB_TOKEN: ${{ github.token }}
         GOFLAGS: -mod=vendor
+        HOMEBREW_DEPLOY_KEY: ${{ inputs.homebrew_deploy_key }}
         # Repository paths are fully specified in .goreleaser.yaml kos.repositories
       run: |
         set -euo pipefail

@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 # Assert Skyhook operator controller-manager is available.
 # fullnameOverride: skyhook-operator (from values.yaml)
-# Chart: skyhook-operator v0.12.0
+# Chart: skyhook-operator v0.14.0
 # Manages NodeConfiguration CRs for node-level customizations (sysctl, kmod, etc.)
 apiVersion: apps/v1
 kind: Deployment

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,7 +70,7 @@ func BenchmarkFilterOut_ManyKeys(b *testing.B) {
 	}
 }
 
-func BenchmarkFilterIn(b *testing.B) {
+func Benchmark_filterIn(b *testing.B) {
 	readings := map[string]Reading{
 		"root_user":       Str("admin"),
 		"root_password":   Str("secret"),
@@ -88,7 +88,7 @@ func BenchmarkFilterIn(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = FilterIn(readings, patterns)
+		_ = filterIn(readings, patterns)
 	}
 }
 
@@ -107,7 +107,7 @@ func BenchmarkFilterIn_Wildcards(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = FilterIn(readings, patterns)
+		_ = filterIn(readings, patterns)
 	}
 }
 

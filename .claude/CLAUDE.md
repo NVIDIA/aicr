@@ -1,5 +1,6 @@
 # CLAUDE.md
 
+This file is the canonical source for coding-agent rules. `AGENTS.md` is an auto-synced mirror (CI enforced).
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Role & Expertise
@@ -61,6 +62,11 @@ unset GITLAB_TOKEN && ./tools/e2e
 # Tools management
 make tools-setup  # Install all required tools
 make tools-check  # Verify versions match .settings.yaml
+
+# Local health check validation
+make check-health COMPONENT=nvsentinel  # Direct chainsaw against Kind
+make check-health-all                   # All components
+make validate-local RECIPE=recipe.yaml  # Full pipeline in Kind
 ```
 
 ## Non-Negotiable Rules
@@ -73,6 +79,12 @@ make tools-check  # Verify versions match .settings.yaml
 6. **Structured errors** — Use `pkg/errors` with error codes (never `fmt.Errorf`)
 7. **Context timeouts** — All I/O operations need context with timeout
 8. **Check context in loops** — Always check `ctx.Done()` in long-running operations
+
+## Review Output Links
+
+When providing review findings, use global GitHub file links by default
+(`https://github.com/<org>/<repo>/blob/<sha>/<path>#L<line>`) instead of local
+workspace paths. Use local file paths only when explicitly requested.
 
 ## Git Configuration
 
@@ -95,6 +107,7 @@ make tools-check  # Verify versions match .settings.yaml
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
 | `pkg/evidence` | Conformance evidence capture and formatting | Yes |
+| `pkg/collector/topology` | Cluster-wide node taint/label topology collection | Yes |
 | `pkg/snapshotter` | System state snapshot orchestration | Yes |
 | `pkg/k8s/client` | Singleton Kubernetes client | Yes |
 | `pkg/k8s/pod` | Shared K8s Job/Pod utilities (wait, logs, ConfigMap URIs) | Yes |
@@ -184,7 +197,7 @@ g, ctx := errgroup.WithContext(ctx)
 g.Go(func() error { return collector1.Collect(ctx) })
 g.Go(func() error { return collector2.Collect(ctx) })
 if err := g.Wait(); err != nil {
-    return fmt.Errorf("collection failed: %w", err)
+    return errors.Wrap(errors.ErrCodeInternal, "collection failed", err)
 }
 ```
 
@@ -204,6 +217,7 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 | New collector | `pkg/collector/<type>/` | Implement `Collector` interface, add to factory |
 | New API endpoint | `pkg/api/` | Handler + middleware chain + OpenAPI spec update |
 | Fix test failures | Run `make test` | Check race conditions (`-race`), verify context handling |
+| New health check | `recipes/checks/<name>/` | Create `health-check.yaml`, register in `registry.yaml`, test with `make check-health` |
 
 **Adding a Helm component (declarative - no Go code needed):**
 ```yaml

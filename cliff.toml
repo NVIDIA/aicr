@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -62,17 +62,12 @@ commit_preprocessors = [
     { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "" },
 ]
 # Regex for parsing and grouping commits
-# Groups match .goreleaser.yaml changelog groups
+# Three categories: New Features, Bug Fixes, Other Tasks
 commit_parsers = [
-    { message = "^feat", group = "Features" },
+    { message = "^feat", group = "New Features" },
     { message = "^fix", group = "Bug Fixes" },
     { message = "^bug", group = "Bug Fixes" },
-    { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Refactor" },
-    { message = "^chore", group = "Tasks" },
-    { message = "^ci", group = "CI/CD" },
-    { message = "^build", group = "Build" },
-    # Skip commits matching .goreleaser.yaml exclude patterns
+    # Skip commits that should not appear in changelog
     { message = "^docs:", skip = true },
     { message = "^test:", skip = true },
     { message = "^lint:", skip = true },
@@ -80,8 +75,8 @@ commit_parsers = [
     { message = "^chore: bump version", skip = true },
     { message = "^chore: update CHANGELOG", skip = true },
     { message = "^build: release v[0-9]+\\.[0-9]+\\.[0-9]+", skip = true },
-    # Default group for other commits
-    { message = ".*", group = "Other" },
+    # Everything else (refactor, chore, ci, build, perf, etc.)
+    { message = ".*", group = "Other Tasks" },
 ]
 # Protect breaking changes from being skipped
 protect_breaking_commits = false

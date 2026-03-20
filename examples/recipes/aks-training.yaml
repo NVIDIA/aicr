@@ -1,0 +1,184 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeResult
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  version: dev
+  appliedOverlays:
+    - base
+    - monitoring-hpa
+    - aks
+    - aks-training
+    - h100-aks-training
+    - h100-aks-ubuntu-training
+criteria:
+  service: aks
+  accelerator: h100
+  intent: training
+  os: ubuntu
+  platform: any
+constraints:
+  - name: K8s.server.version
+    value: '>= 1.32.4'
+  - name: OS.release.ID
+    value: ubuntu
+  - name: OS.release.VERSION_ID
+    value: "24.04"
+  - name: OS.sysctl./proc/sys/kernel/osrelease
+    value: '>= 6.8'
+componentRefs:
+  - name: cert-manager
+    namespace: cert-manager
+    chart: cert-manager
+    type: Helm
+    source: https://charts.jetstack.io
+    version: v1.17.2
+    valuesFile: components/cert-manager/values.yaml
+  - name: gpu-operator
+    namespace: gpu-operator
+    chart: gpu-operator
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    version: v25.10.1
+    valuesFile: components/gpu-operator/values-aks-training.yaml
+    overrides:
+      cdi:
+        enabled: true
+      gdrcopy:
+        enabled: true
+    dependencyRefs:
+      - cert-manager
+      - kube-prometheus-stack
+    manifestFiles:
+      - components/gpu-operator/manifests/dcgm-exporter.yaml
+  - name: k8s-ephemeral-storage-metrics
+    namespace: monitoring
+    chart: k8s-ephemeral-storage-metrics
+    type: Helm
+    source: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
+    version: 1.19.2
+    valuesFile: components/k8s-ephemeral-storage-metrics/values.yaml
+    dependencyRefs:
+      - kube-prometheus-stack
+  - name: kai-scheduler
+    namespace: kai-scheduler
+    chart: kai-scheduler
+    type: Helm
+    source: oci://ghcr.io/nvidia/kai-scheduler
+    version: v0.12.17
+    valuesFile: components/kai-scheduler/values.yaml
+    dependencyRefs:
+      - gpu-operator
+    manifestFiles:
+      - components/kai-scheduler/manifests/disable-runtime-class-injection.yaml
+  - name: kube-prometheus-stack
+    namespace: monitoring
+    chart: kube-prometheus-stack
+    type: Helm
+    source: https://prometheus-community.github.io/helm-charts
+    version: 82.8.0
+    valuesFile: components/kube-prometheus-stack/values.yaml
+    overrides:
+      prometheus:
+        prometheusSpec:
+          storageSpec:
+            emptyDir: null
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 50Gi
+                storageClassName: managed-csi
+  - name: nvidia-dra-driver-gpu
+    namespace: nvidia-dra-driver
+    chart: nvidia-dra-driver-gpu
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia
+    version: 25.12.0
+    valuesFile: components/nvidia-dra-driver-gpu/values.yaml
+    overrides:
+      controller:
+        affinity:
+          nodeAffinity: null
+    dependencyRefs:
+      - gpu-operator
+  - name: nvsentinel
+    namespace: nvsentinel
+    chart: nvsentinel
+    type: Helm
+    source: oci://ghcr.io/nvidia
+    version: v0.10.0
+    valuesFile: components/nvsentinel/values.yaml
+    dependencyRefs:
+      - cert-manager
+      - gpu-operator
+    manifestFiles:
+      - components/nvsentinel/manifests/allow-intra-namespace.yaml
+  - name: prometheus-adapter
+    namespace: monitoring
+    chart: prometheus-adapter
+    type: Helm
+    source: https://prometheus-community.github.io/helm-charts
+    version: 5.3.0
+    valuesFile: components/prometheus-adapter/values.yaml
+    dependencyRefs:
+      - kube-prometheus-stack
+  - name: skyhook-operator
+    namespace: skyhook
+    chart: skyhook-operator
+    type: Helm
+    source: https://helm.ngc.nvidia.com/nvidia/skyhook
+    version: v0.13.1
+    valuesFile: components/skyhook-operator/values.yaml
+deploymentOrder:
+  - cert-manager
+  - kube-prometheus-stack
+  - gpu-operator
+  - k8s-ephemeral-storage-metrics
+  - kai-scheduler
+  - nvidia-dra-driver-gpu
+  - nvsentinel
+  - prometheus-adapter
+  - skyhook-operator
+validation:
+  deployment:
+    constraints:
+      - name: Deployment.gpu-operator.version
+        value: '>= v24.6.0'
+    checks:
+      - operator-health
+      - expected-resources
+      - gpu-operator-version
+      - check-nvidia-smi
+  performance:
+    constraints:
+      - name: nccl-all-reduce-bw
+        value: '>= 100'
+    checks:
+      - nccl-all-reduce-bw
+  conformance:
+    checks:
+      - platform-health
+      - gpu-operator-health
+      - dra-support
+      - accelerator-metrics
+      - ai-service-metrics
+      - gang-scheduling
+      - pod-autoscaling
+      - cluster-autoscaling
+      - robust-controller
+      - secure-accelerator-access

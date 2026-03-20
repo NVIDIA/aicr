@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,11 +25,41 @@ runs:
         KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
         GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
 
-    - name: Build aicr validator image and load into kind
+    - name: Build snapshot agent image and load into kind
       shell: bash
       run: |
-        docker build -f Dockerfile.validator -t ko.local:smoke-test .
+        # Build snapshot agent image with CUDA runtime (provides nvidia-smi for GPU detection).
+        # GPU test workflows use --image=ko.local:smoke-test for aicr snapshot.
+        CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
+        docker build -t ko.local:smoke-test -f - . <<'DOCKERFILE'
+        FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
+        COPY dist/aicr /usr/local/bin/aicr
+        ENTRYPOINT ["/usr/local/bin/aicr"]
+        DOCKERFILE
         kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+
+    - name: Build validator images and load into kind
+      shell: bash
+      env:
+        GOFLAGS: -mod=vendor
+      run: |
+        # Compile validator binaries on host (Go build cache) then COPY-only images.
+        mkdir -p dist/validator
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance
+        CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance
+        for phase in deployment performance conformance; do
+          mkdir -p "validators/${phase}/testdata"
+          docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
+        FROM gcr.io/distroless/static-debian12:nonroot
+        COPY dist/validator/${phase} /${phase}
+        COPY validators/${phase}/testdata /app/testdata
+        WORKDIR /app
+        USER nonroot
+        ENTRYPOINT ["/${phase}"]
+        DOCKERFILE
+          kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
+        done
 
     - name: Build aicr binary
       shell: bash

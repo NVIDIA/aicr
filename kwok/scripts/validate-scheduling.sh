@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -359,6 +359,7 @@ generate_bundle() {
         --system-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
         --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
         --accelerated-node-toleration "kwok.x-k8s.io/node=fake:NoSchedule" \
+        --set "certmanager:startupapicheck.enabled=false" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
         --set "skyhook-customizations:enabled=false" \
@@ -380,6 +381,19 @@ generate_bundle() {
     fi
 
     log_info "Bundle generated at ${WORK_DIR}/bundle"
+
+    # KWOK clusters use emptyDir for Prometheus storage (no PVC/StorageClass).
+    # Cloud overlays (EKS, AKS) set emptyDir: null + volumeClaimTemplate which
+    # the Prometheus CRD rejects. Restore emptyDir and remove PVC for KWOK.
+    local prom_values="${WORK_DIR}/bundle/kube-prometheus-stack/values.yaml"
+    if [[ -f "$prom_values" ]] && yq eval '.prometheus.prometheusSpec.storageSpec.emptyDir' "$prom_values" 2>/dev/null | grep -q 'null'; then
+        log_info "Fixing kube-prometheus-stack storageSpec for KWOK (emptyDir instead of PVC)"
+        yq eval -i '
+            .prometheus.prometheusSpec.storageSpec.emptyDir = {"medium": "", "sizeLimit": "10Gi"} |
+            del(.prometheus.prometheusSpec.storageSpec.volumeClaimTemplate)
+        ' "$prom_values"
+    fi
+
     log_debug "Bundle contents:"
     ls -1 "${WORK_DIR}/bundle" | head -10
 }
@@ -502,55 +516,6 @@ verify_pods() {
     return 0
 }
 
-# Verify deployment materialization by capturing a snapshot with helm data
-# and checking recipe components are present in the cluster
-verify_materialization() {
-    log_info "Verifying deployment materialization..."
-
-    local snapshot_path="${WORK_DIR}/snapshot.yaml"
-    local result_path="${WORK_DIR}/validate-materialization.yaml"
-
-    # Capture snapshot with helm namespace data from the deployed releases
-    log_info "Capturing snapshot with helm data..."
-    if ! "$AICR_BIN" snapshot \
-        --helm-all-namespaces \
-        --output "$snapshot_path" 2>&1; then
-        log_warn "Snapshot capture failed, skipping materialization check"
-        return 0
-    fi
-
-    # Run deployment phase validation against the snapshot
-    log_info "Running deployment materialization validation..."
-    local validate_output
-    validate_output=$("$AICR_BIN" validate \
-        --recipe "${WORK_DIR}/recipe.yaml" \
-        --snapshot "$snapshot_path" \
-        --phase deployment \
-        --no-cluster \
-        --fail-on-error=false \
-        --output "$result_path" 2>&1) || true
-
-    # Check if any components passed materialization
-    local passed_count failed_count skipped_count
-    passed_count=$(grep -c 'status: pass' "$result_path" 2>/dev/null | head -1 || echo "0")
-    failed_count=$(grep -c 'status: fail' "$result_path" 2>/dev/null | head -1 || echo "0")
-    skipped_count=$(grep -c 'status: skipped' "$result_path" 2>/dev/null | head -1 || echo "0")
-
-    log_info "Materialization results: passed=$passed_count failed=$failed_count skipped=$skipped_count"
-
-    # Log failed components for debugging
-    if [[ "$failed_count" -gt 0 ]]; then
-        log_warn "Some recipe components not found in cluster:"
-        grep -B2 "status: fail" "$result_path" | grep "name:" | sed 's/.*name: /  - /' || true
-    fi
-
-    # Materialization is informational in KWOK — don't fail the test
-    # since KWOK doesn't run real containers and some components may
-    # not deploy fully. The check validates the plumbing works.
-    log_info "Materialization verification complete"
-    return 0
-}
-
 # Main
 main() {
     local recipe=""
@@ -613,9 +578,6 @@ main() {
 
     log_debug "Step 6: Verifying pod scheduling..."
     verify_pods
-
-    log_debug "Step 7: Verifying deployment materialization..."
-    verify_materialization
 
     log_info "=========================================="
     log_info "✓ Validation PASSED for recipe: $recipe"

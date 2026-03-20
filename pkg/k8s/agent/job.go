@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ package agent
 
 import (
 	"context"
-	"strings"
-	"time"
+	"strconv"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	batchv1 "k8s.io/api/batch/v1"
@@ -88,8 +88,8 @@ func (d *Deployer) buildJob() *batchv1.Job {
 			Parallelism:             ptr.To(int32(1)),
 			CompletionMode:          ptr.To(batchv1.NonIndexedCompletion),
 			BackoffLimit:            ptr.To(int32(0)),
-			TTLSecondsAfterFinished: ptr.To(int32(3600)),
-			ActiveDeadlineSeconds:   ptr.To(int64(18000)), // 5 hours
+			TTLSecondsAfterFinished: ptr.To(int32(defaults.JobTTLAfterFinished.Seconds())),
+			ActiveDeadlineSeconds:   ptr.To(int64(defaults.AgentJobActiveDeadline.Seconds())),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
@@ -281,27 +281,14 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		},
 	}
 
-	helmNS := d.helmNamespacesEnvValue()
-	if helmNS != "" {
+	if d.config.MaxNodesPerEntry > 0 {
 		envVars = append(envVars, corev1.EnvVar{
-			Name:  "AICR_HELM_NAMESPACES",
-			Value: helmNS,
+			Name:  "AICR_MAX_NODES_PER_ENTRY",
+			Value: strconv.Itoa(d.config.MaxNodesPerEntry),
 		})
 	}
 
 	return envVars
-}
-
-// helmNamespacesEnvValue returns the value for AICR_HELM_NAMESPACES env var.
-// Returns "*" for all-namespaces, comma-joined for scoped, or "" for none.
-func (d *Deployer) helmNamespacesEnvValue() string {
-	if d.config.HelmAllNamespaces {
-		return "*"
-	}
-	if len(d.config.HelmNamespaces) > 0 {
-		return strings.Join(d.config.HelmNamespaces, ",")
-	}
-	return ""
 }
 
 // deleteJob deletes the Job.
@@ -319,8 +306,7 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 
 // waitForJobDeletion waits for the Job to be fully deleted.
 func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
-	timeout := 30 * time.Second
-	return wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, timeout, true,
+	return wait.PollUntilContextTimeout(ctx, defaults.PodPollInterval, defaults.K8sCleanupTimeout, true,
 		func(ctx context.Context) (bool, error) {
 			_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 				Get(ctx, d.config.JobName, metav1.GetOptions{})

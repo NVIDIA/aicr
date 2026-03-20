@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,12 +30,12 @@ const (
 	colorRed   = "\033[31m"
 )
 
-// LogPrefixEnvVar is the environment variable name for customizing the log prefix.
-const LogPrefixEnvVar = "AICR_LOG_PREFIX"
+// logPrefixEnvVar is the environment variable name for customizing the log prefix.
+const logPrefixEnvVar = "AICR_LOG_PREFIX"
 
 // getLogPrefix returns the log prefix from env var or default "cli".
 func getLogPrefix() string {
-	if prefix := os.Getenv(LogPrefixEnvVar); prefix != "" {
+	if prefix := os.Getenv(logPrefixEnvVar); prefix != "" {
 		return prefix
 	}
 	return "cli"
@@ -50,8 +50,8 @@ type CLIHandler struct {
 	level  slog.Level
 }
 
-// NewCLIHandler creates a new CLI handler that writes to the given writer.
-func NewCLIHandler(w io.Writer, level slog.Level) *CLIHandler {
+// newCLIHandler creates a new CLI handler that writes to the given writer.
+func newCLIHandler(w io.Writer, level slog.Level) *CLIHandler {
 	return &CLIHandler{
 		writer: w,
 		level:  level,
@@ -86,8 +86,10 @@ func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 		msg = colorGreen + msg + colorReset
 	}
 
-	_, err := fmt.Fprintln(h.writer, msg)
-	return err
+	if _, err := fmt.Fprintln(h.writer, msg); err != nil {
+		return fmt.Errorf("failed to write log output: %w", err)
+	}
+	return nil
 }
 
 // WithAttrs returns a new handler with the given attributes.
@@ -104,7 +106,7 @@ func (h *CLIHandler) WithGroup(_ string) slog.Handler {
 
 func newCLILogger(level string) *slog.Logger {
 	lev := ParseLogLevel(level)
-	handler := NewCLIHandler(os.Stderr, lev)
+	handler := newCLIHandler(os.Stderr, lev)
 	return slog.New(handler)
 }
 

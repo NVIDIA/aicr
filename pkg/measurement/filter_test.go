@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ package measurement
 import "testing"
 
 func TestFilterOut(t *testing.T) {
+	t.Parallel()
+
 	// Create test data
 	readings := map[string]Reading{
 		"root_user":       Str("admin"),
@@ -77,6 +79,8 @@ func TestFilterOut(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			result := FilterOut(readings, tt.patterns)
 
 			// Check that result has the expected number of keys
@@ -108,7 +112,9 @@ func TestFilterOut(t *testing.T) {
 	}
 }
 
-func TestFilterIn(t *testing.T) {
+func Test_filterIn(t *testing.T) {
+	t.Parallel()
+
 	// Create test data
 	readings := map[string]Reading{
 		"root_user":       Str("admin"),
@@ -169,17 +175,19 @@ func TestFilterIn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := FilterIn(readings, tt.patterns)
+			t.Parallel()
+
+			result := filterIn(readings, tt.patterns)
 
 			// Check that result has the expected number of keys
 			if len(result) != len(tt.wantKeys) {
-				t.Errorf("FilterIn() returned %d keys, want %d", len(result), len(tt.wantKeys))
+				t.Errorf("filterIn() returned %d keys, want %d", len(result), len(tt.wantKeys))
 			}
 
 			// Check that all expected keys are present
 			for _, wantKey := range tt.wantKeys {
 				if _, exists := result[wantKey]; !exists {
-					t.Errorf("FilterIn() missing expected key %q", wantKey)
+					t.Errorf("filterIn() missing expected key %q", wantKey)
 				}
 			}
 
@@ -193,7 +201,7 @@ func TestFilterIn(t *testing.T) {
 					}
 				}
 				if !found {
-					t.Errorf("FilterIn() contains unexpected key %q", key)
+					t.Errorf("filterIn() contains unexpected key %q", key)
 				}
 			}
 		})
@@ -201,6 +209,8 @@ func TestFilterIn(t *testing.T) {
 }
 
 func TestMatchesPattern(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		key     string
@@ -241,6 +251,8 @@ func TestMatchesPattern(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := matchesPattern(tt.key, tt.pattern)
 			if got != tt.want {
 				t.Errorf("matchesPattern(%q, %q) = %v, want %v", tt.key, tt.pattern, got, tt.want)

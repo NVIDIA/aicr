@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package server
 
 import (
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -24,8 +25,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// Config holds server configuration
-type Config struct {
+// config holds server configuration
+type config struct {
 	// Server identity
 	Name    string
 	Version string
@@ -49,14 +50,14 @@ type Config struct {
 }
 
 // parseConfig returns sensible defaults
-func parseConfig() *Config {
-	cfg := &Config{
+func parseConfig() *config {
+	cfg := &config{
 		Name:            "server",
 		Version:         "undefined",
 		Address:         "",
 		Port:            8080,
-		RateLimit:       100, // 100 req/s
-		RateLimitBurst:  200, // burst of 200
+		RateLimit:       defaults.ServerDefaultRateLimit,
+		RateLimitBurst:  defaults.ServerDefaultRateLimitBurst,
 		ReadTimeout:     defaults.ServerReadTimeout,
 		WriteTimeout:    defaults.ServerWriteTimeout,
 		IdleTimeout:     defaults.ServerIdleTimeout,
@@ -68,6 +69,8 @@ func parseConfig() *Config {
 		var port int
 		if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
 			cfg.Port = port
+		} else {
+			slog.Warn("failed to parse PORT env var, using default", "value", portStr, "error", err)
 		}
 	}
 
@@ -76,6 +79,8 @@ func parseConfig() *Config {
 		var seconds int
 		if _, err := fmt.Sscanf(shutdownStr, "%d", &seconds); err == nil && seconds > 0 {
 			cfg.ShutdownTimeout = time.Duration(seconds) * time.Second
+		} else {
+			slog.Warn("failed to parse SHUTDOWN_TIMEOUT_SECONDS env var, using default", "value", shutdownStr, "error", err)
 		}
 	}
 

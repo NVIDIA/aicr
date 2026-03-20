@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,6 +22,32 @@ info:
 
     The recipe system uses a criteria-based overlay architecture where base configurations are layered
     with environment-specific overlays based on criteria matching.
+
+    The API server exposes recipe generation and bundle creation. The following CLI-only
+    capabilities are intentionally excluded because they require direct cluster access,
+    long-running Kubernetes Jobs, interactive authentication, or local filesystem operations:
+
+    - **Snapshot capture** (`aicr snapshot`) — deploys an agent Job to collect cluster state.
+
+    - **Validation** (`aicr validate`) — deploys per-check Jobs and evaluates constraints
+      against a live cluster.
+
+    - **Bundle verification** (`aicr verify`) — verifies attestation signatures and checksums
+      from a local bundle directory.
+
+    - **Trust management** (`aicr trust update`) — updates the local Sigstore TUF root cache.
+
+    - **Bundle attestation** (`aicr bundle --attest`) — requires OIDC interactive or ambient
+      authentication for Sigstore signing.
+
+    - **OCI registry push** (`aicr bundle --output oci://...`) — pushes bundle artifacts to
+      a container registry.
+
+    - **Snapshot-based recipe generation** (`aicr recipe --snapshot`) — evaluates constraints
+      against snapshot data to produce a cluster-aware recipe.
+
+    - **External data overlays** (`aicr recipe --data`, `aicr bundle --data`) — overlays
+      custom components and overlays from a local directory onto embedded recipe data.
 
 servers:
   - url: http://localhost:8080
@@ -546,6 +572,39 @@ paths:
             type: string
             format: uri
           example: "https://github.com/my-org/my-gitops-repo.git"
+        - name: workload-gate
+          in: query
+          required: false
+          description: >
+            Taint for skyhook-operator workload gating (format: key=value:effect or key:effect).
+            Configures a day-2 scaling gate that prevents workloads from scheduling on new
+            nodes until the runtime stack is ready.
+          schema:
+            type: string
+          example: "skyhook.nvidia.com/runtime=required:NoSchedule"
+        - name: workload-selector
+          in: query
+          required: false
+          description: >
+            Label selector for skyhook-customizations (format: key=value).
+            Can be repeated for multiple selectors.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: ["skyhook.nvidia.com/managed=true"]
+        - name: nodes
+          in: query
+          required: false
+          description: >
+            Estimated number of GPU nodes in the cluster (0 = unset).
+            Used to configure node-count-aware components such as skyhook-operator.
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
       requestBody:
         required: true
         description: The recipe (RecipeResult) to generate bundles from

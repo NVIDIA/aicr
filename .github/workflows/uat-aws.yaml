@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ jobs:
       DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
       CLUSTER_CONFIG: tests/uat/aws/config.yaml
       EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:c631e2bebf605690c6cfbb072cb2116023fd0f6b43c2c4c6ead0416ee586635d"
-      VALIDATOR_IMAGE: "ghcr.io/nvidia/aicr-validator"
+      VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
 
       # Debug
@@ -55,7 +55,7 @@ jobs:
 
       # Build from source
       - name: Setup Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417  # v6.3.0
         with:
           go-version: '${{ steps.versions.outputs.go }}'
           cache: true
@@ -73,20 +73,19 @@ jobs:
       - name: Authenticate to GHCR
         uses: ./.github/actions/ghcr-login
 
-      - name: Build and push validator image
+      - name: Build and push validator images
         run: |
-          IMAGE="${VALIDATOR_IMAGE}:${VALIDATOR_TAG}"
-          docker build -f Dockerfile.validator \
-            --build-arg VERSION="${VALIDATOR_TAG}" \
-            --build-arg COMMIT="${{ github.sha }}" \
-            --build-arg DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -t "${IMAGE}" .
-          docker push "${IMAGE}"
+          for phase in deployment performance conformance; do
+            IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
+            docker build -f "validators/${phase}/Dockerfile" \
+              -t "${IMAGE}" .
+            docker push "${IMAGE}"
+          done
 
       # Auth
       - name: Configure AWS credentials
         id: auth
-        uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708  # v5.1.1
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7  # v6.0.0
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -167,8 +166,6 @@ jobs:
         shell: bash
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
-          AICR_IMAGE: "${{ env.VALIDATOR_IMAGE }}:${{ env.VALIDATOR_TAG }}"
-          AICR_VALIDATOR_IMAGE: "${{ env.VALIDATOR_IMAGE }}:${{ env.VALIDATOR_TAG }}"
         run: |
           set -euxo pipefail
           chainsaw test \
@@ -203,19 +200,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Delete the UAT-tagged image version to avoid GHCR clutter
-          VERSION_ID=$(gh api \
-            repos/${{ github.repository }}/packages/container/aicr-validator/versions \
-            --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
-          if [[ -n "${VERSION_ID}" ]]; then
-            gh api --method DELETE \
-              repos/${{ github.repository }}/packages/container/aicr-validator/versions/${VERSION_ID} || true
-          fi
+          # Delete UAT-tagged validator images to avoid GHCR clutter
+          for phase in deployment performance conformance; do
+            VERSION_ID=$(gh api \
+              "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
+              --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
+            if [[ -n "${VERSION_ID}" ]]; then
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
+            fi
+          done
 
       # Artifacts
       - name: Upload Test Artifacts
         if: always() && steps.tests.outcome != 'skipped'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
         with:
           name: uat-aws-results
           path: |

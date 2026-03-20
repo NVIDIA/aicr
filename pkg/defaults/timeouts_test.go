@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,8 @@ func TestTimeoutConstants(t *testing.T) {
 	}{
 		// Collector timeouts
 		{"CollectorTimeout", CollectorTimeout, 5 * time.Second, 30 * time.Second},
-		{"CollectorK8sTimeout", CollectorK8sTimeout, 10 * time.Second, 60 * time.Second},
+		{"CollectorK8sTimeout", CollectorK8sTimeout, 30 * time.Second, 120 * time.Second},
+		{"CollectorTopologyTimeout", CollectorTopologyTimeout, 60 * time.Second, 180 * time.Second},
 
 		// Handler timeouts
 		{"RecipeHandlerTimeout", RecipeHandlerTimeout, 10 * time.Second, 60 * time.Second},
@@ -43,19 +44,16 @@ func TestTimeoutConstants(t *testing.T) {
 
 		// K8s timeouts
 		{"K8sJobCreationTimeout", K8sJobCreationTimeout, 10 * time.Second, 60 * time.Second},
-		{"K8sPodReadyTimeout", K8sPodReadyTimeout, 30 * time.Second, 120 * time.Second},
+		{"K8sPodReadyTimeout", K8sPodReadyTimeout, 1 * time.Minute, 3 * time.Minute},
 		{"K8sJobCompletionTimeout", K8sJobCompletionTimeout, 1 * time.Minute, 10 * time.Minute},
 		{"K8sCleanupTimeout", K8sCleanupTimeout, 10 * time.Second, 60 * time.Second},
+		{"K8sPodTerminationWaitTimeout", K8sPodTerminationWaitTimeout, 30 * time.Second, 120 * time.Second},
 
 		// HTTP client timeouts
 		{"HTTPClientTimeout", HTTPClientTimeout, 10 * time.Second, 60 * time.Second},
 		{"HTTPConnectTimeout", HTTPConnectTimeout, 1 * time.Second, 15 * time.Second},
 
 		// Validation phase timeouts
-		{"ValidateReadinessTimeout", ValidateReadinessTimeout, 1 * time.Minute, 10 * time.Minute},
-		{"ValidateDeploymentTimeout", ValidateDeploymentTimeout, 5 * time.Minute, 30 * time.Minute},
-		{"ValidatePerformanceTimeout", ValidatePerformanceTimeout, 10 * time.Minute, 60 * time.Minute},
-		{"ValidateConformanceTimeout", ValidateConformanceTimeout, 5 * time.Minute, 30 * time.Minute},
 		{"ResourceVerificationTimeout", ResourceVerificationTimeout, 5 * time.Second, 30 * time.Second},
 
 		// Conformance check execution timeout
@@ -64,8 +62,10 @@ func TestTimeoutConstants(t *testing.T) {
 		// Gang scheduling co-scheduling window
 		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
 
-		// Evidence rendering timeout
-		{"EvidenceRenderTimeout", EvidenceRenderTimeout, 10 * time.Second, 60 * time.Second},
+		// Validator timeouts
+		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 10 * time.Second, 60 * time.Second},
+		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
+		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
 	}
 
 	for _, tt := range tests {
@@ -117,26 +117,7 @@ func TestHTTPClientTimeoutRelationships(t *testing.T) {
 	}
 }
 
-func TestValidationPhaseTimeoutRelationships(t *testing.T) {
-	// Readiness should be the shortest phase
-	if ValidateReadinessTimeout > ValidateDeploymentTimeout {
-		t.Errorf("ValidateReadinessTimeout (%v) should not exceed ValidateDeploymentTimeout (%v)",
-			ValidateReadinessTimeout, ValidateDeploymentTimeout)
-	}
-	// Resource verification should be much shorter than phase timeout
-	if ResourceVerificationTimeout >= ValidateDeploymentTimeout {
-		t.Errorf("ResourceVerificationTimeout (%v) should be less than ValidateDeploymentTimeout (%v)",
-			ResourceVerificationTimeout, ValidateDeploymentTimeout)
-	}
-}
-
 func TestCheckExecutionTimeoutRelationships(t *testing.T) {
-	// Check execution timeout must be shorter than the conformance Job timeout
-	// to allow the Job to observe completion before its own deadline.
-	if CheckExecutionTimeout >= ValidateConformanceTimeout {
-		t.Errorf("CheckExecutionTimeout (%v) should be less than ValidateConformanceTimeout (%v)",
-			CheckExecutionTimeout, ValidateConformanceTimeout)
-	}
 	// Individual check timeouts must fit within the execution context.
 	if DRATestPodTimeout >= CheckExecutionTimeout {
 		t.Errorf("DRATestPodTimeout (%v) should be less than CheckExecutionTimeout (%v)",
@@ -150,5 +131,31 @@ func TestCollectorTimeoutLessThanK8s(t *testing.T) {
 	if CollectorTimeout > CollectorK8sTimeout {
 		t.Errorf("CollectorTimeout (%v) should not exceed CollectorK8sTimeout (%v)",
 			CollectorTimeout, CollectorK8sTimeout)
+	}
+}
+
+func TestValidatorTimeoutRelationships(t *testing.T) {
+	// Grace period must fit within the wait buffer so the orchestrator
+	// outlives the container's SIGTERM window.
+	if ValidatorTerminationGracePeriod > ValidatorWaitBuffer {
+		t.Errorf("ValidatorTerminationGracePeriod (%v) should not exceed ValidatorWaitBuffer (%v)",
+			ValidatorTerminationGracePeriod, ValidatorWaitBuffer)
+	}
+	// Default timeout must be positive and reasonable.
+	if ValidatorDefaultTimeout < 1*time.Minute {
+		t.Errorf("ValidatorDefaultTimeout (%v) should be at least 1m", ValidatorDefaultTimeout)
+	}
+	// Max stdout lines must be positive.
+	if ValidatorMaxStdoutLines <= 0 {
+		t.Errorf("ValidatorMaxStdoutLines (%d) should be positive", ValidatorMaxStdoutLines)
+	}
+}
+
+func TestTopologyTimeoutGreaterThanK8s(t *testing.T) {
+	// Topology collector paginates through all nodes, so it needs more time
+	// than the standard K8s collector
+	if CollectorTopologyTimeout <= CollectorK8sTimeout {
+		t.Errorf("CollectorTopologyTimeout (%v) should exceed CollectorK8sTimeout (%v)",
+			CollectorTopologyTimeout, CollectorK8sTimeout)
 	}
 }

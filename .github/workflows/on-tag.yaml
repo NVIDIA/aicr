@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ name: On Tag Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'  # Only build tags with semantic versioning format
+      - 'v[0-9]+.[0-9]+.[0-9]+*'  # Semantic versioning with optional pre-release suffix (e.g., v1.2.3-rc1)
 
 permissions:
   contents: read
@@ -27,7 +27,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  VALIDATOR_IMAGE: ghcr.io/nvidia/aicr-validator
+  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
 
 jobs:
 
@@ -71,13 +71,13 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417  # v6.3.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
+        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22  # v4.1.0
 
       - name: Generate SLSA predicate
         uses: ./.github/actions/generate-slsa-predicate
@@ -89,6 +89,7 @@ jobs:
         uses: ./.github/actions/go-build-release
         with:
           ko_version: ${{ steps.versions.outputs.ko }}
+          homebrew_deploy_key: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
 
       - name: Malware Scan Release Binaries
         if: steps.release.outcome == 'success'
@@ -102,7 +103,7 @@ jobs:
   # =============================================================================
 
   build-docker:
-    name: Docker Validator (${{ matrix.arch }})
+    name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     needs: [tests]
     timeout-minutes: 15
@@ -112,6 +113,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        phase: [deployment, performance, conformance]
+        arch: [amd64, arm64]
         include:
           - arch: amd64
             runner: ubuntu-latest
@@ -126,28 +129,25 @@ jobs:
           persist-credentials: false
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2  # v3.10.0
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
       - name: Build and push
-        uses: docker/build-push-action@471d1dc4e07e5cdedd4c2171150001c434f0b7a4  # v6.15.0
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
         with:
           context: .
-          file: Dockerfile.validator
+          file: validators/${{ matrix.phase }}/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ env.VALIDATOR_IMAGE }}:${{ github.ref_name }}-${{ matrix.arch }}
-          build-args: |
-            VERSION=${{ github.ref_name }}
-            COMMIT=${{ github.sha }}
-            DATE=${{ github.event.head_commit.timestamp }}
+          tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ github.ref_name }}-${{ matrix.arch }}
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.title=aicr-validator
+            org.opencontainers.image.title=aicr-validator-${{ matrix.phase }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -173,11 +173,26 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
-      - name: Create multi-arch manifest
-        uses: ./.github/actions/docker-manifest
-        with:
-          image: ${{ env.VALIDATOR_IMAGE }}
-          tag: ${{ github.ref_name }}
+      - name: Create multi-arch manifests for validator images
+        run: |
+          set -euo pipefail
+          for phase in deployment performance conformance; do
+            IMAGE="${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}"
+
+            # Version tag manifest
+            docker manifest create \
+              "${IMAGE}:${{ github.ref_name }}" \
+              "${IMAGE}:${{ github.ref_name }}-amd64" \
+              "${IMAGE}:${{ github.ref_name }}-arm64"
+            docker manifest push "${IMAGE}:${{ github.ref_name }}"
+
+            # Latest tag manifest (matches catalog's default :latest references)
+            docker manifest create --amend \
+              "${IMAGE}:latest" \
+              "${IMAGE}:${{ github.ref_name }}-amd64" \
+              "${IMAGE}:${{ github.ref_name }}-arm64"
+            docker manifest push "${IMAGE}:latest"
+          done
 
   # =============================================================================
   # Container Image Vulnerability Scan (runs after all images are built)
@@ -199,7 +214,9 @@ jobs:
         image:
           - ghcr.io/nvidia/aicr
           - ghcr.io/nvidia/aicrd
-          - ghcr.io/nvidia/aicr-validator
+          - ghcr.io/nvidia/aicr-validators/deployment
+          - ghcr.io/nvidia/aicr-validators/performance
+          - ghcr.io/nvidia/aicr-validators/conformance
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -211,7 +228,7 @@ jobs:
 
       - name: Scan container image
         id: trivy
-        uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518  # v0.34.1
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0
         with:
           scan-type: 'image'
           image-ref: '${{ matrix.image }}:${{ github.ref_name }}'
@@ -225,7 +242,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: hashFiles('image-scan-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@b20883b0cd1f46c72ae0ba6d1090936928f9fa30  # v4.32.0
+        uses: github/codeql-action/upload-sarif@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
         with:
           sarif_file: image-scan-results.sarif
           category: 'trivy-image-${{ matrix.image }}'
@@ -280,10 +297,24 @@ jobs:
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
-      - name: Attest aicr-validator image
+      - name: Attest deployment validator image
         uses: ./.github/actions/attest-image-from-tag
         with:
-          image_name: ghcr.io/nvidia/aicr-validator
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/deployment
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest performance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/performance
+          tag: ${{ github.ref_name }}
+          crane_version: ${{ steps.versions.outputs.crane }}
+
+      - name: Attest conformance validator image
+        uses: ./.github/actions/attest-image-from-tag
+        with:
+          image_name: ${{ env.VALIDATOR_IMAGE_PREFIX }}/conformance
           tag: ${{ github.ref_name }}
           crane_version: ${{ steps.versions.outputs.crane }}
 
@@ -357,13 +388,63 @@ jobs:
             --draft=false
 
   # =============================================================================
+  # Site: Deploy versioned documentation to GitHub Pages
+  # Dispatched on main (not the tag ref) to satisfy the github-pages
+  # environment's branch deployment policy.
+  # =============================================================================
+
+  site:
+    name: Deploy Site
+    runs-on: ubuntu-latest
+    needs: [publish]
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger site deploy on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run gh-pages.yaml \
+            --repo "${REPO}" \
+            --ref main
+
+  # =============================================================================
+  # Notify: Post release announcement to Slack
+  # =============================================================================
+
+  notify:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    needs: [publish]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Post to Slack
+        env:
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+          SERVER: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          RELEASE_URL="${SERVER}/${REPO}/releases/tag/${TAG}"
+          curl -sSf -X POST \
+            -H 'Content-type: application/json' \
+            --data "{\"text\":\"AICR ${TAG} has been released: ${RELEASE_URL}\"}" \
+            "https://hooks.slack.com/services/${SLACK_SERVICE}"
+
+  # =============================================================================
   # Summary: Release pipeline report (always runs, even on failure)
   # =============================================================================
 
   summary:
     name: Release Summary
     runs-on: ubuntu-latest
-    needs: [tests, build-ko, build-docker, docker-manifest, image-vuln-scan, attest, release-check, deploy, publish]
+    needs: [tests, build-ko, build-docker, docker-manifest, image-vuln-scan, attest, release-check, deploy, publish, site, notify]
     if: always()
     timeout-minutes: 5
     permissions:
@@ -380,6 +461,8 @@ jobs:
           RELEASE_CHECK: ${{ needs.release-check.result }}
           DEPLOY: ${{ needs.deploy.result }}
           PUBLISH: ${{ needs.publish.result }}
+          SITE: ${{ needs.site.result }}
+          NOTIFY: ${{ needs.notify.result }}
           TAG: ${{ github.ref_name }}
           COMMIT: ${{ github.sha }}
         run: |
@@ -400,4 +483,6 @@ jobs:
             echo "| Release Check | ${RELEASE_CHECK} |"
             echo "| Deploy | ${DEPLOY} |"
             echo "| Publish | ${PUBLISH} |"
+            echo "| Site | ${SITE} |"
+            echo "| Slack Notification | ${NOTIFY} |"
           } >> "$GITHUB_STEP_SUMMARY"

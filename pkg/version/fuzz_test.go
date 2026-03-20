@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ func FuzzParseVersion(f *testing.F) {
 			// Test comparison methods don't panic
 			v3 := NewVersion(1, 2, 3)
 			_ = v.EqualsOrNewer(v3)
-			_ = v.IsNewer(v3)
+			_ = v.isNewer(v3)
 			_ = v.Equals(v3)
 			_ = v.Compare(v3)
 		}

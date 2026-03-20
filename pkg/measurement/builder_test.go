@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,11 @@ import (
 )
 
 func TestSubtypeBuilder(t *testing.T) {
+	t.Parallel()
+
 	t.Run("basic build", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder(testSubtypeCluster).
 			SetString("version", testVersion).
 			SetInt("nodes", 3).
@@ -43,13 +47,15 @@ func TestSubtypeBuilder(t *testing.T) {
 			t.Errorf("GetInt64(nodes) = %v, %v; want 3, nil", nodes, err)
 		}
 
-		ready, err := st.GetBool("ready")
+		ready, err := st.getBool("ready")
 		if err != nil || !ready {
 			t.Errorf("GetBool(ready) = %v, %v; want true, nil", ready, err)
 		}
 	})
 
 	t.Run("all numeric types", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("metrics").
 			SetInt("int_val", 42).
 			SetInt64("int64_val", 9223372036854775807).
@@ -72,23 +78,25 @@ func TestSubtypeBuilder(t *testing.T) {
 			t.Errorf("int64_val = %v, want 9223372036854775807", int64Val)
 		}
 
-		uintVal, _ := st.GetUint64("uint_val")
+		uintVal, _ := st.getUint64("uint_val")
 		if uintVal != 42 {
 			t.Errorf("uint_val = %v, want 42", uintVal)
 		}
 
-		uint64Val, _ := st.GetUint64("uint64_val")
+		uint64Val, _ := st.getUint64("uint64_val")
 		if uint64Val != 18446744073709551615 {
 			t.Errorf("uint64_val = %v, want 18446744073709551615", uint64Val)
 		}
 
-		floatVal, _ := st.GetFloat64("float_val")
+		floatVal, _ := st.getFloat64("float_val")
 		if floatVal != 3.14 {
 			t.Errorf("float_val = %v, want 3.14", floatVal)
 		}
 	})
 
 	t.Run("using Set with Reading", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("test").
 			Set("version", Str("1.0.0")).
 			Set("count", Int(10)).
@@ -100,6 +108,8 @@ func TestSubtypeBuilder(t *testing.T) {
 	})
 
 	t.Run("empty builder", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("empty").Build()
 
 		if st.Name != "empty" {
@@ -111,6 +121,8 @@ func TestSubtypeBuilder(t *testing.T) {
 	})
 
 	t.Run("overwrite existing key", func(t *testing.T) {
+		t.Parallel()
+
 		st := NewSubtypeBuilder("test").
 			SetString("key", "value1").
 			SetString("key", "value2").
@@ -124,7 +136,11 @@ func TestSubtypeBuilder(t *testing.T) {
 }
 
 func TestMeasurementBuilder(t *testing.T) {
+	t.Parallel()
+
 	t.Run("basic build", func(t *testing.T) {
+		t.Parallel()
+
 		m := NewMeasurement(TypeK8s).
 			WithSubtype(
 				NewSubtypeBuilder("cluster").
@@ -158,6 +174,8 @@ func TestMeasurementBuilder(t *testing.T) {
 	})
 
 	t.Run("using WithSubtypeBuilder", func(t *testing.T) {
+		t.Parallel()
+
 		builder := NewSubtypeBuilder("test").SetString("key", "value")
 
 		m := NewMeasurement(TypeGPU).
@@ -170,6 +188,8 @@ func TestMeasurementBuilder(t *testing.T) {
 	})
 
 	t.Run("empty measurement", func(t *testing.T) {
+		t.Parallel()
+
 		m := NewMeasurement(TypeOS).Build()
 
 		if m.Type != TypeOS {
@@ -181,6 +201,8 @@ func TestMeasurementBuilder(t *testing.T) {
 	})
 
 	t.Run("fluent API example", func(t *testing.T) {
+		t.Parallel()
+
 		m := NewMeasurement(TypeGPU).
 			WithSubtypeBuilder(
 				NewSubtypeBuilder("gpu0").
@@ -202,12 +224,12 @@ func TestMeasurementBuilder(t *testing.T) {
 			t.Errorf("Validate() error = %v", err)
 		}
 
-		if !m.HasSubtype("gpu0") || !m.HasSubtype("gpu1") {
+		if !m.hasSubtype("gpu0") || !m.hasSubtype("gpu1") {
 			t.Error("Expected both gpu0 and gpu1 subtypes")
 		}
 
 		gpu0 := m.GetSubtype("gpu0")
-		temp, err := gpu0.GetFloat64("temp")
+		temp, err := gpu0.getFloat64("temp")
 		if err != nil || temp != 65.5 {
 			t.Errorf("GetFloat64(temp) = %v, %v; want 65.5, nil", temp, err)
 		}

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,11 @@
 package cli
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/urfave/cli/v3"
 )
 
@@ -59,4 +62,81 @@ func TestBundleVerifyCmd_MinTrustLevelDefault(t *testing.T) {
 		}
 	}
 	t.Error("min-trust-level flag not found")
+}
+
+func TestOutputText_Verdict(t *testing.T) {
+	tests := []struct {
+		name          string
+		result        *verifier.VerifyResult
+		policyFailure string
+		wantContains  string
+		wantAbsent    string
+	}{
+		{
+			name: "clean bundle shows PASSED",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				ChecksumFiles:   12,
+				TrustLevel:      verifier.TrustUnverified,
+			},
+			wantContains: "PASSED",
+			wantAbsent:   "FAILED",
+		},
+		{
+			name: "checksum mismatch shows FAILED",
+			result: &verifier.VerifyResult{
+				TrustLevel: verifier.TrustUnknown,
+				Errors:     []string{"checksum mismatch: deploy.sh"},
+			},
+			wantContains: "FAILED",
+			wantAbsent:   "PASSED",
+		},
+		{
+			name: "policy failure shows FAILED",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				TrustLevel:      verifier.TrustUnverified,
+			},
+			policyFailure: "trust level unverified does not meet minimum attested",
+			wantContains:  "FAILED",
+			wantAbsent:    "PASSED",
+		},
+		{
+			name: "verified bundle shows PASSED",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				ChecksumFiles:   12,
+				BundleAttested:  true,
+				BinaryAttested:  true,
+				IdentityPinned:  true,
+				TrustLevel:      verifier.TrustVerified,
+			},
+			wantContains: "PASSED",
+			wantAbsent:   "FAILED",
+		},
+		{
+			name: "attestation verification error shows FAILED",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				TrustLevel:      verifier.TrustUnknown,
+				Errors:          []string{"bundle attestation verification failed: certificate chain error"},
+			},
+			wantContains: "FAILED",
+			wantAbsent:   "PASSED",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			outputText(&buf, tt.result, tt.policyFailure)
+			output := buf.String()
+
+			if !strings.Contains(output, tt.wantContains) {
+				t.Errorf("output missing %q:\n%s", tt.wantContains, output)
+			}
+			if tt.wantAbsent != "" && strings.Contains(output, tt.wantAbsent) {
+				t.Errorf("output should not contain %q:\n%s", tt.wantAbsent, output)
+			}
+		})
+	}
 }

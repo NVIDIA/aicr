@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Allows maintainers to run the full qualification suite on fork PRs
+# by commenting "/ok-to-test" on the PR. This runs in the base repo
+# context, so id-token: write and other elevated permissions are available.
+
+name: OK to Test
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+
+jobs:
+
+  authorize:
+    name: Authorize
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/ok-to-test'
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pr.outputs.ref }}
+    steps:
+
+      - name: Check maintainer permission
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        with:
+          script: |
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.payload.comment.user.login,
+            });
+            const allowed = ['admin', 'write', 'maintain'];
+            if (!allowed.includes(data.permission)) {
+              core.setFailed(`User ${context.payload.comment.user.login} does not have write permission`);
+            }
+
+      - name: Get PR head ref
+        id: pr
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('ref', pr.head.sha);
+            core.info(`PR #${context.issue.number} head SHA: ${pr.head.sha}`);
+
+  tests:
+    needs: authorize
+    uses: ./.github/workflows/qualification.yaml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write
+    with:
+      ref: ${{ needs.authorize.outputs.ref }}

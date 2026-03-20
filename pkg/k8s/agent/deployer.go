@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,10 +30,19 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 	// Step 0: Check permissions before attempting deployment
 	_, err := d.CheckPermissions(ctx)
 	if err != nil {
+		if aicrerrors.IsNetworkError(err) {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeUnavailable,
+				"cannot reach Kubernetes API server\n\nCheck your network connectivity:\n  - Is your VPN connected?\n  - Is the cluster endpoint correct in your kubeconfig?\n  - Are firewall rules allowing egress to the API server?", err)
+		}
 		return aicrerrors.Wrap(aicrerrors.ErrCodeUnauthorized, "insufficient permissions to deploy agent\n\nTo deploy the agent, you need cluster admin privileges.\nRun: aicr snapshot", err)
 	}
 
-	// Step 1: Ensure RBAC resources (idempotent - reuses if already exists)
+	// Step 1: Ensure namespace exists
+	if err := d.ensureNamespace(ctx); err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to ensure namespace", err)
+	}
+
+	// Step 2: Ensure RBAC resources (idempotent - reuses if already exists)
 	if err := d.ensureServiceAccount(ctx); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)
 	}
@@ -52,12 +61,6 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 
 	if err := d.ensureClusterRoleBinding(ctx); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
-	}
-
-	if len(d.config.HelmNamespaces) > 0 {
-		if err := d.ensureHelmSecretRoles(ctx); err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Helm secrets RBAC", err)
-		}
 	}
 
 	// Step 2: Ensure Job (delete existing + recreate)
@@ -128,14 +131,6 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 		errs = append(errs, fmt.Sprintf("ClusterRoleBinding %q: %v", clusterRoleName, err))
 	} else {
 		deleted = append(deleted, fmt.Sprintf("ClusterRoleBinding %q", clusterRoleName))
-	}
-
-	if len(d.config.HelmNamespaces) > 0 {
-		if err := d.deleteHelmSecretRoles(ctx); err != nil {
-			errs = append(errs, fmt.Sprintf("Helm secrets RBAC: %v", err))
-		} else {
-			deleted = append(deleted, fmt.Sprintf("Helm secrets RBAC (%d namespaces)", len(d.config.HelmNamespaces)))
-		}
 	}
 
 	// Log successful deletions

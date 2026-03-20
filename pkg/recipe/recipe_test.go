@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@
 // Area of Concern: Runtime recipe validation
 // - Recipe.Validate() - ensures recipe has measurements
 // - Recipe.ValidateStructure() - validates measurement structure integrity
-// - Recipe.ValidateMeasurementExists() - checks specific measurements exist
-// - Recipe.ValidateSubtypeExists() - checks specific subtypes exist
-// - ValidateRequiredKeys() - validates required keys in readings
+// - Recipe.validateMeasurementExists() - checks specific measurements exist
+// - Recipe.validateSubtypeExists() - checks specific subtypes exist
+// - validateRequiredKeys() - validates required keys in readings
 //
 // These tests use synthesized Go structs to verify the Recipe type behavior
 // after a recipe has been built from metadata.
@@ -224,7 +224,7 @@ func TestRecipe_ValidateStructure(t *testing.T) {
 	}
 }
 
-func TestRecipe_ValidateMeasurementExists(t *testing.T) {
+func TestRecipe_validateMeasurementExists(t *testing.T) {
 	validRecipe := &Recipe{
 		Measurements: []*measurement.Measurement{
 			{
@@ -310,21 +310,21 @@ func TestRecipe_ValidateMeasurementExists(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.recipe.ValidateMeasurementExists(tt.measurementType)
+			err := tt.recipe.validateMeasurementExists(tt.measurementType)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Recipe.ValidateMeasurementExists() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Recipe.validateMeasurementExists() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr && err != nil {
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("Recipe.ValidateMeasurementExists() error = %v, want to contain %v", err.Error(), tt.errContains)
+					t.Errorf("Recipe.validateMeasurementExists() error = %v, want to contain %v", err.Error(), tt.errContains)
 				}
 			}
 		})
 	}
 }
 
-func TestRecipe_ValidateSubtypeExists(t *testing.T) {
+func TestRecipe_validateSubtypeExists(t *testing.T) {
 	validRecipe := &Recipe{
 		Measurements: []*measurement.Measurement{
 			{
@@ -415,21 +415,21 @@ func TestRecipe_ValidateSubtypeExists(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.recipe.ValidateSubtypeExists(tt.measurementType, tt.subtypeName)
+			err := tt.recipe.validateSubtypeExists(tt.measurementType, tt.subtypeName)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("Recipe.ValidateSubtypeExists() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Recipe.validateSubtypeExists() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr && err != nil {
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("Recipe.ValidateSubtypeExists() error = %v, want to contain %v", err.Error(), tt.errContains)
+					t.Errorf("Recipe.validateSubtypeExists() error = %v, want to contain %v", err.Error(), tt.errContains)
 				}
 			}
 		})
 	}
 }
 
-func TestValidateRequiredKeys(t *testing.T) {
+func Test_validateRequiredKeys(t *testing.T) {
 	tests := []struct {
 		name         string
 		subtype      *measurement.Subtype
@@ -506,14 +506,14 @@ func TestValidateRequiredKeys(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRequiredKeys(tt.subtype, tt.requiredKeys)
+			err := validateRequiredKeys(tt.subtype, tt.requiredKeys)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateRequiredKeys() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("validateRequiredKeys() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr && err != nil {
 				if tt.errContains != "" && !strings.Contains(err.Error(), tt.errContains) {
-					t.Errorf("ValidateRequiredKeys() error = %v, want to contain %v", err.Error(), tt.errContains)
+					t.Errorf("validateRequiredKeys() error = %v, want to contain %v", err.Error(), tt.errContains)
 				}
 			}
 		})

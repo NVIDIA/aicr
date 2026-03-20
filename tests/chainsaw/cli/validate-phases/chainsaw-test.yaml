@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,10 +20,8 @@ metadata:
 spec:
   description: |
     Validates the multi-phase validation CLI (--phase flag).
-    Tests individual phases, --phase all, invalid phase, multiple --phase flags,
-    and result file structure.
-    Replaces test_validate_phases() in tools/e2e.
-    No cluster needed.
+    Tests individual phases, --phase all, invalid phase, and multiple --phase flags.
+    No cluster needed. Output is CTRF JSON.
   timeouts:
     exec: 30s
   steps:
@@ -59,7 +57,7 @@ spec:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-validate-phases"
-              for phase in readiness deployment performance conformance; do
+              for phase in deployment performance conformance; do
                 output=$(${AICR_BIN} validate -r "${WORK}/recipe.yaml" \
                   -s "${WORK}/snapshot.yaml" --phase "$phase" --no-cluster 2>&1) || true
                 if ! echo "$output" | grep -qi "$phase"; then
@@ -71,7 +69,7 @@ spec:
               ($error == null): true
 
     - name: phase-all
-      description: Verify --phase all produces readiness, deployment, and performance phases.
+      description: Verify --phase all produces deployment, performance, and conformance phases.
       try:
         - script:
             content: |
@@ -79,25 +77,26 @@ spec:
               WORK="/tmp/chainsaw-validate-phases"
               output=$(${AICR_BIN} validate -r "${WORK}/recipe.yaml" \
                 -s "${WORK}/snapshot.yaml" --phase all --no-cluster \
-                -o "${WORK}/all-phases.yaml" 2>&1) || true
+                -o "${WORK}/all-phases.json" 2>&1) || true
               count=0
-              echo "$output" | grep -q "readiness" && count=$((count+1))
               echo "$output" | grep -q "deployment" && count=$((count+1))
               echo "$output" | grep -q "performance" && count=$((count+1))
+              echo "$output" | grep -q "conformance" && count=$((count+1))
               if [ "$count" -lt 3 ]; then
-                echo "Expected 3+ phases, found $count" >&2
+                echo "Expected 3 phases, found $count" >&2
                 exit 1
               fi
             check:
               ($error == null): true
 
     - name: result-structure
-      description: Verify --phase all output file contains phases key.
+      description: Verify --phase all output file is a valid CTRF report.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-validate-phases"
-              grep -q "phases:" "${WORK}/all-phases.yaml"
+              # CTRF report should have reportFormat field (JSON output)
+              grep -q '"reportFormat"' "${WORK}/all-phases.json"
             check:
               ($error == null): true
 
@@ -122,8 +121,7 @@ spec:
               WORK="/tmp/chainsaw-validate-phases"
               output=$(${AICR_BIN} validate -r "${WORK}/recipe.yaml" \
                 -s "${WORK}/snapshot.yaml" --no-cluster \
-                --phase readiness --phase deployment --phase conformance 2>&1) || true
-              echo "$output" | grep -q "readiness" || { echo "readiness missing" >&2; exit 1; }
+                --phase deployment --phase conformance 2>&1) || true
               echo "$output" | grep -q "deployment" || { echo "deployment missing" >&2; exit 1; }
               echo "$output" | grep -q "conformance" || { echo "conformance missing" >&2; exit 1; }
             check:

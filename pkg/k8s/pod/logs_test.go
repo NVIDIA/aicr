@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,66 +29,107 @@ import (
 // real log data. It returns an empty body for any pod, even nonexistent ones.
 // Therefore we can only test error paths that fail before or during Stream().
 
-func TestStreamLogs_CancelledContext(t *testing.T) {
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset()
-	var buf bytes.Buffer
+func TestStreamLogs(t *testing.T) {
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		cancel  bool
+		wantErr bool
+		wantOut bool
+	}{
+		{
+			name:    "cancelled context",
+			pod:     nil,
+			cancel:  true,
+			wantErr: true,
+		},
+		{
+			name: "success",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+			},
+			wantErr: false,
+			wantOut: true,
+		},
+	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var client *fake.Clientset //nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			if tt.pod != nil {
+				client = fake.NewSimpleClientset(tt.pod) //nolint:staticcheck
+			} else {
+				client = fake.NewSimpleClientset() //nolint:staticcheck
+			}
 
-	err := pod.StreamLogs(ctx, client, "default", "test-pod", &buf)
-	if err == nil {
-		t.Error("expected error for cancelled context")
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			var buf bytes.Buffer
+			err := pod.StreamLogs(ctx, client, "default", "test-pod", "", &buf)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("StreamLogs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantOut && buf.Len() == 0 {
+				t.Error("expected non-empty buffer from fake client")
+			}
+		})
 	}
 }
 
-func TestGetPodLogs_CancelledContext(t *testing.T) {
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	_, err := pod.GetPodLogs(ctx, client, "default", "test-pod")
-	if err == nil {
-		t.Error("expected error for cancelled context")
+func TestGetPodLogs(t *testing.T) {
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		cancel  bool
+		wantErr bool
+		wantOut bool
+	}{
+		{
+			name:    "cancelled context",
+			pod:     nil,
+			cancel:  true,
+			wantErr: true,
+		},
+		{
+			name: "success",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+			},
+			wantErr: false,
+			wantOut: true,
+		},
 	}
-}
 
-func TestStreamLogs_Success(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-	var buf bytes.Buffer
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var client *fake.Clientset //nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			if tt.pod != nil {
+				client = fake.NewSimpleClientset(tt.pod) //nolint:staticcheck
+			} else {
+				client = fake.NewSimpleClientset() //nolint:staticcheck
+			}
 
-	// Fake client returns "fake logs" for any stream request.
-	err := pod.StreamLogs(context.Background(), client, "default", "test-pod", &buf)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
-	if buf.Len() == 0 {
-		t.Error("expected non-empty buffer from fake client")
-	}
-}
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
 
-func TestGetPodLogs_Success(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-
-	// Fake client returns "fake logs" for any stream request.
-	result, err := pod.GetPodLogs(context.Background(), client, "default", "test-pod")
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
-	if result == "" {
-		t.Error("expected non-empty result from fake client")
+			result, err := pod.GetPodLogs(ctx, client, "default", "test-pod", "")
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetPodLogs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantOut && result == "" {
+				t.Error("expected non-empty result from fake client")
+			}
+		})
 	}
 }

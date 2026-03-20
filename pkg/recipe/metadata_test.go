@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@
 //
 // Related test files:
 // - recipe_test.go: Tests Recipe struct validation methods after recipes
-//   are built (Validate, ValidateStructure, ValidateMeasurementExists)
+//   are built (Validate, ValidateStructure, validateMeasurementExists)
 // - yaml_test.go: Tests embedded YAML data files for schema conformance,
 //   valid references, enum values, and constraint syntax
 
@@ -286,6 +286,48 @@ func TestRecipeMetadataSpecMerge(t *testing.T) {
 	}
 }
 
+func TestComponentRefIsEnabled(t *testing.T) {
+	tests := []struct {
+		name     string
+		ref      ComponentRef
+		expected bool
+	}{
+		{
+			name:     "no overrides",
+			ref:      ComponentRef{Name: "gpu-operator"},
+			expected: true,
+		},
+		{
+			name:     "enabled true",
+			ref:      ComponentRef{Name: "gpu-operator", Overrides: map[string]any{"enabled": true}},
+			expected: true,
+		},
+		{
+			name:     "enabled false",
+			ref:      ComponentRef{Name: "aws-ebs-csi-driver", Overrides: map[string]any{"enabled": false}},
+			expected: false,
+		},
+		{
+			name:     "enabled string false is not recognized",
+			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"enabled": "false"}},
+			expected: true,
+		},
+		{
+			name:     "other overrides no enabled key",
+			ref:      ComponentRef{Name: "test", Overrides: map[string]any{"replicas": 3}},
+			expected: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.ref.IsEnabled()
+			if got != tt.expected {
+				t.Errorf("IsEnabled() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestComponentRefMergeInheritsFromBase verifies that when an overlay specifies
 // only partial fields for a component, the missing fields are inherited from base.
 func TestComponentRefMergeInheritsFromBase(t *testing.T) {
@@ -493,7 +535,7 @@ func TestMergeValidationConfig(t *testing.T) {
 				},
 				Deployment: &ValidationPhase{
 					Timeout: "5m",
-					Checks:  []string{"operator-health"},
+					Checks:  []string{"expected-resources"},
 				},
 			},
 		}
@@ -501,7 +543,7 @@ func TestMergeValidationConfig(t *testing.T) {
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
 					Timeout: "10m",
-					Checks:  []string{"operator-health", "expected-resources"},
+					Checks:  []string{"expected-resources", "check-nvidia-smi"},
 				},
 				Performance: &ValidationPhase{
 					Timeout:        "15m",
@@ -539,7 +581,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		overlay := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
-					Checks: []string{"operator-health"},
+					Checks: []string{"expected-resources"},
 				},
 			},
 		}
@@ -548,7 +590,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation == nil {
 			t.Fatal("validation should be set from overlay")
 		}
-		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0] != "operator-health" {
+		if base.Validation.Deployment == nil || base.Validation.Deployment.Checks[0] != "expected-resources" {
 			t.Error("deployment check should be set from overlay")
 		}
 	})
@@ -557,7 +599,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Deployment: &ValidationPhase{
-					Checks: []string{"operator-health"},
+					Checks: []string{"expected-resources"},
 				},
 			},
 		}
@@ -577,7 +619,7 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 		},
 		Validation: &ValidationConfig{
 			Deployment: &ValidationPhase{
-				Checks: []string{"operator-health"},
+				Checks: []string{"expected-resources"},
 			},
 		},
 	}
@@ -592,8 +634,8 @@ func TestFinalizeRecipeResultIncludesValidation(t *testing.T) {
 	if result.Validation.Deployment == nil {
 		t.Fatal("result.Validation.Deployment should not be nil")
 	}
-	if result.Validation.Deployment.Checks[0] != "operator-health" {
-		t.Errorf("check = %q, want operator-health", result.Validation.Deployment.Checks[0])
+	if result.Validation.Deployment.Checks[0] != "expected-resources" {
+		t.Errorf("check = %q, want expected-resources", result.Validation.Deployment.Checks[0])
 	}
 }
 

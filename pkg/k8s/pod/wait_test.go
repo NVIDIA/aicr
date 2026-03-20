@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,71 +25,139 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-func TestWaitForPodReady_AlreadyReady(t *testing.T) {
-	readyPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status: corev1.PodStatus{
-			Conditions: []corev1.PodCondition{
-				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+func TestWaitForPodSucceeded(t *testing.T) {
+	tests := []struct {
+		name    string
+		pod     corev1.Pod
+		cancel  bool
+		timeout time.Duration
+		wantErr bool
+	}{
+		{
+			name: "already succeeded",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodSucceeded},
 			},
+			timeout: 5 * time.Second,
+			wantErr: false,
+		},
+		{
+			name: "pod failed",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status: corev1.PodStatus{
+					Phase:   corev1.PodFailed,
+					Reason:  "OOMKilled",
+					Message: "container ran out of memory",
+				},
+			},
+			timeout: 2 * time.Second,
+			wantErr: true,
+		},
+		{
+			name: "context cancelled",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			},
+			cancel:  true,
+			timeout: 5 * time.Second,
+			wantErr: true,
 		},
 	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(readyPod)
 
-	err := pod.WaitForPodReady(context.Background(), client, "default", "test-pod", 5*time.Second)
-	if err != nil {
-		t.Errorf("expected no error for ready pod, got: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			client := fake.NewSimpleClientset(&tt.pod)
+
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
+
+			err := pod.WaitForPodSucceeded(ctx, client, "default", "test-pod", tt.timeout)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WaitForPodSucceeded() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
-func TestWaitForPodReady_PodFailed(t *testing.T) {
-	failedPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status: corev1.PodStatus{
-			Phase:   corev1.PodFailed,
-			Reason:  "OOMKilled",
-			Message: "container ran out of memory",
+func TestWaitForPodReady(t *testing.T) {
+	tests := []struct {
+		name    string
+		pod     corev1.Pod
+		cancel  bool
+		timeout time.Duration
+		wantErr bool
+	}{
+		{
+			name: "already ready",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status: corev1.PodStatus{
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
+				},
+			},
+			timeout: 5 * time.Second,
+			wantErr: false,
+		},
+		{
+			name: "pod failed",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status: corev1.PodStatus{
+					Phase:   corev1.PodFailed,
+					Reason:  "OOMKilled",
+					Message: "container ran out of memory",
+				},
+			},
+			timeout: 2 * time.Second,
+			wantErr: true,
+		},
+		{
+			name: "timeout on pending",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			},
+			timeout: 500 * time.Millisecond,
+			wantErr: true,
+		},
+		{
+			name: "context cancelled",
+			pod: corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+				Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			},
+			cancel:  true,
+			timeout: 5 * time.Second,
+			wantErr: true,
 		},
 	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(failedPod)
 
-	err := pod.WaitForPodReady(context.Background(), client, "default", "test-pod", 2*time.Second)
-	if err == nil {
-		t.Error("expected error for failed pod")
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			client := fake.NewSimpleClientset(&tt.pod)
 
-func TestWaitForPodReady_Timeout(t *testing.T) {
-	pendingPod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status: corev1.PodStatus{
-			Phase: corev1.PodPending,
-		},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(pendingPod)
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
 
-	err := pod.WaitForPodReady(context.Background(), client, "default", "test-pod", 500*time.Millisecond)
-	if err == nil {
-		t.Error("expected timeout error for pending pod")
-	}
-}
-
-func TestWaitForPodReady_ContextCancelled(t *testing.T) {
-	p := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
-		Status:     corev1.PodStatus{Phase: corev1.PodPending},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(p)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := pod.WaitForPodReady(ctx, client, "default", "test-pod", 5*time.Second)
-	if err == nil {
-		t.Error("expected error for cancelled context")
+			err := pod.WaitForPodReady(ctx, client, "default", "test-pod", tt.timeout)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WaitForPodReady() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

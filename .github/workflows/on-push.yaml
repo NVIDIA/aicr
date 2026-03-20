@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -36,9 +36,14 @@ on:
 permissions:
   contents: read
 
+env:
+  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel in-progress PR runs but not main pushes — every main merge must
+  # complete to produce its immutable sha-<commit> image tag.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
@@ -51,3 +56,103 @@ jobs:
       security-events: write
     with:
       coverage_report: true
+
+  # =============================================================================
+  # Validator Image Build: publish :edge and sha-<commit> on merge to main
+  # Keeps validator images testable from main without requiring a release.
+  # :latest is reserved for the on-tag release pipeline (vuln scan + attestation).
+  # Skipped for pull requests — only runs on push to main.
+  # =============================================================================
+
+  build-docker:
+    name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.runner }}
+    needs: [tests]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [deployment, performance, conformance]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build and push
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
+        with:
+          context: .
+          file: validators/${{ matrix.phase }}/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:sha-${{ github.sha }}-${{ matrix.arch }}
+            ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:edge-${{ matrix.arch }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.title=aicr-validator-${{ matrix.phase }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=main-${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  docker-manifest:
+    name: Docker Manifest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Create multi-arch manifests for validator images
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          for phase in deployment performance conformance; do
+            IMAGE="${{ env.VALIDATOR_IMAGE_PREFIX }}/${phase}"
+
+            # Immutable per-commit tag for rollback and provenance
+            docker manifest create \
+              "${IMAGE}:sha-${SHA}" \
+              "${IMAGE}:sha-${SHA}-amd64" \
+              "${IMAGE}:sha-${SHA}-arm64"
+            docker manifest push "${IMAGE}:sha-${SHA}"
+
+            # Mutable :edge tag (tracks latest main, not release-grade)
+            docker manifest create --amend \
+              "${IMAGE}:edge" \
+              "${IMAGE}:edge-amd64" \
+              "${IMAGE}:edge-arm64"
+            docker manifest push "${IMAGE}:edge"
+          done

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,8 +50,8 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 		}
 
 		// Check if context is canceled
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "sysctl collection cancelled", ctxErr)
 		}
 
 		// Skip symlinks to prevent directory traversal attacks
@@ -111,7 +111,7 @@ func (c *Collector) collectSysctl(ctx context.Context) (*measurement.Subtype, er
 // parseMultiLineKeyValue attempts to parse lines as space-separated key-value pairs.
 // Returns true if all non-empty lines were successfully parsed as key-value pairs.
 func (c *Collector) parseMultiLineKeyValue(path string, lines []string, params map[string]measurement.Reading) bool {
-	allParsed := true
+	tmp := make(map[string]measurement.Reading)
 
 	for _, line := range lines {
 		if line == "" {
@@ -125,13 +125,16 @@ func (c *Collector) parseMultiLineKeyValue(path string, lines []string, params m
 			key := parts[0]
 			value := strings.Join(parts[1:], " ")
 			extendedPath := path + "/" + key
-			params[extendedPath] = measurement.Str(value)
+			tmp[extendedPath] = measurement.Str(value)
 		} else {
 			// Not a key-value pair format
-			allParsed = false
-			break
+			return false
 		}
 	}
 
-	return allParsed
+	for k, v := range tmp {
+		params[k] = v
+	}
+
+	return true
 }

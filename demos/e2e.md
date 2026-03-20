@@ -215,16 +215,16 @@ cd ../ && tree -L 2 ./recipes/
 
 ## Runtime Data Support
 
-Need Teleport, add component: 
+Need Teleport, add component to a custom data directory (e.g. `./my-data/`):
 
 ```shell
-yq . examples/data/registry.yaml
+yq . ./my-data/registry.yaml
 ```
 
-Override existing recipe: 
+Override existing recipe:
 
 ```shell
-yq . examples/data/overlays/dgxc-teleport.yaml
+yq . ./my-data/overlays/dgxc-teleport.yaml
 ```
 
 Generate recipe with external data:
@@ -235,7 +235,7 @@ aicr recipe \
   --accelerator h100 \
   --os ubuntu \
   --intent training \
-  --data ./examples/data \
+  --data ./my-data \
   --output recipe.yaml
 ```
 
@@ -254,7 +254,7 @@ Now generate bundles:
 ```shell
 aicr bundle \
   --recipe recipe.yaml \
-  --data ./examples/data \
+  --data ./my-data \
   --deployer argocd \
   --output oci://ghcr.io/nvidia/aicr-bundle-example \
   --system-node-selector nodeGroup=system-pool \

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@
 // - metadata_test.go: Tests RecipeMetadata types, Merge(), TopologicalSort(),
 //   ValidateDependencies(), and MetadataStore inheritance chain resolution
 // - recipe_test.go: Tests Recipe struct validation methods after recipes
-//   are built (Validate, ValidateStructure, ValidateMeasurementExists)
+//   are built (Validate, ValidateStructure, validateMeasurementExists)
 
 package recipe
 

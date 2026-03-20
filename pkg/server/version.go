@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	// DefaultAPIVersion is the default API version if none is negotiated
-	DefaultAPIVersion = "v1"
+	// defaultAPIVersion is the default API version if none is negotiated
+	defaultAPIVersion = "v1"
 )
 
 // negotiateAPIVersion extracts the API version from the Accept header.
@@ -31,7 +31,7 @@ const (
 func negotiateAPIVersion(r *http.Request) string {
 	accept := r.Header.Get("Accept")
 	if accept == "" {
-		return DefaultAPIVersion
+		return defaultAPIVersion
 	}
 
 	// Parse Accept header for custom vendor MIME type
@@ -49,7 +49,7 @@ func negotiateAPIVersion(r *http.Request) string {
 		}
 	}
 
-	return DefaultAPIVersion
+	return defaultAPIVersion
 }
 
 // isValidAPIVersion checks if the provided version string is a valid API version.
@@ -63,8 +63,8 @@ func isValidAPIVersion(version string) bool {
 	return validVersions[version]
 }
 
-// SetAPIVersionHeader sets the API version header in the response.
+// setAPIVersionHeader sets the API version header in the response.
 // This helps clients understand which version of the API is being used.
-func SetAPIVersionHeader(w http.ResponseWriter, version string) {
+func setAPIVersionHeader(w http.ResponseWriter, version string) {
 	w.Header().Set("X-API-Version", version)
 }

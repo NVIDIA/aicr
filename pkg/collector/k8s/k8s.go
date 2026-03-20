@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,9 +28,8 @@ import (
 
 // Collector collects information about the Kubernetes cluster.
 type Collector struct {
-	ClientSet      kubernetes.Interface
-	RestConfig     *rest.Config
-	HelmNamespaces []string // nil/empty=skip, ["*"]=all, ["ns1","ns2"]=scoped
+	ClientSet  kubernetes.Interface
+	RestConfig *rest.Config
 }
 
 // Collect retrieves Kubernetes cluster information from the API server.
@@ -69,10 +68,6 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		return k.collectNode(ctx)
 	})
 
-	helm := k.collectHelmReleasesScoped(ctx)
-
-	argocd := k.collectArgocdApplications(ctx)
-
 	res := measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("server").Set(measurement.KeyVersion, versions[measurement.KeyVersion]).
@@ -82,8 +77,6 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		WithSubtype(measurement.Subtype{Name: "image", Data: images}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: policies}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
-		WithSubtype(measurement.Subtype{Name: "helm", Data: helm}).
-		WithSubtype(measurement.Subtype{Name: "argocd", Data: argocd}).
 		Build()
 
 	return res, nil
@@ -110,8 +103,6 @@ func emptyK8sMeasurement() *measurement.Measurement {
 		WithSubtype(measurement.Subtype{Name: "image", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "policy", Data: empty}).
 		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
-		WithSubtype(measurement.Subtype{Name: "helm", Data: empty}).
-		WithSubtype(measurement.Subtype{Name: "argocd", Data: empty}).
 		Build()
 }
 

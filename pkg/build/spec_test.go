@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,6 +27,8 @@ import (
 )
 
 func TestLoadSpec(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	tests := []struct {
@@ -62,6 +64,8 @@ func TestLoadSpec(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			spec, err := LoadSpec(ctx, tt.file)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LoadSpec() error = %v, wantErr %v", err, tt.wantErr)
@@ -75,6 +79,8 @@ func TestLoadSpec(t *testing.T) {
 }
 
 func TestLoadSpec_NotFound(t *testing.T) {
+	t.Parallel()
+
 	_, err := LoadSpec(context.Background(), "testdata/does_not_exist.yaml")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
@@ -90,6 +96,8 @@ func TestLoadSpec_NotFound(t *testing.T) {
 }
 
 func TestLoadSpec_CancelledContext(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -108,6 +116,8 @@ func TestLoadSpec_CancelledContext(t *testing.T) {
 }
 
 func TestLoadSpec_Fields(t *testing.T) {
+	t.Parallel()
+
 	spec, err := LoadSpec(context.Background(), "testdata/valid_spec.yaml")
 	if err != nil {
 		t.Fatalf("LoadSpec() unexpected error: %v", err)
@@ -131,6 +141,8 @@ func TestLoadSpec_Fields(t *testing.T) {
 }
 
 func TestLoadSpec_WithStatus(t *testing.T) {
+	t.Parallel()
+
 	spec, err := LoadSpec(context.Background(), "testdata/spec_with_status.yaml")
 	if err != nil {
 		t.Fatalf("LoadSpec() unexpected error: %v", err)
@@ -152,6 +164,8 @@ func TestLoadSpec_WithStatus(t *testing.T) {
 }
 
 func TestBuildSpec_Validate(t *testing.T) {
+	t.Parallel()
+
 	validBase := func() BuildSpec {
 		return BuildSpec{
 			APIVersion: ExpectedAPIVersion,
@@ -227,6 +241,8 @@ func TestBuildSpec_Validate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			err := tt.spec.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
@@ -236,6 +252,8 @@ func TestBuildSpec_Validate(t *testing.T) {
 }
 
 func TestBuildSpec_WriteBack(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 
 	spec := &BuildSpec{
@@ -291,6 +309,8 @@ func TestBuildSpec_WriteBack(t *testing.T) {
 }
 
 func TestBuildSpec_WriteBack_CancelledContext(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -313,6 +333,8 @@ func TestBuildSpec_WriteBack_CancelledContext(t *testing.T) {
 }
 
 func TestBuildSpec_SetImageStatus(t *testing.T) {
+	t.Parallel()
+
 	spec := &BuildSpec{}
 
 	// First call should initialize the map

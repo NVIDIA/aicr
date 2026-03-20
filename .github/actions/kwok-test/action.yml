@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ runs:
         cache: false  # vendor/ provides deps; disable to save disk on constrained runners
 
     - name: Cache KWOK tools
-      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
       with:
         path: |
           /usr/local/bin/kind
@@ -74,13 +74,8 @@ runs:
           /usr/local/bin/yq
         key: kwok-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.settings.yaml') }}
 
-    - name: Free up disk space
-      shell: bash
-      run: |
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        docker system prune -f
+    - name: Prep runner for Kind
+      uses: ./.github/actions/prep-kind-runner
 
     - name: Setup build tools
       uses: ./.github/actions/setup-build-tools
@@ -94,13 +89,6 @@ runs:
         install_yq: 'true'
         yq_version: '${{ inputs.yq_version }}'
         install_goreleaser: 'true'
-
-    - name: Prep system for Kind cluster
-      shell: bash
-      run: |
-        sudo sysctl -w net.ipv4.ip_forward=1
-        sudo sysctl -w fs.inotify.max_user_watches=524288
-        sudo sysctl -w fs.inotify.max_user_instances=1024
 
     - name: Build aicr binary
       shell: bash

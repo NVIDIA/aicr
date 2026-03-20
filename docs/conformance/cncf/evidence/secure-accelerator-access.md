@@ -1,9 +1,9 @@
 # Secure Accelerator Access
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:21:40 UTC
-**Kubernetes Version:** v1.34
+**Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:40:33 UTC
 
 ---
 
@@ -19,7 +19,7 @@ access control, and auditability of accelerator usage.
 ```
 $ kubectl get clusterpolicy -o wide
 NAME             STATUS   AGE
-cluster-policy   ready    2026-02-18T20:16:26Z
+cluster-policy   ready    2026-03-10T03:25:45Z
 ```
 
 ### GPU Operator Pods
@@ -27,24 +27,31 @@ cluster-policy   ready    2026-02-18T20:16:26Z
 **GPU operator pods**
 ```
 $ kubectl get pods -n gpu-operator -o wide
-NAME                                            READY   STATUS      RESTARTS        AGE     IP               NODE                             NOMINATED NODE   READINESS GATES
-gpu-feature-discovery-dh2p9                     1/1     Running     0               5m2s    100.65.4.71      ip-100-64-171-120.ec2.internal   <none>           <none>
-gpu-operator-54f86f694c-wn8tz                   1/1     Running     0               5d20h   100.64.7.63      ip-100-64-4-149.ec2.internal     <none>           <none>
-node-feature-discovery-gc-559d7b578d-btpc6      1/1     Running     0               5d20h   100.65.168.24    ip-100-64-83-166.ec2.internal    <none>           <none>
-node-feature-discovery-master-75765d64b-td98v   1/1     Running     0               5d20h   100.64.4.111     ip-100-64-6-88.ec2.internal      <none>           <none>
-node-feature-discovery-worker-5mlc6             1/1     Running     0               6d      100.64.8.11      ip-100-64-9-88.ec2.internal      <none>           <none>
-node-feature-discovery-worker-6xx4q             1/1     Running     0               6d      100.64.7.203     ip-100-64-6-88.ec2.internal      <none>           <none>
-node-feature-discovery-worker-bkfmp             1/1     Running     1 (5m12s ago)   5d1h    100.65.49.189    ip-100-64-171-120.ec2.internal   <none>           <none>
-node-feature-discovery-worker-xmhs6             1/1     Running     0               6d      100.65.52.121    ip-100-64-83-166.ec2.internal    <none>           <none>
-node-feature-discovery-worker-zm4d9             1/1     Running     0               6d      100.64.5.27      ip-100-64-4-149.ec2.internal     <none>           <none>
-nvidia-container-toolkit-daemonset-fmmhr        1/1     Running     0               5m2s    100.65.145.135   ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-cuda-validator-w9nvg                     0/1     Completed   0               3m3s    100.65.63.246    ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-dcgm-exporter-br2tz                      1/1     Running     1 (2m54s ago)   5m2s    100.65.138.241   ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-dcgm-l29t6                               1/1     Running     0               5m2s    100.65.111.44    ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-device-plugin-daemonset-jzbk9            1/1     Running     0               5m2s    100.65.244.167   ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-driver-daemonset-97gpb                   3/3     Running     3 (5m12s ago)   5d1h    100.65.9.193     ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-mig-manager-hq49r                        1/1     Running     0               5m2s    100.65.254.73    ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-operator-validator-69vkl                 1/1     Running     0               5m2s    100.65.51.102    ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME                                             READY   STATUS      RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
+gpu-feature-discovery-6rcxf                      1/1     Running     0          14m   10.0.224.30    gpu-node-2     <none>           <none>
+gpu-feature-discovery-8jhh7                      1/1     Running     0          14m   10.0.224.179   gpu-node-1   <none>           <none>
+gpu-operator-6bf99d6478-r55t5                    1/1     Running     0          14m   10.0.6.44      system-node-1     <none>           <none>
+node-feature-discovery-gc-5495c9b5c9-5jhtb       1/1     Running     0          14m   10.0.4.105     system-node-1     <none>           <none>
+node-feature-discovery-master-6f876b9c85-97zcw   1/1     Running     0          14m   10.0.6.62      system-node-1     <none>           <none>
+node-feature-discovery-worker-7z8fm              1/1     Running     0          14m   10.0.230.31    system-node-2   <none>           <none>
+node-feature-discovery-worker-9s5tc              1/1     Running     0          14m   10.0.154.69    gpu-node-1   <none>           <none>
+node-feature-discovery-worker-vb62k              1/1     Running     0          14m   10.0.189.91    gpu-node-2     <none>           <none>
+nvidia-container-toolkit-daemonset-c49gs         1/1     Running     0          14m   10.0.201.217   gpu-node-1   <none>           <none>
+nvidia-container-toolkit-daemonset-lr895         1/1     Running     0          14m   10.0.182.110   gpu-node-2     <none>           <none>
+nvidia-cuda-validator-9866n                      0/1     Completed   0          12m   10.0.247.169   gpu-node-2     <none>           <none>
+nvidia-cuda-validator-f42hd                      0/1     Completed   0          12m   10.0.143.223   gpu-node-1   <none>           <none>
+nvidia-dcgm-4bq8l                                1/1     Running     0          14m   10.0.145.214   gpu-node-1   <none>           <none>
+nvidia-dcgm-exporter-g2fjs                       1/1     Running     0          14m   10.0.247.52    gpu-node-2     <none>           <none>
+nvidia-dcgm-exporter-wqqqn                       1/1     Running     0          14m   10.0.172.246   gpu-node-1   <none>           <none>
+nvidia-dcgm-xjsqq                                1/1     Running     0          14m   10.0.159.246   gpu-node-2     <none>           <none>
+nvidia-device-plugin-daemonset-5884b             1/1     Running     0          14m   10.0.255.120   gpu-node-1   <none>           <none>
+nvidia-device-plugin-daemonset-kx2zg             1/1     Running     0          14m   10.0.185.249   gpu-node-2     <none>           <none>
+nvidia-driver-daemonset-qc7cg                    3/3     Running     0          14m   10.0.198.38    gpu-node-1   <none>           <none>
+nvidia-driver-daemonset-vvlsc                    3/3     Running     0          14m   10.0.166.43    gpu-node-2     <none>           <none>
+nvidia-mig-manager-4gn76                         1/1     Running     0          14m   10.0.135.89    gpu-node-1   <none>           <none>
+nvidia-mig-manager-8s9wj                         1/1     Running     0          14m   10.0.253.166   gpu-node-2     <none>           <none>
+nvidia-operator-validator-twprm                  1/1     Running     0          14m   10.0.231.53    gpu-node-1   <none>           <none>
+nvidia-operator-validator-vwnsb                  1/1     Running     0          14m   10.0.194.119   gpu-node-2     <none>           <none>
 ```
 
 ### GPU Operator DaemonSets
@@ -53,16 +60,16 @@ nvidia-operator-validator-69vkl                 1/1     Running     0           
 ```
 $ kubectl get ds -n gpu-operator
 NAME                                      DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR                                                          AGE
-gpu-feature-discovery                     1         1         1       1            1           nvidia.com/gpu.deploy.gpu-feature-discovery=true                       6d
-node-feature-discovery-worker             5         5         5       5            5           <none>                                                                 6d
-nvidia-container-toolkit-daemonset        1         1         1       1            1           nvidia.com/gpu.deploy.container-toolkit=true                           6d
-nvidia-dcgm                               1         1         1       1            1           nvidia.com/gpu.deploy.dcgm=true                                        6d
-nvidia-dcgm-exporter                      1         1         1       1            1           nvidia.com/gpu.deploy.dcgm-exporter=true                               6d
-nvidia-device-plugin-daemonset            1         1         1       1            1           nvidia.com/gpu.deploy.device-plugin=true                               6d
-nvidia-device-plugin-mps-control-daemon   0         0         0       0            0           nvidia.com/gpu.deploy.device-plugin=true,nvidia.com/mps.capable=true   6d
-nvidia-driver-daemonset                   1         1         1       1            1           nvidia.com/gpu.deploy.driver=true                                      6d
-nvidia-mig-manager                        1         1         1       1            1           nvidia.com/gpu.deploy.mig-manager=true                                 6d
-nvidia-operator-validator                 1         1         1       1            1           nvidia.com/gpu.deploy.operator-validator=true                          6d
+gpu-feature-discovery                     2         2         2       2            2           nvidia.com/gpu.deploy.gpu-feature-discovery=true                       14m
+node-feature-discovery-worker             3         3         3       3            3           <none>                                                                 14m
+nvidia-container-toolkit-daemonset        2         2         2       2            2           nvidia.com/gpu.deploy.container-toolkit=true                           14m
+nvidia-dcgm                               2         2         2       2            2           nvidia.com/gpu.deploy.dcgm=true                                        14m
+nvidia-dcgm-exporter                      2         2         2       2            2           nvidia.com/gpu.deploy.dcgm-exporter=true                               14m
+nvidia-device-plugin-daemonset            2         2         2       2            2           nvidia.com/gpu.deploy.device-plugin=true                               14m
+nvidia-device-plugin-mps-control-daemon   0         0         0       0            0           nvidia.com/gpu.deploy.device-plugin=true,nvidia.com/mps.capable=true   14m
+nvidia-driver-daemonset                   2         2         2       2            2           nvidia.com/gpu.deploy.driver=true                                      14m
+nvidia-mig-manager                        2         2         2       2            2           nvidia.com/gpu.deploy.mig-manager=true                                 14m
+nvidia-operator-validator                 2         2         2       2            2           nvidia.com/gpu.deploy.operator-validator=true                          14m
 ```
 
 ## DRA-Mediated GPU Access
@@ -76,9 +83,11 @@ GPU devices via ResourceSlices, and pods request access through ResourceClaims.
 **ResourceSlices**
 ```
 $ kubectl get resourceslices -o wide
-NAME                                                             NODE                             DRIVER                      POOL                             AGE
-ip-100-64-171-120.ec2.internal-compute-domain.nvidia.com-76zr9   ip-100-64-171-120.ec2.internal   compute-domain.nvidia.com   ip-100-64-171-120.ec2.internal   3m32s
-ip-100-64-171-120.ec2.internal-gpu.nvidia.com-75xvv              ip-100-64-171-120.ec2.internal   gpu.nvidia.com              ip-100-64-171-120.ec2.internal   3m30s
+NAME                                                           NODE                           DRIVER                      POOL                           AGE
+gpu-node-1-compute-domain.nvidia.com-q9xqc   gpu-node-1   compute-domain.nvidia.com   gpu-node-1   11m
+gpu-node-1-gpu.nvidia.com-7cbz2              gpu-node-1   gpu.nvidia.com              gpu-node-1   11m
+gpu-node-2-compute-domain.nvidia.com-2n2cq     gpu-node-2     compute-domain.nvidia.com   gpu-node-2     11m
+gpu-node-2-gpu.nvidia.com-79gvw                gpu-node-2     gpu.nvidia.com              gpu-node-2     11m
 ```
 
 ### GPU Device Details
@@ -91,55 +100,82 @@ items:
 - apiVersion: resource.k8s.io/v1
   kind: ResourceSlice
   metadata:
-    creationTimestamp: "2026-02-24T20:18:17Z"
-    generateName: ip-100-64-171-120.ec2.internal-compute-domain.nvidia.com-
-    generation: 1
-    name: ip-100-64-171-120.ec2.internal-compute-domain.nvidia.com-76zr9
+    creationTimestamp: "2026-03-10T03:29:20Z"
+    generateName: gpu-node-1-compute-domain.nvidia.com-
+    generation: 2
+    name: gpu-node-1-compute-domain.nvidia.com-q9xqc
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-100-64-171-120.ec2.internal
-      uid: a94c3e56-9f0e-42fb-abad-32cd237c6c6b
-    resourceVersion: "6642417"
-    uid: 2e9ffac0-5bdd-49b0-8f6a-5a23764608b3
+      name: gpu-node-1
+      uid: fef55be3-f566-47c8-8bb8-52c117cb3855
+    resourceVersion: "1169500"
+    uid: 8087c1b4-71e0-42c3-9f74-12629e2ee5b5
   spec:
     devices:
-    - attributes:
-        id:
-          int: 0
-        type:
-          string: channel
-      name: channel-0
     - attributes:
         id:
           int: 0
         type:
           string: daemon
       name: daemon-0
+    - attributes:
+        id:
+          int: 0
+        type:
+          string: channel
+      name: channel-0
     driver: compute-domain.nvidia.com
-    nodeName: ip-100-64-171-120.ec2.internal
+    nodeName: gpu-node-1
     pool:
       generation: 1
-      name: ip-100-64-171-120.ec2.internal
+      name: gpu-node-1
       resourceSliceCount: 1
 - apiVersion: resource.k8s.io/v1
   kind: ResourceSlice
   metadata:
-    creationTimestamp: "2026-02-24T20:18:19Z"
-    generateName: ip-100-64-171-120.ec2.internal-gpu.nvidia.com-
-    generation: 1
-    name: ip-100-64-171-120.ec2.internal-gpu.nvidia.com-75xvv
+    creationTimestamp: "2026-03-10T03:29:22Z"
+    generateName: gpu-node-1-gpu.nvidia.com-
+    generation: 2
+    name: gpu-node-1-gpu.nvidia.com-7cbz2
     ownerReferences:
     - apiVersion: v1
       controller: true
       kind: Node
-      name: ip-100-64-171-120.ec2.internal
-      uid: a94c3e56-9f0e-42fb-abad-32cd237c6c6b
-    resourceVersion: "6642429"
-    uid: 83776fa9-badc-49b5-8204-6135190dfd88
+      name: gpu-node-1
+      uid: fef55be3-f566-47c8-8bb8-52c117cb3855
+    resourceVersion: "1169562"
+    uid: 3441669c-08c4-43ff-9b83-42c5f3dddcff
   spec:
     devices:
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:64:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:55
+        type:
+          string: gpu
+        uuid:
+          string: GPU-bc5610b9-79c8-fedd-8899-07539c7f868a
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-1
     - attributes:
         addressingMode:
           string: HMM
@@ -162,7 +198,7 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-f814846a-9bbe-469e-97c3-d037d67c3c32
+          string: GPU-fbc2c554-4d37-8938-0032-f923bad0f716
       capacity:
         memory:
           value: 81559Mi
@@ -189,7 +225,7 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-3cc59718-d7df-49ac-07a3-a6cedfe263c6
+          string: GPU-a65a773d-52bb-bcc1-a8ee-f78c3faa2e2d
       capacity:
         memory:
           value: 81559Mi
@@ -216,7 +252,7 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-71fc8f21-7800-5bb9-53ad-7e6fc93ef15f
+          string: GPU-82e45d1b-1618-559f-144c-eab51545030b
       capacity:
         memory:
           value: 81559Mi
@@ -243,7 +279,7 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-dee5c16e-1d0a-cec8-a9ea-f878a4be1b3d
+          string: GPU-39e28159-8c62-ee71-64db-b748edd61e15
       capacity:
         memory:
           value: 81559Mi
@@ -270,7 +306,7 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-ca1b8386-093b-60cc-349d-c4a38b9124c0
+          string: GPU-e64d69ca-b4b3-59b2-e78c-94f26c4db365
       capacity:
         memory:
           value: 81559Mi
@@ -297,7 +333,7 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-b60b817a-a091-c492-4211-92b276d697e6
+          string: GPU-04d228d3-3b5a-3534-f5cf-969706647d56
       capacity:
         memory:
           value: 81559Mi
@@ -324,7 +360,254 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-22dbdd79-f55a-92a8-aa39-322198e72ed6
+          string: GPU-c4529c8d-69c4-b61d-e0bc-7b2460096005
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-0
+    driver: gpu.nvidia.com
+    nodeName: gpu-node-1
+    pool:
+      generation: 1
+      name: gpu-node-1
+      resourceSliceCount: 1
+- apiVersion: resource.k8s.io/v1
+  kind: ResourceSlice
+  metadata:
+    creationTimestamp: "2026-03-10T03:29:19Z"
+    generateName: gpu-node-2-compute-domain.nvidia.com-
+    generation: 1
+    name: gpu-node-2-compute-domain.nvidia.com-2n2cq
+    ownerReferences:
+    - apiVersion: v1
+      controller: true
+      kind: Node
+      name: gpu-node-2
+      uid: b171b90a-eb8f-4662-bd0d-2055b634dc98
+    resourceVersion: "1168846"
+    uid: 3eca27ae-5231-4845-8407-1e24fd9b5683
+  spec:
+    devices:
+    - attributes:
+        id:
+          int: 0
+        type:
+          string: channel
+      name: channel-0
+    - attributes:
+        id:
+          int: 0
+        type:
+          string: daemon
+      name: daemon-0
+    driver: compute-domain.nvidia.com
+    nodeName: gpu-node-2
+    pool:
+      generation: 1
+      name: gpu-node-2
+      resourceSliceCount: 1
+- apiVersion: resource.k8s.io/v1
+  kind: ResourceSlice
+  metadata:
+    creationTimestamp: "2026-03-10T03:29:21Z"
+    generateName: gpu-node-2-gpu.nvidia.com-
+    generation: 2
+    name: gpu-node-2-gpu.nvidia.com-79gvw
+    ownerReferences:
+    - apiVersion: v1
+      controller: true
+      kind: Node
+      name: gpu-node-2
+      uid: b171b90a-eb8f-4662-bd0d-2055b634dc98
+    resourceVersion: "1169576"
+    uid: 0b3dc1d8-a1ba-4fae-894b-cb90e62ed783
+  spec:
+    devices:
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:75:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:66
+        type:
+          string: gpu
+        uuid:
+          string: GPU-dbabb552-a092-0ca9-0580-8d4fe378eb02
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-2
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:86:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:77
+        type:
+          string: gpu
+        uuid:
+          string: GPU-5342927e-e180-84f1-55ba-257f1cbd3ba4
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-3
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:97:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:88
+        type:
+          string: gpu
+        uuid:
+          string: GPU-95085215-739e-e7c6-4011-8dbe004af8c3
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-4
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:a8:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:99
+        type:
+          string: gpu
+        uuid:
+          string: GPU-a7b658ad-f23e-cea9-2523-569d521700bf
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-5
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:b9:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:aa
+        type:
+          string: gpu
+        uuid:
+          string: GPU-1e9a0e94-769a-b1e6-36f7-9296e286ef90
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-6
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: 0000:ca:00.0
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:bb
+        type:
+          string: gpu
+        uuid:
+          string: GPU-16b2cd36-9dbe-3ee7-0810-07b330e36e04
+      capacity:
+        memory:
+          value: 81559Mi
+      name: gpu-7
+    - attributes:
+        addressingMode:
+          string: HMM
+        architecture:
+          string: Hopper
+        brand:
+          string: Nvidia
+        cudaComputeCapability:
+          version: 9.0.0
+        cudaDriverVersion:
+          version: 13.0.0
+        driverVersion:
+          version: 580.105.8
+        productName:
+          string: NVIDIA H100 80GB HBM3
+        resource.kubernetes.io/pciBusID:
+          string: "0000:53:00.0"
+        resource.kubernetes.io/pcieRoot:
+          string: pci0000:44
+        type:
+          string: gpu
+        uuid:
+          string: GPU-92da0328-2f33-b563-d577-9d2b9f21f280
       capacity:
         memory:
           value: 81559Mi
@@ -351,16 +634,16 @@ items:
         type:
           string: gpu
         uuid:
-          string: GPU-289275cb-a907-ab73-9a95-058ae119f62d
+          string: GPU-184dab49-47ce-eeec-2239-3e03fbd4c002
       capacity:
         memory:
           value: 81559Mi
       name: gpu-1
     driver: gpu.nvidia.com
-    nodeName: ip-100-64-171-120.ec2.internal
+    nodeName: gpu-node-2
     pool:
       generation: 1
-      name: ip-100-64-171-120.ec2.internal
+      name: gpu-node-2
       resourceSliceCount: 1
 kind: List
 metadata:
@@ -385,15 +668,17 @@ $ kubectl get pod isolation-test -n secure-access-test -o jsonpath={.spec.resour
 **Pod volumes (no hostPath)**
 ```
 $ kubectl get pod isolation-test -n secure-access-test -o jsonpath={.spec.volumes}
-[{"name":"kube-api-access-xsvnl","projected":{"defaultMode":420,"sources":[{"serviceAccountToken":{"expirationSeconds":3607,"path":"token"}},{"configMap":{"items":[{"key":"ca.crt","path":"ca.crt"}],"name":"kube-root-ca.crt"}},{"downwardAPI":{"items":[{"fieldRef":{"apiVersion":"v1","fieldPath":"metadata.namespace"},"path":"namespace"}]}}]}}]
+[{"name":"kube-api-access-dl259","projected":{"defaultMode":420,"sources":[{"serviceAccountToken":{"expirationSeconds":3607,"path":"token"}},{"configMap":{"items":[{"key":"ca.crt","path":"ca.crt"}],"name":"kube-root-ca.crt"}},{"downwardAPI":{"items":[{"fieldRef":{"apiVersion":"v1","fieldPath":"metadata.namespace"},"path":"namespace"}]}}]}}]
 ```
 
 **ResourceClaim allocation**
 ```
 $ kubectl get resourceclaim isolated-gpu -n secure-access-test -o wide
 NAME           STATE     AGE
-isolated-gpu   pending   13s
+isolated-gpu   pending   12s
 ```
+
+> **Note:** ResourceClaim may show `pending` after pod completion because the DRA controller deallocates claims when the consuming pod terminates. The pod logs below confirm GPU isolation was enforced during execution.
 
 ### Container GPU Visibility (only allocated GPU visible)
 
@@ -401,17 +686,17 @@ isolated-gpu   pending   13s
 ```
 $ kubectl logs isolation-test -n secure-access-test
 === Visible NVIDIA devices ===
-crw-rw-rw- 1 root root 195, 254 Feb 24 20:22 /dev/nvidia-modeset
-crw-rw-rw- 1 root root 508,   0 Feb 24 20:22 /dev/nvidia-uvm
-crw-rw-rw- 1 root root 508,   1 Feb 24 20:22 /dev/nvidia-uvm-tools
-crw-rw-rw- 1 root root 195,   2 Feb 24 20:22 /dev/nvidia2
-crw-rw-rw- 1 root root 195, 255 Feb 24 20:22 /dev/nvidiactl
+crw-rw-rw- 1 root root 195, 254 Mar 10 03:40 /dev/nvidia-modeset
+crw-rw-rw- 1 root root 507,   0 Mar 10 03:40 /dev/nvidia-uvm
+crw-rw-rw- 1 root root 507,   1 Mar 10 03:40 /dev/nvidia-uvm-tools
+crw-rw-rw- 1 root root 195,   1 Mar 10 03:40 /dev/nvidia1
+crw-rw-rw- 1 root root 195, 255 Mar 10 03:40 /dev/nvidiactl
 
 === nvidia-smi output ===
-GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-f814846a-9bbe-469e-97c3-d037d67c3c32)
+GPU 0: NVIDIA H100 80GB HBM3 (UUID: GPU-bc5610b9-79c8-fedd-8899-07539c7f868a)
 
 === GPU count ===
-0, NVIDIA H100 80GB HBM3, GPU-f814846a-9bbe-469e-97c3-d037d67c3c32
+0, NVIDIA H100 80GB HBM3, GPU-bc5610b9-79c8-fedd-8899-07539c7f868a
 
 Secure accelerator access test completed
 ```
@@ -422,6 +707,6 @@ Secure accelerator access test completed
 
 **Delete test namespace**
 ```
-$ kubectl delete namespace secure-access-test --ignore-not-found
-namespace "secure-access-test" deleted
+$ cleanup_ns secure-access-test
+
 ```

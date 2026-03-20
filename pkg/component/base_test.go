@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -449,13 +449,13 @@ func TestBaseBundler_AddError(t *testing.T) {
 	}
 }
 
-func TestBaseBundler_BuildBaseConfigMap(t *testing.T) {
+func TestBaseBundler_buildBaseConfigMap(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithVersion("v1.2.3"),
 	)
 
 	b := NewBaseBundler(cfg, types.BundleType("gpu-operator"))
-	configMap := b.BuildBaseConfigMap()
+	configMap := b.buildBaseConfigMap()
 
 	// Test bundler version is set
 	if configMap["bundler_version"] != "v1.2.3" {

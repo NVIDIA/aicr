@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -557,7 +557,7 @@ func TestNewFileReader_ReaderState(t *testing.T) {
 	}
 }
 
-func TestNewFileReaderAuto(t *testing.T) {
+func Test_newFileReaderAuto(t *testing.T) {
 	t.Run("auto-detect json", func(t *testing.T) {
 		// Create temporary file
 		tmpfile, err := os.CreateTemp("", "test*.json")
@@ -575,9 +575,9 @@ func TestNewFileReaderAuto(t *testing.T) {
 		tmpfile.Close()
 
 		// Create reader with auto-detection
-		reader, err := NewFileReaderAuto(tmpfile.Name())
+		reader, err := newFileReaderAuto(tmpfile.Name())
 		if err != nil {
-			t.Fatalf("NewFileReaderAuto failed: %v", err)
+			t.Fatalf("newFileReaderAuto failed: %v", err)
 		}
 		defer reader.Close()
 
@@ -613,9 +613,9 @@ func TestNewFileReaderAuto(t *testing.T) {
 		tmpfile.Close()
 
 		// Create reader with auto-detection
-		reader, err := NewFileReaderAuto(tmpfile.Name())
+		reader, err := newFileReaderAuto(tmpfile.Name())
 		if err != nil {
-			t.Fatalf("NewFileReaderAuto failed: %v", err)
+			t.Fatalf("newFileReaderAuto failed: %v", err)
 		}
 		defer reader.Close()
 
@@ -651,9 +651,9 @@ func TestNewFileReaderAuto(t *testing.T) {
 		tmpfile.Close()
 
 		// Create reader with auto-detection
-		reader, err := NewFileReaderAuto(tmpfile.Name())
+		reader, err := newFileReaderAuto(tmpfile.Name())
 		if err != nil {
-			t.Fatalf("NewFileReaderAuto failed: %v", err)
+			t.Fatalf("newFileReaderAuto failed: %v", err)
 		}
 		defer reader.Close()
 
@@ -733,9 +733,9 @@ func TestReader_RoundTrip(t *testing.T) {
 		}
 
 		// Read with Reader
-		reader, err := NewFileReaderAuto(tmpfile.Name())
+		reader, err := newFileReaderAuto(tmpfile.Name())
 		if err != nil {
-			t.Fatalf("NewFileReaderAuto failed: %v", err)
+			t.Fatalf("newFileReaderAuto failed: %v", err)
 		}
 		defer reader.Close()
 
@@ -777,9 +777,9 @@ func TestReader_RoundTrip(t *testing.T) {
 		}
 
 		// Read with Reader
-		reader, err := NewFileReaderAuto(tmpfile.Name())
+		reader, err := newFileReaderAuto(tmpfile.Name())
 		if err != nil {
-			t.Fatalf("NewFileReaderAuto failed: %v", err)
+			t.Fatalf("newFileReaderAuto failed: %v", err)
 		}
 		defer reader.Close()
 
@@ -918,27 +918,29 @@ func ExampleReader() {
 	_ = config.Value // 42
 }
 
-func ExampleNewFileReaderAuto() {
-	// Create a temporary file for this example
-	tmpfile, _ := os.CreateTemp("", "example*.json")
+func Test_newFileReaderAuto_example(t *testing.T) {
+	tmpfile, err := os.CreateTemp("", "example*.json")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
 	defer os.Remove(tmpfile.Name())
 	tmpfile.WriteString(`{"name":"example","value":42}`)
 	tmpfile.Close()
 
-	// Auto-detect format from file extension
-	reader, err := NewFileReaderAuto(tmpfile.Name())
+	reader, err := newFileReaderAuto(tmpfile.Name())
 	if err != nil {
-		panic(err)
+		t.Fatalf("newFileReaderAuto failed: %v", err)
 	}
 	defer reader.Close()
 
 	var config testConfig
 	if err := reader.Deserialize(&config); err != nil {
-		panic(err)
+		t.Fatalf("Deserialize failed: %v", err)
 	}
 
-	// Use the data
-	_ = config.Name // "example"
+	if config.Name != "example" {
+		t.Errorf("Name = %q, want %q", config.Name, "example")
+	}
 }
 
 // New comprehensive tests
@@ -1193,9 +1195,9 @@ func TestReader_LargeFile(t *testing.T) {
 		tmpfile.Write(jsonData)
 		tmpfile.Close()
 
-		reader, err := NewFileReaderAuto(tmpfile.Name())
+		reader, err := newFileReaderAuto(tmpfile.Name())
 		if err != nil {
-			t.Fatalf("NewFileReaderAuto failed: %v", err)
+			t.Fatalf("newFileReaderAuto failed: %v", err)
 		}
 		defer reader.Close()
 

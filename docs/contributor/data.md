@@ -25,7 +25,7 @@ The recipe system is a rule-based configuration engine that generates tailored s
 4. **Merging configurations** - Components, constraints, and values are merged with overlay precedence
 5. **Computing deployment order** - Topological sort of components based on dependency references
 
-The recipe data is organized in [`recipes/`](../../recipes/) as multiple YAML files:
+The recipe data is organized in [`recipes/`](https://github.com/NVIDIA/aicr/tree/main/recipes) as multiple YAML files:
 
 ```
 recipes/
@@ -1033,8 +1033,8 @@ jobs:
       - uses: actions/checkout@v5
       - uses: ./.github/actions/go-ci
         with:
-          go_version: '1.25'
-          golangci_lint_version: 'v2.6'
+          go_version: '1.26'
+          golangci_lint_version: 'v2.10.1'
 ```
 
 ### Adding New Tests
@@ -1292,5 +1292,5 @@ func initDataProvider(cmd *cli.Command) error {
 - [CLI Architecture](cli.md) - How the CLI uses recipe data
 - [CLI Reference](../user/cli-reference.md) - Complete CLI flag reference
 - [API Server Architecture](api-server.md) - How the API serves recipes
-- [OpenAPI Specification](../../api/aicr/v1/server.yaml) - Recipe API contract
-- [Recipe Package Documentation](../../pkg/recipe/) - Go implementation details
+- [OpenAPI Specification](https://github.com/NVIDIA/aicr/blob/main/api/aicr/v1/server.yaml) - Recipe API contract
+- [Recipe Package Documentation](https://github.com/NVIDIA/aicr/tree/main/pkg/recipe) - Go implementation details

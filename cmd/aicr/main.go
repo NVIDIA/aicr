@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,6 @@ package main
 
 import (
 	"github.com/NVIDIA/aicr/pkg/cli"
-
-	// Import check packages for side-effect registration.
-	// Each package's init() function registers its validators.
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/conformance"
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/deployment"
-	_ "github.com/NVIDIA/aicr/pkg/validator/checks/performance"
 )
 
 func main() {

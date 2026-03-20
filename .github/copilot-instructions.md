@@ -1,6 +1,6 @@
 # Copilot Instructions for NVIDIA AI Cluster Runtime (AICR)
 
-This file contains extended technical documentation for GitHub Copilot. For core rules and patterns, see `.claude/CLAUDE.md`.
+This file contains extended technical documentation for GitHub Copilot. For core rules and patterns, see `AGENTS.md`.
 
 ## Critical Rules (Always Apply)
 
@@ -53,7 +53,7 @@ func (r *Reader) Read(url string) ([]byte, error) {
 **Git Configuration:**
 - Commit to `main` branch (not `master`)
 - Do NOT add `Co-Authored-By` lines (organization policy)
-- Use DCO sign-off: `git commit -s -m "message"`
+- Use cryptographic commit signing: `git commit -S -m "message"` (use `-s` only when DCO sign-off is required for non-member contributions)
 
 **Decision Framework:**
 Choose solutions based on: testability, readability, consistency, simplicity, reversibility
@@ -88,10 +88,10 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
 - **CLI (`aicr`)**: All four stages (snapshot/recipe/validate/bundle)
 - **API Server (`aicrd`)**: Recipe generation and bundle creation via REST API
 - **Agent**: Kubernetes Job for automated cluster snapshots → ConfigMaps
-- **Bundlers**: Plugin-based artifact generators (GPU Operator, Network Operator, Cert-Manager, NVSentinel, Skyhook, DRA Driver)
+- **Bundlers**: Plugin-based artifact generators — one per component in `recipes/registry.yaml`
 - **Deployers**: GitOps integration providers (helm, argocd) with deployment ordering
 
-**Tech Stack:** Go 1.25, Kubernetes 1.33+, golangci-lint v2.9, Container images via Ko
+**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10.1, Container images via Ko
 
 **Package Architecture (Critical Principle):**
 - **User Interaction Packages** (`pkg/cli`, `pkg/api`): Focus solely on capturing user intent, validating input, and formatting output. No business logic.
@@ -178,7 +178,7 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
    make test
    ```
 
-→ See [Bundler Development Guide](docs/contributor/component.md) for full details
+→ See [Bundler Development Guide](../docs/contributor/component.md) for full details
 
 ### I Need To: Add New API Endpoint
 
@@ -377,7 +377,8 @@ aicr bundle -r recipe.yaml \
 
 ### Key Links
 
-- **[CLAUDE.md](../.claude/CLAUDE.md)** – Core rules, patterns, and commands
+- **[AGENTS.md](../AGENTS.md)** – Core rules, patterns, and commands (synced from `.claude/CLAUDE.md`)
+- **[CLAUDE.md](../.claude/CLAUDE.md)** – Canonical source for coding-agent rules
 - **[Contributing Guide](../CONTRIBUTING.md)** – Design principles, development setup, PR process
 - **[Development Guide](../DEVELOPMENT.md)** – Local development, Make targets, Tilt/Kind setup
 - **[Release Process](../RELEASING.md)** – Maintainer guide for releases, verification, hotfixes
@@ -741,7 +742,8 @@ AICR uses a **three-layer composite actions architecture** for reusability:
 - `security-scan` – Grype vulnerability scanning
 
 **Layer 2: Composed Actions** (Combine Primitives)
-- `go-ci` – Complete Go CI pipeline (setup → test → lint)
+- `go-test` – Go setup, vendor verify, unit tests with coverage
+- `go-lint` – Go linter, YAML linter, license header checks
 - `go-build-release` – Full build/release pipeline
 - `attest-image-from-tag` – Resolve digest + generate attestations
 - `cloud-run-deploy` – Demo API server deployment (example deployment to GCP)
@@ -758,11 +760,14 @@ jobs:
   unit:
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/go-ci
+      - uses: ./.github/actions/go-test
         with:
-          go_version: '1.25'
-          golangci_lint_version: 'v2.9.0'
+          go_version: '1.26'
           coverage_report: 'true'
+      - uses: ./.github/actions/go-lint
+        with:
+          go_version: '1.26'
+          golangci_lint_version: 'v2.9.0'
       - uses: ./.github/actions/security-scan
   integration:
     steps:
@@ -795,7 +800,7 @@ jobs:
       - uses: ./.github/actions/cloud-run-deploy
         with:
           source_image: 'ghcr.io/nvidia/aicrd:${{ github.ref_name }}'
-          target_registry: 'us-docker.pkg.dev/eidosx/demo'
+          target_registry: 'us-docker.pkg.dev/example-gcp-project/demo'
 ```
 
 **Supply Chain Security:**

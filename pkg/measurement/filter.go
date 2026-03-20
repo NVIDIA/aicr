@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,14 +41,14 @@ func FilterOut(readings map[string]Reading, keys []string) map[string]Reading {
 	return result
 }
 
-// FilterIn returns a new map with only keys that match the provided patterns.
+// filterIn returns a new map with only keys that match the provided patterns.
 // This is the complement of FilterOut.
 // Supports the same wildcard patterns as FilterOut:
 //   - "prefix*" matches keys starting with "prefix"
 //   - "*suffix" matches keys ending with "suffix"
 //   - "*contains*" matches keys containing "contains"
 //   - "exact" matches keys exactly
-func FilterIn(readings map[string]Reading, keys []string) map[string]Reading {
+func filterIn(readings map[string]Reading, keys []string) map[string]Reading {
 	result := make(map[string]Reading)
 
 	for key, value := range readings {

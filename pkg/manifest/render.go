@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import (
 	"text/template"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // RenderInput provides the data needed to render a manifest template.
@@ -60,9 +62,9 @@ type chartData struct {
 // and functions. Templates can use .Values, .Release, .Chart, and functions
 // like toYaml, nindent, toString, and default.
 func Render(content []byte, input RenderInput) ([]byte, error) {
-	tmpl, err := template.New("manifest").Funcs(HelmFuncMap()).Parse(string(content))
+	tmpl, err := template.New("manifest").Funcs(helmFuncMap()).Parse(string(content))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse manifest template", err)
 	}
 
 	data := templateData{
@@ -79,13 +81,13 @@ func Render(content []byte, input RenderInput) ([]byte, error) {
 
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to execute manifest template", err)
 	}
 	return []byte(buf.String()), nil
 }
 
-// HelmFuncMap returns Helm-compatible template functions for manifest rendering.
-func HelmFuncMap() template.FuncMap {
+// helmFuncMap returns Helm-compatible template functions for manifest rendering.
+func helmFuncMap() template.FuncMap {
 	return template.FuncMap{
 		"toYaml": func(v any) string {
 			out, err := yaml.Marshal(v)

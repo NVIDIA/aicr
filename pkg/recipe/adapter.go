@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -207,8 +207,8 @@ func mergeValues(dst, src map[string]any) {
 	}
 }
 
-// HasComponentRefs checks if the input is a RecipeResult with component references.
-func HasComponentRefs(input RecipeInput) bool {
+// hasComponentRefs checks if the input is a RecipeResult with component references.
+func hasComponentRefs(input RecipeInput) bool {
 	_, ok := input.(*RecipeResult)
 	return ok
 }

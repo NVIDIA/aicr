@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -34,29 +34,9 @@ spec:
     - name: K8s.server.version
       value: ">= 1.34"
 
-  # AWS Security Group Prerequisites (EKS only):
-  #
-  # Dynamo-platform's etcd (port 2379) and NATS (port 4222) typically run on
-  # system nodes. If GPU worker nodes are in a different subnet/security group,
-  # AWS SGs may block this traffic, causing pods to fail with:
-  #   - "Unable to create lease" (etcd unreachable)
-  #   - "JetStream not available" (NATS unreachable)
-  #
-  # To fix, allow ingress from the GPU node SG to the system node SG:
-  #
-  #   # 1. Find security group IDs for system and GPU nodes:
-  #   aws ec2 describe-instances \
-  #     --filters "Name=tag:eks:nodegroup-name,Values=<system-nodegroup>" \
-  #     --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" --output text
-  #   aws ec2 describe-instances \
-  #     --filters "Name=tag:eks:nodegroup-name,Values=<gpu-nodegroup>" \
-  #     --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" --output text
-  #
-  #   # 2. Allow etcd and NATS traffic from GPU nodes to system nodes:
-  #   aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
-  #     --protocol tcp --port 2379 --source-group <gpu-sg-id>
-  #   aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
-  #     --protocol tcp --port 4222 --source-group <gpu-sg-id>
+  # EKS Dynamo networking prerequisite:
+  # allow GPU node SG -> system node SG on TCP 2379 (etcd) and 4222 (NATS).
+  # See docs/integrator/eks-dynamo-networking.md.
 
   componentRefs:
     - name: nvidia-dra-driver-gpu
@@ -79,6 +59,7 @@ spec:
         - dynamo-crds
         - cert-manager
         - kube-prometheus-stack
+        - gpu-operator
         - kai-scheduler
       overrides:
         etcd:
@@ -92,6 +73,15 @@ spec:
                   storageClassName: gp2
 
   validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"
     conformance:
       checks:
         - platform-health
@@ -100,7 +90,8 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - inference-gateway
-        - robust-controller
-        - secure-accelerator-access
+        - gang-scheduling
         - pod-autoscaling
         - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

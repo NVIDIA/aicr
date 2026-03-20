@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -446,8 +446,11 @@ func TestHTTPReader_Read_SetsUserAgent(t *testing.T) {
 
 func TestHTTPReader_ReadWithContext_Canceled(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// If the request isn't canceled, block for long enough to fail the test.
-		time.Sleep(5 * time.Second)
+		// Block until request context is done (or short timeout as fallback)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(500 * time.Millisecond):
+		}
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()

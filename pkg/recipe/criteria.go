@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -258,27 +258,27 @@ func (c *Criteria) Matches(other *Criteria) bool {
 	// omitted fields get the zero value ("") rather than the "any" constant.
 
 	// Service matching
-	if !matchesCriteriaField(string(c.Service), string(other.Service)) {
+	if !MatchesCriteriaField(string(c.Service), string(other.Service)) {
 		return false
 	}
 
 	// Accelerator matching
-	if !matchesCriteriaField(string(c.Accelerator), string(other.Accelerator)) {
+	if !MatchesCriteriaField(string(c.Accelerator), string(other.Accelerator)) {
 		return false
 	}
 
 	// Intent matching
-	if !matchesCriteriaField(string(c.Intent), string(other.Intent)) {
+	if !MatchesCriteriaField(string(c.Intent), string(other.Intent)) {
 		return false
 	}
 
 	// OS matching
-	if !matchesCriteriaField(string(c.OS), string(other.OS)) {
+	if !MatchesCriteriaField(string(c.OS), string(other.OS)) {
 		return false
 	}
 
 	// Platform matching
-	if !matchesCriteriaField(string(c.Platform), string(other.Platform)) {
+	if !MatchesCriteriaField(string(c.Platform), string(other.Platform)) {
 		return false
 	}
 
@@ -297,14 +297,14 @@ func (c *Criteria) Matches(other *Criteria) bool {
 	return true
 }
 
-// matchesCriteriaField implements asymmetric matching for a single criteria field.
+// MatchesCriteriaField implements asymmetric matching for a single criteria field.
 // Returns true if the recipe field matches the query field.
 //
 // Matching rules:
 //   - Query is "any"/empty → only matches if recipe is also "any"/empty
 //   - Recipe is "any"/empty → matches any query value (recipe is generic/wildcard)
 //   - Otherwise → must match exactly
-func matchesCriteriaField(recipeValue, queryValue string) bool {
+func MatchesCriteriaField(recipeValue, queryValue string) bool {
 	recipeIsAny := recipeValue == criteriaAnyValue || recipeValue == ""
 	queryIsAny := queryValue == criteriaAnyValue || queryValue == ""
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,7 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 	for _, pod := range pods.Items {
 		// Check for context cancellation
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
 		}
 
 		for _, container := range pod.Spec.Containers {

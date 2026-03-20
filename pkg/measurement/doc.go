@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@
 //
 //	version, err := m.GetSubtype("cluster").GetString("version")
 //	nodes, err := m.GetSubtype("cluster").GetInt64("nodes")
-//	ready, err := m.GetSubtype("cluster").GetBool("ready")
+//	ready, err := m.GetSubtype("cluster").getBool("ready")
 //
 // # Filtering Data
 //
@@ -67,7 +67,7 @@
 //	filtered := FilterOut(readings, []string{"*password*", "secret*"})
 //
 //	// Keep only version and count fields
-//	kept := FilterIn(readings, []string{"version", "count"})
+//	kept := filterIn(readings, []string{"version", "count"})
 //
 // # Serialization
 //

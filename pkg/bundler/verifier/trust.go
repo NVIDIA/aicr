@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 // TrustLevel represents the verification trust level of a bundle.
@@ -159,7 +159,7 @@ func (r *VerifyResult) CheckPolicy(p Policy) (string, error) {
 		if !hasOperatorPrefix(expr) {
 			expr = ">= " + expr
 		}
-		constraint, err := validator.ParseConstraintExpression(expr)
+		constraint, err := constraints.ParseConstraintExpression(expr)
 		if err != nil {
 			return "", errors.Wrap(errors.ErrCodeInvalidRequest, "invalid tool version constraint", err)
 		}

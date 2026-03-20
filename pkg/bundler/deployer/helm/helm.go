@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -453,9 +453,11 @@ func (g *Generator) generateUndeployScript(ctx context.Context, input *Generator
 		return "", 0, err
 	}
 
+	reversed := reverseComponents(components)
 	data := undeployTemplateData{
 		BundlerVersion:     input.Version,
-		ComponentsReversed: reverseComponents(components),
+		ComponentsReversed: reversed,
+		Namespaces:         uniqueNamespaces(reversed),
 	}
 
 	undeployPath, undeploySize, err := shared.GenerateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
@@ -491,6 +493,7 @@ type deployTemplateData struct {
 type undeployTemplateData struct {
 	BundlerVersion     string
 	ComponentsReversed []ComponentData
+	Namespaces         []string // unique namespaces in reverse-deployment order
 }
 
 // reverseComponents returns a reversed copy of the component list (for uninstall order).
@@ -500,6 +503,21 @@ func reverseComponents(components []ComponentData) []ComponentData {
 		reversed[len(components)-1-i] = comp
 	}
 	return reversed
+}
+
+// uniqueNamespaces returns deduplicated namespaces from Helm/Kustomize components,
+// preserving order. Manifest-only components are excluded to match the previous
+// behavior where namespace cleanup only occurred inside HasChart/IsKustomize branches.
+func uniqueNamespaces(components []ComponentData) []string {
+	seen := make(map[string]bool)
+	var namespaces []string
+	for _, c := range components {
+		if c.Namespace != "" && !seen[c.Namespace] && (c.HasChart || c.IsKustomize) {
+			seen[c.Namespace] = true
+			namespaces = append(namespaces, c.Namespace)
+		}
+	}
+	return namespaces
 }
 
 // hasYAMLObjects returns true if content contains at least one YAML object

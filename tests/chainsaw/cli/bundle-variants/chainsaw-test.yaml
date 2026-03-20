@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -181,6 +181,12 @@ spec:
                 fi
               done
               [ "$found" = "true" ] || { echo "No component with sync-wave found" >&2; exit 1; }
+              # Validate all generated YAML files are structurally valid (issue #410)
+              for yamlfile in "${WORK}"/argocd/*.yaml "${WORK}"/argocd/*/*.yaml; do
+                [ -f "$yamlfile" ] || continue
+                yamllint -d '{extends: relaxed, rules: {trailing-spaces: disable}}' "$yamlfile" \
+                  || { echo "yamllint failed on $yamlfile" >&2; exit 1; }
+              done
             check:
               ($error == null): true
       cleanup:

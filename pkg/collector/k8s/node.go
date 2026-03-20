@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ import (
 func (k *Collector) collectNode(ctx context.Context) (map[string]measurement.Reading, error) {
 	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "node collection cancelled", err)
 	}
 
 	// Get the current node name from environment
@@ -68,6 +68,10 @@ func (k *Collector) collectNode(ctx context.Context) (map[string]measurement.Rea
 		}
 	}
 
+	if status.NodeInfo.KubeletVersion != "" {
+		providerData["kubelet-version"] = measurement.Str(status.NodeInfo.KubeletVersion)
+	}
+
 	if status.NodeInfo.KernelVersion != "" {
 		providerData["kernel-version"] = measurement.Str(status.NodeInfo.KernelVersion)
 	}
@@ -99,10 +103,6 @@ func parseProvider(providerID string) string {
 
 	// Split by "://" to get the provider prefix
 	parts := strings.SplitN(providerID, "://", 2)
-	if len(parts) < 1 {
-		slog.Warn("invalid providerID format", slog.String("providerID", providerID))
-		return ""
-	}
 
 	// Normalize provider names
 	provider := strings.ToLower(strings.TrimSpace(parts[0]))

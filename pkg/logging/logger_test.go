@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -201,13 +201,13 @@ func TestSetDefaultStructuredLogger(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Clean up any existing environment variable first
-			os.Unsetenv(EnvVarLogLevel)
+			os.Unsetenv(envVarLogLevel)
 
 			// Set environment variable
 			if tt.envVar != "" {
-				os.Setenv(EnvVarLogLevel, tt.envVar)
+				os.Setenv(envVarLogLevel, tt.envVar)
 			}
-			defer os.Unsetenv(EnvVarLogLevel)
+			defer os.Unsetenv(envVarLogLevel)
 
 			// Set the default logger
 			SetDefaultStructuredLogger(tt.module, tt.version)
@@ -272,9 +272,9 @@ func TestSetDefaultStructuredLoggerWithLevel(t *testing.T) {
 	}
 }
 
-func TestEnvVarLogLevel(t *testing.T) {
-	if EnvVarLogLevel != "LOG_LEVEL" {
-		t.Errorf("EnvVarLogLevel = %q, want %q", EnvVarLogLevel, "LOG_LEVEL")
+func TestEnvVarLogLevelConstant(t *testing.T) {
+	if envVarLogLevel != "LOG_LEVEL" {
+		t.Errorf("envVarLogLevel = %q, want %q", envVarLogLevel, "LOG_LEVEL")
 	}
 }
 

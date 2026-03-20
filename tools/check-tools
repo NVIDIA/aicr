@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -97,6 +97,9 @@ get_tool_metadata() {
         grype)
             echo "grype:::grype version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | grep -v '^\[' || echo installed:::presence"
             ;;
+        syft)
+            echo "syft:::syft version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}':::major_minor"
+            ;;
         # Testing tools
         kubectl)
             echo "kubectl:::kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\.[0-9]+' || echo installed:::major"
@@ -114,7 +117,7 @@ get_tool_metadata() {
             echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
             ;;
         chainsaw)
-            echo "chainsaw:::chainsaw version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
+            echo "chainsaw:::chainsaw version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;
         # Optional tools (no version in .settings.yaml)
         docker)

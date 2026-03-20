@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ import (
 // Server represents the HTTP server for handling API requests.
 // It includes rate limiting, health checks, metrics, and graceful shutdown capabilities.
 type Server struct {
-	config      *Config
+	config      *config
 	httpServer  *http.Server
 	rateLimiter *rate.Limiter
 	mu          sync.RWMutex
@@ -47,8 +47,8 @@ type Server struct {
 // Option is a functional option for configuring Server instances.
 type Option func(*Server)
 
-// WithConfig returns an Option that sets a custom configuration for the Server.
-func WithConfig(cfg *Config) Option {
+// withConfig returns an Option that sets a custom configuration for the Server.
+func withConfig(cfg *config) Option {
 	return func(s *Server) {
 		s.config = cfg
 	}

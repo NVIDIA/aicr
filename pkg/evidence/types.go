@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,50 +16,47 @@ package evidence
 
 import (
 	"time"
-
-	"github.com/NVIDIA/aicr/pkg/validator"
-	"github.com/NVIDIA/aicr/pkg/validator/checks"
 )
 
-// EvidenceEntry holds all data needed to render a single evidence document.
-// Multiple checks can contribute to a single entry when they share an EvidenceFile.
-type EvidenceEntry struct {
-	// RequirementID is the CNCF requirement identifier (e.g., "dra_support").
+// evidenceEntry holds all data needed to render a single evidence document.
+// Multiple checks can contribute to one entry when they share a requirement.
+type evidenceEntry struct {
+	// RequirementID is the CNCF requirement identifier.
 	RequirementID string
 
-	// Title is the human-readable title for the evidence document.
+	// Title is the human-readable evidence document title.
 	Title string
 
-	// Description is a one-paragraph description of what this requirement demonstrates.
+	// Description is a one-paragraph description.
 	Description string
 
 	// Filename is the output filename (e.g., "dra-support.md").
 	Filename string
 
-	// Checks contains the individual check results contributing to this entry.
-	Checks []CheckEntry
+	// Checks contains the individual check results.
+	Checks []checkEntry
 
-	// Status is the aggregate status: pass if all checks pass, fail if any fails.
-	Status validator.ValidationStatus
+	// Status is the aggregate: "passed" if all pass, "failed" if any fails.
+	Status string
 
-	// GeneratedAt is the timestamp when evidence was generated.
+	// GeneratedAt is the evidence generation timestamp.
 	GeneratedAt time.Time
 }
 
-// CheckEntry represents one check result within an evidence entry.
-type CheckEntry struct {
-	// Name is the check registry name (e.g., "accelerator-metrics").
+// checkEntry represents one check result within an evidence entry.
+type checkEntry struct {
+	// Name is the validator name.
 	Name string
 
-	// Status is the check outcome.
-	Status validator.ValidationStatus
+	// Status is the check outcome ("passed", "failed", "skipped", "other").
+	Status string
 
-	// Reason is the check output/reason text.
-	Reason string
+	// Message is the error message (from termination log on failure).
+	Message string
 
-	// Duration is how long the check took.
-	Duration time.Duration
+	// Stdout contains the evidence output lines.
+	Stdout []string
 
-	// Artifacts contains diagnostic evidence captured during check execution.
-	Artifacts []checks.Artifact
+	// Duration is the execution time in milliseconds.
+	Duration int
 }

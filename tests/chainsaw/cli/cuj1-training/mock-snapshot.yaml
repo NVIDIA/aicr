@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,10 +40,10 @@ measurements:
           k8s-ephemeral-storage-metrics.version: 1.19.2
           k8s-ephemeral-storage-metrics.namespace: monitoring
           kai-scheduler.chart: kai-scheduler
-          kai-scheduler.version: v0.12.15
+          kai-scheduler.version: v0.12.17
           kai-scheduler.namespace: kai-scheduler
           kube-prometheus-stack.chart: kube-prometheus-stack
-          kube-prometheus-stack.version: 81.2.2
+          kube-prometheus-stack.version: 82.8.0
           kube-prometheus-stack.namespace: monitoring
           kubeflow-trainer.chart: kubeflow-trainer
           kubeflow-trainer.version: 2.1.0
@@ -52,15 +52,15 @@ measurements:
           nvidia-dra-driver-gpu.version: 25.12.0
           nvidia-dra-driver-gpu.namespace: nvidia-dra-driver
           nvsentinel.chart: nvsentinel
-          nvsentinel.version: v0.8.0
+          nvsentinel.version: v0.10.0
           nvsentinel.namespace: nvsentinel
           prometheus-adapter.chart: prometheus-adapter
-          prometheus-adapter.version: 4.14.0
+          prometheus-adapter.version: 5.3.0
           prometheus-adapter.namespace: monitoring
           skyhook-customizations.chart: skyhook-customizations
           skyhook-customizations.namespace: skyhook
           skyhook-operator.chart: skyhook-operator
-          skyhook-operator.version: v0.12.0
+          skyhook-operator.version: v0.14.0
           skyhook-operator.namespace: skyhook
   - type: OS
     subtypes:

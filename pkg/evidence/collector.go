@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -116,9 +116,10 @@ type CollectorOption func(*Collector)
 // Collector orchestrates behavioral evidence collection by invoking the
 // embedded collect-evidence.sh script against a live Kubernetes cluster.
 type Collector struct {
-	outputDir string
-	features  []string
-	noCleanup bool
+	outputDir  string
+	features   []string
+	noCleanup  bool
+	kubeconfig string
 }
 
 // NewCollector creates a new evidence Collector.
@@ -144,6 +145,13 @@ func WithFeatures(features []string) CollectorOption {
 func WithNoCleanup(noCleanup bool) CollectorOption {
 	return func(c *Collector) {
 		c.noCleanup = noCleanup
+	}
+}
+
+// WithKubeconfig sets the kubeconfig path for kubectl commands in the evidence script.
+func WithKubeconfig(kubeconfig string) CollectorOption {
+	return func(c *Collector) {
+		c.kubeconfig = kubeconfig
 	}
 }
 
@@ -218,16 +226,22 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 	if c.noCleanup {
 		cmd.Env = append(cmd.Env, "NO_CLEANUP=true")
 	}
+	if c.kubeconfig != "" {
+		cmd.Env = append(cmd.Env, "KUBECONFIG="+c.kubeconfig)
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "evidence collection command failed", err)
+	}
+	return nil
 }
 
 // writeEmbeddedManifests extracts the embedded manifests to the target directory.
 func writeEmbeddedManifests(targetDir string) error {
 	return fs.WalkDir(manifestsFS, "scripts/manifests", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return errors.Wrap(errors.ErrCodeInternal, "failed to walk embedded manifests", err)
 		}
 
 		// Compute relative path from "scripts/manifests" prefix.
@@ -240,7 +254,7 @@ func writeEmbeddedManifests(targetDir string) error {
 
 		data, err := manifestsFS.ReadFile(path)
 		if err != nil {
-			return err
+			return errors.Wrap(errors.ErrCodeInternal, "failed to read embedded manifest", err)
 		}
 		return os.WriteFile(targetPath, data, 0o600)
 	})

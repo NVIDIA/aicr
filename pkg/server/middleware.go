@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/google/uuid"
 )
@@ -46,7 +47,7 @@ func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 func (s *Server) versionMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		version := negotiateAPIVersion(r)
-		SetAPIVersionHeader(w, version)
+		setAPIVersionHeader(w, version)
 
 		// Store version in context for handlers to access if needed
 		ctx := context.WithValue(r.Context(), contextKeyAPIVersion, version)
@@ -81,8 +82,7 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.rateLimiter.Allow() {
 			rateLimitRejects.Inc()
-			retryAfterSeconds := "1"
-			w.Header().Set("Retry-After", retryAfterSeconds)
+			w.Header().Set("Retry-After", defaults.ServerRetryAfterSeconds)
 			WriteError(w, r, http.StatusTooManyRequests, aicrerrors.ErrCodeRateLimitExceeded,
 				"Rate limit exceeded", true, map[string]any{
 					"limit": s.config.RateLimit,

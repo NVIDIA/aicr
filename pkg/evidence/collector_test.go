@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -112,18 +112,32 @@ func TestNewCollector(t *testing.T) {
 		if c.noCleanup {
 			t.Error("noCleanup = true, want false")
 		}
+		if c.kubeconfig != "" {
+			t.Errorf("kubeconfig = %q, want empty", c.kubeconfig)
+		}
 	})
 
 	t.Run("with options", func(t *testing.T) {
 		c := NewCollector("/tmp/out",
 			WithFeatures([]string{"dra", "gang"}),
 			WithNoCleanup(true),
+			WithKubeconfig("/path/to/kubeconfig"),
 		)
 		if len(c.features) != 2 {
 			t.Errorf("features length = %d, want 2", len(c.features))
 		}
 		if !c.noCleanup {
 			t.Error("noCleanup = false, want true")
+		}
+		if c.kubeconfig != "/path/to/kubeconfig" {
+			t.Errorf("kubeconfig = %q, want %q", c.kubeconfig, "/path/to/kubeconfig")
+		}
+	})
+
+	t.Run("empty kubeconfig not set", func(t *testing.T) {
+		c := NewCollector("/tmp/out", WithKubeconfig(""))
+		if c.kubeconfig != "" {
+			t.Errorf("kubeconfig = %q, want empty", c.kubeconfig)
 		}
 	})
 }

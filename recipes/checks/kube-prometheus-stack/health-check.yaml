@@ -1,0 +1,76 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kube Prometheus Stack Health Check
+#
+# Validates that the kube-prometheus-stack operator is running and healthy in
+# the monitoring namespace. Checks that the kube-prometheus-stack-operator
+# deployment has at least one available replica and that no prometheus stack
+# pods (selected by label) are stuck in Pending, Failed, or Unknown phases.
+# Label selectors are used because monitoring is a shared namespace.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kube-prometheus-stack-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-deployment-exists
+      try:
+        # Guard against vacuous pass: verify the kube-prometheus-stack-operator
+        # deployment exists and has at least one ready replica.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kube-prometheus-operator
+                namespace: monitoring
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Assert no prometheus stack pods are in unhealthy phases.
+        # Uses label selector because monitoring is a shared namespace.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: monitoring
+                labels:
+                  app.kubernetes.io/name: kube-prometheus-stack
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: monitoring
+                labels:
+                  app.kubernetes.io/name: kube-prometheus-stack
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: monitoring
+                labels:
+                  app.kubernetes.io/name: kube-prometheus-stack
+              status:
+                phase: Unknown

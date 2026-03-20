@@ -7,12 +7,12 @@ set -euo pipefail
 #
 # PURPOSE:
 # Builds the aicr binary and runs Chainsaw-based CLI integration tests.
-# Tests are defined declaratively in tests/chainsaw/cli/*/chainsaw-test.yaml.
+# Tests are defined declaratively in tests/chainsaw/cli/ and tests/chainsaw/bundle-templates/.
 #
 # WHAT THIS SCRIPT DOES:
 # 1. Builds the aicr binary via make build
 # 2. Locates the platform-specific binary
-# 3. Runs chainsaw test --no-cluster on tests/chainsaw/cli/
+# 3. Runs chainsaw test --no-cluster on tests/chainsaw/cli/ and tests/chainsaw/bundle-templates/
 #
 # PREREQUISITES:
 # - chainsaw (brew install kyverno/tap/chainsaw)
@@ -96,11 +96,12 @@ build_binary
 
 export REPO_ROOT="${ROOT}"
 
-msg "Running chainsaw tests (no-cluster CLI tests)"
+msg "Running chainsaw tests (CLI + bundle template tests)"
 chainsaw test \
   --no-cluster \
   --config "${ROOT}/tests/chainsaw/chainsaw-config.yaml" \
   --test-dir "${ROOT}/tests/chainsaw/cli/" \
+  --test-dir "${ROOT}/tests/chainsaw/bundle-templates/" \
   --selector 'ci!=true'
 
 msg "All tests passed!"

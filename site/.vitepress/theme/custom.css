@@ -1,0 +1,449 @@
+/**
+ * Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/* ============================================================
+   NVIDIA AI Cluster Runtime — VitePress Custom Theme
+   Primary: #76B900 (NVIDIA Green)
+   Dark backgrounds: #0a0a0a, #111, #000
+   ============================================================ */
+
+/* ── Landing page: hide VitePress chrome ─────────────────── */
+.landing-page .VPNav,
+.landing-page .VPNavBar,
+.landing-page .VPFooter,
+.landing-page .VPSidebar,
+.landing-page .VPLocalNav {
+  display: none !important;
+}
+
+.landing-page .VPContent {
+  padding-top: 0 !important;
+}
+
+.landing-page .VPDoc {
+  padding: 0 !important;
+  max-width: none !important;
+}
+
+/* ── Brand color overrides ──────────────────────────────────── */
+:root {
+  --vp-c-brand-1: #76B900;
+  --vp-c-brand-2: #69a600;
+  --vp-c-brand-3: #5c9300;
+  --vp-c-brand-soft: rgba(118, 185, 0, 0.14);
+
+  --vp-c-tip-1: #76B900;
+  --vp-c-tip-2: rgba(118, 185, 0, 0.6);
+  --vp-c-tip-3: rgba(118, 185, 0, 0.14);
+  --vp-c-tip-soft: rgba(118, 185, 0, 0.06);
+}
+
+/* ── Dark theme (default) ───────────────────────────────────── */
+.dark {
+  --vp-c-brand-1: #76B900;
+  --vp-c-brand-2: #84cc00;
+  --vp-c-brand-3: #92e000;
+  --vp-c-brand-soft: rgba(118, 185, 0, 0.14);
+
+  --vp-c-bg: #0a0a0a;
+  --vp-c-bg-alt: #111111;
+  --vp-c-bg-elv: #161616;
+  --vp-c-bg-soft: #1a1a1a;
+
+  --vp-c-text-1: rgba(255, 255, 255, 0.87);
+  --vp-c-text-2: rgba(255, 255, 255, 0.6);
+  --vp-c-text-3: rgba(255, 255, 255, 0.38);
+
+  --vp-c-divider: rgba(255, 255, 255, 0.06);
+  --vp-c-gutter: #000000;
+
+  --vp-c-default-1: rgba(255, 255, 255, 0.12);
+  --vp-c-default-2: rgba(255, 255, 255, 0.08);
+  --vp-c-default-3: rgba(255, 255, 255, 0.04);
+  --vp-c-default-soft: rgba(255, 255, 255, 0.04);
+
+  --vp-c-tip-1: #76B900;
+  --vp-c-tip-2: rgba(118, 185, 0, 0.6);
+  --vp-c-tip-3: rgba(118, 185, 0, 0.14);
+  --vp-c-tip-soft: rgba(118, 185, 0, 0.06);
+
+  --vp-code-block-bg: #0d0d0d;
+  --vp-code-line-highlight-color: rgba(118, 185, 0, 0.06);
+  --vp-code-copy-code-hover-bg: rgba(118, 185, 0, 0.08);
+
+  --vp-button-brand-bg: #76B900;
+  --vp-button-brand-text: #000000;
+  --vp-button-brand-hover-bg: #84cc00;
+  --vp-button-brand-hover-text: #000000;
+  --vp-button-brand-active-bg: #69a600;
+  --vp-button-brand-active-text: #000000;
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(135deg, #76B900, #a4e830);
+  --vp-home-hero-image-background-image: linear-gradient(135deg, rgba(118, 185, 0, 0.2), rgba(118, 185, 0, 0.05));
+  --vp-home-hero-image-filter: blur(56px);
+}
+
+/* ── Navbar ─────────────────────────────────────────────────── */
+.dark .VPNav {
+  background: rgba(10, 10, 10, 0.85) !important;
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dark .VPNavBar {
+  background: transparent !important;
+  border-bottom: none !important;
+}
+
+.dark .VPNavBarTitle .title {
+  color: rgba(255, 255, 255, 0.92) !important;
+  font-weight: 600;
+}
+
+.dark .VPNavBarMenuLink {
+  color: rgba(255, 255, 255, 0.6) !important;
+  transition: color 0.2s ease;
+}
+
+.dark .VPNavBarMenuLink:hover,
+.dark .VPNavBarMenuLink.active {
+  color: #ffffff !important;
+}
+
+/* ── Sidebar ────────────────────────────────────────────────── */
+.dark .VPSidebar {
+  background: #0a0a0a !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+.dark .VPSidebarItem .text {
+  color: rgba(255, 255, 255, 0.55);
+  transition: color 0.2s ease;
+}
+
+.dark .VPSidebarItem .text:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.dark .VPSidebarItem.is-active > .item > .indicator {
+  background: #76B900 !important;
+}
+
+.dark .VPSidebarItem.is-active > .item > .link > .text {
+  color: #76B900 !important;
+  font-weight: 600;
+}
+
+.dark .VPSidebarItem .caret {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Links ──────────────────────────────────────────────────── */
+.dark .vp-doc a {
+  color: #76B900;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(118, 185, 0, 0.2);
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.dark .vp-doc a:hover {
+  color: #84cc00;
+  border-bottom-color: rgba(118, 185, 0, 0.5);
+}
+
+/* ── Buttons (VPButton brand variant) ───────────────────────── */
+.dark .VPButton.brand {
+  background-color: #76B900 !important;
+  color: #000000 !important;
+  border: 1px solid #76B900 !important;
+  font-weight: 600;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dark .VPButton.brand:hover {
+  background-color: #84cc00 !important;
+  border-color: #84cc00 !important;
+  box-shadow: 0 0 20px rgba(118, 185, 0, 0.15);
+}
+
+.dark .VPButton.alt {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.dark .VPButton.alt:hover {
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* ── Code blocks ────────────────────────────────────────────── */
+.dark .vp-doc div[class*='language-'] {
+  background: #0d0d0d !important;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+}
+
+.dark .vp-doc div[class*='language-'] > button.copy {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+}
+
+.dark .vp-doc div[class*='language-'] > button.copy:hover {
+  border-color: rgba(118, 185, 0, 0.3);
+  background: rgba(118, 185, 0, 0.08);
+}
+
+.dark .vp-doc div[class*='language-'] > button.copy.copied,
+.dark .vp-doc div[class*='language-'] > button.copy:hover.copied {
+  border-color: #76B900;
+  background: rgba(118, 185, 0, 0.1);
+}
+
+.dark .vp-doc div[class*='language-'] > span.lang {
+  color: rgba(255, 255, 255, 0.2);
+  font-size: 12px;
+}
+
+.dark .vp-doc [class*='language-'] code .line.highlighted {
+  background: rgba(118, 185, 0, 0.06);
+  border-left: 3px solid rgba(118, 185, 0, 0.5);
+  padding-left: 12px;
+  margin-left: -16px;
+  padding-right: 16px;
+}
+
+.dark .vp-doc [class*='language-'] code .line.diff.add {
+  background: rgba(118, 185, 0, 0.08);
+}
+
+.dark .vp-doc [class*='language-'] code .line.diff.add::before {
+  color: #76B900;
+}
+
+/* Inline code */
+.dark .vp-doc :not(pre) > code {
+  background: rgba(118, 185, 0, 0.08);
+  color: #92d600;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.9em;
+}
+
+/* ── Content area ───────────────────────────────────────────── */
+.dark .VPDoc {
+  background: #0a0a0a;
+}
+
+.dark .VPContent {
+  background: #0a0a0a;
+}
+
+/* ── Headings ───────────────────────────────────────────────── */
+.dark .vp-doc h1 {
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.dark .vp-doc h2 {
+  color: rgba(255, 255, 255, 0.9);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 24px;
+}
+
+.dark .vp-doc h3 {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+/* Heading anchors */
+.dark .vp-doc .header-anchor::before {
+  color: rgba(118, 185, 0, 0.4);
+}
+
+.dark .vp-doc .header-anchor:hover::before {
+  color: #76B900;
+}
+
+/* ── Tables ─────────────────────────────────────────────────── */
+.dark .vp-doc table {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dark .vp-doc tr {
+  background: transparent;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.dark .vp-doc tr:nth-child(2n) {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dark .vp-doc th {
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dark .vp-doc td {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ── Custom containers (tip, warning, danger, info) ─────────── */
+.dark .vp-doc .custom-block.tip {
+  border-color: rgba(118, 185, 0, 0.2);
+  background: rgba(118, 185, 0, 0.04);
+}
+
+.dark .vp-doc .custom-block.tip .custom-block-title {
+  color: #76B900;
+}
+
+.dark .vp-doc .custom-block.info {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.dark .vp-doc .custom-block.warning {
+  border-color: rgba(234, 179, 8, 0.3);
+  background: rgba(234, 179, 8, 0.04);
+}
+
+.dark .vp-doc .custom-block.danger {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.04);
+}
+
+/* ── Footer ─────────────────────────────────────────────────── */
+.dark .VPFooter {
+  background: #0a0a0a !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.04) !important;
+}
+
+.dark .VPFooter .message,
+.dark .VPFooter .copyright {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Search ─────────────────────────────────────────────────── */
+.dark .VPNavBarSearch .DocSearch-Button {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dark .VPNavBarSearch .DocSearch-Button:hover {
+  border-color: rgba(118, 185, 0, 0.2);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+.dark ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Edit link ──────────────────────────────────────────────── */
+.dark .VPDocFooter .edit-link-button {
+  color: rgba(255, 255, 255, 0.45);
+  transition: color 0.2s ease;
+}
+
+.dark .VPDocFooter .edit-link-button:hover {
+  color: #76B900;
+}
+
+/* ── Last updated ───────────────────────────────────────────── */
+.dark .VPDocFooter .VPLastUpdated .text {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── Prev / Next navigation ─────────────────────────────────── */
+.dark .VPDocFooter .pager .pager-link {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.dark .VPDocFooter .pager .pager-link:hover {
+  border-color: rgba(118, 185, 0, 0.2);
+  background: rgba(118, 185, 0, 0.04);
+}
+
+.dark .VPDocFooter .pager .pager-link .title {
+  color: #76B900;
+}
+
+/* ── Badge ──────────────────────────────────────────────────── */
+.dark .VPBadge.tip {
+  background: rgba(118, 185, 0, 0.12);
+  color: #76B900;
+  border-color: rgba(118, 185, 0, 0.2);
+}
+
+/* ── Outline (table of contents on right) ───────────────────── */
+.dark .VPDocAsideOutline .outline-link {
+  color: rgba(255, 255, 255, 0.4);
+  transition: color 0.2s ease;
+}
+
+.dark .VPDocAsideOutline .outline-link:hover,
+.dark .VPDocAsideOutline .outline-link.active {
+  color: #76B900;
+}
+
+.dark .VPDocAsideOutline .outline-marker {
+  background-color: #76B900 !important;
+}
+
+/* ── Local search modal ─────────────────────────────────────── */
+.dark .VPLocalSearchBox .search-input {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: #111;
+}
+
+.dark .VPLocalSearchBox .search-input:focus {
+  border-color: rgba(118, 185, 0, 0.4);
+}
+
+.dark .VPLocalSearchBox .result.selected {
+  background: rgba(118, 185, 0, 0.06);
+  border-color: rgba(118, 185, 0, 0.2);
+}
+
+/* ── Selection highlight ────────────────────────────────────── */
+.dark ::selection {
+  background: rgba(118, 185, 0, 0.25);
+  color: #fff;
+}

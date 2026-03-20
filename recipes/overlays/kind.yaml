@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,18 +35,6 @@ spec:
     # Assumes host has NVIDIA drivers and container toolkit pre-configured
     - name: gpu-operator
       type: Helm
-      # Override base expectedResources to exclude nvidia-driver-daemonset —
-      # Kind uses pre-installed host drivers (driver.enabled: false).
-      expectedResources:
-        - kind: Deployment
-          name: gpu-operator
-          namespace: gpu-operator
-        - kind: DaemonSet
-          name: nvidia-device-plugin-daemonset
-          namespace: gpu-operator
-        - kind: DaemonSet
-          name: nvidia-dcgm-exporter
-          namespace: gpu-operator
       overrides:
         driver:
           # Disable driver installation - use pre-installed host drivers

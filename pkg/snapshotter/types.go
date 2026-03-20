@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,9 @@
 package snapshotter
 
 import (
-	"context"
-
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
-
-// Snapshotter defines the interface for collecting system configuration snapshots.
-// Implementations gather measurements from various system components and serialize
-// the results for analysis or recommendation generation.
-type Snapshotter interface {
-	Measure(ctx context.Context) error
-}
 
 // NewSnapshot creates a new Snapshot instance with an initialized Measurements slice.
 func NewSnapshot() *Snapshot {

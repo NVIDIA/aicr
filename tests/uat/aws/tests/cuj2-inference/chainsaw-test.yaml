@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ spec:
     Tests the aicr workflow from demos/cuj2.md against a real cluster:
       Step 1: Snapshot the live cluster
       Step 2: Generate recipe (EKS/H100/inference/dynamo)
-      Step 3: Validate readiness against live snapshot
+      Step 3: Validate deployment against live snapshot
       Step 4: Generate bundle with node scheduling
       Step 5: Validate bundle structure
       Step 6: Multi-phase validation
@@ -74,9 +74,9 @@ spec:
                 --file ./assert-recipe.yaml \
                 --no-color --timeout 10s
 
-    # ── Step 3: Validate readiness against live snapshot ───────────────
-    - name: validate-readiness
-      description: Run readiness validation with live cluster snapshot.
+    # ── Step 3: Validate deployment against live snapshot ───────────────
+    - name: validate-deployment
+      description: Run deployment validation with live cluster snapshot.
       try:
         - script:
             content: |
@@ -86,23 +86,23 @@ spec:
               ${AICR_BIN} validate \
                 --recipe "${WORK}/recipe.yaml" \
                 --snapshot "${WORK}/snapshot.yaml" \
-                --phase readiness \
+                --phase deployment \
                 --no-cluster \
-                --output "${WORK}/validate-readiness-raw.yaml" || true
-              printf 'apiVersion: aicr.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/validate-readiness.yaml"
-              sed '/^---$/d' "${WORK}/validate-readiness-raw.yaml" >> "${WORK}/validate-readiness.yaml"
+                --output "${WORK}/validate-deployment.json" || true
+              test -f "${WORK}/validate-deployment.json"
+              grep -q 'reportformat: CTRF' "${WORK}/validate-deployment.json" || grep -q '\"reportFormat\"' "${WORK}/validate-deployment.json"
 
-    - name: assert-validate-readiness
-      description: Verify readiness validation result is present.
+    - name: assert-validate-deployment
+      description: Verify deployment validation produces CTRF output.
       try:
         - script:
             content: |
               set -eu
               WORK="/tmp/uat-cuj2-inference"
-              chainsaw assert \
-                --resource "${WORK}/validate-readiness.yaml" \
-                --file ./assert-validate-readiness.yaml \
-                --no-color --timeout 10s
+              test -f "${WORK}/validate-deployment.json"
+              grep -q 'reportformat: CTRF' "${WORK}/validate-deployment.json" || grep -q '\"reportFormat\"' "${WORK}/validate-deployment.json"
+            check:
+              ($error == null): true
 
     # ── Step 4: Generate bundle with node scheduling ───────────────────
     - name: generate-bundle
@@ -147,25 +147,23 @@ spec:
               ${AICR_BIN} validate \
                 --recipe "${WORK}/recipe.yaml" \
                 --snapshot "${WORK}/snapshot.yaml" \
-                --phase readiness \
                 --phase deployment \
+                --phase performance \
                 --phase conformance \
                 --no-cluster \
-                --output "${WORK}/validate-multiphase-raw.yaml" || true
-              printf 'apiVersion: aicr.nvidia.com/v1alpha1\nkind: ValidationResult\n' > "${WORK}/validate-multiphase.yaml"
-              sed '/^---$/d' "${WORK}/validate-multiphase-raw.yaml" >> "${WORK}/validate-multiphase.yaml"
+                --output "${WORK}/validate-multiphase.json" || true
 
     - name: assert-validate-multiphase
-      description: Verify all phases present in validation result.
+      description: Verify multiphase validation produces CTRF output.
       try:
         - script:
             content: |
               set -eu
               WORK="/tmp/uat-cuj2-inference"
-              chainsaw assert \
-                --resource "${WORK}/validate-multiphase.yaml" \
-                --file ./assert-validate-multiphase.yaml \
-                --no-color --timeout 10s
+              test -f "${WORK}/validate-multiphase.json"
+              grep -q 'reportformat: CTRF' "${WORK}/validate-multiphase.json" || grep -q '\"reportFormat\"' "${WORK}/validate-multiphase.json"
+            check:
+              ($error == null): true
       cleanup:
         - script:
             content: |

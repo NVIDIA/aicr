@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,16 +182,6 @@ func ResetComponentRegistryForTesting() {
 	globalRegistry = nil
 	globalRegistryErr = nil
 	globalRegistryOnce = sync.Once{}
-}
-
-// MustGetComponentRegistry returns the global component registry or panics.
-// Use this in init() functions where the registry must be available.
-func MustGetComponentRegistry() *ComponentRegistry {
-	reg, err := GetComponentRegistry()
-	if err != nil {
-		panic(fmt.Sprintf("failed to load component registry: %v", err))
-	}
-	return reg
 }
 
 // loadComponentRegistry loads the component registry from the data provider.

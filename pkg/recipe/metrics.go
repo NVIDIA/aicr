@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,12 +30,6 @@ var (
 	)
 
 	// Recipe metadata cache metrics
-	recipeCacheHits = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Name: "aicr_recipe_cache_hits_total",
-			Help: "Total number of recipe metadata cache hits",
-		},
-	)
 	recipeCacheMisses = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "aicr_recipe_cache_misses_total",

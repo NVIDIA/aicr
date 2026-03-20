@@ -1,9 +1,9 @@
 # DRA Support (Dynamic Resource Allocation)
 
-**Recipe:** `h100-eks-ubuntu-inference-dynamo`
-**Generated:** 2026-02-24 20:20:22 UTC
-**Kubernetes Version:** v1.34
+**Kubernetes Version:** v1.35
 **Platform:** linux/amd64
+**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
+**Generated:** 2026-03-10 03:39:16 UTC
 
 ---
 
@@ -23,14 +23,28 @@ resourceclaimtemplates                resource.k8s.io/v1   true         Resource
 resourceslices                        resource.k8s.io/v1   false        ResourceSlice
 ```
 
+## DeviceClasses
+
+**DeviceClasses**
+```
+$ kubectl get deviceclass
+NAME                                        AGE
+compute-domain-daemon.nvidia.com            10m
+compute-domain-default-channel.nvidia.com   10m
+gpu.nvidia.com                              10m
+mig.nvidia.com                              10m
+vfio.gpu.nvidia.com                         10m
+```
+
 ## DRA Driver Health
 
 **DRA driver pods**
 ```
 $ kubectl get pods -n nvidia-dra-driver -o wide
-NAME                                                READY   STATUS    RESTARTS        AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-nvidia-dra-driver-gpu-controller-75f987ff5f-chrbn   1/1     Running   1 (3m54s ago)   47h   100.65.71.124   ip-100-64-171-120.ec2.internal   <none>           <none>
-nvidia-dra-driver-gpu-kubelet-plugin-rmxdj          2/2     Running   2 (3m54s ago)   17m   100.65.2.168    ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME                                                READY   STATUS    RESTARTS   AGE     IP             NODE                           NOMINATED NODE   READINESS GATES
+nvidia-dra-driver-gpu-controller-68966c79bb-zj7lf   1/1     Running   0          10m     10.0.4.122     system-node-1     <none>           <none>
+nvidia-dra-driver-gpu-kubelet-plugin-4kfhk          2/2     Running   0          9m54s   10.0.143.178   gpu-node-1   <none>           <none>
+nvidia-dra-driver-gpu-kubelet-plugin-grg2l          2/2     Running   0          9m54s   10.0.216.98    gpu-node-2     <none>           <none>
 ```
 
 ## Device Advertisement (ResourceSlices)
@@ -38,9 +52,11 @@ nvidia-dra-driver-gpu-kubelet-plugin-rmxdj          2/2     Running   2 (3m54s a
 **ResourceSlices**
 ```
 $ kubectl get resourceslices
-NAME                                                             NODE                             DRIVER                      POOL                             AGE
-ip-100-64-171-120.ec2.internal-compute-domain.nvidia.com-76zr9   ip-100-64-171-120.ec2.internal   compute-domain.nvidia.com   ip-100-64-171-120.ec2.internal   2m12s
-ip-100-64-171-120.ec2.internal-gpu.nvidia.com-75xvv              ip-100-64-171-120.ec2.internal   gpu.nvidia.com              ip-100-64-171-120.ec2.internal   2m10s
+NAME                                                           NODE                           DRIVER                      POOL                           AGE
+gpu-node-1-compute-domain.nvidia.com-q9xqc   gpu-node-1   compute-domain.nvidia.com   gpu-node-1   10m
+gpu-node-1-gpu.nvidia.com-7cbz2              gpu-node-1   gpu.nvidia.com              gpu-node-1   10m
+gpu-node-2-compute-domain.nvidia.com-2n2cq     gpu-node-2     compute-domain.nvidia.com   gpu-node-2     10m
+gpu-node-2-gpu.nvidia.com-79gvw                gpu-node-2     gpu.nvidia.com              gpu-node-2     10m
 ```
 
 ## GPU Allocation Test
@@ -48,8 +64,23 @@ ip-100-64-171-120.ec2.internal-gpu.nvidia.com-75xvv              ip-100-64-171-1
 Deploy a test pod that requests 1 GPU via ResourceClaim and verifies device access.
 
 **Test manifest:** `pkg/evidence/scripts/manifests/dra-gpu-test.yaml`
-
 ```yaml
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DRA GPU allocation test
+# Usage: kubectl apply -f pkg/evidence/scripts/manifests/dra-gpu-test.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -99,7 +130,7 @@ spec:
 
 **Apply test manifest**
 ```
-$ kubectl apply -f pkg/evidence/scripts/manifests/dra-gpu-test.yaml
+$ kubectl apply -f manifests/dra-gpu-test.yaml
 namespace/dra-test created
 resourceclaim.resource.k8s.io/gpu-claim created
 pod/dra-gpu-test created
@@ -109,14 +140,16 @@ pod/dra-gpu-test created
 ```
 $ kubectl get resourceclaim -n dra-test -o wide
 NAME        STATE     AGE
-gpu-claim   pending   10s
+gpu-claim   pending   11s
 ```
+
+> **Note:** ResourceClaim shows `pending` because the DRA controller deallocates the claim after pod completion. The pod logs below confirm the GPU was successfully allocated and visible during execution.
 
 **Pod status**
 ```
 $ kubectl get pod dra-gpu-test -n dra-test -o wide
-NAME           READY   STATUS      RESTARTS   AGE   IP              NODE                             NOMINATED NODE   READINESS GATES
-dra-gpu-test   0/1     Completed   0          10s   100.65.63.246   ip-100-64-171-120.ec2.internal   <none>           <none>
+NAME           READY   STATUS      RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
+dra-gpu-test   0/1     Completed   0          13s   10.0.177.19   gpu-node-2   <none>           <none>
 ```
 
 **Pod logs**
@@ -136,6 +169,6 @@ DRA GPU allocation successful
 
 **Delete test namespace**
 ```
-$ kubectl delete namespace dra-test --ignore-not-found
-namespace "dra-test" deleted
+$ cleanup_ns dra-test
+
 ```

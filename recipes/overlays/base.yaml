@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -38,16 +38,6 @@ spec:
       valuesFile: components/gpu-operator/values.yaml
       manifestFiles:
         - components/gpu-operator/manifests/dcgm-exporter.yaml
-      expectedResources:
-        - kind: Deployment
-          name: gpu-operator
-          namespace: gpu-operator
-        - kind: DaemonSet
-          name: nvidia-driver-daemonset
-          namespace: gpu-operator
-        - kind: DaemonSet
-          name: nvidia-device-plugin-daemonset
-          namespace: gpu-operator
       dependencyRefs:
         - cert-manager
         - kube-prometheus-stack
@@ -55,10 +45,8 @@ spec:
     - name: nvsentinel
       type: Helm
       source: oci://ghcr.io/nvidia
-      version: v0.8.0
+      version: v1.1.0
       valuesFile: components/nvsentinel/values.yaml
-      manifestFiles:
-        - components/nvsentinel/manifests/allow-intra-namespace.yaml
       dependencyRefs:
         - cert-manager
         - gpu-operator
@@ -66,13 +54,13 @@ spec:
     - name: skyhook-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia/skyhook
-      version: v0.12.0
+      version: v0.14.0
       valuesFile: components/skyhook-operator/values.yaml
 
     - name: kube-prometheus-stack
       type: Helm
       source: https://prometheus-community.github.io/helm-charts
-      version: 81.2.2
+      version: 82.8.0
       valuesFile: components/kube-prometheus-stack/values.yaml
 
     - name: k8s-ephemeral-storage-metrics
@@ -94,7 +82,7 @@ spec:
     - name: kai-scheduler
       type: Helm
       source: oci://ghcr.io/nvidia/kai-scheduler
-      version: v0.12.15
+      version: v0.12.17
       valuesFile: components/kai-scheduler/values.yaml
       # Workaround: KAI scheduler v0.12.x injects runtimeClassName: nvidia
       # into GPU pods, which fails with GPU Operator v25.10.0+ CDI defaults.
@@ -104,8 +92,3 @@ spec:
         - components/kai-scheduler/manifests/disable-runtime-class-injection.yaml
       dependencyRefs:
         - gpu-operator
-
-  validation:
-    deployment:
-      checks:
-        - expected-resources

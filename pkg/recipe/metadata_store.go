@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,12 +48,6 @@ type MetadataStore struct {
 
 // loadMetadataStore loads and caches the metadata store from the data provider.
 func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
-	// Check for cache hit before entering Once.Do
-	if cachedMetadataStore != nil && cachedMetadataErr == nil {
-		recipeCacheHits.Inc()
-		return cachedMetadataStore, nil
-	}
-
 	metadataStoreOnce.Do(func() {
 		// Record cache miss on first load
 		recipeCacheMisses.Inc()
@@ -113,10 +107,10 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse %s", path), parseErr)
 			}
 
-			// Validate kind field
+			// Skip files with a different kind (e.g., ValidatorCatalog).
 			if metadata.Kind != "" && metadata.Kind != RecipeMetadataKind {
-				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid kind in %s: got %q, expected %q", path, metadata.Kind, RecipeMetadataKind))
+				slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadata.Kind)
+				return nil
 			}
 
 			// Categorize as base or overlay

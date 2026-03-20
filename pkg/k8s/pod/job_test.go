@@ -1,4 +1,4 @@
-// Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,84 +28,106 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
-func TestWaitForJobCompletion_Success(t *testing.T) {
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+func TestWaitForJobCompletion(t *testing.T) {
+	tests := []struct {
+		name       string
+		job        *batchv1.Job
+		cancel     bool
+		timeout    time.Duration
+		watchEvent *batchv1.Job // if non-nil, send this as a Modify event after brief delay
+		wantErr    bool
+	}{
+		{
+			name: "success via watch",
+			job:  &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"}},
+			watchEvent: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+				Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+				}},
+			},
+			timeout: 5 * time.Second,
+			wantErr: false,
+		},
+		{
+			name: "failure via watch",
+			job:  &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"}},
+			watchEvent: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+				Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"},
+				}},
+			},
+			timeout: 5 * time.Second,
+			wantErr: true,
+		},
+		{
+			name:    "timeout",
+			job:     &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"}},
+			timeout: 100 * time.Millisecond,
+			wantErr: true,
+		},
+		{
+			name: "already complete",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+				Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
+				}},
+			},
+			timeout: 1 * time.Second,
+			wantErr: false,
+		},
+		{
+			name: "already failed",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
+				Status: batchv1.JobStatus{Conditions: []batchv1.JobCondition{
+					{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"},
+				}},
+			},
+			timeout: 1 * time.Second,
+			wantErr: true,
+		},
+		{
+			name:    "context cancelled",
+			job:     nil,
+			cancel:  true,
+			timeout: 5 * time.Second,
+			wantErr: true,
+		},
 	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(job)
 
-	watcher := watch.NewFake()
-	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var client *fake.Clientset //nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+			if tt.job != nil {
+				client = fake.NewSimpleClientset(tt.job) //nolint:staticcheck
+			} else {
+				client = fake.NewSimpleClientset() //nolint:staticcheck
+			}
 
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		completedJob := job.DeepCopy()
-		completedJob.Status.Conditions = []batchv1.JobCondition{
-			{Type: batchv1.JobComplete, Status: corev1.ConditionTrue},
-		}
-		watcher.Modify(completedJob)
-	}()
+			if tt.watchEvent != nil {
+				watcher := watch.NewFake()
+				client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
 
-	err := pod.WaitForJobCompletion(context.Background(), client, "default", "test-job", 5*time.Second)
-	if err != nil {
-		t.Errorf("expected no error, got: %v", err)
-	}
-}
+				go func() {
+					time.Sleep(10 * time.Millisecond)
+					watcher.Modify(tt.watchEvent)
+				}()
+			}
 
-func TestWaitForJobCompletion_Failure(t *testing.T) {
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(job)
+			ctx := context.Background()
+			if tt.cancel {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			}
 
-	watcher := watch.NewFake()
-	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
-
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		failedJob := job.DeepCopy()
-		failedJob.Status.Conditions = []batchv1.JobCondition{
-			{Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "BackoffLimitExceeded"},
-		}
-		watcher.Modify(failedJob)
-	}()
-
-	err := pod.WaitForJobCompletion(context.Background(), client, "default", "test-job", 5*time.Second)
-	if err == nil {
-		t.Error("expected error for failed job")
-	}
-}
-
-func TestWaitForJobCompletion_Timeout(t *testing.T) {
-	job := &batchv1.Job{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-job", Namespace: "default"},
-	}
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset(job)
-
-	watcher := watch.NewFake()
-	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
-
-	err := pod.WaitForJobCompletion(context.Background(), client, "default", "test-job", 100*time.Millisecond)
-	if err == nil {
-		t.Error("expected timeout error")
-	}
-}
-
-func TestWaitForJobCompletion_ContextCancelled(t *testing.T) {
-	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
-	client := fake.NewSimpleClientset()
-
-	watcher := watch.NewFake()
-	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := pod.WaitForJobCompletion(ctx, client, "default", "test-job", 5*time.Second)
-	if err == nil {
-		t.Error("expected error for cancelled context")
+			err := pod.WaitForJobCompletion(ctx, client, "default", "test-job", tt.timeout)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("WaitForJobCompletion() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }

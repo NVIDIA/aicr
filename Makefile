@@ -8,7 +8,7 @@ ifeq ($(IMAGE_REGISTRY),)
 IMAGE_REGISTRY     := ghcr.io/nvidia
 endif
 IMAGE_TAG          ?= latest
-YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundles/*" ! -path "*/testdata/*")
+YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*")
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
 GO_VERSION         := $(shell go env GOVERSION 2>/dev/null | sed 's/go//')
@@ -103,8 +103,16 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license ## Lints the entire project (Go, YAML, and license headers)
+lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar ## Lints the entire project (Go, YAML, and license headers)
 	@echo "Completed Go and YAML lints and ensured license headers"
+
+.PHONY: check-agents-sync
+check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
+	@./tools/check-agents-sync
+
+.PHONY: check-docs-sidebar
+check-docs-sidebar: ## Verifies all docs/ pages have sidebar entries in VitePress config
+	@./tools/check-docs-sidebar
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -134,7 +142,6 @@ LICENSE_IGNORES = \
 	-ignore '**/*.csv' \
 	-ignore '**/*.pyc' \
 	-ignore '**/*.xml' \
-	-ignore '**/*.toml' \
 	-ignore '**/*lock.hcl' \
 	-ignore '**/*pb2*' \
 	-ignore 'bundles/**' \
@@ -160,7 +167,8 @@ license-check: ## Check license is approved
 test: ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
-	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v /tests/chainsaw/) || exit 1; \
+	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
+	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.out $$(go list ./... | grep -v -e /tests/chainsaw/ -e /validators) || exit 1; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
 
@@ -222,19 +230,19 @@ docs: ## Serves Go documentation on http://localhost:6060
 .PHONY: site-serve
 site-serve: ## Serve documentation site locally
 	@set -e; \
-	echo "Starting documentation site on http://localhost:1313..."; \
-	cd site && npm install && hugo serve --baseURL http://localhost:1313/
+	echo "Starting documentation site on http://localhost:5173..."; \
+	cd site && npm install && npm run dev
 
 .PHONY: site-build
 site-build: ## Build documentation site
 	@set -e; \
 	echo "Building documentation site..."; \
-	cd site && npm install && hugo --minify; \
-	echo "Site built in site/public/"
+	cd site && npm install && npm run build; \
+	echo "Site built in site/.vitepress/dist/"
 
 .PHONY: site-clean
 site-clean: ## Clean documentation build artifacts
-	@rm -rf site/public site/resources
+	@rm -rf site/.vitepress/dist site/.vitepress/cache
 	@echo "Cleaned documentation build artifacts"
 
 .PHONY: build
@@ -249,15 +257,83 @@ image: ## Builds and pushes container image (IMAGE_REGISTRY, IMAGE_TAG)
 	echo "Building and pushing image to $(IMAGE_REGISTRY)/aicr:$(IMAGE_TAG)"; \
 	KO_DOCKER_REPO=$(IMAGE_REGISTRY) ko build --bare --sbom=none --tags=$(IMAGE_TAG) ./cmd/aicr
 
-.PHONY: image-validator
-image-validator: build ## Builds validator image with Go toolchain (IMAGE_REGISTRY, IMAGE_TAG)
+.PHONY: image-validators
+image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
-	echo "Building validator image to $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG)"; \
-	docker build -f Dockerfile.validator -t $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG) .; \
-	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
-		echo "Pushing validator image to $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG)"; \
-		docker push $(IMAGE_REGISTRY)/aicr-validator:$(IMAGE_TAG); \
-	fi
+	for phase in deployment performance conformance; do \
+		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
+		docker build -f validators/$${phase}/Dockerfile \
+			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
+		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
+			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
+			docker push $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG); \
+		fi; \
+	done
+
+.PHONY: check-health
+check-health: ## Runs chainsaw health check directly against Kind cluster (COMPONENT=<name>)
+	@set -e; \
+	if [ -z "$(COMPONENT)" ]; then \
+		echo "Usage: make check-health COMPONENT=<name>"; \
+		echo "Available components:"; \
+		ls -1 recipes/checks/; \
+		exit 1; \
+	fi; \
+	CHECK_FILE="recipes/checks/$(COMPONENT)/health-check.yaml"; \
+	if [ ! -f "$$CHECK_FILE" ]; then \
+		echo "Error: $$CHECK_FILE not found"; \
+		echo "Available components:"; \
+		ls -1 recipes/checks/; \
+		exit 1; \
+	fi; \
+	echo "Running health check for $(COMPONENT)..."; \
+	chainsaw test --test-dir "recipes/checks/$(COMPONENT)/" --test-file health-check.yaml --no-color
+
+.PHONY: check-health-all
+check-health-all: ## Runs all chainsaw health checks against Kind cluster
+	@set -e; \
+	FAILED=""; \
+	for dir in recipes/checks/*/; do \
+		COMPONENT=$$(basename "$$dir"); \
+		echo "=== $$COMPONENT ==="; \
+		if chainsaw test --test-dir "$$dir" --test-file health-check.yaml --no-color; then \
+			echo "PASS: $$COMPONENT"; \
+		else \
+			echo "FAIL: $$COMPONENT"; \
+			FAILED="$$FAILED $$COMPONENT"; \
+		fi; \
+		echo ""; \
+	done; \
+	if [ -n "$$FAILED" ]; then \
+		echo "Failed components:$$FAILED"; \
+		exit 1; \
+	fi; \
+	echo "All health checks passed"
+
+.PHONY: validate-local
+validate-local: image-validator ## Builds validator image and runs validation in Kind (RECIPE=<path>)
+	@set -e; \
+	if [ -z "$(RECIPE)" ]; then \
+		echo "Usage: make validate-local RECIPE=<path-to-recipe.yaml>"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(RECIPE)" ]; then \
+		echo "Error: recipe file $(RECIPE) not found"; \
+		exit 1; \
+	fi; \
+	echo "Loading validator images into Kind cluster..."; \
+	for phase in deployment performance conformance; do \
+		kind load docker-image $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) --name kind-aicr; \
+	done; \
+	echo "Running validation with local images..."; \
+	AICR_BIN=$$(find dist/ -name "aicr" -type f | head -1); \
+	if [ -z "$$AICR_BIN" ]; then \
+		echo "Error: aicr binary not found in dist/. Run 'make build' first."; \
+		exit 1; \
+	fi; \
+	AICR_VALIDATOR_IMAGE_REGISTRY=$(IMAGE_REGISTRY) $$AICR_BIN validate \
+		--recipe "$(RECIPE)" \
+		--phase deployment
 
 .PHONY: release
 release: ## Runs the full release process with goreleaser

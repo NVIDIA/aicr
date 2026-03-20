@@ -114,7 +114,7 @@ brew install kind tilt-dev/tap/tilt tilt-dev/tap/ctlptl ko
 [PASS] cli/recipe/query-params
 
 [INFO] --- Test: Recipe with external data ---
-  $ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training --data ./examples/data
+  $ aicr recipe --service eks --accelerator h100 --os ubuntu --intent training --data ./my-data
      → External component 'dgxc-teleport' included in recipe
 [PASS] cli/external-data/recipe
 
