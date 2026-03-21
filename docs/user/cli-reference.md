@@ -1084,7 +1084,7 @@ ArgoCD Applications use multi-source to:
 
 > **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
 
-When `--attest` is passed, the bundle command performs four steps:
+When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires an OIDC token** — In GitHub Actions the ambient OIDC token is used automatically. Locally, a browser window opens for Sigstore OIDC authentication.
@@ -1407,18 +1407,20 @@ AICR respects standard environment variables:
 |----------|-------------|---------|
 | `KUBECONFIG` | Path to Kubernetes config file | `~/.kube/config` |
 | `LOG_LEVEL` | Logging level: debug, info, warn, error | info |
-| `NO_COLOR` | Disable colored output | false |
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | General error |
-| 2 | Invalid arguments |
-| 3 | File I/O error |
-| 4 | Kubernetes connection error |
-| 5 | Recipe generation error |
+| 1 | General error (unclassified) |
+| 2 | Invalid input (bad arguments, validation failure) |
+| 3 | Not found (requested resource does not exist) |
+| 4 | Unauthorized (authentication or authorization failure) |
+| 5 | Timeout (operation exceeded time limit) |
+| 6 | Unavailable (service temporarily unavailable) |
+| 7 | Rate limited (client exceeded rate limit) |
+| 8 | Internal error (unexpected failure) |
 
 ## Common Usage Patterns
 
@@ -1430,7 +1432,7 @@ aicr recipe --os ubuntu --accelerator h100 | jq '.componentRefs[]'
 ### Save All Steps
 ```shell
 aicr snapshot -o snapshot.yaml
-aicr recipe -s snapshot.yaml -i training -o recipe.yaml
+aicr recipe -s snapshot.yaml --intent training -o recipe.yaml
 aicr bundle -r recipe.yaml -o ./bundles
 ```
 
