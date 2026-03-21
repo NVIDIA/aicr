@@ -22,11 +22,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
 func recipeCmdFlags() []cli.Flag {
@@ -124,111 +122,36 @@ Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			// Validate single-value flags are not duplicated
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "output", "format"); err != nil {
 				return err
 			}
 
-			// Initialize external data provider if --data flag is set
 			if err := initDataProvider(cmd); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 			}
 
-			// Parse output format
 			outFormat, err := parseOutputFormat(cmd)
 			if err != nil {
 				return err
 			}
 
-			// Create builder
-			builder := recipe.NewBuilder(
-				recipe.WithVersion(version),
-			)
-
-			var result *recipe.RecipeResult
-
-			// Check if using snapshot or criteria file
-			// Precedence: snapshot > criteria file > CLI flags
-			snapFilePath := cmd.String("snapshot")
-			criteriaFilePath := cmd.String("criteria")
-
-			//nolint:gocritic // if-else chain is appropriate for non-empty string conditions
-			if snapFilePath != "" {
-				slog.Info("loading snapshot from", "uri", snapFilePath)
-				snap, loadErr := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapFilePath, cmd.String("kubeconfig"))
-				if loadErr != nil {
-					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapFilePath), loadErr)
-				}
-
-				// Extract criteria from snapshot
-				criteria := recipe.ExtractCriteriaFromSnapshot(snap)
-
-				// Apply CLI overrides
-				if applyErr := applyCriteriaOverrides(cmd, criteria); applyErr != nil {
-					return applyErr
-				}
-
-				// Create a constraint evaluator that uses the snapshot
-				// This wraps constraints.Evaluate with the snapshot data
-				evaluator := func(constraint recipe.Constraint) recipe.ConstraintEvalResult {
-					valResult := constraints.Evaluate(constraint, snap)
-					return recipe.ConstraintEvalResult{
-						Passed: valResult.Passed,
-						Actual: valResult.Actual,
-						Error:  valResult.Error,
-					}
-				}
-
-				slog.Info("building recipe from snapshot with constraint validation", "criteria", criteria.String())
-				result, err = builder.BuildFromCriteriaWithEvaluator(ctx, criteria, evaluator)
-
-				// Log constraint warnings for visibility
-				if result != nil && len(result.Metadata.ConstraintWarnings) > 0 {
-					for _, w := range result.Metadata.ConstraintWarnings {
-						slog.Warn("overlay excluded due to constraint failure",
-							"overlay", w.Overlay,
-							"constraint", w.Constraint,
-							"expected", w.Expected,
-							"actual", w.Actual,
-							"reason", w.Reason)
-					}
-				}
-			} else if criteriaFilePath != "" {
-				// Load criteria from file
-				slog.Info("loading criteria from file", "path", criteriaFilePath)
-				criteria, loadErr := recipe.LoadCriteriaFromFileWithContext(ctx, criteriaFilePath)
-				if loadErr != nil {
-					return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load criteria from %q", criteriaFilePath), loadErr)
-				}
-
-				// Apply CLI overrides (individual flags take precedence over file)
-				if applyErr := applyCriteriaOverrides(cmd, criteria); applyErr != nil {
-					return applyErr
-				}
-
-				slog.Info("building recipe from criteria file", "criteria", criteria.String())
-				result, err = builder.BuildFromCriteria(ctx, criteria)
-			} else {
-				// Build criteria from CLI flags
-				criteria, buildErr := buildCriteriaFromCmd(cmd)
-				if buildErr != nil {
-					return errors.Wrap(errors.ErrCodeInvalidRequest, "error parsing criteria", buildErr)
-				}
-
-				// Validate that at least some criteria was provided
-				if criteria.Specificity() == 0 {
-					return errors.New(errors.ErrCodeInvalidRequest, "no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --platform, --nodes, --criteria, or use --snapshot to load from a snapshot file")
-				}
-
-				slog.Info("building recipe from criteria", "criteria", criteria.String())
-				result, err = builder.BuildFromCriteria(ctx, criteria)
-			}
-
+			result, err := buildRecipeFromCmd(ctx, cmd)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "error building recipe", err)
 			}
 
-			// Serialize output
+			// Log constraint warnings for visibility
+			if result != nil && len(result.Metadata.ConstraintWarnings) > 0 {
+				for _, w := range result.Metadata.ConstraintWarnings {
+					slog.Warn("overlay excluded due to constraint failure",
+						"overlay", w.Overlay,
+						"constraint", w.Constraint,
+						"expected", w.Expected,
+						"actual", w.Actual,
+						"reason", w.Reason)
+				}
+			}
+
 			output := cmd.String("output")
 			ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
 			if err != nil {

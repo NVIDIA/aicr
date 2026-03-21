@@ -78,6 +78,7 @@ const (
 	CriteriaAcceleratorAny   CriteriaAcceleratorType = "any"
 	CriteriaAcceleratorH100  CriteriaAcceleratorType = "h100"
 	CriteriaAcceleratorGB200 CriteriaAcceleratorType = "gb200"
+	CriteriaAcceleratorB200  CriteriaAcceleratorType = "b200"
 	CriteriaAcceleratorA100  CriteriaAcceleratorType = "a100"
 	CriteriaAcceleratorL40   CriteriaAcceleratorType = "l40"
 )
@@ -91,6 +92,8 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 		return CriteriaAcceleratorH100, nil
 	case "gb200":
 		return CriteriaAcceleratorGB200, nil
+	case "b200":
+		return CriteriaAcceleratorB200, nil
 	case "a100":
 		return CriteriaAcceleratorA100, nil
 	case "l40":
@@ -102,7 +105,7 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 
 // GetCriteriaAcceleratorTypes returns all supported accelerator types sorted alphabetically.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "gb200", "h100", "l40"}
+	return []string{"a100", "b200", "gb200", "h100", "l40"}
 }
 
 // CriteriaIntentType represents the workload intent.
@@ -204,7 +207,7 @@ type Criteria struct {
 	// Service is the Kubernetes service type (eks, gke, aks, oke, self-managed).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, gb200, a100, l40).
+	// Accelerator is the GPU/accelerator type (h100, gb200, b200, a100, l40).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
@@ -322,6 +325,48 @@ func MatchesCriteriaField(recipeValue, queryValue string) bool {
 
 	// Both have specific values - must match exactly
 	return recipeValue == queryValue
+}
+
+// Validate checks that all non-empty criteria fields contain valid values.
+// This runs the same parsing/normalization as ParseCriteriaFromValues,
+// ensuring POST request bodies are validated the same as GET query parameters.
+func (c *Criteria) Validate() error {
+	if c.Service != "" {
+		parsed, err := ParseCriteriaServiceType(string(c.Service))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid service", err)
+		}
+		c.Service = parsed
+	}
+	if c.Accelerator != "" {
+		parsed, err := ParseCriteriaAcceleratorType(string(c.Accelerator))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerator", err)
+		}
+		c.Accelerator = parsed
+	}
+	if c.Intent != "" {
+		parsed, err := ParseCriteriaIntentType(string(c.Intent))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid intent", err)
+		}
+		c.Intent = parsed
+	}
+	if c.OS != "" {
+		parsed, err := ParseCriteriaOSType(string(c.OS))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid os", err)
+		}
+		c.OS = parsed
+	}
+	if c.Platform != "" {
+		parsed, err := ParseCriteriaPlatformType(string(c.Platform))
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid platform", err)
+		}
+		c.Platform = parsed
+	}
+	return nil
 }
 
 // Specificity returns a score indicating how specific this criteria is.

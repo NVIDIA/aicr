@@ -4,7 +4,7 @@ The `aicr` CLI provides command-line access to AICR configuration management cap
 
 ## Overview
 
-The CLI provides a four-step workflow for optimizing GPU infrastructure:
+The CLI provides a four-step workflow for optimizing GPU infrastructure, plus a `query` command for inspecting hydrated recipe values:
 
 ```
 ┌──────────────┐      ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
@@ -12,6 +12,12 @@ The CLI provides a four-step workflow for optimizing GPU infrastructure:
 └──────────────┘      └──────────────┘      └──────────────┘      └──────────────┘
    Capture system      Generate optimized    Check cluster         Create deployment
    configuration        recommendations       compatibility         artifacts
+                              │
+                        ┌─────┴──────┐
+                        │   Query    │
+                        └────────────┘
+                        Extract hydrated
+                        config values
 ```
 
 ### Step 1: Snapshot Command
@@ -647,6 +653,54 @@ constraints:
 
 **Common Errors**:
 - Unknown output format: Error with supported formats list (json, yaml)
+
+### Query Command: `pkg/cli/query.go`
+
+Extracts specific values from the fully hydrated recipe configuration using dot-path selectors.
+
+#### Command Flow
+
+```mermaid
+flowchart TD
+    A[User Flags + --selector] --> B[Build Recipe from Criteria]
+    B --> C[recipe.HydrateResult]
+    C --> D["Inline GetValuesForComponent<br/>for each ComponentRef"]
+    D --> E["recipe.Select(hydrated, selector)"]
+    E --> F{Scalar?}
+    F -->|Yes| G[Print plain text]
+    F -->|No| H[Print YAML/JSON]
+```
+
+#### Hydration Process
+
+The query command builds a fully hydrated `map[string]any` from the `RecipeResult`:
+
+1. Recipe-level fields (criteria, metadata, deploymentOrder, constraints) are mapped directly
+2. Each `ComponentRef` is expanded into a component map with metadata fields (name, chart, source, version, etc.)
+3. `GetValuesForComponent` is called per component to merge base values, overlay values, and inline overrides
+4. The merged values are inlined under each component's `values` key
+
+#### Selector Resolution
+
+The selector uses dot-delimited path walking. Leading dots are stripped (yq-style), so `.components.X` and `components.X` are equivalent. An empty selector or `.` returns the entire hydrated map.
+
+#### Usage Examples
+
+```bash
+# Scalar value — plain text output
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version
+
+# Subtree — YAML output
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver
+
+# Shell-friendly for scripting
+VERSION=$(aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version)
+```
+
+**Implementation:** `pkg/recipe/query.go` (`HydrateResult`, `Select`)
 
 ### Bundle Command: `pkg/cli/bundle.go`
 

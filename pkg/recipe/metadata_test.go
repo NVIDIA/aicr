@@ -488,22 +488,23 @@ func TestMergeComponentRef_AdvancedFields(t *testing.T) {
 	})
 
 	t.Run("expectedResources inherited from base", func(t *testing.T) {
+		const gpuOp = "gpu-operator"
 		base := ComponentRef{
-			Name: "gpu-operator",
+			Name: gpuOp,
 			ExpectedResources: []ExpectedResource{
-				{Kind: "Deployment", Name: "gpu-operator", Namespace: "gpu-operator"},
+				{Kind: "Deployment", Name: gpuOp, Namespace: gpuOp},
 			},
 		}
 		overlay := ComponentRef{
-			Name:      "gpu-operator",
+			Name:      gpuOp,
 			Overrides: map[string]any{"cdi.enabled": true},
 		}
 		result := mergeComponentRef(base, overlay)
 		if len(result.ExpectedResources) != 1 {
 			t.Errorf("expectedResources len = %d, want 1 (inherited from base)", len(result.ExpectedResources))
 		}
-		if result.ExpectedResources[0].Name != "gpu-operator" {
-			t.Errorf("expectedResources[0].Name = %q, want gpu-operator", result.ExpectedResources[0].Name)
+		if result.ExpectedResources[0].Name != gpuOp {
+			t.Errorf("expectedResources[0].Name = %q, want %s", result.ExpectedResources[0].Name, gpuOp)
 		}
 	})
 
@@ -1107,11 +1108,12 @@ func TestComponentRefMergeNamespaceAndChart(t *testing.T) {
 			},
 		}
 
+		const overlayVersion = "v2.0.0"
 		overlay := RecipeMetadataSpec{
 			ComponentRefs: []ComponentRef{
 				{
 					Name:    gpuOp,
-					Version: "v2.0.0",
+					Version: overlayVersion,
 				},
 			},
 		}
@@ -1125,12 +1127,15 @@ func TestComponentRefMergeNamespaceAndChart(t *testing.T) {
 		if comp.Chart != gpuOp {
 			t.Errorf("Chart = %q, want %q (should be inherited from base)", comp.Chart, gpuOp)
 		}
-		if comp.Version != "v2.0.0" {
-			t.Errorf("Version = %q, want %q (should be from overlay)", comp.Version, "v2.0.0")
+		if comp.Version != overlayVersion {
+			t.Errorf("Version = %q, want %q (should be from overlay)", comp.Version, overlayVersion)
 		}
 	})
 
 	t.Run("namespace and chart overridden by overlay", func(t *testing.T) {
+		const customNS = "custom-ns"
+		const customChart = "custom-chart"
+
 		base := RecipeMetadataSpec{
 			ComponentRefs: []ComponentRef{
 				{
@@ -1147,8 +1152,8 @@ func TestComponentRefMergeNamespaceAndChart(t *testing.T) {
 			ComponentRefs: []ComponentRef{
 				{
 					Name:      gpuOp,
-					Namespace: "custom-ns",
-					Chart:     "custom-chart",
+					Namespace: customNS,
+					Chart:     customChart,
 				},
 			},
 		}
@@ -1156,11 +1161,11 @@ func TestComponentRefMergeNamespaceAndChart(t *testing.T) {
 		base.Merge(&overlay)
 
 		comp := base.ComponentRefs[0]
-		if comp.Namespace != "custom-ns" {
-			t.Errorf("Namespace = %q, want %q (should be from overlay)", comp.Namespace, "custom-ns")
+		if comp.Namespace != customNS {
+			t.Errorf("Namespace = %q, want %q (should be from overlay)", comp.Namespace, customNS)
 		}
-		if comp.Chart != "custom-chart" {
-			t.Errorf("Chart = %q, want %q (should be from overlay)", comp.Chart, "custom-chart")
+		if comp.Chart != customChart {
+			t.Errorf("Chart = %q, want %q (should be from overlay)", comp.Chart, customChart)
 		}
 	})
 }

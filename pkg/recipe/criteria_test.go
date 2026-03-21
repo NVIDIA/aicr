@@ -69,6 +69,7 @@ func TestParseCriteriaAcceleratorType(t *testing.T) {
 		{"h100", "h100", CriteriaAcceleratorH100, false},
 		{"H100 uppercase", "H100", CriteriaAcceleratorH100, false},
 		{"gb200", "gb200", CriteriaAcceleratorGB200, false},
+		{"b200", "b200", CriteriaAcceleratorB200, false},
 		{"a100", "a100", CriteriaAcceleratorA100, false},
 		{"l40", "l40", CriteriaAcceleratorL40, false},
 		{"invalid", "v100", CriteriaAcceleratorAny, true},
@@ -686,7 +687,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 	types := GetCriteriaAcceleratorTypes()
 
 	// Should return sorted list
-	expected := []string{"a100", "gb200", "h100", "l40"}
+	expected := []string{"a100", "b200", "gb200", "h100", "l40"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaAcceleratorTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -1470,6 +1471,64 @@ func TestWithCriteriaNodes(t *testing.T) {
 			}
 			if !tt.wantErr && criteria.Nodes != tt.wantNodes {
 				t.Errorf("Nodes = %d, want %d", criteria.Nodes, tt.wantNodes)
+			}
+		})
+	}
+}
+
+func TestCriteriaValidate(t *testing.T) {
+	tests := []struct {
+		name    string
+		c       *Criteria
+		wantErr bool
+	}{
+		{
+			name:    "valid criteria",
+			c:       &Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+			wantErr: false,
+		},
+		{
+			name:    "empty criteria is valid",
+			c:       &Criteria{},
+			wantErr: false,
+		},
+		{
+			name:    "invalid service",
+			c:       &Criteria{Service: "invalid-service"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid accelerator",
+			c:       &Criteria{Accelerator: "invalid-gpu"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid intent",
+			c:       &Criteria{Intent: "invalid-intent"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid os",
+			c:       &Criteria{OS: "windows"},
+			wantErr: true,
+		},
+		{
+			name:    "invalid platform",
+			c:       &Criteria{Platform: "invalid-platform"},
+			wantErr: true,
+		},
+		{
+			name:    "normalizes case",
+			c:       &Criteria{Service: "EKS", Accelerator: "H100"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.c.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

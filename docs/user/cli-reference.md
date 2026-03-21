@@ -418,6 +418,126 @@ constraints:
 
 ---
 
+### aicr query
+
+Query a specific value from the fully hydrated recipe configuration. Resolves a recipe
+from criteria (same as `aicr recipe`), merges all base, overlay, and inline value
+overrides, then extracts the value at the given dot-path selector.
+
+**Synopsis:**
+```shell
+aicr query --selector <path> [flags]
+```
+
+**Flags:**
+
+All `aicr recipe` flags are supported, plus:
+
+| Flag | Type | Description |
+|------|------|-------------|
+| `--selector` | string | **Required.** Dot-path to the configuration value to extract |
+
+**Selector Syntax:**
+
+Uses dot-delimited paths consistent with Helm `--set` and `yq`:
+
+| Selector | Returns |
+|----------|---------|
+| `components.<name>.values.<path>` | Hydrated Helm value (scalar or subtree) |
+| `components.<name>.chart` | Component metadata field |
+| `components.<name>` | Entire hydrated component block |
+| `criteria.<field>` | Recipe criteria field |
+| `deploymentOrder` | Component deployment order list |
+| `constraints` | Merged constraint list |
+| `.` or empty | Entire hydrated recipe |
+
+Leading dots are optional (yq-style): `.components.gpu-operator.chart` and
+`components.gpu-operator.chart` are equivalent.
+
+**Output:**
+
+- **Scalar values** (string, number, bool) are printed as plain text — no YAML wrapper
+- **Complex values** (maps, lists) are printed as YAML (default) or JSON (`--format json`)
+
+**Examples:**
+```shell
+# Get a specific Helm value
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version
+# stdout: 570.86.16
+
+# Get a value subtree
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver
+# stdout:
+#   version: "570.86.16"
+#   repository: nvcr.io/nvidia
+
+# Get the full hydrated component
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator
+
+# Get deployment order
+aicr query --service eks --accelerator h100 --intent training \
+  --selector deploymentOrder
+
+# Use in shell scripts
+VERSION=$(aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version)
+echo "Driver version: $VERSION"
+
+# JSON output for complex values
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values --format json
+
+# Query from snapshot
+aicr query --snapshot snapshot.yaml \
+  --selector components.gpu-operator.values.driver.version
+
+# Full hydrated recipe
+aicr query --service eks --accelerator h100 --intent training --selector .
+```
+
+**Advanced Examples:**
+
+```shell
+# Cross-cloud comparison: how Prometheus storage differs between EKS and GKE
+# EKS provisions a 50Gi persistent EBS volume (gp2)
+aicr query --service eks --intent training \
+  --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
+# GKE uses a 10Gi ephemeral emptyDir (GMP handles long-term retention)
+aicr query --service gke --intent training \
+  --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
+
+# Compare deployment order across clouds
+# EKS deploys 12 components (includes aws-ebs-csi-driver, aws-efa, skyhook-customizations)
+aicr query --service eks --accelerator h100 --intent training --selector deploymentOrder
+# GKE deploys 9 components (storage and networking are platform-managed)
+aicr query --service gke --accelerator h100 --intent training --selector deploymentOrder
+
+# Pin the exact driver version into Terraform/Pulumi variables
+DRIVER_VERSION=$(aicr query --service eks --accelerator h100 --intent training \
+  --selector components.gpu-operator.values.driver.version)
+echo "gpu_driver_version = \"${DRIVER_VERSION}\""
+
+# Compare skyhook tuning parameters across accelerators
+# H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
+aicr query --service eks --accelerator h100 --intent training \
+  --selector components.skyhook-customizations.values
+# GB200: same value structure, but manifest renders a no-op (ARM64 packages pending)
+aicr query --service eks --accelerator gb200 --intent training \
+  --selector components.skyhook-customizations.values
+
+# Watch constraints tighten as you add specificity
+# Just "EKS" → 1 constraint (K8s >= 1.28)
+aicr query --service eks --selector constraints
+# Add GPU + intent + OS → 4 constraints (K8s >= 1.32.4, Ubuntu 24.04, kernel >= 6.8)
+aicr query --service eks --accelerator h100 --intent training --os ubuntu \
+  --selector constraints
+```
+
+---
+
 ### aicr validate
 
 Validate a system snapshot against the constraints defined in a recipe to verify cluster compatibility. Supports multi-phase validation with different validation stages.

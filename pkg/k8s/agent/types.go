@@ -33,9 +33,10 @@ type Config struct {
 	Tolerations        []corev1.Toleration
 	Output             string
 	Debug              bool
-	Privileged         bool // If true, run with privileged security context (required for GPU/SystemD collectors)
-	RequireGPU         bool // If true, request nvidia.com/gpu resource (required for CDI environments)
-	MaxNodesPerEntry   int  // Max node names per topology entry (0 = unlimited)
+	Privileged         bool   // If true, run with privileged security context (required for GPU/SystemD collectors)
+	RequireGPU         bool   // If true, request nvidia.com/gpu resource (required for CDI environments)
+	RuntimeClassName   string // If set, use this runtimeClassName on the pod and inject NVIDIA_VISIBLE_DEVICES=all (alternative to RequireGPU)
+	MaxNodesPerEntry   int    // Max node names per topology entry (0 = unlimited)
 }
 
 // Deployer manages the deployment and lifecycle of the agent Job.

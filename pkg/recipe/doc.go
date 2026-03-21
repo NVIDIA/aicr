@@ -26,7 +26,7 @@
 //
 //	type Criteria struct {
 //	    Service     CriteriaServiceType     // eks, gke, aks, any
-//	    Accelerator CriteriaAcceleratorType // h100, gb200, a100, l40, any
+//	    Accelerator CriteriaAcceleratorType // h100, gb200, b200, a100, l40, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, cos, rhel, any
 //	    Nodes       int                     // node count (0 = any)
@@ -68,6 +68,7 @@
 // Accelerator types for GPU selection:
 //   - CriteriaAcceleratorH100: NVIDIA H100
 //   - CriteriaAcceleratorGB200: NVIDIA GB200
+//   - CriteriaAcceleratorB200: NVIDIA B200
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
@@ -115,7 +116,7 @@
 //
 // The HTTP handler accepts these query parameters for GET requests:
 //   - service: eks, gke, aks, any (default: any)
-//   - accelerator: h100, gb200, a100, l40, any (default: any)
+//   - accelerator: h100, gb200, b200, a100, l40, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, cos, rhel, any (default: any)
