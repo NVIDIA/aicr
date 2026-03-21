@@ -152,14 +152,6 @@ spec:
                   networking.gke.io/default-interface: eth0
                   networking.gke.io/interfaces: '${GKE_NETWORK_INTERFACES}'
               spec:
-                nodeSelector:
-                  cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
-                tolerations:
-                - operator: Exists
-                - key: nvidia.com/gpu
-                  operator: Equal
-                  value: present
-                  effect: NoSchedule
                 initContainers:
                 # TCPXO FastRak native sidecar — runs fastrak_gpumem_manager
                 # alongside the worker. Uses NRI device injection (devices.gke.io

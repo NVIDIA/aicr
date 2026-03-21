@@ -309,6 +309,8 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		"MAX_MESSAGE_SIZE":   maxMessageSize,
 	}
 
+	var instanceType string
+
 	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
 	if service == recipe.CriteriaServiceGKE {
 		gpuNICs, err := discoverGKEGPUNICNetworks(ctx.Ctx, dynamicClient)
@@ -328,11 +330,11 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
 	if service == recipe.CriteriaServiceEKS {
 		warnIfHeterogeneousNodes(config.Nodes)
-		instanceType, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
+		it, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
 		if err != nil {
 			return err
 		}
-		templateData["INSTANCE_TYPE"] = instanceType
+		instanceType = it
 		// Indentation matches the resource block position in runtime.yaml.
 		const efaIndent = "                      "
 		templateData["EFA_RESOURCE_LIMITS"] = buildEFAResourceLine(efaCount, efaIndent)
@@ -346,16 +348,25 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		}
 	}
 
-	// Parse the per-platform runtime template and apply scheduling overrides
-	// before creating the resource. This replaces the hardcoded platform-specific
-	// nodeSelector (e.g., instance-type, gke-accelerator) when the user has
-	// provided --node-selector or --toleration flags for non-standard clusters.
+	// Build effective worker scheduling: user override takes precedence over platform default.
+	defaultNodeSelector, defaultTolerations := platformWorkerScheduling(service, instanceType)
+	effectiveNodeSelector := defaultNodeSelector
+	if len(ctx.NodeSelector) > 0 {
+		effectiveNodeSelector = ctx.NodeSelector
+		slog.Info("Using user-provided node selector override for NCCL workers", "selector", ctx.NodeSelector)
+	}
+	effectiveTolerations := defaultTolerations
+	if len(ctx.Tolerations) > 0 {
+		effectiveTolerations = ctx.Tolerations
+		slog.Info("Using user-provided toleration override for NCCL workers", "count", len(ctx.Tolerations))
+	}
+
 	runtimeObj, err := parseYAMLTemplate(templatePath(accelerator, service, "runtime.yaml"), templateData)
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse training runtime template", err)
 	}
-	if err := overrideNCCLWorkerScheduling(runtimeObj, ctx.NodeSelector, ctx.Tolerations); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to override NCCL worker scheduling", err)
+	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
 	}
 	if err := createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
@@ -417,14 +428,29 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 	return nil
 }
 
-// overrideNCCLWorkerScheduling replaces the nodeSelector and/or tolerations
-// on the "node" (worker) replicatedJob within a TrainingRuntime unstructured object.
-// Only overrides when the provided slice/map is non-nil and non-empty.
-func overrideNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[string]string, tolerations []v1.Toleration) error {
-	if len(nodeSelector) == 0 && len(tolerations) == 0 {
-		return nil
+// platformWorkerScheduling returns the default nodeSelector and tolerations
+// for NCCL worker pods on the given service. instanceType is only used for EKS.
+func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string) (map[string]string, []v1.Toleration) {
+	switch service {
+	case recipe.CriteriaServiceEKS:
+		return map[string]string{
+			"node.kubernetes.io/instance-type": instanceType,
+		}, []v1.Toleration{{Operator: v1.TolerationOpExists}}
+	case recipe.CriteriaServiceGKE:
+		return map[string]string{
+			"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
+		}, []v1.Toleration{
+			{Operator: v1.TolerationOpExists},
+			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
+		}
+	default:
+		return nil, nil
 	}
+}
 
+// applyNCCLWorkerScheduling sets the nodeSelector and tolerations on the "node"
+// (worker) replicatedJob within a TrainingRuntime unstructured object.
+func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[string]string, tolerations []v1.Toleration) error {
 	replicatedJobs, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	if err != nil || !found {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal, "replicatedJobs not found in TrainingRuntime")
@@ -452,7 +478,7 @@ func overrideNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector m
 				ns[k] = v
 			}
 			workerPodSpec["nodeSelector"] = ns
-			slog.Info("Overriding NCCL worker nodeSelector", "selector", nodeSelector)
+			slog.Info("Applying NCCL worker nodeSelector", "selector", nodeSelector)
 		}
 
 		if len(tolerations) > 0 {
@@ -473,7 +499,7 @@ func overrideNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector m
 				tolList = append(tolList, tolMap)
 			}
 			workerPodSpec["tolerations"] = tolList
-			slog.Info("Overriding NCCL worker tolerations", "count", len(tolerations))
+			slog.Info("Applying NCCL worker tolerations", "count", len(tolerations))
 		}
 
 		replicatedJobs[i] = jobMap

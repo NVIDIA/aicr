@@ -145,10 +145,6 @@ spec:
           spec:
             template:
               spec:
-                nodeSelector:
-                  node.kubernetes.io/instance-type: ${INSTANCE_TYPE}
-                tolerations:
-                - operator: Exists
                 initContainers:
                 # Fix authorized_keys permissions so sshd accepts incoming connections.
                 # The MPI plugin mounts the secret at /tmp/mpi-keys with 0644; sshd
