@@ -438,11 +438,13 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 		}, []v1.Toleration{{Operator: v1.TolerationOpExists}}
 	case recipe.CriteriaServiceGKE:
 		return map[string]string{
-			"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
-		}, []v1.Toleration{
-			{Operator: v1.TolerationOpExists},
-			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
-		}
+				"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
+			}, []v1.Toleration{
+				{Operator: v1.TolerationOpExists},
+				{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
+			}
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOKE, recipe.CriteriaServiceKind:
+		return nil, nil
 	default:
 		return nil, nil
 	}

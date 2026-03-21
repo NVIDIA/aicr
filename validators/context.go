@@ -145,7 +145,7 @@ func LoadContext() (*Context, error) {
 func parseNodeSelectorEnv() (map[string]string, error) {
 	raw := os.Getenv("AICR_NODE_SELECTOR")
 	if raw == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil signals "not set" — callers check len to distinguish from empty
 	}
 	entries := strings.Split(raw, ",")
 	return snapshotter.ParseNodeSelectors(entries)
@@ -156,7 +156,7 @@ func parseNodeSelectorEnv() (map[string]string, error) {
 func parseTolerationEnv() ([]corev1.Toleration, error) {
 	raw := os.Getenv("AICR_TOLERATIONS")
 	if raw == "" {
-		return nil, nil
+		return nil, nil //nolint:nilnil // nil signals "not set" — callers check len to distinguish from empty
 	}
 	entries := strings.Split(raw, ",")
 	// Use ParseTolerations but we must not pass empty slice (it returns DefaultTolerations).
