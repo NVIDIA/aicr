@@ -162,10 +162,9 @@ func snapshotCmdFlags() []cli.Flag {
 
 func snapshotCmd() *cli.Command {
 	return &cli.Command{
-		Name:                  "snapshot",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Capture cluster configuration snapshot.",
+		Name:     "snapshot",
+		Category: functionalCategoryName,
+		Usage:    "Capture cluster configuration snapshot.",
 		Description: `Generate a comprehensive snapshot of cluster measurements including:
   - CPU and GPU settings
   - GRUB boot parameters

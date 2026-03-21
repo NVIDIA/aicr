@@ -30,10 +30,9 @@ import (
 
 func bundleVerifyCmd() *cli.Command {
 	return &cli.Command{
-		Name:                  "verify",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Verify bundle integrity and attestation chain.",
+		Name:     "verify",
+		Category: functionalCategoryName,
+		Usage:    "Verify bundle integrity and attestation chain.",
 		Description: `Verifies a bundle's checksums, attestation signatures, and provenance chain.
 
 Trust levels:

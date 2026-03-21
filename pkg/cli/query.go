@@ -52,10 +52,9 @@ func queryCmdFlags() []cli.Flag {
 
 func queryCmd() *cli.Command {
 	return &cli.Command{
-		Name:                  "query",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Query a specific value from the hydrated recipe configuration.",
+		Name:     "query",
+		Category: functionalCategoryName,
+		Usage:    "Query a specific value from the hydrated recipe configuration.",
 		Description: `Resolve a recipe from criteria and extract a specific configuration value
 using a dot-path selector. Returns the fully hydrated value at the given path,
 with all base, overlay, and inline overrides merged.

@@ -25,10 +25,9 @@ import (
 
 func trustCmd() *cli.Command {
 	return &cli.Command{
-		Name:                  "trust",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Manage Sigstore trusted root for attestation verification.",
+		Name:     "trust",
+		Category: functionalCategoryName,
+		Usage:    "Manage Sigstore trusted root for attestation verification.",
 		Commands: []*cli.Command{
 			trustUpdateCmd(),
 		},

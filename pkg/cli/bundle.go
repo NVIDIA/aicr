@@ -192,10 +192,9 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 //nolint:funlen // bundle command is inherently large (flags + description + action)
 func bundleCmd() *cli.Command {
 	return &cli.Command{
-		Name:                  "bundle",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Generate deployment bundle from a given recipe.",
+		Name:     "bundle",
+		Category: functionalCategoryName,
+		Usage:    "Generate deployment bundle from a given recipe.",
 		Description: `Generates a deployment bundle from a given recipe. 
 Use --deployer argocd to generate ArgoCD Applications.
 

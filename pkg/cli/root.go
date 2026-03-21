@@ -89,9 +89,8 @@ var (
 	}
 )
 
-// Execute starts the CLI application.
-// This is called by main.main().
-func Execute() {
+// newRootCmd builds the root CLI command tree.
+func newRootCmd() *cli.Command {
 	cmd := &cli.Command{
 		Name:                  name,
 		Usage:                 "AICR CLI",
@@ -155,12 +154,104 @@ func Execute() {
 			validateCmd(),
 			trustCmd(),
 		},
-		ShellComplete: commandLister,
+		ShellComplete: completeWithAllFlags,
 	}
+	setShellComplete(cmd)
+	return cmd
+}
+
+// setShellComplete recursively assigns completeWithAllFlags to all subcommands
+// so that urfave/cli's setupDefaults does not replace it with
+// DefaultCompleteWithFlags (which only shows the primary flag name, not aliases).
+func setShellComplete(cmd *cli.Command) {
+	for _, sub := range cmd.Commands {
+		sub.ShellComplete = completeWithAllFlags
+		setShellComplete(sub)
+	}
+}
+
+// completeWithAllFlags replaces urfave/cli's DefaultCompleteWithFlags to include
+// all flag names (primary + aliases) in shell completion output. This ensures
+// aliases like --gpu (for --accelerator) appear in TAB completions.
+//
+// Unlike DefaultCompleteWithFlags which reads cmd.Args() (parsed positional
+// args), this function reads os.Args directly to determine what the user was
+// typing. This is necessary because partial flags like "--form" cause
+// urfave/cli's flag parser to error, and the partial flag never appears in
+// cmd.Args().
+func completeWithAllFlags(_ context.Context, cmd *cli.Command) {
+	lastArg := completionLastArg()
+	writer := cmd.Root().Writer
+
+	if strings.HasPrefix(lastArg, "-") {
+		cur := strings.TrimLeft(lastArg, "-")
+		for _, f := range cmd.Flags {
+			for _, flagName := range f.Names() {
+				// Skip short flags when the user typed a -- prefix.
+				if strings.HasPrefix(lastArg, "--") && len(flagName) == 1 {
+					continue
+				}
+				if strings.HasPrefix(flagName, cur) && cur != flagName {
+					prefix := "-"
+					if len(flagName) > 1 {
+						prefix = "--"
+					}
+					completion := prefix + flagName
+					if usage := flagUsage(f); usage != "" {
+						shell := os.Getenv("SHELL")
+						if strings.HasSuffix(shell, "zsh") || strings.HasSuffix(shell, "fish") {
+							completion = completion + ":" + usage
+						}
+					}
+					fmt.Fprintln(writer, completion)
+				}
+			}
+		}
+		return
+	}
+
+	for _, sub := range cmd.Commands {
+		if !sub.Hidden {
+			fmt.Fprintln(writer, sub.Name)
+		}
+	}
+}
+
+// completionLastArg returns the last user-typed argument from os.Args,
+// skipping the trailing --generate-shell-completion flag. This is the
+// only reliable way to see what the user was typing, since partial flags
+// (e.g. "--form") fail urfave/cli's flag parser and never appear in
+// cmd.Args().
+func completionLastArg() string {
+	n := len(os.Args)
+	if n >= 2 && os.Args[n-1] == "--generate-shell-completion" {
+		return os.Args[n-2]
+	}
+	if n >= 1 {
+		return os.Args[n-1]
+	}
+	return ""
+}
+
+// flagUsage returns the usage string for a flag if available.
+func flagUsage(f cli.Flag) string {
+	type usageProvider interface {
+		GetUsage() string
+	}
+	if u, ok := f.(usageProvider); ok {
+		return u.GetUsage()
+	}
+	return ""
+}
+
+// Execute starts the CLI application.
+// This is called by main.main().
+func Execute() {
+	cmd := newRootCmd()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
-	if err := cmd.Run(ctx, os.Args); err != nil {
+	if err := cmd.Run(ctx, sanitizeCompletionArgs(os.Args)); err != nil {
 		cancel()
 		exitCode := errors.ExitCodeFromError(err)
 		slog.Error("command failed", "error", err, "exitCode", exitCode)
@@ -169,16 +260,28 @@ func Execute() {
 	cancel()
 }
 
-func commandLister(_ context.Context, cmd *cli.Command) {
-	if cmd == nil || cmd.Root() == nil {
-		return
+// sanitizeCompletionArgs works around a urfave/cli v3 limitation where "--"
+// immediately before "--generate-shell-completion" disables completion mode
+// entirely (checkShellCompleteFlag treats "--" as a flag terminator). This
+// causes the actual command to execute during TAB completion instead of
+// returning suggestions.
+//
+// When the shell sends "aicr snapshot -- --generate-shell-completion" (user
+// typed "--<TAB>"), we replace the bare "--" with "-" so urfave/cli keeps
+// completion mode active and the "-" survives flag parsing as a positional
+// arg that triggers flag suggestions.
+func sanitizeCompletionArgs(args []string) []string {
+	n := len(args)
+	if n < 3 || args[n-1] != "--generate-shell-completion" {
+		return args
 	}
-	for _, c := range cmd.Root().Commands {
-		if c.Hidden {
-			continue
-		}
-		fmt.Println(c.Name)
+	if args[n-2] != "--" {
+		return args
 	}
+	out := make([]string, n)
+	copy(out, args)
+	out[n-2] = "-"
+	return out
 }
 
 // initDataProvider initializes the data provider from the --data flag.

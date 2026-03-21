@@ -655,23 +655,6 @@ func TestSnapshotCmd_CommandStructure(t *testing.T) {
 	}
 }
 
-func TestCommandLister(_ *testing.T) {
-	commandLister(context.Background(), nil)
-
-	cmd := &cli.Command{Name: "test"}
-	commandLister(context.Background(), cmd)
-
-	rootCmd := &cli.Command{
-		Name: "root",
-		Commands: []*cli.Command{
-			{Name: "visible1", Hidden: false},
-			{Name: "hidden", Hidden: true},
-			{Name: "visible2", Hidden: false},
-		},
-	}
-	commandLister(context.Background(), rootCmd)
-}
-
 func hasName(flag cli.Flag, name string) bool {
 	if flag == nil {
 		return false

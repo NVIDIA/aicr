@@ -429,10 +429,9 @@ func validateCmdFlags() []cli.Flag {
 
 func validateCmd() *cli.Command {
 	return &cli.Command{
-		Name:                  "validate",
-		Category:              functionalCategoryName,
-		EnableShellCompletion: true,
-		Usage:                 "Validate cluster against recipe constraints using containerized validators.",
+		Name:     "validate",
+		Category: functionalCategoryName,
+		Usage:    "Validate cluster against recipe constraints using containerized validators.",
 		Description: `Run validation checks against a cluster snapshot using the constraints and
 checks defined in a recipe. Each validator runs as an isolated Kubernetes Job.
 
