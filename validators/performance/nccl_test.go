@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func TestOverrideNCCLWorkerScheduling_NodeSelector(t *testing.T) {
+func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	// Build a minimal TrainingRuntime-like unstructured object matching the real template structure.
 	workerPodSpec := map[string]interface{}{
 		"nodeSelector": map[string]interface{}{
@@ -60,8 +60,8 @@ func TestOverrideNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	}
 
 	nodeSelector := map[string]string{"my-org/gpu-pool": "true"}
-	if err := overrideNCCLWorkerScheduling(obj, nodeSelector, nil); err != nil {
-		t.Fatalf("overrideNCCLWorkerScheduling() error = %v", err)
+	if err := applyNCCLWorkerScheduling(obj, nodeSelector, nil); err != nil {
+		t.Fatalf("applyNCCLWorkerScheduling() error = %v", err)
 	}
 
 	// Verify the nodeSelector was replaced in the worker spec.
@@ -82,7 +82,7 @@ func TestOverrideNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	}
 }
 
-func TestOverrideNCCLWorkerScheduling_Tolerations(t *testing.T) {
+func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"spec": map[string]interface{}{
@@ -117,8 +117,8 @@ func TestOverrideNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	tolerations := []corev1.Toleration{
 		{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 	}
-	if err := overrideNCCLWorkerScheduling(obj, nil, tolerations); err != nil {
-		t.Fatalf("overrideNCCLWorkerScheduling() error = %v", err)
+	if err := applyNCCLWorkerScheduling(obj, nil, tolerations); err != nil {
+		t.Fatalf("applyNCCLWorkerScheduling() error = %v", err)
 	}
 
 	// nodeSelector should be unchanged (only tolerations overridden).
@@ -144,45 +144,31 @@ func TestOverrideNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	}
 }
 
-func TestOverrideNCCLWorkerScheduling_NoOp(t *testing.T) {
-	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{
-								"name": "node",
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
-											"spec": map[string]interface{}{
-												"nodeSelector": map[string]interface{}{
-													"original-key": "original-value",
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	// Passing nil for both should leave the object unchanged.
-	if err := overrideNCCLWorkerScheduling(obj, nil, nil); err != nil {
-		t.Fatalf("overrideNCCLWorkerScheduling() error = %v", err)
-	}
-
-	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
-	jm, _ := jobs[0].(map[string]interface{})
-	ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
-	if ns["original-key"] != "original-value" {
-		t.Errorf("nodeSelector should be unchanged, got %v", ns)
-	}
+func TestPlatformWorkerScheduling(t *testing.T) {
+	t.Run("EKS returns instance-type selector", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge")
+		if ns["node.kubernetes.io/instance-type"] != "p5.48xlarge" {
+			t.Errorf("EKS nodeSelector = %v, want instance-type=p5.48xlarge", ns)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("EKS tolerations = %v, want tolerate-all", tols)
+		}
+	})
+	t.Run("GKE returns gke-accelerator selector", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceGKE, "")
+		if ns["cloud.google.com/gke-accelerator"] != "nvidia-h100-mega-80gb" {
+			t.Errorf("GKE nodeSelector = %v, want gke-accelerator=nvidia-h100-mega-80gb", ns)
+		}
+		if len(tols) != 2 {
+			t.Errorf("GKE tolerations count = %d, want 2", len(tols))
+		}
+	})
+	t.Run("unknown service returns nil", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling("unknown", "")
+		if ns != nil || tols != nil {
+			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
+		}
+	})
 }
 
 func TestTemplatePath(t *testing.T) {
