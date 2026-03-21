@@ -77,12 +77,10 @@ componentRefs:
     chart: kai-scheduler
     type: Helm
     source: oci://ghcr.io/nvidia/kai-scheduler
-    version: v0.12.17
+    version: v0.13.0
     valuesFile: components/kai-scheduler/values.yaml
     dependencyRefs:
       - gpu-operator
-    manifestFiles:
-      - components/kai-scheduler/manifests/disable-runtime-class-injection.yaml
   - name: kube-prometheus-stack
     namespace: monitoring
     chart: kube-prometheus-stack

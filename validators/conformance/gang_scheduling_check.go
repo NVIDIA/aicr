@@ -473,6 +473,7 @@ func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
 }
 
 // buildGangResourceClaim returns the unstructured ResourceClaim for a gang test pod.
+// The kai.scheduler/queue label is required by KAI v0.13.0+ for DRA claims.
 func buildGangResourceClaim(run *gangTestRun, index int) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
@@ -481,6 +482,9 @@ func buildGangResourceClaim(run *gangTestRun, index int) *unstructured.Unstructu
 			"metadata": map[string]interface{}{
 				"name":      run.claims[index],
 				"namespace": gangTestNamespace,
+				"labels": map[string]interface{}{
+					"kai.scheduler/queue": "default-queue",
+				},
 			},
 			"spec": map[string]interface{}{
 				"devices": map[string]interface{}{
