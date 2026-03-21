@@ -261,7 +261,7 @@ kubectl logs -n gpu-operator -l app=nvidia-operator-validator
     aicr bundle -r recipe.yaml -o ./bundles
 
 - name: Upload artifacts
-  uses: actions/upload-artifact@v3
+  uses: actions/upload-artifact@v4
   with:
     name: cluster-config
     path: |
