@@ -120,7 +120,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, gb200, a100, l40, any]
+            enum: [h100, gb200, b200, a100, l40, any]
             default: any
         - name: gpu
           in: query
@@ -128,7 +128,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, gb200, a100, l40, any]
+            enum: [h100, gb200, b200, a100, l40, any]
             default: any
         - name: intent
           in: query
@@ -478,7 +478,7 @@ paths:
           description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [h100, gb200, a100, l40, any]
+            enum: [h100, gb200, b200, a100, l40, any]
             default: any
         - name: gpu
           in: query
@@ -486,7 +486,7 @@ paths:
           description: Alias for accelerator parameter (backwards compatibility).
           schema:
             type: string
-            enum: [h100, gb200, a100, l40, any]
+            enum: [h100, gb200, b200, a100, l40, any]
             default: any
         - name: intent
           in: query
@@ -1188,7 +1188,7 @@ components:
         accelerator:
           type: string
           description: GPU/accelerator type
-          enum: [h100, gb200, a100, l40, any]
+          enum: [h100, gb200, b200, a100, l40, any]
           example: h100
         intent:
           type: string
