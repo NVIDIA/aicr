@@ -16,6 +16,8 @@ package validators
 
 import (
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestResolveNamespace(t *testing.T) {
@@ -48,6 +50,113 @@ func TestResolveNamespace(t *testing.T) {
 			got := resolveNamespace()
 			if got != tt.expected {
 				t.Errorf("resolveNamespace() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestParseNodeSelectorEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVal   string
+		expected map[string]string
+		wantErr  bool
+	}{
+		{
+			name:     "env var unset returns nil",
+			envVal:   "",
+			expected: nil,
+		},
+		{
+			name:     "single key=value pair",
+			envVal:   "my-org/gpu-pool=true",
+			expected: map[string]string{"my-org/gpu-pool": "true"},
+		},
+		{
+			name:     "multiple key=value pairs",
+			envVal:   "accelerator=h100,pool=gpu",
+			expected: map[string]string{"accelerator": "h100", "pool": "gpu"},
+		},
+		{
+			name:    "invalid format missing equals",
+			envVal:  "invalidkey",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_NODE_SELECTOR", tt.envVal)
+			got, err := parseNodeSelectorEnv()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseNodeSelectorEnv() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if len(got) != len(tt.expected) {
+					t.Errorf("parseNodeSelectorEnv() = %v, want %v", got, tt.expected)
+					return
+				}
+				for k, want := range tt.expected {
+					if got[k] != want {
+						t.Errorf("parseNodeSelectorEnv()[%q] = %q, want %q", k, got[k], want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestParseTolerationEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVal   string
+		expected []corev1.Toleration
+		wantErr  bool
+	}{
+		{
+			name:     "env var unset returns nil",
+			envVal:   "",
+			expected: nil,
+		},
+		{
+			name:   "key=value:effect toleration",
+			envVal: "gpu-type=h100:NoSchedule",
+			expected: []corev1.Toleration{
+				{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+			},
+		},
+		{
+			name:   "key:effect toleration (exists operator)",
+			envVal: "dedicated:NoExecute",
+			expected: []corev1.Toleration{
+				{Key: "dedicated", Effect: corev1.TaintEffectNoExecute, Operator: corev1.TolerationOpExists},
+			},
+		},
+		{
+			name:    "invalid format",
+			envVal:  "badformat",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_TOLERATIONS", tt.envVal)
+			got, err := parseTolerationEnv()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parseTolerationEnv() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if len(got) != len(tt.expected) {
+					t.Errorf("parseTolerationEnv() = %v, want %v", got, tt.expected)
+					return
+				}
+				for i, want := range tt.expected {
+					if got[i].Key != want.Key || got[i].Value != want.Value ||
+						got[i].Effect != want.Effect || got[i].Operator != want.Operator {
+						t.Errorf("parseTolerationEnv()[%d] = %+v, want %+v", i, got[i], want)
+					}
+				}
 			}
 		})
 	}

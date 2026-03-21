@@ -564,8 +564,8 @@ aicr validate [flags]
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Name for the validation Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
-| `--node-selector` | | string[] | | Node selector for validation scheduling (key=value, repeatable) |
-| `--toleration` | | string[] | | Tolerations for validation scheduling (key=value:effect, repeatable) |
+| `--node-selector` | | string[] | | Override GPU node selection for validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
+| `--toleration` | | string[] | | Override tolerations for validation workloads. Replaces the default tolerate-all policy on inner workloads like NCCL benchmark pods and conformance test pods. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
@@ -667,7 +667,42 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --kubeconfig ~/.kube/prod-cluster
+
+# Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
+# recognize by default, e.g., using a custom node pool label instead of cloud-provider defaults)
+aicr validate \
+  --recipe recipe.yaml \
+  --node-selector my-org/gpu-pool=true \
+  --phase performance
+
+# Override both node selector and tolerations for a non-standard taint setup
+aicr validate \
+  --recipe recipe.yaml \
+  --node-selector gpu-type=h100 \
+  --toleration gpu-type=h100:NoSchedule
 ```
+
+**Workload Scheduling:**
+
+The `--node-selector` and `--toleration` flags control scheduling for **validation
+workloads** — the inner pods that validators create to test cluster functionality
+(e.g., NCCL benchmark workers, conformance test pods). They do **not** affect the
+validator orchestrator Job, which runs lightweight check logic and is placed on
+CPU-preferred nodes automatically.
+
+When `--node-selector` is provided, it replaces the platform-specific selectors
+that validators use by default:
+
+| Platform | Default Selector (replaced) | Use Case |
+|----------|-----------------------------|----------|
+| GKE | `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb` | Non-standard GPU node pool labels |
+| EKS | `node.kubernetes.io/instance-type: <discovered>` | Custom node pool labels |
+
+When `--toleration` is provided, it replaces the default tolerate-all policy
+(`operator: Exists`) on workloads that need to land on tainted GPU nodes.
+
+Validators that use `nodeName` pinning (nvidia-smi, DRA isolation test) or
+DRA ResourceClaims for placement (gang scheduling) are not affected by these flags.
 
 **Output Structure ([CTRF](https://ctrf.io/) JSON):**
 
