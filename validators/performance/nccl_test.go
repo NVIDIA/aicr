@@ -144,6 +144,73 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	}
 }
 
+func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{"name": "launcher"},
+							map[string]interface{}{
+								"name": "node",
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": map[string]interface{}{
+												"nodeSelector": map[string]interface{}{
+													"node.kubernetes.io/instance-type": "p5.48xlarge",
+												},
+												"tolerations": []interface{}{
+													map[string]interface{}{"operator": "Exists"},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodeSelector := map[string]string{"custom-label/gpu": "a100"}
+	tolerations := []corev1.Toleration{
+		{Key: "custom-taint", Value: "true", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+	}
+	if err := applyNCCLWorkerScheduling(obj, nodeSelector, tolerations); err != nil {
+		t.Fatalf("applyNCCLWorkerScheduling() error = %v", err)
+	}
+
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		jm, _ := j.(map[string]interface{})
+		name, _, _ := unstructured.NestedString(jm, "name")
+		if name != "node" {
+			continue
+		}
+		// Verify nodeSelector was replaced.
+		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+		if ns["custom-label/gpu"] != "a100" {
+			t.Errorf("worker nodeSelector = %v, want custom-label/gpu=a100", ns)
+		}
+		if _, hasOld := ns["node.kubernetes.io/instance-type"]; hasOld {
+			t.Error("old instance-type selector should have been replaced")
+		}
+		// Verify tolerations were replaced.
+		tolsRaw, _, _ := unstructured.NestedSlice(jm, "template", "spec", "template", "spec", "tolerations")
+		if len(tolsRaw) != 1 {
+			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
+		}
+		tol, _ := tolsRaw[0].(map[string]interface{})
+		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" {
+			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule", tol)
+		}
+	}
+}
+
 func TestPlatformWorkerScheduling(t *testing.T) {
 	t.Run("EKS returns instance-type selector", func(t *testing.T) {
 		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge")
