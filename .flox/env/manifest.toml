@@ -1,0 +1,113 @@
+schema-version = "1.10.0"
+
+
+## Install Packages --------------------------------------------------
+##  Tracks tools/setup-tools — dev tools from .settings.yaml (best-effort)
+## -------------------------------------------------------------------
+[install]
+# Language
+go.pkg-path = "go_1_26"
+go.version = "^1.26"
+
+# Build tools
+goreleaser.pkg-path = "goreleaser"
+goreleaser.version = "^2"
+ko.pkg-path = "ko"
+ko.version = "^0.18"
+crane.pkg-path = "crane"
+crane.outputs = "all"
+# crane 0.21 not yet in nixpkgs; unpinned to get latest available
+git-cliff.pkg-path = "git-cliff"
+git-cliff.version = "^2"
+
+# Linting
+golangci-lint.pkg-path = "golangci-lint"
+golangci-lint.version = "^2"
+yamllint.pkg-path = "yamllint"
+yamllint.version = "^1"
+yamllint.outputs = "all"
+addlicense.pkg-path = "addlicense"
+go-licenses.pkg-path = "go-licenses"
+
+# Security tools
+grype.pkg-path = "grype"
+# grype 0.107 not yet in nixpkgs; unpinned to get latest available
+cosign.pkg-path = "cosign"
+cosign.version = "^3"
+syft.pkg-path = "syft"
+syft.version = "^1"
+
+# Kubernetes / testing tools
+kubectl.pkg-path = "kubectl"
+kubectl.version = "^1"
+kubectl.outputs = "all"
+kubernetes-helm.pkg-path = "kubernetes-helm"
+# helm 4 not yet in nixpkgs; unpinned to get latest available (v3.x)
+kind.pkg-path = "kind"
+kind.version = "^0.31"
+ctlptl.pkg-path = "ctlptl"
+ctlptl.version = "^0.9"
+tilt.pkg-path = "tilt"
+# tilt 0.37 not yet in nixpkgs; unpinned to get latest available (v0.36.x)
+chainsaw.pkg-path = "kyverno-chainsaw"
+chainsaw.version = "^0.2"
+kwok.pkg-path = "kwok"
+kwok.version = "^0.7"
+# Note: karpenter is a server-side K8s controller (deployed via Helm into
+# clusters), not a local CLI tool. It is intentionally excluded.
+
+# Documentation tools
+hugo.pkg-path = "hugo"
+hugo.version = "~0.155"
+nodejs.pkg-path = "nodejs_22"
+
+# Utilities
+yq.pkg-path = "yq-go"
+yq.version = "^4"
+
+
+## Environment Variables ---------------------------------------------
+##  GOFLAGS is used by Makefile targets (go vet, go test, golangci-lint)
+##  GOPATH/GOBIN keep Go tool installs inside the flox environment cache
+## -------------------------------------------------------------------
+[vars]
+GOFLAGS = "-mod=vendor"
+
+
+## Activation Hook ---------------------------------------------------
+##  Sets up GOPATH/GOBIN inside the flox cache so `go install` artifacts
+##  stay isolated and are on PATH automatically.
+## -------------------------------------------------------------------
+[hook]
+on-activate = '''
+  export GOPATH="$FLOX_ENV_CACHE/go"
+  export GOBIN="$GOPATH/bin"
+  mkdir -p "$GOBIN"
+'''
+
+
+## Profile script ----------------------------------------------------
+##  Ensures GOBIN is on PATH in the user's shell.
+## -------------------------------------------------------------------
+[profile]
+common = '''
+  export GOPATH="$FLOX_ENV_CACHE/go"
+  export GOBIN="$GOPATH/bin"
+  export PATH="$GOBIN:$PATH"
+'''
+
+
+## Services ---------------------------------------------------------
+[services]
+
+
+## Include ----------------------------------------------------------
+[include]
+
+
+## Build and publish your own packages ------------------------------
+[build]
+
+
+## Other Environment Options -----------------------------------------
+[options]
