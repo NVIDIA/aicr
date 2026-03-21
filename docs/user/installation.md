@@ -56,7 +56,7 @@ Visit the [releases page](https://github.com/nvidia/aicr/releases/latest) and do
 - **Linux ARM64**: `aicr_<version>_linux_arm64.tar.gz`
 - **Linux x86_64**: `aicr_<version>_linux_amd64.tar.gz`
 
-1. **Extract and install**
+2. **Extract and install**
 
 ```shell
 # Example for Linux x86_64

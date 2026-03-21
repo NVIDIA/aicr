@@ -58,7 +58,7 @@ data:
 
 - Kubernetes cluster with GPU nodes
 - aicr CLI installed
-- GPU Operator installed (agent runs in `gpu-operator` namespace)
+- GPU Operator installed (or appropriate namespace configured via `--namespace`)
 - Cluster admin permissions (for RBAC setup)
 
 ## Quick Start
@@ -121,7 +121,7 @@ aicr snapshot \
 
 **Available flags:**
 - `--kubeconfig`: Custom kubeconfig path (default: `~/.kube/config` or `$KUBECONFIG`)
-- `--namespace`: Deployment namespace (default: `gpu-operator`)
+- `--namespace`: Deployment namespace (default: `default`)
 - `--image`: Container image (default: `ghcr.io/nvidia/aicr:latest`)
 - `--job-name`: Job name (default: `aicr`)
 - `--service-account-name`: ServiceAccount name (default: `aicr`)
