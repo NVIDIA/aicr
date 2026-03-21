@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -57,6 +58,16 @@ type Context struct {
 
 	// Namespace is the validation namespace.
 	Namespace string
+
+	// NodeSelector overrides platform-specific node selectors on inner workloads
+	// (e.g., NCCL benchmark worker pods). Nil means use the validator's default selectors.
+	// Set from the AICR_NODE_SELECTOR env var (comma-separated key=value pairs).
+	NodeSelector map[string]string
+
+	// Tolerations overrides the default tolerate-all policy on inner workloads.
+	// Nil means use the validator's default tolerations.
+	// Set from the AICR_TOLERATIONS env var (comma-separated key=value:effect entries).
+	Tolerations []corev1.Toleration
 }
 
 // LoadContext creates a Context from the v2 container environment.
@@ -103,6 +114,18 @@ func LoadContext() (*Context, error) {
 		}
 	}
 
+	// Parse optional scheduling overrides for inner workloads.
+	nodeSelector, err := parseNodeSelectorEnv()
+	if err != nil {
+		cancel()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse AICR_NODE_SELECTOR", err)
+	}
+	tolerations, err := parseTolerationEnv()
+	if err != nil {
+		cancel()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse AICR_TOLERATIONS", err)
+	}
+
 	return &Context{
 		Ctx:           ctx,
 		Cancel:        cancel,
@@ -112,7 +135,33 @@ func LoadContext() (*Context, error) {
 		Snapshot:      snap,
 		Recipe:        rec,
 		Namespace:     namespace,
+		NodeSelector:  nodeSelector,
+		Tolerations:   tolerations,
 	}, nil
+}
+
+// parseNodeSelectorEnv reads AICR_NODE_SELECTOR and parses it into a map.
+// Returns nil (no override) if the env var is unset or empty.
+func parseNodeSelectorEnv() (map[string]string, error) {
+	raw := os.Getenv("AICR_NODE_SELECTOR")
+	if raw == "" {
+		return nil, nil //nolint:nilnil // nil signals "not set" — callers check len to distinguish from empty
+	}
+	entries := strings.Split(raw, ",")
+	return snapshotter.ParseNodeSelectors(entries)
+}
+
+// parseTolerationEnv reads AICR_TOLERATIONS and parses it into a slice of Tolerations.
+// Returns nil (no override) if the env var is unset or empty.
+func parseTolerationEnv() ([]corev1.Toleration, error) {
+	raw := os.Getenv("AICR_TOLERATIONS")
+	if raw == "" {
+		return nil, nil //nolint:nilnil // nil signals "not set" — callers check len to distinguish from empty
+	}
+	entries := strings.Split(raw, ",")
+	// Use ParseTolerations but we must not pass empty slice (it returns DefaultTolerations).
+	// Since we guard against empty raw above, entries will always be non-empty here.
+	return snapshotter.ParseTolerations(entries)
 }
 
 // Timeout returns a child context with the specified timeout.

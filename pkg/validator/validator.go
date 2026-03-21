@@ -322,7 +322,7 @@ func (v *Validator) runPhase(
 
 		deployer := job.NewDeployer(
 			clientset, factory, v.Namespace, v.RunID, entry,
-			v.ImagePullSecrets, v.Tolerations,
+			v.ImagePullSecrets, v.Tolerations, v.NodeSelector,
 		)
 
 		// Deploy

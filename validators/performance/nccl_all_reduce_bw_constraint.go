@@ -309,6 +309,8 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		"MAX_MESSAGE_SIZE":   maxMessageSize,
 	}
 
+	var instanceType string
+
 	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
 	if service == recipe.CriteriaServiceGKE {
 		gpuNICs, err := discoverGKEGPUNICNetworks(ctx.Ctx, dynamicClient)
@@ -328,11 +330,11 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// EFA count of 0 is valid — NCCL falls back to TCP (slower but functional).
 	if service == recipe.CriteriaServiceEKS {
 		warnIfHeterogeneousNodes(config.Nodes)
-		instanceType, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
+		it, efaCount, err := discoverEKSNodeConfig(config.Nodes[0])
 		if err != nil {
 			return err
 		}
-		templateData["INSTANCE_TYPE"] = instanceType
+		instanceType = it
 		// Indentation matches the resource block position in runtime.yaml.
 		const efaIndent = "                      "
 		templateData["EFA_RESOURCE_LIMITS"] = buildEFAResourceLine(efaCount, efaIndent)
@@ -346,8 +348,27 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		}
 	}
 
-	// Apply per-platform runtime: testdata/{accelerator}/{service}/runtime.yaml
-	if err := applyYAMLWithDynamicClient(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, templatePath(accelerator, service, "runtime.yaml"), templateData); err != nil {
+	// Build effective worker scheduling: user override takes precedence over platform default.
+	defaultNodeSelector, defaultTolerations := platformWorkerScheduling(service, instanceType)
+	effectiveNodeSelector := defaultNodeSelector
+	if len(ctx.NodeSelector) > 0 {
+		effectiveNodeSelector = ctx.NodeSelector
+		slog.Info("Using user-provided node selector override for NCCL workers", "selector", ctx.NodeSelector)
+	}
+	effectiveTolerations := defaultTolerations
+	if len(ctx.Tolerations) > 0 {
+		effectiveTolerations = ctx.Tolerations
+		slog.Info("Using user-provided toleration override for NCCL workers", "count", len(ctx.Tolerations))
+	}
+
+	runtimeObj, err := parseYAMLTemplate(templatePath(accelerator, service, "runtime.yaml"), templateData)
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse training runtime template", err)
+	}
+	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
+	}
+	if err := createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
 	}
 	slog.Info("Applied TrainingRuntime", "service", service)
@@ -370,35 +391,142 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 }
 
 // applyYAMLWithDynamicClient reads a YAML template, performs substitution, and applies it using dynamic client
-func applyYAMLWithDynamicClient(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace, templatePath string, data map[string]string) error {
-	content, err := os.ReadFile(templatePath)
+func applyYAMLWithDynamicClient(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace, path string, data map[string]string) error {
+	obj, err := parseYAMLTemplate(path, data)
 	if err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read template", err)
+		return err
 	}
+	return createUnstructured(ctx, dynamicClient, gvr, namespace, obj)
+}
 
-	// Perform template substitution
+// parseYAMLTemplate reads a YAML template file, performs ${KEY} substitution,
+// and unmarshals it into an unstructured object.
+func parseYAMLTemplate(path string, data map[string]string) (*unstructured.Unstructured, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read template", err)
+	}
 	yamlContent := string(content)
 	for key, value := range data {
 		yamlContent = strings.ReplaceAll(yamlContent, "${"+key+"}", value)
 	}
-
-	// Parse YAML to unstructured object
 	obj := &unstructured.Unstructured{}
-	if unmarshalErr := yaml.Unmarshal([]byte(yamlContent), obj); unmarshalErr != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse YAML", unmarshalErr)
+	if err := yaml.Unmarshal([]byte(yamlContent), obj); err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to parse YAML", err)
 	}
+	return obj, nil
+}
 
-	// Apply with timeout
+// createUnstructured creates a namespaced resource from an unstructured object with a timeout.
+func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
 	applyCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
-
-	// Create the resource
-	_, err = dynamicClient.Resource(gvr).Namespace(namespace).Create(applyCtx, obj, metav1.CreateOptions{})
+	_, err := dynamicClient.Resource(gvr).Namespace(namespace).Create(applyCtx, obj, metav1.CreateOptions{})
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create resource", err)
 	}
-
 	return nil
+}
+
+// platformWorkerScheduling returns the default nodeSelector and tolerations
+// for NCCL worker pods on the given service. instanceType is only used for EKS.
+func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string) (map[string]string, []v1.Toleration) {
+	switch service {
+	case recipe.CriteriaServiceEKS:
+		return map[string]string{
+			"node.kubernetes.io/instance-type": instanceType,
+		}, []v1.Toleration{{Operator: v1.TolerationOpExists}}
+	case recipe.CriteriaServiceGKE:
+		return map[string]string{
+				"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
+			}, []v1.Toleration{
+				{Operator: v1.TolerationOpExists},
+				{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
+			}
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceAKS, recipe.CriteriaServiceOKE, recipe.CriteriaServiceKind:
+		return nil, nil
+	default:
+		return nil, nil
+	}
+}
+
+// applyNCCLWorkerScheduling sets the nodeSelector and tolerations on the "node"
+// (worker) replicatedJob within a TrainingRuntime unstructured object.
+func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[string]string, tolerations []v1.Toleration) error {
+	replicatedJobs, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	if err != nil || !found {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, "replicatedJobs not found in TrainingRuntime")
+	}
+
+	for i, jobRaw := range replicatedJobs {
+		jobMap, ok := jobRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, _, _ := unstructured.NestedString(jobMap, "name")
+		if name != "node" {
+			continue
+		}
+
+		// Navigate deep into the worker pod spec.
+		workerPodSpec, found := nestedMap(jobMap, "template", "spec", "template", "spec")
+		if !found {
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, "worker pod spec not found in TrainingRuntime node job")
+		}
+
+		if len(nodeSelector) > 0 {
+			ns := make(map[string]interface{}, len(nodeSelector))
+			for k, v := range nodeSelector {
+				ns[k] = v
+			}
+			workerPodSpec["nodeSelector"] = ns
+			slog.Info("Applying NCCL worker nodeSelector", "selector", nodeSelector)
+		}
+
+		if len(tolerations) > 0 {
+			tolList := make([]interface{}, 0, len(tolerations))
+			for _, t := range tolerations {
+				tolMap := map[string]interface{}{
+					"operator": string(t.Operator),
+				}
+				if t.Key != "" {
+					tolMap["key"] = t.Key
+				}
+				if t.Value != "" {
+					tolMap["value"] = t.Value
+				}
+				if t.Effect != "" {
+					tolMap["effect"] = string(t.Effect)
+				}
+				tolList = append(tolList, tolMap)
+			}
+			workerPodSpec["tolerations"] = tolList
+			slog.Info("Applying NCCL worker tolerations", "count", len(tolerations))
+		}
+
+		replicatedJobs[i] = jobMap
+		break
+	}
+
+	return unstructured.SetNestedSlice(obj.Object, replicatedJobs, "spec", "template", "spec", "replicatedJobs")
+}
+
+// nestedMap navigates a chain of string keys through nested map[string]interface{} values.
+// Returns the target map and true if found, nil and false otherwise.
+func nestedMap(m map[string]interface{}, keys ...string) (map[string]interface{}, bool) {
+	current := m
+	for _, key := range keys {
+		next, ok := current[key]
+		if !ok {
+			return nil, false
+		}
+		nextMap, ok := next.(map[string]interface{})
+		if !ok {
+			return nil, false
+		}
+		current = nextMap
+	}
+	return current, true
 }
 
 // waitForLauncherPodAndGetLogs waits for the launcher pod to be created and retrieves logs

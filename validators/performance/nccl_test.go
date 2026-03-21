@@ -21,8 +21,224 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+const testWorkerJobName = "node"
+
+func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
+	// Build a minimal TrainingRuntime-like unstructured object matching the real template structure.
+	workerPodSpec := map[string]interface{}{
+		"nodeSelector": map[string]interface{}{
+			"node.kubernetes.io/instance-type": "p5.48xlarge",
+		},
+		"tolerations": []interface{}{
+			map[string]interface{}{"operator": "Exists"},
+		},
+	}
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{"name": "launcher"},
+							map[string]interface{}{
+								"name": testWorkerJobName,
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": workerPodSpec,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodeSelector := map[string]string{"my-org/gpu-pool": "true"}
+	if err := applyNCCLWorkerScheduling(obj, nodeSelector, nil); err != nil {
+		t.Fatalf("applyNCCLWorkerScheduling() error = %v", err)
+	}
+
+	// Verify the nodeSelector was replaced in the worker spec.
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		jm, _ := j.(map[string]interface{})
+		name, _, _ := unstructured.NestedString(jm, "name")
+		if name != testWorkerJobName {
+			continue
+		}
+		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+		if ns["my-org/gpu-pool"] != "true" {
+			t.Errorf("worker nodeSelector = %v, want my-org/gpu-pool=true", ns)
+		}
+		if _, hasOld := ns["node.kubernetes.io/instance-type"]; hasOld {
+			t.Error("old instance-type selector should have been replaced")
+		}
+	}
+}
+
+func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{"name": "launcher"},
+							map[string]interface{}{
+								"name": testWorkerJobName,
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": map[string]interface{}{
+												"nodeSelector": map[string]interface{}{
+													"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
+												},
+												"tolerations": []interface{}{
+													map[string]interface{}{"operator": "Exists"},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tolerations := []corev1.Toleration{
+		{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+	}
+	if err := applyNCCLWorkerScheduling(obj, nil, tolerations); err != nil {
+		t.Fatalf("applyNCCLWorkerScheduling() error = %v", err)
+	}
+
+	// nodeSelector should be unchanged (only tolerations overridden).
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		jm, _ := j.(map[string]interface{})
+		name, _, _ := unstructured.NestedString(jm, "name")
+		if name != testWorkerJobName {
+			continue
+		}
+		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+		if ns["cloud.google.com/gke-accelerator"] != "nvidia-h100-mega-80gb" {
+			t.Errorf("nodeSelector should be unchanged, got %v", ns)
+		}
+		tolsRaw, _, _ := unstructured.NestedSlice(jm, "template", "spec", "template", "spec", "tolerations")
+		if len(tolsRaw) != 1 {
+			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
+		}
+		tol, _ := tolsRaw[0].(map[string]interface{})
+		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" {
+			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule", tol)
+		}
+	}
+}
+
+func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{"name": "launcher"},
+							map[string]interface{}{
+								"name": testWorkerJobName,
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": map[string]interface{}{
+												"nodeSelector": map[string]interface{}{
+													"node.kubernetes.io/instance-type": "p5.48xlarge",
+												},
+												"tolerations": []interface{}{
+													map[string]interface{}{"operator": "Exists"},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodeSelector := map[string]string{"custom-label/gpu": "a100"}
+	tolerations := []corev1.Toleration{
+		{Key: "custom-taint", Value: "true", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+	}
+	if err := applyNCCLWorkerScheduling(obj, nodeSelector, tolerations); err != nil {
+		t.Fatalf("applyNCCLWorkerScheduling() error = %v", err)
+	}
+
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		jm, _ := j.(map[string]interface{})
+		name, _, _ := unstructured.NestedString(jm, "name")
+		if name != testWorkerJobName {
+			continue
+		}
+		// Verify nodeSelector was replaced.
+		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+		if ns["custom-label/gpu"] != "a100" {
+			t.Errorf("worker nodeSelector = %v, want custom-label/gpu=a100", ns)
+		}
+		if _, hasOld := ns["node.kubernetes.io/instance-type"]; hasOld {
+			t.Error("old instance-type selector should have been replaced")
+		}
+		// Verify tolerations were replaced.
+		tolsRaw, _, _ := unstructured.NestedSlice(jm, "template", "spec", "template", "spec", "tolerations")
+		if len(tolsRaw) != 1 {
+			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
+		}
+		tol, _ := tolsRaw[0].(map[string]interface{})
+		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" {
+			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule", tol)
+		}
+	}
+}
+
+func TestPlatformWorkerScheduling(t *testing.T) {
+	t.Run("EKS returns instance-type selector", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge")
+		if ns["node.kubernetes.io/instance-type"] != "p5.48xlarge" {
+			t.Errorf("EKS nodeSelector = %v, want instance-type=p5.48xlarge", ns)
+		}
+		if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
+			t.Errorf("EKS tolerations = %v, want tolerate-all", tols)
+		}
+	})
+	t.Run("GKE returns gke-accelerator selector", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceGKE, "")
+		if ns["cloud.google.com/gke-accelerator"] != "nvidia-h100-mega-80gb" {
+			t.Errorf("GKE nodeSelector = %v, want gke-accelerator=nvidia-h100-mega-80gb", ns)
+		}
+		if len(tols) != 2 {
+			t.Errorf("GKE tolerations count = %d, want 2", len(tols))
+		}
+	})
+	t.Run("unknown service returns nil", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling("unknown", "")
+		if ns != nil || tols != nil {
+			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
+		}
+	})
+}
 
 func TestTemplatePath(t *testing.T) {
 	tests := []struct {
