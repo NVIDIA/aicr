@@ -329,33 +329,57 @@ func TestDeployJobTolerations(t *testing.T) {
 	}
 }
 
-func TestDeployJobNodeSelector(t *testing.T) {
+func TestDeployJobNodeSelectorEnvVar(t *testing.T) {
 	ns := createUniqueNamespace(t)
-	nodeSelector := map[string]string{
-		"dedicated":       "system-workload",
-		"kubernetes.io/os": "linux",
-	}
+	// Use a single-key selector to avoid map ordering issues in serialization.
+	nodeSelector := map[string]string{"my-org/gpu-pool": "true"}
 	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", testEntry(), nil, nil, nodeSelector))
 
-	podSpec := job.Spec.Template.Spec
-	if len(podSpec.NodeSelector) != 2 {
-		t.Fatalf("nodeSelector count = %d, want 2", len(podSpec.NodeSelector))
+	env := job.Spec.Template.Spec.Containers[0].Env
+	envMap := make(map[string]corev1.EnvVar)
+	for _, e := range env {
+		envMap[e.Name] = e
 	}
-	if podSpec.NodeSelector["dedicated"] != "system-workload" {
-		t.Errorf("nodeSelector[dedicated] = %q, want %q", podSpec.NodeSelector["dedicated"], "system-workload")
+
+	// AICR_NODE_SELECTOR must be set so the validator container can apply it to inner workloads.
+	if envMap["AICR_NODE_SELECTOR"].Value != "my-org/gpu-pool=true" {
+		t.Errorf("AICR_NODE_SELECTOR = %q, want %q", envMap["AICR_NODE_SELECTOR"].Value, "my-org/gpu-pool=true")
 	}
-	if podSpec.NodeSelector["kubernetes.io/os"] != "linux" {
-		t.Errorf("nodeSelector[kubernetes.io/os] = %q, want %q", podSpec.NodeSelector["kubernetes.io/os"], "linux")
+
+	// The orchestrator Job pod spec must NOT have a nodeSelector — scheduling of the
+	// orchestrator is handled by preferCPUNodeAffinityApply(), not the user flag.
+	if len(job.Spec.Template.Spec.NodeSelector) != 0 {
+		t.Errorf("orchestrator pod spec nodeSelector should be empty, got %v", job.Spec.Template.Spec.NodeSelector)
 	}
 }
 
-func TestDeployJobNodeSelectorEmpty(t *testing.T) {
+func TestDeployJobNodeSelectorEnvVarAbsent(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", testEntry(), nil, nil, nil))
 
-	podSpec := job.Spec.Template.Spec
-	if len(podSpec.NodeSelector) != 0 {
-		t.Errorf("nodeSelector should be empty when nil, got %v", podSpec.NodeSelector)
+	for _, e := range job.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "AICR_NODE_SELECTOR" {
+			t.Errorf("AICR_NODE_SELECTOR should be absent when nodeSelector is nil, got %q", e.Value)
+		}
+	}
+}
+
+func TestDeployJobTolerationsEnvVar(t *testing.T) {
+	ns := createUniqueNamespace(t)
+	tolerations := []corev1.Toleration{
+		{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+	}
+	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", testEntry(), nil, tolerations, nil))
+
+	env := job.Spec.Template.Spec.Containers[0].Env
+	envMap := make(map[string]corev1.EnvVar)
+	for _, e := range env {
+		envMap[e.Name] = e
+	}
+
+	// AICR_TOLERATIONS must be set so validators can apply it to inner workloads.
+	if envMap["AICR_TOLERATIONS"].Value != "gpu-type=h100:NoSchedule" {
+		t.Errorf("AICR_TOLERATIONS = %q, want %q", envMap["AICR_TOLERATIONS"].Value, "gpu-type=h100:NoSchedule")
 	}
 }
 

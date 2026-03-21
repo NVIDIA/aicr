@@ -21,8 +21,169 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+func TestOverrideNCCLWorkerScheduling_NodeSelector(t *testing.T) {
+	// Build a minimal TrainingRuntime-like unstructured object matching the real template structure.
+	workerPodSpec := map[string]interface{}{
+		"nodeSelector": map[string]interface{}{
+			"node.kubernetes.io/instance-type": "p5.48xlarge",
+		},
+		"tolerations": []interface{}{
+			map[string]interface{}{"operator": "Exists"},
+		},
+	}
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{"name": "launcher"},
+							map[string]interface{}{
+								"name": "node",
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": workerPodSpec,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	nodeSelector := map[string]string{"my-org/gpu-pool": "true"}
+	if err := overrideNCCLWorkerScheduling(obj, nodeSelector, nil); err != nil {
+		t.Fatalf("overrideNCCLWorkerScheduling() error = %v", err)
+	}
+
+	// Verify the nodeSelector was replaced in the worker spec.
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		jm, _ := j.(map[string]interface{})
+		name, _, _ := unstructured.NestedString(jm, "name")
+		if name != "node" {
+			continue
+		}
+		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+		if ns["my-org/gpu-pool"] != "true" {
+			t.Errorf("worker nodeSelector = %v, want my-org/gpu-pool=true", ns)
+		}
+		if _, hasOld := ns["node.kubernetes.io/instance-type"]; hasOld {
+			t.Error("old instance-type selector should have been replaced")
+		}
+	}
+}
+
+func TestOverrideNCCLWorkerScheduling_Tolerations(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{"name": "launcher"},
+							map[string]interface{}{
+								"name": "node",
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": map[string]interface{}{
+												"nodeSelector": map[string]interface{}{
+													"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
+												},
+												"tolerations": []interface{}{
+													map[string]interface{}{"operator": "Exists"},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	tolerations := []corev1.Toleration{
+		{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+	}
+	if err := overrideNCCLWorkerScheduling(obj, nil, tolerations); err != nil {
+		t.Fatalf("overrideNCCLWorkerScheduling() error = %v", err)
+	}
+
+	// nodeSelector should be unchanged (only tolerations overridden).
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, j := range jobs {
+		jm, _ := j.(map[string]interface{})
+		name, _, _ := unstructured.NestedString(jm, "name")
+		if name != "node" {
+			continue
+		}
+		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+		if ns["cloud.google.com/gke-accelerator"] != "nvidia-h100-mega-80gb" {
+			t.Errorf("nodeSelector should be unchanged, got %v", ns)
+		}
+		tolsRaw, _, _ := unstructured.NestedSlice(jm, "template", "spec", "template", "spec", "tolerations")
+		if len(tolsRaw) != 1 {
+			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
+		}
+		tol, _ := tolsRaw[0].(map[string]interface{})
+		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" {
+			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule", tol)
+		}
+	}
+}
+
+func TestOverrideNCCLWorkerScheduling_NoOp(t *testing.T) {
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"spec": map[string]interface{}{
+				"template": map[string]interface{}{
+					"spec": map[string]interface{}{
+						"replicatedJobs": []interface{}{
+							map[string]interface{}{
+								"name": "node",
+								"template": map[string]interface{}{
+									"spec": map[string]interface{}{
+										"template": map[string]interface{}{
+											"spec": map[string]interface{}{
+												"nodeSelector": map[string]interface{}{
+													"original-key": "original-value",
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Passing nil for both should leave the object unchanged.
+	if err := overrideNCCLWorkerScheduling(obj, nil, nil); err != nil {
+		t.Fatalf("overrideNCCLWorkerScheduling() error = %v", err)
+	}
+
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	jm, _ := jobs[0].(map[string]interface{})
+	ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
+	if ns["original-key"] != "original-value" {
+		t.Errorf("nodeSelector should be unchanged, got %v", ns)
+	}
+}
 
 func TestTemplatePath(t *testing.T) {
 	tests := []struct {

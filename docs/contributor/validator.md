@@ -136,6 +136,8 @@ The validator engine mounts snapshot and recipe data as ConfigMaps:
 | `AICR_SNAPSHOT_PATH` | Override snapshot mount path |
 | `AICR_RECIPE_PATH` | Override recipe mount path |
 | `AICR_VALIDATOR_IMAGE_REGISTRY` | Override image registry prefix (set by user) |
+| `AICR_NODE_SELECTOR` | User-provided node selector override for inner workloads (comma-separated `key=value` pairs). Set by the `--node-selector` CLI flag. Use `ctx.NodeSelector` to access the parsed value. |
+| `AICR_TOLERATIONS` | User-provided toleration override for inner workloads (comma-separated `key=value:effect` entries). Set by the `--toleration` CLI flag. Use `ctx.Tolerations` to access the parsed value. |
 
 ## Context API
 
@@ -151,10 +153,31 @@ type Context struct {
     Snapshot      *snapshotter.Snapshot  // Captured cluster state
     Recipe        *recipe.RecipeResult   // Recipe with validation config
     Namespace     string                 // Validation namespace
+    NodeSelector  map[string]string      // User-provided node selector override (nil = use defaults)
+    Tolerations   []corev1.Toleration    // User-provided toleration override (nil = use defaults)
 }
 ```
 
 `LoadContext()` builds this from the container environment: reads mounted ConfigMaps, creates in-cluster K8s clients, and sets a timeout from `defaults.CheckExecutionTimeout`.
+
+### Scheduling Overrides
+
+When creating inner workloads (pods, Jobs, TrainJobs), check `ctx.NodeSelector` and `ctx.Tolerations` before applying hardcoded platform selectors. If non-nil, these override the default scheduling constraints to support clusters with non-standard GPU node labels or taints.
+
+```go
+// Apply scheduling overrides when creating inner workload pods.
+nodeSelector := map[string]string{"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb"}
+if ctx.NodeSelector != nil {
+    nodeSelector = ctx.NodeSelector // user override replaces platform default
+}
+
+tolerations := []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
+if ctx.Tolerations != nil {
+    tolerations = ctx.Tolerations // user override replaces default tolerate-all
+}
+```
+
+Validators that use `nodeName` pinning (e.g., nvidia-smi, DRA isolation) bypass the scheduler entirely and should not apply `ctx.NodeSelector`.
 
 ### Helper Methods
 

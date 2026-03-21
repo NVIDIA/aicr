@@ -148,7 +148,7 @@ func validateDRAAllocation(ctx *validators.Context, dynClient dynamic.Interface)
 		fmt.Sprintf("Created Namespace=%s ResourceClaim=%s Pod=%s via Kubernetes API",
 			draTestNamespace, run.claimName, run.podName))
 
-	if err = deployDRATestResources(ctx.Ctx, ctx.Clientset, dynClient, run); err != nil {
+	if err = deployDRATestResources(ctx.Ctx, ctx.Clientset, dynClient, run, ctx.Tolerations); err != nil {
 		return err
 	}
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
