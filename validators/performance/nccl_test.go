@@ -25,6 +25,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+const testWorkerJobName = "node"
+
 func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	// Build a minimal TrainingRuntime-like unstructured object matching the real template structure.
 	workerPodSpec := map[string]interface{}{
@@ -43,7 +45,7 @@ func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 						"replicatedJobs": []interface{}{
 							map[string]interface{}{"name": "launcher"},
 							map[string]interface{}{
-								"name": "node",
+								"name": testWorkerJobName,
 								"template": map[string]interface{}{
 									"spec": map[string]interface{}{
 										"template": map[string]interface{}{
@@ -69,7 +71,7 @@ func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	for _, j := range jobs {
 		jm, _ := j.(map[string]interface{})
 		name, _, _ := unstructured.NestedString(jm, "name")
-		if name != "node" {
+		if name != testWorkerJobName {
 			continue
 		}
 		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
@@ -91,7 +93,7 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 						"replicatedJobs": []interface{}{
 							map[string]interface{}{"name": "launcher"},
 							map[string]interface{}{
-								"name": "node",
+								"name": testWorkerJobName,
 								"template": map[string]interface{}{
 									"spec": map[string]interface{}{
 										"template": map[string]interface{}{
@@ -126,7 +128,7 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	for _, j := range jobs {
 		jm, _ := j.(map[string]interface{})
 		name, _, _ := unstructured.NestedString(jm, "name")
-		if name != "node" {
+		if name != testWorkerJobName {
 			continue
 		}
 		ns, _, _ := unstructured.NestedStringMap(jm, "template", "spec", "template", "spec", "nodeSelector")
@@ -153,7 +155,7 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 						"replicatedJobs": []interface{}{
 							map[string]interface{}{"name": "launcher"},
 							map[string]interface{}{
-								"name": "node",
+								"name": testWorkerJobName,
 								"template": map[string]interface{}{
 									"spec": map[string]interface{}{
 										"template": map[string]interface{}{
@@ -188,7 +190,7 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 	for _, j := range jobs {
 		jm, _ := j.(map[string]interface{})
 		name, _, _ := unstructured.NestedString(jm, "name")
-		if name != "node" {
+		if name != testWorkerJobName {
 			continue
 		}
 		// Verify nodeSelector was replaced.

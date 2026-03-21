@@ -154,6 +154,7 @@ func TestParseTolerationEnv(t *testing.T) {
 				for i, want := range tt.expected {
 					if got[i].Key != want.Key || got[i].Value != want.Value ||
 						got[i].Effect != want.Effect || got[i].Operator != want.Operator {
+
 						t.Errorf("parseTolerationEnv()[%d] = %+v, want %+v", i, got[i], want)
 					}
 				}

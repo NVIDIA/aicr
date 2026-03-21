@@ -232,12 +232,13 @@ func serializeTolerations(tols []corev1.Toleration) string {
 	parts := make([]string, 0, len(tols))
 	for _, t := range tols {
 		var part string
-		if t.Key == "" {
+		switch {
+		case t.Key == "":
 			// Universal toleration (operator: Exists, no key)
 			part = ":"
-		} else if t.Value != "" {
+		case t.Value != "":
 			part = t.Key + "=" + t.Value + ":" + string(t.Effect)
-		} else {
+		default:
 			part = t.Key + ":" + string(t.Effect)
 		}
 		parts = append(parts, part)
