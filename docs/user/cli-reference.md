@@ -23,7 +23,7 @@ Available for all commands:
 
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--debug` | `-d` | bool | false | Enable debug logging (text mode with full metadata) |
+| `--debug` | | bool | false | Enable debug logging (text mode with full metadata) |
 | `--log-json` | | bool | false | Enable JSON logging (structured output for machine parsing) |
 | `--help` | `-h` | bool | false | Show help |
 | `--version` | `-v` | bool | false | Show version |
@@ -75,9 +75,9 @@ aicr snapshot [flags]
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
 | `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (cm://namespace/name), or stdout |
-| `--format` | `-f` | string | yaml | Output format: json, yaml, table |
+| `--format` | | string | yaml | Output format: json, yaml, table |
 | `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (overrides KUBECONFIG env) |
-| `--namespace` | `-n` | string | gpu-operator | Kubernetes namespace for agent deployment |
+| `--namespace` | `-n` | string | default | Kubernetes namespace for agent deployment |
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for agent Job |
 | `--job-name` | | string | aicr | Name for the agent Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for agent Job |
@@ -86,6 +86,9 @@ aicr snapshot [flags]
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion. **Warning:** leaves a cluster-admin ClusterRoleBinding active. |
 | `--privileged` | | bool | true | Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces. |
+| `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
+| `--require-gpu` | | bool | false | Require GPU resources on the agent pod (mutually exclusive with `--runtime-class`) |
+| `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
 
@@ -548,14 +551,29 @@ aicr validate [flags]
 ```
 
 **Flags:**
-| Flag | Short | Type | Description |
-|------|-------|------|-------------|
-| `--recipe` | `-r` | string | Path/URI to recipe file containing constraints (required) |
-| `--snapshot` | `-s` | string | Path/URI to snapshot file containing measurements (omit to capture live) |
-| `--phase` | | string | Validation phase to run: deployment, performance, conformance, all (default: all) |
-| `--fail-on-error` | | bool | Exit with non-zero status if any constraint fails (default: true) |
-| `--output` | `-o` | string | Output destination (file or stdout, default: stdout) |
-| `--kubeconfig` | `-k` | string | Path to kubeconfig file (for ConfigMap URIs) |
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints |
+| `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
+| `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
+| `--output` | `-o` | string | stdout | Output destination (file or stdout) |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig file (for ConfigMap URIs) |
+| `--namespace` | `-n` | string | aicr-validation | Kubernetes namespace for validation Job deployment |
+| `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
+| `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
+| `--job-name` | | string | aicr-validate | Name for the validation Job |
+| `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
+| `--node-selector` | | string[] | | Node selector for validation scheduling (key=value, repeatable) |
+| `--toleration` | | string[] | | Tolerations for validation scheduling (key=value:effect, repeatable) |
+| `--timeout` | | duration | 5m | Timeout for validation Job completion |
+| `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
+| `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
+| `--no-cluster` | | bool | false | Skip cluster access (test mode): skips RBAC and Job deployment, reports checks as skipped |
+| `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
+| `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
+| `--feature` | `-f` | string[] | | Feature flags for validation (repeatable) |
+| `--data` | | string | | External data directory to overlay on embedded data |
 
 **Input Sources:**
 - **File**: Local file path (`./recipe.yaml`, `./snapshot.yaml`)
@@ -750,7 +768,7 @@ aicr bundle [flags]
 |---------------------------------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path to recipe file (required) |
 | `--output` | `-o` | string | Output directory (default: current dir) |
-| `--deployer` | | string | Deployment method: helm (default), argocd |
+| `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
 | `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -761,6 +779,10 @@ aicr bundle [flags]
 | `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
+| `--kubeconfig` | `-k` | string | Path to kubeconfig file |
+| `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
+| `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
+| `--image-refs` | | string | Path to image references file for OCI registry |
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 
@@ -1062,7 +1084,7 @@ ArgoCD Applications use multi-source to:
 
 > **Prerequisite:** The `--attest` flag requires a binary installed using the install script, which includes a cryptographic attestation from NVIDIA. Binaries installed via `go install` or manual download do not include this file and cannot use `--attest`.
 
-When `--attest` is passed, the bundle command performs four steps:
+When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires an OIDC token** — In GitHub Actions the ambient OIDC token is used automatically. Locally, a browser window opens for Sigstore OIDC authentication.
@@ -1385,18 +1407,20 @@ AICR respects standard environment variables:
 |----------|-------------|---------|
 | `KUBECONFIG` | Path to Kubernetes config file | `~/.kube/config` |
 | `LOG_LEVEL` | Logging level: debug, info, warn, error | info |
-| `NO_COLOR` | Disable colored output | false |
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | General error |
-| 2 | Invalid arguments |
-| 3 | File I/O error |
-| 4 | Kubernetes connection error |
-| 5 | Recipe generation error |
+| 1 | General error (unclassified) |
+| 2 | Invalid input (bad arguments, validation failure) |
+| 3 | Not found (requested resource does not exist) |
+| 4 | Unauthorized (authentication or authorization failure) |
+| 5 | Timeout (operation exceeded time limit) |
+| 6 | Unavailable (service temporarily unavailable) |
+| 7 | Rate limited (client exceeded rate limit) |
+| 8 | Internal error (unexpected failure) |
 
 ## Common Usage Patterns
 
@@ -1408,7 +1432,7 @@ aicr recipe --os ubuntu --accelerator h100 | jq '.componentRefs[]'
 ### Save All Steps
 ```shell
 aicr snapshot -o snapshot.yaml
-aicr recipe -s snapshot.yaml -i training -o recipe.yaml
+aicr recipe -s snapshot.yaml --intent training -o recipe.yaml
 aicr bundle -r recipe.yaml -o ./bundles
 ```
 

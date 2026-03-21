@@ -24,6 +24,7 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 | Feature | API | CLI |
 |---------|-----|-----|
 | Recipe generation | ✅ GET /v1/recipe | ✅ `aicr recipe` |
+| Value query | ✅ GET /v1/query | ✅ `aicr query` |
 | Bundle creation | ✅ POST /v1/bundle | ✅ `aicr bundle` |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
@@ -100,7 +101,7 @@ curl "http://localhost:8080/"
 {
   "service": "aicrd",
   "version": "v0.7.6",
-  "routes": ["/v1/recipe", "/v1/bundle"]
+  "routes": ["/v1/recipe", "/v1/query", "/v1/bundle"]
 }
 ```
 
@@ -266,6 +267,38 @@ Same as GET /v1/recipe - returns a recipe JSON response.
 
 ---
 
+### GET /v1/query
+
+Query a specific value from a fully hydrated recipe. Resolves a recipe from criteria (same parameters as GET /v1/recipe), merges all base, overlay, and inline overrides, then returns the value at the given selector path.
+
+**Query Parameters:**
+
+All GET /v1/recipe parameters are supported, plus:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `selector` | string | Yes | Dot-delimited path to the value to extract (e.g. `components.gpu-operator.values.driver.version`). Empty string returns the entire hydrated recipe. |
+
+**Response:**
+
+- **Scalar values** (string, number, bool) are returned as plain JSON values
+- **Complex values** (maps, lists) are returned as JSON objects/arrays
+
+**Examples:**
+
+```shell
+# Get a specific Helm value
+curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&intent=training&selector=components.gpu-operator.values.driver.version"
+
+# Get deployment order
+curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&intent=training&selector=deploymentOrder" | jq '.'
+
+# Get a component subtree
+curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&selector=components.gpu-operator.values.driver" | jq '.'
+```
+
+---
+
 ### POST /v1/bundle
 
 Generate deployment bundles from a recipe.
@@ -295,6 +328,7 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 |---------|-------------|
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
+| `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
 | `skyhook-operator` | OS-level node tuning and kernel configuration |
