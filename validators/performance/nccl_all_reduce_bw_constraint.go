@@ -92,6 +92,7 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 var supportedNCCLCombinations = map[recipe.CriteriaServiceType][]recipe.CriteriaAcceleratorType{
 	recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorH100},
 	recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorH100},
+	recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 }
 
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth using Kubeflow TrainJob + MPI.
@@ -359,6 +360,12 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	if len(ctx.Tolerations) > 0 {
 		effectiveTolerations = ctx.Tolerations
 		slog.Info("Using user-provided toleration override for NCCL workers", "count", len(ctx.Tolerations))
+	}
+
+	if service == recipe.CriteriaServiceAny && len(effectiveNodeSelector) == 0 {
+		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			"self-managed clusters (service=any) require --node-selector to identify GPU nodes "+
+				"(e.g., --node-selector nvidia.com/gpu.present=true)")
 	}
 
 	runtimeObj, err := parseYAMLTemplate(templatePath(accelerator, service, "runtime.yaml"), templateData)

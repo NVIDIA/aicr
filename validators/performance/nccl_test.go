@@ -238,6 +238,12 @@ func TestPlatformWorkerScheduling(t *testing.T) {
 			t.Errorf("unknown service should return nil, got ns=%v tols=%v", ns, tols)
 		}
 	})
+	t.Run("any service returns nil", func(t *testing.T) {
+		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceAny, "")
+		if ns != nil || tols != nil {
+			t.Errorf("any service should return nil, got ns=%v tols=%v", ns, tols)
+		}
+	})
 }
 
 func TestTemplatePath(t *testing.T) {
@@ -268,6 +274,20 @@ func TestTemplatePath(t *testing.T) {
 			service:     recipe.CriteriaServiceGKE,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "gke", "runtime.yaml"),
+		},
+		{
+			name:        "b200 any runtime",
+			accelerator: recipe.CriteriaAcceleratorB200,
+			service:     recipe.CriteriaServiceAny,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "b200", "any", "runtime.yaml"),
+		},
+		{
+			name:        "gb200 any runtime",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceAny,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "any", "runtime.yaml"),
 		},
 	}
 	for _, tt := range tests {
