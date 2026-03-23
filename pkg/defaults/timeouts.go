@@ -227,6 +227,10 @@ const (
 	// to reach the Established condition after installation.
 	TrainerCRDEstablishedTimeout = 2 * time.Minute
 
+	// TrainerControllerReadyTimeout is the time to wait for the Kubeflow Trainer
+	// controller-manager Deployment to have at least one ready replica after installation.
+	TrainerControllerReadyTimeout = 2 * time.Minute
+
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
 

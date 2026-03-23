@@ -62,6 +62,9 @@ func TestTimeoutConstants(t *testing.T) {
 		// Gang scheduling co-scheduling window
 		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
 
+		// Trainer timeouts
+		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
+
 		// Validator timeouts
 		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 10 * time.Second, 60 * time.Second},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
