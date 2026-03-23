@@ -233,9 +233,8 @@ func serializeTolerations(tols []corev1.Toleration) string {
 	for _, t := range tols {
 		var part string
 		switch {
-		case t.Key == "":
-			// Universal toleration (operator: Exists, no key)
-			part = ":"
+		case t.Key == "" && t.Operator == corev1.TolerationOpExists:
+			part = "*"
 		case t.Value != "":
 			part = t.Key + "=" + t.Value + ":" + string(t.Effect)
 		default:

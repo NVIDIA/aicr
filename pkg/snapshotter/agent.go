@@ -282,6 +282,11 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 
 	result := make([]corev1.Toleration, 0, len(tolerations))
 	for _, t := range tolerations {
+		if t == "*" {
+			result = append(result, corev1.Toleration{Operator: corev1.TolerationOpExists})
+			continue
+		}
+
 		// Format: key=value:effect or key:effect (for exists operator)
 		var key, value, effect string
 
