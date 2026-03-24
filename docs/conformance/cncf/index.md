@@ -31,6 +31,7 @@ docs/conformance/cncf/
     ├── gang-scheduling.md
     ├── secure-accelerator-access.md
     ├── accelerator-metrics.md
+    ├── ai-service-metrics.md
     ├── inference-gateway.md
     ├── robust-operator.md
     ├── pod-autoscaling.md
@@ -112,8 +113,9 @@ See [evidence/index.md](evidence/index.md) for a summary of all collected eviden
 | 1 | DRA Support | `dra_support` | [evidence/dra-support.md](evidence/dra-support.md) |
 | 2 | Gang Scheduling | `gang_scheduling` | [evidence/gang-scheduling.md](evidence/gang-scheduling.md) |
 | 3 | Secure Accelerator Access | `secure_accelerator_access` | [evidence/secure-accelerator-access.md](evidence/secure-accelerator-access.md) |
-| 4 | Accelerator & AI Service Metrics | `accelerator_metrics`, `ai_service_metrics` | [evidence/accelerator-metrics.md](evidence/accelerator-metrics.md) |
-| 5 | Inference API Gateway | `ai_inference` | [evidence/inference-gateway.md](evidence/inference-gateway.md) |
-| 6 | Robust AI Operator | `robust_controller` | [evidence/robust-operator.md](evidence/robust-operator.md) |
-| 7 | Pod Autoscaling | `pod_autoscaling` | [evidence/pod-autoscaling.md](evidence/pod-autoscaling.md) |
-| 8 | Cluster Autoscaling | `cluster_autoscaling` | [evidence/cluster-autoscaling.md](evidence/cluster-autoscaling.md) |
+| 4 | Accelerator Metrics | `accelerator_metrics` | [evidence/accelerator-metrics.md](evidence/accelerator-metrics.md) |
+| 5 | AI Service Metrics | `ai_service_metrics` | [evidence/ai-service-metrics.md](evidence/ai-service-metrics.md) |
+| 6 | Inference API Gateway | `ai_inference` | [evidence/inference-gateway.md](evidence/inference-gateway.md) |
+| 7 | Robust AI Operator | `robust_controller` | [evidence/robust-operator.md](evidence/robust-operator.md) |
+| 8 | Pod Autoscaling | `pod_autoscaling` | [evidence/pod-autoscaling.md](evidence/pod-autoscaling.md) |
+| 9 | Cluster Autoscaling | `cluster_autoscaling` | [evidence/cluster-autoscaling.md](evidence/cluster-autoscaling.md) |

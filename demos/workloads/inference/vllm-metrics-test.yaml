@@ -1,0 +1,147 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Standalone vLLM inference server with Prometheus ServiceMonitor.
+# Used for CNCF AI Conformance ai_service_metrics evidence collection.
+#
+# Deploys vLLM serving Qwen/Qwen3-0.6B with a DRA ResourceClaim for GPU
+# allocation and a ServiceMonitor for Prometheus auto-discovery.
+#
+# Prerequisites:
+#   - DRA driver installed (gpu.nvidia.com DeviceClass)
+#   - Prometheus with ServiceMonitor support (kube-prometheus-stack)
+#
+# Usage:
+#   kubectl apply -f vllm-metrics-test.yaml
+#   # Wait for pod to be ready, then send requests:
+#   kubectl exec -n vllm-metrics-test vllm-server -- python3 -c "
+#     import urllib.request, json
+#     req = urllib.request.Request('http://localhost:8000/v1/completions',
+#         data=json.dumps({'model': 'Qwen/Qwen3-0.6B', 'prompt': 'Hello', 'max_tokens': 20}).encode(),
+#         headers={'Content-Type': 'application/json'})
+#     print(json.loads(urllib.request.urlopen(req).read())['choices'][0]['text'])"
+#
+# Cleanup:
+#   kubectl delete ns vllm-metrics-test
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vllm-metrics-test
+
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: vllm-gpu
+  namespace: vllm-metrics-test
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+
+---
+# Service name must NOT be "vllm" — Kubernetes injects VLLM_PORT env var
+# from service discovery, which conflicts with vLLM's own VLLM_PORT env var.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-inference
+  namespace: vllm-metrics-test
+  labels:
+    app: vllm-inference
+spec:
+  selector:
+    app: vllm-inference
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vllm-inference
+  namespace: vllm-metrics-test
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: vllm-inference
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vllm-server
+  namespace: vllm-metrics-test
+  labels:
+    app: vllm-inference
+spec:
+  restartPolicy: Never
+  securityContext:
+    # vLLM/PyTorch requires root — getpass.getuser() fails without /etc/passwd entry,
+    # and the upstream image does not define a non-root user.
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
+  tolerations:
+    - operator: Exists
+  resourceClaims:
+    - name: gpu
+      resourceClaimName: vllm-gpu
+  containers:
+    - name: vllm
+      image: vllm/vllm-openai:v0.18.0
+      args: ["--model", "Qwen/Qwen3-0.6B", "--port", "8000"]
+      env:
+        - name: HF_HOME
+          value: /.cache/huggingface
+        - name: VLLM_CACHE_ROOT
+          value: /.cache/vllm
+      ports:
+        - containerPort: 8000
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+      volumeMounts:
+        - name: hf-cache
+          mountPath: /root/.cache
+        - name: tmp
+          mountPath: /tmp
+      resources:
+        claims:
+          - name: gpu
+        requests:
+          cpu: "1"
+          memory: 4Gi
+        limits:
+          cpu: "4"
+          memory: 16Gi
+  volumes:
+    - name: hf-cache
+      emptyDir: {}
+    - name: tmp
+      emptyDir: {}

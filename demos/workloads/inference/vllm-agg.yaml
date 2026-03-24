@@ -45,6 +45,25 @@ metadata:
   name: dynamo-workload
 
 ---
+# DRA ResourceClaim for GPU allocation (required on DRA-only clusters).
+# The kai.scheduler/queue label is required for KAI scheduler to manage the claim.
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaim
+metadata:
+  name: vllm-gpu-claim
+  namespace: dynamo-workload
+  labels:
+    kai.scheduler/queue: dynamo
+spec:
+  devices:
+    requests:
+      - name: gpu
+        exactly:
+          deviceClassName: gpu.nvidia.com
+          allocationMode: ExactCount
+          count: 1
+
+---
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
@@ -85,8 +104,8 @@ spec:
         - name: DYN_EVENT_PLANE
           value: zmq
       resources:
-        limits:
-          gpu: "1"
+        claims:
+          - name: gpu
       extraPodSpec:
         nodeSelector:
           nodeGroup: gpu-worker
@@ -99,6 +118,12 @@ spec:
             operator: Equal
             value: worker-workload
             effect: NoExecute
+          - key: nvidia.com/gpu
+            operator: Exists
+            effect: NoSchedule
+        resourceClaims:
+          - name: gpu
+            resourceClaimName: vllm-gpu-claim
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:0.9.0
           workingDir: /workspace/examples/backends/vllm
