@@ -47,15 +47,15 @@ var requirements = map[string]requirementMeta{
 	},
 	"accelerator-metrics": {
 		RequirementID: "accelerator_metrics",
-		Title:         "Accelerator & AI Service Metrics",
+		Title:         "Accelerator Metrics (DCGM Exporter)",
 		Description:   "Demonstrates that the DCGM exporter exposes per-GPU metrics (utilization, memory, temperature, power) in Prometheus format.",
 		File:          "accelerator-metrics.md",
 	},
 	"ai-service-metrics": {
-		RequirementID: "accelerator_metrics",
-		Title:         "Accelerator & AI Service Metrics",
-		Description:   "Demonstrates that GPU metrics flow through Prometheus and are available via the Kubernetes custom metrics API for HPA scaling.",
-		File:          "accelerator-metrics.md",
+		RequirementID: "ai_service_metrics",
+		Title:         "AI Service Metrics (Prometheus ServiceMonitor Discovery)",
+		Description:   "Demonstrates that Prometheus discovers and collects metrics from AI workloads exposing Prometheus exposition format via ServiceMonitors.",
+		File:          "ai-service-metrics.md",
 	},
 	"inference-gateway": {
 		RequirementID: "ai_inference",

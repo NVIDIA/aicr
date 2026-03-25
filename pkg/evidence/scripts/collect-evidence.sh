@@ -507,19 +507,15 @@ EOF
     log_info "Secure accelerator access evidence collection complete."
 }
 
-# --- Section 4: Accelerator & AI Service Metrics ---
-collect_metrics() {
+# --- Section 4a: Accelerator Metrics (DCGM Exporter) ---
+collect_accelerator_metrics() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/accelerator-metrics.md"
-    log_info "Collecting Accelerator & AI Service Metrics evidence → ${EVIDENCE_FILE}"
-    write_section_header "Accelerator & AI Service Metrics"
+    log_info "Collecting Accelerator Metrics evidence → ${EVIDENCE_FILE}"
+    write_section_header "Accelerator Metrics (DCGM Exporter)"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
-Demonstrates two CNCF AI Conformance observability requirements:
-
-1. **accelerator_metrics** — Fine-grained GPU performance metrics (utilization, memory,
-   temperature, power) exposed via standardized Prometheus endpoint
-2. **ai_service_metrics** — Monitoring system that discovers and collects metrics from
-   workloads exposing Prometheus exposition format
+Demonstrates that the DCGM exporter exposes per-GPU metrics (utilization, memory,
+temperature, power) in Prometheus format via a standardized metrics endpoint.
 
 ## Monitoring Stack Health
 
@@ -640,33 +636,446 @@ EOF
     # Always clean up port-forward process to avoid leaking on timeout/failure
     kill "${pf_pid}" 2>/dev/null || true
 
-    cat >> "${EVIDENCE_FILE}" <<'EOF'
-
-## AI Service Metrics (Custom Metrics API)
-
-Prometheus adapter exposes custom metrics via the Kubernetes custom metrics API,
-enabling HPA and other consumers to act on workload-specific metrics.
-EOF
-    # Query custom metrics API
-    echo "" >> "${EVIDENCE_FILE}"
-    echo "**Custom metrics API available resources**" >> "${EVIDENCE_FILE}"
-    echo '```' >> "${EVIDENCE_FILE}"
-    echo '$ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | python3 -c "..." # extract resource names' >> "${EVIDENCE_FILE}"
-    kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 2>&1 | \
-        python3 -c "import sys,json; data=json.loads(sys.stdin.read()); resources=data.get('resources',[]); [print(r['name']) for r in resources[:20]]" >> "${EVIDENCE_FILE}" 2>&1
-    echo '```' >> "${EVIDENCE_FILE}"
-
     # Verdict
     echo "" >> "${EVIDENCE_FILE}"
     local pass=true
     if [ -z "${dcgm_svc}" ]; then pass=false; fi
     if [ "${pass}" = "true" ]; then
-        echo "**Result: PASS** — DCGM exporter provides per-GPU metrics (utilization, memory, temperature, power). Prometheus actively scrapes and stores metrics. Custom metrics API available via prometheus-adapter." >> "${EVIDENCE_FILE}"
+        echo "**Result: PASS** — DCGM exporter provides per-GPU metrics (utilization, memory, temperature, power). Prometheus actively scrapes and stores metrics." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — DCGM exporter not found or metrics unavailable." >> "${EVIDENCE_FILE}"
     fi
 
-    log_info "Metrics evidence collection complete."
+    log_info "Accelerator metrics evidence collection complete."
+}
+
+# --- Section 4b: AI Service Metrics (Prometheus Discovery) ---
+# Detects the AI workload type and collects metrics evidence accordingly.
+# Priority: Dynamo inference > standalone PyTorch training (with embedded manifest).
+# The training path only requires GPU nodes + Prometheus — no Kubeflow Trainer needed.
+collect_service_metrics() {
+    EVIDENCE_FILE="${EVIDENCE_DIR}/ai-service-metrics.md"
+    log_info "Collecting AI Service Metrics evidence → ${EVIDENCE_FILE}"
+
+    # Detect workload type: prefer Dynamo if running, otherwise use training path
+    local dynamo_ns="dynamo-workload"
+
+    if kubectl get pods -n "${dynamo_ns}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null | grep -q .; then
+        collect_service_metrics_dynamo
+    else
+        # Training path: deploys a standalone PyTorch pod with Prometheus metrics.
+        # Only requires GPU nodes + Prometheus — no Kubeflow Trainer dependency.
+        collect_service_metrics_trainer
+    fi
+}
+
+# --- Dynamo inference metrics collection ---
+collect_service_metrics_dynamo() {
+    write_section_header "AI Service Metrics (Prometheus PodMonitor Discovery)"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+Demonstrates that Prometheus discovers and collects metrics from AI workloads
+that expose them in Prometheus exposition format, using the PodMonitor CRD
+for automatic target discovery.
+
+## Dynamo Inference Workload
+EOF
+
+    local NS="dynamo-workload"
+    local deployed_dynamo=false
+
+    # Deploy Dynamo workload if not already running
+    if ! kubectl get pods -n "${NS}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null | grep -q .; then
+        local manifest="${SCRIPT_DIR}/manifests/dynamo-vllm-agg.yaml"
+        if [ -f "${manifest}" ]; then
+            log_info "Deploying Dynamo vLLM workload from embedded manifest..."
+            kubectl apply -f "${manifest}"
+            deployed_dynamo=true
+        else
+            log_warn "No Dynamo workload running and manifest not found at ${manifest}"
+            echo "**Result: SKIP** — No Dynamo workload found. Deploy vllm-agg.yaml first." >> "${EVIDENCE_FILE}"
+            return
+        fi
+    fi
+
+    # Wait for Dynamo workload pods to be ready (poll every 15s, up to 5 minutes)
+    log_info "Waiting for Dynamo workload pods in ${NS} (up to 5m)..."
+    local worker_pod=""
+    local frontend_pod=""
+    local workload_ready=false
+    for i in $(seq 1 20); do
+        worker_pod=$(kubectl get pods -n "${NS}" -l nvidia.com/dynamo-component-type=worker \
+            --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        frontend_pod=$(kubectl get pods -n "${NS}" -l nvidia.com/dynamo-component-type=frontend \
+            --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+        if [ -n "${worker_pod}" ] && [ -n "${frontend_pod}" ]; then
+            workload_ready=true
+            break
+        fi
+        log_info "Dynamo pods not ready yet (attempt ${i}/20), retrying in 15s..."
+        sleep 15
+    done
+
+    if [ "${workload_ready}" != "true" ]; then
+        log_warn "Dynamo workload not ready in ${NS} after 5 minutes, skipping service metrics"
+        echo "**Result: SKIP** — Dynamo workload not ready in ${NS}. Deploy vllm-agg.yaml first." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    # Wait for the inference endpoint to be serving (model loading can take additional time)
+    log_info "Waiting for Dynamo frontend to serve requests (up to 3m)..."
+    local serving_ready=false
+    for i in $(seq 1 12); do
+        if kubectl exec -n "${NS}" "${frontend_pod}" -- python3 -c "
+import urllib.request
+urllib.request.urlopen('http://localhost:8000/v1/models')" &>/dev/null; then
+            serving_ready=true
+            break
+        fi
+        log_info "Frontend not serving yet (attempt ${i}/12), retrying in 15s..."
+        sleep 15
+    done
+
+    if [ "${serving_ready}" != "true" ]; then
+        log_warn "Dynamo frontend not serving after 3 minutes"
+        capture "Dynamo workload pods" kubectl get pods -n "${NS}" -o wide
+        echo "**Result: FAIL** — Dynamo frontend did not become ready." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    capture "Dynamo workload pods" kubectl get pods -n "${NS}" -o wide
+
+    # Send inference requests via frontend to generate non-zero metrics
+    log_info "Sending 10 inference requests via Dynamo frontend..."
+    for i in $(seq 1 10); do
+        kubectl exec -n "${NS}" "${frontend_pod}" -- python3 -c "
+import urllib.request, json
+req = urllib.request.Request('http://localhost:8000/v1/completions',
+    data=json.dumps({'model': 'Qwen/Qwen3-0.6B', 'prompt': 'Explain GPU computing.', 'max_tokens': 50}).encode(),
+    headers={'Content-Type': 'application/json'})
+urllib.request.urlopen(req)" &>/dev/null || true
+    done
+
+    # Collect worker metrics (Dynamo runtime exposes metrics on port 9090 "system")
+    # Filter to dynamo_component_* and key vllm:* metrics, excluding _bucket and _created
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Worker metrics endpoint (sampled after 10 inference requests)**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl exec -n "${NS}" "${worker_pod}" -- python3 -c "
+import urllib.request
+data = urllib.request.urlopen('http://localhost:9090/metrics').read().decode()
+for l in data.split('\n'):
+    if not l or l.startswith('#') or '_bucket' in l or '_created' in l:
+        continue
+    # Only show dynamo_component_* and select vllm:* metrics
+    if not (l.startswith('dynamo_component_') or l.startswith('vllm:prefix_cache') or
+            l.startswith('vllm:engine_sleep')):
+        continue
+    parts = l.rsplit(' ', 1)
+    if len(parts) == 2 and parts[1] not in ('0', '0.0'):
+        print(l)" 2>&1 | head -15 >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Show PodMonitors (auto-created by Dynamo operator)
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## PodMonitors (Auto-Created by Dynamo Operator)
+
+The Dynamo operator automatically creates PodMonitors for worker and frontend
+pods. Prometheus discovers workload pods in any namespace via
+`namespaceSelector.any: true`.
+EOF
+    capture "Dynamo PodMonitors" kubectl get podmonitors -n dynamo-system
+    capture "Worker PodMonitor spec" kubectl get podmonitor dynamo-worker -n dynamo-system -o yaml
+
+    # Show worker pod labels matching PodMonitor selector
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Worker pod labels (matching PodMonitor selector)**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl get pod "${worker_pod}" -n "${NS}" -o jsonpath='{.metadata.labels}' 2>&1 | \
+        python3 -c "import sys,json; d=json.loads(sys.stdin.read()); [print(f'{k}: {v}') for k,v in sorted(d.items()) if 'dynamo' in k or 'metrics' in k]" >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Verify Prometheus target discovery via port-forward
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Prometheus Target Discovery
+
+Prometheus automatically discovers both Dynamo frontend and worker pods as
+scrape targets via PodMonitors and actively collects metrics.
+EOF
+
+    log_info "Checking Prometheus targets for Dynamo workload..."
+    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    local pf_pid=$!
+
+    if wait_for_port 9090 30 "${pf_pid}"; then
+        # Wait for Dynamo targets to appear (up to 2 minutes)
+        local target_found=false
+        for i in $(seq 1 12); do
+            if curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
+                python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if any('dynamo' in t['labels'].get('job','') for t in data['data']['activeTargets']) else 1)" 2>/dev/null; then
+                target_found=true
+                break
+            fi
+            sleep 10
+        done
+
+        if [ "${target_found}" = "true" ]; then
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Prometheus scrape targets (active)**" >> "${EVIDENCE_FILE}"
+            echo '```' >> "${EVIDENCE_FILE}"
+            curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
+                python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+for t in data['data']['activeTargets']:
+    job = t['labels'].get('job','')
+    # Only show workload PodMonitor targets (dynamo-system/dynamo-*), not operator ServiceMonitor
+    if job.startswith('dynamo-system/dynamo-'):
+        print(json.dumps({'job':job,'endpoint':t['scrapeUrl'],'health':t['health'],'lastScrape':t['lastScrape']},indent=2))" >> "${EVIDENCE_FILE}" 2>&1
+            echo '```' >> "${EVIDENCE_FILE}"
+
+            # Query Dynamo metrics from Prometheus
+            cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Dynamo Metrics in Prometheus
+
+Prometheus collects Dynamo application-level inference metrics from both
+frontend and worker, including request throughput, latency, token counts,
+and model KV cache utilization.
+EOF
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Dynamo metrics queried from Prometheus (after 10 inference requests)**" >> "${EVIDENCE_FILE}"
+            echo '```' >> "${EVIDENCE_FILE}"
+            local prom_response
+            prom_response=$(curl -sf --data-urlencode 'query={job=~"dynamo-system/dynamo-.*",__name__=~"dynamo_.*"}' 'http://localhost:9090/api/v1/query' 2>/dev/null)
+            if [ -n "${prom_response}" ]; then
+                echo "${prom_response}" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+seen=set()
+for r in data['data']['result']:
+    name=r['metric']['__name__']
+    val=r['value'][1]
+    if name not in seen and val not in ('0','0.0') and '_bucket' not in name:
+        seen.add(name)
+        endpoint=r['metric'].get('dynamo_endpoint','')
+        label=f'{{endpoint=\"{endpoint}\"}}' if endpoint else ''
+        print(f'{name}{label} = {val}')" 2>&1 | head -15 >> "${EVIDENCE_FILE}"
+            else
+                echo "WARNING: No response from Prometheus query" >> "${EVIDENCE_FILE}"
+            fi
+            echo '```' >> "${EVIDENCE_FILE}"
+
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Result: PASS** — Prometheus discovers Dynamo inference workloads (frontend + worker) via operator-managed PodMonitors and actively scrapes their Prometheus-format metrics endpoints. Application-level AI inference metrics are collected and queryable." >> "${EVIDENCE_FILE}"
+        else
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Result: FAIL** — Prometheus did not discover Dynamo targets within 2 minutes. Ensure PodMonitors have the 'release' label matching Prometheus podMonitorSelector." >> "${EVIDENCE_FILE}"
+        fi
+    else
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**WARNING:** Could not port-forward to Prometheus" >> "${EVIDENCE_FILE}"
+    fi
+    kill "${pf_pid}" 2>/dev/null || true
+
+    # Cleanup deployed workload if we created it
+    if [ "${deployed_dynamo}" = "true" ] && [ "${NO_CLEANUP}" != "true" ]; then
+        log_info "Cleaning up deployed Dynamo workload..."
+        kubectl delete -f "${SCRIPT_DIR}/manifests/dynamo-vllm-agg.yaml" --ignore-not-found 2>/dev/null || true
+    fi
+
+    # Always document cleanup steps
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Cleanup
+
+**Delete workload namespace**
+```
+$ kubectl delete ns dynamo-workload
+```
+EOF
+
+    log_info "AI service metrics (Dynamo) evidence collection complete."
+}
+
+# --- PyTorch training workload metrics collection ---
+# Deploys a PyTorch training pod that exposes training metrics (loss, throughput,
+# GPU memory) on :8080/metrics in Prometheus format via a ServiceMonitor.
+collect_service_metrics_trainer() {
+    write_section_header "AI Service Metrics (Prometheus ServiceMonitor Discovery)"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+Demonstrates that Prometheus discovers and collects metrics from AI training
+workloads that expose them in Prometheus exposition format, using the
+ServiceMonitor CRD for automatic target discovery.
+
+## PyTorch Training Workload
+EOF
+
+    local NS="trainer-metrics-test"
+    local train_manifest="${SCRIPT_DIR}/manifests/trainer-pytorch-test.yaml"
+    local deployed_training=false
+
+    # Deploy PyTorch training workload
+    if [ -f "${train_manifest}" ]; then
+        log_info "Deploying PyTorch training workload..."
+        kubectl apply -f "${train_manifest}"
+        deployed_training=true
+    else
+        log_warn "trainer-pytorch-test.yaml not found at ${train_manifest}"
+        echo "**Result: SKIP** — Training manifest not found." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    # Wait for training pod to be running (poll every 15s, up to 5 minutes)
+    log_info "Waiting for training pod to be running (up to 5m)..."
+    local pod_ready=false
+    for i in $(seq 1 20); do
+        local phase
+        phase=$(kubectl get pod pytorch-training-job -n "${NS}" -o jsonpath='{.status.phase}' 2>/dev/null)
+        if [ "${phase}" = "Running" ]; then
+            pod_ready=true
+            break
+        elif [ "${phase}" = "Failed" ] || [ "${phase}" = "Error" ]; then
+            log_error "Training pod failed"
+            break
+        fi
+        log_info "Training pod not ready yet (attempt ${i}/20), retrying in 15s..."
+        sleep 15
+    done
+
+    if [ "${pod_ready}" != "true" ]; then
+        log_warn "Training pod did not become ready"
+        capture "Training pod status" kubectl get pods -n "${NS}" -o wide
+        echo "**Result: FAIL** — Training pod did not become ready." >> "${EVIDENCE_FILE}"
+        if [ "${deployed_training}" = "true" ] && [ "${NO_CLEANUP}" != "true" ]; then
+            kubectl delete -f "${train_manifest}" --ignore-not-found 2>/dev/null || true
+        fi
+        return
+    fi
+
+    # Wait for metrics endpoint to be serving (training may still be warming up)
+    log_info "Waiting for training metrics endpoint (up to 2m)..."
+    local metrics_ready=false
+    for i in $(seq 1 8); do
+        if kubectl exec -n "${NS}" pytorch-training-job -- python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/metrics')" &>/dev/null; then
+            metrics_ready=true
+            break
+        fi
+        sleep 15
+    done
+
+    if [ "${metrics_ready}" != "true" ]; then
+        log_warn "Training metrics endpoint not ready"
+        echo "**Result: FAIL** — Training metrics endpoint not ready." >> "${EVIDENCE_FILE}"
+        if [ "${deployed_training}" = "true" ] && [ "${NO_CLEANUP}" != "true" ]; then
+            kubectl delete -f "${train_manifest}" --ignore-not-found 2>/dev/null || true
+        fi
+        return
+    fi
+
+    capture "Training workload pod" kubectl get pods -n "${NS}" -o wide
+
+    # Collect training metrics from the pod
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Training metrics endpoint (after training run)**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl exec -n "${NS}" pytorch-training-job -- python3 -c "
+import urllib.request
+print(urllib.request.urlopen('http://localhost:8080/metrics').read().decode())" 2>&1 >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Show ServiceMonitor
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## ServiceMonitor
+EOF
+    capture "Training ServiceMonitor" kubectl get servicemonitor pytorch-training -n "${NS}" -o yaml
+    capture "Service endpoint" kubectl get endpoints pytorch-training-metrics -n "${NS}"
+
+    # Verify Prometheus target discovery
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Prometheus Target Discovery
+
+Prometheus automatically discovers the PyTorch training workload as a scrape
+target via ServiceMonitor and actively collects metrics.
+EOF
+
+    log_info "Checking Prometheus targets for training workload..."
+    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    local pf_pid=$!
+
+    if wait_for_port 9090 30 "${pf_pid}"; then
+        # Wait for target to appear (up to 3 minutes)
+        local target_found=false
+        for i in $(seq 1 18); do
+            if curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
+                python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if any(t['labels'].get('job','')=='pytorch-training-metrics' for t in data['data']['activeTargets']) else 1)" 2>/dev/null; then
+                target_found=true
+                break
+            fi
+            sleep 10
+        done
+
+        if [ "${target_found}" = "true" ]; then
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Prometheus scrape target (active)**" >> "${EVIDENCE_FILE}"
+            echo '```' >> "${EVIDENCE_FILE}"
+            curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
+                python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+for t in data['data']['activeTargets']:
+    if t['labels'].get('job','')=='pytorch-training-metrics':
+        print(json.dumps({'job':t['labels']['job'],'endpoint':t['scrapeUrl'],'health':t['health'],'lastScrape':t['lastScrape']},indent=2))" >> "${EVIDENCE_FILE}" 2>&1
+            echo '```' >> "${EVIDENCE_FILE}"
+
+            # Wait for metrics to be ingested (one more scrape cycle)
+            sleep 20
+
+            # Query training metrics from Prometheus
+            cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Training Metrics in Prometheus
+
+Prometheus collects PyTorch training workload metrics including training step
+count, loss, throughput, and GPU memory utilization.
+EOF
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Training metrics queried from Prometheus**" >> "${EVIDENCE_FILE}"
+            echo '```' >> "${EVIDENCE_FILE}"
+            for metric in training_step_total training_loss training_throughput_samples_per_sec training_gpu_memory_used_bytes training_gpu_memory_total_bytes; do
+                local val
+                val=$(curl -sf --data-urlencode "query=${metric}{job=\"pytorch-training-metrics\"}" 'http://localhost:9090/api/v1/query' 2>/dev/null | \
+                    python3 -c "import sys,json; data=json.load(sys.stdin); r=data['data']['result']; print(f'{r[0][\"metric\"][\"__name__\"]} = {r[0][\"value\"][1]}') if r else None" 2>/dev/null)
+                if [ -n "${val}" ]; then
+                    echo "${val}" >> "${EVIDENCE_FILE}"
+                fi
+            done
+            echo '```' >> "${EVIDENCE_FILE}"
+
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Result: PASS** — Prometheus discovers the PyTorch training workload via ServiceMonitor and actively scrapes its Prometheus-format metrics endpoint. Training-level metrics (step count, loss, throughput, GPU memory) are collected and queryable." >> "${EVIDENCE_FILE}"
+        else
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Result: FAIL** — Prometheus did not discover training target within 3 minutes." >> "${EVIDENCE_FILE}"
+        fi
+    else
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**WARNING:** Could not port-forward to Prometheus" >> "${EVIDENCE_FILE}"
+    fi
+    kill "${pf_pid}" 2>/dev/null || true
+
+    # Cleanup
+    if [ "${deployed_training}" = "true" ] && [ "${NO_CLEANUP}" != "true" ]; then
+        log_info "Cleaning up training workload..."
+        kubectl delete -f "${train_manifest}" --ignore-not-found 2>/dev/null || true
+    fi
+
+    log_info "AI service metrics (training) evidence collection complete."
 }
 
 # --- Section 5: Inference API Gateway ---
@@ -1469,8 +1878,11 @@ main() {
         secure)
             run_check "Secure Accelerator Access" "secure-accelerator-access" collect_secure
             ;;
-        metrics)
-            run_check "Accelerator Metrics" "accelerator-metrics" collect_metrics
+        accelerator-metrics)
+            run_check "Accelerator Metrics" "accelerator-metrics" collect_accelerator_metrics
+            ;;
+        service-metrics)
+            run_check "AI Service Metrics" "ai-service-metrics" collect_service_metrics
             ;;
         gateway)
             run_check "Inference Gateway" "inference-gateway" collect_gateway
@@ -1488,7 +1900,8 @@ main() {
             run_check "DRA Support" "dra-support" collect_dra
             run_check "Gang Scheduling" "gang-scheduling" collect_gang
             run_check "Secure Accelerator Access" "secure-accelerator-access" collect_secure
-            run_check "Accelerator Metrics" "accelerator-metrics" collect_metrics
+            run_check "Accelerator Metrics" "accelerator-metrics" collect_accelerator_metrics
+            run_check "AI Service Metrics" "ai-service-metrics" collect_service_metrics
             run_check "Inference Gateway" "inference-gateway" collect_gateway
             run_check "Robust AI Operator" "robust-operator" collect_operator
             run_check "Pod Autoscaling (HPA)" "pod-autoscaling" collect_hpa
@@ -1496,7 +1909,7 @@ main() {
             ;;
         *)
             log_error "Unknown section: ${SECTION}"
-            echo "Usage: $0 [dra|gang|secure|metrics|gateway|operator|hpa|cluster-autoscaling|all]"
+            echo "Usage: $0 [dra|gang|secure|accelerator-metrics|service-metrics|gateway|operator|hpa|cluster-autoscaling|all]"
             exit 1
             ;;
     esac

@@ -39,6 +39,7 @@ var ValidFeatures = []string{
 	"gang-scheduling",
 	"secure-access",
 	"accelerator-metrics",
+	"ai-service-metrics",
 	"inference-gateway",
 	"robust-operator",
 	"pod-autoscaling",
@@ -50,7 +51,8 @@ var featureToScript = map[string]string{
 	"dra-support":         "dra",
 	"gang-scheduling":     "gang",
 	"secure-access":       "secure",
-	"accelerator-metrics": "metrics",
+	"accelerator-metrics": "accelerator-metrics",
+	"ai-service-metrics":  "service-metrics",
 	"inference-gateway":   "gateway",
 	"robust-operator":     "operator",
 	"pod-autoscaling":     "hpa",
@@ -59,13 +61,14 @@ var featureToScript = map[string]string{
 
 // featureAliases maps short names to canonical feature names for convenience.
 var featureAliases = map[string]string{
-	"dra":      "dra-support",
-	"gang":     "gang-scheduling",
-	"secure":   "secure-access",
-	"metrics":  "accelerator-metrics",
-	"gateway":  "inference-gateway",
-	"operator": "robust-operator",
-	"hpa":      "pod-autoscaling",
+	"dra":             "dra-support",
+	"gang":            "gang-scheduling",
+	"secure":          "secure-access",
+	"metrics":         "accelerator-metrics",
+	"service-metrics": "ai-service-metrics",
+	"gateway":         "inference-gateway",
+	"operator":        "robust-operator",
+	"hpa":             "pod-autoscaling",
 }
 
 // ResolveFeature returns the canonical feature name, resolving aliases.
@@ -103,7 +106,8 @@ var FeatureDescriptions = map[string]string{
 	"dra-support":         "DRA GPU allocation test",
 	"gang-scheduling":     "Gang scheduling co-scheduling test",
 	"secure-access":       "Secure accelerator access verification",
-	"accelerator-metrics": "Accelerator & AI service metrics",
+	"accelerator-metrics": "Accelerator metrics (DCGM exporter)",
+	"ai-service-metrics":  "AI service metrics (Prometheus ServiceMonitor discovery)",
 	"inference-gateway":   "Inference API gateway conditions",
 	"robust-operator":     "Robust AI operator + webhook test",
 	"pod-autoscaling":     "HPA pod autoscaling (scale-up + scale-down)",

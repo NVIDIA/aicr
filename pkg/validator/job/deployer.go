@@ -209,11 +209,22 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	return env
 }
 
-// imagePullPolicy returns Always when the image uses :latest tag (dev builds),
-// PullIfNotPresent otherwise. This ensures dev builds always pull fresh images
-// and avoids exec format errors from stale cached images on cluster nodes.
+// imagePullPolicy returns the appropriate pull policy based on the image reference.
+// Local images (ko.local, kind.local, localhost) always use IfNotPresent since they
+// are side-loaded into the cluster and cannot be pulled from a registry.
+// Remote images with :latest tag use Always to avoid stale cached images.
 func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
-	if strings.HasSuffix(d.entry.Image, ":latest") {
+	img := d.entry.Image
+	// Local images side-loaded into kind/nvkind — never pull from registry.
+	if strings.HasPrefix(img, "ko.local") ||
+		strings.HasPrefix(img, "kind.local") ||
+		strings.HasPrefix(img, "localhost/") ||
+		strings.HasPrefix(img, "localhost:") {
+
+		return corev1.PullIfNotPresent
+	}
+
+	if strings.HasSuffix(img, ":latest") {
 		return corev1.PullAlways
 	}
 	return corev1.PullIfNotPresent

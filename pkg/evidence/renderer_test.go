@@ -18,7 +18,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -109,11 +108,11 @@ func TestRenderSkippedExcluded(t *testing.T) {
 	}
 }
 
-func TestRenderSharedEvidenceFile(t *testing.T) {
+func TestRenderSeparateMetricsFiles(t *testing.T) {
 	dir := t.TempDir()
 	r := New(WithOutputDir(dir))
 
-	// accelerator-metrics and ai-service-metrics share the same evidence file.
+	// accelerator-metrics and ai-service-metrics produce separate evidence files.
 	report := &ctrf.Report{
 		Results: ctrf.Results{
 			Tests: []ctrf.TestResult{
@@ -127,23 +126,12 @@ func TestRenderSharedEvidenceFile(t *testing.T) {
 		t.Fatalf("Render failed: %v", err)
 	}
 
-	// Both should produce ONE shared evidence file.
+	// Each should produce its own evidence file.
 	if _, err := os.Stat(filepath.Join(dir, "accelerator-metrics.md")); err != nil {
 		t.Errorf("accelerator-metrics.md not found: %v", err)
 	}
-
-	// Read the file and check both check names are present.
-	data, err := os.ReadFile(filepath.Join(dir, "accelerator-metrics.md"))
-	if err != nil {
-		t.Fatalf("failed to read evidence file: %v", err)
-	}
-
-	content := string(data)
-	if !strings.Contains(content, "accelerator-metrics") {
-		t.Error("evidence file should contain accelerator-metrics check")
-	}
-	if !strings.Contains(content, "ai-service-metrics") {
-		t.Error("evidence file should contain ai-service-metrics check")
+	if _, err := os.Stat(filepath.Join(dir, "ai-service-metrics.md")); err != nil {
+		t.Errorf("ai-service-metrics.md not found: %v", err)
 	}
 }
 
@@ -156,9 +144,9 @@ func TestGetRequirement(t *testing.T) {
 		{"dra-support", false, "dra-support.md"},
 		{"gang-scheduling", false, "gang-scheduling.md"},
 		{"accelerator-metrics", false, "accelerator-metrics.md"},
-		{"ai-service-metrics", false, "accelerator-metrics.md"}, // shared file
-		{"gpu-operator-health", true, ""},                       // diagnostic
-		{"platform-health", true, ""},                           // diagnostic
+		{"ai-service-metrics", false, "ai-service-metrics.md"},
+		{"gpu-operator-health", true, ""}, // diagnostic
+		{"platform-health", true, ""},     // diagnostic
 		{"nonexistent", true, ""},
 	}
 

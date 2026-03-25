@@ -160,6 +160,27 @@ jobs:
                 overQuotaWeight: 1
           EOF
 
+          # Create DRA ResourceClaim for GPU allocation.
+          # Required on DRA-only clusters where device-plugin GPU requests cannot be scheduled.
+          # The kai.scheduler/queue label is required for KAI scheduler to manage the claim.
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f - <<'EOF'
+          apiVersion: resource.k8s.io/v1
+          kind: ResourceClaim
+          metadata:
+            name: vllm-smoke-gpu-claim
+            namespace: dynamo-system
+            labels:
+              kai.scheduler/queue: dynamo
+          spec:
+            devices:
+              requests:
+                - name: gpu
+                  exactly:
+                    deviceClassName: gpu.nvidia.com
+                    allocationMode: ExactCount
+                    count: 1
+          EOF
+
           kubectl --context="kind-${KIND_CLUSTER_NAME}" apply \
             -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
 
@@ -318,6 +339,10 @@ jobs:
           kubectl --context="kind-${KIND_CLUSTER_NAME}" delete \
             -f tests/manifests/dynamo-vllm-smoke-test.yaml \
             -n dynamo-system --ignore-not-found 2>/dev/null || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" delete resourceclaim \
+            vllm-smoke-gpu-claim -n dynamo-system --ignore-not-found 2>/dev/null || true
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" delete queue \
+            dynamo --ignore-not-found 2>/dev/null || true
 
       - name: GPU Test Cleanup
         if: always()

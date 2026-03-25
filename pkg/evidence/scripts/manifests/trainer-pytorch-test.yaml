@@ -1,0 +1,203 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# PyTorch training workload with Prometheus metrics for ai_service_metrics evidence.
+# Runs a short GPU training loop exposing training metrics (loss, step count,
+# GPU memory, throughput) on :8080/metrics in Prometheus format.
+# Uses default scheduler to avoid KAI scheduler queue requirements.
+#
+# Prerequisites:
+#   - GPU nodes with nvidia.com/gpu resources
+#   - Prometheus with ServiceMonitor support (kube-prometheus-stack)
+#
+# Usage:
+#   kubectl apply -f trainer-pytorch-test.yaml
+#
+# Cleanup:
+#   kubectl delete ns trainer-metrics-test
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trainer-metrics-test
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pytorch-training-metrics
+  namespace: trainer-metrics-test
+  labels:
+    app: pytorch-training
+spec:
+  selector:
+    app: pytorch-training
+  ports:
+    - name: metrics
+      port: 8080
+      targetPort: 8080
+
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pytorch-training
+  namespace: trainer-metrics-test
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app: pytorch-training
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 15s
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pytorch-training-job
+  namespace: trainer-metrics-test
+  labels:
+    app: pytorch-training
+spec:
+  schedulerName: default-scheduler
+  restartPolicy: Never
+  securityContext:
+    # PyTorch/CUDA image requires root — no non-root user in /etc/passwd
+    runAsNonRoot: false
+    seccompProfile:
+      type: RuntimeDefault
+  tolerations:
+    - operator: Exists
+  containers:
+    - name: trainer
+      image: nvcr.io/nvidia/pytorch:25.06-py3
+      ports:
+        - name: metrics
+          containerPort: 8080
+      securityContext:
+        readOnlyRootFilesystem: true
+        allowPrivilegeEscalation: false
+      volumeMounts:
+        - name: cache
+          mountPath: /root/.cache
+        - name: tmp
+          mountPath: /tmp
+        - name: triton-cache
+          mountPath: /root/.triton
+      command: ["python3", "-c"]
+      args:
+        - |
+          import torch
+          import time
+          import threading
+          from http.server import HTTPServer, BaseHTTPRequestHandler
+
+          # --- Prometheus metrics (minimal, no external deps) ---
+          metrics = {
+              'training_step_total': 0,
+              'training_loss': 0.0,
+              'training_throughput_samples_per_sec': 0.0,
+              'training_gpu_memory_used_bytes': 0,
+              'training_gpu_memory_total_bytes': 0,
+          }
+
+          class MetricsHandler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  if self.path != '/metrics':
+                      self.send_response(404)
+                      self.end_headers()
+                      return
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'text/plain; version=0.0.4')
+                  self.end_headers()
+                  lines = []
+                  lines.append('# HELP training_step_total Total training steps completed')
+                  lines.append('# TYPE training_step_total counter')
+                  lines.append(f'training_step_total {metrics["training_step_total"]}')
+                  lines.append('# HELP training_loss Current training loss')
+                  lines.append('# TYPE training_loss gauge')
+                  lines.append(f'training_loss {metrics["training_loss"]:.6f}')
+                  lines.append('# HELP training_throughput_samples_per_sec Training throughput')
+                  lines.append('# TYPE training_throughput_samples_per_sec gauge')
+                  lines.append(f'training_throughput_samples_per_sec {metrics["training_throughput_samples_per_sec"]:.2f}')
+                  lines.append('# HELP training_gpu_memory_used_bytes GPU memory used')
+                  lines.append('# TYPE training_gpu_memory_used_bytes gauge')
+                  lines.append(f'training_gpu_memory_used_bytes {metrics["training_gpu_memory_used_bytes"]}')
+                  lines.append('# HELP training_gpu_memory_total_bytes GPU memory total')
+                  lines.append('# TYPE training_gpu_memory_total_bytes gauge')
+                  lines.append(f'training_gpu_memory_total_bytes {metrics["training_gpu_memory_total_bytes"]}')
+                  self.wfile.write(('\n'.join(lines) + '\n').encode())
+              def log_message(self, format, *args):
+                  pass
+
+          server = HTTPServer(('0.0.0.0', 8080), MetricsHandler)
+          threading.Thread(target=server.serve_forever, daemon=True).start()
+          print('Metrics server started on :8080/metrics')
+
+          device = 'cuda' if torch.cuda.is_available() else 'cpu'
+          print(f'Training on {device}')
+          model = torch.nn.Linear(1000, 1000).to(device)
+          optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+          loss_fn = torch.nn.MSELoss()
+
+          if torch.cuda.is_available():
+              metrics['training_gpu_memory_total_bytes'] = torch.cuda.get_device_properties(0).total_memory
+
+          batch_size = 256
+          for step in range(1, 101):
+              t0 = time.time()
+              x = torch.randn(batch_size, 1000, device=device)
+              y = torch.randn(batch_size, 1000, device=device)
+              pred = model(x)
+              loss = loss_fn(pred, y)
+              optimizer.zero_grad()
+              loss.backward()
+              optimizer.step()
+              elapsed = time.time() - t0
+
+              metrics['training_step_total'] = step
+              metrics['training_loss'] = loss.item()
+              metrics['training_throughput_samples_per_sec'] = batch_size / elapsed
+              if torch.cuda.is_available():
+                  metrics['training_gpu_memory_used_bytes'] = torch.cuda.memory_allocated(0)
+
+              if step % 20 == 0:
+                  print(f'Step {step}: loss={loss.item():.4f} throughput={batch_size/elapsed:.1f} samples/s')
+
+          print('Training complete, keeping metrics server alive for scraping...')
+          # Keep alive long enough for Prometheus to discover the ServiceMonitor,
+          # scrape the target, and ingest metrics (~3-4 minutes typical).
+          time.sleep(300)
+          print('Done')
+      resources:
+        requests:
+          nvidia.com/gpu: "1"
+          cpu: "1"
+          memory: 4Gi
+        limits:
+          nvidia.com/gpu: "1"
+          cpu: "4"
+          memory: 16Gi
+  volumes:
+    - name: cache
+      emptyDir: {}
+    - name: tmp
+      emptyDir: {}
+    - name: triton-cache
+      emptyDir: {}

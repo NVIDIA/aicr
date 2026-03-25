@@ -524,6 +524,11 @@ func TestImagePullPolicy(t *testing.T) {
 	}{
 		{"latest tag uses Always", "ghcr.io/nvidia/aicr-validators/conformance:latest", corev1.PullAlways},
 		{"versioned tag uses IfNotPresent", "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0", corev1.PullIfNotPresent},
+		{"ko.local uses IfNotPresent", "ko.local:smoke-test", corev1.PullIfNotPresent},
+		{"ko.local latest uses IfNotPresent", "ko.local:latest", corev1.PullIfNotPresent},
+		{"kind.local uses IfNotPresent", "kind.local/validator:latest", corev1.PullIfNotPresent},
+		{"localhost registry uses IfNotPresent", "localhost:5000/validator:latest", corev1.PullIfNotPresent},
+		{"localhost path uses IfNotPresent", "localhost/validator:latest", corev1.PullIfNotPresent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
