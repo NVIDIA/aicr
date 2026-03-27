@@ -15,6 +15,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,6 +25,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"golang.org/x/time/rate"
 )
+
+// LifecycleHook is a function executed at server lifecycle events (start/shutdown).
+// OnStart hooks receive the parent server context.
+// OnShutdown hooks receive a context bounded by the server's shutdown timeout.
+type LifecycleHook func(ctx context.Context) error
 
 // config holds server configuration
 type config struct {
@@ -47,6 +53,10 @@ type config struct {
 	WriteTimeout    time.Duration
 	IdleTimeout     time.Duration
 	ShutdownTimeout time.Duration
+
+	// Lifecycle hooks
+	OnStart    []LifecycleHook // Executed after the server is ready to accept traffic
+	OnShutdown []LifecycleHook // Executed before the HTTP server shuts down
 }
 
 // parseConfig returns sensible defaults
@@ -55,7 +65,7 @@ func parseConfig() *config {
 		Name:            "server",
 		Version:         "undefined",
 		Address:         "",
-		Port:            8080,
+		Port:            defaults.ServerDefaultPort,
 		RateLimit:       defaults.ServerDefaultRateLimit,
 		RateLimitBurst:  defaults.ServerDefaultRateLimitBurst,
 		ReadTimeout:     defaults.ServerReadTimeout,

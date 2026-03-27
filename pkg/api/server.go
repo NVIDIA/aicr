@@ -16,6 +16,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,7 +24,10 @@ import (
 	"syscall"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/discovery"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/logging"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/server"
@@ -101,12 +105,26 @@ func Serve() error {
 		"/v1/bundle": bb.HandleBundles,
 	}
 
-	// Create and run server
-	s := server.New(
+	var serverOpts []server.Option
+	serverOpts = append(serverOpts,
 		server.WithName(name),
 		server.WithVersion(version),
-		server.WithHandler(r),
 	)
+
+	// Wire DNS-AID discovery when enabled via environment
+	if os.Getenv("AICR_DISCOVERY_ENABLED") == "true" {
+		opts, agentHandler, err := setupDiscovery()
+		if err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to setup discovery", err)
+		}
+		serverOpts = append(serverOpts, opts...)
+		r["/v1/agents"] = agentHandler
+	}
+
+	serverOpts = append(serverOpts, server.WithHandler(r))
+
+	// Create and run server
+	s := server.New(serverOpts...)
 
 	if err := s.Run(ctx); err != nil {
 		slog.Error("server exited with error", "error", err)
@@ -114,4 +132,82 @@ func Serve() error {
 	}
 
 	return nil
+}
+
+// podNamespace returns the Kubernetes namespace this pod is running in.
+// Reads from AICR_DISCOVERY_NAMESPACE env var, then the service account mount,
+// and falls back to "default".
+func podNamespace() string {
+	if ns := os.Getenv("AICR_DISCOVERY_NAMESPACE"); ns != "" {
+		return ns
+	}
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+		return string(data)
+	}
+	return "default"
+}
+
+// discoveryDomain returns the Kubernetes DNS domain for agent discovery.
+// Reads from AICR_DISCOVERY_DOMAIN env var, then derives from podNamespace().
+func discoveryDomain() string {
+	if domain := os.Getenv("AICR_DISCOVERY_DOMAIN"); domain != "" {
+		return domain
+	}
+	return podNamespace() + ".svc.cluster.local."
+}
+
+// setupDiscovery creates the DNS-AID publisher, discoverer, and lifecycle hooks.
+// Returns server options for OnStart/OnShutdown and the /v1/agents handler.
+func setupDiscovery() ([]server.Option, http.HandlerFunc, error) {
+	clientset, _, err := k8sclient.GetKubeClient()
+	if err != nil {
+		return nil, nil, errors.Wrap(errors.ErrCodeUnavailable, "failed to create K8s client for discovery", err)
+	}
+
+	ns := podNamespace()
+	domain := discoveryDomain()
+
+	pub := discovery.NewPublisher(clientset,
+		discovery.WithNamespace(ns),
+		discovery.WithLabels(map[string]string{"app.kubernetes.io/managed-by": name}),
+	)
+
+	reg := discovery.AgentRegistration{
+		Name:         name,
+		Protocol:     discovery.ProtocolMCP,
+		Namespace:    ns,
+		ServiceName:  name,
+		Port:         defaults.ServerDefaultPort,
+		Capabilities: []string{"recipe", "bundle", "validate", "query"},
+		Version:      version,
+	}
+
+	// Override port from env if set
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		var port int
+		if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
+			reg.Port = uint16(port)
+		}
+	}
+
+	disc := discovery.NewDiscoverer()
+
+	onStart := server.WithOnStart(func(ctx context.Context) error {
+		slog.Info("publishing agent to DNS-AID",
+			slog.String("name", reg.Name),
+			slog.String("domain", domain),
+		)
+		return pub.Publish(ctx, reg)
+	})
+
+	onShutdown := server.WithOnShutdown(func(ctx context.Context) error {
+		slog.Info("deregistering agent from DNS-AID",
+			slog.String("name", reg.Name),
+		)
+		return pub.Deregister(ctx, reg.Name, reg.Protocol)
+	})
+
+	handler := handleAgents(disc, domain)
+
+	return []server.Option{onStart, onShutdown}, handler, nil
 }

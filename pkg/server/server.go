@@ -77,6 +77,22 @@ func WithHandler(handlers map[string]http.HandlerFunc) Option {
 	}
 }
 
+// WithOnStart returns an Option that registers a lifecycle hook to run
+// after the server is ready to accept traffic.
+func WithOnStart(hook LifecycleHook) Option {
+	return func(s *Server) {
+		s.config.OnStart = append(s.config.OnStart, hook)
+	}
+}
+
+// WithOnShutdown returns an Option that registers a lifecycle hook to run
+// before the HTTP server shuts down.
+func WithOnShutdown(hook LifecycleHook) Option {
+	return func(s *Server) {
+		s.config.OnShutdown = append(s.config.OnShutdown, hook)
+	}
+}
+
 // New creates a new Server instance with the provided functional options.
 // It parses environment configuration, sets up rate limiting, and configures
 // the HTTP server with health checks, metrics, and custom handlers.
@@ -133,10 +149,17 @@ func (s *Server) setReady(ready bool) {
 }
 
 // Start starts the HTTP server and listens for incoming requests.
+// OnStart hooks run before the server accepts traffic.
+// The server is marked ready only after hooks succeed and the listener is up.
 func (s *Server) Start(ctx context.Context) error {
-	s.setReady(true)
-
 	slog.Debug("server start", "port", s.httpServer.Addr)
+
+	// Run OnStart lifecycle hooks before accepting traffic
+	for _, hook := range s.config.OnStart {
+		if err := hook(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "OnStart hook failed", err)
+		}
+	}
 
 	// Start server in goroutine. Always send on errChan (nil for clean exit)
 	// so the consumer below is deterministic even when the server crashes
@@ -149,6 +172,9 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		errChan <- err
 	}()
+
+	// Mark ready after hooks and listener are up
+	s.setReady(true)
 
 	// Wait for context cancellation or server error
 	select {
@@ -171,6 +197,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	defer cancel()
 
 	slog.Info("shutting down server")
+
+	// Run OnShutdown lifecycle hooks (best-effort: log errors but continue shutdown)
+	for _, hook := range s.config.OnShutdown {
+		if err := hook(shutdownCtx); err != nil {
+			slog.Error("OnShutdown hook failed", "error", err)
+		}
+	}
+
 	return s.httpServer.Shutdown(shutdownCtx)
 }
 

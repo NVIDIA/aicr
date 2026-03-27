@@ -115,6 +115,22 @@ const (
 	FileReadTimeout = 30 * time.Second
 )
 
+// DNS-AID discovery timeouts.
+const (
+	// DiscoveryDNSTimeout is the timeout for individual DNS SVCB queries.
+	DiscoveryDNSTimeout = 5 * time.Second
+
+	// DiscoveryPublishTimeout is the timeout for publishing agent records to K8s.
+	DiscoveryPublishTimeout = 10 * time.Second
+
+	// DiscoveryDeregisterTimeout is the timeout for deregistering agent records.
+	DiscoveryDeregisterTimeout = 10 * time.Second
+
+	// DiscoveryHandlerTimeout is the timeout for the /v1/agents HTTP handler.
+	// Covers index TXT query + N concurrent SVCB queries.
+	DiscoveryHandlerTimeout = 15 * time.Second
+)
+
 // HTTP client timeouts for outbound requests.
 const (
 	// HTTPClientTimeout is the default total timeout for HTTP requests.
@@ -484,6 +500,9 @@ const (
 	// swaps a file between walk-time validation and the read at
 	// consumption time.
 	MaxExternalDataFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
+
+	// ServerDefaultPort is the default HTTP listen port for the API server.
+	ServerDefaultPort = 8080
 )
 
 // Server-wide handler defaults.
