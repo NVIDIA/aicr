@@ -48,7 +48,7 @@ const (
 var k8sNameRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$`)
 
 // Publisher manages DNS-AID agent registration via Kubernetes resources.
-// CoreDNS with the rdatapolicy plugin reads these resources to serve SVCB records.
+// CoreDNS reads these resources to serve SVCB records.
 type Publisher struct {
 	clientset kubernetes.Interface
 	namespace string
@@ -69,8 +69,8 @@ func NewPublisher(clientset kubernetes.Interface, opts ...PublisherOption) *Publ
 }
 
 // Publish creates or updates Kubernetes resources that represent an agent
-// in the DNS-AID discovery system. CoreDNS rdatapolicy reads these to
-// serve SVCB records at _{name}._{protocol}._agents.{namespace}.svc.cluster.local.
+// in the DNS-AID discovery system. CoreDNS reads these to serve SVCB
+// records at _{name}._{protocol}._agents.{namespace}.svc.cluster.local.
 func (p *Publisher) Publish(ctx context.Context, reg AgentRegistration) error {
 	ctx, cancel := context.WithTimeout(ctx, defaults.DiscoveryPublishTimeout)
 	defer cancel()

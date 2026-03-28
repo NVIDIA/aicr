@@ -27,6 +27,6 @@
 //	_index._agents.{domain}
 //
 // The Discoverer queries DNS for agent SVCB records. The Publisher
-// creates Kubernetes resources (ConfigMaps) that CoreDNS with the
-// rdatapolicy plugin can serve as SVCB records.
+// creates Kubernetes resources (ConfigMaps) that CoreDNS can serve
+// as SVCB records.
 package discovery
