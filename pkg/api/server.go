@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/logging"
+	"github.com/NVIDIA/aicr/pkg/openshell"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/server"
 )
@@ -192,6 +193,26 @@ func setupDiscovery() ([]server.Option, http.HandlerFunc, error) {
 
 	disc := discovery.NewDiscoverer()
 
+	// Create OpenShell policy guard
+	guardMode := openshell.ModePermissive
+	if mode := os.Getenv("OPENSHELL_MODE"); mode != "" {
+		guardMode = openshell.Mode(mode)
+		if !openshell.ValidMode(guardMode) {
+			return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+				"invalid OPENSHELL_MODE: "+mode+" (valid: strict, permissive, disabled)")
+		}
+	}
+	guard := openshell.NewGuard(
+		openshell.WithMode(guardMode),
+		openshell.WithCallerID(name),
+		openshell.WithCallerDomain(domain),
+	)
+	slog.Info("openshell policy enforcement configured",
+		slog.String("mode", string(guardMode)),
+		slog.String("caller_id", name),
+		slog.String("caller_domain", domain),
+	)
+
 	onStart := server.WithOnStart(func(ctx context.Context) error {
 		slog.Info("publishing agent to DNS-AID",
 			slog.String("name", reg.Name),
@@ -207,7 +228,7 @@ func setupDiscovery() ([]server.Option, http.HandlerFunc, error) {
 		return pub.Deregister(ctx, reg.Name, reg.Protocol)
 	})
 
-	handler := handleAgents(disc, domain)
+	handler := handleAgents(disc, guard, domain)
 
 	return []server.Option{onStart, onShutdown}, handler, nil
 }

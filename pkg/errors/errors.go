@@ -45,6 +45,8 @@ const (
 	// version mismatch). Distinct from ErrCodeInvalidRequest because the request
 	// itself is well-formed; the conflict is with current resource state.
 	ErrCodeConflict ErrorCode = "CONFLICT"
+	// ErrCodePolicyFetch indicates a failure to fetch or parse a policy document.
+	ErrCodePolicyFetch ErrorCode = "POLICY_FETCH"
 )
 
 // StructuredError provides structured error information for better observability.

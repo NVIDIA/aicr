@@ -19,9 +19,12 @@ import (
 	"net/http"
 	"regexp"
 
+	"log/slog"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/discovery"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/openshell"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/server"
 )
@@ -32,12 +35,13 @@ var dnsNameRegex = regexp.MustCompile(`^[a-z0-9_][a-z0-9_\-]{0,62}(\.[a-z0-9_][a
 
 // agentResponse represents a single agent in the /v1/agents JSON response.
 type agentResponse struct {
-	Name     string             `json:"name"`
-	Protocol string             `json:"protocol"`
-	Endpoint string             `json:"endpoint"`
-	Port     uint16             `json:"port"`
-	Priority uint16             `json:"priority"`
-	Params   agentParamsSummary `json:"params,omitempty"`
+	Name         string               `json:"name"`
+	Protocol     string               `json:"protocol"`
+	Endpoint     string               `json:"endpoint"`
+	Port         uint16               `json:"port"`
+	Priority     uint16               `json:"priority"`
+	Params       agentParamsSummary   `json:"params,omitempty"`
+	PolicyResult *policyResultSummary `json:"policyResult,omitempty"`
 }
 
 // agentParamsSummary is a subset of SvcParams relevant for the API response.
@@ -48,10 +52,17 @@ type agentParamsSummary struct {
 	ConnectClass string   `json:"connectClass,omitempty"`
 }
 
-// handleAgents returns an http.HandlerFunc that discovers all agents in a domain
-// and returns them as JSON. The domain is taken from the "domain" query parameter
-// and defaults to defaultDomain.
-func handleAgents(disc *discovery.Discoverer, defaultDomain string) http.HandlerFunc {
+// policyResultSummary is the OpenShell policy evaluation result for an agent.
+type policyResultSummary struct {
+	Allowed    bool     `json:"allowed"`
+	Violations []string `json:"violations,omitempty"`
+}
+
+// handleAgents returns an http.HandlerFunc that discovers all agents in a domain,
+// evaluates OpenShell policy for each, and returns them as JSON. The domain is
+// taken from the "domain" query parameter and defaults to defaultDomain.
+// If guard is nil, policy evaluation is skipped.
+func handleAgents(disc *discovery.Discoverer, guard *openshell.Guard, defaultDomain string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", http.MethodGet)
@@ -80,8 +91,9 @@ func handleAgents(disc *discovery.Discoverer, defaultDomain string) http.Handler
 		}
 
 		agents := make([]agentResponse, 0, len(records))
-		for _, rec := range records {
-			agents = append(agents, agentResponse{
+		for i := range records {
+			rec := &records[i]
+			resp := agentResponse{
 				Name:     rec.Name,
 				Protocol: string(rec.Protocol),
 				Endpoint: rec.Endpoint,
@@ -93,7 +105,25 @@ func handleAgents(disc *discovery.Discoverer, defaultDomain string) http.Handler
 					Policy:       rec.Params.Policy,
 					ConnectClass: rec.Params.ConnectClass,
 				},
-			})
+			}
+
+			// Evaluate OpenShell policy if a guard is configured
+			if guard != nil && rec.Params.Policy != "" {
+				result, err := guard.Check(ctx, rec)
+				if err != nil {
+					slog.Debug("openshell policy fetch error (fail-open)",
+						"agent", rec.Name, "error", err)
+				}
+				if result != nil {
+					summary := policyResultSummary{Allowed: result.Allowed}
+					for _, v := range result.Violations {
+						summary.Violations = append(summary.Violations, v.Rule+": "+v.Detail)
+					}
+					resp.PolicyResult = &summary
+				}
+			}
+
+			agents = append(agents, resp)
 		}
 
 		resp := map[string]any{

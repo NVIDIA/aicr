@@ -89,7 +89,7 @@ func TestHandleAgents(t *testing.T) {
 		discovery.WithDNSTimeout(2*time.Second),
 	)
 
-	h := handleAgents(disc, "default.svc.cluster.local.")
+	h := handleAgents(disc, nil, "default.svc.cluster.local.")
 
 	t.Run("GET returns agents", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
@@ -152,7 +152,7 @@ func TestHandleAgentsEmptyIndex(t *testing.T) {
 		discovery.WithDNSTimeout(2*time.Second),
 	)
 
-	h := handleAgents(disc, "empty.svc.cluster.local.")
+	h := handleAgents(disc, nil, "empty.svc.cluster.local.")
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/agents", nil)
 	w := httptest.NewRecorder()
@@ -175,7 +175,7 @@ func TestHandleAgentsInvalidDomain(t *testing.T) {
 		discovery.WithDNSTimeout(100*time.Millisecond),
 	)
 
-	h := handleAgents(disc, "default.svc.cluster.local.")
+	h := handleAgents(disc, nil, "default.svc.cluster.local.")
 
 	tests := []struct {
 		name   string

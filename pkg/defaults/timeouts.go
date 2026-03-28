@@ -131,6 +131,21 @@ const (
 	DiscoveryHandlerTimeout = 15 * time.Second
 )
 
+// OpenShell policy enforcement timeouts.
+const (
+	// PolicyFetchTimeout is the timeout for fetching a policy document.
+	// Matches dns-aid-core's _FETCH_TIMEOUT = 3s.
+	PolicyFetchTimeout = 3 * time.Second
+
+	// PolicyCacheTTL is the default cache duration for fetched policy documents.
+	// Matches dns-aid-core's default cache_ttl = 300s.
+	PolicyCacheTTL = 5 * time.Minute
+
+	// PolicyMaxBytes is the maximum policy document size in bytes.
+	// Matches dns-aid-core's _MAX_POLICY_BYTES = 65536 (64 KB).
+	PolicyMaxBytes = 65536
+)
+
 // HTTP client timeouts for outbound requests.
 const (
 	// HTTPClientTimeout is the default total timeout for HTTP requests.
