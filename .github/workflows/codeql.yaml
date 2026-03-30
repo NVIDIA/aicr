@@ -57,10 +57,10 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false  # vendor/ provides deps; disable to save disk on constrained runners
-      - uses: github/codeql-action/init@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
+      - uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13  # v4.35.1
         with:
           languages: go
       - run: go build ./...
         env:
           GOFLAGS: -mod=vendor
-      - uses: github/codeql-action/analyze@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
+      - uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13  # v4.35.1

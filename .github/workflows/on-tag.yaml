@@ -239,7 +239,7 @@ jobs:
 
       - name: Upload SARIF to GitHub Security
         if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13  # v4.35.1
         with:
           sarif_file: ${{ steps.scan.outputs.sarif }}
           category: 'anchore-image-${{ matrix.image }}'
