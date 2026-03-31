@@ -238,6 +238,20 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 			ref.Path = config.Kustomize.DefaultPath
 		}
 	}
+
+	// Load health check assert file content if not already set
+	if ref.HealthCheckAsserts == "" && config.HealthCheck.AssertFile != "" {
+		provider := GetDataProvider()
+		if provider != nil {
+			data, err := provider.ReadFile(config.HealthCheck.AssertFile)
+			if err != nil {
+				slog.Debug("failed to read health check assert file",
+					"component", ref.Name, "file", config.HealthCheck.AssertFile, "error", err)
+			} else {
+				ref.HealthCheckAsserts = string(data)
+			}
+		}
+	}
 }
 
 // RecipeMetadataSpec contains the specification for a recipe.
