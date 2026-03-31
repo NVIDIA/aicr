@@ -21,8 +21,8 @@ set -e
 
 NAMESPACE="${NAMESPACE:-nim-workload}"
 SERVICE="${SERVICE:-svc/llama-3-2-1b}"
-API_PORT=8000
-UI_PORT=9090
+API_PORT="${API_PORT:-8000}"
+UI_PORT="${UI_PORT:-9090}"
 
 cleanup() {
     echo "Shutting down..."
@@ -32,13 +32,13 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# Kill anything already on our ports
+# Check if our ports are already in use
 for port in $API_PORT $UI_PORT; do
-    pids=$(lsof -ti :$port 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-        echo "Killing existing processes on port $port"
-        echo "$pids" | xargs kill 2>/dev/null || true
-        sleep 1
+    if lsof -ti :$port &>/dev/null; then
+        echo "Error: port $port is already in use. Free it or set a different port:"
+        echo "  UI_PORT=9091 API_PORT=8001 $0"
+        lsof -ti :$port 2>/dev/null | xargs ps -p 2>/dev/null | tail -1
+        exit 1
     fi
 done
 
@@ -47,6 +47,14 @@ echo "Starting port-forward to $SERVICE on :$API_PORT..."
 kubectl port-forward -n "$NAMESPACE" "$SERVICE" "$API_PORT":8000 &
 PF_PID=$!
 sleep 2
+
+# Verify port-forward is still running
+if ! kill -0 $PF_PID 2>/dev/null; then
+    echo "Error: port-forward to $SERVICE failed. Check that the service exists:"
+    echo "  kubectl get svc -n $NAMESPACE"
+    exit 1
+fi
+
 
 # Start chat UI + API proxy on UI_PORT
 echo "Starting chat UI on :$UI_PORT..."
