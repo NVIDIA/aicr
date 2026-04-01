@@ -349,6 +349,12 @@ func TestParseTolerations(t *testing.T) {
 			wantLen:     0,
 			wantErr:     true,
 		},
+		{
+			name:        "wildcard toleration",
+			tolerations: []string{"*"},
+			wantLen:     1,
+			wantErr:     false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -390,6 +396,14 @@ func TestParseTolerationsOperator(t *testing.T) {
 			wantKey:      "nvidia.com/gpu",
 			wantValue:    "",
 			wantEffect:   corev1.TaintEffectNoExecute,
+		},
+		{
+			name:         "wildcard toleration produces Exists with empty key",
+			toleration:   "*",
+			wantOperator: corev1.TolerationOpExists,
+			wantKey:      "",
+			wantValue:    "",
+			wantEffect:   "",
 		},
 	}
 

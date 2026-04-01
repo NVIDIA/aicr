@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -188,7 +189,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 }
 
 func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
-	orchestratorEnvCount := 6
+	orchestratorEnvCount := 8
 	env := make([]*applycorev1.EnvVarApplyConfiguration, 0, orchestratorEnvCount+len(d.entry.Env))
 	env = append(env,
 		applycorev1.EnvVar().WithName("AICR_SNAPSHOT_PATH").WithValue("/data/snapshot/snapshot.yaml"),
@@ -216,11 +217,17 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 }
 
 // serializeNodeSelector encodes a nodeSelector map as a comma-separated key=value string.
-// This matches the format expected by snapshotter.ParseNodeSelectors on the receiving end.
+// Keys are sorted for deterministic output. This matches the format expected by
+// snapshotter.ParseNodeSelectors on the receiving end.
 func serializeNodeSelector(ns map[string]string) string {
+	keys := make([]string, 0, len(ns))
+	for k := range ns {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
 	pairs := make([]string, 0, len(ns))
-	for k, v := range ns {
-		pairs = append(pairs, k+"="+v)
+	for _, k := range keys {
+		pairs = append(pairs, k+"="+ns[k])
 	}
 	return strings.Join(pairs, ",")
 }
@@ -245,22 +252,11 @@ func serializeTolerations(tols []corev1.Toleration) string {
 	return strings.Join(parts, ",")
 }
 
-// imagePullPolicy returns the appropriate pull policy based on the image reference.
-// Local images (ko.local, kind.local, localhost) always use IfNotPresent since they
-// are side-loaded into the cluster and cannot be pulled from a registry.
-// Remote images with :latest tag use Always to avoid stale cached images.
+// imagePullPolicy returns Always when the image uses :latest tag (dev builds),
+// PullIfNotPresent otherwise. This ensures dev builds always pull fresh images
+// and avoids exec format errors from stale cached images on cluster nodes.
 func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
-	img := d.entry.Image
-	// Local images side-loaded into kind/nvkind — never pull from registry.
-	if strings.HasPrefix(img, "ko.local") ||
-		strings.HasPrefix(img, "kind.local") ||
-		strings.HasPrefix(img, "localhost/") ||
-		strings.HasPrefix(img, "localhost:") {
-
-		return corev1.PullIfNotPresent
-	}
-
-	if strings.HasSuffix(img, ":latest") {
+	if strings.HasSuffix(d.entry.Image, ":latest") {
 		return corev1.PullAlways
 	}
 	return corev1.PullIfNotPresent
@@ -275,35 +271,16 @@ func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectRefere
 }
 
 func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
+	// The orchestrator Job always tolerates all taints so it can schedule on any
+	// available CPU node. User-provided tolerations (--toleration flag) are forwarded
+	// to inner workloads via AICR_TOLERATIONS and do not affect orchestrator scheduling.
 	return applycorev1.PodSpec().
 		WithServiceAccountName(ServiceAccountName).
 		WithRestartPolicy(corev1.RestartPolicyNever).
 		WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
 		WithImagePullSecrets(d.buildImagePullSecretsApply()...).
-		WithTolerations(d.buildTolerationsApply()...).
+		WithTolerations(applycorev1.Toleration().WithOperator(corev1.TolerationOpExists)).
 		WithAffinity(preferCPUNodeAffinityApply())
-}
-
-func (d *Deployer) buildTolerationsApply() []*applycorev1.TolerationApplyConfiguration {
-	tols := make([]*applycorev1.TolerationApplyConfiguration, 0, len(d.tolerations))
-	for i := range d.tolerations {
-		t := &d.tolerations[i]
-		tol := applycorev1.Toleration().WithOperator(t.Operator)
-		if t.Key != "" {
-			tol = tol.WithKey(t.Key)
-		}
-		if t.Value != "" {
-			tol = tol.WithValue(t.Value)
-		}
-		if t.Effect != "" {
-			tol = tol.WithEffect(t.Effect)
-		}
-		if t.TolerationSeconds != nil {
-			tol = tol.WithTolerationSeconds(*t.TolerationSeconds)
-		}
-		tols = append(tols, tol)
-	}
-	return tols
 }
 
 // WaitForCompletion watches the Job until it reaches a terminal state

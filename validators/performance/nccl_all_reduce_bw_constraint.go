@@ -352,12 +352,12 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// Build effective worker scheduling: user override takes precedence over platform default.
 	defaultNodeSelector, defaultTolerations := platformWorkerScheduling(service, instanceType)
 	effectiveNodeSelector := defaultNodeSelector
-	if len(ctx.NodeSelector) > 0 {
+	if ctx.NodeSelector != nil {
 		effectiveNodeSelector = ctx.NodeSelector
 		slog.Info("Using user-provided node selector override for NCCL workers", "selector", ctx.NodeSelector)
 	}
 	effectiveTolerations := defaultTolerations
-	if len(ctx.Tolerations) > 0 {
+	if ctx.Tolerations != nil {
 		effectiveTolerations = ctx.Tolerations
 		slog.Info("Using user-provided toleration override for NCCL workers", "count", len(ctx.Tolerations))
 	}
@@ -465,6 +465,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 		return aicrErrors.New(aicrErrors.ErrCodeInternal, "replicatedJobs not found in TrainingRuntime")
 	}
 
+	nodeJobFound := false
 	for i, jobRaw := range replicatedJobs {
 		jobMap, ok := jobRaw.(map[string]interface{})
 		if !ok {
@@ -474,6 +475,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 		if name != "node" {
 			continue
 		}
+		nodeJobFound = true
 
 		// Navigate deep into the worker pod spec.
 		workerPodSpec, found := nestedMap(jobMap, "template", "spec", "template", "spec")
@@ -513,6 +515,10 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 
 		replicatedJobs[i] = jobMap
 		break
+	}
+
+	if !nodeJobFound {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, `replicatedJob "node" not found in TrainingRuntime`)
 	}
 
 	return unstructured.SetNestedSlice(obj.Object, replicatedJobs, "spec", "template", "spec", "replicatedJobs")

@@ -318,14 +318,26 @@ func TestDeployJobImagePullSecrets(t *testing.T) {
 	}
 }
 
-func TestDeployJobTolerations(t *testing.T) {
-	ns := createUniqueNamespace(t)
-	tolerations := []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
-	job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", testEntry(), nil, tolerations, nil))
-
-	tols := job.Spec.Template.Spec.Tolerations
-	if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists {
-		t.Errorf("tolerations = %v, want tolerate-all", tols)
+func TestDeployJobOrchestratorToleratesTolerateAll(t *testing.T) {
+	// The orchestrator Job must always have tolerate-all so it can schedule on
+	// any CPU node, regardless of what tolerations are passed for inner workloads.
+	tests := []struct {
+		name        string
+		tolerations []corev1.Toleration
+	}{
+		{"nil tolerations", nil},
+		{"narrow GPU toleration", []corev1.Toleration{{Key: "gpu-type", Value: "h100", Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual}}},
+		{"explicit tolerate-all", []corev1.Toleration{{Operator: corev1.TolerationOpExists}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ns := createUniqueNamespace(t)
+			job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", testEntry(), nil, tt.tolerations, nil))
+			tols := job.Spec.Template.Spec.Tolerations
+			if len(tols) != 1 || tols[0].Operator != corev1.TolerationOpExists || tols[0].Key != "" {
+				t.Errorf("orchestrator tolerations = %v, want single tolerate-all {Operator: Exists}", tols)
+			}
+		})
 	}
 }
 
@@ -578,11 +590,6 @@ func TestImagePullPolicy(t *testing.T) {
 	}{
 		{"latest tag uses Always", "ghcr.io/nvidia/aicr-validators/conformance:latest", corev1.PullAlways},
 		{"versioned tag uses IfNotPresent", "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0", corev1.PullIfNotPresent},
-		{"ko.local uses IfNotPresent", "ko.local:smoke-test", corev1.PullIfNotPresent},
-		{"ko.local latest uses IfNotPresent", "ko.local:latest", corev1.PullIfNotPresent},
-		{"kind.local uses IfNotPresent", "kind.local/validator:latest", corev1.PullIfNotPresent},
-		{"localhost registry uses IfNotPresent", "localhost:5000/validator:latest", corev1.PullIfNotPresent},
-		{"localhost path uses IfNotPresent", "localhost/validator:latest", corev1.PullIfNotPresent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

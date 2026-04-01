@@ -23,11 +23,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"time"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
