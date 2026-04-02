@@ -18,8 +18,8 @@
 # This keeps the issue tracker focused on active work.
 #
 # Timelines:
-#   Issues: 60 days → stale, 14 more days → closed
-#   PRs: 30 days → stale, 14 more days → closed
+#   Issues: 90 days → stale, 30 more days → closed
+#   PRs: 30 days → stale, 30 more days → closed
 #
 # Exemptions:
 #   - lifecycle/frozen: Never goes stale
@@ -53,22 +53,22 @@ jobs:
         with:
           # Issue settings
           stale-issue-message: |
-            This issue has been marked as stale due to 60 days of inactivity.
-            It will be closed in 14 days unless there is new activity.
+            This issue has been marked as stale due to 90 days of inactivity.
+            It will be closed in 30 days unless there is new activity.
 
             To keep this issue open:
             - Add a comment with an update
             - Add the `lifecycle/frozen` label
 
             If this issue is no longer relevant, it's okay to let it close.
-          days-before-stale: 60
+          days-before-stale: 90
           stale-issue-label: 'lifecycle/stale'
           exempt-issue-labels: 'lifecycle/frozen,priority/critical,good first issue'
 
           # PR settings (shorter timeline)
           stale-pr-message: |
             This PR has been marked as stale due to 30 days of inactivity.
-            It will be closed in 14 days unless there is new activity.
+            It will be closed in 30 days unless there is new activity.
 
             To keep this PR open:
             - Push new commits or add a comment
@@ -92,7 +92,7 @@ jobs:
             If you would like to continue this work:
             - Reopen and push new commits or add a comment with an update
             - Add the `lifecycle/frozen` label to prevent it from being closed again
-          days-before-close: 14
+          days-before-close: 30
 
           # Performance
           operations-per-run: 500
