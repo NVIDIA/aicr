@@ -406,6 +406,25 @@ components:
         tolerationPaths:
           - tolerations
 
+  - name: k8s-nim-operator
+    displayName: k8s-nim-operator
+    valueOverrideKeys:
+      - nimoperator
+      - nim
+    healthCheck:
+      assertFile: checks/k8s-nim-operator/health-check.yaml
+    helm:
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia
+      defaultChart: k8s-nim-operator
+      defaultVersion: "3.1.0"
+      defaultNamespace: nvidia-nim
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - operator.nodeSelector
+        tolerationPaths:
+          - operator.tolerations
+
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
     valueOverrideKeys:

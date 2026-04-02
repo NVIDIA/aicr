@@ -1,9 +1,9 @@
 # Pod Autoscaling (HPA with GPU Metrics)
 
+**Cluster:** `EKS / p5.48xlarge / NVIDIA-H100-80GB-HBM3`
+**Generated:** 2026-04-01 23:19:27 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
-**Validated on:** Kubernetes v1.35 clusters with NVIDIA H100 80GB HBM3
-**Generated:** 2026-03-10 03:42:06 UTC
 
 ---
 
@@ -27,14 +27,14 @@ utilizing accelerators, including the ability to scale based on custom GPU metri
 ```
 $ kubectl get pods -n monitoring -l app.kubernetes.io/name=prometheus-adapter
 NAME                                  READY   STATUS    RESTARTS   AGE
-prometheus-adapter-78b8b8d75c-fh4cf   1/1     Running   0          18m
+prometheus-adapter-78b8b8d75c-wv9h2   1/1     Running   0          68m
 ```
 
 **Prometheus adapter service**
 ```
 $ kubectl get svc prometheus-adapter -n monitoring
-NAME                 TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)   AGE
-prometheus-adapter   ClusterIP   172.20.178.141   <none>        443/TCP   18m
+NAME                 TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+prometheus-adapter   ClusterIP   172.20.38.130   <none>        443/TCP   68m
 ```
 
 ## Custom Metrics API
@@ -42,12 +42,12 @@ prometheus-adapter   ClusterIP   172.20.178.141   <none>        443/TCP   18m
 **Available custom metrics**
 ```
 $ kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1 | python3 -c "..." # extract resource names
-namespaces/gpu_memory_used
 namespaces/gpu_power_usage
 pods/gpu_power_usage
 pods/gpu_utilization
 namespaces/gpu_utilization
 pods/gpu_memory_used
+namespaces/gpu_memory_used
 ```
 
 ## GPU Stress Test Deployment
@@ -166,8 +166,8 @@ horizontalpodautoscaler.autoscaling/gpu-workload-hpa created
 **GPU workload pod**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
-gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          3s    10.0.254.75   gpu-node-2   <none>           <none>
+NAME                            READY   STATUS    RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
+gpu-workload-86c75dcd97-qbc7g   1/1     Running   0          4s    10.0.222.136   ip-10-0-251-220.ec2.internal   <none>           <none>
 ```
 
 ## HPA Status
@@ -176,7 +176,7 @@ gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          3s    10.0.254.75  
 ```
 $ kubectl get hpa -n hpa-test
 NAME               REFERENCE                 TARGETS   MINPODS   MAXPODS   REPLICAS   AGE
-gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          90s
+gpu-workload-hpa   Deployment/gpu-workload   100/50    1         2         2          49s
 ```
 
 **HPA details**
@@ -186,10 +186,10 @@ Name:                         gpu-workload-hpa
 Namespace:                    hpa-test
 Labels:                       <none>
 Annotations:                  <none>
-CreationTimestamp:            Mon, 09 Mar 2026 20:42:14 -0700
+CreationTimestamp:            Wed, 01 Apr 2026 16:19:34 -0700
 Reference:                    Deployment/gpu-workload
 Metrics:                      ( current / target )
-  "gpu_utilization" on pods:  50 / 50
+  "gpu_utilization" on pods:  100 / 50
 Min replicas:                 1
 Max replicas:                 2
 Behavior:
@@ -214,18 +214,18 @@ Conditions:
 Events:
   Type     Reason                        Age   From                       Message
   ----     ------                        ----  ----                       -------
-  Warning  FailedGetPodsMetric           76s   horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Warning  FailedComputeMetricsReplicas  76s   horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
-  Normal   SuccessfulRescale             31s   horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
+  Warning  FailedGetPodsMetric           35s   horizontal-pod-autoscaler  unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Warning  FailedComputeMetricsReplicas  35s   horizontal-pod-autoscaler  invalid metrics (1 invalid out of 1), first error is: failed to get pods metric value: unable to get metric gpu_utilization: no metrics returned from custom metrics API
+  Normal   SuccessfulRescale             20s   horizontal-pod-autoscaler  New size: 2; reason: pods metric gpu_utilization above target
 ```
 
 ## GPU Utilization Evidence
 
 **GPU utilization (nvidia-smi)**
 ```
-$ kubectl exec -n hpa-test gpu-workload-86c75dcd97-2wk4f -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
+$ kubectl exec -n hpa-test gpu-workload-86c75dcd97-qbc7g -- nvidia-smi --query-gpu=utilization.gpu,utilization.memory,power.draw --format=csv
 utilization.gpu [%], utilization.memory [%], power.draw [W]
-100 %, 0 %, 290.28 W
+100 %, 0 %, 297.05 W
 ```
 
 ## Pods After Scale-Up
@@ -233,9 +233,9 @@ utilization.gpu [%], utilization.memory [%], power.draw [W]
 **Pods after scale-up**
 ```
 $ kubectl get pods -n hpa-test -o wide
-NAME                            READY   STATUS    RESTARTS   AGE   IP            NODE                         NOMINATED NODE   READINESS GATES
-gpu-workload-86c75dcd97-2wk4f   1/1     Running   0          96s   10.0.254.75   gpu-node-2   <none>           <none>
-gpu-workload-86c75dcd97-4gbn8   1/1     Running   0          36s   10.0.219.76   gpu-node-2   <none>           <none>
+NAME                            READY   STATUS    RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
+gpu-workload-86c75dcd97-qbc7g   1/1     Running   0          55s   10.0.222.136   ip-10-0-251-220.ec2.internal   <none>           <none>
+gpu-workload-86c75dcd97-zvnlg   1/1     Running   0          25s   10.0.228.202   ip-10-0-251-220.ec2.internal   <none>           <none>
 ```
 
 **Result: PASS** — HPA successfully read gpu_utilization metric and scaled replicas when utilization exceeded target threshold.

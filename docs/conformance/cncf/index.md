@@ -1,43 +1,43 @@
-# CNCF AI Conformance Evidence
+# CNCF AI Conformance
 
 ## Overview
 
 This directory contains evidence for [CNCF Kubernetes AI Conformance](https://github.com/cncf/k8s-ai-conformance)
-certification. The evidence demonstrates that a cluster configured with a specific
-recipe meets the Must-have requirements for Kubernetes v1.35.
+certification. Each submission certifies a specific product on a specific Kubernetes
+distribution, with evidence collected using AICR as the validation tooling.
 
-> **Note:** It is the **cluster configured by a recipe** that is conformant, not the
-> tool itself. The recipe determines which components are deployed and how they are
-> configured. Different recipes may produce clusters with different conformance profiles.
+> **Note:** It is the **product deployed on a Kubernetes platform** that is conformant.
+> AICR serves as the deployment and validation tooling (similar to sonobuoy for K8s
+> conformance), while the certified product is the AI inference/training platform.
 
-**Kubernetes:** v1.35
-**Product:** Kubernetes clusters with NVIDIA AI Cluster Runtime (AICR)
+## Submissions
 
-AICR deploys the runtime components that make a Kubernetes cluster AI conformant.
-All conformance requirements are platform-agnostic except cluster autoscaling,
-which relies on the underlying platform's node group scaling mechanism.
+| Version | Product | Platform | Status | Evidence |
+|---------|---------|----------|--------|----------|
+| v1.35 | [NVIDIA NIM](https://developer.nvidia.com/nim) | EKS | 9/9 PASS | [v1.35/nim-eks/](v1.35/nim-eks/) |
 
 ## Directory Structure
 
 ```
 docs/conformance/cncf/
-├── README.md
-├── submission/
-│   ├── PRODUCT.yaml
-│   └── README.md
-└── evidence/
-    ├── index.md
-    ├── dra-support.md
-    ├── gang-scheduling.md
-    ├── secure-accelerator-access.md
-    ├── accelerator-metrics.md
-    ├── ai-service-metrics.md
-    ├── inference-gateway.md
-    ├── robust-operator.md
-    ├── pod-autoscaling.md
-    └── cluster-autoscaling.md
+├── index.md                          # This file
+└── v1.35/                            # Kubernetes version
+    └── nim-eks/                      # Product + platform (mirrors CNCF repo)
+        ├── PRODUCT.yaml              # CNCF submission metadata
+        ├── README.md                 # Submission overview + results table
+        └── evidence/                 # Behavioral evidence files
+            ├── index.md
+            ├── dra-support.md
+            ├── gang-scheduling.md
+            ├── secure-accelerator-access.md
+            ├── accelerator-metrics.md
+            ├── ai-service-metrics.md
+            ├── inference-gateway.md
+            ├── robust-operator.md
+            ├── pod-autoscaling.md
+            └── cluster-autoscaling.md
 
-pkg/evidence/scripts/             # Evidence collection script + test manifests
+pkg/evidence/scripts/                 # Evidence collection script + test manifests
 ├── collect-evidence.sh
 └── manifests/
     ├── dra-gpu-test.yaml
@@ -82,9 +82,9 @@ Alternatively, run the evidence collection script directly:
 ```
 
 > **Note:** The `--cncf-submission` flag deploys GPU workloads and takes ~5-10
-> minutes. The evidence collection script uses polling with early exit on both
-> success and failure, minimizing wait times. The HPA test uses CUDA N-Body
-> Simulation to stress GPUs and verifies scale-up.
+> minutes. The evidence collection script automatically detects the AI workload
+> type (NIM inference, Dynamo inference, or Kubeflow training) and collects
+> appropriate metrics and operator evidence.
 
 ### Two Modes
 
@@ -101,21 +101,3 @@ Alternatively, run the evidence collection script directly:
 | **Gateway** | Condition verification (Accepted, Programmed) | Same |
 | **Webhook test** | Rejection test with invalid CR | Same |
 | **Cluster autoscaling** | Cloud node group validation | Cloud-provider autoscaler API |
-
-## Evidence
-
-See [evidence/index.md](evidence/index.md) for a summary of all collected evidence and results.
-
-## Feature Areas
-
-| # | Feature | Requirement | Evidence File |
-|---|---------|-------------|---------------|
-| 1 | DRA Support | `dra_support` | [evidence/dra-support.md](evidence/dra-support.md) |
-| 2 | Gang Scheduling | `gang_scheduling` | [evidence/gang-scheduling.md](evidence/gang-scheduling.md) |
-| 3 | Secure Accelerator Access | `secure_accelerator_access` | [evidence/secure-accelerator-access.md](evidence/secure-accelerator-access.md) |
-| 4 | Accelerator Metrics | `accelerator_metrics` | [evidence/accelerator-metrics.md](evidence/accelerator-metrics.md) |
-| 5 | AI Service Metrics | `ai_service_metrics` | [evidence/ai-service-metrics.md](evidence/ai-service-metrics.md) |
-| 6 | Inference API Gateway | `ai_inference` | [evidence/inference-gateway.md](evidence/inference-gateway.md) |
-| 7 | Robust AI Operator | `robust_controller` | [evidence/robust-operator.md](evidence/robust-operator.md) |
-| 8 | Pod Autoscaling | `pod_autoscaling` | [evidence/pod-autoscaling.md](evidence/pod-autoscaling.md) |
-| 9 | Cluster Autoscaling | `cluster_autoscaling` | [evidence/cluster-autoscaling.md](evidence/cluster-autoscaling.md) |

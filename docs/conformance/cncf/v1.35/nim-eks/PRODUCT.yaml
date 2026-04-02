@@ -14,23 +14,24 @@
 
 metadata:
   kubernetesVersion: v1.35
-  platformName: "NVIDIA AI Cluster Runtime"
-  platformVersion: "0.8.0"
+  platformName: "NVIDIA NIM on EKS"
+  platformVersion: "1.8.3"
   vendorName: "NVIDIA"
-  websiteUrl: "https://github.com/NVIDIA/aicr"
-  repoUrl: "https://github.com/NVIDIA/aicr"
-  documentationUrl: "https://github.com/NVIDIA/aicr/blob/main/README.md"
+  websiteUrl: "https://developer.nvidia.com/nim"
+  repoUrl: "https://github.com/NVIDIA/k8s-nim-operator"
+  documentationUrl: "https://docs.nvidia.com/nim/large-language-models/latest/deploy-helm.html"
   productLogoUrl: "https://raw.githubusercontent.com/cncf/landscape/master/hosted_logos/nvidia-member.svg"
   description: >-
-    NVIDIA AI Cluster Runtime (AICR) generates validated, GPU-accelerated
-    Kubernetes configurations and deploys runtime components that satisfy all
-    CNCF AI Conformance requirements.
+    NVIDIA NIM on EKS is a Kubernetes-based AI inference platform that deploys
+    and manages NVIDIA NIM microservices on Amazon EKS with GPU scheduling,
+    autoscaling, and Gateway API integration. Configured and validated using
+    NVIDIA AI Cluster Runtime (AICR).
   contactEmailAddress: "aicr-maintainers@nvidia.com"
-  # AICR is not a Kubernetes distribution — it deploys AI runtime components on
-  # existing conformant platforms. We reference EKS's k8s-conformance entry
-  # because evidence was collected on a conformant EKS cluster. AICR is
-  # validated on multiple conformant platforms.
-  # Also validated on GKE: https://github.com/cncf/k8s-conformance/tree/master/v1.35/gke
+  # NVIDIA NIM on EKS is not a Kubernetes distribution — it is an AI inference
+  # platform deployed on top of conformant Amazon EKS. Per CNCF AI Conformance
+  # guidelines, we reference the underlying Kubernetes distribution's conformance
+  # entry to establish that the base platform is already K8s conformant.
+  # This submission certifies the AI capabilities layered on top of EKS.
   k8sConformanceUrl: "https://github.com/cncf/k8s-conformance/tree/master/v1.35/eks"
 
 spec:
@@ -40,7 +41,7 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/dra-support.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/dra-support.md"
       notes: >-
         DRA API (resource.k8s.io/v1) is enabled with DeviceClass, ResourceClaim,
         ResourceClaimTemplate, and ResourceSlice resources available. The NVIDIA
@@ -58,7 +59,7 @@ spec:
       level: SHOULD
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/dra-support.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/dra-support.md"
       notes: >-
         GPU Operator manages the full driver and runtime lifecycle: driver
         installation, container toolkit configuration, device plugin, and DRA
@@ -115,7 +116,7 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/inference-gateway.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/inference-gateway.md"
       notes: >-
         kgateway controller is deployed with full Gateway API CRD support
         (GatewayClass, Gateway, HTTPRoute, GRPCRoute, ReferenceGrant). Inference
@@ -134,7 +135,7 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/gang-scheduling.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/gang-scheduling.md"
       notes: >-
         KAI Scheduler is deployed with operator, scheduler, admission
         controller, pod-grouper, and queue-controller components. PodGroup CRD
@@ -150,12 +151,11 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/cluster-autoscaling.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/cluster-autoscaling.md"
       notes: >-
         Demonstrated on EKS with a GPU Auto Scaling Group (p5.48xlarge, 8x H100
-        per node) tagged for Cluster Autoscaler discovery, and on GKE with the
-        built-in cluster autoscaler managing a3-megagpu-8g node pools. Both
-        platforms support scaling GPU nodes based on pending pod demand.
+        per node) tagged for Cluster Autoscaler discovery. The platform supports
+        scaling GPU nodes based on pending pod demand.
     - id: pod_autoscaling
       description: >-
         If the platform supports the HorizontalPodAutoscaler, it must function
@@ -164,7 +164,7 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/pod-autoscaling.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/pod-autoscaling.md"
       notes: >-
         Prometheus adapter exposes GPU custom metrics (gpu_utilization,
         gpu_memory_used, gpu_power_usage) via the Kubernetes custom metrics API.
@@ -189,7 +189,7 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/accelerator-metrics.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/accelerator-metrics.md"
       notes: >-
         DCGM Exporter runs on GPU nodes exposing metrics at :9400/metrics in
         Prometheus format. Per-GPU metrics include utilization, memory usage,
@@ -205,13 +205,14 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/accelerator-metrics.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/ai-service-metrics.md"
       notes: >-
-        Prometheus and Grafana are deployed as the monitoring stack. Prometheus
-        discovers and scrapes workloads exposing metrics in Prometheus
-        exposition format via ServiceMonitors. The prometheus-adapter bridges
-        these metrics into the Kubernetes custom metrics API for consumption by
-        HPA and other controllers.
+        NVIDIA NIM inference microservice exposes Prometheus-format metrics at
+        /v1/metrics including token throughput (prompt_tokens_total,
+        generation_tokens_total), request latency (time_to_first_token_seconds,
+        time_per_output_token_seconds), and model request counts. Prometheus
+        and prometheus-adapter are deployed for metrics collection and bridging
+        to the Kubernetes custom metrics API.
   security:
     - id: secure_accelerator_access
       description: >-
@@ -222,7 +223,7 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/secure-accelerator-access.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/secure-accelerator-access.md"
       notes: >-
         GPU Operator manages all GPU lifecycle components (driver, device-plugin,
         DCGM, toolkit, validator, MIG manager). 8x H100 GPUs are individually
@@ -240,11 +241,9 @@ spec:
       level: MUST
       status: "Implemented"
       evidence:
-        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/evidence/robust-operator.md"
+        - "https://github.com/NVIDIA/aicr/blob/main/docs/conformance/cncf/v1.35/nim-eks/evidence/robust-operator.md"
       notes: >-
-        Two operators validated: (1) NVIDIA Dynamo for inference — 6 CRDs,
-        4 validating webhooks, DynamoGraphDeployment reconciled into running
-        workload pods; (2) Kubeflow Trainer for training — 3 CRDs, 3 validating
-        webhooks, TrainJob reconciled into distributed training pods. Both
-        operators verified via webhook rejection tests (invalid CRs correctly
-        denied).
+        NVIDIA NIM Operator validated: 4 CRDs (NIMService, NIMCache, NIMPipeline,
+        NIMBuild), admission controller with webhook rejection test (invalid
+        NIMService correctly denied), NIMService CR reconciled into running
+        inference pod serving Llama 3.2 1B on H100 GPU.

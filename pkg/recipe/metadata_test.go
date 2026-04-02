@@ -35,8 +35,10 @@ package recipe
 
 import (
 	"context"
+	"io/fs"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
@@ -1240,6 +1242,94 @@ func TestComponentRefApplyRegistryDefaults_NamespaceAndChart(t *testing.T) {
 			t.Errorf("Chart = %q, want %q (should extract after /)", ref.Chart, "kube-prometheus-stack")
 		}
 	})
+}
+
+// TestComponentRefApplyRegistryDefaults_HealthCheckAsserts verifies that
+// ApplyRegistryDefaults loads healthCheck.assertFile content into HealthCheckAsserts.
+func TestComponentRefApplyRegistryDefaults_HealthCheckAsserts(t *testing.T) {
+	t.Run("loads assert file from data provider", func(t *testing.T) {
+		// Set up a test data provider with a health check file
+		fs := fstest.MapFS{
+			"checks/test-component/health-check.yaml": &fstest.MapFile{
+				Data: []byte("apiVersion: chainsaw.kyverno.io/v1alpha1\nkind: Test\n"),
+			},
+		}
+		old := GetDataProvider()
+		SetDataProvider(&testFSProvider{fs: fs})
+		defer SetDataProvider(old)
+
+		config := &ComponentConfig{
+			Name: "test-component",
+			HealthCheck: HealthCheckConfig{
+				AssertFile: "checks/test-component/health-check.yaml",
+			},
+			Helm: HelmConfig{DefaultRepository: "https://example.com"},
+		}
+		ref := &ComponentRef{Name: "test-component"}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.HealthCheckAsserts == "" {
+			t.Fatal("HealthCheckAsserts should be populated from assertFile")
+		}
+		if !strings.Contains(ref.HealthCheckAsserts, "chainsaw.kyverno.io") {
+			t.Errorf("HealthCheckAsserts = %q, want content containing chainsaw.kyverno.io", ref.HealthCheckAsserts)
+		}
+	})
+
+	t.Run("does not overwrite existing HealthCheckAsserts", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name: "test-component",
+			HealthCheck: HealthCheckConfig{
+				AssertFile: "checks/test-component/health-check.yaml",
+			},
+		}
+		ref := &ComponentRef{
+			Name:               "test-component",
+			HealthCheckAsserts: "existing-content",
+		}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.HealthCheckAsserts != "existing-content" {
+			t.Errorf("HealthCheckAsserts = %q, want %q (should not overwrite)", ref.HealthCheckAsserts, "existing-content")
+		}
+	})
+
+	t.Run("handles missing assert file gracefully", func(t *testing.T) {
+		fs := fstest.MapFS{}
+		old := GetDataProvider()
+		SetDataProvider(&testFSProvider{fs: fs})
+		defer SetDataProvider(old)
+
+		config := &ComponentConfig{
+			Name: "test-component",
+			HealthCheck: HealthCheckConfig{
+				AssertFile: "checks/nonexistent/health-check.yaml",
+			},
+		}
+		ref := &ComponentRef{Name: "test-component"}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.HealthCheckAsserts != "" {
+			t.Errorf("HealthCheckAsserts = %q, want empty for missing file", ref.HealthCheckAsserts)
+		}
+	})
+}
+
+// testFSProvider wraps fstest.MapFS to implement DataProvider for testing.
+type testFSProvider struct {
+	fs fstest.MapFS
+}
+
+func (p *testFSProvider) ReadFile(path string) ([]byte, error) {
+	return p.fs.ReadFile(path)
+}
+
+func (p *testFSProvider) WalkDir(root string, fn fs.WalkDirFunc) error {
+	return fs.WalkDir(p.fs, root, fn)
+}
+
+func (p *testFSProvider) Source(path string) string {
+	return path
 }
 
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged

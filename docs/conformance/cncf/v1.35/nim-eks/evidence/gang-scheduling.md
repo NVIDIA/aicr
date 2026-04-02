@@ -1,7 +1,7 @@
 # Gang Scheduling (KAI Scheduler)
 
 **Cluster:** `EKS / p5.48xlarge / NVIDIA-H100-80GB-HBM3`
-**Generated:** 2026-03-20 20:09:13 UTC
+**Generated:** 2026-04-01 23:14:07 UTC
 **Kubernetes Version:** v1.35
 **Platform:** linux/amd64
 
@@ -16,26 +16,26 @@ scheduler with PodGroups. Both pods in the group must be scheduled together or n
 ```
 $ kubectl get deploy -n kai-scheduler
 NAME                    READY   UP-TO-DATE   AVAILABLE   AGE
-admission               1/1     1            1           20m
-binder                  1/1     1            1           20m
-kai-operator            1/1     1            1           20m
-kai-scheduler-default   1/1     1            1           6d22h
-pod-grouper             1/1     1            1           20m
-podgroup-controller     1/1     1            1           20m
-queue-controller        1/1     1            1           20m
+admission               1/1     1            1           59m
+binder                  1/1     1            1           59m
+kai-operator            1/1     1            1           59m
+kai-scheduler-default   1/1     1            1           59m
+pod-grouper             1/1     1            1           59m
+podgroup-controller     1/1     1            1           59m
+queue-controller        1/1     1            1           59m
 ```
 
 **KAI scheduler pods**
 ```
 $ kubectl get pods -n kai-scheduler
 NAME                                     READY   STATUS    RESTARTS   AGE
-admission-6d48656c78-vsf22               1/1     Running   0          20m
-binder-8cfb98496-79hwx                   1/1     Running   0          20m
-kai-operator-558c46545b-tth97            1/1     Running   0          20m
-kai-scheduler-default-7945d65d9c-5w4bb   1/1     Running   0          20m
-pod-grouper-7bd4c7488c-wlfds             1/1     Running   0          20m
-podgroup-controller-798798fb5f-mjht6     1/1     Running   0          20m
-queue-controller-5b45bb74c9-b75vg        1/1     Running   0          20m
+admission-6d48656c78-wshnq               1/1     Running   0          59m
+binder-8cfb98496-sdg2h                   1/1     Running   0          59m
+kai-operator-558c46545b-qz2rx            1/1     Running   0          59m
+kai-scheduler-default-57bdcb878c-fpkl2   1/1     Running   0          59m
+pod-grouper-7bd4c7488c-mpbsh             1/1     Running   0          59m
+podgroup-controller-798798fb5f-pjwkm     1/1     Running   0          59m
+queue-controller-5b45bb74c9-knjc9        1/1     Running   0          59m
 ```
 
 ## PodGroup CRD
@@ -44,7 +44,7 @@ queue-controller-5b45bb74c9-b75vg        1/1     Running   0          20m
 ```
 $ kubectl get crd podgroups.scheduling.run.ai
 NAME                          CREATED AT
-podgroups.scheduling.run.ai   2026-03-10T20:53:06Z
+podgroups.scheduling.run.ai   2026-04-01T22:13:48Z
 ```
 
 ## Gang Scheduling Test
@@ -195,23 +195,23 @@ pod/gang-worker-1 created
 ```
 $ kubectl get podgroups -n gang-scheduling-test -o wide
 NAME                                                    AGE
-gang-test-group                                         12s
-pg-gang-worker-0-0f1259e1-c344-4964-a1fb-b1ae14e25859   10s
-pg-gang-worker-1-af882f6e-316a-49b2-95f6-189b1a20b5c3   10s
+gang-test-group                                         13s
+pg-gang-worker-0-bb3f5b6f-080d-4cf3-8625-8be214e2032b   11s
+pg-gang-worker-1-f9c72e1a-f7e9-427f-8127-42bb50491402   11s
 ```
 
 **Pod status**
 ```
 $ kubectl get pods -n gang-scheduling-test -o wide
-NAME            READY   STATUS      RESTARTS   AGE   IP             NODE                           NOMINATED NODE   READINESS GATES
-gang-worker-0   0/1     Completed   0          13s   10.0.214.229   ip-10-0-180-136.ec2.internal   <none>           <none>
-gang-worker-1   0/1     Completed   0          13s   10.0.238.183   ip-10-0-180-136.ec2.internal   <none>           <none>
+NAME            READY   STATUS      RESTARTS   AGE   IP            NODE                           NOMINATED NODE   READINESS GATES
+gang-worker-0   0/1     Completed   0          13s   10.0.190.56   ip-10-0-180-136.ec2.internal   <none>           <none>
+gang-worker-1   0/1     Completed   0          13s   10.0.153.74   ip-10-0-180-136.ec2.internal   <none>           <none>
 ```
 
 **gang-worker-0 logs**
 ```
 $ kubectl logs gang-worker-0 -n gang-scheduling-test
-Fri Mar 20 20:09:24 2026       
+Wed Apr  1 23:14:19 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.105.08             Driver Version: 580.105.08     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -219,8 +219,8 @@ Fri Mar 20 20:09:24 2026
 | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
-|   0  NVIDIA H100 80GB HBM3          On  |   00000000:86:00.0 Off |                    0 |
-| N/A   32C    P0             66W /  700W |       0MiB /  81559MiB |      0%      Default |
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:53:00.0 Off |                    0 |
+| N/A   31C    P0             67W /  700W |       0MiB /  81559MiB |      0%      Default |
 |                                         |                        |             Disabled |
 +-----------------------------------------+------------------------+----------------------+
 
@@ -237,7 +237,7 @@ Gang worker 0 completed successfully
 **gang-worker-1 logs**
 ```
 $ kubectl logs gang-worker-1 -n gang-scheduling-test
-Fri Mar 20 20:09:24 2026       
+Wed Apr  1 23:14:19 2026       
 +-----------------------------------------------------------------------------------------+
 | NVIDIA-SMI 580.105.08             Driver Version: 580.105.08     CUDA Version: 13.0     |
 +-----------------------------------------+------------------------+----------------------+
@@ -245,7 +245,7 @@ Fri Mar 20 20:09:24 2026
 | Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
 |                                         |                        |               MIG M. |
 |=========================================+========================+======================|
-|   0  NVIDIA H100 80GB HBM3          On  |   00000000:97:00.0 Off |                    0 |
+|   0  NVIDIA H100 80GB HBM3          On  |   00000000:64:00.0 Off |                    0 |
 | N/A   33C    P0             67W /  700W |       0MiB /  81559MiB |      0%      Default |
 |                                         |                        |             Disabled |
 +-----------------------------------------+------------------------+----------------------+

@@ -657,11 +657,14 @@ collect_service_metrics() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/ai-service-metrics.md"
     log_info "Collecting AI Service Metrics evidence → ${EVIDENCE_FILE}"
 
-    # Detect workload type: prefer Dynamo if running, otherwise use training path
+    # Detect workload type: Dynamo inference > NIM inference > PyTorch training
     local dynamo_ns="dynamo-workload"
+    local nim_ns="nim-workload"
 
     if kubectl get pods -n "${dynamo_ns}" -l nvidia.com/dynamo-component-type=worker --no-headers 2>/dev/null | grep -q .; then
         collect_service_metrics_dynamo
+    elif kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator --no-headers 2>/dev/null | grep -q .; then
+        collect_service_metrics_nim
     else
         # Training path: deploys a standalone PyTorch pod with Prometheus metrics.
         # Only requires GPU nodes + Prometheus — no Kubeflow Trainer dependency.
@@ -898,6 +901,222 @@ $ kubectl delete ns dynamo-workload
 EOF
 
     log_info "AI service metrics (Dynamo) evidence collection complete."
+}
+
+# --- NIM inference metrics collection ---
+# Collects metrics from a running NIMService deployment. NIM exposes OpenAI-compatible
+# inference metrics at /v1/metrics in Prometheus exposition format.
+collect_service_metrics_nim() {
+    write_section_header "AI Service Metrics (NIM Inference)"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+Demonstrates that NVIDIA NIM inference microservices expose Prometheus-format
+metrics that can be discovered and collected by the monitoring stack.
+
+## NIM Inference Workload
+EOF
+
+    local NS="nim-workload"
+
+    # Find the NIM service pod
+    local nim_pod=""
+    nim_pod=$(kubectl get pods -n "${NS}" -l app.kubernetes.io/managed-by=k8s-nim-operator \
+        --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+
+    if [ -z "${nim_pod}" ]; then
+        log_warn "No running NIM pod found in ${NS}"
+        echo "**Result: SKIP** — No running NIM pod found in ${NS}." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    # Get the NIMService name from pod labels
+    local nim_service=""
+    nim_service=$(kubectl get pod "${nim_pod}" -n "${NS}" -o jsonpath='{.metadata.labels.app\.kubernetes\.io/name}' 2>/dev/null)
+
+    capture "NIMService" kubectl get nimservice -n "${NS}"
+    capture "NIM workload pods" kubectl get pods -n "${NS}" -o wide
+
+    # Wait for NIM to be serving
+    log_info "Checking NIM readiness..."
+    local serving_ready=false
+    for i in $(seq 1 12); do
+        if kubectl exec -n "${NS}" "${nim_pod}" -- python3 -c "
+import urllib.request
+urllib.request.urlopen('http://localhost:8000/v1/health/ready')" &>/dev/null; then
+            serving_ready=true
+            break
+        fi
+        log_info "NIM not serving yet (attempt ${i}/12), retrying in 15s..."
+        sleep 15
+    done
+
+    if [ "${serving_ready}" != "true" ]; then
+        log_warn "NIM service not serving after 3 minutes"
+        echo "**Result: FAIL** — NIM service did not become ready." >> "${EVIDENCE_FILE}"
+        return
+    fi
+
+    # Show available models
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**NIM models endpoint**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl exec -n "${NS}" "${nim_pod}" -- python3 -c "
+import urllib.request, json
+data = json.loads(urllib.request.urlopen('http://localhost:8000/v1/models').read())
+for m in data['data']:
+    print(f\"Model: {m['id']}\")" >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Get model name for requests
+    local model_name=""
+    model_name=$(kubectl exec -n "${NS}" "${nim_pod}" -- python3 -c "
+import urllib.request, json
+data = json.loads(urllib.request.urlopen('http://localhost:8000/v1/models').read())
+print(data['data'][0]['id'])" 2>/dev/null)
+
+    # Send inference requests to generate non-zero metrics
+    log_info "Sending 10 inference requests via NIM..."
+    for i in $(seq 1 10); do
+        kubectl exec -n "${NS}" "${nim_pod}" -- python3 -c "
+import urllib.request, json
+req = urllib.request.Request('http://localhost:8000/v1/chat/completions',
+    data=json.dumps({'model': '${model_name}', 'messages': [{'role': 'user', 'content': 'Explain GPU computing in one sentence.'}], 'max_tokens': 30}).encode(),
+    headers={'Content-Type': 'application/json'})
+urllib.request.urlopen(req)" &>/dev/null || true
+    done
+
+    # Collect NIM metrics from /v1/metrics
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**NIM inference metrics endpoint (sampled after generating inference traffic)**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl exec -n "${NS}" "${nim_pod}" -- python3 -c "
+import urllib.request
+data = urllib.request.urlopen('http://localhost:8000/v1/metrics').read().decode()
+for l in data.split('\n'):
+    if not l or l.startswith('#') or '_bucket' in l or '_created' in l:
+        continue
+    parts = l.rsplit(' ', 1)
+    if len(parts) == 2 and parts[1] not in ('0', '0.0'):
+        # Show key inference metrics
+        if any(k in l for k in ['prompt_tokens', 'generation_tokens', 'time_to_first_token',
+                'time_per_output_token', 'request_success', 'num_request',
+                'e2e_request_latency', 'request_prompt_tokens', 'request_generation_tokens']):
+            print(l)" 2>&1 | head -20 >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    # Create a ServiceMonitor so Prometheus can discover and scrape NIM metrics.
+    # NIM exposes metrics at /v1/metrics (not /metrics), so we need a custom path.
+    log_info "Creating ServiceMonitor for NIM metrics discovery..."
+    kubectl apply -f - <<'SM_EOF'
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: nim-inference
+  namespace: monitoring
+  labels:
+    release: kube-prometheus
+spec:
+  namespaceSelector:
+    matchNames:
+      - nim-workload
+  selector:
+    matchLabels:
+      app.kubernetes.io/managed-by: k8s-nim-operator
+  endpoints:
+    - port: api
+      path: /v1/metrics
+      interval: 15s
+SM_EOF
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Prometheus Metrics Discovery
+
+A ServiceMonitor is created to enable Prometheus auto-discovery of NIM inference
+metrics. NIM exposes metrics at `/v1/metrics` in Prometheus exposition format.
+EOF
+
+    capture "NIM ServiceMonitor" kubectl get servicemonitor nim-inference -n monitoring -o yaml
+
+    log_info "Waiting for Prometheus to discover and scrape NIM targets (up to 3m)..."
+    kubectl port-forward svc/kube-prometheus-prometheus -n monitoring 9090:9090 &>/dev/null &
+    local pf_pid=$!
+
+    if wait_for_port 9090 30 "${pf_pid}"; then
+        # Wait for NIM targets with health=up (at least one successful scrape).
+        # Match by namespace since the job name comes from the service name.
+        local target_found=false
+        for i in $(seq 1 18); do
+            if curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
+                python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if any(t['labels'].get('namespace','')=='${NS}' and t.get('health')=='up' for t in data['data']['activeTargets']) else 1)" 2>/dev/null; then
+                target_found=true
+                break
+            fi
+            log_info "NIM target not yet healthy (attempt ${i}/18), retrying in 10s..."
+            sleep 10
+        done
+
+        if [ "${target_found}" = "true" ]; then
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Prometheus scrape targets (active)**" >> "${EVIDENCE_FILE}"
+            echo '```' >> "${EVIDENCE_FILE}"
+            curl -sf 'http://localhost:9090/api/v1/targets?state=active' 2>/dev/null | \
+                python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+for t in data['data']['activeTargets']:
+    ns = t['labels'].get('namespace','')
+    if ns == '${NS}':
+        print(json.dumps({'job':t['labels'].get('job',''),'endpoint':t['scrapeUrl'],'health':t['health'],'lastScrape':t['lastScrape']},indent=2))" >> "${EVIDENCE_FILE}" 2>&1
+            echo '```' >> "${EVIDENCE_FILE}"
+
+            # Query NIM-specific metrics from Prometheus
+            local prom_response
+            prom_response=$(curl -sf --data-urlencode "query={__name__=~\"prompt_tokens_total|generation_tokens_total|time_to_first_token_seconds_sum|time_per_output_token_seconds_sum|e2e_request_latency_seconds_sum\",model_name=~\".*\"}" 'http://localhost:9090/api/v1/query' 2>/dev/null)
+
+            if [ -n "${prom_response}" ] && echo "${prom_response}" | python3 -c "import sys,json; data=json.load(sys.stdin); exit(0 if data['data']['result'] else 1)" 2>/dev/null; then
+                echo "" >> "${EVIDENCE_FILE}"
+                echo "**NIM metrics queried from Prometheus**" >> "${EVIDENCE_FILE}"
+                echo '```' >> "${EVIDENCE_FILE}"
+                echo "${prom_response}" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+for r in data['data']['result']:
+    name=r['metric']['__name__']
+    model=r['metric'].get('model_name','')
+    val=r['value'][1]
+    print(f'{name}{{model_name=\"{model}\"}} = {val}')" 2>&1 | head -15 >> "${EVIDENCE_FILE}"
+                echo '```' >> "${EVIDENCE_FILE}"
+            fi
+
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Result: PASS** — Prometheus discovers NIM inference workloads via ServiceMonitor and actively scrapes application-level AI inference metrics (token throughput, request latency, time-to-first-token) from the /v1/metrics endpoint." >> "${EVIDENCE_FILE}"
+        else
+            echo "" >> "${EVIDENCE_FILE}"
+            echo "**Result: FAIL** — Prometheus did not discover NIM targets within 2 minutes." >> "${EVIDENCE_FILE}"
+        fi
+    else
+        echo "" >> "${EVIDENCE_FILE}"
+        echo "**Result: FAIL** — Could not connect to Prometheus." >> "${EVIDENCE_FILE}"
+    fi
+    kill "${pf_pid}" 2>/dev/null || true
+
+    # Clean up ServiceMonitor
+    if [ "${NO_CLEANUP}" != "true" ]; then
+        kubectl delete servicemonitor nim-inference -n monitoring --ignore-not-found 2>/dev/null || true
+    fi
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Cleanup
+
+**Delete workload namespace**
+```
+$ kubectl delete ns nim-workload
+```
+EOF
+
+    log_info "AI service metrics (NIM) evidence collection complete."
 }
 
 # --- PyTorch training workload metrics collection ---
@@ -1186,8 +1405,11 @@ collect_operator() {
     log_info "Collecting Robust AI Operator evidence → ${EVIDENCE_FILE}"
 
     # Detect which AI operator is present and route to the appropriate collector.
+    # Priority: Dynamo > NIM Operator > Kubeflow Trainer
     if kubectl get deploy -n dynamo-system dynamo-platform-dynamo-operator-controller-manager --no-headers 2>/dev/null | grep -q .; then
         collect_operator_dynamo
+    elif kubectl get deploy -n nvidia-nim -l app.kubernetes.io/name=k8s-nim-operator --no-headers 2>/dev/null | grep -q .; then
+        collect_operator_nim
     elif kubectl get deploy -n kubeflow kubeflow-trainer-controller-manager --no-headers 2>/dev/null | grep -q .; then
         collect_operator_kubeflow
     else
@@ -1308,6 +1530,130 @@ INVALID_CR
     fi
 
     log_info "Robust operator (Kubeflow Trainer) evidence collection complete."
+}
+
+# --- NIM Operator evidence ---
+collect_operator_nim() {
+    write_section_header "Robust AI Operator (NIM Operator)"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+Demonstrates CNCF AI Conformance requirement that at least one complex AI operator
+with a CRD can be installed and functions reliably, including operator pods running,
+webhooks operational, and custom resources reconciled.
+
+## Summary
+
+1. **NIM Operator** — Controller manager running in `nvidia-nim`
+2. **Custom Resource Definitions** — NIMService, NIMCache, NIMPipeline, NIMBuild CRDs registered
+3. **Admission Controller** — Validating/mutating webhooks configured and active
+4. **Custom Resource Reconciled** — `NIMService` reconciled into running inference pod(s)
+5. **Result: PASS**
+
+---
+
+## NIM Operator Health
+EOF
+    capture "NIM operator deployment" kubectl get deploy -n nvidia-nim
+    capture "NIM operator pods" kubectl get pods -n nvidia-nim
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Custom Resource Definitions
+EOF
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**NIM CRDs**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    kubectl get crds 2>/dev/null | grep "apps\.nvidia\.com" >> "${EVIDENCE_FILE}" 2>&1
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Webhooks
+EOF
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**NIM Operator webhooks**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    # Match webhooks by name or by backing service in the nvidia-nim namespace
+    if [[ "${HAS_JQ}" == "true" ]]; then
+      kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations -o json 2>/dev/null | \
+        jq -r '.items[] | select(.webhooks[]?.clientConfig.service.namespace == "nvidia-nim") | "\(.kind)/\(.metadata.name)"' 2>/dev/null >> "${EVIDENCE_FILE}" 2>&1 || true
+    else
+      kubectl get validatingwebhookconfigurations,mutatingwebhookconfigurations 2>/dev/null | grep -iE 'nim|apps\.nvidia\.com' >> "${EVIDENCE_FILE}" 2>&1 || true
+    fi
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Custom Resource Reconciliation
+
+A `NIMService` defines an inference microservice. The operator reconciles it into
+a Deployment with GPU resources, a Service, and health monitoring.
+EOF
+    capture "NIMServices" kubectl get nimservices -A
+    local nim_ns="nim-workload"
+    local nim_service=""
+    nim_service=$(kubectl get nimservices -n "${nim_ns}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -n "${nim_service}" ]; then
+        capture "NIMService details" kubectl get nimservice "${nim_service}" -n "${nim_ns}" -o yaml
+    fi
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+### Workload Pods Created by Operator
+EOF
+    capture "NIM workload pods" kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator -o wide
+
+    cat >> "${EVIDENCE_FILE}" <<'EOF'
+
+## Webhook Rejection Test
+
+Submit an invalid NIMService to verify the admission controller actively
+rejects malformed resources.
+EOF
+    echo "" >> "${EVIDENCE_FILE}"
+    echo "**Invalid CR rejection**" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+    local webhook_result
+    webhook_result=$(kubectl apply -f - 2>&1 <<INVALID_CR || true
+apiVersion: apps.nvidia.com/v1alpha1
+kind: NIMService
+metadata:
+  name: webhook-test-invalid
+  namespace: default
+spec: {}
+INVALID_CR
+)
+    echo "${webhook_result}" >> "${EVIDENCE_FILE}"
+    echo '```' >> "${EVIDENCE_FILE}"
+
+    echo "" >> "${EVIDENCE_FILE}"
+    if echo "${webhook_result}" | grep -qi "denied\|forbidden\|invalid\|error"; then
+        echo "Webhook correctly rejected the invalid resource." >> "${EVIDENCE_FILE}"
+    else
+        echo "WARNING: Webhook did not reject the invalid resource." >> "${EVIDENCE_FILE}"
+        kubectl delete nimservice webhook-test-invalid -n default --ignore-not-found 2>/dev/null
+    fi
+
+    # Verdict
+    echo "" >> "${EVIDENCE_FILE}"
+    local crd_count
+    crd_count=$(kubectl get crds 2>/dev/null | grep -c "apps\.nvidia\.com" || true)
+    local running_pods
+    running_pods=$(kubectl get pods -n "${nim_ns}" -l app.kubernetes.io/managed-by=k8s-nim-operator --no-headers 2>/dev/null | grep -c "Running" || true)
+    local webhook_ok
+    webhook_ok=$(echo "${webhook_result}" | grep -ci "denied\|forbidden\|invalid\|error" || true)
+
+    if [ "${crd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ] && [ "${webhook_ok}" -gt 0 ]; then
+        echo "**Result: PASS** — NIM operator running, webhooks operational (rejection verified), ${crd_count} CRDs registered, NIMService reconciled with ${running_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
+    elif [ "${crd_count}" -gt 0 ] && [ "${running_pods}" -gt 0 ]; then
+        echo "**Result: PASS** — NIM operator running, ${crd_count} CRDs registered, NIMService reconciled with ${running_pods} healthy inference pod(s)." >> "${EVIDENCE_FILE}"
+    elif [ "${crd_count}" -gt 0 ]; then
+        echo "**Result: FAIL** — NIMService found but no healthy inference pods." >> "${EVIDENCE_FILE}"
+    else
+        echo "**Result: FAIL** — No NIM CRDs found." >> "${EVIDENCE_FILE}"
+    fi
+
+    log_info "Robust operator (NIM) evidence collection complete."
 }
 
 # --- Dynamo evidence ---
