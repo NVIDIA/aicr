@@ -25,6 +25,11 @@ const (
 	// CollectorK8sTimeout is the timeout for Kubernetes API calls in collectors.
 	// Covers 6 sequential sub-collectors (server, image, policy, node, helm, argocd).
 	CollectorK8sTimeout = 60 * time.Second
+
+	// NFDDetectionTimeout is the timeout for NFD-based hardware detection.
+	// PCI enumeration and kernel module listing are fast local operations
+	// reading from sysfs/procfs, so a short timeout is sufficient.
+	NFDDetectionTimeout = 5 * time.Second
 )
 
 // Node topology collector constants.
