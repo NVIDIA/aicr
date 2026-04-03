@@ -17,6 +17,8 @@ package gpu
 import (
 	"context"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // mockHardwareDetector is a test double for the HardwareDetector interface.
@@ -36,33 +38,46 @@ func TestHardwareDetectorInterface(t *testing.T) {
 		wantPresent bool
 		wantCount   int
 		wantDriver  bool
+		wantDetSrc  string
 		wantErr     bool
 	}{
 		{
 			name: "GPU present with driver",
 			detector: &mockHardwareDetector{
 				info: &HardwareInfo{
-					GPUPresent:   true,
-					GPUCount:     2,
-					DriverLoaded: true,
+					GPUPresent:      true,
+					GPUCount:        2,
+					DriverLoaded:    true,
+					DetectionSource: "nfd",
 				},
 			},
 			wantPresent: true,
 			wantCount:   2,
 			wantDriver:  true,
+			wantDetSrc:  "nfd",
 		},
 		{
 			name: "no GPU hardware",
 			detector: &mockHardwareDetector{
 				info: &HardwareInfo{
-					GPUPresent:   false,
-					GPUCount:     0,
-					DriverLoaded: false,
+					GPUPresent:      false,
+					GPUCount:        0,
+					DriverLoaded:    false,
+					DetectionSource: "nfd",
 				},
 			},
 			wantPresent: false,
 			wantCount:   0,
 			wantDriver:  false,
+			wantDetSrc:  "nfd",
+		},
+		{
+			name: "detection failure",
+			detector: &mockHardwareDetector{
+				info: nil,
+				err:  errors.New(errors.ErrCodeInternal, "sysfs not available"),
+			},
+			wantErr: true,
 		},
 	}
 
@@ -73,6 +88,9 @@ func TestHardwareDetectorInterface(t *testing.T) {
 				t.Errorf("Detect() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+			if err != nil {
+				return // error expected and received; skip field assertions
+			}
 			if info.GPUPresent != tt.wantPresent {
 				t.Errorf("GPUPresent = %v, want %v", info.GPUPresent, tt.wantPresent)
 			}
@@ -81,6 +99,9 @@ func TestHardwareDetectorInterface(t *testing.T) {
 			}
 			if info.DriverLoaded != tt.wantDriver {
 				t.Errorf("DriverLoaded = %v, want %v", info.DriverLoaded, tt.wantDriver)
+			}
+			if info.DetectionSource != tt.wantDetSrc {
+				t.Errorf("DetectionSource = %v, want %v", info.DetectionSource, tt.wantDetSrc)
 			}
 		})
 	}
