@@ -29,6 +29,7 @@ func TestTimeoutConstants(t *testing.T) {
 		// Collector timeouts
 		{"CollectorTimeout", CollectorTimeout, 5 * time.Second, 30 * time.Second},
 		{"CollectorK8sTimeout", CollectorK8sTimeout, 30 * time.Second, 120 * time.Second},
+		{"NFDDetectionTimeout", NFDDetectionTimeout, 1 * time.Second, 15 * time.Second},
 		{"CollectorTopologyTimeout", CollectorTopologyTimeout, 60 * time.Second, 180 * time.Second},
 
 		// Handler timeouts

@@ -142,3 +142,7 @@ Choose the path that matches how you'll use the project.
 ## Contributing
 
 AI Cluster Runtime is Apache 2.0. Contributions are welcome: new recipes for environments we haven't covered (OpenShift, AKS, bare metal), additional bundler formats, validation checks, or bug reports. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the PR process.
+
+## Slack
+
+Join [Kubernetes](https://kubernetes.slack.com) and visit the [#aicr](https://kubernetes.slack.com/archives/C0AQMPP1BK7) channel on Slack.
