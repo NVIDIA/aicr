@@ -14,12 +14,7 @@
 
 package gpu
 
-import (
-	"context"
-
-	// Ensure NFD dependency is retained in go.mod for Task 1 (NFDHardwareDetector implementation).
-	_ "sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1"
-)
+import "context"
 
 // HardwareDetector abstracts GPU hardware detection for testability.
 // Implementations enumerate PCI devices and kernel module state without
