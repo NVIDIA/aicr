@@ -36,4 +36,8 @@ type HardwareInfo struct {
 
 	// DriverLoaded is true if the nvidia kernel module is currently loaded.
 	DriverLoaded bool
+
+	// DetectionSource identifies which detection method produced this result
+	// (e.g., "nfd", "sysfs").
+	DetectionSource string
 }
