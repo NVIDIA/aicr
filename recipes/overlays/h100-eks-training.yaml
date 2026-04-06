@@ -56,3 +56,34 @@ spec:
         intent: multiNodeTraining
       dependencyRefs:
         - skyhook-operator
+
+  # Validation checks for H100 on EKS training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v24.6.0"
+    performance:
+      checks:
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 300"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access
