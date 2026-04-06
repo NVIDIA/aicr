@@ -336,6 +336,38 @@ func TestCriteriaSpecificity(t *testing.T) {
 			},
 			want: 6,
 		},
+		// Regression tests: YAML-parsed criteria have empty strings for omitted
+		// fields, not "any". Specificity must treat "" as equivalent to "any".
+		{
+			name: "yaml-parsed one field - empty strings are zero specificity",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				// Remaining fields omitted — Go zero value is ""
+			},
+			want: 1,
+		},
+		{
+			name: "yaml-parsed two fields - empty strings are zero specificity",
+			criteria: &Criteria{
+				Service: CriteriaServiceEKS,
+				Intent:  CriteriaIntentTraining,
+			},
+			want: 2,
+		},
+		{
+			name: "yaml-parsed three fields - empty strings are zero specificity",
+			criteria: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorH100,
+				Intent:      CriteriaIntentTraining,
+			},
+			want: 3,
+		},
+		{
+			name:     "all empty strings - zero specificity",
+			criteria: &Criteria{},
+			want:     0,
+		},
 	}
 
 	for _, tt := range tests {

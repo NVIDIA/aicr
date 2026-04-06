@@ -42,14 +42,4 @@ spec:
 
   componentRefs: []
 
-  validation:
-    conformance:
-      checks:
-        - platform-health
-        - gpu-operator-health
-        - dra-support
-        - accelerator-metrics
-        - ai-service-metrics
-        - gang-scheduling
-        - pod-autoscaling
-        - cluster-autoscaling
+  # Validation is inherited from gb200-eks-training (not OS-specific)

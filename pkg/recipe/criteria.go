@@ -377,19 +377,22 @@ func (c *Criteria) Validate() error {
 // Used for ordering overlay application - more specific overlays are applied later.
 func (c *Criteria) Specificity() int {
 	score := 0
-	if c.Service != CriteriaServiceAny {
+	// Empty string is treated as equivalent to "any" because when YAML is parsed,
+	// omitted fields get the zero value ("") rather than the "any" constant.
+	// This is consistent with Matches() and MatchesCriteriaField().
+	if c.Service != CriteriaServiceAny && c.Service != "" {
 		score++
 	}
-	if c.Accelerator != CriteriaAcceleratorAny {
+	if c.Accelerator != CriteriaAcceleratorAny && c.Accelerator != "" {
 		score++
 	}
-	if c.Intent != CriteriaIntentAny {
+	if c.Intent != CriteriaIntentAny && c.Intent != "" {
 		score++
 	}
-	if c.OS != CriteriaOSAny {
+	if c.OS != CriteriaOSAny && c.OS != "" {
 		score++
 	}
-	if c.Platform != CriteriaPlatformAny {
+	if c.Platform != CriteriaPlatformAny && c.Platform != "" {
 		score++
 	}
 	if c.Nodes != 0 {
