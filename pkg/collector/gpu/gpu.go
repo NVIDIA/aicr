@@ -28,25 +28,69 @@ import (
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
 
+// commandRunner executes an external command and returns its output.
+// Used for dependency injection in tests.
+type commandRunner func(ctx context.Context, name string, args ...string) ([]byte, error)
+
+// CollectorOption configures a Collector.
+type CollectorOption func(*Collector)
+
+// WithHardwareDetector sets the hardware detector for Phase 1 GPU detection.
+// When not set, Phase 1 is skipped and only nvidia-smi collection runs.
+func WithHardwareDetector(d HardwareDetector) CollectorOption {
+	return func(c *Collector) {
+		c.hardwareDetector = d
+	}
+}
+
+// WithCommandRunner sets a custom command runner for executing external tools.
+// Used in tests to mock nvidia-smi execution.
+func WithCommandRunner(runner commandRunner) CollectorOption {
+	return func(c *Collector) {
+		c.runner = runner
+	}
+}
+
+// NewCollector creates a GPU collector with the given options.
+func NewCollector(opts ...CollectorOption) *Collector {
+	c := &Collector{}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
 // Collector collects NVIDIA SMI configurations from nvidia-smi command output in XML format
 // and parses them into NVSMIDevice structures
 type Collector struct {
+	// hardwareDetector provides day-0 GPU detection via PCI enumeration.
+	// When nil, Phase 1 (hardware detection) is skipped and only nvidia-smi
+	// collection runs, preserving pre-NFD behavior.
+	hardwareDetector HardwareDetector
+
+	// runner executes external commands. When nil, the real executeCommand is used.
+	// Injected in tests to mock nvidia-smi execution.
+	runner commandRunner
 }
 
-const nvidiaSMICommand = "nvidia-smi"
+const (
+	nvidiaSMICommand = "nvidia-smi"
 
-// Collect retrieves the NVIDIA SMI information by executing nvidia-smi command and
-// parses the XML output into NVSMIDevice structures.
-// If nvidia-smi is not installed, returns a measurement with gpu-count=0 (graceful degradation).
+	// subtypeHardware is the measurement subtype name for NFD-based hardware detection.
+	subtypeHardware = "hardware"
+
+	// subtypeSMI is the measurement subtype name for nvidia-smi based collection.
+	subtypeSMI = "smi"
+)
+
+// Collect retrieves GPU information in two phases:
+//   - Phase 1 (hardware): NFD-based PCI detection when hardwareDetector is set
+//   - Phase 2 (smi): existing nvidia-smi collection (always runs)
+//
+// When hardwareDetector is nil, Phase 1 is skipped preserving pre-NFD behavior.
+// On Phase 1 failure, collector logs a warning and proceeds with Phase 2.
 func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
-	slog.Info("collecting GPU information via nvidia-smi")
-
-	// Check if nvidia-smi is available before attempting to run it
-	if _, err := exec.LookPath(nvidiaSMICommand); err != nil {
-		slog.Warn("nvidia-smi not found - no GPU data will be collected",
-			slog.String("hint", "install NVIDIA drivers to enable GPU collection"))
-		return noGPUMeasurement(), nil
-	}
+	slog.Info("collecting GPU information")
 
 	// Use parent context deadline if it's sooner than our default timeout
 	deadline, ok := ctx.Deadline()
@@ -58,54 +102,93 @@ func (s *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		}
 	}
 
-	// Add timeout to prevent runaway operations
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Check if context is canceled
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "GPU collection cancelled", err)
 	}
 
-	data, err := executeCommand(ctx, nvidiaSMICommand, "-q", "-x")
+	var subtypes []measurement.Subtype
+
+	// Phase 1: Hardware detection (NFD-based, no driver required)
+	if s.hardwareDetector != nil {
+		info, err := s.hardwareDetector.Detect(ctx)
+		if err != nil {
+			slog.Warn("hardware detection failed, proceeding with nvidia-smi only",
+				slog.String("error", err.Error()))
+		} else if info != nil {
+			subtypes = append(subtypes, hardwareSubtype(info))
+		}
+	}
+
+	// Phase 2: nvidia-smi collection (existing behavior)
+	subtypes = append(subtypes, s.collectSMI(ctx))
+
+	return &measurement.Measurement{
+		Type:     measurement.TypeGPU,
+		Subtypes: subtypes,
+	}, nil
+}
+
+// hardwareSubtype converts HardwareInfo into a measurement subtype.
+func hardwareSubtype(info *HardwareInfo) measurement.Subtype {
+	return measurement.Subtype{
+		Name: subtypeHardware,
+		Data: map[string]measurement.Reading{
+			measurement.KeyGPUPresent:         measurement.Bool(info.GPUPresent),
+			measurement.KeyGPUCount:           measurement.Int(info.GPUCount),
+			measurement.KeyGPUDriverLoaded:    measurement.Bool(info.DriverLoaded),
+			measurement.KeyGPUDetectionSource: measurement.Str(info.DetectionSource),
+		},
+	}
+}
+
+// noGPUSMISubtype returns a zero-GPU "smi" subtype for graceful degradation
+// when nvidia-smi is unavailable or fails.
+func noGPUSMISubtype() measurement.Subtype {
+	return measurement.Subtype{
+		Name: subtypeSMI,
+		Data: map[string]measurement.Reading{
+			measurement.KeyGPUCount: measurement.Int(0),
+		},
+	}
+}
+
+// collectSMI runs nvidia-smi and returns the "smi" subtype measurement data.
+// Returns a zero-GPU subtype if nvidia-smi is not available or fails.
+func (s *Collector) collectSMI(ctx context.Context) measurement.Subtype {
+	// When a custom runner is set (tests), use it directly without LookPath check
+	if s.runner == nil {
+		if _, err := exec.LookPath(nvidiaSMICommand); err != nil {
+			slog.Warn("nvidia-smi not found - no GPU data will be collected",
+				slog.String("hint", "install NVIDIA drivers to enable GPU collection"))
+			return noGPUSMISubtype()
+		}
+	}
+
+	run := executeCommand
+	if s.runner != nil {
+		run = s.runner
+	}
+
+	data, err := run(ctx, nvidiaSMICommand, "-q", "-x")
 	if err != nil {
 		slog.Warn("nvidia-smi execution failed - no GPU data will be collected",
 			slog.String("error", err.Error()))
-		return noGPUMeasurement(), nil
+		return noGPUSMISubtype()
 	}
+
 	smiReadings, err := getSMIReadings(data)
 	if err != nil {
 		slog.Warn("nvidia-smi output parsing failed - no GPU data will be collected",
 			slog.String("error", err.Error()))
-		return noGPUMeasurement(), nil
+		return noGPUSMISubtype()
 	}
 
-	res := &measurement.Measurement{
-		Type: measurement.TypeGPU,
-		Subtypes: []measurement.Subtype{
-			{
-				Name: "smi",
-				Data: smiReadings, // no need for filtering here since we control the fields in getSMIReadings
-			},
-		},
-	}
-
-	return res, nil
-}
-
-// noGPUMeasurement returns a measurement indicating no GPU is available.
-// This is used for graceful degradation when nvidia-smi is not installed.
-func noGPUMeasurement() *measurement.Measurement {
-	return &measurement.Measurement{
-		Type: measurement.TypeGPU,
-		Subtypes: []measurement.Subtype{
-			{
-				Name: "smi",
-				Data: map[string]measurement.Reading{
-					measurement.KeyGPUCount: measurement.Int(0),
-				},
-			},
-		},
+	return measurement.Subtype{
+		Name: subtypeSMI,
+		Data: smiReadings,
 	}
 }
 

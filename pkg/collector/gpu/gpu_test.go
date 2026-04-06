@@ -19,12 +19,31 @@ import (
 	"encoding/xml"
 	"errors"
 	"os"
-	"os/exec"
 	"testing"
 	"time"
 
+	pkgerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
+
+// mockCommandRunner returns a commandRunner that returns fixed output.
+func mockCommandRunner(output []byte, err error) commandRunner {
+	return func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		return output, err
+	}
+}
+
+// testDriverVersion is the expected driver version in test fixtures.
+const testDriverVersion = "570.86.15"
+
+// zeroGPUXML is minimal valid nvidia-smi XML with 0 GPUs for testing.
+var zeroGPUXML = []byte(`<?xml version="1.0" ?>
+<nvidia_smi_log>
+	<timestamp>Mon Apr 7 12:00:00 2026</timestamp>
+	<driver_version>570.86.15</driver_version>
+	<cuda_version>12.8</cuda_version>
+	<attached_gpus>0</attached_gpus>
+</nvidia_smi_log>`)
 
 func TestParseNvidiaSMILog(t *testing.T) {
 	data, err := os.ReadFile("gpu.xml")
@@ -67,48 +86,11 @@ func TestParseNvidiaSMILog(t *testing.T) {
 	}
 }
 
-func TestNoGPUMeasurement(t *testing.T) {
-	m := noGPUMeasurement()
-
-	if m == nil {
-		t.Fatal("expected non-nil measurement")
-		return
-	}
-
-	if m.Type != measurement.TypeGPU {
-		t.Errorf("expected type %q, got %q", measurement.TypeGPU, m.Type)
-	}
-
-	if len(m.Subtypes) != 1 {
-		t.Fatalf("expected 1 subtype, got %d", len(m.Subtypes))
-	}
-
-	if m.Subtypes[0].Name != "smi" {
-		t.Errorf("expected subtype name %q, got %q", "smi", m.Subtypes[0].Name)
-	}
-
-	gpuCount, ok := m.Subtypes[0].Data[measurement.KeyGPUCount]
-	if !ok {
-		t.Fatal("expected gpu-count key in data")
-	}
-
-	gpuCountVal, ok := gpuCount.Any().(int)
-	if !ok {
-		t.Fatalf("expected gpu-count to be int, got %T", gpuCount.Any())
-	}
-
-	if gpuCountVal != 0 {
-		t.Errorf("expected gpu-count=0, got %d", gpuCountVal)
-	}
-}
-
 func TestCollector_GracefulDegradation_WhenNvidiaSmiMissing(t *testing.T) {
-	// Skip if nvidia-smi is actually available (we can't test graceful degradation)
-	if _, err := exec.LookPath(nvidiaSMICommand); err == nil {
-		t.Skip("nvidia-smi is available, skipping graceful degradation test")
-	}
-
-	collector := &Collector{}
+	// Inject a runner that simulates nvidia-smi failure
+	collector := NewCollector(
+		WithCommandRunner(mockCommandRunner(nil, pkgerrors.New(pkgerrors.ErrCodeInternal, "nvidia-smi not found"))),
+	)
 	ctx := context.Background()
 
 	m, err := collector.Collect(ctx)
@@ -128,9 +110,13 @@ func TestCollector_GracefulDegradation_WhenNvidiaSmiMissing(t *testing.T) {
 		t.Errorf("expected type %q, got %q", measurement.TypeGPU, m.Type)
 	}
 
-	// Should indicate 0 GPUs
-	if len(m.Subtypes) < 1 {
-		t.Fatal("expected at least 1 subtype")
+	// With nil HardwareDetector, should have only "smi" subtype
+	if len(m.Subtypes) != 1 {
+		t.Fatalf("expected 1 subtype (smi only, no hardware detector), got %d", len(m.Subtypes))
+	}
+
+	if m.Subtypes[0].Name != subtypeSMI {
+		t.Errorf("expected subtype name %q, got %q", subtypeSMI, m.Subtypes[0].Name)
 	}
 
 	gpuCount, ok := m.Subtypes[0].Data[measurement.KeyGPUCount]
@@ -181,8 +167,8 @@ func TestGetSMIReadings(t *testing.T) {
 	if !ok {
 		t.Fatal("missing driver-version key")
 	}
-	if driverVersion.Any().(string) != "570.86.15" {
-		t.Errorf("expected driver version 570.86.15, got %v", driverVersion.Any())
+	if driverVersion.Any().(string) != testDriverVersion {
+		t.Errorf("expected driver version %s, got %v", testDriverVersion, driverVersion.Any())
 	}
 
 	// Validate GPU count
@@ -262,8 +248,8 @@ func TestParseSMIDevice(t *testing.T) {
 		t.Fatalf("parseSMIDevice failed: %v", err)
 	}
 
-	if device.DriverVersion != "570.86.15" {
-		t.Errorf("expected driver version 570.86.15, got %s", device.DriverVersion)
+	if device.DriverVersion != testDriverVersion {
+		t.Errorf("expected driver version %s, got %s", testDriverVersion, device.DriverVersion)
 	}
 
 	if device.CudaVersion != "12.8" {
@@ -354,12 +340,10 @@ func TestParseSMIDevice_MinimalValid(t *testing.T) {
 }
 
 func TestCollector_ContextTimeout(t *testing.T) {
-	// Skip if nvidia-smi is available (we don't want to actually run it)
-	if _, err := exec.LookPath(nvidiaSMICommand); err == nil {
-		t.Skip("nvidia-smi is available, skipping timeout test")
-	}
-
-	collector := &Collector{}
+	// Inject a runner so we don't depend on nvidia-smi being absent
+	collector := NewCollector(
+		WithCommandRunner(mockCommandRunner(zeroGPUXML, nil)),
+	)
 
 	// Create a context with very short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
@@ -408,5 +392,145 @@ func TestNVSMIDevice_XMLUnmarshal(t *testing.T) {
 		if gpu.FbMemoryUsage.Total == "" {
 			t.Error("expected FbMemoryUsage.Total to be set")
 		}
+	}
+}
+
+func TestHardwareSubtype(t *testing.T) {
+	info := &HardwareInfo{
+		GPUPresent:      true,
+		GPUCount:        4,
+		DriverLoaded:    true,
+		DetectionSource: "nfd",
+	}
+
+	st := hardwareSubtype(info)
+	if st.Name != subtypeHardware {
+		t.Errorf("expected name %q, got %q", subtypeHardware, st.Name)
+	}
+	if len(st.Data) != 4 {
+		t.Errorf("expected 4 data entries, got %d", len(st.Data))
+	}
+}
+
+func TestCollector_TwoPhase_Day0_GPUPresentNoDriver(t *testing.T) {
+	collector := NewCollector(
+		WithHardwareDetector(&mockHardwareDetector{
+			info: &HardwareInfo{
+				GPUPresent:      true,
+				GPUCount:        2,
+				DriverLoaded:    false,
+				DetectionSource: "nfd",
+			},
+		}),
+		WithCommandRunner(mockCommandRunner(zeroGPUXML, nil)),
+	)
+
+	m, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have 2 subtypes: "hardware" + "smi"
+	if len(m.Subtypes) != 2 {
+		t.Fatalf("expected 2 subtypes, got %d", len(m.Subtypes))
+	}
+
+	// Phase 1: hardware subtype
+	hw := m.Subtypes[0]
+	if hw.Name != subtypeHardware {
+		t.Errorf("expected first subtype %q, got %q", subtypeHardware, hw.Name)
+	}
+	if gpuPresent, ok := hw.Data[measurement.KeyGPUPresent]; !ok || gpuPresent.Any().(bool) != true {
+		t.Error("expected gpu-present=true in hardware subtype")
+	}
+	if gpuCount, ok := hw.Data[measurement.KeyGPUCount]; !ok || gpuCount.Any().(int) != 2 {
+		t.Error("expected gpu-count=2 in hardware subtype")
+	}
+	if driverLoaded, ok := hw.Data[measurement.KeyGPUDriverLoaded]; !ok || driverLoaded.Any().(bool) != false {
+		t.Error("expected driver-loaded=false in hardware subtype")
+	}
+	if detSrc, ok := hw.Data[measurement.KeyGPUDetectionSource]; !ok || detSrc.Any().(string) != "nfd" {
+		t.Error("expected detection-source=nfd in hardware subtype")
+	}
+
+	// Phase 2: smi subtype (mock runner returns zero-GPU XML with driver info)
+	smi := m.Subtypes[1]
+	if smi.Name != subtypeSMI {
+		t.Errorf("expected second subtype %q, got %q", subtypeSMI, smi.Name)
+	}
+	if gpuCount, ok := smi.Data[measurement.KeyGPUCount]; !ok || gpuCount.Any().(int) != 0 {
+		t.Error("expected gpu-count=0 in smi subtype")
+	}
+	if driverVer, ok := smi.Data[measurement.KeyGPUDriver]; !ok || driverVer.Any().(string) != testDriverVersion {
+		t.Errorf("expected driver-version=%s in smi subtype", testDriverVersion)
+	}
+}
+
+func TestCollector_TwoPhase_NoGPUHardware(t *testing.T) {
+	collector := NewCollector(
+		WithHardwareDetector(&mockHardwareDetector{
+			info: &HardwareInfo{
+				GPUPresent:      false,
+				GPUCount:        0,
+				DriverLoaded:    false,
+				DetectionSource: "nfd",
+			},
+		}),
+		WithCommandRunner(mockCommandRunner(zeroGPUXML, nil)),
+	)
+
+	m, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(m.Subtypes) != 2 {
+		t.Fatalf("expected 2 subtypes, got %d", len(m.Subtypes))
+	}
+
+	hw := m.Subtypes[0]
+	if gpuPresent, ok := hw.Data[measurement.KeyGPUPresent]; !ok || gpuPresent.Any().(bool) != false {
+		t.Error("expected gpu-present=false in hardware subtype")
+	}
+}
+
+func TestCollector_TwoPhase_HardwareDetectorFails(t *testing.T) {
+	collector := NewCollector(
+		WithHardwareDetector(&mockHardwareDetector{
+			err: pkgerrors.New(pkgerrors.ErrCodeInternal, "sysfs not available"),
+		}),
+		WithCommandRunner(mockCommandRunner(zeroGPUXML, nil)),
+	)
+
+	m, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have only "smi" subtype (hardware detection failed gracefully)
+	if len(m.Subtypes) != 1 {
+		t.Fatalf("expected 1 subtype (smi only), got %d", len(m.Subtypes))
+	}
+	if m.Subtypes[0].Name != subtypeSMI {
+		t.Errorf("expected subtype %q, got %q", subtypeSMI, m.Subtypes[0].Name)
+	}
+}
+
+func TestCollector_TwoPhase_NilHardwareDetector(t *testing.T) {
+	collector := NewCollector(
+		WithCommandRunner(mockCommandRunner(zeroGPUXML, nil)),
+	)
+
+	m, err := collector.Collect(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have only "smi" subtype (no hardware detector configured)
+	if len(m.Subtypes) != 1 {
+		t.Fatalf("expected 1 subtype (smi only), got %d", len(m.Subtypes))
+	}
+	if m.Subtypes[0].Name != subtypeSMI {
+		t.Errorf("expected subtype %q, got %q", subtypeSMI, m.Subtypes[0].Name)
 	}
 }
