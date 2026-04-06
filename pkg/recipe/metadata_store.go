@@ -28,6 +28,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const baseRecipeName = "base"
+
 var (
 	metadataStoreOnce   sync.Once
 	cachedMetadataStore *MetadataStore
@@ -164,7 +166,7 @@ func (s *MetadataStore) GetValuesFile(filename string) ([]byte, error) {
 // GetRecipeByName returns a recipe metadata by name.
 // Returns the base recipe if name is "base", otherwise looks up in overlays.
 func (s *MetadataStore) GetRecipeByName(name string) (*RecipeMetadata, bool) {
-	if name == "" || name == "base" {
+	if name == "" || name == baseRecipeName {
 		return s.Base, s.Base != nil
 	}
 	overlay, exists := s.Overlays[name]
@@ -180,7 +182,7 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 	var chain []*RecipeMetadata
 
 	currentName := recipeName
-	for currentName != "" && currentName != "base" {
+	for currentName != "" && currentName != baseRecipeName {
 		// Check for cycle
 		if visited[currentName] {
 			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
@@ -214,8 +216,18 @@ func (s *MetadataStore) resolveInheritanceChain(recipeName string) ([]*RecipeMet
 	return chain, nil
 }
 
-// FindMatchingOverlays finds all overlays that match the given criteria.
-// Returns overlays sorted by specificity (least specific first).
+// FindMatchingOverlays finds all overlays that match the given criteria and
+// returns maximal leaf candidates sorted by specificity (least specific first).
+//
+// Maximal leaf selection: after collecting all matching overlays, any overlay
+// that is an ancestor (via spec.base chain) of another matching overlay is
+// filtered out. Only the most-specific leaves survive as candidates. Their
+// full inheritance chains are still resolved during merging, so ancestor
+// content is not lost — it is just not applied as a separate independent
+// candidate.
+//
+// This is used by both BuildRecipeResult and BuildRecipeResultWithEvaluator
+// to ensure consistent candidate selection regardless of call site.
 func (s *MetadataStore) FindMatchingOverlays(criteria *Criteria) []*RecipeMetadata {
 	matches := make([]*RecipeMetadata, 0, len(s.Overlays))
 
@@ -228,12 +240,54 @@ func (s *MetadataStore) FindMatchingOverlays(criteria *Criteria) []*RecipeMetada
 		}
 	}
 
+	// Filter to maximal leaf candidates
+	matches = s.filterToMaximalLeaves(matches)
+
 	// Sort by specificity (least specific first, so more specific overlays are applied later)
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].Spec.Criteria.Specificity() < matches[j].Spec.Criteria.Specificity()
 	})
 
 	return matches
+}
+
+// filterToMaximalLeaves removes any matching overlay that is an ancestor
+// (via spec.base chain) of another matching overlay. This ensures only the
+// most-specific leaves are returned as candidates.
+func (s *MetadataStore) filterToMaximalLeaves(matches []*RecipeMetadata) []*RecipeMetadata {
+	// Build set of all ancestors of matching overlays
+	ancestors := make(map[string]bool)
+	for _, overlay := range matches {
+		visited := make(map[string]bool)
+		base := overlay.Spec.Base
+		for base != "" && base != baseRecipeName {
+			if visited[base] {
+				break // cycle detected — stop walking
+			}
+			visited[base] = true
+			ancestors[base] = true
+			if recipe, exists := s.GetRecipeByName(base); exists {
+				base = recipe.Spec.Base
+			} else {
+				break
+			}
+		}
+	}
+
+	// Keep only overlays that are not ancestors of another match
+	leaves := make([]*RecipeMetadata, 0, len(matches))
+	for _, overlay := range matches {
+		if !ancestors[overlay.Metadata.Name] {
+			leaves = append(leaves, overlay)
+		}
+	}
+
+	if filtered := len(matches) - len(leaves); filtered > 0 {
+		slog.Debug("filtered ancestor overlays from candidates",
+			"removed", filtered, "remaining", len(leaves))
+	}
+
+	return leaves
 }
 
 // initBaseMergedSpec creates a copy of the base spec for overlay merging.
@@ -245,7 +299,7 @@ func (s *MetadataStore) initBaseMergedSpec() (RecipeMetadataSpec, []string) {
 	}
 	copy(mergedSpec.Constraints, s.Base.Spec.Constraints)
 	copy(mergedSpec.ComponentRefs, s.Base.Spec.ComponentRefs)
-	return mergedSpec, []string{"base"}
+	return mergedSpec, []string{baseRecipeName}
 }
 
 // mergeOverlayChains resolves inheritance chains and merges overlays into the spec.

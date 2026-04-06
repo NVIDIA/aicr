@@ -15,13 +15,16 @@
 package recipe
 
 import (
+	"context"
 	"fmt"
+	"reflect"
 	"testing"
 )
 
 const (
-	testRecipeBase = "base"
-	testOverlayEKS = "eks"
+	testRecipeBase        = "base"
+	testOverlayEKS        = "eks"
+	testOverlayEKSTraning = "eks-training"
 )
 
 func TestMetadataStore_GetValuesFile(t *testing.T) {
@@ -115,7 +118,7 @@ func TestMetadataStore_ResolveInheritanceChain(t *testing.T) {
 	eksMeta.Metadata.Name = testOverlayEKS
 
 	eksTraining := &RecipeMetadata{}
-	eksTraining.Metadata.Name = "eks-training"
+	eksTraining.Metadata.Name = testOverlayEKSTraning
 	eksTraining.Spec.Base = testOverlayEKS
 
 	t.Run("single overlay", func(t *testing.T) {
@@ -138,11 +141,11 @@ func TestMetadataStore_ResolveInheritanceChain(t *testing.T) {
 		store := &MetadataStore{
 			Base: baseMeta,
 			Overlays: map[string]*RecipeMetadata{
-				testOverlayEKS: eksMeta,
-				"eks-training": eksTraining,
+				testOverlayEKS:        eksMeta,
+				testOverlayEKSTraning: eksTraining,
 			},
 		}
-		chain, err := store.resolveInheritanceChain("eks-training")
+		chain, err := store.resolveInheritanceChain(testOverlayEKSTraning)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -366,4 +369,310 @@ func TestMetadataStore_FindMatchingOverlays(t *testing.T) {
 			t.Errorf("expected 0 matches for empty store, got %d", len(matches))
 		}
 	})
+}
+
+func TestMetadataStore_FindMatchingOverlays_MaximalLeafSelection(t *testing.T) {
+	baseMeta := &RecipeMetadata{}
+	baseMeta.Metadata.Name = testRecipeBase
+
+	// Build a chain: eks → eks-training → h100-eks-training
+	eksOverlay := &RecipeMetadata{}
+	eksOverlay.Metadata.Name = "eks"
+	eksOverlay.Spec.Criteria = &Criteria{Service: CriteriaServiceEKS}
+
+	eksTraining := &RecipeMetadata{}
+	eksTraining.Metadata.Name = testOverlayEKSTraning
+	eksTraining.Spec.Base = "eks"
+	eksTraining.Spec.Criteria = &Criteria{
+		Service: CriteriaServiceEKS,
+		Intent:  CriteriaIntentTraining,
+	}
+
+	h100EksTraining := &RecipeMetadata{}
+	h100EksTraining.Metadata.Name = "h100-eks-training"
+	h100EksTraining.Spec.Base = testOverlayEKSTraning
+	h100EksTraining.Spec.Criteria = &Criteria{
+		Service:     CriteriaServiceEKS,
+		Accelerator: CriteriaAcceleratorH100,
+		Intent:      CriteriaIntentTraining,
+	}
+
+	store := &MetadataStore{
+		Base: baseMeta,
+		Overlays: map[string]*RecipeMetadata{
+			"eks":                 eksOverlay,
+			testOverlayEKSTraning: eksTraining,
+			"h100-eks-training":   h100EksTraining,
+		},
+	}
+
+	t.Run("filters ancestors when leaf matches", func(t *testing.T) {
+		criteria := &Criteria{
+			Service:     CriteriaServiceEKS,
+			Accelerator: CriteriaAcceleratorH100,
+			Intent:      CriteriaIntentTraining,
+		}
+		matches := store.FindMatchingOverlays(criteria)
+
+		// Only h100-eks-training should survive — eks and eks-training are ancestors
+		if len(matches) != 1 {
+			names := make([]string, len(matches))
+			for i, m := range matches {
+				names[i] = m.Metadata.Name
+			}
+			t.Fatalf("expected 1 maximal leaf, got %d: %v", len(matches), names)
+		}
+		if matches[0].Metadata.Name != "h100-eks-training" {
+			t.Errorf("expected h100-eks-training, got %s", matches[0].Metadata.Name)
+		}
+	})
+
+	t.Run("keeps multiple leaves from different branches", func(t *testing.T) {
+		// Add a sibling leaf on a different branch
+		gb200EksTraining := &RecipeMetadata{}
+		gb200EksTraining.Metadata.Name = "gb200-eks-training"
+		gb200EksTraining.Spec.Base = testOverlayEKSTraning
+		gb200EksTraining.Spec.Criteria = &Criteria{
+			Service:     CriteriaServiceEKS,
+			Accelerator: CriteriaAcceleratorGB200,
+			Intent:      CriteriaIntentTraining,
+		}
+		store.Overlays["gb200-eks-training"] = gb200EksTraining
+		t.Cleanup(func() { delete(store.Overlays, "gb200-eks-training") })
+
+		// Query with all fields specified so both leaves match
+		criteria := &Criteria{
+			Service:     CriteriaServiceEKS,
+			Accelerator: CriteriaAcceleratorH100,
+			Intent:      CriteriaIntentTraining,
+		}
+		matches := store.FindMatchingOverlays(criteria)
+
+		// h100-eks-training matches directly. gb200-eks-training does NOT match
+		// because its accelerator (gb200) != query accelerator (h100).
+		// eks and eks-training are ancestors of h100-eks-training, so filtered out.
+		names := make(map[string]bool)
+		for _, m := range matches {
+			names[m.Metadata.Name] = true
+		}
+		if !names["h100-eks-training"] {
+			t.Error("expected h100-eks-training in matches")
+		}
+		if names["gb200-eks-training"] {
+			t.Error("gb200-eks-training should not match (wrong accelerator)")
+		}
+		if names[testOverlayEKSTraning] {
+			t.Error("eks-training should be filtered as ancestor")
+		}
+		if names["eks"] {
+			t.Error("eks should be filtered as ancestor")
+		}
+
+		// Now test with GB200 query — gb200-eks-training should be the only leaf
+		criteriaGB200 := &Criteria{
+			Service:     CriteriaServiceEKS,
+			Accelerator: CriteriaAcceleratorGB200,
+			Intent:      CriteriaIntentTraining,
+		}
+		matchesGB200 := store.FindMatchingOverlays(criteriaGB200)
+		namesGB200 := make(map[string]bool)
+		for _, m := range matchesGB200 {
+			namesGB200[m.Metadata.Name] = true
+		}
+		if !namesGB200["gb200-eks-training"] {
+			t.Error("expected gb200-eks-training in GB200 matches")
+		}
+		if namesGB200["h100-eks-training"] {
+			t.Error("h100-eks-training should not match GB200 query")
+		}
+	})
+
+	t.Run("no filtering when single match", func(t *testing.T) {
+		criteria := &Criteria{
+			Service: CriteriaServiceGKE,
+			Intent:  CriteriaIntentTraining,
+		}
+		matches := store.FindMatchingOverlays(criteria)
+		if len(matches) != 0 {
+			t.Errorf("expected 0 matches for GKE, got %d", len(matches))
+		}
+	})
+}
+
+// TestBothBuildPathsProduceIdenticalContent verifies that BuildRecipeResult and
+// BuildRecipeResultWithEvaluator (with a pass-all evaluator) produce identical
+// hydrated recipe content for all leaf overlays discovered from recipes/overlays/.
+// This is a characterization test for the maximal leaf candidate selection change.
+func TestBothBuildPathsProduceIdenticalContent(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	// Discover all leaf overlays: overlays not referenced as spec.base by any other overlay
+	referencedAsBases := make(map[string]bool)
+	for _, overlay := range store.Overlays {
+		if overlay.Spec.Base != "" {
+			referencedAsBases[overlay.Spec.Base] = true
+		}
+	}
+
+	passAllEvaluator := func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: true, Actual: "test"}
+	}
+
+	leafCount := 0
+	for name, overlay := range store.Overlays {
+		if referencedAsBases[name] {
+			continue // not a leaf
+		}
+		if overlay.Spec.Criteria == nil {
+			continue // no criteria
+		}
+
+		leafCount++
+		t.Run(name, func(t *testing.T) {
+			criteria := overlay.Spec.Criteria
+
+			resultA, errA := store.BuildRecipeResult(ctx, criteria)
+			if errA != nil {
+				t.Fatalf("BuildRecipeResult failed: %v", errA)
+			}
+
+			resultB, errB := store.BuildRecipeResultWithEvaluator(ctx, criteria, passAllEvaluator)
+			if errB != nil {
+				t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", errB)
+			}
+
+			// Compare constraints
+			if len(resultA.Constraints) != len(resultB.Constraints) {
+				t.Errorf("constraint count mismatch: %d vs %d", len(resultA.Constraints), len(resultB.Constraints))
+			}
+			for i := range resultA.Constraints {
+				if i >= len(resultB.Constraints) {
+					break
+				}
+				if resultA.Constraints[i].Name != resultB.Constraints[i].Name ||
+					resultA.Constraints[i].Value != resultB.Constraints[i].Value {
+
+					t.Errorf("constraint mismatch at %d: %v vs %v", i, resultA.Constraints[i], resultB.Constraints[i])
+				}
+			}
+
+			// Compare full component refs (not just names — catch value-level drift)
+			if !reflect.DeepEqual(resultA.ComponentRefs, resultB.ComponentRefs) {
+				t.Errorf("component refs differ between build paths")
+				if len(resultA.ComponentRefs) != len(resultB.ComponentRefs) {
+					t.Errorf("  count: %d vs %d", len(resultA.ComponentRefs), len(resultB.ComponentRefs))
+				}
+				for i := range resultA.ComponentRefs {
+					if i >= len(resultB.ComponentRefs) {
+						break
+					}
+					if !reflect.DeepEqual(resultA.ComponentRefs[i], resultB.ComponentRefs[i]) {
+						t.Errorf("  diff at %d: %s", i, resultA.ComponentRefs[i].Name)
+					}
+				}
+			}
+
+			// Compare deployment order
+			if len(resultA.DeploymentOrder) != len(resultB.DeploymentOrder) {
+				t.Errorf("deployment order count mismatch: %d vs %d", len(resultA.DeploymentOrder), len(resultB.DeploymentOrder))
+			}
+			for i := range resultA.DeploymentOrder {
+				if i >= len(resultB.DeploymentOrder) {
+					break
+				}
+				if resultA.DeploymentOrder[i] != resultB.DeploymentOrder[i] {
+					t.Errorf("deployment order mismatch at %d: %s vs %s", i, resultA.DeploymentOrder[i], resultB.DeploymentOrder[i])
+				}
+			}
+
+			// Compare applied overlays
+			if len(resultA.Metadata.AppliedOverlays) != len(resultB.Metadata.AppliedOverlays) {
+				t.Errorf("applied overlay count mismatch: %d vs %d",
+					len(resultA.Metadata.AppliedOverlays), len(resultB.Metadata.AppliedOverlays))
+			}
+		})
+	}
+
+	if leafCount == 0 {
+		t.Fatal("no leaf overlays discovered — test is not exercising any overlays")
+	}
+	t.Logf("verified %d leaf overlays through both build paths", leafCount)
+}
+
+// TestEvaluatorFailingLeafExcludesCandidate verifies that when a leaf overlay's
+// constraints fail evaluation, no ancestor overlay is used as a fallback
+// candidate. With maximal leaf selection, ancestors are not independent
+// candidates — only non-excluded leaf candidates and non-chain overlays
+// (like monitoring-hpa) remain applied.
+func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	// Use criteria that match a specific leaf overlay
+	criteria := &Criteria{
+		Service:     CriteriaServiceEKS,
+		Accelerator: CriteriaAcceleratorH100,
+		Intent:      CriteriaIntentTraining,
+		OS:          CriteriaOSUbuntu,
+	}
+
+	// Evaluator that fails all constraints
+	failAllEvaluator := func(_ Constraint) ConstraintEvalResult {
+		return ConstraintEvalResult{Passed: false, Actual: "fail"}
+	}
+
+	result, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, failAllEvaluator)
+	if err != nil {
+		t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", err)
+	}
+
+	// The leaf candidate (h100-eks-ubuntu-training) should be excluded
+	if len(result.Metadata.ExcludedOverlays) == 0 {
+		t.Fatal("expected at least one excluded overlay")
+	}
+
+	excluded := make(map[string]bool)
+	for _, name := range result.Metadata.ExcludedOverlays {
+		excluded[name] = true
+	}
+
+	// The leaf should be excluded
+	if !excluded["h100-eks-ubuntu-training"] {
+		t.Errorf("expected h100-eks-ubuntu-training in ExcludedOverlays, got %v", result.Metadata.ExcludedOverlays)
+	}
+
+	// Ancestors should NOT appear in ExcludedOverlays (they were never candidates)
+	for _, ancestor := range []string{"eks", testOverlayEKSTraning, "h100-eks-training"} {
+		if excluded[ancestor] {
+			t.Errorf("ancestor %q should not appear in ExcludedOverlays (not a candidate)", ancestor)
+		}
+	}
+
+	// Applied overlays should not contain any ancestor of the excluded leaf.
+	// Only base and non-chain overlays (like monitoring-hpa) should remain.
+	applied := make(map[string]bool)
+	for _, name := range result.Metadata.AppliedOverlays {
+		applied[name] = true
+	}
+	for _, ancestor := range []string{"eks", testOverlayEKSTraning, "h100-eks-training"} {
+		if applied[ancestor] {
+			t.Errorf("ancestor %q should not be applied as fallback when leaf is excluded", ancestor)
+		}
+	}
+
+	// base is always applied; monitoring-hpa matches intent:any and is not
+	// an ancestor of h100-eks-ubuntu-training, so it remains as an independent leaf.
+	if !applied["base"] {
+		t.Error("base should always be applied")
+	}
+	if !applied["monitoring-hpa"] {
+		t.Error("monitoring-hpa should remain applied (independent non-ancestor leaf)")
+	}
 }

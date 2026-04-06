@@ -50,7 +50,7 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "", criteriaAnyValue, "self-managed", "self", "vanilla":
 		return CriteriaServiceAny, nil
-	case "eks":
+	case string(CriteriaServiceEKS):
 		return CriteriaServiceEKS, nil
 	case "gke":
 		return CriteriaServiceGKE, nil
