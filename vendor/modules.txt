@@ -471,10 +471,14 @@ github.com/spf13/cobra
 # github.com/spf13/pflag v1.0.10
 ## explicit; go 1.12
 github.com/spf13/pflag
+# github.com/stretchr/objx v0.5.2
+## explicit; go 1.20
+github.com/stretchr/objx
 # github.com/stretchr/testify v1.11.1
 ## explicit; go 1.17
 github.com/stretchr/testify/assert
 github.com/stretchr/testify/assert/yaml
+github.com/stretchr/testify/mock
 # github.com/theupdateframework/go-tuf v0.7.0
 ## explicit; go 1.20
 github.com/theupdateframework/go-tuf/data
@@ -1265,6 +1269,10 @@ k8s.io/kube-openapi/pkg/validation/errors
 k8s.io/kube-openapi/pkg/validation/spec
 k8s.io/kube-openapi/pkg/validation/strfmt
 k8s.io/kube-openapi/pkg/validation/strfmt/bson
+# k8s.io/kubernetes v1.34.1
+## explicit; go 1.24.0
+k8s.io/kubernetes/pkg/apis/core
+k8s.io/kubernetes/pkg/apis/core/helper
 # k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
 ## explicit; go 1.23
 k8s.io/utils/buffer
@@ -1407,6 +1415,16 @@ sigs.k8s.io/kustomize/kyaml/yaml/internal/k8sgen/pkg/util/validation/field
 sigs.k8s.io/kustomize/kyaml/yaml/merge2
 sigs.k8s.io/kustomize/kyaml/yaml/schema
 sigs.k8s.io/kustomize/kyaml/yaml/walk
+# sigs.k8s.io/node-feature-discovery v0.18.3
+## explicit; go 1.25.0
+sigs.k8s.io/node-feature-discovery/pkg/utils
+sigs.k8s.io/node-feature-discovery/pkg/utils/hostpath
+sigs.k8s.io/node-feature-discovery/source
+sigs.k8s.io/node-feature-discovery/source/kernel
+sigs.k8s.io/node-feature-discovery/source/pci
+# sigs.k8s.io/node-feature-discovery/api/nfd v0.18.3
+## explicit; go 1.23.0
+sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1
 # sigs.k8s.io/randfill v1.0.0
 ## explicit; go 1.18
 sigs.k8s.io/randfill
