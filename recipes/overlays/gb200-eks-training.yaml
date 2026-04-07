@@ -60,3 +60,17 @@ spec:
         intent: multiNodeTraining
       dependencyRefs:
         - skyhook-operator
+
+  # Validation checks for GB200 on EKS training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling

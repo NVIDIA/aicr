@@ -80,7 +80,7 @@ func NewDefaultFactory(opts ...Option) *DefaultFactory {
 
 // CreateGPUCollector creates a GPU collector that gathers GPU hardware and driver information.
 func (f *DefaultFactory) CreateGPUCollector() Collector {
-	return &gpu.Collector{}
+	return gpu.NewCollector()
 }
 
 // CreateSystemDCollector creates a systemd collector that monitors the configured services.

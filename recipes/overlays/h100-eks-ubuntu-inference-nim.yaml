@@ -48,6 +48,10 @@ spec:
       dependencyRefs:
         - cert-manager
         - gpu-operator
+      expectedResources:
+        - kind: Deployment
+          namespace: nvidia-nim
+          name: k8s-nim-operator
 
   validation:
     deployment:

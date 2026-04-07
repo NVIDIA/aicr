@@ -239,19 +239,12 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 		}
 	}
 
-	// Load health check assert file content if not already set
-	if ref.HealthCheckAsserts == "" && config.HealthCheck.AssertFile != "" {
-		provider := GetDataProvider()
-		if provider != nil {
-			data, err := provider.ReadFile(config.HealthCheck.AssertFile)
-			if err != nil {
-				slog.Debug("failed to read health check assert file",
-					"component", ref.Name, "file", config.HealthCheck.AssertFile, "error", err)
-			} else {
-				ref.HealthCheckAsserts = string(data)
-			}
-		}
-	}
+	// NOTE: healthCheck.assertFile content is intentionally NOT loaded here.
+	// The deployment validator image (distroless) does not include the chainsaw
+	// binary required to execute Chainsaw Test format assertions. Loading the
+	// content would activate chainsaw-based checks in expected-resources, causing
+	// runtime failures. Health check files are used by the conformance validator,
+	// which has its own chainsaw execution path.
 }
 
 // RecipeMetadataSpec contains the specification for a recipe.
