@@ -1,0 +1,39 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA DRA Driver GPU Helm values
+# OKE configuration overrides
+#
+# OKE pre-installs NVIDIA drivers on GPU bare-metal shapes, so the driver
+# root is `/` (host-installed) rather than `/run/nvidia/driver` (containerized).
+# Compute domains are enabled for multi-node training coordination.
+# Reference: https://github.com/oracle-quickstart/oci-hpc-oke/blob/grace-blackwell/manifests/dra/values.yaml
+
+# Override release name prefix to avoid aicr-stack- prefix in resource names
+fullnameOverride: nvidia-dra-driver-gpu
+
+# Host-installed driver (OKE pre-installs NVIDIA drivers)
+nvidiaDriverRoot: /
+
+gpuResourcesEnabledOverride: true
+resources:
+  gpus:
+    enabled: true
+  computeDomains:
+    enabled: true
+
+controller:
+  priorityClassName: ""
+kubeletPlugin:
+  priorityClassName: ""
