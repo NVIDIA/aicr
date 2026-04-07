@@ -259,6 +259,12 @@ type RecipeMetadataSpec struct {
 	// Only present in overlay files, not in base.
 	Criteria *Criteria `json:"criteria,omitempty" yaml:"criteria,omitempty"`
 
+	// Mixins is a list of mixin names to compose into this overlay.
+	// Mixins are loaded from recipes/mixins/ and carry only constraints
+	// and componentRefs. This field is loader metadata and is stripped
+	// from the materialized recipe result.
+	Mixins []string `json:"mixins,omitempty" yaml:"mixins,omitempty"`
+
 	// Constraints are deployment assumptions/requirements.
 	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 
@@ -268,6 +274,24 @@ type RecipeMetadataSpec struct {
 	// Validation defines multi-phase validation configuration.
 	// Presence of a phase implies it is enabled.
 	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+}
+
+// RecipeMixinKind is the kind value for mixin files.
+const RecipeMixinKind = "RecipeMixin"
+
+// RecipeMixin represents a composable fragment that carries only constraints
+// and componentRefs. Mixins live in recipes/mixins/ and are referenced by
+// overlay spec.mixins fields.
+type RecipeMixin struct {
+	Kind       string `json:"kind" yaml:"kind"`
+	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+	Metadata   struct {
+		Name string `json:"name" yaml:"name"`
+	} `json:"metadata" yaml:"metadata"`
+	Spec struct {
+		Constraints   []Constraint   `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+		ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+	} `json:"spec" yaml:"spec"`
 }
 
 // RecipeMetadataHeader contains the Kubernetes-style header fields.
@@ -419,6 +443,23 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 			}
 			if other.Validation.Conformance != nil {
 				s.Validation.Conformance = other.Validation.Conformance
+			}
+		}
+	}
+
+	// Accumulate mixins (deduplicated, preserving order).
+	// Both leaf and intermediate overlays can declare mixins. When an
+	// intermediate overlay (e.g., eks-inference) declares a mixin, it is
+	// accumulated into all descendants during inheritance chain merging.
+	if len(other.Mixins) > 0 {
+		seen := make(map[string]bool)
+		for _, m := range s.Mixins {
+			seen[m] = true
+		}
+		for _, m := range other.Mixins {
+			if !seen[m] {
+				s.Mixins = append(s.Mixins, m)
+				seen[m] = true
 			}
 		}
 	}

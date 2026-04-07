@@ -251,10 +251,15 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 │     ├─ + gb200-eks-training (GB200 overrides)          │
 │     └─ + gb200-eks-ubuntu-training (Ubuntu specifics)  │
 │                                                        │
-│  4. Strip context (if !context)                        │
+│  4. Apply mixins (if spec.mixins declared)             │
+│     ├─ Load mixin files from recipes/mixins/           │
+│     ├─ Append mixin constraints and componentRefs      │
+│     └─ If snapshot provided, evaluate mixin constraints│
+│                                                        │
+│  5. Strip context (if !context)                        │
 │     └─ Remove context maps from all subtypes           │
 │                                                        │
-│  5. Return recipe                                      │
+│  6. Return recipe                                      │
 │                                                        │
 └────────────────────────────────────────────────────────┘
 ```
@@ -812,7 +817,7 @@ X-RateLimit-Reset: 1735650000
 ### Embedded Data
 
 **Recipe Data:**
-- Location: `recipes/overlays/*.yaml` (including `base.yaml`)
+- Location: `recipes/overlays/*.yaml` (including `base.yaml`), `recipes/mixins/*.yaml`
 - Embedded at compile time via `//go:embed` directives
 - Loaded once per process, cached in memory
 - TTL: 5 minutes (in-memory cache)

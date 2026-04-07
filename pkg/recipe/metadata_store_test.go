@@ -15,16 +15,20 @@
 package recipe
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"reflect"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	testRecipeBase        = "base"
-	testOverlayEKS        = "eks"
-	testOverlayEKSTraning = "eks-training"
+	testRecipeBase         = "base"
+	testOverlayEKS         = "eks"
+	testK8sVersionConstant = "K8s.server.version"
+	testOverlayEKSTraning  = "eks-training"
 )
 
 func TestMetadataStore_GetValuesFile(t *testing.T) {
@@ -674,5 +678,150 @@ func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 	}
 	if !applied["monitoring-hpa"] {
 		t.Error("monitoring-hpa should remain applied (independent non-ancestor leaf)")
+	}
+}
+
+// TestMixinConstraintFailureExcludesCandidate verifies that when a mixin-contributed
+// constraint fails evaluation (e.g., os-ubuntu kernel constraint against a snapshot
+// with kernel < 6.8), the composed candidate is excluded and the result falls back
+// to base-only output. This tests the post-compose evaluation path in
+// evaluateMixinConstraints.
+func TestMixinConstraintFailureExcludesCandidate(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
+	// Query that resolves to a leaf using the os-ubuntu mixin
+	criteria := &Criteria{
+		Service:     CriteriaServiceEKS,
+		Accelerator: CriteriaAcceleratorH100,
+		Intent:      CriteriaIntentTraining,
+		OS:          CriteriaOSUbuntu,
+	}
+
+	// Evaluator that passes K8s constraint but fails OS/kernel constraints
+	// (simulates a snapshot where OS matches but kernel is too old)
+	selectiveEvaluator := func(c Constraint) ConstraintEvalResult {
+		if c.Name == testK8sVersionConstant {
+			return ConstraintEvalResult{Passed: true, Actual: "v1.35.0"}
+		}
+		// Fail OS-related constraints (these come from the os-ubuntu mixin)
+		if c.Name == "OS.sysctl./proc/sys/kernel/osrelease" {
+			return ConstraintEvalResult{Passed: false, Actual: "5.15.0"}
+		}
+		// Pass everything else
+		return ConstraintEvalResult{Passed: true, Actual: "ok"}
+	}
+
+	result, err := store.BuildRecipeResultWithEvaluator(ctx, criteria, selectiveEvaluator)
+	if err != nil {
+		t.Fatalf("BuildRecipeResultWithEvaluator failed: %v", err)
+	}
+
+	// The mixin constraint (kernel >= 6.8) should have failed post-compose,
+	// causing a fallback to base-only output
+	if len(result.Metadata.ExcludedOverlays) == 0 {
+		t.Fatal("expected excluded overlays from mixin constraint failure")
+	}
+
+	// Applied overlays should be base-only (plus monitoring-hpa which has no
+	// mixin constraints and passes evaluation independently)
+	applied := make(map[string]bool)
+	for _, name := range result.Metadata.AppliedOverlays {
+		applied[name] = true
+	}
+	if !applied[baseRecipeName] {
+		t.Error("base should always be applied")
+	}
+
+	// The EKS chain overlays should NOT be in applied (they were part of the
+	// composed candidate that failed post-compose evaluation)
+	for _, name := range []string{"h100-eks-ubuntu-training", "h100-eks-training", "eks-training", "eks"} {
+		if applied[name] {
+			t.Errorf("%q should not be applied after mixin constraint failure", name)
+		}
+	}
+
+	// Constraint warnings should include the failing mixin constraint
+	foundKernelWarning := false
+	for _, w := range result.Metadata.ConstraintWarnings {
+		if w.Constraint == "OS.sysctl./proc/sys/kernel/osrelease" {
+			foundKernelWarning = true
+		}
+	}
+	if !foundKernelWarning {
+		t.Error("expected constraint warning for OS.sysctl./proc/sys/kernel/osrelease from mixin")
+	}
+
+	t.Logf("excluded: %v", result.Metadata.ExcludedOverlays)
+	t.Logf("applied: %v", result.Metadata.AppliedOverlays)
+	t.Logf("warnings: %d", len(result.Metadata.ConstraintWarnings))
+}
+
+// TestMalformedMixinRejected verifies that mixin files with forbidden fields
+// (base, criteria, mixins, validation) are rejected at load time by
+// KnownFields(true) strict parsing.
+func TestMalformedMixinRejected(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name: "mixin with forbidden base field",
+			content: `kind: RecipeMixin
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: bad-mixin
+spec:
+  base: eks
+  constraints:
+    - name: test
+      value: "1.0"
+`,
+		},
+		{
+			name: "mixin with forbidden criteria field",
+			content: `kind: RecipeMixin
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: bad-mixin
+spec:
+  criteria:
+    service: eks
+  constraints:
+    - name: test
+      value: "1.0"
+`,
+		},
+		{
+			name: "mixin with forbidden validation field",
+			content: `kind: RecipeMixin
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: bad-mixin
+spec:
+  validation:
+    deployment:
+      checks:
+        - operator-health
+  constraints:
+    - name: test
+      value: "1.0"
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mixin RecipeMixin
+			decoder := yaml.NewDecoder(bytes.NewReader([]byte(tt.content)))
+			decoder.KnownFields(true)
+			err := decoder.Decode(&mixin)
+			if err == nil {
+				t.Error("expected error for mixin with forbidden fields, got nil")
+			}
+		})
 	}
 }

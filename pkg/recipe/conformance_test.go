@@ -261,7 +261,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			if tt.wantDRAConstraint {
 				var hasDRAConstraint bool
 				for _, c := range result.Constraints {
-					if c.Name == "K8s.server.version" && strings.Contains(c.Value, "1.34") {
+					if c.Name == testK8sVersionConstant && strings.Contains(c.Value, "1.34") {
 						hasDRAConstraint = true
 						break
 					}

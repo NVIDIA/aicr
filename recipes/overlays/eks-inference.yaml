@@ -25,29 +25,14 @@ spec:
     service: eks
     intent: inference
 
+  # Inference gateway components via mixin
+  mixins:
+    - platform-inference
+
   # Inference specific constraints for EKS workloads
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
       value: ">= 1.30"
 
-  componentRefs:
-    - name: kgateway-crds
-      type: Helm
-      source: oci://cr.kgateway.dev/kgateway-dev/charts
-      version: v2.0.0
-      valuesFile: components/kgateway-crds/values.yaml
-      manifestFiles:
-        - components/kgateway-crds/manifests/gateway-api-crds.yaml
-        - components/kgateway-crds/manifests/inference-extension-crds.yaml
-
-    - name: kgateway
-      type: Helm
-      source: oci://cr.kgateway.dev/kgateway-dev/charts
-      version: v2.0.0
-      valuesFile: components/kgateway/values.yaml
-      manifestFiles:
-        - components/kgateway/manifests/inference-gateway.yaml
-      dependencyRefs:
-        - kgateway-crds
-        - cert-manager
+  componentRefs: []
