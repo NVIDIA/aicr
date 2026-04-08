@@ -12,136 +12,79 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package gpu collects GPU hardware and driver configuration data.
+// Package gpu collects GPU hardware and driver configuration data using a
+// two-phase detection model.
 //
-// This collector gathers comprehensive GPU information from NVIDIA GPUs using
-// nvidia-smi, including hardware specifications, driver details, and GPU-specific
-// runtime settings.
+// # Two-Phase Collection
 //
-// # Collected Data
+// The collector runs two independent detection phases, each producing a
+// separate measurement subtype:
 //
-// The collector returns a measurement with multiple subtypes, one per GPU:
+//	Phase 1 ("hardware"): NFD-based PCI enumeration — detects NVIDIA GPUs
+//	    via sysfs PCI device scan and checks nvidia kernel module state.
+//	    No GPU drivers required. Requires Linux with sysfs mounted.
 //
-// GPU Hardware:
-//   - model: GPU model name (H100, A100, L40, etc.)
-//   - uuid: GPU UUID for unique identification
-//   - architecture: GPU architecture (Hopper, Ampere, Ada, etc.)
-//   - computeCapability: CUDA compute capability (9.0, 8.0, etc.)
-//   - memory: Total GPU memory in MB
-//   - bandwidth: Memory bandwidth in GB/s
+//	Phase 2 ("smi"): nvidia-smi XML query — collects driver version, CUDA
+//	    version, per-GPU hardware specs, and runtime settings. Requires
+//	    nvidia-smi in PATH with a loaded NVIDIA driver.
 //
-// Driver Information:
-//   - driverVersion: NVIDIA driver version (570.158.01, etc.)
-//   - cudaVersion: Maximum supported CUDA version
-//   - vbios: GPU firmware/VBIOS version
+// Phase 1 enables day-0 GPU detection on freshly provisioned nodes where
+// drivers have not yet been installed. Phase 2 provides the full telemetry
+// used for recipe generation and validation.
 //
-// Runtime Settings:
-//   - persistenceMode: Whether persistence mode is enabled
-//   - computeMode: Compute mode (Default, Exclusive, Prohibited)
-//   - migMode: MIG mode (Enabled, Disabled) for supported GPUs
-//   - addressingMode: GPU addressing mode
-//   - powerLimit: Current power limit in watts
-//   - powerState: Current power state (P0-P12)
+// # Graceful Degradation
+//
+// Each phase degrades independently:
+//
+//   - Phase 1 failure (e.g., no sysfs on macOS): logged as warning, skipped.
+//     Only the "smi" subtype is returned.
+//   - Phase 2 failure (e.g., nvidia-smi not installed): logged as warning.
+//     A zero-GPU "smi" subtype is returned with gpu-count=0.
+//   - Both phases fail: measurement contains only the zero-GPU "smi" subtype.
+//   - Phase 1 nil (no HardwareDetector configured): Phase 1 is skipped entirely,
+//     preserving the pre-NFD single-phase behavior.
+//
+// # Measurement Structure
+//
+// A successful two-phase collection produces:
+//
+//	Measurement{
+//	    Type: "GPU",
+//	    Subtypes: [
+//	        {Name: "hardware", Data: {gpu-present, gpu-count, driver-loaded, detection-source}},
+//	        {Name: "smi",      Data: {gpu-count, driver, cuda-version, gpu.model, ...}},
+//	    ],
+//	}
+//
+// The "hardware" subtype keys are defined in pkg/measurement:
+//   - KeyGPUPresent: bool — true if at least one NVIDIA GPU found via PCI
+//   - KeyGPUCount: int — number of NVIDIA GPUs detected
+//   - KeyGPUDriverLoaded: bool — true if nvidia kernel module is loaded
+//   - KeyGPUDetectionSource: string — detection method (e.g., "nfd")
+//
+// The "smi" subtype contains driver telemetry and per-GPU hardware details.
 //
 // # Usage
 //
-// Create and use the collector:
+// The collector is created by the factory with NFD wiring:
 //
-//	collector := gpu.NewCollector()
-//	measurements, err := collector.Collect(ctx)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
+//	collector := gpu.NewCollector(
+//	    gpu.WithHardwareDetector(&gpu.NFDHardwareDetector{}),
+//	)
+//	m, err := collector.Collect(ctx)
 //
-//	for _, m := range measurements {
-//	    for _, subtype := range m.Subtypes {
-//	        fmt.Printf("GPU %s: %s\n", subtype.Name, subtype.Data["model"])
-//	    }
-//	}
+// Without WithHardwareDetector, Phase 1 is skipped (backward compatible).
 //
-// # nvidia-smi Dependency
+// # Context and Timeouts
 //
-// The collector requires nvidia-smi to be installed and in the system PATH:
+// The collector respects context cancellation and applies a bounded timeout
+// (defaults.CollectorTimeout). NFD detection has its own sub-timeout
+// (defaults.NFDDetectionTimeout = 5s). The context is passed to each phase,
+// so cancellation is respected within each phase's I/O operations.
 //
-//	which nvidia-smi
-//	# Output: /usr/bin/nvidia-smi
+// # Platform Support
 //
-// nvidia-smi must be executable and properly configured to communicate with
-// the NVIDIA driver.
-//
-// # Query Format
-//
-// The collector uses nvidia-smi's query mode for reliable, machine-readable output:
-//
-//	nvidia-smi --query-gpu=name,uuid,driver_version,... --format=csv,noheader
-//
-// This provides consistent output across driver versions and GPU models.
-//
-// # Multi-GPU Support
-//
-// The collector automatically detects and collects data from all available GPUs:
-//
-//	measurements, _ := collector.Collect(ctx)
-//	for i, subtype := range measurements[0].Subtypes {
-//	    fmt.Printf("GPU %d: %s\n", i, subtype.Data["model"])
-//	}
-//
-// Each GPU becomes a separate subtype named by its index (0, 1, 2, etc.).
-//
-// # Context Support
-//
-// The collector respects context cancellation and timeouts:
-//
-//	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-//	defer cancel()
-//
-//	measurements, err := collector.Collect(ctx)
-//
-// nvidia-smi execution is bounded by the context deadline.
-//
-// # Error Handling
-//
-// Common error scenarios:
-//   - nvidia-smi not found: Returns error with installation instructions
-//   - No GPUs detected: Returns error
-//   - Driver not loaded: Returns error with troubleshooting guidance
-//   - nvidia-smi timeout: Returns context deadline exceeded error
-//
-// The collector does not continue on errors since GPU data is critical for
-// GPU-accelerated cluster configuration.
-//
-// # MIG Support
-//
-// For GPUs with MIG enabled, the collector:
-//   - Reports MIG mode status
-//   - Includes MIG-related settings
-//   - Works with both MIG-enabled and disabled GPUs
-//
-// MIG instances are not individually queried (that requires additional nvidia-smi flags).
-//
-// # Containerized Collection
-//
-// When running in containers, ensure:
-//   - NVIDIA Container Toolkit is installed
-//   - Container has GPU access (--gpus all or device requests)
-//   - nvidia-smi is available in the container
-//
-// For Kubernetes pods:
-//
-//	spec:
-//	  containers:
-//	  - name: collector
-//	    image: nvidia/cuda:12.7-base
-//	    resources:
-//	      limits:
-//	        nvidia.com/gpu: "1"
-//
-// # Use in Recipes
-//
-// Recipe generation uses GPU data for:
-//   - GPU-specific driver version recommendations
-//   - Model-specific optimizations (H100 vs A100)
-//   - MIG configuration recommendations
-//   - Power and thermal management settings
-//   - Memory-based workload sizing
+//   - Linux with sysfs: Both phases run (full two-phase detection)
+//   - macOS / containers without /sys: Phase 1 fails gracefully, Phase 2 only
+//   - No nvidia-smi: Phase 2 returns zero-GPU subtype
 package gpu

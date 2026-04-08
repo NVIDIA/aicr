@@ -12,31 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-kind: RecipeMetadata
+kind: RecipeMixin
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: gb200-eks-ubuntu-training-kubeflow
-
+  name: os-ubuntu
 spec:
-  # Inherits from gb200-eks-ubuntu-training recipe (GB200 + EKS + Ubuntu + training settings)
-  # This overlay adds Kubeflow Training Operator for distributed training with TrainJob
-  base: gb200-eks-ubuntu-training
-
-  criteria:
-    service: eks
-    accelerator: gb200
-    os: ubuntu
-    intent: training
-    platform: kubeflow
-
-  # Ubuntu OS constraints + Kubeflow platform via mixins
-  mixins:
-    - os-ubuntu
-    - platform-kubeflow
-
-  # GB200 + EKS specific constraints (not covered by mixin)
   constraints:
-    - name: K8s.server.version
-      value: ">= 1.32.4"
-
-  componentRefs: []
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "24.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 6.8"

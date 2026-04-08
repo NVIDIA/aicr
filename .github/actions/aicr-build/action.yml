@@ -28,15 +28,22 @@ runs:
     - name: Build snapshot agent image and load into kind
       shell: bash
       run: |
-        # Build snapshot agent image with CUDA runtime (provides nvidia-smi for GPU detection).
+        # Build snapshot agent image with CUDA base (provides nvidia-smi for GPU detection).
+        # Uses cuda:base (~250MB) instead of cuda:runtime (~1.8GB) — only nvidia-smi is needed.
         # GPU test workflows use --image=ko.local:smoke-test for aicr snapshot.
         CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
         docker build -t ko.local:smoke-test -f - . <<'DOCKERFILE'
-        FROM nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
+        FROM nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04
         COPY dist/aicr /usr/local/bin/aicr
         ENTRYPOINT ["/usr/local/bin/aicr"]
         DOCKERFILE
-        kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+
+        # Load onto all nodes (validator Jobs tolerate all taints and may schedule on
+        # control-plane). The cuda:base image is ~250MB so 3-node loads are fast.
+        timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
+          echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
+          timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+        }
 
     - name: Build validator images and load into kind
       shell: bash
@@ -48,6 +55,7 @@ runs:
         CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment
         CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance
         CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance
+
         for phase in deployment performance conformance; do
           mkdir -p "validators/${phase}/testdata"
           docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
@@ -58,7 +66,10 @@ runs:
         USER nonroot
         ENTRYPOINT ["/${phase}"]
         DOCKERFILE
-          kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
+          timeout 300 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {
+            echo "::warning::kind load attempt 1 failed for ko.local/aicr-validators/${phase}:latest, retrying..."
+            timeout 300 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
+          }
         done
 
     - name: Build aicr binary

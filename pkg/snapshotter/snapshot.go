@@ -190,5 +190,5 @@ func verifyGPUCollected(snap *Snapshot) error {
 		}
 	}
 	return errors.New(errors.ErrCodeNotFound,
-		"--require-gpu was set but no GPU was detected (nvidia-smi not found or returned 0 GPUs)")
+		"--require-gpu was set but no GPU was detected (neither NFD PCI enumeration nor nvidia-smi found GPUs)")
 }

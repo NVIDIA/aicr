@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/collector/gpu"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
 )
 
@@ -85,6 +86,21 @@ func TestWithSystemDServices(t *testing.T) {
 
 	if factory.SystemDServices[0] != "custom1.service" {
 		t.Errorf("expected custom1.service, got %s", factory.SystemDServices[0])
+	}
+}
+
+func TestDefaultCollectorFactory_CreateGPUCollector_ReturnsConfiguredCollector(t *testing.T) {
+	factory := NewDefaultFactory()
+	col := factory.CreateGPUCollector()
+	if col == nil {
+		t.Fatal("expected non-nil GPU collector")
+	}
+
+	// Verify the factory returns a *gpu.Collector (not a generic mock or wrapper).
+	// The actual NFDHardwareDetector wiring is an internal detail tested by
+	// the gpu package's two-phase tests.
+	if _, ok := col.(*gpu.Collector); !ok {
+		t.Errorf("expected *gpu.Collector, got %T", col)
 	}
 }
 

@@ -252,11 +252,20 @@ func serializeTolerations(tols []corev1.Toleration) string {
 	return strings.Join(parts, ",")
 }
 
-// imagePullPolicy returns Always when the image uses :latest tag (dev builds),
-// PullIfNotPresent otherwise. This ensures dev builds always pull fresh images
-// and avoids exec format errors from stale cached images on cluster nodes.
+// imagePullPolicy returns the appropriate pull policy based on the image reference.
+// Side-loaded images (ko.local, kind.local) use Never since they are loaded
+// via `kind load docker-image` and no registry exists to pull from.
+// All other images (including localhost registry) follow the standard policy:
+// :latest tag uses Always to ensure fresh images, versioned tags use IfNotPresent.
 func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
-	if strings.HasSuffix(d.entry.Image, ":latest") {
+	img := d.entry.Image
+	// Side-loaded images via kind load — no registry exists, never pull.
+	if strings.HasPrefix(img, "ko.local") ||
+		strings.HasPrefix(img, "kind.local") {
+
+		return corev1.PullNever
+	}
+	if strings.HasSuffix(img, ":latest") {
 		return corev1.PullAlways
 	}
 	return corev1.PullIfNotPresent
