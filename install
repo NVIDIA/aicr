@@ -121,6 +121,7 @@ write_completion() {
     rm -f "$tmp_file"
     return 1
   fi
+  chmod 644 "$tmp_file"
   if [[ -w "$target_dir" ]]; then
     mv "$tmp_file" "$target" || { rm -f "$tmp_file"; return 1; }
   else
@@ -170,13 +171,13 @@ setup_zsh_completions() {
 
 setup_fish_completions() {
   local bin_path="$1"
-  local fish_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish"
-  [[ -d "$fish_dir" ]] || return 0
+  local sys_dir="/usr/share/fish/vendor_completions.d"
+  local user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
 
-  if write_completion "$bin_path" fish "${fish_dir}/completions/aicr.fish"; then
+  if [[ -d "$sys_dir" ]] && write_completion "$bin_path" fish "${sys_dir}/aicr.fish"; then
     ok "Fish completions installed"
-  else
-    warn "Could not install fish completions"
+  elif [[ -d "${user_dir%/*}" ]] && write_completion "$bin_path" fish "${user_dir}/aicr.fish"; then
+    ok "Fish completions installed (user-local)"
   fi
 }
 
@@ -405,7 +406,7 @@ main() {
     msg "Attestation: ${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
 
   # Install shell completions
-  setup_completions || true
+  setup_completions || warn "Shell completion setup failed (non-fatal)"
 
   # Fetch latest Sigstore trusted root for offline verification.
   # The trusted root enables 'aicr verify' to check attestation signatures
