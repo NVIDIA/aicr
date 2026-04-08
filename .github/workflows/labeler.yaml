@@ -36,11 +36,54 @@ jobs:
       pull-requests: write
     timeout-minutes: 5
     steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          sparse-checkout: .settings.yaml
+          sparse-checkout-cone-mode: false
+
       - name: Label by Path
         uses: actions/labeler@634933edcd8ababfe52f92936142cc22ac488b1b  # v6.0.1
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
           sync-labels: true
+
+      - name: Parse area assignees
+        id: assignees
+        run: |
+          # Extract area_assignees map from .settings.yaml as JSON
+          yq -o=json '.area_assignees' .settings.yaml > /tmp/area_assignees.json
+
+      - name: Assign by Area
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        with:
+          script: |
+            const fs = require('fs');
+
+            const assignees = JSON.parse(fs.readFileSync('/tmp/area_assignees.json', 'utf8'));
+
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const toAssign = new Set();
+            for (const label of labels) {
+              const user = assignees[label.name];
+              if (user) {
+                toAssign.add(user);
+              }
+            }
+
+            if (toAssign.size > 0) {
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                assignees: [...toAssign],
+              });
+            }
 
       - name: Label by Size
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
