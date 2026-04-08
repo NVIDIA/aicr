@@ -202,8 +202,9 @@ const (
 // HPA behavioral test timeouts for conformance validation.
 const (
 	// HPAScaleTimeout is the timeout for waiting for HPA to report scaling intent.
-	// The HPA needs time to read metrics and compute desired replicas.
-	HPAScaleTimeout = 3 * time.Minute
+	// On a healthy cluster this completes in under 30s. The timeout is a safety net
+	// for slow metrics pipeline startup; fail fast rather than hang CI.
+	HPAScaleTimeout = 1 * time.Minute
 
 	// HPAPollInterval is the interval for polling HPA status during behavioral tests.
 	HPAPollInterval = 10 * time.Second
@@ -252,7 +253,8 @@ const (
 const (
 	// DeploymentScaleTimeout is the timeout for waiting for Deployment controller
 	// to observe and act on HPA scale-up by increasing replica count.
-	DeploymentScaleTimeout = 2 * time.Minute
+	// On a healthy cluster this completes in seconds; fail fast in CI.
+	DeploymentScaleTimeout = 1 * time.Minute
 
 	// PodScheduleTimeout is the timeout for waiting for test pods to be scheduled
 	// on Karpenter-provisioned nodes after the HPA scales up.
