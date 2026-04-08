@@ -28,17 +28,14 @@ spec:
     os: ubuntu
     intent: training
 
-  # Constraints for GB200 on EKS with Ubuntu for training workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  # Ubuntu OS constraints via mixin (defined once in recipes/mixins/os-ubuntu.yaml)
+  mixins:
+    - os-ubuntu
+
+  # GB200 + EKS specific constraints (not covered by mixin)
   constraints:
     - name: K8s.server.version
       value: ">= 1.32.4"
-    - name: OS.release.ID
-      value: ubuntu
-    - name: OS.release.VERSION_ID
-      value: "24.04"
-    - name: OS.sysctl./proc/sys/kernel/osrelease
-      value: ">= 6.8"
 
   componentRefs: []
 

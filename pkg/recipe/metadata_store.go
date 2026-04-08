@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -44,6 +45,9 @@ type MetadataStore struct {
 	// Overlays is a list of overlay recipes indexed by name.
 	Overlays map[string]*RecipeMetadata
 
+	// Mixins is a map of composable mixin fragments indexed by name.
+	Mixins map[string]*RecipeMixin
+
 	// ValuesFiles contains embedded values file contents indexed by filename.
 	ValuesFiles map[string][]byte
 }
@@ -56,6 +60,7 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 
 		store := &MetadataStore{
 			Overlays:    make(map[string]*RecipeMetadata),
+			Mixins:      make(map[string]*RecipeMixin),
 			ValuesFiles: make(map[string][]byte),
 		}
 
@@ -74,6 +79,34 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 
 			// Skip health check assert files (not recipe metadata)
 			if strings.Contains(path, "checks/") {
+				return nil
+			}
+
+			// Handle mixin files (files in the mixins/ directory)
+			if strings.HasPrefix(path, "mixins/") {
+				if !strings.HasSuffix(filename, ".yaml") {
+					return nil
+				}
+				content, readErr := provider.ReadFile(path)
+				if readErr != nil {
+					return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read mixin %s", path), readErr)
+				}
+				var mixin RecipeMixin
+				decoder := yaml.NewDecoder(bytes.NewReader(content))
+				decoder.KnownFields(true)
+				if parseErr := decoder.Decode(&mixin); parseErr != nil {
+					return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse mixin %s (unknown fields are not allowed)", path), parseErr)
+				}
+				if mixin.Kind != RecipeMixinKind {
+					return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+						fmt.Sprintf("mixin file %s has wrong kind %q, expected %q", path, mixin.Kind, RecipeMixinKind))
+				}
+				if _, exists := store.Mixins[mixin.Metadata.Name]; exists {
+					return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+						fmt.Sprintf("duplicate mixin name %q in %s", mixin.Metadata.Name, path))
+				}
+				store.Mixins[mixin.Metadata.Name] = &mixin
+				slog.Debug("loaded mixin", "name", mixin.Metadata.Name, "path", path)
 				return nil
 			}
 
@@ -290,6 +323,241 @@ func (s *MetadataStore) filterToMaximalLeaves(matches []*RecipeMetadata) []*Reci
 	return leaves
 }
 
+// mergeMixins resolves and merges mixin fragments referenced by spec.mixins.
+// Mixins are merged after the inheritance chain, contributing only constraints
+// and componentRefs. Detects conflicts: duplicate constraint names or component
+// names between a mixin and the already-merged spec are rejected.
+// The Mixins field is cleared from the result afterward.
+// Returns the set of mixin-contributed constraint names for post-compose evaluation.
+func (s *MetadataStore) mergeMixins(mergedSpec *RecipeMetadataSpec) (map[string]bool, error) {
+	mixinConstraintNames := make(map[string]bool)
+	if len(mergedSpec.Mixins) == 0 {
+		return mixinConstraintNames, nil
+	}
+
+	// Build index of existing constraint and component names for conflict detection
+	existingConstraints := make(map[string]bool)
+	for _, c := range mergedSpec.Constraints {
+		existingConstraints[c.Name] = true
+	}
+	existingComponents := make(map[string]bool)
+	for _, c := range mergedSpec.ComponentRefs {
+		existingComponents[c.Name] = true
+	}
+
+	for _, mixinName := range mergedSpec.Mixins {
+		mixin, exists := s.Mixins[mixinName]
+		if !exists {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeNotFound,
+				fmt.Sprintf("mixin %q not found in recipes/mixins/", mixinName))
+		}
+
+		// Detect conflicts: mixin constraint/component names vs inheritance chain
+		// and previously applied mixins (existingConstraints/existingComponents
+		// are updated after each mixin merge)
+		for _, c := range mixin.Spec.Constraints {
+			if existingConstraints[c.Name] {
+				return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("mixin %q constraint %q conflicts with inheritance chain or another mixin", mixinName, c.Name))
+			}
+		}
+		for _, c := range mixin.Spec.ComponentRefs {
+			if existingComponents[c.Name] {
+				return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("mixin %q component %q conflicts with inheritance chain or another mixin", mixinName, c.Name))
+			}
+		}
+
+		// Merge mixin content
+		mixinSpec := RecipeMetadataSpec{
+			Constraints:   mixin.Spec.Constraints,
+			ComponentRefs: mixin.Spec.ComponentRefs,
+		}
+		mergedSpec.Merge(&mixinSpec)
+
+		// Track mixin contributions for future conflict detection
+		for _, c := range mixin.Spec.Constraints {
+			existingConstraints[c.Name] = true
+			mixinConstraintNames[c.Name] = true
+		}
+		for _, c := range mixin.Spec.ComponentRefs {
+			existingComponents[c.Name] = true
+		}
+
+		slog.Debug("merged mixin", "name", mixinName,
+			"constraints", len(mixin.Spec.Constraints),
+			"components", len(mixin.Spec.ComponentRefs))
+	}
+
+	// Strip mixins from the materialized result — loader metadata only
+	mergedSpec.Mixins = nil
+	return mixinConstraintNames, nil
+}
+
+// mixinEvalResult holds the outcome of post-compose mixin constraint evaluation.
+type mixinEvalResult struct {
+	// Failed is true if any mixin constraint failed evaluation.
+	Failed bool
+	// ExcludedOverlays are the overlays excluded due to the failure.
+	ExcludedOverlays []string
+	// Warnings are the constraint warnings for the failing constraints.
+	Warnings []ConstraintWarning
+	// Spec is the rebuilt spec (without mixin-bearing chains) if failed, or nil if all passed.
+	Spec *RecipeMetadataSpec
+	// AppliedOverlays is the surviving applied overlays if failed.
+	AppliedOverlays []string
+}
+
+// evaluateMixinConstraints evaluates the fully composed constraint set
+// (including mixin-contributed constraints) against the snapshot evaluator.
+// This runs after mergeMixins so that constraints moved from inline overlay
+// definitions to mixins are still validated against the snapshot.
+//
+// If any mixin constraint fails, only the overlay chains that contributed
+// mixins are excluded. Independent overlays (e.g., monitoring-hpa) that do
+// not declare mixins are preserved. This maintains the existing maximal-leaf
+// filtering behavior for non-mixin overlays.
+func (s *MetadataStore) evaluateMixinConstraints(
+	mergedSpec *RecipeMetadataSpec,
+	evaluator ConstraintEvaluatorFunc,
+	mixinConstraintNames map[string]bool,
+	appliedOverlays []string,
+) mixinEvalResult {
+
+	if evaluator == nil || len(mixinConstraintNames) == 0 {
+		return mixinEvalResult{}
+	}
+
+	var failedConstraints []ConstraintWarning
+	for _, constraint := range mergedSpec.Constraints {
+		if !mixinConstraintNames[constraint.Name] {
+			continue // already evaluated per-overlay
+		}
+		result := evaluator(constraint)
+		if !result.Passed {
+			// Identify the overlay that declared the mixin contributing this constraint.
+			declaringOverlay := s.findMixinDeclaringOverlay(constraint.Name, appliedOverlays)
+			warning := ConstraintWarning{
+				Overlay:    declaringOverlay,
+				Constraint: constraint.Name,
+				Expected:   constraint.Value,
+				Actual:     result.Actual,
+				Reason:     "mixin constraint failed post-compose evaluation",
+			}
+			if result.Error != nil {
+				warning.Reason = result.Error.Error()
+			}
+			failedConstraints = append(failedConstraints, warning)
+		}
+	}
+
+	if len(failedConstraints) == 0 {
+		return mixinEvalResult{}
+	}
+
+	// Identify which applied overlays declared mixins and which are in their
+	// inheritance chains. The mixin-declaring leaves and their ancestors are
+	// removed from the rebuilt spec. Only the leaf candidates themselves are
+	// reported in ExcludedOverlays (ancestors are shared infrastructure, not
+	// rejected candidates).
+	mixinDeclarers := make(map[string]bool)    // leaf overlays that declared mixins
+	mixinChainMembers := make(map[string]bool) // declarers + their ancestors (for spec rebuild)
+	for _, name := range appliedOverlays {
+		if name == baseRecipeName {
+			continue
+		}
+		overlay, exists := s.Overlays[name]
+		if !exists {
+			continue
+		}
+		if len(overlay.Spec.Mixins) > 0 {
+			mixinDeclarers[name] = true
+			mixinChainMembers[name] = true
+			s.markAncestors(name, mixinChainMembers)
+		}
+	}
+
+	var excluded []string
+	var surviving []string
+	surviving = append(surviving, baseRecipeName)
+	for _, name := range appliedOverlays {
+		if name == baseRecipeName {
+			continue
+		}
+		if mixinChainMembers[name] {
+			// Only report leaf candidates in ExcludedOverlays, not ancestors
+			if mixinDeclarers[name] {
+				excluded = append(excluded, name)
+			}
+		} else {
+			surviving = append(surviving, name)
+		}
+	}
+
+	// Rebuild the spec from surviving overlays only
+	rebuiltSpec, _ := s.initBaseMergedSpec()
+	for _, name := range surviving {
+		if name == baseRecipeName {
+			continue
+		}
+		if overlay, exists := s.Overlays[name]; exists {
+			rebuiltSpec.Merge(&overlay.Spec)
+		}
+	}
+
+	slog.Warn("post-compose constraint evaluation failed, excluding mixin-bearing chains",
+		"failed_constraints", len(failedConstraints),
+		"excluded", excluded,
+		"surviving", surviving)
+
+	return mixinEvalResult{
+		Failed:           true,
+		ExcludedOverlays: excluded,
+		Warnings:         failedConstraints,
+		Spec:             &rebuiltSpec,
+		AppliedOverlays:  surviving,
+	}
+}
+
+// findMixinDeclaringOverlay finds the overlay that declared the mixin
+// contributing a given constraint name.
+func (s *MetadataStore) findMixinDeclaringOverlay(constraintName string, appliedOverlays []string) string {
+	// Walk applied overlays in reverse (most specific first) to find
+	// which overlay declared a mixin that contains this constraint.
+	for i := len(appliedOverlays) - 1; i >= 0; i-- {
+		name := appliedOverlays[i]
+		overlay, exists := s.Overlays[name]
+		if !exists {
+			continue
+		}
+		for _, mixinName := range overlay.Spec.Mixins {
+			mixin, mExists := s.Mixins[mixinName]
+			if !mExists {
+				continue
+			}
+			for _, c := range mixin.Spec.Constraints {
+				if c.Name == constraintName {
+					return name
+				}
+			}
+		}
+	}
+	return "post-compose" // fallback if mapping not found
+}
+
+// markAncestors walks the inheritance chain of an overlay and marks all ancestors.
+func (s *MetadataStore) markAncestors(name string, marked map[string]bool) {
+	overlay, exists := s.Overlays[name]
+	if !exists || overlay.Spec.Base == "" {
+		return
+	}
+	ancestor := overlay.Spec.Base
+	if !marked[ancestor] {
+		marked[ancestor] = true
+		s.markAncestors(ancestor, marked)
+	}
+}
+
 // initBaseMergedSpec creates a copy of the base spec for overlay merging.
 func (s *MetadataStore) initBaseMergedSpec() (RecipeMetadataSpec, []string) {
 	mergedSpec := RecipeMetadataSpec{
@@ -384,6 +652,11 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 		return nil, err
 	}
 
+	// Merge mixin fragments referenced by overlays in the chain
+	if _, err := s.mergeMixins(&mergedSpec); err != nil {
+		return nil, err
+	}
+
 	if len(appliedOverlays) <= 1 {
 		slog.Warn("no environment-specific overlays matched, using base configuration only",
 			"criteria", criteria.String(),
@@ -450,6 +723,25 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 	appliedOverlays, err := s.mergeOverlayChains(filteredOverlays, &mergedSpec, appliedOverlays)
 	if err != nil {
 		return nil, err
+	}
+
+	// Merge mixin fragments referenced by overlays in the chain.
+	mixinConstraintNames, err := s.mergeMixins(&mergedSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	// Evaluate mixin-contributed constraints against the snapshot.
+	// Per-overlay constraints were evaluated before merge (above), but mixin
+	// constraints are only present after mergeMixins. Without this post-compose
+	// evaluation, a mixin constraint (e.g., kernel >= 6.8 from os-ubuntu) could
+	// fail against the snapshot but the candidate would still be selected.
+	mixinResult := s.evaluateMixinConstraints(&mergedSpec, evaluator, mixinConstraintNames, appliedOverlays)
+	if mixinResult.Failed {
+		excludedOverlays = append(excludedOverlays, mixinResult.ExcludedOverlays...)
+		constraintWarnings = append(constraintWarnings, mixinResult.Warnings...)
+		mergedSpec = *mixinResult.Spec
+		appliedOverlays = mixinResult.AppliedOverlays
 	}
 
 	if len(excludedOverlays) > 0 {

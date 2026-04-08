@@ -532,7 +532,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Readiness: &ValidationPhase{
-					Constraints: []Constraint{{Name: "K8s.server.version", Value: ">= 1.30"}},
+					Constraints: []Constraint{{Name: testK8sVersionConstant, Value: ">= 1.30"}},
 				},
 				Deployment: &ValidationPhase{
 					Timeout: "5m",
@@ -560,7 +560,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation.Readiness == nil {
 			t.Fatal("readiness should be preserved from base")
 		}
-		if base.Validation.Readiness.Constraints[0].Name != "K8s.server.version" {
+		if base.Validation.Readiness.Constraints[0].Name != testK8sVersionConstant {
 			t.Error("readiness constraints should be preserved from base")
 		}
 		if base.Validation.Deployment.Timeout != "10m" {
