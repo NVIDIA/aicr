@@ -29,26 +29,14 @@ spec:
     intent: training
     platform: kubeflow
 
-  # Constraints for H100 on AKS with Ubuntu for Kubeflow training workloads
-  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  # Ubuntu OS constraints + Kubeflow platform via mixins
+  mixins:
+    - os-ubuntu
+    - platform-kubeflow
+
+  # H100 + AKS specific constraints (not covered by mixin)
   constraints:
     - name: K8s.server.version
       value: ">= 1.32.4"
-    - name: OS.release.ID
-      value: ubuntu
-    - name: OS.release.VERSION_ID
-      value: "24.04"
-    - name: OS.sysctl./proc/sys/kernel/osrelease
-      value: ">= 6.8"
 
-  # Kubeflow Training Operator for TrainJob support
-  componentRefs:
-    - name: kubeflow-trainer
-      type: Helm
-      valuesFile: components/kubeflow-trainer/values.yaml
-      manifestFiles:
-        - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
-      dependencyRefs:
-        - cert-manager
-        - kube-prometheus-stack
-        - gpu-operator
+  componentRefs: []

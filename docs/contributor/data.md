@@ -36,6 +36,10 @@ recipes/
 │   ├── eks-training.yaml          # EKS + training workloads (inherits from eks)
 │   ├── gb200-eks-ubuntu-training.yaml # GB200/EKS/Ubuntu/training (inherits from eks-training)
 │   └── h100-ubuntu-inference.yaml # H100/Ubuntu/inference
+├── mixins/                        # Composable mixin fragments (kind: RecipeMixin)
+│   ├── os-ubuntu.yaml             # Ubuntu OS constraints (shared by leaf overlays)
+│   ├── platform-inference.yaml    # Inference gateway components (shared by service-inference overlays)
+│   └── platform-kubeflow.yaml     # Kubeflow trainer component (shared by leaf overlays)
 └── components/                    # Component values files
     ├── cert-manager/
     │   └── values.yaml
@@ -88,6 +92,9 @@ metadata:
 
 spec:
   base: <parent-recipe>  # Optional - inherits from another recipe
+  mixins:                # Optional - composable mixin fragments
+    - os-ubuntu          #   OS constraints (from recipes/mixins/)
+    - platform-kubeflow  #   Platform components (from recipes/mixins/)
   
   criteria:              # When this recipe/overlay applies
     service: eks         # Kubernetes platform
@@ -118,6 +125,7 @@ spec:
 | `apiVersion` | Always `aicr.nvidia.com/v1alpha1` |
 | `metadata.name` | Unique recipe identifier |
 | `spec.base` | Parent recipe to inherit from (empty = inherits from `overlays/base.yaml`) |
+| `spec.mixins` | List of mixin names to compose (e.g., `["os-ubuntu", "platform-kubeflow"]`) |
 | `spec.criteria` | Query parameters that select this recipe |
 | `spec.constraints` | Pre-flight validation rules |
 | `spec.componentRefs` | List of components to deploy |
@@ -389,6 +397,52 @@ spec:
 | **Flexible Extension** | Add new leaf recipes without duplicating parent configs |
 | **Testable** | Each level can be validated independently |
 
+### Mixin Composition
+
+Inheritance is single-parent (`spec.base`), which means cross-cutting concerns like OS constraints or platform components would need to be duplicated across leaf overlays. **Mixins** solve this by providing composable fragments that leaf overlays reference via `spec.mixins`.
+
+Mixin files live in `recipes/mixins/` and use `kind: RecipeMixin`:
+
+```yaml
+# recipes/mixins/os-ubuntu.yaml
+kind: RecipeMixin
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: os-ubuntu
+
+spec:
+  constraints:
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "24.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 6.8"
+```
+
+Leaf overlays compose mixins alongside inheritance:
+
+```yaml
+# recipes/overlays/h100-eks-ubuntu-training-kubeflow.yaml
+spec:
+  base: h100-eks-training
+  mixins:
+    - os-ubuntu          # Ubuntu constraints
+    - platform-kubeflow  # Kubeflow trainer component
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: kubeflow
+```
+
+**Mixin rules:**
+- Mixins carry only `constraints` and `componentRefs` — no `criteria`, `base`, `mixins`, or `validation`
+- Mixins are applied after inheritance chain merging but before constraint evaluation
+- Conflict detection: a mixin constraint or component that conflicts with the inheritance chain or a previously applied mixin produces an error
+- When a snapshot is provided, mixin constraints are evaluated against it after merging; if any fail, the entire composed candidate is invalid and falls back to base-only output. In plain query mode (no snapshot), mixin constraints are merged but not evaluated
+
 ### Cycle Detection
 
 The system detects circular inheritance to prevent infinite loops:
@@ -624,7 +678,7 @@ store, err := loadMetadataStore(ctx)
 
 - Embedded YAML files are parsed into Go structs
 - Cached in memory on first access (singleton pattern with `sync.Once`)
-- Contains base recipe, all overlays, and component values files
+- Contains base recipe, all overlays, mixins, and component values files
 
 ### Step 2: Find Matching Overlays
 
@@ -679,7 +733,18 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 }
 ```
 
-### Step 5: Validate Dependencies
+### Step 5: Apply Mixins
+
+```go
+mixinConstraintNames, err := store.mergeMixins(mergedSpec)
+```
+
+- If the leaf overlay declares `spec.mixins`, each named mixin is loaded from `recipes/mixins/`
+- Mixin constraints and componentRefs are appended to the merged spec
+- Conflict detection prevents duplicates between the inheritance chain, previously applied mixins, and the current mixin
+- When a snapshot evaluator is provided, mixin constraints are evaluated against it after merging; failure invalidates the entire composed candidate. In plain query mode (no snapshot), mixin constraints are merged but not evaluated
+
+### Step 6: Validate Dependencies
 
 ```go
 if err := mergedSpec.ValidateDependencies(); err != nil {
@@ -690,7 +755,7 @@ if err := mergedSpec.ValidateDependencies(); err != nil {
 - Verify all `dependencyRefs` reference existing components
 - Detect circular dependencies
 
-### Step 6: Compute Deployment Order
+### Step 7: Compute Deployment Order
 
 ```go
 deployOrder, err := mergedSpec.TopologicalSort()
@@ -699,7 +764,7 @@ deployOrder, err := mergedSpec.TopologicalSort()
 - Topologically sort components based on `dependencyRefs`
 - Ensures dependencies are deployed before dependents
 
-### Step 7: Build RecipeResult
+### Step 8: Build RecipeResult
 
 ```go
 return &RecipeResult{

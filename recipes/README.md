@@ -24,6 +24,10 @@ recipes/
 │   ├── gb200-eks-ubuntu-training.yaml # Full criteria leaf recipe
 │   ├── h100-eks-ubuntu-training-kubeflow.yaml # H100 + EKS + Ubuntu + training + Kubeflow
 │   └── h100-ubuntu-inference.yaml # H100 inference overlay
+├── mixins/                        # Composable mixin fragments
+│   ├── os-ubuntu.yaml             # Ubuntu OS constraints (shared by 12 leaf overlays)
+│   ├── platform-inference.yaml    # Inference gateway components (shared by 5 service-inference overlays)
+│   └── platform-kubeflow.yaml     # Kubeflow trainer component (shared by 4 leaf overlays)
 └── components/                    # Component value configurations
     ├── cert-manager/
     ├── nvidia-dra-driver-gpu/
@@ -42,10 +46,11 @@ Examples:
 
 ## Overview
 
-The recipe system uses a **base-plus-overlay architecture**:
+The recipe system uses a **base-plus-overlay architecture** with **mixin composition**:
 
 - **Base values** (`overlays/base.yaml`) provide default configurations
 - **Overlay values** (e.g., `eks-gb200-training.yaml`) provide environment-specific optimizations
+- **Mixins** (`mixins/*.yaml`) provide shared fragments (OS constraints, platform components) that leaf overlays compose via `spec.mixins` instead of duplicating content
 - **Inline overrides** allow per-recipe customization without creating new files
 
 All files in this directory are embedded into the CLI binary and API server at compile time.
