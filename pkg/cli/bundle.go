@@ -298,13 +298,13 @@ Package with explicit tag (overrides CLI version):
 				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
 				Category: "Scheduling",
 			},
-			&cli.StringFlag{
+			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
 				Value:    string(config.DeployerHelm),
 				Usage:    fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
 				Category: "Deployment",
-			},
+			}, config.GetDeployerTypes),
 			&cli.StringFlag{
 				Name:     "repo",
 				Value:    "",
