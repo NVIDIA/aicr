@@ -29,32 +29,32 @@ import (
 
 func recipeCmdFlags() []cli.Flag {
 	return []cli.Flag{
-		&cli.StringFlag{
+		withCompletions(&cli.StringFlag{
 			Name:     "service",
 			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
 			Category: "Query Parameters",
-		},
-		&cli.StringFlag{
+		}, recipe.GetCriteriaServiceTypes),
+		withCompletions(&cli.StringFlag{
 			Name:     "accelerator",
 			Aliases:  []string{"gpu"},
 			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
 			Category: "Query Parameters",
-		},
-		&cli.StringFlag{
+		}, recipe.GetCriteriaAcceleratorTypes),
+		withCompletions(&cli.StringFlag{
 			Name:     "intent",
 			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
 			Category: "Query Parameters",
-		},
-		&cli.StringFlag{
+		}, recipe.GetCriteriaIntentTypes),
+		withCompletions(&cli.StringFlag{
 			Name:     "os",
 			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
 			Category: "Query Parameters",
-		},
-		&cli.StringFlag{
+		}, recipe.GetCriteriaOSTypes),
+		withCompletions(&cli.StringFlag{
 			Name:     "platform",
 			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
 			Category: "Query Parameters",
-		},
+		}, recipe.GetCriteriaPlatformTypes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -77,7 +77,7 @@ func recipeCmdFlags() []cli.Flag {
 		},
 		dataFlag,
 		outputFlag,
-		formatFlag,
+		formatFlag(),
 		kubeconfigFlag,
 	}
 }

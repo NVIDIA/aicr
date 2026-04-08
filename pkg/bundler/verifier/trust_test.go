@@ -229,3 +229,17 @@ func TestMaxAchievableTrustLevel(t *testing.T) {
 		})
 	}
 }
+
+func TestGetTrustLevels(t *testing.T) {
+	levels := GetTrustLevels()
+
+	expected := []string{"attested", "unknown", "unverified", "verified"}
+	if len(levels) != len(expected) {
+		t.Fatalf("got %d levels, want %d", len(levels), len(expected))
+	}
+	for i, v := range levels {
+		if v != expected[i] {
+			t.Errorf("levels[%d] = %q, want %q", i, v, expected[i])
+		}
+	}
+}
