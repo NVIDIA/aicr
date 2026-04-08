@@ -29,6 +29,8 @@
 #     defaultSource:     Git repository or OCI reference
 #     defaultPath:       Path within the repository to the kustomization
 #     defaultTag:        Git tag, branch, or commit
+#   testTier:          Optional override for component test tier detection
+#                      (scheduling, deploy, or gpu-aware). Used by tools/component-test/.
 #   nodeScheduling:    Paths in Helm values where node selectors/tolerations are injected
 #
 # Note: A component must have either 'helm' OR 'kustomize' configuration, not both.
