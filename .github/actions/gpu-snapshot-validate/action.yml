@@ -45,9 +45,9 @@ runs:
     - name: Validate snapshot detected GPU
       shell: bash
       run: |
-        # Query by subtype name (not index) — #502 added a "hardware" subtype before "smi".
-        GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.name == "smi") | .data["gpu.model"]' snapshot.yaml)
-        GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.name == "smi") | .data["gpu-count"]' snapshot.yaml)
+        # Query by subtype field (not index) — #502 added a "hardware" subtype before "smi".
+        GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "smi") | .data["gpu.model"]' snapshot.yaml)
+        GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "smi") | .data["gpu-count"]' snapshot.yaml)
         echo "GPU model: ${GPU_MODEL}"
         echo "GPU count: ${GPU_COUNT}"
         if [[ "${GPU_MODEL}" != *"${{ inputs.gpu_model }}"* ]]; then
