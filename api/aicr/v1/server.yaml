@@ -194,6 +194,15 @@ paths:
                         - eks
                         - eks-training
                         - gb200-eks-training
+                      excludedOverlays:
+                        - name: h100-eks-ubuntu-training
+                          reason: mixin-constraint-failed
+                      constraintWarnings:
+                        - overlay: h100-eks-ubuntu-training
+                          constraint: OS.sysctl./proc/sys/kernel/osrelease
+                          expected: ">= 6.8"
+                          actual: "5.15.0"
+                          reason: "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
                     criteria:
                       service: eks
                       accelerator: gb200
@@ -890,6 +899,15 @@ paths:
                       - eks
                       - eks-training
                       - gb200-eks-training
+                    excludedOverlays:
+                      - name: h100-eks-ubuntu-training
+                        reason: mixin-constraint-failed
+                    constraintWarnings:
+                      - overlay: h100-eks-ubuntu-training
+                        constraint: OS.sysctl./proc/sys/kernel/osrelease
+                        expected: ">= 6.8"
+                        actual: "5.15.0"
+                        reason: "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
                   criteria:
                     service: eks
                     accelerator: gb200
@@ -1289,6 +1307,45 @@ components:
               items:
                 type: string
               description: List of overlay criteria that were applied
+            excludedOverlays:
+              type: array
+              description: Optional list of matching overlays excluded from the final recipe
+              items:
+                type: object
+                required: [name]
+                properties:
+                  name:
+                    type: string
+                    description: Name of the excluded overlay
+                  reason:
+                    type: string
+                    description: >
+                      Machine-readable reason for exclusion. API-generated responses
+                      populate this field; legacy stored recipes accepted for backward
+                      compatibility may omit it when deserialized.
+                    enum: [constraint-failed, mixin-constraint-failed]
+            constraintWarnings:
+              type: array
+              description: Optional details about failed constraint evaluations for excluded overlays
+              items:
+                type: object
+                required: [overlay, constraint, expected, reason]
+                properties:
+                  overlay:
+                    type: string
+                    description: Overlay that was excluded
+                  constraint:
+                    type: string
+                    description: Constraint name that failed evaluation
+                  expected:
+                    type: string
+                    description: Expected constraint value
+                  actual:
+                    type: string
+                    description: Actual evaluated value when available
+                  reason:
+                    type: string
+                    description: Human-readable explanation of the failure
         criteria:
           $ref: "#/components/schemas/Criteria"
           description: Original criteria parameters

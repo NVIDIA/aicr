@@ -16,6 +16,7 @@
 package recipe
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -23,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"gopkg.in/yaml.v3"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
@@ -335,6 +337,67 @@ type ConstraintWarning struct {
 	Reason string `json:"reason" yaml:"reason"`
 }
 
+// ExcludedOverlayReason indicates why a matching overlay was dropped.
+type ExcludedOverlayReason string
+
+const (
+	// ExcludedOverlayReasonConstraintFailed is used when an overlay's own
+	// constraints fail pre-merge evaluation.
+	ExcludedOverlayReasonConstraintFailed ExcludedOverlayReason = "constraint-failed"
+	// ExcludedOverlayReasonMixinConstraintFailed is used when a candidate chain
+	// is excluded during post-compose mixin constraint evaluation.
+	ExcludedOverlayReasonMixinConstraintFailed ExcludedOverlayReason = "mixin-constraint-failed"
+)
+
+// ExcludedOverlay records a matching overlay that was excluded from the final
+// recipe result, along with a machine-readable reason.
+type ExcludedOverlay struct {
+	// Name is the excluded overlay name.
+	Name string `json:"name" yaml:"name"`
+
+	// Reason identifies why the overlay was excluded.
+	Reason ExcludedOverlayReason `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// UnmarshalYAML accepts both the legacy scalar string form:
+//   - excludedOverlays: ["overlay-name"]
+//
+// and the current object form:
+//   - excludedOverlays: [{name: overlay-name, reason: constraint-failed}]
+func (e *ExcludedOverlay) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		e.Name = node.Value
+		e.Reason = ""
+		return nil
+	}
+
+	type rawExcludedOverlay ExcludedOverlay
+	var raw rawExcludedOverlay
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	*e = ExcludedOverlay(raw)
+	return nil
+}
+
+// UnmarshalJSON accepts both the legacy string form and the current object form.
+func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		e.Name = name
+		e.Reason = ""
+		return nil
+	}
+
+	type rawExcludedOverlay ExcludedOverlay
+	var raw rawExcludedOverlay
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*e = ExcludedOverlay(raw)
+	return nil
+}
+
 // RecipeResult represents the final merged recipe output.
 type RecipeResult struct {
 	// Kind is always "RecipeResult".
@@ -352,9 +415,9 @@ type RecipeResult struct {
 		AppliedOverlays []string `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
 
 		// ExcludedOverlays lists overlays that matched criteria but were excluded
-		// due to failing constraint validation against the snapshot.
+		// from the final recipe, along with the machine-readable exclusion reason.
 		// Only populated when a snapshot is provided during recipe generation.
-		ExcludedOverlays []string `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+		ExcludedOverlays []ExcludedOverlay `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
 
 		// ConstraintWarnings contains details about why specific overlays were excluded.
 		// Helps users understand why certain environment-specific configurations
