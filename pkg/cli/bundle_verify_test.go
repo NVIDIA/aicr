@@ -20,7 +20,6 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
-	"github.com/urfave/cli/v3"
 )
 
 func TestBundleVerifyCmd_HasExpectedFlags(t *testing.T) {
@@ -50,11 +49,12 @@ func TestBundleVerifyCmd_MinTrustLevelDefault(t *testing.T) {
 
 	for _, f := range cmd.Flags {
 		if f.Names()[0] == "min-trust-level" {
-			// Check it's a StringFlag with default "max"
-			sf, ok := f.(*cli.StringFlag)
+			// Check it's a completable StringFlag with default "max"
+			cf, ok := f.(*completableStringFlag)
 			if !ok {
-				t.Fatal("min-trust-level should be a StringFlag")
+				t.Fatal("min-trust-level should be a completableStringFlag")
 			}
+			sf := cf.StringFlag
 			if sf.Value != "max" {
 				t.Errorf("min-trust-level default = %q, want %q", sf.Value, "max")
 			}

@@ -155,7 +155,7 @@ func snapshotCmdFlags() []cli.Flag {
 			Category: "Output",
 		},
 		outputFlag,
-		formatFlag,
+		formatFlag(),
 		kubeconfigFlag,
 	}
 }

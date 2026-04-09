@@ -16,6 +16,7 @@ package verifier
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/constraints"
@@ -70,6 +71,17 @@ func ParseTrustLevel(s string) (TrustLevel, error) {
 			fmt.Sprintf("invalid trust level %q: must be one of unknown, unverified, attested, verified", s))
 	}
 	return level, nil
+}
+
+// GetTrustLevels returns all valid trust level names sorted alphabetically.
+// This excludes "max" which is a meta-value for auto-detection, not a real level.
+func GetTrustLevels() []string {
+	levels := make([]string, 0, len(trustOrder))
+	for level := range trustOrder {
+		levels = append(levels, string(level))
+	}
+	sort.Strings(levels)
+	return levels
 }
 
 // VerifyResult contains the outcome of bundle verification.

@@ -36,6 +36,7 @@ const (
 	versionDefault         = "dev"
 	functionalCategoryName = "Functional"
 	agentImageBase         = "ghcr.io/nvidia/aicr"
+	shellCompletionFlag    = "--generate-shell-completion"
 )
 
 // defaultAgentImage returns the agent container image reference matching the
@@ -64,12 +65,16 @@ var (
 		Category: "Output",
 	}
 
-	formatFlag = &cli.StringFlag{
-		Name:     "format",
-		Aliases:  []string{"t"},
-		Value:    string(serializer.FormatYAML),
-		Usage:    fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
-		Category: "Output",
+	// formatFlag is a function to avoid sharing a single flag instance across
+	// commands, which causes urfave/cli internal state conflicts in parallel tests.
+	formatFlag = func() cli.Flag {
+		return withCompletions(&cli.StringFlag{
+			Name:     "format",
+			Aliases:  []string{"t"},
+			Value:    string(serializer.FormatYAML),
+			Usage:    fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
+			Category: "Output",
+		}, serializer.SupportedFormats)
 	}
 
 	kubeconfigFlag = &cli.StringFlag{
@@ -184,6 +189,18 @@ func completeWithAllFlags(_ context.Context, cmd *cli.Command) {
 	writer := cmd.Root().Writer
 
 	if strings.HasPrefix(lastArg, "-") {
+		// Flag value completion: when lastArg exactly matches a completable
+		// flag name (e.g. "--intent"), emit valid values. This handles the
+		// zsh/fish case where "aicr recipe --intent <TAB>" sends
+		// ["aicr", "recipe", "--intent", shellCompletionFlag]
+		// without an empty string for the value being completed.
+		if cf, ok := findCompletableFlag(cmd, lastArg); ok {
+			for _, v := range cf.Completions() {
+				fmt.Fprintln(writer, v)
+			}
+			return
+		}
+
 		cur := strings.TrimLeft(lastArg, "-")
 		for _, f := range cmd.Flags {
 			for _, flagName := range f.Names() {
@@ -210,6 +227,20 @@ func completeWithAllFlags(_ context.Context, cmd *cli.Command) {
 		return
 	}
 
+	// Flag value completion: if the previous arg is a completable flag,
+	// suggest its valid values instead of subcommands. This handles the
+	// bash case where "aicr recipe --intent <TAB>" sends
+	// ["aicr", "recipe", "--intent", "", shellCompletionFlag]
+	// with an empty string for the value being completed.
+	if prevArg := completionPrevArg(); prevArg != "" {
+		if cf, ok := findCompletableFlag(cmd, prevArg); ok {
+			for _, v := range cf.Completions() {
+				fmt.Fprintln(writer, v)
+			}
+			return
+		}
+	}
+
 	for _, sub := range cmd.Commands {
 		if !sub.Hidden {
 			fmt.Fprintln(writer, sub.Name)
@@ -224,11 +255,24 @@ func completeWithAllFlags(_ context.Context, cmd *cli.Command) {
 // cmd.Args().
 func completionLastArg() string {
 	n := len(os.Args)
-	if n >= 2 && os.Args[n-1] == "--generate-shell-completion" {
+	if n >= 2 && os.Args[n-1] == shellCompletionFlag {
 		return os.Args[n-2]
 	}
 	if n >= 1 {
 		return os.Args[n-1]
+	}
+	return ""
+}
+
+// completionPrevArg returns the second-to-last user-typed argument from
+// os.Args, which is the flag name when the user is completing a flag value.
+// For "aicr recipe --intent <TAB>", os.Args is
+// ["aicr", "recipe", "--intent", "", shellCompletionFlag]
+// and this returns "--intent".
+func completionPrevArg() string {
+	n := len(os.Args)
+	if n >= 3 && os.Args[n-1] == shellCompletionFlag {
+		return os.Args[n-3]
 	}
 	return ""
 }
@@ -261,7 +305,7 @@ func Execute() {
 }
 
 // sanitizeCompletionArgs works around a urfave/cli v3 limitation where "--"
-// immediately before "--generate-shell-completion" disables completion mode
+// immediately before shellCompletionFlag disables completion mode
 // entirely (checkShellCompleteFlag treats "--" as a flag terminator). This
 // causes the actual command to execute during TAB completion instead of
 // returning suggestions.
@@ -272,7 +316,7 @@ func Execute() {
 // arg that triggers flag suggestions.
 func sanitizeCompletionArgs(args []string) []string {
 	n := len(args)
-	if n < 3 || args[n-1] != "--generate-shell-completion" {
+	if n < 3 || args[n-1] != shellCompletionFlag {
 		return args
 	}
 	if args[n-2] != "--" {

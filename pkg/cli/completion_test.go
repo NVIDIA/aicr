@@ -22,6 +22,11 @@ import (
 	"testing"
 
 	urfave "github.com/urfave/cli/v3"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 // runCompletion runs the root command with --generate-shell-completion appended
@@ -158,6 +163,136 @@ func TestCompletion_NestedSubcommands(t *testing.T) {
 
 	if !strings.Contains(output, "update") {
 		t.Errorf("expected nested subcommand %q in trust completion output, got:\n%s", "update", output)
+	}
+}
+
+func TestCompletion_RecipeFlagValues(t *testing.T) {
+	tests := []struct {
+		flag   string
+		expect []string
+	}{
+		{"--intent", recipe.GetCriteriaIntentTypes()},
+		{"--service", recipe.GetCriteriaServiceTypes()},
+		{"--accelerator", recipe.GetCriteriaAcceleratorTypes()},
+		{"--gpu", recipe.GetCriteriaAcceleratorTypes()},
+		{"--os", recipe.GetCriteriaOSTypes()},
+		{"--platform", recipe.GetCriteriaPlatformTypes()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.flag, func(t *testing.T) {
+			output, err := runCompletion(t, "recipe", tt.flag, "")
+			if err != nil {
+				t.Fatalf("recipe %s completion failed: %v", tt.flag, err)
+			}
+			for _, v := range tt.expect {
+				if !strings.Contains(output, v) {
+					t.Errorf("expected %q in output for %s, got:\n%s", v, tt.flag, output)
+				}
+			}
+		})
+	}
+}
+
+func TestCompletion_SharedFormatFlag(t *testing.T) {
+	for _, cmd := range []string{"recipe", "snapshot"} {
+		t.Run(cmd, func(t *testing.T) {
+			output, err := runCompletion(t, cmd, "--format", "")
+			if err != nil {
+				t.Fatalf("%s --format completion failed: %v", cmd, err)
+			}
+			for _, v := range serializer.SupportedFormats() {
+				if !strings.Contains(output, v) {
+					t.Errorf("expected %q in %s --format output, got:\n%s", v, cmd, output)
+				}
+			}
+		})
+	}
+}
+
+func TestCompletion_BundleDeployerFlag(t *testing.T) {
+	output, err := runCompletion(t, "bundle", "--deployer", "")
+	if err != nil {
+		t.Fatalf("bundle --deployer completion failed: %v", err)
+	}
+	for _, v := range config.GetDeployerTypes() {
+		if !strings.Contains(output, v) {
+			t.Errorf("expected %q in --deployer output, got:\n%s", v, output)
+		}
+	}
+}
+
+func TestCompletion_VerifyFlagValues(t *testing.T) {
+	tests := []struct {
+		flag   string
+		expect []string
+	}{
+		{"--min-trust-level", verifier.GetTrustLevels()},
+		{"--format", []string{"text", "json"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.flag, func(t *testing.T) {
+			output, err := runCompletion(t, "verify", tt.flag, "")
+			if err != nil {
+				t.Fatalf("verify %s completion failed: %v", tt.flag, err)
+			}
+			for _, v := range tt.expect {
+				if !strings.Contains(output, v) {
+					t.Errorf("expected %q in output for %s, got:\n%s", v, tt.flag, output)
+				}
+			}
+		})
+	}
+}
+
+func TestCompletion_QueryInheritsRecipeCompletions(t *testing.T) {
+	output, err := runCompletion(t, "query", "--intent", "")
+	if err != nil {
+		t.Fatalf("query --intent completion failed: %v", err)
+	}
+	for _, v := range recipe.GetCriteriaIntentTypes() {
+		if !strings.Contains(output, v) {
+			t.Errorf("expected %q in query --intent output, got:\n%s", v, output)
+		}
+	}
+}
+
+func TestFindCompletableFlag(t *testing.T) {
+	cmd := &urfave.Command{
+		Flags: []urfave.Flag{
+			withCompletions(&urfave.StringFlag{
+				Name:    "intent",
+				Aliases: []string{"i"},
+			}, func() []string { return []string{"inference", "training"} }),
+			&urfave.StringFlag{
+				Name: "output",
+			},
+		},
+	}
+
+	tests := []struct {
+		name    string
+		flagArg string
+		wantOK  bool
+		wantLen int
+	}{
+		{"primary name", "--intent", true, 2},
+		{"alias", "-i", true, 2},
+		{"non-completable flag", "--output", false, 0},
+		{"unknown flag", "--bogus", false, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cf, ok := findCompletableFlag(cmd, tt.flagArg)
+			if ok != tt.wantOK {
+				t.Fatalf("findCompletableFlag(%q) ok = %v, want %v", tt.flagArg, ok, tt.wantOK)
+			}
+			if ok && len(cf.Completions()) != tt.wantLen {
+				t.Errorf("completions len = %d, want %d", len(cf.Completions()), tt.wantLen)
+			}
+		})
 	}
 }
 

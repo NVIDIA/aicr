@@ -53,6 +53,19 @@ testing_tools:
   yq: 'v4.52.4'
   karpenter: 'v1.8.0'
 
+# Area Assignees (GitHub usernames assigned to issues by area label)
+area_assignees:
+  area/api: cullenmcdermott
+  area/bundler: ArangoGutierrez
+  area/ci: mchmarny
+  area/cli: lockwobr
+  area/collector: ayuskauskas
+  area/docs: dims
+  area/infra: mchmarny
+  area/recipes: yuanchen8911
+  area/tests: atif1996
+  area/validator: xdu31
+
 # Quality Thresholds
 quality:
   coverage_threshold: '70'

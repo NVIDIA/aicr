@@ -27,6 +27,18 @@ on:
       - '.github/actions/aicr-build/**'
       - '.github/actions/gpu-test-cleanup/**'
       - '.github/actions/load-versions/**'
+      # Collector/snapshotter — affects GPU detection and snapshot content
+      - 'pkg/collector/**'
+      - 'pkg/snapshotter/**'
+      - '.github/actions/gpu-snapshot-validate/**'
+      # Validator infrastructure — affects how validator Jobs are deployed and run
+      - 'pkg/validator/job/**'
+      - 'pkg/validator/catalog/**'
+      - 'pkg/defaults/timeouts.go'
+      # Conformance validator source
+      - 'validators/conformance/**'
+  pull_request:
+    types: [labeled]
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -39,6 +51,9 @@ concurrency:
 jobs:
 
   gpu-smoke-test:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-gpu-tests'
     name: GPU Smoke Test (nvkind + T4)
     runs-on: linux-amd64-gpu-t4-latest-1
     timeout-minutes: 30

@@ -28,6 +28,7 @@ jobs:
     name: Auto-Triage Issues
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     timeout-minutes: 5
     steps:
@@ -63,3 +64,49 @@ jobs:
                 name: 'needs-triage',
               });
             }
+
+      - name: Assign by area label
+        if: >-
+          github.event.action == 'labeled' &&
+          startsWith(github.event.label.name, 'area/')
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd  # v8.0.0
+        with:
+          script: |
+            const { data: file } = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: '.settings.yaml',
+            });
+            const content = Buffer.from(file.content, 'base64').toString('utf8');
+
+            // Parse area_assignees from .settings.yaml
+            const assignees = {};
+            let inBlock = false;
+            for (const line of content.split('\n')) {
+              if (line.startsWith('area_assignees:')) {
+                inBlock = true;
+                continue;
+              }
+              if (inBlock) {
+                const m = line.match(/^\s+(area\/\S+):\s*(\S+)/);
+                if (m) {
+                  assignees[m[1]] = m[2];
+                } else if (/^\S/.test(line)) {
+                  break;
+                }
+              }
+            }
+
+            const label = context.payload.label.name;
+            const user = assignees[label];
+            if (!user) {
+              core.info(`No assignee configured for ${label}`);
+              return;
+            }
+
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              assignees: [user],
+            });
