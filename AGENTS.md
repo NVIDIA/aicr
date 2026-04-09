@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This file provides guidance to Codex and other coding agents when working with code in this repository.
-<!-- AUTO-SYNCED: canonical source is .claude/CLAUDE.md. Only the first 4 lines differ. CI enforces sync. -->
+<!-- AUTO-SYNCED: canonical source is .claude/CLAUDE.md. Only the first 4 lines differ. CI enforced sync. -->
 
 ## Role & Expertise
 
@@ -477,6 +477,25 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 | Use `IgnoreAlreadyExists` for mutable K8s resources | Use create-or-update semantics (Create, then Update if exists) |
 | Ignore `Close()` error on writable file handles | Capture and check `closeErr := f.Close()` |
 | Hardcode resource names from templates | Extract to named constants to keep code and templates in sync |
+
+## Pull Request Requirements
+
+**Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers tests, linting (golangci-lint + yamllint), e2e, vulnerability scan, and repo-specific checks (docs sidebar, agents sync). Do not substitute a subset of commands — if `make qualify` passes locally, CI will pass.
+
+**Branch hygiene:**
+- Always rebase onto the target branch before pushing: `git fetch origin main && git rebase origin/main`
+- Squash commits into a single commit before push
+- Cryptographically sign commits (`git commit -S`)
+
+**PR description:** Use the template from `.github/PULL_REQUEST_TEMPLATE.md` exactly as defined there. Do not inline a modified copy — read and fill in the canonical template. The template covers: Summary, Motivation/Context (with Fixes/Related), Type of Change, Components Affected, Implementation Notes, Testing, Risk Assessment, and Checklist.
+
+**PR policy:**
+- Do NOT add `Co-Authored-By` lines (organization policy)
+- Do NOT add "Generated with Claude Code" or similar attribution
+- Add appropriate type labels: `enhancement`, `bug`, `documentation`
+- Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
+- Do NOT add `size/*` labels (auto-assigned by bot)
+- Keep the PR title under 70 characters; use the description for details
 
 ## Key Files
 
