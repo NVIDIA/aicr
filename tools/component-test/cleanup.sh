@@ -100,6 +100,10 @@ if [[ "$DELETE_CLUSTER" == "true" ]]; then
 
     if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
         if [[ "$FORCE_CLEANUP" != "true" ]]; then
+            if [[ ! -t 0 ]]; then
+                log_error "DELETE_CLUSTER=true requires FORCE_CLEANUP=true in non-interactive mode"
+                exit 1
+            fi
             log_info "About to delete Kind cluster: $CLUSTER_NAME"
             read -r -p "Continue? [y/N] " confirm
             if [[ "$confirm" != [yY] ]]; then

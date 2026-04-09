@@ -14,7 +14,9 @@ make component-test COMPONENT=cert-manager
 ```
 
 That's it. The harness auto-detects the right test tier, creates a Kind cluster,
-deploys the component, and runs its health check.
+deploys the component, and runs its health check. Components detected as
+`scheduling` tier are redirected to the KWOK infrastructure (`make kwok-e2e`)
+and exit with code 2 — no Kind cluster is created for those.
 
 ## Test Tiers
 

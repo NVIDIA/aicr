@@ -613,7 +613,10 @@ endif
 		GPU_PROFILE=$${GPU_PROFILE:-} GPU_COUNT=$${GPU_COUNT:-} bash tools/component-test/setup-gpu-mock.sh; \
 	fi; \
 	if [ "$$TIER" = "scheduling" ]; then \
-		exit 0; \
+		echo "[INFO] Scheduling tier uses KWOK, not this harness."; \
+		echo "[INFO] Run: make kwok-e2e RECIPE=<recipe-name>"; \
+		echo "[INFO] No test was executed. Exiting with code 2."; \
+		exit 2; \
 	fi; \
 	COMPONENT=$(COMPONENT) HELM_NAMESPACE=$${HELM_NAMESPACE:-} bash tools/component-test/deploy-component.sh; \
 	COMPONENT=$(COMPONENT) bash tools/component-test/run-health-check.sh
