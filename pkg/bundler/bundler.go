@@ -365,6 +365,7 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 		ComponentValues:  componentValues,
 		Version:          b.Config.Version(),
 		RepoURL:          b.Config.RepoURL(),
+		TargetRevision:   b.Config.TargetRevision(),
 		IncludeChecksums: b.Config.IncludeChecksums(),
 	}
 

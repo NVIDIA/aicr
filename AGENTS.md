@@ -247,6 +247,27 @@ slog.Error("operation failed", "error", err, "component", "gpu-collector")
 
 **Note:** A component must have either `helm` OR `kustomize` configuration, not both.
 
+**Using mixins for shared OS/platform content:**
+```yaml
+# Leaf overlay referencing mixins instead of duplicating content
+spec:
+  base: h100-eks-ubuntu-training
+  mixins:
+    - os-ubuntu          # Ubuntu constraints (defined once in recipes/mixins/)
+    - platform-kubeflow  # kubeflow-trainer component (defined once in recipes/mixins/)
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: kubeflow
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+```
+
+Mixins carry only `constraints` and `componentRefs` — no `criteria`, `base`, `mixins`, or `validation`. They live in `recipes/mixins/` with `kind: RecipeMixin`.
+
 ## Error Wrapping Rules
 
 **Never return bare errors.** Every `return err` must wrap with context:
@@ -467,6 +488,7 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 | `.settings.yaml` | Project settings: tool versions, quality thresholds, build/test config (single source of truth) |
 | `recipes/registry.yaml` | Declarative component configuration |
 | `recipes/overlays/*.yaml` | Recipe overlay definitions |
+| `recipes/mixins/*.yaml` | Composable mixin fragments (OS constraints, platform components) |
 | `recipes/components/*/values.yaml` | Component Helm values |
 | `api/aicr/v1/server.yaml` | OpenAPI spec |
 | `.goreleaser.yaml` | Release configuration |

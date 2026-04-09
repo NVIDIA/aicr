@@ -415,6 +415,20 @@ func TestDeployerOptions(t *testing.T) {
 			t.Errorf("RepoURL() = %s, want empty string", cfg.RepoURL())
 		}
 	})
+
+	t.Run("WithTargetRevision sets target revision", func(t *testing.T) {
+		cfg := NewConfig(WithTargetRevision("v1.0.0"))
+		if cfg.TargetRevision() != "v1.0.0" {
+			t.Errorf("TargetRevision() = %s, want v1.0.0", cfg.TargetRevision())
+		}
+	})
+
+	t.Run("default TargetRevision is empty", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.TargetRevision() != "" {
+			t.Errorf("TargetRevision() = %s, want empty string", cfg.TargetRevision())
+		}
+	})
 }
 
 func TestParseValueOverrides(t *testing.T) {
