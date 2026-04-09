@@ -40,15 +40,12 @@ jobs:
         with:
           script: |
             const creator = context.payload.issue.user.login;
-            const { data: issues } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              creator: creator,
-              state: 'all',
+            const { data: { total_count } } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} type:issue author:${creator}`,
             });
 
             // Only the issue that just triggered this event
-            if (issues.length === 1) {
+            if (total_count === 1) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -70,15 +67,12 @@ jobs:
         with:
           script: |
             const creator = context.payload.pull_request.user.login;
-            const { data: prs } = await github.rest.pulls.list({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              state: 'all',
+            const { data: { total_count } } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} type:pr author:${creator}`,
             });
 
-            const authorPRs = prs.filter(pr => pr.user.login === creator);
             // Only the PR that just triggered this event
-            if (authorPRs.length === 1) {
+            if (total_count === 1) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
