@@ -53,7 +53,7 @@ testing_tools:
   yq: 'v4.52.4'
   karpenter: 'v1.8.0'
 
-# Area Assignees (GitHub usernames assigned to PRs by area label)
+# Area Assignees (GitHub usernames assigned to issues by area label)
 area_assignees:
   area/api: cullenmcdermott
   area/bundler: ArangoGutierrez
