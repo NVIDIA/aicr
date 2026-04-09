@@ -260,6 +260,121 @@ func TestGenerate_WithRepoURL(t *testing.T) {
 	if !strings.Contains(string(content), customRepoURL) {
 		t.Error("app-of-apps.yaml should contain custom repo URL")
 	}
+
+	// Verify child application.yaml contains custom repo URL in values source
+	gpuOperatorApp := filepath.Join(outputDir, "gpu-operator", "application.yaml")
+	appContent, err := os.ReadFile(gpuOperatorApp)
+	if err != nil {
+		t.Fatalf("Failed to read gpu-operator application.yaml: %v", err)
+	}
+	if !strings.Contains(string(appContent), customRepoURL) {
+		t.Errorf("application.yaml should contain custom repo URL %s, got:\n%s", customRepoURL, string(appContent))
+	}
+}
+
+func TestGenerate_WithOCIRepoURL(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	ociRepoURL := "nvcr.io/foo/aicr-bundles"
+	ociTag := "v0.0.1"
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+
+	input := &GeneratorInput{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.9.0",
+		RepoURL:         ociRepoURL,
+		TargetRevision:  ociTag,
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify app-of-apps uses OCI repo URL and tag
+	appOfApps, err := os.ReadFile(filepath.Join(outputDir, "app-of-apps.yaml"))
+	if err != nil {
+		t.Fatalf("Failed to read app-of-apps.yaml: %v", err)
+	}
+	if !strings.Contains(string(appOfApps), ociRepoURL) {
+		t.Error("app-of-apps.yaml should contain OCI repo URL")
+	}
+	if !strings.Contains(string(appOfApps), ociTag) {
+		t.Error("app-of-apps.yaml should contain OCI tag as targetRevision")
+	}
+
+	// Verify child application uses OCI repo URL and tag
+	gpuApp, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "application.yaml"))
+	if err != nil {
+		t.Fatalf("Failed to read gpu-operator application.yaml: %v", err)
+	}
+	gpuAppStr := string(gpuApp)
+	if !strings.Contains(gpuAppStr, ociRepoURL) {
+		t.Errorf("application.yaml should contain OCI repo URL, got:\n%s", gpuAppStr)
+	}
+	if !strings.Contains(gpuAppStr, ociTag) {
+		t.Errorf("application.yaml should contain OCI tag as targetRevision, got:\n%s", gpuAppStr)
+	}
+	if strings.Contains(gpuAppStr, "{{ .RepoURL }}") {
+		t.Error("application.yaml should not contain literal {{ .RepoURL }} placeholder")
+	}
+}
+
+func TestGenerate_DefaultRepoURL_InChildApplications(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+
+	input := &GeneratorInput{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.9.0",
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	gpuApp, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "application.yaml"))
+	if err != nil {
+		t.Fatalf("Failed to read application.yaml: %v", err)
+	}
+	gpuAppStr := string(gpuApp)
+	if !strings.Contains(gpuAppStr, "YOUR-ORG/YOUR-REPO") {
+		t.Errorf("application.yaml should contain placeholder URL, got:\n%s", gpuAppStr)
+	}
+	if strings.Contains(gpuAppStr, "{{ .RepoURL }}") {
+		t.Error("application.yaml should not contain literal {{ .RepoURL }} placeholder")
+	}
 }
 
 func TestGenerate_WithChecksums(t *testing.T) {
