@@ -37,6 +37,18 @@ on:
       - 'kwok/manifests/karpenter/**'
       - 'kwok/scripts/install-karpenter-kwok.sh'
       - 'recipes/components/prometheus-adapter/**'
+      # Collector/snapshotter — affects GPU detection and snapshot content
+      - 'pkg/collector/**'
+      - 'pkg/snapshotter/**'
+      - '.github/actions/gpu-snapshot-validate/**'
+      # Validator infrastructure — affects how validator Jobs are deployed and run
+      - 'pkg/validator/job/**'
+      - 'pkg/validator/catalog/**'
+      - 'pkg/defaults/timeouts.go'
+      # Conformance validator source
+      - 'validators/conformance/**'
+  pull_request:
+    types: [labeled]
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -49,6 +61,9 @@ concurrency:
 jobs:
 
   gpu-training-test:
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.label.name == 'run-gpu-tests'
     name: GPU Training Test (nvkind + H100 x2)
     runs-on: linux-amd64-gpu-h100-latest-2
     timeout-minutes: 45
