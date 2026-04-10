@@ -72,41 +72,55 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
         with:
           script: |
-            const { data: file } = await github.rest.repos.getContent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              path: '.settings.yaml',
-            });
-            const content = Buffer.from(file.content, 'base64').toString('utf8');
+            try {
+              const label = context.payload.label.name;
+              const issue = context.issue.number;
+              core.info(`[assign] label=${label} issue=#${issue}`);
 
-            // Parse area_assignees from .settings.yaml
-            const assignees = {};
-            let inBlock = false;
-            for (const line of content.split('\n')) {
-              if (line.startsWith('area_assignees:')) {
-                inBlock = true;
-                continue;
-              }
-              if (inBlock) {
-                const m = line.match(/^\s+(area\/\S+):\s*(\S+)/);
-                if (m) {
-                  assignees[m[1]] = m[2];
-                } else if (/^\S/.test(line)) {
-                  break;
+              const { data: file } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: '.settings.yaml',
+              });
+              core.info(`[assign] fetched .settings.yaml (${file.size} bytes, encoding=${file.encoding})`);
+
+              const content = Buffer.from(file.content, 'base64').toString('utf8');
+
+              // Parse area_assignees from .settings.yaml
+              const assignees = {};
+              let inBlock = false;
+              for (const line of content.split('\n')) {
+                if (line.startsWith('area_assignees:')) {
+                  inBlock = true;
+                  continue;
+                }
+                if (inBlock) {
+                  const m = line.match(/^\s+(area\/\S+):\s*(\S+)/);
+                  if (m) {
+                    assignees[m[1]] = m[2];
+                  } else if (/^\S/.test(line)) {
+                    break;
+                  }
                 }
               }
-            }
+              core.info(`[assign] parsed map: ${JSON.stringify(assignees)}`);
 
-            const label = context.payload.label.name;
-            const user = assignees[label];
-            if (!user) {
-              core.info(`No assignee configured for ${label}`);
-              return;
-            }
+              const value = assignees[label];
+              if (!value) {
+                core.warning(`[assign] no assignee configured for label "${label}"`);
+                return;
+              }
 
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              assignees: [user],
-            });
+              const users = value.split(',').map(u => u.trim()).filter(Boolean);
+              core.info(`[assign] assigning [${users.join(', ')}] to issue #${issue}`);
+
+              const result = await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue,
+                assignees: users,
+              });
+              core.info(`[assign] API status=${result.status}, assignees=${result.data.assignees.map(a => a.login).join(',')}`);
+            } catch (err) {
+              core.setFailed(`[assign] failed: ${err.message} (status=${err.status || 'n/a'})`);
+            }

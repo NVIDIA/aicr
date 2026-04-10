@@ -27,6 +27,8 @@ runs:
 
     - name: Build snapshot agent image and load into kind
       shell: bash
+      env:
+        GOFLAGS: -mod=vendor
       run: |
         # Build snapshot agent image with CUDA base (provides nvidia-smi for GPU detection).
         # Uses cuda:base (~250MB) instead of cuda:runtime (~1.8GB) — only nvidia-smi is needed.

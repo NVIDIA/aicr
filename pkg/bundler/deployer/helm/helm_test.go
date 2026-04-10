@@ -1047,7 +1047,7 @@ func createKustomizeRecipeResult() *recipe.RecipeResult {
 		Metadata: struct {
 			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []string                   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
 			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
 		}{
 			Version: "v0.1.0",
@@ -1073,7 +1073,7 @@ func createMixedRecipeResult() *recipe.RecipeResult {
 		Metadata: struct {
 			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []string                   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
 			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
 		}{
 			Version: "v0.1.0",
@@ -1112,7 +1112,7 @@ func createTestRecipeResult() *recipe.RecipeResult {
 		Metadata: struct {
 			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []string                   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
 			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
 		}{
 			Version: "v0.1.0",
@@ -1149,7 +1149,7 @@ func createEmptyRecipeResult() *recipe.RecipeResult {
 		Metadata: struct {
 			Version            string                     `json:"version,omitempty" yaml:"version,omitempty"`
 			AppliedOverlays    []string                   `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
-			ExcludedOverlays   []string                   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+			ExcludedOverlays   []recipe.ExcludedOverlay   `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
 			ConstraintWarnings []recipe.ConstraintWarning `json:"constraintWarnings,omitempty" yaml:"constraintWarnings,omitempty"`
 		}{
 			Version: "v0.1.0",

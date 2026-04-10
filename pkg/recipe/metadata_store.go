@@ -399,10 +399,10 @@ type mixinEvalResult struct {
 	// Failed is true if any mixin constraint failed evaluation.
 	Failed bool
 	// ExcludedOverlays are the overlays excluded due to the failure.
-	ExcludedOverlays []string
+	ExcludedOverlays []ExcludedOverlay
 	// Warnings are the constraint warnings for the failing constraints.
 	Warnings []ConstraintWarning
-	// Spec is the rebuilt spec (without mixin-bearing chains) if failed, or nil if all passed.
+	// Spec is the rebuilt spec (without the failed candidate chains) if failed, or nil if all passed.
 	Spec *RecipeMetadataSpec
 	// AppliedOverlays is the surviving applied overlays if failed.
 	AppliedOverlays []string
@@ -413,149 +413,148 @@ type mixinEvalResult struct {
 // This runs after mergeMixins so that constraints moved from inline overlay
 // definitions to mixins are still validated against the snapshot.
 //
-// If any mixin constraint fails, only the overlay chains that contributed
-// mixins are excluded. Independent overlays (e.g., monitoring-hpa) that do
-// not declare mixins are preserved. This maintains the existing maximal-leaf
-// filtering behavior for non-mixin overlays.
+// If any mixin constraint fails, only the candidate chains that contributed the
+// failing mixin constraints are excluded. Independent overlays
+// (e.g., monitoring-hpa) are preserved. This maintains the existing
+// maximal-leaf filtering behavior for non-mixin overlays.
 func (s *MetadataStore) evaluateMixinConstraints(
 	mergedSpec *RecipeMetadataSpec,
 	evaluator ConstraintEvaluatorFunc,
 	mixinConstraintNames map[string]bool,
-	appliedOverlays []string,
-) mixinEvalResult {
+	candidateOverlays []string,
+) (mixinEvalResult, error) {
 
 	if evaluator == nil || len(mixinConstraintNames) == 0 {
-		return mixinEvalResult{}
+		return mixinEvalResult{}, nil
+	}
+
+	constraintCandidates, err := s.buildMixinConstraintCandidateIndex(candidateOverlays)
+	if err != nil {
+		return mixinEvalResult{}, err
 	}
 
 	var failedConstraints []ConstraintWarning
+	failedCandidates := make(map[string]bool)
 	for _, constraint := range mergedSpec.Constraints {
 		if !mixinConstraintNames[constraint.Name] {
 			continue // already evaluated per-overlay
 		}
 		result := evaluator(constraint)
 		if !result.Passed {
-			// Identify the overlay that declared the mixin contributing this constraint.
-			declaringOverlay := s.findMixinDeclaringOverlay(constraint.Name, appliedOverlays)
-			warning := ConstraintWarning{
-				Overlay:    declaringOverlay,
-				Constraint: constraint.Name,
-				Expected:   constraint.Value,
-				Actual:     result.Actual,
-				Reason:     "mixin constraint failed post-compose evaluation",
+			affectedCandidates := constraintCandidates[constraint.Name]
+			if len(affectedCandidates) == 0 {
+				return mixinEvalResult{}, aicrerrors.NewWithContext(
+					aicrerrors.ErrCodeInternal,
+					"failed to map mixin constraint to candidate chain",
+					map[string]any{
+						"constraint":      constraint.Name,
+						"candidate_count": len(candidateOverlays),
+					},
+				)
 			}
-			if result.Error != nil {
-				warning.Reason = result.Error.Error()
+			for _, candidate := range affectedCandidates {
+				failedCandidates[candidate] = true
+				failedConstraints = append(failedConstraints, ConstraintWarning{
+					Overlay:    candidate,
+					Constraint: constraint.Name,
+					Expected:   constraint.Value,
+					Actual:     result.Actual,
+					Reason:     buildMixinConstraintWarningReason(constraint, result),
+				})
 			}
-			failedConstraints = append(failedConstraints, warning)
 		}
 	}
 
 	if len(failedConstraints) == 0 {
-		return mixinEvalResult{}
+		return mixinEvalResult{}, nil
 	}
 
-	// Identify which applied overlays declared mixins and which are in their
-	// inheritance chains. The mixin-declaring leaves and their ancestors are
-	// removed from the rebuilt spec. Only the leaf candidates themselves are
-	// reported in ExcludedOverlays (ancestors are shared infrastructure, not
-	// rejected candidates).
-	mixinDeclarers := make(map[string]bool)    // leaf overlays that declared mixins
-	mixinChainMembers := make(map[string]bool) // declarers + their ancestors (for spec rebuild)
-	for _, name := range appliedOverlays {
-		if name == baseRecipeName {
+	var excluded []ExcludedOverlay
+	survivingCandidates := make([]*RecipeMetadata, 0, len(candidateOverlays))
+	for _, name := range candidateOverlays {
+		if failedCandidates[name] {
+			excluded = append(excluded, ExcludedOverlay{
+				Name:   name,
+				Reason: ExcludedOverlayReasonMixinConstraintFailed,
+			})
 			continue
 		}
 		overlay, exists := s.Overlays[name]
 		if !exists {
-			continue
+			return mixinEvalResult{}, aicrerrors.New(
+				aicrerrors.ErrCodeNotFound,
+				fmt.Sprintf("overlay %q not found during mixin fallback rebuild", name),
+			)
 		}
-		if len(overlay.Spec.Mixins) > 0 {
-			mixinDeclarers[name] = true
-			mixinChainMembers[name] = true
-			s.markAncestors(name, mixinChainMembers)
-		}
+		survivingCandidates = append(survivingCandidates, overlay)
 	}
 
-	var excluded []string
-	var surviving []string
-	surviving = append(surviving, baseRecipeName)
-	for _, name := range appliedOverlays {
-		if name == baseRecipeName {
-			continue
-		}
-		if mixinChainMembers[name] {
-			// Only report leaf candidates in ExcludedOverlays, not ancestors
-			if mixinDeclarers[name] {
-				excluded = append(excluded, name)
-			}
-		} else {
-			surviving = append(surviving, name)
-		}
+	// Rebuild from the surviving candidate leaves so any shared ancestors remain
+	// present when still needed by another surviving chain.
+	rebuiltSpec, survivingApplied := s.initBaseMergedSpec()
+	survivingApplied, err = s.mergeOverlayChains(survivingCandidates, &rebuiltSpec, survivingApplied)
+	if err != nil {
+		return mixinEvalResult{}, err
+	}
+	if _, err := s.mergeMixins(&rebuiltSpec); err != nil {
+		return mixinEvalResult{}, err
 	}
 
-	// Rebuild the spec from surviving overlays only
-	rebuiltSpec, _ := s.initBaseMergedSpec()
-	for _, name := range surviving {
-		if name == baseRecipeName {
-			continue
-		}
-		if overlay, exists := s.Overlays[name]; exists {
-			rebuiltSpec.Merge(&overlay.Spec)
-		}
-	}
-
-	slog.Warn("post-compose constraint evaluation failed, excluding mixin-bearing chains",
+	slog.Warn("post-compose constraint evaluation failed, excluding affected mixin chains",
 		"failed_constraints", len(failedConstraints),
 		"excluded", excluded,
-		"surviving", surviving)
+		"surviving", survivingApplied)
 
 	return mixinEvalResult{
 		Failed:           true,
 		ExcludedOverlays: excluded,
 		Warnings:         failedConstraints,
 		Spec:             &rebuiltSpec,
-		AppliedOverlays:  surviving,
-	}
+		AppliedOverlays:  survivingApplied,
+	}, nil
 }
 
-// findMixinDeclaringOverlay finds the overlay that declared the mixin
-// contributing a given constraint name.
-func (s *MetadataStore) findMixinDeclaringOverlay(constraintName string, appliedOverlays []string) string {
-	// Walk applied overlays in reverse (most specific first) to find
-	// which overlay declared a mixin that contains this constraint.
-	for i := len(appliedOverlays) - 1; i >= 0; i-- {
-		name := appliedOverlays[i]
-		overlay, exists := s.Overlays[name]
-		if !exists {
-			continue
+func buildMixinConstraintWarningReason(constraint Constraint, result ConstraintEvalResult) string {
+	if result.Error != nil {
+		return fmt.Sprintf("mixin-constraint-failed: %s", result.Error.Error())
+	}
+	return fmt.Sprintf("mixin-constraint-failed: expected %s, got %s", constraint.Value, result.Actual)
+}
+
+// buildMixinConstraintCandidateIndex maps mixin-contributed constraint names to
+// the candidate leaf overlays whose inheritance chains contribute them.
+func (s *MetadataStore) buildMixinConstraintCandidateIndex(candidateOverlays []string) (map[string][]string, error) {
+	index := make(map[string][]string)
+	for _, candidate := range candidateOverlays {
+		chain, err := s.resolveInheritanceChain(candidate)
+		if err != nil {
+			return nil, aicrerrors.WrapWithContext(
+				aicrerrors.ErrCodeInvalidRequest,
+				"failed to resolve candidate chain for mixin constraint evaluation",
+				err,
+				map[string]any{"overlay": candidate},
+			)
 		}
-		for _, mixinName := range overlay.Spec.Mixins {
-			mixin, mExists := s.Mixins[mixinName]
-			if !mExists {
-				continue
-			}
-			for _, c := range mixin.Spec.Constraints {
-				if c.Name == constraintName {
-					return name
+
+		seen := make(map[string]bool)
+		for _, recipe := range chain {
+			for _, mixinName := range recipe.Spec.Mixins {
+				mixin, exists := s.Mixins[mixinName]
+				if !exists {
+					continue
+				}
+				for _, constraint := range mixin.Spec.Constraints {
+					if seen[constraint.Name] {
+						continue
+					}
+					index[constraint.Name] = append(index[constraint.Name], candidate)
+					seen[constraint.Name] = true
 				}
 			}
 		}
 	}
-	return "post-compose" // fallback if mapping not found
-}
 
-// markAncestors walks the inheritance chain of an overlay and marks all ancestors.
-func (s *MetadataStore) markAncestors(name string, marked map[string]bool) {
-	overlay, exists := s.Overlays[name]
-	if !exists || overlay.Spec.Base == "" {
-		return
-	}
-	ancestor := overlay.Spec.Base
-	if !marked[ancestor] {
-		marked[ancestor] = true
-		s.markAncestors(ancestor, marked)
-	}
+	return index, nil
 }
 
 // initBaseMergedSpec creates a copy of the base spec for overlay merging.
@@ -696,7 +695,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 	overlays := s.FindMatchingOverlays(criteria)
 
 	var filteredOverlays []*RecipeMetadata
-	var excludedOverlays []string
+	var excludedOverlays []ExcludedOverlay
 	var constraintWarnings []ConstraintWarning
 
 	for _, overlay := range overlays {
@@ -710,7 +709,10 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 			slog.Debug("overlay passed all constraints",
 				"overlay", overlay.Metadata.Name)
 		} else {
-			excludedOverlays = append(excludedOverlays, overlay.Metadata.Name)
+			excludedOverlays = append(excludedOverlays, ExcludedOverlay{
+				Name:   overlay.Metadata.Name,
+				Reason: ExcludedOverlayReasonConstraintFailed,
+			})
 			constraintWarnings = append(constraintWarnings, warnings...)
 			slog.Info("excluding overlay due to constraint failures",
 				"overlay", overlay.Metadata.Name,
@@ -736,7 +738,14 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 	// constraints are only present after mergeMixins. Without this post-compose
 	// evaluation, a mixin constraint (e.g., kernel >= 6.8 from os-ubuntu) could
 	// fail against the snapshot but the candidate would still be selected.
-	mixinResult := s.evaluateMixinConstraints(&mergedSpec, evaluator, mixinConstraintNames, appliedOverlays)
+	candidateOverlays := make([]string, 0, len(filteredOverlays))
+	for _, overlay := range filteredOverlays {
+		candidateOverlays = append(candidateOverlays, overlay.Metadata.Name)
+	}
+	mixinResult, err := s.evaluateMixinConstraints(&mergedSpec, evaluator, mixinConstraintNames, candidateOverlays)
+	if err != nil {
+		return nil, err
+	}
 	if mixinResult.Failed {
 		excludedOverlays = append(excludedOverlays, mixinResult.ExcludedOverlays...)
 		constraintWarnings = append(constraintWarnings, mixinResult.Warnings...)

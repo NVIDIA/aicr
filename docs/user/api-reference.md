@@ -233,6 +233,21 @@ Same as GET /v1/recipe - returns a recipe JSON response.
       "eks",
       "eks-training",
       "gb200-eks-training"
+    ],
+    "excludedOverlays": [
+      {
+        "name": "h100-eks-ubuntu-training",
+        "reason": "mixin-constraint-failed"
+      }
+    ],
+    "constraintWarnings": [
+      {
+        "overlay": "h100-eks-ubuntu-training",
+        "constraint": "OS.sysctl./proc/sys/kernel/osrelease",
+        "expected": ">= 6.8",
+        "actual": "5.15.0",
+        "reason": "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
+      }
     ]
   },
   "criteria": {
@@ -264,6 +279,8 @@ Same as GET /v1/recipe - returns a recipe JSON response.
   }
 }
 ```
+
+`metadata.excludedOverlays` is optional. When present, each entry includes the overlay `name` and a machine-readable `reason` such as `constraint-failed` or `mixin-constraint-failed`.
 
 ---
 
