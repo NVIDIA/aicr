@@ -1,0 +1,72 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+navigation:
+  - section: Overview
+    contents:
+      - page: Introduction
+        path: README.md
+
+  - section: User Guide
+    contents:
+      - page: Installation
+        path: user/installation.md
+      - page: CLI Reference
+        path: user/cli-reference.md
+      - page: API Reference
+        path: user/api-reference.md
+      - page: Agent Deployment
+        path: user/agent-deployment.md
+      - page: Component Catalog
+        path: user/component-catalog.md
+
+  - section: Integrator Guide
+    contents:
+      - page: Automation
+        path: integrator/automation.md
+      - page: Data Flow
+        path: integrator/data-flow.md
+      - page: Kubernetes Deployment
+        path: integrator/kubernetes-deployment.md
+      - page: AKS GPU Setup
+        path: integrator/aks-gpu-setup.md
+      - page: EKS Dynamo Networking
+        path: integrator/eks-dynamo-networking.md
+      - page: GKE TCPXO Networking
+        path: integrator/gke-tcpxo-networking.md
+      - page: Recipe Development
+        path: integrator/recipe-development.md
+      - page: Validator Extension
+        path: integrator/validator-extension.md
+      - section: Components
+        contents:
+          - page: Skyhook
+            path: integrator/components/skyhook.md
+
+  - section: Contributor Guide
+    contents:
+      - page: Architecture Overview
+        path: contributor/index.md
+      - page: CLI
+        path: contributor/cli.md
+      - page: API Server
+        path: contributor/api-server.md
+      - page: Data Architecture
+        path: contributor/data.md
+      - page: Component Development
+        path: contributor/component.md
+      - page: Validations
+        path: contributor/validations.md
+      - page: Validator Development
+        path: contributor/validator.md

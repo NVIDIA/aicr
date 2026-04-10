@@ -121,10 +121,10 @@ For platform operators deploying and operating GPU-accelerated Kubernetes cluste
 
 | Document | Description |
 |----------|-------------|
-| [Installation](user/installation.md) | Installing the `aicr` CLI |
-| [CLI Reference](user/cli-reference.md) | Complete CLI command reference with examples |
-| [API Reference](user/api-reference.md) | Quick start for the REST API |
-| [Agent Deployment](user/agent-deployment.md) | Running the snapshot agent as a Kubernetes Job |
+| Installation | Installing the `aicr` CLI |
+| CLI Reference | Complete CLI command reference with examples |
+| API Reference | Quick start for the REST API |
+| Agent Deployment | Running the snapshot agent as a Kubernetes Job |
 
 ### Contributor Documentation
 
@@ -132,11 +132,11 @@ For developers contributing code, extending functionality, or working on AICR in
 
 | Document | Description |
 |----------|-------------|
-| [Architecture Overview](contributor/index.md) | System design, patterns, and deployment topologies |
-| [CLI Architecture](contributor/cli.md) | Detailed CLI implementation and workflow diagrams |
-| [API Server Architecture](contributor/api-server.md) | HTTP server design, middleware, and endpoints |
-| [Data Architecture](contributor/data.md) | Recipe metadata system, criteria matching, and inheritance |
-| [Bundler Development](contributor/component.md) | Guide for creating new bundlers |
+| Architecture Overview | System design, patterns, and deployment topologies |
+| CLI Architecture | Detailed CLI implementation and workflow diagrams |
+| API Server Architecture | HTTP server design, middleware, and endpoints |
+| Data Architecture | Recipe metadata system, criteria matching, and inheritance |
+| Bundler Development | Guide for creating new bundlers |
 
 ### Integrator Documentation
 
@@ -144,11 +144,11 @@ For engineers integrating AICR into CI/CD pipelines, GitOps workflows, or larger
 
 | Document | Description |
 |----------|-------------|
-| [API Reference](user/api-reference.md) | Complete REST API specification with examples |
-| [Automation](integrator/automation.md) | CI/CD integration patterns |
-| [Data Flow](integrator/data-flow.md) | Understanding recipe data architecture |
-| [Kubernetes Deployment](integrator/kubernetes-deployment.md) | Self-hosted API server deployment |
-| [Recipe Development](integrator/recipe-development.md) | Adding and modifying recipe metadata |
+| API Reference | Complete REST API specification with examples |
+| Automation | CI/CD integration patterns |
+| Data Flow | Understanding recipe data architecture |
+| Kubernetes Deployment | Self-hosted API server deployment |
+| Recipe Development | Adding and modifying recipe metadata |
 
 ## Quick Start
 
@@ -163,7 +163,7 @@ brew install aicr
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
 ```
 
-See [Installation Guide](user/installation.md) for manual installation, building from source, and container images.
+See the Installation Guide for manual installation, building from source, and container images.
 
 ### Generate Recipe
 
@@ -202,5 +202,5 @@ chmod +x deploy.sh && ./deploy.sh
 ## Links
 
 - **GitHub Repository:** [github.com/NVIDIA/aicr](https://github.com/NVIDIA/aicr)
-- **Contributing:** [CONTRIBUTING.md](../CONTRIBUTING.md)
-- **Security:** [SECURITY.md](../SECURITY.md)
+- **Contributing:** [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md)
+- **Security:** [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md)

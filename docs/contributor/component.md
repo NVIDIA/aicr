@@ -191,8 +191,8 @@ The component registry (`recipes/registry.yaml`) supports these fields:
 
 - Only add custom manifests when the Helm chart doesn't provide needed functionality
 - Use Helm template syntax (not Go templates) for manifest files
-- Reference values via <code v-pre>{{ index .Values "component-name" }}</code>
-- Make manifests conditional with <code v-pre>{{- if }}</code> blocks
+- Reference values via `{{ index .Values "component-name" }}`
+- Make manifests conditional with `{{- if }}` blocks
 
 ### Testing
 

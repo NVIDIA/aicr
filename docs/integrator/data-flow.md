@@ -846,22 +846,22 @@ X-RateLimit-Reset: 1735650000
 
 - **Cached**: Recipe data cached in memory (5min TTL)
 - **Overlay Matching**: O(n) where n = number of overlays
-- **Memory**: <1MB per request
-- **Duration**: <100ms typical (in-memory only)
+- **Memory**: &lt;1MB per request
+- **Duration**: &lt;100ms typical (in-memory only)
 
 ### Bundle Generation
 
 - **Parallel**: All bundlers run concurrently
-- **Template Rendering**: Minimal overhead (<10ms per template)
+- **Template Rendering**: Minimal overhead (&lt;10ms per template)
 - **File I/O**: ~10-20 files per bundler
-- **Duration**: <1 second typical
+- **Duration**: &lt;1 second typical
 
 ### API Server
 
 - **Concurrency**: 100 req/s sustained, 200 burst
 - **Latency**: p50: 50ms, p95: 150ms, p99: 300ms
 - **Memory**: ~100MB baseline + 1MB per concurrent request
-- **CPU**: Minimal (<5% single core at 100 req/s)
+- **CPU**: Minimal (&lt;5% single core at 100 req/s)
 
 ## Data Validation
 

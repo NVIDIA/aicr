@@ -100,7 +100,7 @@ Key properties:
 - NRI annotations inject GPU devices and multi-NIC interfaces
 - Requires NRI device injector DaemonSet deployed on GPU nodes
 
-See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](../../demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example.
+See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example.
 
 ## NCCL Plugin Version Matching
 
