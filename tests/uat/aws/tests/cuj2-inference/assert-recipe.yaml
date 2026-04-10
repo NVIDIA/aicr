@@ -13,6 +13,11 @@
 # limitations under the License.
 
 # Assert the CUJ2 recipe has the expected structure.
+#
+# Validates that `aicr recipe --service eks --accelerator h100 --intent inference
+# --os ubuntu --platform dynamo` produces a valid recipe with correct criteria,
+# inference-specific components (kgateway, DRA driver, KAI scheduler, Dynamo),
+# and standard GPU stack components.
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
 criteria:
@@ -21,4 +26,46 @@ criteria:
   intent: inference
   os: ubuntu
   platform: dynamo
-(length(componentRefs) > `0`): true
+constraints:
+  - name: K8s.server.version
+    value: '>= 1.34'
+  - name: OS.release.ID
+    value: ubuntu
+  - name: OS.release.VERSION_ID
+    value: "24.04"
+  - name: OS.sysctl./proc/sys/kernel/osrelease
+    value: '>= 6.8'
+componentRefs: ## alphabetically sorted
+  - name: aws-ebs-csi-driver
+  - name: aws-efa
+  - name: cert-manager
+  - name: dynamo-crds
+  - name: dynamo-platform
+  - name: gpu-operator
+  - name: k8s-ephemeral-storage-metrics
+  - name: kai-scheduler
+  - name: kgateway
+  - name: kgateway-crds
+  - name: kube-prometheus-stack
+  - name: nvidia-dra-driver-gpu
+  - name: nvsentinel
+  - name: prometheus-adapter
+  - name: skyhook-customizations
+  - name: skyhook-operator
+deploymentOrder:
+  - aws-ebs-csi-driver
+  - aws-efa
+  - cert-manager
+  - dynamo-crds
+  - kgateway-crds
+  - kgateway
+  - kube-prometheus-stack
+  - k8s-ephemeral-storage-metrics
+  - prometheus-adapter
+  - skyhook-operator
+  - skyhook-customizations
+  - gpu-operator
+  - kai-scheduler
+  - dynamo-platform
+  - nvidia-dra-driver-gpu
+  - nvsentinel

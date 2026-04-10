@@ -88,21 +88,28 @@ spec:
                 --snapshot "${WORK}/snapshot.yaml" \
                 --phase deployment \
                 --no-cluster \
-                --output "${WORK}/validate-deployment.json" || true
+                --output "${WORK}/validate-deployment.json"
               test -f "${WORK}/validate-deployment.json"
-              grep -q 'reportformat: CTRF' "${WORK}/validate-deployment.json" || grep -q '\"reportFormat\"' "${WORK}/validate-deployment.json"
 
     - name: assert-validate-deployment
-      description: Verify deployment validation produces CTRF output.
+      description: Verify deployment validation CTRF report is well-formed.
       try:
         - script:
             content: |
               set -eu
               WORK="/tmp/uat-cuj2-inference-aks"
-              test -f "${WORK}/validate-deployment.json"
-              grep -q 'reportformat: CTRF' "${WORK}/validate-deployment.json" || grep -q '\"reportFormat\"' "${WORK}/validate-deployment.json"
-            check:
-              ($error == null): true
+              # chainsaw assert requires apiVersion/kind; inject into CTRF JSON
+              python3 -c "
+              import json, sys
+              d = json.load(open(sys.argv[1]))
+              d['apiVersion'] = 'ctrf/v1'
+              d['kind'] = 'CTRFReport'
+              json.dump(d, open(sys.argv[2], 'w'), indent=2)
+              " "${WORK}/validate-deployment.json" "${WORK}/validate-deployment-resource.json"
+              chainsaw assert \
+                --resource "${WORK}/validate-deployment-resource.json" \
+                --file ./assert-validate-deployment.yaml \
+                --no-color --timeout 10s
 
     # ── Step 4: Generate bundle with node scheduling ───────────────────
     - name: generate-bundle
@@ -151,19 +158,27 @@ spec:
                 --phase performance \
                 --phase conformance \
                 --no-cluster \
-                --output "${WORK}/validate-multiphase.json" || true
+                --output "${WORK}/validate-multiphase.json"
 
     - name: assert-validate-multiphase
-      description: Verify multiphase validation produces CTRF output.
+      description: Verify multiphase validation CTRF report is well-formed.
       try:
         - script:
             content: |
               set -eu
               WORK="/tmp/uat-cuj2-inference-aks"
-              test -f "${WORK}/validate-multiphase.json"
-              grep -q 'reportformat: CTRF' "${WORK}/validate-multiphase.json" || grep -q '\"reportFormat\"' "${WORK}/validate-multiphase.json"
-            check:
-              ($error == null): true
+              # chainsaw assert requires apiVersion/kind; inject into CTRF JSON
+              python3 -c "
+              import json, sys
+              d = json.load(open(sys.argv[1]))
+              d['apiVersion'] = 'ctrf/v1'
+              d['kind'] = 'CTRFReport'
+              json.dump(d, open(sys.argv[2], 'w'), indent=2)
+              " "${WORK}/validate-multiphase.json" "${WORK}/validate-multiphase-resource.json"
+              chainsaw assert \
+                --resource "${WORK}/validate-multiphase-resource.json" \
+                --file ./assert-validate-multiphase.yaml \
+                --no-color --timeout 10s
       cleanup:
         - script:
             content: |
