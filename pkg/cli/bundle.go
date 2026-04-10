@@ -52,6 +52,7 @@ type bundleCmdOptions struct {
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
+	targetRevision             string
 
 	// attest enables bundle attestation and binary verification.
 	attest bool
@@ -136,6 +137,17 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve output path: "+ref.LocalPath, absErr)
 		}
 		opts.outputDir = absOut
+	}
+
+	// When using ArgoCD deployer with OCI output and no explicit --repo,
+	// auto-populate repoURL from the OCI reference (issue #519).
+	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
+		opts.repoURL = opts.ociRef.Registry + "/" + opts.ociRef.Repository
+	}
+
+	// Derive target revision: use OCI tag when available
+	if opts.ociRef != nil && opts.ociRef.Tag != "" {
+		opts.targetRevision = opts.ociRef.Tag
 	}
 
 	// Parse value overrides from --set flags
@@ -394,6 +406,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithVersion(version),
 		config.WithDeployer(opts.deployer),
 		config.WithRepoURL(opts.repoURL),
+		config.WithTargetRevision(opts.targetRevision),
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
 		config.WithValueOverrides(opts.valueOverrides),

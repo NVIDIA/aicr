@@ -101,6 +101,9 @@ type Config struct {
 	// repoURL specifies the Git repository URL for ArgoCD applications.
 	repoURL string
 
+	// targetRevision specifies the target revision for the ArgoCD repo (default: "main").
+	targetRevision string
+
 	// workloadGateTaint specifies the taint for skyhook-operator runtime required feature.
 	workloadGateTaint *corev1.Taint
 
@@ -207,6 +210,11 @@ func (c *Config) Deployer() DeployerType {
 // RepoURL returns the Git repository URL for ArgoCD applications.
 func (c *Config) RepoURL() string {
 	return c.repoURL
+}
+
+// TargetRevision returns the target revision for the ArgoCD repo.
+func (c *Config) TargetRevision() string {
+	return c.targetRevision
 }
 
 // WorkloadGateTaint returns a copy of the workload gate taint.
@@ -359,6 +367,13 @@ func WithDeployer(deployer DeployerType) Option {
 func WithRepoURL(repoURL string) Option {
 	return func(c *Config) {
 		c.repoURL = repoURL
+	}
+}
+
+// WithTargetRevision sets the target revision for the ArgoCD repo.
+func WithTargetRevision(targetRevision string) Option {
+	return func(c *Config) {
+		c.targetRevision = targetRevision
 	}
 }
 

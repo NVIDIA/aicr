@@ -30,7 +30,8 @@ Install utility for $BIN_NAME
 Usage: $0 [-d install_dir]
 
 Environment Variables:
-  GITHUB_TOKEN    GitHub token to avoid API rate limits (no special scopes required)
+  GITHUB_TOKEN           GitHub token to avoid API rate limits (no special scopes required)
+  AICR_NO_COMPLETIONS    Set to 1 to skip shell completion installation
 
 Examples:
   $0                    # Install to /usr/local/bin
@@ -104,6 +105,102 @@ get_binary_name() {
 get_archive_name() {
   local ver="${1#v}"  # strip leading 'v'
   echo "${BIN_NAME}_${ver}_${2}_${3}.tar.gz"  # version, os, arch
+}
+
+# ==============================================================================
+# Shell Completion Setup
+# ==============================================================================
+
+write_completion() {
+  local bin_path="$1" shell="$2" target="$3"
+  local target_dir tmp_file
+  target_dir=$(dirname "$target")
+  mkdir -p "$target_dir" 2>/dev/null || sudo mkdir -p "$target_dir" 2>/dev/null || return 1
+  tmp_file=$(mktemp) || return 1
+  if ! "$bin_path" completion "$shell" > "$tmp_file" 2>/dev/null || [[ ! -s "$tmp_file" ]]; then
+    rm -f "$tmp_file"
+    return 1
+  fi
+  chmod 644 "$tmp_file"
+  if [[ -w "$target_dir" ]]; then
+    mv "$tmp_file" "$target" || { rm -f "$tmp_file"; return 1; }
+  else
+    sudo mv "$tmp_file" "$target" || { rm -f "$tmp_file"; return 1; }
+  fi
+}
+
+setup_bash_completions() {
+  local bin_path="$1" os="$2" xdg_data="$3" user_only="$4"
+  local sys_dir
+  if [[ "$os" == "darwin" ]]; then
+    local brew_prefix="/usr/local"
+    [[ -d /opt/homebrew ]] && brew_prefix="/opt/homebrew"
+    sys_dir="${brew_prefix}/etc/bash_completion.d"
+  else
+    sys_dir="/usr/share/bash-completion/completions"
+  fi
+
+  if [[ "$user_only" != "true" ]] && write_completion "$bin_path" bash "${sys_dir}/aicr"; then
+    ok "Bash completions installed"
+  elif write_completion "$bin_path" bash "${xdg_data}/bash-completion/completions/aicr"; then
+    ok "Bash completions installed (user-local)"
+  else
+    warn "Could not install bash completions"
+  fi
+}
+
+setup_zsh_completions() {
+  local bin_path="$1" os="$2" xdg_data="$3" user_only="$4"
+  local sys_dir
+  if [[ "$os" == "darwin" ]]; then
+    local brew_prefix="/usr/local"
+    [[ -d /opt/homebrew ]] && brew_prefix="/opt/homebrew"
+    sys_dir="${brew_prefix}/share/zsh/site-functions"
+  else
+    sys_dir="/usr/local/share/zsh/site-functions"
+  fi
+
+  if [[ "$user_only" != "true" ]] && write_completion "$bin_path" zsh "${sys_dir}/_aicr"; then
+    ok "Zsh completions installed"
+  elif write_completion "$bin_path" zsh "${xdg_data}/zsh/site-functions/_aicr"; then
+    ok "Zsh completions installed (user-local)"
+  else
+    warn "Could not install zsh completions"
+  fi
+}
+
+setup_fish_completions() {
+  local bin_path="$1" user_only="$2"
+  local sys_dir="/usr/share/fish/vendor_completions.d"
+  local user_dir="${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions"
+
+  if [[ "$user_only" != "true" ]] && [[ -d "$sys_dir" ]] && write_completion "$bin_path" fish "${sys_dir}/aicr.fish"; then
+    ok "Fish completions installed"
+  elif [[ -d "${user_dir%/*}" ]] && write_completion "$bin_path" fish "${user_dir}/aicr.fish"; then
+    ok "Fish completions installed (user-local)"
+  fi
+}
+
+setup_completions() {
+  if [[ "${AICR_NO_COMPLETIONS:-0}" == "1" ]]; then
+    info "Skipping shell completion setup (AICR_NO_COMPLETIONS=1)"
+    return 0
+  fi
+
+  local bin_path="${INSTALL_DIR}/${BIN_NAME}"
+  local os xdg_data user_only="false"
+  os=$(get_os)
+  xdg_data="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+  # If the binary install did not need sudo, skip system completion dirs
+  # to avoid unexpected sudo prompts (e.g., ./install -d ~/bin).
+  [[ "${USED_SUDO:-false}" == "false" ]] && user_only="true"
+
+  step "Setting up shell completions..."
+
+  setup_bash_completions "$bin_path" "$os" "$xdg_data" "$user_only"
+  setup_zsh_completions "$bin_path" "$os" "$xdg_data" "$user_only"
+  setup_fish_completions "$bin_path" "$user_only"
 }
 
 # ==============================================================================
@@ -297,11 +394,13 @@ main() {
   chmod +x "${temp_dir}/${BIN_NAME}"
   step "Installing $BIN_NAME to $INSTALL_DIR"
   mkdir -p "$INSTALL_DIR"
+  USED_SUDO=false
   if [[ -w "$INSTALL_DIR" ]]; then
     mv "${temp_dir}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
     [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]] && \
       mv "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
   else
+    USED_SUDO=true
     sudo mv "${temp_dir}/${BIN_NAME}" "${INSTALL_DIR}/${BIN_NAME}"
     [[ -f "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" ]] && \
       sudo mv "${temp_dir}/${BIN_NAME}-attestation.sigstore.json" "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
@@ -312,6 +411,9 @@ main() {
   "${BIN_NAME}" --version
   [[ -f "${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json" ]] && \
     msg "Attestation: ${INSTALL_DIR}/${BIN_NAME}-attestation.sigstore.json"
+
+  # Install shell completions
+  setup_completions || warn "Shell completion setup failed (non-fatal)"
 
   # Fetch latest Sigstore trusted root for offline verification.
   # The trusted root enables 'aicr verify' to check attestation signatures
