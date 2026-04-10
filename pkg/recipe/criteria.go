@@ -43,6 +43,7 @@ const (
 	CriteriaServiceAKS  CriteriaServiceType = "aks"
 	CriteriaServiceOKE  CriteriaServiceType = "oke"
 	CriteriaServiceKind CriteriaServiceType = "kind"
+	CriteriaServiceLKE  CriteriaServiceType = "lke"
 )
 
 // ParseCriteriaServiceType parses a string into a CriteriaServiceType.
@@ -60,6 +61,8 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceOKE, nil
 	case "kind":
 		return CriteriaServiceKind, nil
+	case "lke":
+		return CriteriaServiceLKE, nil
 	default:
 		return CriteriaServiceAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid service type: %s", s))
 	}
@@ -67,7 +70,7 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 
 // GetCriteriaServiceTypes returns all supported service types sorted alphabetically.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "eks", "gke", "kind", "oke"}
+	return []string{"aks", "eks", "gke", "kind", "lke", "oke"}
 }
 
 // CriteriaAcceleratorType represents the GPU/accelerator type.
@@ -75,12 +78,13 @@ type CriteriaAcceleratorType string
 
 // CriteriaAcceleratorType constants for supported accelerators.
 const (
-	CriteriaAcceleratorAny   CriteriaAcceleratorType = "any"
-	CriteriaAcceleratorH100  CriteriaAcceleratorType = "h100"
-	CriteriaAcceleratorGB200 CriteriaAcceleratorType = "gb200"
-	CriteriaAcceleratorB200  CriteriaAcceleratorType = "b200"
-	CriteriaAcceleratorA100  CriteriaAcceleratorType = "a100"
-	CriteriaAcceleratorL40   CriteriaAcceleratorType = "l40"
+	CriteriaAcceleratorAny        CriteriaAcceleratorType = "any"
+	CriteriaAcceleratorH100       CriteriaAcceleratorType = "h100"
+	CriteriaAcceleratorGB200      CriteriaAcceleratorType = "gb200"
+	CriteriaAcceleratorB200       CriteriaAcceleratorType = "b200"
+	CriteriaAcceleratorA100       CriteriaAcceleratorType = "a100"
+	CriteriaAcceleratorL40        CriteriaAcceleratorType = "l40"
+	CriteriaAcceleratorRTXPro6000 CriteriaAcceleratorType = "rtx-pro-6000"
 )
 
 // ParseCriteriaAcceleratorType parses a string into a CriteriaAcceleratorType.
@@ -98,6 +102,8 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 		return CriteriaAcceleratorA100, nil
 	case "l40":
 		return CriteriaAcceleratorL40, nil
+	case "rtx-pro-6000":
+		return CriteriaAcceleratorRTXPro6000, nil
 	default:
 		return CriteriaAcceleratorAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid accelerator type: %s", s))
 	}
@@ -105,7 +111,7 @@ func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 
 // GetCriteriaAcceleratorTypes returns all supported accelerator types sorted alphabetically.
 func GetCriteriaAcceleratorTypes() []string {
-	return []string{"a100", "b200", "gb200", "h100", "l40"}
+	return []string{"a100", "b200", "gb200", "h100", "l40", "rtx-pro-6000"}
 }
 
 // CriteriaIntentType represents the workload intent.

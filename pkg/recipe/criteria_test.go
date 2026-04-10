@@ -37,6 +37,8 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"gke", "gke", CriteriaServiceGKE, false},
 		{"aks", "aks", CriteriaServiceAKS, false},
 		{"oke", "oke", CriteriaServiceOKE, false},
+		{"lke", "lke", CriteriaServiceLKE, false},
+		{"LKE uppercase", "LKE", CriteriaServiceLKE, false},
 		{"self-managed", "self-managed", CriteriaServiceAny, false},
 		{"self", "self", CriteriaServiceAny, false},
 		{"vanilla", "vanilla", CriteriaServiceAny, false},
@@ -72,6 +74,8 @@ func TestParseCriteriaAcceleratorType(t *testing.T) {
 		{"b200", "b200", CriteriaAcceleratorB200, false},
 		{"a100", "a100", CriteriaAcceleratorA100, false},
 		{"l40", "l40", CriteriaAcceleratorL40, false},
+		{"rtx-pro-6000", "rtx-pro-6000", CriteriaAcceleratorRTXPro6000, false},
+		{"RTX-PRO-6000 uppercase", "RTX-PRO-6000", CriteriaAcceleratorRTXPro6000, false},
 		{"invalid", "v100", CriteriaAcceleratorAny, true},
 	}
 
@@ -695,7 +699,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "eks", "gke", "kind", "oke"}
+	expected := []string{"aks", "eks", "gke", "kind", "lke", "oke"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -719,7 +723,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 	types := GetCriteriaAcceleratorTypes()
 
 	// Should return sorted list
-	expected := []string{"a100", "b200", "gb200", "h100", "l40"}
+	expected := []string{"a100", "b200", "gb200", "h100", "l40", "rtx-pro-6000"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaAcceleratorTypes() returned %d types, want %d", len(types), len(expected))
 	}
