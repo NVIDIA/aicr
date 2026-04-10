@@ -26,9 +26,9 @@
 //     per-component application.yaml + values.yaml)
 //  2. For each Helm component, transform the multi-source Application manifest
 //     into a single-source template with valuesObject: {{ .Values.<key> }}
-//  3. Build a root values.yaml with all component values keyed by override key,
-//     replacing dynamic paths with empty string stubs
-//  4. Write Chart.yaml + templates/ + values.yaml as a valid Helm chart
+//  3. Build a root values.yaml with ONLY dynamic paths (recipe defaults when
+//     available, empty strings otherwise). Static values stay in chart files.
+//  4. Write Chart.yaml + static/ + templates/ + values.yaml as a valid Helm chart
 //
 // This approach means changes to the ArgoCD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
@@ -44,7 +44,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -160,7 +159,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	for _, ref := range g.RecipeResult.ComponentRefs {
 		select {
 		case <-ctx.Done():
-			return nil, errors.Wrap(errors.ErrCodeInternal, "context cancelled", ctx.Err())
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", ctx.Err())
 		default:
 		}
 
@@ -177,7 +176,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			continue
 		}
 
-		overrideKey := resolveOverrideKey(ref.Name)
+		overrideKey, keyErr := resolveOverrideKey(ref.Name)
+		if keyErr != nil {
+			return nil, keyErr
+		}
 		hasDynamic := len(g.DynamicValues[ref.Name]) > 0
 		tmplPath, tmplSize, transformErr := transformApplication(tmpDir, templatesDir, ref.Name, overrideKey, hasDynamic)
 		if transformErr != nil {
@@ -254,17 +256,22 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		// Deep-copy values so we can remove dynamic paths without mutating the input
 		staticValues := deepCopyMap(values)
 
-		// Extract dynamic paths: remove from static, build stubs for root values.yaml
+		// Extract dynamic paths: remove from static, build stubs for root values.yaml.
+		// When the path exists in static values, the resolved default is preserved
+		// so users see what value to override. When the path doesn't exist, an
+		// empty string stub is created.
 		if dynPaths, ok := g.DynamicValues[ref.Name]; ok {
-			overrideKey := resolveOverrideKey(ref.Name)
+			overrideKey, keyErr := resolveOverrideKey(ref.Name)
+			if keyErr != nil {
+				return nil, 0, nil, keyErr
+			}
 			stubs := make(map[string]any)
 			for _, path := range dynPaths {
 				if val, found := component.GetValueByPath(staticValues, path); found {
 					component.RemoveValueByPath(staticValues, path)
-					setStubValue(stubs, path)
-					setNestedValue(stubs, path, val)
+					component.SetValueByPath(stubs, path, val)
 				} else {
-					setStubValue(stubs, path)
+					component.SetValueByPath(stubs, path, "")
 				}
 			}
 			dynamicOnlyValues[overrideKey] = stubs
@@ -287,7 +294,14 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // its multi-source helm block to a single-source with valuesObject that loads
 // static values from chart files and merges dynamic overrides from .Values.
 func transformApplication(srcDir, templatesDir, componentName, overrideKey string, hasDynamic bool) (string, int64, error) {
-	srcPath := filepath.Join(srcDir, componentName, "application.yaml")
+	componentDir, joinErr := shared.SafeJoin(srcDir, componentName)
+	if joinErr != nil {
+		return "", 0, joinErr
+	}
+	srcPath, joinErr := shared.SafeJoin(componentDir, "application.yaml")
+	if joinErr != nil {
+		return "", 0, joinErr
+	}
 	content, err := os.ReadFile(srcPath)
 	if err != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
@@ -357,7 +371,14 @@ func transformMultiSourceToValuesObject(content, componentName, overrideKey stri
 
 // copyAsTemplate copies an application.yaml from the flat output to templates/ as-is.
 func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, error) {
-	srcPath := filepath.Join(srcDir, componentName, "application.yaml")
+	componentDir, joinErr := shared.SafeJoin(srcDir, componentName)
+	if joinErr != nil {
+		return "", 0, joinErr
+	}
+	srcPath, joinErr := shared.SafeJoin(componentDir, "application.yaml")
+	if joinErr != nil {
+		return "", 0, joinErr
+	}
 	content, err := os.ReadFile(srcPath)
 	if err != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
@@ -458,7 +479,10 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	buf.WriteString("Dynamic values are supplied at install time using `helm install --set`.\n\n")
 	buf.WriteString("## Install\n\n```bash\nhelm install aicr-bundle .")
 
-	dynamicSetFlags := buildDynamicSetFlags(g.DynamicValues)
+	dynamicSetFlags, flagsErr := buildDynamicSetFlags(g.DynamicValues)
+	if flagsErr != nil {
+		return "", 0, flagsErr
+	}
 	if len(dynamicSetFlags) > 0 {
 		buf.WriteString(" \\\n  " + strings.Join(dynamicSetFlags, " \\\n  "))
 	}
@@ -472,7 +496,10 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 		}
 		sort.Strings(compNames)
 		for _, name := range compNames {
-			overrideKey := resolveOverrideKey(name)
+			overrideKey, keyErr := resolveOverrideKey(name)
+			if keyErr != nil {
+				return "", 0, keyErr
+			}
 			for _, path := range g.DynamicValues[name] {
 				fmt.Fprintf(&buf, "- `%s.%s`\n", overrideKey, path)
 			}
@@ -486,9 +513,9 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	return readmePath, int64(len(content)), nil
 }
 
-func buildDynamicSetFlags(dynamicValues map[string][]string) []string {
+func buildDynamicSetFlags(dynamicValues map[string][]string) ([]string, error) {
 	if len(dynamicValues) == 0 {
-		return nil
+		return nil, nil
 	}
 	var flags []string
 	compNames := make([]string, 0, len(dynamicValues))
@@ -497,24 +524,36 @@ func buildDynamicSetFlags(dynamicValues map[string][]string) []string {
 	}
 	sort.Strings(compNames)
 	for _, name := range compNames {
-		overrideKey := resolveOverrideKey(name)
+		overrideKey, keyErr := resolveOverrideKey(name)
+		if keyErr != nil {
+			return nil, keyErr
+		}
 		for _, path := range dynamicValues[name] {
 			flags = append(flags, fmt.Sprintf("--set %s.%s=VALUE", overrideKey, path))
 		}
 	}
-	return flags
+	return flags, nil
 }
 
-func resolveOverrideKey(componentName string) string {
+// resolveOverrideKey returns the valueOverrideKey for a component (e.g., "gpuOperator"
+// for "gpu-operator"). Returns an error if the registry is unavailable or the component
+// has no override keys — using the wrong key would produce a broken chart.
+func resolveOverrideKey(componentName string) (string, error) {
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
-		return componentName
+		return "", errors.Wrap(errors.ErrCodeInternal,
+			"failed to load component registry for override key resolution", err)
 	}
 	comp := registry.Get(componentName)
-	if comp != nil && len(comp.ValueOverrideKeys) > 0 {
-		return comp.ValueOverrideKeys[0]
+	if comp == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q not found in registry", componentName))
 	}
-	return componentName
+	if len(comp.ValueOverrideKeys) == 0 {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q has no valueOverrideKeys in registry", componentName))
+	}
+	return comp.ValueOverrideKeys[0], nil
 }
 
 func deepCopyMap(m map[string]any) map[string]any {
@@ -523,6 +562,7 @@ func deepCopyMap(m map[string]any) map[string]any {
 	}
 	data, err := yaml.Marshal(m)
 	if err != nil {
+		slog.Warn("deepCopyMap: yaml.Marshal failed, falling back to shallow copy", "error", err)
 		result := make(map[string]any, len(m))
 		for k, v := range m {
 			result[k] = v
@@ -531,44 +571,11 @@ func deepCopyMap(m map[string]any) map[string]any {
 	}
 	var result map[string]any
 	if unmarshalErr := yaml.Unmarshal(data, &result); unmarshalErr != nil {
+		slog.Warn("deepCopyMap: yaml.Unmarshal failed, falling back to shallow copy", "error", unmarshalErr)
 		result = make(map[string]any, len(m))
 		for k, v := range m {
 			result[k] = v
 		}
 	}
 	return result
-}
-
-func setNestedValue(m map[string]any, path string, value any) {
-	parts := strings.Split(path, ".")
-	current := m
-	for _, part := range parts[:len(parts)-1] {
-		if next, ok := current[part]; ok {
-			if nextMap, ok := next.(map[string]any); ok {
-				current = nextMap
-				continue
-			}
-		}
-		newMap := make(map[string]any)
-		current[part] = newMap
-		current = newMap
-	}
-	current[parts[len(parts)-1]] = value
-}
-
-func setStubValue(m map[string]any, path string) {
-	parts := strings.Split(path, ".")
-	current := m
-	for _, part := range parts[:len(parts)-1] {
-		if next, ok := current[part]; ok {
-			if nextMap, ok := next.(map[string]any); ok {
-				current = nextMap
-				continue
-			}
-		}
-		newMap := make(map[string]any)
-		current[part] = newMap
-		current = newMap
-	}
-	current[parts[len(parts)-1]] = ""
 }

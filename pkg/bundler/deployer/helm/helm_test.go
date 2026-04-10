@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1844,7 +1845,7 @@ func TestSetNestedValue(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := make(map[string]any)
-			setNestedValue(m, tt.path, tt.value)
+			component.SetValueByPath(m, tt.path, tt.value)
 
 			for _, key := range tt.wantKeys {
 				if _, ok := m[key]; !ok {
@@ -1857,7 +1858,7 @@ func TestSetNestedValue(t *testing.T) {
 	// Verify full structure for nested path
 	t.Run("verify nested structure", func(t *testing.T) {
 		m := make(map[string]any)
-		setNestedValue(m, "driver.version", testDriverVersion)
+		component.SetValueByPath(m, "driver.version", testDriverVersion)
 
 		driver, ok := m["driver"].(map[string]any)
 		if !ok {
@@ -1875,8 +1876,8 @@ func TestSetNestedValue(t *testing.T) {
 	// Verify multiple paths into same parent
 	t.Run("multiple paths same parent", func(t *testing.T) {
 		m := make(map[string]any)
-		setNestedValue(m, "driver.version", testDriverVersion)
-		setNestedValue(m, "driver.enabled", true)
+		component.SetValueByPath(m, "driver.version", testDriverVersion)
+		component.SetValueByPath(m, "driver.enabled", true)
 
 		driver, ok := m["driver"].(map[string]any)
 		if !ok {

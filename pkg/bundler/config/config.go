@@ -16,12 +16,17 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// safePathPattern validates that dynamic value path segments contain only safe characters.
+// Prevents injection of template expressions ({{ }}) or path traversal (../).
+var safePathPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // DeployerType represents the type of deployment method used for generated bundles.
 type DeployerType string
@@ -539,6 +544,14 @@ func ParseDynamicValues(inputs []string) (map[string][]string, error) {
 
 		if component == "" || path == "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': component and path cannot be empty", input))
+		}
+
+		// Validate path segments contain only safe characters
+		for _, segment := range strings.Split(path, ".") {
+			if !safePathPattern.MatchString(segment) {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid path segment %q in '%s': must contain only alphanumeric, dot, hyphen, or underscore characters", segment, input))
+			}
 		}
 
 		result[component] = append(result[component], path)

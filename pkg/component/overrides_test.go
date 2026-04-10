@@ -1904,3 +1904,87 @@ func TestRemoveValueByPath(t *testing.T) {
 		})
 	}
 }
+
+// TestSetValueByPath verifies setting values at dot-notation paths,
+// including creating intermediate maps and overwriting existing values.
+func TestSetValueByPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		target map[string]any
+		path   string
+		value  any
+		verify func(t *testing.T, m map[string]any)
+	}{
+		{
+			name:   "set top-level key",
+			target: map[string]any{},
+			path:   "clusterName",
+			value:  "prod",
+			verify: func(t *testing.T, m map[string]any) {
+				if m["clusterName"] != "prod" {
+					t.Errorf("got %v, want prod", m["clusterName"])
+				}
+			},
+		},
+		{
+			name:   "creates intermediate maps",
+			target: map[string]any{},
+			path:   "driver.version",
+			value:  "580",
+			verify: func(t *testing.T, m map[string]any) {
+				driver, ok := m["driver"].(map[string]any)
+				if !ok {
+					t.Fatal("driver should be a map")
+				}
+				if driver["version"] != "580" {
+					t.Errorf("got %v, want 580", driver["version"])
+				}
+			},
+		},
+		{
+			name:   "deeply nested path",
+			target: map[string]any{},
+			path:   "network.subnet.id",
+			value:  "subnet-123",
+			verify: func(t *testing.T, m map[string]any) {
+				val, found := GetValueByPath(m, "network.subnet.id")
+				if !found || val != "subnet-123" {
+					t.Errorf("got %v (found=%v), want subnet-123", val, found)
+				}
+			},
+		},
+		{
+			name:   "overwrites existing value",
+			target: map[string]any{"driver": map[string]any{"version": "old"}},
+			path:   "driver.version",
+			value:  "new",
+			verify: func(t *testing.T, m map[string]any) {
+				if m["driver"].(map[string]any)["version"] != "new" {
+					t.Error("should overwrite existing value")
+				}
+			},
+		},
+		{
+			name:   "preserves sibling keys",
+			target: map[string]any{"driver": map[string]any{"version": "580", "registry": "nvcr.io"}},
+			path:   "driver.version",
+			value:  "",
+			verify: func(t *testing.T, m map[string]any) {
+				driver := m["driver"].(map[string]any)
+				if driver["version"] != "" {
+					t.Errorf("version should be empty, got %v", driver["version"])
+				}
+				if driver["registry"] != "nvcr.io" {
+					t.Error("registry should be preserved")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			SetValueByPath(tt.target, tt.path, tt.value)
+			tt.verify(t, tt.target)
+		})
+	}
+}

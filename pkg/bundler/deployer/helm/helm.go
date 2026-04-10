@@ -549,7 +549,7 @@ func writeDynamicValuesFile(values map[string]any, dynamicPaths []string, compon
 		} else {
 			val = ""
 		}
-		setNestedValue(stubValues, path, val)
+		component.SetValueByPath(stubValues, path, val)
 	}
 
 	clusterPath, clusterSize, err := shared.WriteValuesFile(stubValues, componentDir, "cluster-values.yaml")
@@ -560,27 +560,6 @@ func writeDynamicValuesFile(values map[string]any, dynamicPaths []string, compon
 
 	slog.Debug("wrote cluster-values.yaml", "component", componentName, "paths", dynamicPaths)
 	return []string{clusterPath}, clusterSize, nil
-}
-
-// setNestedValue sets a value in a nested map using dot-notation path,
-// creating intermediate maps as needed.
-func setNestedValue(m map[string]any, path string, value any) {
-	parts := strings.Split(path, ".")
-	current := m
-
-	for _, part := range parts[:len(parts)-1] {
-		if next, ok := current[part]; ok {
-			if nextMap, ok := next.(map[string]any); ok {
-				current = nextMap
-				continue
-			}
-		}
-		newMap := make(map[string]any)
-		current[part] = newMap
-		current = newMap
-	}
-
-	current[parts[len(parts)-1]] = value
 }
 
 // hasYAMLObjects returns true if content contains at least one YAML object

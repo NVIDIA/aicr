@@ -24,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -100,7 +101,10 @@ func TestGenerate(t *testing.T) {
 				}
 
 				// Root values.yaml should ONLY have dynamic stubs
-				key := resolveOverrideKey("gpu-operator")
+				key, keyErr := resolveOverrideKey("gpu-operator")
+				if keyErr != nil {
+					t.Fatalf("resolveOverrideKey failed: %v", keyErr)
+				}
 				compValues, ok := values[key].(map[string]any)
 				if !ok {
 					t.Fatalf("expected dynamic stubs under key %q", key)
@@ -371,11 +375,11 @@ spec:
 	}
 }
 
-func TestSetStubValue(t *testing.T) {
+func TestSetValueByPath_StubBehavior(t *testing.T) {
 	m := map[string]any{
 		"driver": map[string]any{"version": "580", "registry": "nvcr.io"},
 	}
-	setStubValue(m, "driver.version")
+	component.SetValueByPath(m, "driver.version", "")
 
 	driver := m["driver"].(map[string]any)
 	if driver["version"] != "" {

@@ -690,6 +690,27 @@ func RemoveValueByPath(target map[string]any, path string) bool {
 	return true
 }
 
+// SetValueByPath sets a value in a nested map at the given dot-notation path,
+// creating intermediate maps as needed.
+func SetValueByPath(target map[string]any, path string, value any) {
+	parts := strings.Split(path, ".")
+	current := target
+
+	for _, part := range parts[:len(parts)-1] {
+		if next, ok := current[part]; ok {
+			if nextMap, ok := next.(map[string]any); ok {
+				current = nextMap
+				continue
+			}
+		}
+		newMap := make(map[string]any)
+		current[part] = newMap
+		current = newMap
+	}
+
+	current[parts[len(parts)-1]] = value
+}
+
 // nodeSelectorToMatchExpressions converts a map of node selectors to matchExpressions format.
 // This format is used by some CRDs like Skyhook that use label selector syntax.
 // Each key=value pair becomes a matchExpression with operator "In" and single value.

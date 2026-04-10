@@ -1055,7 +1055,7 @@ aicr bundle -r recipe.yaml \
 bundles/
 ├── alloy/
 │   ├── values.yaml                # Static values (clusterName removed)
-│   └── cluster-values.yaml        # Dynamic stubs (fill in before deploying)
+│   └── cluster-values.yaml        # Dynamic values (override before deploying)
 ├── gpu-operator/
 │   └── values.yaml                # No dynamic values, no cluster-values.yaml
 ├── deploy.sh                      # Passes -f cluster-values.yaml when present
@@ -1066,7 +1066,7 @@ bundles/
 ```
 bundles/
 ├── Chart.yaml                     # Helm chart metadata
-├── values.yaml                    # All component values (dynamic paths are empty stubs)
+├── values.yaml                    # Dynamic values only (defaults from recipe, override per cluster)
 ├── templates/
 │   ├── alloy.yaml                 # ArgoCD Application template with valuesObject
 │   └── gpu-operator.yaml
