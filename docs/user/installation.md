@@ -40,6 +40,7 @@ This script:
 - Detects your OS and architecture automatically
 - Downloads the appropriate binary from GitHub releases
 - Installs to `/usr/local/bin/aicr` by default (use `-d <dir>` for a custom location)
+- Installs shell completions for bash, zsh, and fish (set `AICR_NO_COMPLETIONS=1` to skip)
 - Verifies the installation
 - Uses `GITHUB_TOKEN` environment variable for authenticated API calls (avoids rate limits)
 
@@ -99,26 +100,41 @@ Expected output shows version information and available commands.
 
 ## Post-Installation
 
-### Shell Completion (Optional)
+### Shell Completion
 
-Enable shell auto-completion for command and flag names:
+Tab completion for commands and flags is installed automatically by both the Homebrew formula and the install script. No manual setup is required.
 
-**Bash:**
+**Opt out** (install script only): set `AICR_NO_COMPLETIONS=1` before running the script:
+
 ```shell
-# Add to ~/.bashrc
+AICR_NO_COMPLETIONS=1 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --
+```
+
+**Manual setup** (build from source or `go install`):
+
+Bash:
+```shell
+aicr completion bash > "${BASH_COMPLETION_USER_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion}/completions/aicr"
+```
+
+Zsh:
+```shell
+aicr completion zsh > "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_aicr"
+```
+
+Fish:
+```shell
+aicr completion fish > ~/.config/fish/completions/aicr.fish
+```
+
+Alternatively, source completions dynamically in your shell RC file (evaluates on every shell start):
+
+```shell
+# Bash (~/.bashrc)
 source <(aicr completion bash)
-```
 
-**Zsh:**
-```shell
-# Add to ~/.zshrc
+# Zsh (~/.zshrc)
 source <(aicr completion zsh)
-```
-
-**Fish:**
-```shell
-# Add to ~/.config/fish/config.fish
-aicr completion fish | source
 ```
 
 ## Container Images
@@ -180,8 +196,15 @@ nvidia-smi
 # Remove binary
 sudo rm /usr/local/bin/aicr
 
-# Remove shell completion (if configured)
-# Remove the source line from your shell RC file
+# Remove shell completions (remove whichever exist)
+sudo rm -f /usr/share/bash-completion/completions/aicr
+sudo rm -f /usr/local/share/zsh/site-functions/_aicr
+sudo rm -f /opt/homebrew/share/zsh/site-functions/_aicr
+sudo rm -f /opt/homebrew/etc/bash_completion.d/aicr
+sudo rm -f /usr/local/etc/bash_completion.d/aicr
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/aicr"
+rm -f "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/site-functions/_aicr"
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/fish/completions/aicr.fish"
 ```
 
 ## Getting Help

@@ -182,6 +182,7 @@ brews:
     install: |
       bin.install "aicr"
       bin.install "aicr-attestation.sigstore.json" if File.exist? "aicr-attestation.sigstore.json"
+      generate_completions_from_executable(bin/"aicr", "completion")
     test: |
       assert_match version.to_s, shell_output("#{bin}/aicr version")
     caveats: |

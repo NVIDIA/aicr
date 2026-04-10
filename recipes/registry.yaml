@@ -425,6 +425,24 @@ components:
         tolerationPaths:
           - operator.tolerations
 
+  - name: kueue
+    displayName: kueue
+    valueOverrideKeys:
+      - kueue
+    healthCheck:
+      assertFile: checks/kueue/health-check.yaml
+    helm:
+      defaultRepository: oci://registry.k8s.io/kueue/charts
+      defaultChart: kueue
+      defaultVersion: "0.17.0"
+      defaultNamespace: kueue-system
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controllerManager.nodeSelector
+        tolerationPaths:
+          - controllerManager.tolerations
+
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
     valueOverrideKeys:
