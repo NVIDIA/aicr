@@ -489,9 +489,19 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 
 **PR description:** Use the template from `.github/PULL_REQUEST_TEMPLATE.md` exactly as defined there. Do not inline a modified copy — read and fill in the canonical template. The template covers: Summary, Motivation/Context (with Fixes/Related), Type of Change, Components Affected, Implementation Notes, Testing, Risk Assessment, and Checklist.
 
+**Test coverage gate (Go packages only):**
+Before pushing a PR that changes Go source files, check test coverage on affected packages. Set `pkg` to the narrowest directory root you want to measure — `$pkg/...` intentionally includes descendant packages. Prefer the narrowest changed root (e.g., if only `pkg/collector/topology` changed, use `pkg=pkg/collector/topology`, not `pkg=pkg/collector`). Use a broader root only when you intentionally want one combined delta across related subpackages.
+1. Run `GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./$pkg/...` on each changed package
+2. Get the baseline using a clean worktree (changes must be committed first): `(git worktree add $TMPDIR/baseline origin/main && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test -coverprofile=$TMPDIR/base.out ./$pkg/...); rc=$?; git worktree remove --force $TMPDIR/baseline; return $rc 2>/dev/null || (exit $rc))`. This preserves the test exit status through cleanup. Write the profile to `$TMPDIR/base.out` (outside the worktree) so it survives cleanup. Compare with `go tool cover -func` on both profiles. Skip this step for entirely new packages.
+3. **Block** if `make test-coverage` fails — this enforces the project-wide 70% floor (from `.settings.yaml`). Do not use per-package profiles for this check.
+4. **Flag** any package with per-package coverage decrease > 0.5% (comparing step 1 vs step 2)
+5. **Block** if any new exported function or method (identified via `git diff origin/main -- $pkg/` — look for added `func` lines with uppercase names) has 0% coverage — add tests before pushing
+6. Report the delta in the PR description's Testing section (e.g., `pkg/recipe: 90.4% → 90.3% (-0.1%)`)
+This rule does not apply to non-Go changes (YAML, docs, CI workflows). Note: CI also posts per-package coverage deltas post-push via `go-coverage-report` in `on-push-comment.yaml`; this gate catches regressions before push.
+
 **PR policy:**
 - Do NOT add `Co-Authored-By` lines (organization policy)
-- Do NOT add "Generated with Claude Code" or similar attribution
+- Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
 - Add appropriate type labels: `enhancement`, `bug`, `documentation`
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
 - Do NOT add `size/*` labels (auto-assigned by bot)
