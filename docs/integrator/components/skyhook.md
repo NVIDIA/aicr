@@ -31,7 +31,7 @@ Integration notes:
 
 ## Secondary optimizer
 
-A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/skyhook-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Skyhook configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](../../../recipes/overlays/gke-cos.yaml#69)
+A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/skyhook-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Skyhook configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/overlays/gke-cos.yaml#L69)
 ```
     - name: skyhook-operator
       type: Helm
@@ -72,14 +72,14 @@ Includes the setup and optimizations for a specific service, accelerator and int
 
  To support non service specific tuning for example: h100, inference. The nvidia-tuned package would need to be separated out or nvidia-setup updated to support additional services or have less assumptions about what it is installing as it is currently opinionated towards EKS.
 
- See [recipes/components/skyhook-customizations/manifests/tuning.yaml](../../../recipes/components/skyhook-customizations/manifests/tuning.yaml)
+ See [recipes/components/skyhook-customizations/manifests/tuning.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/tuning.yaml)
 
 ## Tuning-gke
 
 A GKE + Container Optimized OS (COS) specific tuning that only sets some of the sysctl settings and does NOT require any interrupts due to being able to configure seamlessly while workloads are running.
 
-See [recipes/components/skyhook-customizations/manifests/tuning-gke.yaml](../../../recipes/components/skyhook-customizations/manifests/tuning-gke.yaml)
+See [recipes/components/skyhook-customizations/manifests/tuning-gke.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/tuning-gke.yaml)
 
 ## No-op
 
-A no-op package may be used as a place holder until a full package suite can be tested. See [recipes/components/skyhook-customizations/manifests/no-op.yaml](../../../recipes/components/skyhook-customizations/manifests/no-op.yaml)
+A no-op package may be used as a place holder until a full package suite can be tested. See [recipes/components/skyhook-customizations/manifests/no-op.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/no-op.yaml)
