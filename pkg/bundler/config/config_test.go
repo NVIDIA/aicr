@@ -612,6 +612,27 @@ func TestParseDynamicValues(t *testing.T) {
 			inputs: []string{},
 			want:   map[string][]string{},
 		},
+		// Security: safePathPattern blocks dangerous path segments
+		{
+			name:    "template injection in path",
+			inputs:  []string{"gpuoperator:{{.Values.x}}"},
+			wantErr: true,
+		},
+		{
+			name:    "path traversal",
+			inputs:  []string{"gpuoperator:../../../etc/passwd"},
+			wantErr: true,
+		},
+		{
+			name:    "double dot segment",
+			inputs:  []string{"gpuoperator:foo..bar"},
+			wantErr: true,
+		},
+		{
+			name:    "space in path",
+			inputs:  []string{"gpuoperator:driver version"},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -684,9 +705,9 @@ func TestParseDeployerType(t *testing.T) {
 func TestGetDeployerTypes(t *testing.T) {
 	types := GetDeployerTypes()
 
-	// Verify we get the expected types
-	if len(types) != 2 {
-		t.Errorf("GetDeployerTypes() returned %d types, want 2", len(types))
+	// Verify we get the expected types (helm, argocd, argocd-helm)
+	if len(types) != 3 {
+		t.Errorf("GetDeployerTypes() returned %d types, want 3", len(types))
 	}
 
 	// Verify types are sorted alphabetically

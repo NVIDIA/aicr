@@ -25,7 +25,7 @@
 //  1. Generate flat ArgoCD output to a temp directory (app-of-apps.yaml,
 //     per-component application.yaml + values.yaml)
 //  2. For each Helm component, transform the multi-source Application manifest
-//     into a single-source template with valuesObject: {{ .Values.<key> }}
+//     into a single-source template with helm.values containing {{ .Values.<key> }}
 //  3. Build a root values.yaml with ONLY dynamic paths (recipe defaults when
 //     available, empty strings otherwise). Static values stay in chart files.
 //  4. Write Chart.yaml + static/ + templates/ + values.yaml as a valid Helm chart
@@ -35,8 +35,9 @@
 //
 // # When this deployer is used
 //
-// The bundler routes here when --deployer argocd AND --dynamic flags are both
-// present. Without --dynamic, the standard flat ArgoCD deployer is used.
+// The bundler routes here when --deployer argocd-helm is specified.
+// The --dynamic flag is optional — it pre-populates specific paths in the
+// root values.yaml, but all values are overridable regardless.
 package argocdhelm
 
 import (
@@ -44,7 +45,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -81,10 +81,6 @@ type Generator struct {
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
 }
-
-// sourcesPattern matches the multi-source block in ArgoCD Application manifests.
-// Used to replace it with a single-source + valuesObject for the Helm chart.
-var sourcesPattern = regexp.MustCompile(`(?ms)  sources:\n.*?(?:  destination:)`)
 
 // Generate creates a Helm chart app-of-apps by:
 //  1. Delegating to the flat ArgoCD deployer for proven Application generation
@@ -127,7 +123,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Write Chart.yaml
 	chartPath, chartSize, err := writeChartYAML(outputDir, shared.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version))
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write Chart.yaml", err)
 	}
 	output.Files = append(output.Files, chartPath)
 	output.TotalSize += chartSize
@@ -135,7 +131,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Step 3: Write static values as chart files and build dynamic-only root values.yaml
 	staticFiles, staticSize, dynamicOnlyValues, err := g.writeStaticValuesAndBuildStubs(outputDir)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write static values", err)
 	}
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
@@ -150,7 +146,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Step 4: Transform Application manifests into Helm templates
 	templatesDir, err := shared.SafeJoin(outputDir, "templates")
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve templates directory", err)
 	}
 	if mkdirErr := os.MkdirAll(templatesDir, 0755); mkdirErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create templates directory", mkdirErr)
@@ -180,8 +176,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		if keyErr != nil {
 			return nil, keyErr
 		}
-		hasDynamic := len(g.DynamicValues[ref.Name]) > 0
-		tmplPath, tmplSize, transformErr := transformApplication(tmpDir, templatesDir, ref.Name, overrideKey, hasDynamic)
+		tmplPath, tmplSize, transformErr := transformApplication(tmpDir, templatesDir, ref.Name, overrideKey)
 		if transformErr != nil {
 			return nil, transformErr
 		}
@@ -192,28 +187,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Step 5: Generate README
 	readmePath, readmeSize, err := g.writeReadme(outputDir)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write README", err)
 	}
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
-	// Generate checksums if requested
-	if g.IncludeChecksums {
-		if checksumErr := checksum.GenerateChecksums(ctx, outputDir, output.Files); checksumErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", checksumErr)
-		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		info, statErr := os.Stat(checksumPath)
-		if statErr == nil {
-			output.Files = append(output.Files, checksumPath)
-			output.TotalSize += info.Size()
-		}
-	}
-
-	output.Duration = time.Since(start)
-	output.DeploymentSteps = []string{
-		fmt.Sprintf("cd %s", outputDir),
-		"helm install aicr-bundle .",
+	// Generate checksums and finalize output
+	if err := g.finalizeOutput(ctx, output, outputDir, start); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to finalize output", err)
 	}
 
 	slog.Debug("argocd helm chart generated",
@@ -224,6 +205,27 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	)
 
 	return output, nil
+}
+
+// finalizeOutput generates checksums (if requested) and sets deployment metadata.
+func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output, outputDir string, start time.Time) error {
+	if g.IncludeChecksums {
+		if checksumErr := checksum.GenerateChecksums(ctx, outputDir, output.Files); checksumErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", checksumErr)
+		}
+		checksumPath := checksum.GetChecksumFilePath(outputDir)
+		info, statErr := os.Stat(checksumPath)
+		if statErr == nil {
+			output.Files = append(output.Files, checksumPath)
+			output.TotalSize += info.Size()
+		}
+	}
+	output.Duration = time.Since(start)
+	output.DeploymentSteps = []string{
+		fmt.Sprintf("cd %s", outputDir),
+		"helm install aicr-bundle .",
+	}
+	return nil
 }
 
 // writeStaticValuesAndBuildStubs writes each component's values to static/<name>.yaml
@@ -254,7 +256,7 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		}
 
 		// Deep-copy values so we can remove dynamic paths without mutating the input
-		staticValues := deepCopyMap(values)
+		staticValues := component.DeepCopyMap(values)
 
 		// Extract dynamic paths: remove from static, build stubs for root values.yaml.
 		// When the path exists in static values, the resolved default is preserved
@@ -290,10 +292,14 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 	return files, totalSize, dynamicOnlyValues, nil
 }
 
-// transformApplication reads a flat ArgoCD Application manifest and converts
-// its multi-source helm block to a single-source with valuesObject that loads
-// static values from chart files and merges dynamic overrides from .Values.
-func transformApplication(srcDir, templatesDir, componentName, overrideKey string, hasDynamic bool) (string, int64, error) {
+// transformApplication reads a flat ArgoCD Application manifest, parses it as
+// structured YAML, replaces the multi-source block with a single-source +
+// helm.values Helm template, and writes the result as a chart template file.
+func transformApplication(srcDir, templatesDir, componentName, overrideKey string) (string, int64, error) {
+	if !shared.IsSafePathComponent(componentName) {
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", componentName))
+	}
 	componentDir, joinErr := shared.SafeJoin(srcDir, componentName)
 	if joinErr != nil {
 		return "", 0, joinErr
@@ -308,69 +314,152 @@ func transformApplication(srcDir, templatesDir, componentName, overrideKey strin
 			fmt.Sprintf("failed to read application.yaml for %s", componentName), err)
 	}
 
-	transformed, transformErr := transformMultiSourceToValuesObject(string(content), componentName, overrideKey, hasDynamic)
-	if transformErr != nil {
+	// Parse as structured YAML to avoid fragile regex/string manipulation.
+	var app map[string]any
+	if unmarshalErr := yaml.Unmarshal(content, &app); unmarshalErr != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to parse application.yaml for %s", componentName), unmarshalErr)
+	}
+
+	if transformErr := convertToSingleSourceWithValues(app, componentName, overrideKey); transformErr != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to transform application.yaml for %s", componentName), transformErr)
 	}
+
+	// Marshal to YAML, then replace the quoted values string with the
+	// raw Helm template expression. yaml.Marshal wraps the template in quotes
+	// (since it contains {{ }}), but ArgoCD needs the raw template text so
+	// Helm can evaluate it at render time.
+	out, marshalErr := yaml.Marshal(app)
+	if marshalErr != nil {
+		return "", 0, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to marshal transformed application for %s", componentName), marshalErr)
+	}
+	out = fixValuesTemplate(out, app)
 
 	destPath, pathErr := shared.SafeJoin(templatesDir, componentName+".yaml")
 	if pathErr != nil {
 		return "", 0, pathErr
 	}
 
-	if writeErr := os.WriteFile(destPath, []byte(transformed), 0600); writeErr != nil {
+	if writeErr := os.WriteFile(destPath, out, 0600); writeErr != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to write template for %s", componentName), writeErr)
 	}
-	return destPath, int64(len(transformed)), nil
+	return destPath, int64(len(out)), nil
 }
 
-// transformMultiSourceToValuesObject replaces the ArgoCD multi-source block
-// with a single-source block that loads static values from chart files and
-// merges dynamic overrides from .Values.
+// convertToSingleSourceWithValues mutates an ArgoCD Application map,
+// replacing the multi-source "sources" block with a single "source" that
+// loads static values from a chart file and merges dynamic overrides.
 //
-// Static values are loaded via .Files.Get from the chart's static/ directory.
-// When the component has dynamic values, they are merged on top using
-// mustMergeOverwrite so user-provided values win.
-func transformMultiSourceToValuesObject(content, componentName, overrideKey string, hasDynamic bool) (string, error) {
-	repoURL, chart, targetRevision, err := extractFirstSourceValues(content)
-	if err != nil {
-		return "", err
+// All Helm components use the merge pattern — every value is overridable
+// at install time via --set, not just paths declared with --dynamic.
+func convertToSingleSourceWithValues(app map[string]any, componentName, overrideKey string) error {
+	spec, ok := app["spec"].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "application manifest missing 'spec'")
 	}
 
-	if !sourcesPattern.MatchString(content) {
-		return "", errors.New(errors.ErrCodeInternal,
-			"ArgoCD Application manifest does not contain expected multi-source block; "+
-				"the upstream template format may have changed")
+	sources, ok := spec["sources"].([]any)
+	if !ok || len(sources) == 0 {
+		return errors.New(errors.ErrCodeInternal, "application manifest missing 'spec.sources'")
 	}
 
-	var replacement strings.Builder
-	fmt.Fprintf(&replacement, "  source:\n")
-	fmt.Fprintf(&replacement, "    repoURL: %s\n", repoURL)
-	fmt.Fprintf(&replacement, "    chart: %s\n", chart)
-	fmt.Fprintf(&replacement, "    targetRevision: %s\n", targetRevision)
-	fmt.Fprintf(&replacement, "    helm:\n")
-
-	if hasDynamic {
-		// Merge static (from chart file) + dynamic (from .Values) at render time
-		fmt.Fprintf(&replacement, "      valuesObject: |-\n")
-		fmt.Fprintf(&replacement, `        {{- $static := (.Files.Get "static/%s.yaml") | fromYaml -}}`+"\n", componentName)
-		fmt.Fprintf(&replacement, `        {{- $dynamic := index .Values %q | default dict -}}`+"\n", overrideKey)
-		fmt.Fprintf(&replacement, "        {{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}\n")
-	} else {
-		// Static only — load directly from chart file
-		fmt.Fprintf(&replacement, "      valuesObject: |-\n")
-		fmt.Fprintf(&replacement, `        {{- (.Files.Get "static/%s.yaml") | fromYaml | toYaml | nindent 8 }}`+"\n", componentName)
+	// First source entry has the chart reference
+	firstSource, ok := sources[0].(map[string]any)
+	if !ok {
+		return errors.New(errors.ErrCodeInternal, "first source entry is not a map")
 	}
 
-	replacement.WriteString("  destination:")
+	repoURL, _ := firstSource["repoURL"].(string)
+	chart, _ := firstSource["chart"].(string)
+	targetRevision, _ := firstSource["targetRevision"].(string)
 
-	return sourcesPattern.ReplaceAllLiteralString(content, replacement.String()), nil
+	if repoURL == "" || chart == "" || targetRevision == "" {
+		var missing []string
+		if repoURL == "" {
+			missing = append(missing, "repoURL")
+		}
+		if chart == "" {
+			missing = append(missing, "chart")
+		}
+		if targetRevision == "" {
+			missing = append(missing, "targetRevision")
+		}
+		return errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("first source entry missing fields: %s", strings.Join(missing, ", ")))
+	}
+
+	// Build the Helm template expression for values.
+	// ArgoCD's spec.source.helm.values is a string field containing YAML text.
+	// This template merges static values (from chart files) with dynamic overrides
+	// (from .Values) at Helm render time.
+	valuesTmpl := fmt.Sprintf(
+		`{{- $static := (.Files.Get "static/%s.yaml") | fromYaml | default dict -}}`+"\n"+
+			`{{- $dynamic := index .Values %q | default dict -}}`+"\n"+
+			`{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}`,
+		componentName, overrideKey)
+
+	// Replace multi-source with single source + values
+	spec["source"] = map[string]any{
+		"repoURL":        repoURL,
+		"chart":          chart,
+		"targetRevision": targetRevision,
+		"helm": map[string]any{
+			"values": valuesTmpl,
+		},
+	}
+	delete(spec, "sources")
+
+	return nil
 }
 
-// copyAsTemplate copies an application.yaml from the flat output to templates/ as-is.
+// fixValuesTemplate replaces the yaml.Marshal-quoted values string with a raw
+// block scalar. yaml.Marshal wraps strings containing {{ }} in quotes, but the
+// output needs to be a raw Helm template that Helm evaluates at render time.
+// ArgoCD's spec.source.helm.values is a string field, so |- block scalar is correct.
+func fixValuesTemplate(marshaled []byte, app map[string]any) []byte {
+	spec, _ := app["spec"].(map[string]any)
+	source, _ := spec["source"].(map[string]any)
+	helm, _ := source["helm"].(map[string]any)
+	tmpl, _ := helm["values"].(string)
+	if tmpl == "" {
+		return marshaled
+	}
+
+	// Build the raw block scalar version
+	var raw strings.Builder
+	raw.WriteString("      values: |-\n")
+	for _, line := range strings.Split(tmpl, "\n") {
+		raw.WriteString("        " + line + "\n")
+	}
+
+	// Replace whatever yaml.Marshal produced for values with the raw version.
+	result := string(marshaled)
+	start := strings.Index(result, "      values:")
+	if start == -1 {
+		return marshaled
+	}
+	// Find the end of the values value (next line at indent <= 6 spaces)
+	rest := result[start:]
+	lines := strings.Split(rest, "\n")
+	end := len(lines[0]) + 1
+	for _, line := range lines[1:] {
+		if line == "" || (len(line) > 0 && len(line)-len(strings.TrimLeft(line, " ")) <= 6 && strings.TrimSpace(line) != "") {
+			break
+		}
+		end += len(line) + 1
+	}
+
+	return []byte(result[:start] + raw.String() + result[start+end:])
+}
+
 func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, error) {
+	if !shared.IsSafePathComponent(componentName) {
+		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", componentName))
+	}
 	componentDir, joinErr := shared.SafeJoin(srcDir, componentName)
 	if joinErr != nil {
 		return "", 0, joinErr
@@ -395,56 +484,6 @@ func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, 
 			fmt.Sprintf("failed to write template for %s", componentName), writeErr)
 	}
 	return destPath, int64(len(content)), nil
-}
-
-// extractFirstSourceValues parses the multi-source block and extracts
-// repoURL, chart, and targetRevision from the first source entry.
-// Returns an error if any required field is missing, which indicates the
-// upstream ArgoCD template format has changed.
-func extractFirstSourceValues(content string) (repoURL, chart, targetRevision string, err error) {
-	lines := strings.Split(content, "\n")
-	inFirstSource := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- repoURL:") {
-			if !inFirstSource {
-				inFirstSource = true
-				repoURL = strings.TrimSpace(strings.TrimPrefix(trimmed, "- repoURL:"))
-				repoURL = strings.Trim(repoURL, "'")
-			}
-			continue
-		}
-		if !inFirstSource {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "ref:") {
-			break // hit second source entry or ref field
-		}
-		if strings.HasPrefix(trimmed, "chart:") {
-			chart = strings.TrimSpace(strings.TrimPrefix(trimmed, "chart:"))
-		}
-		if strings.HasPrefix(trimmed, "targetRevision:") {
-			targetRevision = strings.TrimSpace(strings.TrimPrefix(trimmed, "targetRevision:"))
-		}
-	}
-
-	var missing []string
-	if repoURL == "" {
-		missing = append(missing, "repoURL")
-	}
-	if chart == "" {
-		missing = append(missing, "chart")
-	}
-	if targetRevision == "" {
-		missing = append(missing, "targetRevision")
-	}
-	if len(missing) > 0 {
-		return "", "", "", errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to extract source fields [%s] from ArgoCD Application manifest; "+
-				"the upstream template format may have changed", strings.Join(missing, ", ")))
-	}
-
-	return repoURL, chart, targetRevision, nil
 }
 
 func writeChartYAML(outputDir, version string) (string, int64, error) {
@@ -554,28 +593,4 @@ func resolveOverrideKey(componentName string) (string, error) {
 			fmt.Sprintf("component %q has no valueOverrideKeys in registry", componentName))
 	}
 	return comp.ValueOverrideKeys[0], nil
-}
-
-func deepCopyMap(m map[string]any) map[string]any {
-	if m == nil {
-		return nil
-	}
-	data, err := yaml.Marshal(m)
-	if err != nil {
-		slog.Warn("deepCopyMap: yaml.Marshal failed, falling back to shallow copy", "error", err)
-		result := make(map[string]any, len(m))
-		for k, v := range m {
-			result[k] = v
-		}
-		return result
-	}
-	var result map[string]any
-	if unmarshalErr := yaml.Unmarshal(data, &result); unmarshalErr != nil {
-		slog.Warn("deepCopyMap: yaml.Unmarshal failed, falling back to shallow copy", "error", unmarshalErr)
-		result = make(map[string]any, len(m))
-		for k, v := range m {
-			result[k] = v
-		}
-	}
-	return result
 }

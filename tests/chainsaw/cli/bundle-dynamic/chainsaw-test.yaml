@@ -21,7 +21,7 @@ spec:
   description: |
     Tests --dynamic flag for install-time values in bundle output.
     Covers Helm deployer (cluster-values.yaml split) and ArgoCD deployer
-    (Helm chart app-of-apps with valuesObject). No cluster needed.
+    (Helm chart app-of-apps with helm.values). No cluster needed.
   timeouts:
     exec: 60s
   steps:
@@ -60,19 +60,19 @@ spec:
                 --file ./assert-cluster-values.yaml \
                 --no-color --timeout 5s
 
-    - name: helm-no-cluster-values-for-other-components
-      description: Components without --dynamic do not get cluster-values.yaml.
+    - name: helm-all-components-have-cluster-values
+      description: All components get cluster-values.yaml for per-cluster overrides.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-dynamic"
               for dir in "${WORK}"/helm-dynamic/*/; do
                 comp=$(basename "$dir")
-                [ "$comp" = "gpu-operator" ] && continue
-                if [ -f "${dir}cluster-values.yaml" ]; then
-                  echo "unexpected cluster-values.yaml in ${comp}" >&2; exit 1
-                fi
+                test -f "${dir}cluster-values.yaml" \
+                  || { echo "${comp} missing cluster-values.yaml" >&2; exit 1; }
               done
+              # Only gpu-operator's should have dynamic content
+              grep -q "driver" "${WORK}/helm-dynamic/gpu-operator/cluster-values.yaml"
             check:
               ($error == null): true
 
@@ -86,32 +86,33 @@ spec:
             check:
               ($error == null): true
 
-    - name: helm-no-dynamic-backwards-compatible
-      description: Without --dynamic, no cluster-values.yaml anywhere (backwards compatible).
+    - name: helm-no-dynamic-still-has-cluster-values
+      description: Without --dynamic, cluster-values.yaml exists (empty) for all components.
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-dynamic"
               ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/helm-nodynamic"
-              found=false
-              for f in "${WORK}"/helm-nodynamic/*/cluster-values.yaml; do
-                [ -f "$f" ] && { found=true; break; }
+              # Every component should have cluster-values.yaml
+              for dir in "${WORK}"/helm-nodynamic/*/; do
+                test -f "${dir}cluster-values.yaml" \
+                  || { echo "$(basename "$dir") missing cluster-values.yaml" >&2; exit 1; }
               done
-              [ "$found" = "false" ]
-              ! grep -q "cluster-values.yaml" "${WORK}/helm-nodynamic/deploy.sh"
+              # deploy.sh should always reference cluster-values.yaml
+              grep -q "cluster-values.yaml" "${WORK}/helm-nodynamic/deploy.sh"
             check:
               ($error == null): true
 
-    - name: argocd-dynamic-creates-helm-chart
-      description: --dynamic with ArgoCD produces Helm chart (Chart.yaml + templates/).
+    - name: argocd-helm-creates-helm-chart
+      description: --deployer argocd-helm produces Helm chart (Chart.yaml + templates/).
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-dynamic"
               ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/argocd-dynamic" \
-                --deployer argocd \
+                --deployer argocd-helm \
                 --dynamic gpuoperator:driver.version
               test -d "${WORK}/argocd-dynamic/templates"
               # Flat ArgoCD artifacts should NOT exist
@@ -132,7 +133,7 @@ spec:
                 --no-color --timeout 5s
 
     - name: argocd-template-has-values-object
-      description: At least one ArgoCD Application template references valuesObject.
+      description: At least one ArgoCD Application template references helm.values.
       try:
         - script:
             content: |
@@ -140,7 +141,7 @@ spec:
               found=false
               for tmpl in "${WORK}"/argocd-dynamic/templates/*.yaml; do
                 [ -f "$tmpl" ] || continue
-                grep -q "valuesObject" "$tmpl" && { found=true; break; }
+                grep -q "values:" "$tmpl" && { found=true; break; }
               done
               [ "$found" = "true" ]
             check:
@@ -177,9 +178,9 @@ spec:
               # Output should contain ArgoCD Application resources
               echo "$output" | grep -q "kind: Application" \
                 || { echo "rendered output should contain ArgoCD Applications" >&2; exit 1; }
-              # Output should contain valuesObject (proves template references resolve)
-              echo "$output" | grep -q "valuesObject" \
-                || { echo "rendered output should contain valuesObject" >&2; exit 1; }
+              # Output should contain values: (proves template references resolve)
+              echo "$output" | grep -q "values:" \
+                || { echo "rendered output should contain values:" >&2; exit 1; }
             check:
               ($error == null): true
 
@@ -211,17 +212,13 @@ spec:
               # Both components should have cluster-values.yaml
               test -f "${WORK}/helm-multi-dynamic/gpu-operator/cluster-values.yaml"
               test -f "${WORK}/helm-multi-dynamic/cert-manager/cluster-values.yaml"
-              # Verify content in each
+              # Dynamic components should have pre-populated content
               grep -q "driver" "${WORK}/helm-multi-dynamic/gpu-operator/cluster-values.yaml"
               grep -q "crds" "${WORK}/helm-multi-dynamic/cert-manager/cluster-values.yaml"
-              # Other components should NOT have cluster-values.yaml
+              # All components should have cluster-values.yaml (empty for non-dynamic)
               for dir in "${WORK}"/helm-multi-dynamic/*/; do
-                comp=$(basename "$dir")
-                [ "$comp" = "gpu-operator" ] && continue
-                [ "$comp" = "cert-manager" ] && continue
-                if [ -f "${dir}cluster-values.yaml" ]; then
-                  echo "unexpected cluster-values.yaml in ${comp}" >&2; exit 1
-                fi
+                test -f "${dir}cluster-values.yaml" \
+                  || { echo "$(basename "$dir") missing cluster-values.yaml" >&2; exit 1; }
               done
             check:
               ($error == null): true

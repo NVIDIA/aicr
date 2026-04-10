@@ -134,7 +134,7 @@ func TestGenerate(t *testing.T) {
 			},
 		},
 		{
-			name: "transformed template uses valuesObject",
+			name: "transformed template uses values",
 			input: &Generator{
 				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
 					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
@@ -156,8 +156,8 @@ func TestGenerate(t *testing.T) {
 				}
 				tmplStr := string(tmplContent)
 
-				if !strings.Contains(tmplStr, "valuesObject") {
-					t.Error("template should contain valuesObject")
+				if !strings.Contains(tmplStr, "values:") {
+					t.Error("template should contain values:")
 				}
 				if !strings.Contains(tmplStr, "static/gpu-operator.yaml") {
 					t.Error("template should load static values via .Files.Get")
@@ -252,126 +252,139 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
-func TestTransformMultiSourceToValuesObject(t *testing.T) {
-	input := `apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: gpu-operator
-spec:
-  project: default
-  sources:
-    - repoURL: https://helm.ngc.nvidia.com/nvidia
-      chart: gpu-operator
-      targetRevision: v24.9.0
-      helm:
-        valueFiles:
-          - $values/gpu-operator/values.yaml
-    - repoURL: 'https://github.com/example/repo.git'
-      targetRevision: main
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: gpu-operator
-`
+// TestConvertToSingleSourceWithValues verifies the structured YAML
+// transformation from multi-source to single-source with helm.values.
+func TestConvertToSingleSourceWithValues(t *testing.T) {
+	// Build a valid multi-source Application map
+	app := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"metadata":   map[string]any{"name": "gpu-operator"},
+		"spec": map[string]any{
+			"project": "default",
+			"sources": []any{
+				map[string]any{
+					"repoURL":        "https://helm.ngc.nvidia.com/nvidia",
+					"chart":          "gpu-operator",
+					"targetRevision": "v24.9.0",
+				},
+				map[string]any{
+					"repoURL": "https://github.com/example/repo.git",
+					"ref":     "values",
+				},
+			},
+			"destination": map[string]any{
+				"server":    "https://kubernetes.default.svc",
+				"namespace": "gpu-operator",
+			},
+		},
+	}
 
-	result, err := transformMultiSourceToValuesObject(input, "gpu-operator", "gpuOperator", true)
+	err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator")
 	if err != nil {
-		t.Fatalf("transformMultiSourceToValuesObject() error = %v", err)
+		t.Fatalf("convertToSingleSourceWithValues() error = %v", err)
 	}
 
-	if strings.Contains(result, "sources:") {
-		t.Error("should not contain multi-source 'sources:'")
+	spec := app["spec"].(map[string]any)
+
+	// Should have single "source", not "sources"
+	if _, hasSources := spec["sources"]; hasSources {
+		t.Error("should remove multi-source 'sources'")
 	}
-	if !strings.Contains(result, "source:") {
-		t.Error("should contain single 'source:'")
+	source, ok := spec["source"].(map[string]any)
+	if !ok {
+		t.Fatal("should have single 'source' map")
 	}
-	if !strings.Contains(result, "valuesObject") {
-		t.Error("should contain valuesObject")
+
+	// Verify chart fields preserved
+	if source["repoURL"] != "https://helm.ngc.nvidia.com/nvidia" {
+		t.Errorf("repoURL = %v, want nvidia repo", source["repoURL"])
 	}
-	if !strings.Contains(result, "static/gpu-operator.yaml") {
-		t.Error("should reference static values file")
+	if source["chart"] != "gpu-operator" {
+		t.Errorf("chart = %v, want gpu-operator", source["chart"])
 	}
-	if !strings.Contains(result, "mustMergeOverwrite") {
-		t.Error("should merge static + dynamic values")
+	if source["targetRevision"] != "v24.9.0" {
+		t.Errorf("targetRevision = %v, want v24.9.0", source["targetRevision"])
 	}
-	if !strings.Contains(result, `"gpuOperator"`) {
-		t.Error("should reference .Values with override key")
+
+	// Verify helm.values contains template expressions
+	helm, ok := source["helm"].(map[string]any)
+	if !ok {
+		t.Fatal("source should have 'helm' map")
 	}
-	if !strings.Contains(result, "chart: gpu-operator") {
-		t.Error("should preserve chart name")
+	valuesStr, ok := helm["values"].(string)
+	if !ok {
+		t.Fatal("helm should have 'values' string")
 	}
-	if !strings.Contains(result, "repoURL: https://helm.ngc.nvidia.com/nvidia") {
-		t.Error("should preserve chart repoURL")
+	if !strings.Contains(valuesStr, "static/gpu-operator.yaml") {
+		t.Error("values should reference static file")
+	}
+	if !strings.Contains(valuesStr, "mustMergeOverwrite") {
+		t.Error("values should use merge pattern")
+	}
+	if !strings.Contains(valuesStr, `"gpuOperator"`) {
+		t.Error("values should reference override key")
+	}
+	// Should NOT use valuesObject (that expects a YAML object, not a string)
+	if _, hasValuesObject := helm["valuesObject"]; hasValuesObject {
+		t.Error("should use 'values' (string), not 'valuesObject' (object)")
+	}
+
+	// Destination should be untouched
+	dest := spec["destination"].(map[string]any)
+	if dest["namespace"] != "gpu-operator" {
+		t.Error("destination should be preserved")
 	}
 }
 
-func TestTransformMultiSource_StaticOnly(t *testing.T) {
-	input := `apiVersion: argoproj.io/v1alpha1
-kind: Application
-spec:
-  sources:
-    - repoURL: https://charts.example.com
-      chart: cert-manager
-      targetRevision: v1.14.0
-      helm:
-        valueFiles:
-          - $values/cert-manager/values.yaml
-    - repoURL: 'https://github.com/example/repo.git'
-      targetRevision: main
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-`
-
-	result, err := transformMultiSourceToValuesObject(input, "cert-manager", "certmanager", false)
-	if err != nil {
-		t.Fatalf("error = %v", err)
+// TestConvertToSingleSource_MissingFields verifies error handling when the
+// Application manifest is missing required fields.
+func TestConvertToSingleSource_MissingFields(t *testing.T) {
+	tests := []struct {
+		name string
+		app  map[string]any
+	}{
+		{
+			name: "missing spec",
+			app:  map[string]any{"apiVersion": "v1"},
+		},
+		{
+			name: "missing sources",
+			app: map[string]any{
+				"spec": map[string]any{
+					"source": map[string]any{"repoURL": "https://example.com"},
+				},
+			},
+		},
+		{
+			name: "empty sources",
+			app: map[string]any{
+				"spec": map[string]any{"sources": []any{}},
+			},
+		},
+		{
+			name: "missing chart in first source",
+			app: map[string]any{
+				"spec": map[string]any{
+					"sources": []any{
+						map[string]any{
+							"repoURL":        "https://example.com",
+							"targetRevision": "v1.0.0",
+							// chart is missing
+						},
+					},
+				},
+			},
+		},
 	}
 
-	if !strings.Contains(result, "static/cert-manager.yaml") {
-		t.Error("static-only should reference .Files.Get")
-	}
-	if strings.Contains(result, "mustMergeOverwrite") {
-		t.Error("static-only should NOT use merge (no dynamic values)")
-	}
-}
-
-func TestTransformMultiSource_MissingFields(t *testing.T) {
-	// Application with no sources block — regex won't match
-	noSources := `apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: gpu-operator
-spec:
-  source:
-    repoURL: https://example.com
-  destination:
-    server: https://kubernetes.default.svc
-`
-	_, err := transformMultiSourceToValuesObject(noSources, "gpu-operator", "gpuOperator", true)
-	if err == nil {
-		t.Error("expected error when sources block is missing")
-	}
-
-	// Application with sources but missing chart field
-	noChart := `apiVersion: argoproj.io/v1alpha1
-kind: Application
-spec:
-  sources:
-    - repoURL: https://example.com
-      targetRevision: v1.0.0
-      helm:
-        valueFiles:
-          - $values/test/values.yaml
-    - repoURL: 'https://github.com/example/repo.git'
-      targetRevision: main
-      ref: values
-  destination:
-    server: https://kubernetes.default.svc
-`
-	_, err = transformMultiSourceToValuesObject(noChart, "test", "test", true)
-	if err == nil {
-		t.Error("expected error when chart field is missing from source")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := convertToSingleSourceWithValues(tt.app, "test", "test")
+			if err == nil {
+				t.Error("expected error for malformed application")
+			}
+		})
 	}
 }
 
@@ -390,11 +403,52 @@ func TestSetValueByPath_StubBehavior(t *testing.T) {
 	}
 }
 
+// TestFixValuesTemplate verifies that the raw Helm template expression in
+// helm.values survives yaml.Marshal → fixValuesTemplate without being
+// quoted or escaped. This is critical: ArgoCD needs the raw template text, not
+// a YAML string literal.
+func TestFixValuesTemplate(t *testing.T) {
+	tmpl := `{{- $static := (.Files.Get "static/gpu-operator.yaml") | fromYaml -}}
+{{- $dynamic := index .Values "gpuOperator" | default dict -}}
+{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}`
+
+	app := map[string]any{
+		"spec": map[string]any{
+			"source": map[string]any{
+				"helm": map[string]any{
+					"values": tmpl,
+				},
+			},
+		},
+	}
+
+	// yaml.Marshal will quote the template (it contains {{ }})
+	marshaled, err := yaml.Marshal(app)
+	if err != nil {
+		t.Fatalf("yaml.Marshal error: %v", err)
+	}
+
+	// Apply the fix
+	fixed := fixValuesTemplate(marshaled, app)
+
+	// The fixed output should contain the raw template as a block scalar
+	fixedStr := string(fixed)
+	if !strings.Contains(fixedStr, "values: |-") {
+		t.Error("fixed output should use block scalar (|-) for values")
+	}
+	if !strings.Contains(fixedStr, "{{- $static") {
+		t.Error("fixed output should contain raw template expression")
+	}
+	if !strings.Contains(fixedStr, "mustMergeOverwrite") {
+		t.Error("fixed output should contain mustMergeOverwrite")
+	}
+}
+
 func TestDeepCopyMap(t *testing.T) {
 	original := map[string]any{
 		"driver": map[string]any{"version": "580"},
 	}
-	copied := deepCopyMap(original)
+	copied := component.DeepCopyMap(original)
 
 	if inner, ok := copied["driver"].(map[string]any); ok {
 		inner["version"] = "changed"

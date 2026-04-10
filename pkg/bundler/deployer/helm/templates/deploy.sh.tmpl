@@ -368,9 +368,7 @@ helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   {{ end -}}
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-{{- if .HasDynamicValues }}
   -f "${SCRIPT_DIR}/{{ .Name }}/cluster-values.yaml" \
-{{- end }}
   ${COMPONENT_WAIT_ARGS} \
   || helm_failed "{{ .Name }}"
 {{ else -}}
@@ -381,9 +379,7 @@ helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   {{ end -}}
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-{{- if .HasDynamicValues }}
   -f "${SCRIPT_DIR}/{{ .Name }}/cluster-values.yaml" \
-{{- end }}
   ${COMPONENT_WAIT_ARGS} \
   || helm_failed "{{ .Name }}"
 {{ end -}}

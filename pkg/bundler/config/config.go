@@ -37,6 +37,10 @@ const (
 	DeployerHelm DeployerType = "helm"
 	// DeployerArgoCD generates ArgoCD App of Apps manifests.
 	DeployerArgoCD DeployerType = "argocd"
+	// DeployerArgoCDHelm generates a Helm chart app-of-apps for ArgoCD.
+	// All values are overridable at install time via helm --set.
+	// Use --dynamic to pre-populate specific paths in root values.yaml.
+	DeployerArgoCDHelm DeployerType = "argocd-helm"
 )
 
 // ParseDeployerType parses a string into a DeployerType.
@@ -47,6 +51,8 @@ func ParseDeployerType(s string) (DeployerType, error) {
 		return DeployerHelm, nil
 	case string(DeployerArgoCD):
 		return DeployerArgoCD, nil
+	case string(DeployerArgoCDHelm):
+		return DeployerArgoCDHelm, nil
 	default:
 		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid deployer type %q: must be one of %v", s, GetDeployerTypes()))
 	}
@@ -58,6 +64,7 @@ func GetDeployerTypes() []string {
 	types := []string{
 		string(DeployerHelm),
 		string(DeployerArgoCD),
+		string(DeployerArgoCDHelm),
 	}
 	sort.Strings(types)
 	return types

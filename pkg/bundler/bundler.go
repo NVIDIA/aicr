@@ -253,14 +253,21 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	}
 
 	// Route based on deployer
-	deployer := b.Config.Deployer()
-	if deployer == config.DeployerArgoCD {
+	switch b.Config.Deployer() {
+	case config.DeployerArgoCDHelm:
+		return b.makeArgoCDHelmChart(ctx, recipeResult, componentValues, dir, start)
+	case config.DeployerArgoCD:
 		if b.Config.HasDynamicValues() {
-			return b.makeArgoCDHelmChart(ctx, recipeResult, componentValues, dir, start)
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
 		}
 		return b.makeArgoCD(ctx, recipeResult, componentValues, dir, start)
+	case config.DeployerHelm:
+		return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
+	default:
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
 	}
-	return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
 }
 
 // makeHelmBundle generates a Helm per-component bundle.
@@ -364,6 +371,18 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 
 // makeArgoCDHelmChart generates a Helm chart app-of-apps for ArgoCD with dynamic install-time values.
 func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
+	// Reject flags not yet supported by the argocd-helm deployer.
+	if b.Config.Attest() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--attest is not yet supported with --deployer argocd-helm")
+	}
+	if provider := recipe.GetDataProvider(); provider != nil {
+		if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--data is not yet supported with --deployer argocd-helm")
+		}
+	}
+
 	dynamicValues, dynErr := b.buildDynamicValuesMap()
 	if dynErr != nil {
 		return nil, dynErr

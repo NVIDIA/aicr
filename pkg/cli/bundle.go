@@ -393,8 +393,13 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	outputType := "Helm per-component bundle"
-	if opts.deployer == config.DeployerArgoCD {
+	switch opts.deployer {
+	case config.DeployerHelm:
+		// default
+	case config.DeployerArgoCD:
 		outputType = "ArgoCD applications"
+	case config.DeployerArgoCDHelm:
+		outputType = "ArgoCD Helm chart app-of-apps"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),

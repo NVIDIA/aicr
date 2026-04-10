@@ -1634,17 +1634,17 @@ func TestGenerate_DynamicValues(t *testing.T) {
 		wantDeployClusterValues bool   // whether deploy.sh should contain cluster-values.yaml for gpu-operator
 	}{
 		{
-			name:          "no dynamic values",
+			name:          "no dynamic values — cluster-values.yaml still generated (empty)",
 			dynamicValues: nil,
 			componentValues: map[string]map[string]any{
 				"cert-manager": {"crds": map[string]any{"enabled": true}},
 				"gpu-operator": {"driver": map[string]any{"version": testDriverVersion, "enabled": true}},
 			},
-			wantClusterValues:       false,
-			wantDeployClusterValues: false,
+			wantClusterValues:       true,
+			wantDeployClusterValues: true,
 		},
 		{
-			name: "dynamic values present",
+			name: "dynamic values present — extracted into cluster-values.yaml",
 			dynamicValues: map[string][]string{
 				"gpu-operator": {"driver.version"},
 			},
@@ -1718,13 +1718,13 @@ func TestGenerate_DynamicValues(t *testing.T) {
 				}
 			}
 
-			// cert-manager should never have cluster-values.yaml
+			// cert-manager should also have cluster-values.yaml (all components get one)
 			certClusterPath := filepath.Join(outputDir, "cert-manager", "cluster-values.yaml")
-			if _, certStatErr := os.Stat(certClusterPath); !os.IsNotExist(certStatErr) {
-				t.Error("cert-manager should not have cluster-values.yaml")
+			if _, certStatErr := os.Stat(certClusterPath); os.IsNotExist(certStatErr) {
+				t.Error("cert-manager should have cluster-values.yaml (all components get one)")
 			}
 
-			// Verify deploy.sh content
+			// Verify deploy.sh content — all components always reference cluster-values.yaml
 			deployContent, readErr := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
 			if readErr != nil {
 				t.Fatalf("failed to read deploy.sh: %v", readErr)
@@ -1736,16 +1736,12 @@ func TestGenerate_DynamicValues(t *testing.T) {
 				if !strings.Contains(deployScript, gpuClusterRef) {
 					t.Error("deploy.sh should contain cluster-values.yaml reference for gpu-operator")
 				}
-			} else {
-				if strings.Contains(deployScript, gpuClusterRef) {
-					t.Error("deploy.sh should NOT contain cluster-values.yaml reference for gpu-operator")
-				}
 			}
 
-			// cert-manager should never have cluster-values.yaml in deploy.sh
+			// All components always have cluster-values.yaml in deploy.sh
 			certClusterRef := `cert-manager/cluster-values.yaml`
-			if strings.Contains(deployScript, certClusterRef) {
-				t.Error("deploy.sh should NOT contain cluster-values.yaml reference for cert-manager")
+			if !strings.Contains(deployScript, certClusterRef) {
+				t.Error("deploy.sh should contain cluster-values.yaml reference for all components")
 			}
 		})
 	}
@@ -2215,5 +2211,42 @@ func TestReverseComponents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGenerate_DoesNotMutateComponentValues verifies that Generate deep-copies
+// component values before extracting dynamic paths, so the input map is preserved.
+func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	originalValues := map[string]map[string]any{
+		"gpu-operator": {
+			"driver": map[string]any{"version": testDriverVersion, "enabled": true},
+		},
+	}
+
+	input := &GeneratorInput{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: originalValues,
+		Version:         "test",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version"},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Original values should NOT be mutated — driver.version should still exist
+	driver, ok := originalValues["gpu-operator"]["driver"].(map[string]any)
+	if !ok {
+		t.Fatal("original driver should still be a map")
+	}
+	if _, hasVersion := driver["version"]; !hasVersion {
+		t.Error("original driver.version was mutated (removed) — deep copy is missing")
 	}
 }

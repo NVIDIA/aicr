@@ -806,7 +806,7 @@ aicr bundle [flags]
 | `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
 | `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
-| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -868,8 +868,11 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 | Method | Description |
 |--------|-------------|
-| `helm` | (Default) Generates Helm charts with values for deployment |
-| `argocd` | Generates ArgoCD Application manifests for GitOps deployment |
+| `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
+| `argocd` | Generates ArgoCD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
+| `argocd-helm` | Generates a Helm chart app-of-apps for ArgoCD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
+
+> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
 **Deployment Order:**
 
@@ -1014,7 +1017,7 @@ Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
 **ArgoCD deployer behavior:**
 
-When `--dynamic` is used with `--deployer argocd`, the deployer automatically generates a Helm chart app-of-apps instead of flat Application manifests. Each component's Application template injects values via `valuesObject`, and dynamic values are supplied at install time via `helm install --set`:
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
 
 ```shell
 helm install aicr-bundle ./bundle \
@@ -1022,31 +1025,34 @@ helm install aicr-bundle ./bundle \
   --set alloy.subnetName=subnet-abc123
 ```
 
-Without `--dynamic`, the ArgoCD deployer produces flat manifests as usual.
-
 **Examples:**
 ```shell
-# Declare cluster name as install-time parameter
+# Helm: declare cluster name as install-time parameter
 aicr bundle -r recipe.yaml \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# Multiple dynamic paths across components
+# Helm: multiple dynamic paths across components
 aicr bundle -r recipe.yaml \
   --dynamic alloy:clusterName \
   --dynamic alloy:subnetName \
   -o ./bundles
 
-# Combine with --set (static overrides + dynamic cluster-specific values)
+# Helm: combine with --set (static overrides + dynamic cluster-specific values)
 aicr bundle -r recipe.yaml \
   --set gpuoperator:driver.version=580.105.08 \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# ArgoCD with dynamic values (produces Helm chart app-of-apps)
+# ArgoCD Helm chart: all values overridable, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
-  --deployer argocd \
+  --deployer argocd-helm \
   --dynamic alloy:clusterName \
+  -o ./bundles
+
+# ArgoCD Helm chart: without --dynamic, still fully overridable via helm --set
+aicr bundle -r recipe.yaml \
+  --deployer argocd-helm \
   -o ./bundles
 ```
 
@@ -1068,7 +1074,7 @@ bundles/
 ├── Chart.yaml                     # Helm chart metadata
 ├── values.yaml                    # Dynamic values only (defaults from recipe, override per cluster)
 ├── templates/
-│   ├── alloy.yaml                 # ArgoCD Application template with valuesObject
+│   ├── alloy.yaml                 # ArgoCD Application template with helm.values
 │   └── gpu-operator.yaml
 └── README.md
 ```

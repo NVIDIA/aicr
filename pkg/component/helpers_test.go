@@ -19,6 +19,8 @@ import (
 	"testing"
 )
 
+const testMutatedValue = "changed"
+
 func Test_computeChecksum(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -253,6 +255,102 @@ func Test_parseBoolString(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDeepCopyMap verifies deep copy produces an independent copy that
+// preserves types and structure, and mutations to the copy don't leak.
+func TestDeepCopyMap(t *testing.T) {
+	t.Run("nil returns empty map", func(t *testing.T) {
+		result := DeepCopyMap(nil)
+		if result == nil {
+			t.Error("nil input should return non-nil empty map")
+		}
+		if len(result) != 0 {
+			t.Errorf("nil input should return empty map, got %v", result)
+		}
+	})
+
+	t.Run("nested maps are independent", func(t *testing.T) {
+		original := map[string]any{
+			"driver": map[string]any{
+				"version":  "580",
+				"registry": "nvcr.io",
+			},
+			"enabled": true,
+		}
+		copied := DeepCopyMap(original)
+
+		copied["driver"].(map[string]any)["version"] = testMutatedValue
+		copied["enabled"] = false
+
+		if original["driver"].(map[string]any)["version"] != "580" {
+			t.Error("mutation leaked to original nested map")
+		}
+		if original["enabled"] != true {
+			t.Error("mutation leaked to original scalar")
+		}
+	})
+
+	t.Run("slices are independent", func(t *testing.T) {
+		original := map[string]any{
+			"items": []any{
+				map[string]any{"key": "nvidia.com/gpu", "effect": "NoSchedule"},
+			},
+		}
+		copied := DeepCopyMap(original)
+
+		copied["items"].([]any)[0].(map[string]any)["key"] = testMutatedValue
+
+		origKey := original["items"].([]any)[0].(map[string]any)["key"]
+		if origKey != "nvidia.com/gpu" {
+			t.Errorf("mutation leaked to original slice element, got %v", origKey)
+		}
+	})
+
+	t.Run("preserves types without drift", func(t *testing.T) {
+		original := map[string]any{
+			"count":   42,
+			"ratio":   3.14,
+			"name":    "test",
+			"enabled": true,
+			"empty":   nil,
+		}
+		copied := DeepCopyMap(original)
+
+		if v, ok := copied["count"].(int); !ok || v != 42 {
+			t.Errorf("count type/value wrong: %T %v", copied["count"], copied["count"])
+		}
+		if v, ok := copied["ratio"].(float64); !ok || v != 3.14 {
+			t.Errorf("ratio type/value wrong: %T %v", copied["ratio"], copied["ratio"])
+		}
+		if v, ok := copied["name"].(string); !ok || v != "test" {
+			t.Errorf("name type/value wrong: %T %v", copied["name"], copied["name"])
+		}
+		if v, ok := copied["enabled"].(bool); !ok || !v {
+			t.Errorf("enabled type/value wrong: %T %v", copied["enabled"], copied["enabled"])
+		}
+		if copied["empty"] != nil {
+			t.Errorf("empty should be nil, got %v", copied["empty"])
+		}
+	})
+
+	t.Run("deeply nested structure", func(t *testing.T) {
+		original := map[string]any{
+			"a": map[string]any{
+				"b": map[string]any{
+					"c": map[string]any{"d": "deep"},
+				},
+			},
+		}
+		copied := DeepCopyMap(original)
+
+		copied["a"].(map[string]any)["b"].(map[string]any)["c"].(map[string]any)["d"] = testMutatedValue
+
+		origVal := original["a"].(map[string]any)["b"].(map[string]any)["c"].(map[string]any)["d"]
+		if origVal != "deep" {
+			t.Error("mutation leaked through deeply nested maps")
+		}
+	})
 }
 
 func TestMarshalYAMLWithHeader(t *testing.T) {
