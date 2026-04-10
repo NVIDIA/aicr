@@ -642,6 +642,54 @@ func TolerationsToPodSpec(tolerations []corev1.Toleration) []map[string]any {
 	return result
 }
 
+// GetValueByPath retrieves a value from a nested map using dot-notation path.
+// Returns the value and true if found, or nil and false if any path segment is missing.
+func GetValueByPath(target map[string]any, path string) (any, bool) {
+	parts := strings.Split(path, ".")
+	current := target
+
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := current[part]
+		if !ok {
+			return nil, false
+		}
+		nextMap, ok := next.(map[string]any)
+		if !ok {
+			return nil, false
+		}
+		current = nextMap
+	}
+
+	val, ok := current[parts[len(parts)-1]]
+	return val, ok
+}
+
+// RemoveValueByPath removes a value from a nested map at the given dot-notation path.
+// Returns true if the value existed and was removed, false otherwise.
+func RemoveValueByPath(target map[string]any, path string) bool {
+	parts := strings.Split(path, ".")
+	current := target
+
+	for _, part := range parts[:len(parts)-1] {
+		next, ok := current[part]
+		if !ok {
+			return false
+		}
+		nextMap, ok := next.(map[string]any)
+		if !ok {
+			return false
+		}
+		current = nextMap
+	}
+
+	key := parts[len(parts)-1]
+	if _, ok := current[key]; !ok {
+		return false
+	}
+	delete(current, key)
+	return true
+}
+
 // nodeSelectorToMatchExpressions converts a map of node selectors to matchExpressions format.
 // This format is used by some CRDs like Skyhook that use label selector syntax.
 // Each key=value pair becomes a matchExpression with operator "In" and single value.

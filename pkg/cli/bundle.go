@@ -54,6 +54,9 @@ type bundleCmdOptions struct {
 	estimatedNodeCount         int
 	targetRevision             string
 
+	// dynamicValues declares value paths provided at install time.
+	dynamicValues map[string][]string
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -154,6 +157,12 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	opts.valueOverrides, err = config.ParseValueOverrides(cmd.StringSlice("set"))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --set flag", err)
+	}
+
+	// Parse dynamic value declarations from --dynamic flags
+	opts.dynamicValues, err = config.ParseDynamicValues(cmd.StringSlice("dynamic"))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --dynamic flag", err)
 	}
 
 	// Parse node selectors
@@ -272,6 +281,14 @@ Package with explicit tag (overrides CLI version):
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
 	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver)`,
+				Category: "Deployment",
+			},
+			&cli.StringSliceFlag{
+				Name: "dynamic",
+				Usage: `Declare value paths as install-time parameters
+	(format: component:path.to.field, e.g., --dynamic alloy:clusterName).
+	Dynamic paths are removed from values.yaml and placed in cluster-values.yaml
+	for the user to fill in at install time.`,
 				Category: "Deployment",
 			},
 			&cli.StringSliceFlag{
@@ -410,6 +427,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
 		config.WithValueOverrides(opts.valueOverrides),
+		config.WithDynamicValues(opts.dynamicValues),
 		config.WithSystemNodeSelector(opts.systemNodeSelector),
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
 		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),

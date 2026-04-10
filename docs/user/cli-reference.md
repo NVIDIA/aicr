@@ -806,6 +806,7 @@ aicr bundle [flags]
 | `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
 | `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -978,6 +979,98 @@ aicr bundle -r recipe.yaml --deployer argocd \
 aicr bundle -r recipe.yaml \
   --deployer argocd \
   -o ./bundles
+```
+
+**Dynamic Install-Time Values (`--dynamic`):**
+
+The `--dynamic` flag declares value paths that are cluster-specific and should be provided at install time rather than baked into the bundle at build time. This enables building a single bundle that can be deployed to multiple clusters with different configurations.
+
+Use `--dynamic` for values that genuinely vary per cluster — cluster names, subnet IDs, endpoint URLs, region-specific settings. For values that are static per bundle but differ from the recipe default (e.g., a specific driver version), use `--set` instead.
+
+| Use case | Flag | Example |
+|----------|------|---------|
+| Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
+| Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
+
+```shell
+--dynamic component:path.to.field
+```
+
+**Format:** `component:path` where:
+- `component` - Component name or override key (same keys as `--set`, e.g., `gpuoperator`, `alloy`)
+- `path` - Dot-separated path to the value that varies per cluster
+
+**Helm deployer behavior:**
+
+Dynamic paths are removed from `values.yaml` and written to a separate `cluster-values.yaml` per component. The generated `deploy.sh` passes both files to Helm:
+
+```shell
+helm upgrade --install gpu-operator ... \
+  -f values.yaml \
+  -f cluster-values.yaml
+```
+
+Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
+
+**ArgoCD deployer behavior:**
+
+When `--dynamic` is used with `--deployer argocd`, the deployer automatically generates a Helm chart app-of-apps instead of flat Application manifests. Each component's Application template injects values via `valuesObject`, and dynamic values are supplied at install time via `helm install --set`:
+
+```shell
+helm install aicr-bundle ./bundle \
+  --set alloy.clusterName=prod-east \
+  --set alloy.subnetName=subnet-abc123
+```
+
+Without `--dynamic`, the ArgoCD deployer produces flat manifests as usual.
+
+**Examples:**
+```shell
+# Declare cluster name as install-time parameter
+aicr bundle -r recipe.yaml \
+  --dynamic alloy:clusterName \
+  -o ./bundles
+
+# Multiple dynamic paths across components
+aicr bundle -r recipe.yaml \
+  --dynamic alloy:clusterName \
+  --dynamic alloy:subnetName \
+  -o ./bundles
+
+# Combine with --set (static overrides + dynamic cluster-specific values)
+aicr bundle -r recipe.yaml \
+  --set gpuoperator:driver.version=580.105.08 \
+  --dynamic alloy:clusterName \
+  -o ./bundles
+
+# ArgoCD with dynamic values (produces Helm chart app-of-apps)
+aicr bundle -r recipe.yaml \
+  --deployer argocd \
+  --dynamic alloy:clusterName \
+  -o ./bundles
+```
+
+**Bundle structure with `--dynamic`** (Helm deployer):
+```
+bundles/
+├── alloy/
+│   ├── values.yaml                # Static values (clusterName removed)
+│   └── cluster-values.yaml        # Dynamic stubs (fill in before deploying)
+├── gpu-operator/
+│   └── values.yaml                # No dynamic values, no cluster-values.yaml
+├── deploy.sh                      # Passes -f cluster-values.yaml when present
+└── ...
+```
+
+**ArgoCD Helm chart structure with `--dynamic`:**
+```
+bundles/
+├── Chart.yaml                     # Helm chart metadata
+├── values.yaml                    # All component values (dynamic paths are empty stubs)
+├── templates/
+│   ├── alloy.yaml                 # ArgoCD Application template with valuesObject
+│   └── gpu-operator.yaml
+└── README.md
 ```
 
 **Bundle structure** (with default Helm deployer):

@@ -15,6 +15,7 @@
 package component
 
 import (
+	"fmt"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -1724,6 +1725,182 @@ func TestApplyValueOverrides_MultiSegmentPaths(t *testing.T) {
 				t.Fatalf("ApplyValueOverrides() unexpected error = %v", err)
 			}
 			tt.verify(t, s)
+		})
+	}
+}
+
+func TestGetValueByPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		target map[string]any
+		path   string
+		want   any
+		found  bool
+	}{
+		{
+			name:   "top-level key",
+			target: map[string]any{"clusterName": "prod"},
+			path:   "clusterName",
+			want:   "prod",
+			found:  true,
+		},
+		{
+			name: "nested key",
+			target: map[string]any{
+				"driver": map[string]any{
+					"version": "580.105.08",
+				},
+			},
+			path:  "driver.version",
+			want:  "580.105.08",
+			found: true,
+		},
+		{
+			name: "deeply nested key",
+			target: map[string]any{
+				"network": map[string]any{
+					"subnet": map[string]any{
+						"id": "subnet-123",
+					},
+				},
+			},
+			path:  "network.subnet.id",
+			want:  "subnet-123",
+			found: true,
+		},
+		{
+			name:   "missing top-level key",
+			target: map[string]any{"other": "value"},
+			path:   "missing",
+			want:   nil,
+			found:  false,
+		},
+		{
+			name: "missing intermediate key",
+			target: map[string]any{
+				"driver": map[string]any{
+					"version": "580",
+				},
+			},
+			path:  "driver.missing.field",
+			want:  nil,
+			found: false,
+		},
+		{
+			name: "intermediate is not a map",
+			target: map[string]any{
+				"driver": "scalar-value",
+			},
+			path:  "driver.version",
+			want:  nil,
+			found: false,
+		},
+		{
+			name: "value is a map",
+			target: map[string]any{
+				"driver": map[string]any{
+					"config": map[string]any{"a": "b"},
+				},
+			},
+			path:  "driver.config",
+			want:  map[string]any{"a": "b"},
+			found: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found := GetValueByPath(tt.target, tt.path)
+			if found != tt.found {
+				t.Errorf("GetValueByPath() found = %v, want %v", found, tt.found)
+			}
+			if !tt.found {
+				return
+			}
+			// Use fmt.Sprintf for comparison to handle map types
+			if fmt.Sprintf("%v", got) != fmt.Sprintf("%v", tt.want) {
+				t.Errorf("GetValueByPath() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRemoveValueByPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		target  map[string]any
+		path    string
+		removed bool
+		verify  func(t *testing.T, m map[string]any)
+	}{
+		{
+			name:    "remove top-level key",
+			target:  map[string]any{"clusterName": "prod", "other": "keep"},
+			path:    "clusterName",
+			removed: true,
+			verify: func(t *testing.T, m map[string]any) {
+				if _, ok := m["clusterName"]; ok {
+					t.Error("clusterName should have been removed")
+				}
+				if m["other"] != "keep" {
+					t.Error("other key should still exist")
+				}
+			},
+		},
+		{
+			name: "remove nested key",
+			target: map[string]any{
+				"driver": map[string]any{
+					"version":  "580",
+					"registry": "nvcr.io",
+				},
+			},
+			path:    "driver.version",
+			removed: true,
+			verify: func(t *testing.T, m map[string]any) {
+				driver := m["driver"].(map[string]any)
+				if _, ok := driver["version"]; ok {
+					t.Error("driver.version should have been removed")
+				}
+				if driver["registry"] != "nvcr.io" {
+					t.Error("driver.registry should still exist")
+				}
+			},
+		},
+		{
+			name:    "missing top-level key",
+			target:  map[string]any{"other": "value"},
+			path:    "missing",
+			removed: false,
+			verify:  func(t *testing.T, m map[string]any) {},
+		},
+		{
+			name: "missing intermediate key",
+			target: map[string]any{
+				"driver": map[string]any{"version": "580"},
+			},
+			path:    "missing.version",
+			removed: false,
+			verify:  func(t *testing.T, m map[string]any) {},
+		},
+		{
+			name: "intermediate is not a map",
+			target: map[string]any{
+				"driver": "scalar",
+			},
+			path:    "driver.version",
+			removed: false,
+			verify:  func(t *testing.T, m map[string]any) {},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			removed := RemoveValueByPath(tt.target, tt.path)
+			if removed != tt.removed {
+				t.Errorf("RemoveValueByPath() = %v, want %v", removed, tt.removed)
+			}
+			tt.verify(t, tt.target)
 		})
 	}
 }
