@@ -10,6 +10,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 | **Recipe** | A generated configuration recommendation containing component references, constraints, and deployment order. Created by `aicr recipe` based on criteria or snapshot analysis. |
 | **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke), `accelerator` (h100/gb200/a100/l40), `intent` (training/inference), `os` (ubuntu/rhel/cos), `platform` (kubeflow), and `nodes`. |
 | **Overlay** | A recipe metadata file that extends the base recipe for specific environments. Overlays are matched against criteria using asymmetric matching. |
+| **Mixin** | A composable recipe fragment (`kind: RecipeMixin`) that carries only `constraints` and `componentRefs`. Mixins live in `recipes/mixins/`, are excluded from overlay discovery, and are referenced by leaf overlays via `spec.mixins` to share orthogonal content (e.g., OS constraints, platform components) without duplication. See [ADR-005](design/005-overlay-refactoring.md). |
 | **Bundle** | Deployment artifacts generated from a recipe: Helm values files, Kubernetes manifests, installation scripts, and checksums. |
 | **Bundler** | A plugin that generates bundle artifacts for a specific component (e.g., GPU Operator bundler, Network Operator bundler). |
 | **Deployer** | A plugin that transforms bundle artifacts into deployment-specific formats: `helm` (Helm per-component bundles, default), `argocd` (Applications with sync-waves). |
