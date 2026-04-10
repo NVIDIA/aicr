@@ -26,7 +26,7 @@ on:
   push:
     tags:
       - 'docs/v*'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
