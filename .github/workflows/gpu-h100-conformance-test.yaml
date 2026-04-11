@@ -71,7 +71,7 @@ jobs:
       github.event.label.name == 'run-gpu-tests'
     name: GPU Conformance Test (nvkind + H100 x2)
     runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     env:
       KIND_CLUSTER_NAME: gpu-conformance-test
@@ -88,8 +88,11 @@ jobs:
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
+        with:
+          validator_phases: 'conformance'
 
-      - name: Install GPU operator (bundle)
+      - name: Install runtime bundle
+        id: bundle-install
         uses: ./.github/actions/gpu-operator-install
         with:
           method: bundle
@@ -149,7 +152,7 @@ jobs:
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
-        if: always()
+        if: always() && steps.bundle-install.outcome == 'success'
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind-training \

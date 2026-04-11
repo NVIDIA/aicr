@@ -393,8 +393,68 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	if !strings.Contains(string(content), "retry()") {
 		t.Error("deploy.sh missing retry function")
 	}
+	if !strings.Contains(string(content), "helm_retry()") {
+		t.Error("deploy.sh missing helm_retry function")
+	}
+	if !strings.Contains(string(content), "cleanup_helm_hooks()") {
+		t.Error("deploy.sh missing cleanup_helm_hooks function")
+	}
+	if !strings.Contains(string(content), "HELM_TIMEOUT=") {
+		t.Error("deploy.sh missing HELM_TIMEOUT variable")
+	}
+	if !strings.Contains(string(content), "NO_WAIT=") {
+		t.Error("deploy.sh missing NO_WAIT variable")
+	}
 	if !strings.Contains(string(content), "--retries") {
 		t.Error("deploy.sh missing --retries flag handling")
+	}
+}
+
+func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.nvidia.com/v1alpha1",
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:      "kai-scheduler",
+					Namespace: "kai-scheduler",
+					Chart:     "kai-scheduler",
+					Version:   "v0.13.0",
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "oci://ghcr.io/nvidia/kai-scheduler",
+				},
+			},
+			DeploymentOrder: []string{"kai-scheduler"},
+		},
+		ComponentValues: map[string]map[string]any{
+			"kai-scheduler": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	script := string(content)
+
+	// kai-scheduler should get a custom 20m timeout override
+	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="20m"`) {
+		t.Error("deploy.sh missing kai-scheduler 20m timeout override")
+	}
+	// Other components should use the default HELM_TIMEOUT
+	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"`) {
+		t.Error("deploy.sh missing default COMPONENT_HELM_TIMEOUT")
 	}
 }
 
