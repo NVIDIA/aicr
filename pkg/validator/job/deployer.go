@@ -280,16 +280,19 @@ func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectRefere
 }
 
 func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
-	// The orchestrator Job always tolerates all taints so it can schedule on any
-	// available CPU node. User-provided tolerations (--toleration flag) are forwarded
-	// to inner workloads via AICR_TOLERATIONS and do not affect orchestrator scheduling.
+	// The orchestrator Job tolerates all taints and is required to schedule on a
+	// non-GPU node (nvidia.com/gpu.present must not exist). This keeps the
+	// orchestrator off GPU nodes, reserving them for inner workloads, and enables
+	// targeted image loading in CI (CUDA image to control-plane only).
+	// User-provided tolerations (--toleration flag) are forwarded to inner
+	// workloads via AICR_TOLERATIONS and do not affect orchestrator scheduling.
 	return applycorev1.PodSpec().
 		WithServiceAccountName(ServiceAccountName).
 		WithRestartPolicy(corev1.RestartPolicyNever).
 		WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
 		WithImagePullSecrets(d.buildImagePullSecretsApply()...).
 		WithTolerations(applycorev1.Toleration().WithOperator(corev1.TolerationOpExists)).
-		WithAffinity(preferCPUNodeAffinityApply())
+		WithAffinity(requireCPUNodeAffinityApply())
 }
 
 // WaitForCompletion watches the Job until it reaches a terminal state
@@ -415,18 +418,17 @@ func checkJobTerminal(job *batchv1.Job) (bool, string) {
 	return false, ""
 }
 
-func preferCPUNodeAffinityApply() *applycorev1.AffinityApplyConfiguration {
+func requireCPUNodeAffinityApply() *applycorev1.AffinityApplyConfiguration {
 	return applycorev1.Affinity().WithNodeAffinity(
-		applycorev1.NodeAffinity().WithPreferredDuringSchedulingIgnoredDuringExecution(
-			applycorev1.PreferredSchedulingTerm().
-				WithWeight(100).
-				WithPreference(applycorev1.NodeSelectorTerm().
+		applycorev1.NodeAffinity().WithRequiredDuringSchedulingIgnoredDuringExecution(
+			applycorev1.NodeSelector().WithNodeSelectorTerms(
+				applycorev1.NodeSelectorTerm().
 					WithMatchExpressions(
 						applycorev1.NodeSelectorRequirement().
 							WithKey("nvidia.com/gpu.present").
 							WithOperator(corev1.NodeSelectorOpDoesNotExist),
 					),
-				),
+			),
 		),
 	)
 }

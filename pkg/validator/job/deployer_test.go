@@ -290,12 +290,12 @@ func TestDeployJobAffinity(t *testing.T) {
 		t.Fatal("affinity should be set")
 	}
 
-	prefs := affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution
-	if len(prefs) != 1 || prefs[0].Weight != 100 {
-		t.Fatalf("preferred scheduling = %v, want weight=100", prefs)
+	required := affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	if required == nil || len(required.NodeSelectorTerms) != 1 {
+		t.Fatalf("required node selector terms = %v, want 1 term", required)
 	}
 
-	exprs := prefs[0].Preference.MatchExpressions
+	exprs := required.NodeSelectorTerms[0].MatchExpressions
 	if len(exprs) != 1 || exprs[0].Key != "nvidia.com/gpu.present" {
 		t.Errorf("affinity key = %v, want nvidia.com/gpu.present", exprs)
 	}
@@ -359,7 +359,7 @@ func TestDeployJobNodeSelectorEnvVar(t *testing.T) {
 	}
 
 	// The orchestrator Job pod spec must NOT have a nodeSelector — scheduling of the
-	// orchestrator is handled by preferCPUNodeAffinityApply(), not the user flag.
+	// orchestrator is handled by requireCPUNodeAffinityApply(), not the user flag.
 	if len(job.Spec.Template.Spec.NodeSelector) != 0 {
 		t.Errorf("orchestrator pod spec nodeSelector should be empty, got %v", job.Spec.Template.Spec.NodeSelector)
 	}

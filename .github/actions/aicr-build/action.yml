@@ -40,11 +40,13 @@ runs:
         ENTRYPOINT ["/usr/local/bin/aicr"]
         DOCKERFILE
 
-        # Load onto all nodes (validator Jobs tolerate all taints and may schedule on
-        # control-plane). The cuda:base image is ~250MB so 3-node loads are fast.
-        timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
-          echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
-          timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+        # Load CUDA image to control-plane only. The orchestrator Job requires
+        # non-GPU nodes (requireCPUNodeAffinityApply), so it always schedules on
+        # control-plane. Loading to 1 node halves the ~250MB transfer time.
+        CP_NODE="${KIND_CLUSTER_NAME}-control-plane"
+        timeout 600 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" --nodes "${CP_NODE}" || {
+          echo "::warning::kind load attempt 1 failed for ko.local:smoke-test on ${CP_NODE}, retrying..."
+          timeout 600 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" --nodes "${CP_NODE}"
         }
 
     - name: Build validator images and load into kind
@@ -68,9 +70,13 @@ runs:
         USER nonroot
         ENTRYPOINT ["/${phase}"]
         DOCKERFILE
-          timeout 300 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {
-            echo "::warning::kind load attempt 1 failed for ko.local/aicr-validators/${phase}:latest, retrying..."
-            timeout 300 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
+          # Load validator images to control-plane only. Validator Jobs use the
+          # same requireCPUNodeAffinityApply() as the orchestrator, so they also
+          # schedule on non-GPU nodes. The GPU pods they create pull their own
+          # images (e.g., cuda:12.9.0) from registries, not from kind load.
+          timeout 120 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" --nodes "${CP_NODE}" || {
+            echo "::warning::kind load attempt 1 failed for ko.local/aicr-validators/${phase}:latest on ${CP_NODE}, retrying..."
+            timeout 120 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" --nodes "${CP_NODE}"
           }
         done
 
