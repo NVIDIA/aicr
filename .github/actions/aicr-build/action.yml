@@ -30,18 +30,19 @@ runs:
       env:
         GOFLAGS: -mod=vendor
       run: |
-        # Build snapshot agent image with CUDA base (provides nvidia-smi for GPU detection).
-        # Uses cuda:base (~250MB) instead of cuda:runtime (~1.8GB) — only nvidia-smi is needed.
-        # GPU test workflows use --image=ko.local:smoke-test for aicr snapshot.
+        # Build snapshot agent image with distroless base (~2MB vs ~250MB CUDA base).
+        # Test: GPU detection uses NFD PCI enumeration (Phase 1), nvidia-smi (Phase 2) is optional.
+        # If conformance checks pass without nvidia-smi in the image, we can eliminate the
+        # 250MB cold-pull that causes kind load timeouts on slow runners.
         CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
         docker build -t ko.local:smoke-test -f - . <<'DOCKERFILE'
-        FROM nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04
+        FROM gcr.io/distroless/static-debian12:nonroot
         COPY dist/aicr /usr/local/bin/aicr
         ENTRYPOINT ["/usr/local/bin/aicr"]
         DOCKERFILE
 
         # Load onto all nodes (validator Jobs tolerate all taints and may schedule on
-        # control-plane). The cuda:base image is ~250MB so 3-node loads are fast.
+        # control-plane). The distroless image is ~2MB so loads are near-instant.
         timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
           echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
           timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
