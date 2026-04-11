@@ -48,8 +48,8 @@ jobs:
       - name: Read PR metadata
         id: metadata
         run: |
-          echo "pr_number=$(cat .preview-metadata/pr_number)" >> "$GITHUB_OUTPUT"
-          echo "head_ref=$(cat .preview-metadata/head_ref)" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$(cat preview-metadata/pr_number)" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$(cat preview-metadata/head_ref)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
@@ -82,8 +82,8 @@ jobs:
           PREVIEW_URL: ${{ steps.generate-docs.outputs.preview_url }}
         run: |
           CHANGED_FILES=""
-          if [ -f .preview-metadata/changed_md_files ]; then
-            CHANGED_FILES=$(cat .preview-metadata/changed_md_files)
+          if [ -f preview-metadata/changed_md_files ]; then
+            CHANGED_FILES=$(cat preview-metadata/changed_md_files)
           fi
 
           if [ -z "$CHANGED_FILES" ] || [ -z "$PREVIEW_URL" ]; then
@@ -127,7 +127,7 @@ jobs:
           ${MARKER}"
 
           COMMENT_ID=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
-            --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | head -1)
+            --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" | tr -d '\r' | head -1)
 
           if [ -n "$COMMENT_ID" ]; then
             gh api "repos/${{ github.repository }}/issues/comments/${COMMENT_ID}" \

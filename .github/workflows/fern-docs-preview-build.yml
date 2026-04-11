@@ -48,10 +48,10 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           BASE_REF: ${{ github.base_ref }}
         run: |
-          mkdir -p .preview-metadata
-          echo "$PR_NUMBER" > .preview-metadata/pr_number
-          echo "$HEAD_REF" > .preview-metadata/head_ref
-          git diff --name-only "origin/${BASE_REF}...HEAD" -- '*.md' > .preview-metadata/changed_md_files 2>/dev/null || true
+          mkdir -p preview-metadata
+          echo "$PR_NUMBER" > preview-metadata/pr_number
+          echo "$HEAD_REF" > preview-metadata/head_ref
+          git diff --name-only "origin/${BASE_REF}...HEAD" -- '*.md' > preview-metadata/changed_md_files 2>/dev/null || true
 
       - name: Upload fern sources and metadata
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -60,5 +60,5 @@ jobs:
           path: |
             fern/
             docs/
-            .preview-metadata/
+            preview-metadata/
           retention-days: 1
