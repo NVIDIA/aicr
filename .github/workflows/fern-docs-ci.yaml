@@ -50,5 +50,5 @@ jobs:
       - name: Check links
         uses: lycheeverse/lychee-action@f613c4a64e50d792e0b31ec34bbcbba12263c6a6 # v2.3.0
         with:
-          args: --offline --no-progress --exclude-path 'docs/design' --exclude-path 'docs/plans' --exclude-path 'docs/conformance' 'docs/**/*.md'
+          args: --offline --no-progress 'docs/**/*.md'
           fail: true

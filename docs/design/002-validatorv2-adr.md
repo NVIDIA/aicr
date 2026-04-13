@@ -260,4 +260,3 @@ managed via Server-Side Apply and cleaned up after each run.
 - [CTRF JSON Schema](https://github.com/ctrf-io/ctrf/blob/main/schema/ctrf.schema.json)
 - [Kubernetes Termination Messages](https://kubernetes.io/docs/tasks/debug/debug-application/determine-reason-pod-failure/)
 - [Current validator implementation](../../pkg/validator/)
-- [Implementation Plan](001-validatorv2-plan.md)

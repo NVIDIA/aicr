@@ -1,0 +1,12 @@
+# Lychee link checker configuration.
+# exclude_path patterns are matched against full file paths (including absolute paths in CI).
+# Use (^|/) prefix to match directory names anywhere in the path.
+#
+# Excluded directories mirror those intentionally omitted from docs/index.yml.
+
+[params]
+exclude_path = [
+    "(^|/)design(/|$)",
+    "(^|/)plans(/|$)",
+    "(^|/)conformance(/|$)",
+]
