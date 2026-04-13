@@ -20,33 +20,6 @@ on:
   push:
     branches:
       - "pull-request/[0-9]+"
-    paths:
-      - '.github/workflows/gpu-h100-training-test.yaml'
-      - '.github/actions/gpu-cluster-setup/**'
-      - '.github/actions/gpu-operator-install/**'
-      - '.github/actions/aicr-build/**'
-      - 'validators/*/Dockerfile'
-      - 'pkg/evidence/**'
-      - 'pkg/validator/checks/conformance/**'
-      - 'pkg/validator/checks/deployment/**'
-      - '.github/actions/gpu-test-cleanup/**'
-      - '.github/actions/load-versions/**'
-      - 'tests/chainsaw/ai-conformance/kind-training/**'
-      - 'recipes/overlays/kind.yaml'
-      - 'recipes/overlays/h100-kind-training.yaml'
-      - 'kwok/manifests/karpenter/**'
-      - 'kwok/scripts/install-karpenter-kwok.sh'
-      - 'recipes/components/prometheus-adapter/**'
-      # Collector/snapshotter — affects GPU detection and snapshot content
-      - 'pkg/collector/**'
-      - 'pkg/snapshotter/**'
-      - '.github/actions/gpu-snapshot-validate/**'
-      # Validator infrastructure — affects how validator Jobs are deployed and run
-      - 'pkg/validator/job/**'
-      - 'pkg/validator/catalog/**'
-      - 'pkg/defaults/timeouts.go'
-      # Conformance validator source
-      - 'validators/conformance/**'
   pull_request:
     types: [labeled]
   workflow_dispatch: {}  # Allow manual runs
@@ -60,10 +33,56 @@ concurrency:
 
 jobs:
 
+  # Gate GPU tests on actual PR diff (against main), not the push diff.
+  # Without this, rebasing a pull-request/* branch includes merged changes
+  # in the push diff, causing GPU tests to trigger for unrelated PRs.
+  check-paths:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      should-run: ${{ steps.filter.outputs.matched }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
+        id: filter
+        with:
+          base: main
+          filters: |
+            matched:
+              - '.github/workflows/gpu-h100-training-test.yaml'
+              - '.github/actions/gpu-cluster-setup/**'
+              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/aicr-build/**'
+              - 'validators/*/Dockerfile'
+              - 'pkg/evidence/**'
+              - 'pkg/validator/checks/conformance/**'
+              - 'pkg/validator/checks/deployment/**'
+              - '.github/actions/gpu-test-cleanup/**'
+              - '.github/actions/load-versions/**'
+              - 'tests/chainsaw/ai-conformance/kind-training/**'
+              - 'recipes/overlays/kind.yaml'
+              - 'recipes/overlays/h100-kind-training.yaml'
+              - 'kwok/manifests/karpenter/**'
+              - 'kwok/scripts/install-karpenter-kwok.sh'
+              - 'recipes/components/prometheus-adapter/**'
+              - 'pkg/collector/**'
+              - 'pkg/snapshotter/**'
+              - '.github/actions/gpu-snapshot-validate/**'
+              - 'pkg/validator/job/**'
+              - 'pkg/validator/catalog/**'
+              - 'pkg/defaults/timeouts.go'
+              - 'validators/conformance/**'
+
   gpu-training-test:
+    needs: [check-paths]
     if: >
-      github.event_name != 'pull_request' ||
-      github.event.label.name == 'run-gpu-tests'
+      always() && (
+        github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && github.event.label.name == 'run-gpu-tests') ||
+        (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
+      )
     name: GPU Training Test (nvkind + H100 x2)
     runs-on: linux-amd64-gpu-h100-latest-2
     timeout-minutes: 120
