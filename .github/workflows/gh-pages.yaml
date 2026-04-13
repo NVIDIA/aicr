@@ -19,14 +19,18 @@ on:
     branches:
       - main
     paths:
+      - 'docs/**'
       - 'site/**'
+      - 'tools/sync-site-docs'
       - '.github/workflows/gh-pages.yaml'
       - '.github/actions/build-versioned-site/**'
   pull_request:
     branches:
       - main
     paths:
+      - 'docs/**'
       - 'site/**'
+      - 'tools/sync-site-docs'
       - '.github/workflows/gh-pages.yaml'
       - '.github/actions/build-versioned-site/**'
   workflow_call: {}
