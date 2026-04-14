@@ -85,3 +85,14 @@ docs_tools:
 # Testing Configuration
 testing:
   kind_node_image: 'kindest/node:v1.32.0'
+
+  # Component test harness configuration
+  # Used by tools/component-test/ scripts to validate individual components
+  component_test:
+    nvml_mock_version: '0.1.0'
+    nvml_mock_image: 'ghcr.io/nvidia/nvml-mock'
+    default_gpu_profile: 'a100'
+    default_gpu_count: 8
+    cluster_name: 'aicr-component-test'
+    helm_timeout: '300s'
+    health_check_timeout: '5m'

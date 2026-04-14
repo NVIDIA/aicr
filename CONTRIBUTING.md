@@ -84,6 +84,22 @@ This creates three files with TODOs guiding implementation:
 
 **See [docs/contributor/validator.md](docs/contributor/validator.md) for complete guide with examples, architecture overview, and troubleshooting.**
 
+#### Adding a Component
+
+AICR components are declarative — add an entry to `recipes/registry.yaml` with
+Helm or Kustomize settings, create a `values.yaml`, and optionally add a health
+check. No Go code needed.
+
+**Validate your component:**
+```bash
+make build
+make component-test COMPONENT=my-component
+```
+
+This auto-detects the right test tier, creates a Kind cluster, deploys the
+component, and runs its health check. See
+[tools/component-test/README.md](tools/component-test/README.md) for details.
+
 ## Design Principles
 
 These principles guide all design decisions in AICR. When faced with trade-offs, these principles take precedence.
