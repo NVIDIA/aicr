@@ -1072,6 +1072,260 @@ func TestMake_Reproducible(t *testing.T) {
 	t.Logf("Reproducibility verified: both iterations produced %d identical files", len(fileHashes[0]))
 }
 
+func TestMake_DynamicValuesUnknownComponent(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDynamicValues(map[string][]string{
+			"nonexistent-component": {"some.path"},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "RecipeResult",
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:    "gpu-operator",
+				Version: "v25.3.3",
+				Type:    "helm",
+				Source:  "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+	}
+
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for unknown component in --dynamic, got nil")
+	}
+	if !strings.Contains(err.Error(), "nonexistent-component") {
+		t.Errorf("error should mention the unknown component, got: %v", err)
+	}
+}
+
+func TestMake_DynamicValuesValidComponent(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDynamicValues(map[string][]string{
+			"gpu-operator": {"driver.version"},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "RecipeResult",
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Version:   "v25.3.3",
+				Type:      "helm",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+				Chart:     "gpu-operator",
+			},
+		},
+	}
+
+	out, err := bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err != nil {
+		t.Fatalf("expected success for valid --dynamic component, got: %v", err)
+	}
+	if out == nil {
+		t.Fatal("expected non-nil output")
+	}
+}
+
+func TestMake_DisabledComponentWithDynamic(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.NewConfig(
+		config.WithValueOverrides(map[string]map[string]string{
+			"awsebscsidriver": {"enabled": "false"},
+		}),
+		config.WithDynamicValues(map[string][]string{
+			"awsebscsidriver": {"controller.replicaCount"},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "RecipeResult",
+		Criteria:   &recipe.Criteria{Service: "eks", Accelerator: "h100", Intent: "training"},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Version:   "v25.3.3",
+				Type:      "helm",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+				Chart:     "gpu-operator",
+			},
+			{
+				Name:      "aws-ebs-csi-driver",
+				Namespace: "kube-system",
+				Version:   "2.55.0",
+				Type:      "helm",
+				Source:    "https://kubernetes-sigs.github.io/aws-ebs-csi-driver",
+				Chart:     "aws-ebs-csi-driver",
+			},
+		},
+		DeploymentOrder: []string{"gpu-operator", "aws-ebs-csi-driver"},
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	_, makeErr := bundler.Make(ctx, recipeResult, tmpDir)
+	if makeErr != nil {
+		t.Fatalf("Make() error = %v", makeErr)
+	}
+
+	// Disabled component should NOT have a directory at all
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver")); !os.IsNotExist(statErr) {
+		t.Error("expected aws-ebs-csi-driver directory to NOT be created (component is disabled)")
+	}
+
+	// Disabled component should NOT have cluster-values.yaml
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver", "cluster-values.yaml")); !os.IsNotExist(statErr) {
+		t.Error("expected aws-ebs-csi-driver/cluster-values.yaml to NOT exist (component is disabled)")
+	}
+
+	// Enabled component should still exist
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
+		t.Error("expected gpu-operator/values.yaml to be created")
+	}
+
+	// deploy.sh should not reference the disabled component
+	deployScript, readErr := os.ReadFile(filepath.Join(tmpDir, "deploy.sh"))
+	if readErr != nil {
+		t.Fatalf("failed to read deploy.sh: %v", readErr)
+	}
+	if strings.Contains(string(deployScript), "aws-ebs-csi-driver") {
+		t.Error("deploy.sh should not contain aws-ebs-csi-driver (disabled component)")
+	}
+}
+
+// TestMake_ArgoCDRejectsDynamic verifies that --deployer argocd with --dynamic
+// returns a clear error directing users to --deployer argocd-helm.
+func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerArgoCD),
+		config.WithDynamicValues(map[string][]string{
+			"gpu-operator": {"driver.version"},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "RecipeResult",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
+		},
+	}
+
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for --deployer argocd with --dynamic")
+	}
+	if !strings.Contains(err.Error(), "argocd-helm") {
+		t.Errorf("error should suggest argocd-helm, got: %v", err)
+	}
+}
+
+// TestMake_ArgoCDHelmRejectsAttest verifies that --attest is rejected with
+// --deployer argocd-helm since attestation is not yet supported.
+func TestMake_ArgoCDHelmRejectsAttest(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerArgoCDHelm),
+		config.WithAttest(true),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		// New() may fail for attest pre-flight (no binary attestation file)
+		// which is fine — the important thing is it doesn't silently succeed
+		return
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "RecipeResult",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
+		},
+	}
+
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for --attest with --deployer argocd-helm")
+	}
+	if !strings.Contains(err.Error(), "not yet supported") {
+		t.Errorf("error should mention not yet supported, got: %v", err)
+	}
+}
+
+// TestMake_ArgoCDHelmRejectsData verifies that --data is rejected with
+// --deployer argocd-helm since external data is not yet supported.
+func TestMake_ArgoCDHelmRejectsData(t *testing.T) {
+	// Create a temp external data dir with a minimal registry.yaml (required by LayeredDataProvider)
+	dataDir := t.TempDir()
+	registryContent := "components:\n  - name: custom\n    displayName: Custom\n"
+	if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
+		t.Fatalf("failed to write registry.yaml: %v", err)
+	}
+
+	// Set up layered data provider (simulates --data flag)
+	originalProvider := recipe.GetDataProvider()
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
+	layered, providerErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+		ExternalDir: dataDir,
+	})
+	if providerErr != nil {
+		t.Fatalf("NewLayeredDataProvider error: %v", providerErr)
+	}
+	recipe.SetDataProvider(layered)
+	recipe.ResetComponentRegistryForTesting()
+	defer func() {
+		recipe.SetDataProvider(originalProvider)
+		recipe.ResetComponentRegistryForTesting()
+	}()
+
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerArgoCDHelm),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "RecipeResult",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
+		},
+	}
+
+	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if err == nil {
+		t.Fatal("expected error for --data with --deployer argocd-helm")
+	}
+	if !strings.Contains(err.Error(), "not yet supported") {
+		t.Errorf("error should mention not yet supported, got: %v", err)
+	}
+}
+
 // computeTestChecksum computes SHA256 hash for test comparison.
 func computeTestChecksum(content []byte) string {
 	hash := make([]byte, 32)

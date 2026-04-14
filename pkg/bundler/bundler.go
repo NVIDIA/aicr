@@ -30,6 +30,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -252,11 +253,21 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	}
 
 	// Route based on deployer
-	deployer := b.Config.Deployer()
-	if deployer == config.DeployerArgoCD {
+	switch b.Config.Deployer() {
+	case config.DeployerArgoCDHelm:
+		return b.makeArgoCDHelmChart(ctx, recipeResult, componentValues, dir, start)
+	case config.DeployerArgoCD:
+		if b.Config.HasDynamicValues() {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
+		}
 		return b.makeArgoCD(ctx, recipeResult, componentValues, dir, start)
+	case config.DeployerHelm:
+		return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
+	default:
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
 	}
-	return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
 }
 
 // makeHelmBundle generates a Helm per-component bundle.
@@ -280,6 +291,12 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 			"failed to copy external data files", err)
 	}
 
+	// Resolve dynamic values for Helm deployer
+	dynamicValues, dynErr := b.buildDynamicValuesMap()
+	if dynErr != nil {
+		return nil, dynErr
+	}
+
 	// Generate per-component bundle
 	generator := helm.NewGenerator()
 	generatorInput := &helm.GeneratorInput{
@@ -289,6 +306,7 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 		IncludeChecksums:   b.Config.IncludeChecksums(),
 		ComponentManifests: componentManifests,
 		DataFiles:          dataFiles,
+		DynamicValues:      dynamicValues,
 	}
 
 	output, err := generator.Generate(ctx, generatorInput, dir)
@@ -347,6 +365,74 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 		"size_bytes", output.TotalSize,
 		"duration", output.Duration,
 	)
+
+	return resultOutput, nil
+}
+
+// makeArgoCDHelmChart generates a Helm chart app-of-apps for ArgoCD with dynamic install-time values.
+func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
+	// Reject flags not yet supported by the argocd-helm deployer.
+	if b.Config.Attest() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--attest is not yet supported with --deployer argocd-helm")
+	}
+	if provider := recipe.GetDataProvider(); provider != nil {
+		if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--data is not yet supported with --deployer argocd-helm")
+		}
+	}
+
+	dynamicValues, dynErr := b.buildDynamicValuesMap()
+	if dynErr != nil {
+		return nil, dynErr
+	}
+
+	slog.Debug("generating argocd helm chart app-of-apps",
+		"component_count", len(recipeResult.ComponentRefs),
+		"dynamic_components", len(dynamicValues),
+		"output_dir", dir,
+	)
+
+	generator := &argocdhelm.Generator{
+		RecipeResult:     recipeResult,
+		ComponentValues:  componentValues,
+		Version:          b.Config.Version(),
+		RepoURL:          b.Config.RepoURL(),
+		TargetRevision:   b.Config.TargetRevision(),
+		IncludeChecksums: b.Config.IncludeChecksums(),
+		DynamicValues:    dynamicValues,
+	}
+
+	output, err := generator.Generate(ctx, dir)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to generate argocd helm chart", err)
+	}
+
+	resultOutput := &result.Output{
+		Results:       make([]*result.Result, 0),
+		Errors:        make([]result.BundleError, 0),
+		TotalDuration: time.Since(start),
+		TotalSize:     output.TotalSize,
+		TotalFiles:    len(output.Files),
+		OutputDir:     dir,
+	}
+
+	argocdResult := &result.Result{
+		Type:     "argocd-helm-chart",
+		Success:  true,
+		Files:    output.Files,
+		Size:     output.TotalSize,
+		Duration: output.Duration,
+	}
+	resultOutput.Results = append(resultOutput.Results, argocdResult)
+
+	resultOutput.Deployment = &result.DeploymentInfo{
+		Type:  "ArgoCD Helm chart app-of-apps",
+		Steps: output.DeploymentSteps,
+		Notes: b.warnings,
+	}
 
 	return resultOutput, nil
 }
@@ -907,6 +993,32 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 
 	slog.Debug("wrote recipe file", "path", recipePath)
 	return int64(len(recipeData)), nil
+}
+
+// buildDynamicValuesMap re-keys the config's dynamic values from user override keys
+// (e.g., "gpuoperator") to component names (e.g., "gpu-operator") using the registry.
+func (b *DefaultBundler) buildDynamicValuesMap() (map[string][]string, error) {
+	if !b.Config.HasDynamicValues() {
+		return make(map[string][]string), nil
+	}
+
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load component registry for --dynamic resolution", err)
+	}
+
+	raw := b.Config.DynamicValues()
+	result := make(map[string][]string, len(raw))
+	for key, paths := range raw {
+		comp := registry.GetByOverrideKey(key)
+		if comp == nil {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unknown component %q in --dynamic flag: not found in component registry", key))
+		}
+		result[comp.Name] = append(result[comp.Name], paths...)
+	}
+
+	return result, nil
 }
 
 // removeHyphens removes hyphens from a string.

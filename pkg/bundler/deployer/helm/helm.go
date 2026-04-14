@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -85,6 +86,10 @@ type GeneratorInput struct {
 	// DataFiles lists additional file paths (relative to output dir) to include
 	// in checksum generation. Used for external data files copied into the bundle.
 	DataFiles []string
+
+	// DynamicValues maps component names to their dynamic value paths.
+	// These paths are removed from values.yaml and written to cluster-values.yaml.
+	DynamicValues map[string][]string
 }
 
 // GeneratorOutput contains the result of Helm bundle generation.
@@ -288,11 +293,20 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 				fmt.Sprintf("failed to create directory for %s", comp.Name), mkdirErr)
 		}
 
-		// Write values.yaml
-		values := input.ComponentValues[comp.Name]
-		if values == nil {
-			values = make(map[string]any)
+		// Deep-copy component values so writeClusterValuesFile can safely
+		// remove dynamic paths without mutating the caller's map.
+		values := component.DeepCopyMap(input.ComponentValues[comp.Name])
+
+		// Extract dynamic paths (if any) from values into cluster-values.yaml.
+		// Every component gets a cluster-values.yaml — dynamic paths are pre-populated,
+		// and users can add any additional overrides. deploy.sh always passes it.
+		clusterFiles, clusterSize, clusterErr := writeClusterValuesFile(values, input.DynamicValues[comp.Name], componentDir, comp.Name)
+		if clusterErr != nil {
+			return nil, 0, clusterErr
 		}
+		files = append(files, clusterFiles...)
+		totalSize += clusterSize
+
 		valuesPath, valuesSize, err := shared.WriteValuesFile(values, componentDir, "values.yaml")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
@@ -518,6 +532,33 @@ func uniqueNamespaces(components []ComponentData) []string {
 		}
 	}
 	return namespaces
+}
+
+// writeClusterValuesFile writes a cluster-values.yaml for per-cluster overrides.
+// If dynamicPaths is non-empty, those paths are extracted from values and pre-populated.
+// WARNING: This function mutates the values map in place (removes dynamic paths via
+// RemoveValueByPath). Callers must pass a deep copy if the original map must be preserved.
+// The file is always written — even when empty — so users can add any overrides.
+func writeClusterValuesFile(values map[string]any, dynamicPaths []string, componentDir, componentName string) ([]string, int64, error) {
+	clusterValues := make(map[string]any)
+	for _, path := range dynamicPaths {
+		val, found := component.GetValueByPath(values, path)
+		if found {
+			component.RemoveValueByPath(values, path)
+		} else {
+			val = ""
+		}
+		component.SetValueByPath(clusterValues, path, val)
+	}
+
+	clusterPath, clusterSize, err := shared.WriteValuesFile(clusterValues, componentDir, "cluster-values.yaml")
+	if err != nil {
+		return nil, 0, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to write cluster-values.yaml for %s", componentName), err)
+	}
+
+	slog.Debug("wrote cluster-values.yaml", "component", componentName, "dynamic_paths", len(dynamicPaths))
+	return []string{clusterPath}, clusterSize, nil
 }
 
 // hasYAMLObjects returns true if content contains at least one YAML object

@@ -16,12 +16,17 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// safePathPattern validates that dynamic value path segments contain only safe characters.
+// Prevents injection of template expressions ({{ }}) or path traversal (../).
+var safePathPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // DeployerType represents the type of deployment method used for generated bundles.
 type DeployerType string
@@ -32,6 +37,10 @@ const (
 	DeployerHelm DeployerType = "helm"
 	// DeployerArgoCD generates ArgoCD App of Apps manifests.
 	DeployerArgoCD DeployerType = "argocd"
+	// DeployerArgoCDHelm generates a Helm chart app-of-apps for ArgoCD.
+	// All values are overridable at install time via helm --set.
+	// Use --dynamic to pre-populate specific paths in root values.yaml.
+	DeployerArgoCDHelm DeployerType = "argocd-helm"
 )
 
 // ParseDeployerType parses a string into a DeployerType.
@@ -42,6 +51,8 @@ func ParseDeployerType(s string) (DeployerType, error) {
 		return DeployerHelm, nil
 	case string(DeployerArgoCD):
 		return DeployerArgoCD, nil
+	case string(DeployerArgoCDHelm):
+		return DeployerArgoCDHelm, nil
 	default:
 		return "", errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid deployer type %q: must be one of %v", s, GetDeployerTypes()))
 	}
@@ -53,6 +64,7 @@ func GetDeployerTypes() []string {
 	types := []string{
 		string(DeployerHelm),
 		string(DeployerArgoCD),
+		string(DeployerArgoCDHelm),
 	}
 	sort.Strings(types)
 	return types
@@ -119,6 +131,10 @@ type Config struct {
 
 	// estimatedNodeCount is the estimated number of GPU nodes (0 = unset). Used by skyhook-operator for estimatedNodeCount Helm value.
 	estimatedNodeCount int
+
+	// dynamicValues declares value paths that should be provided at install time.
+	// Map structure: component_key -> [path1, path2, ...]
+	dynamicValues map[string][]string
 }
 
 // Getter methods for read-only access
@@ -253,6 +269,25 @@ func (c *Config) CertificateIdentityRegexp() string {
 // EstimatedNodeCount returns the estimated number of GPU nodes (0 means unset).
 func (c *Config) EstimatedNodeCount() int {
 	return c.estimatedNodeCount
+}
+
+// DynamicValues returns a deep copy of the dynamic value declarations.
+func (c *Config) DynamicValues() map[string][]string {
+	if c.dynamicValues == nil {
+		return nil
+	}
+	result := make(map[string][]string, len(c.dynamicValues))
+	for component, paths := range c.dynamicValues {
+		pathsCopy := make([]string, len(paths))
+		copy(pathsCopy, paths)
+		result[component] = pathsCopy
+	}
+	return result
+}
+
+// HasDynamicValues returns true if any dynamic value declarations exist.
+func (c *Config) HasDynamicValues() bool {
+	return len(c.dynamicValues) > 0
 }
 
 // Validate checks if the Config has valid settings.
@@ -429,6 +464,19 @@ func WithEstimatedNodeCount(n int) Option {
 	}
 }
 
+// WithDynamicValues sets the dynamic value declarations for the bundler.
+// Dynamic values are paths that should be provided at install time rather than bundle time.
+func WithDynamicValues(dynamicValues map[string][]string) Option {
+	return func(c *Config) {
+		if dynamicValues == nil {
+			return
+		}
+		for component, paths := range dynamicValues {
+			c.dynamicValues[component] = append(c.dynamicValues[component], paths...)
+		}
+	}
+}
+
 // NewConfig returns a Config with default values.
 func NewConfig(options ...Option) *Config {
 	c := &Config{
@@ -436,6 +484,7 @@ func NewConfig(options ...Option) *Config {
 		includeChecksums: true,
 		includeReadme:    true,
 		valueOverrides:   make(map[string]map[string]string),
+		dynamicValues:    make(map[string][]string),
 		verbose:          false,
 		version:          "dev",
 	}
@@ -480,6 +529,39 @@ func ParseValueOverrides(overrides []string) (map[string]map[string]string, erro
 		}
 
 		result[bundlerName][path] = value
+	}
+
+	return result, nil
+}
+
+// ParseDynamicValues parses dynamic value declarations in format "component:path.to.field".
+// Returns a map of component -> list of paths.
+// This function is used by both CLI and API handlers to parse --dynamic flags.
+func ParseDynamicValues(inputs []string) (map[string][]string, error) {
+	result := make(map[string][]string)
+
+	for _, input := range inputs {
+		parts := strings.SplitN(input, ":", 2)
+		if len(parts) != 2 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': expected 'component:path'", input))
+		}
+
+		component := parts[0]
+		path := parts[1]
+
+		if component == "" || path == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': component and path cannot be empty", input))
+		}
+
+		// Validate path segments contain only safe characters
+		for _, segment := range strings.Split(path, ".") {
+			if !safePathPattern.MatchString(segment) {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid path segment %q in '%s': must contain only alphanumeric, dot, hyphen, or underscore characters", segment, input))
+			}
+		}
+
+		result[component] = append(result[component], path)
 	}
 
 	return result, nil

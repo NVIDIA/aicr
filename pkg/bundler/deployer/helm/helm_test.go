@@ -21,9 +21,15 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// testDriverVersion is a test constant for driver version strings to satisfy goconst.
+const testDriverVersion = "570.86.16"
 
 func TestNewGenerator(t *testing.T) {
 	g := NewGenerator()
@@ -1617,6 +1623,543 @@ func TestGenerateUndeployScript(t *testing.T) {
 	}
 }
 
+func TestGenerate_DynamicValues(t *testing.T) {
+	tests := []struct {
+		name                    string
+		dynamicValues           map[string][]string
+		componentValues         map[string]map[string]any
+		wantClusterValues       bool   // whether cluster-values.yaml should exist for gpu-operator
+		wantClusterContains     string // substring expected in cluster-values.yaml
+		wantValuesLacksPath     string // dot path that should NOT be in values.yaml
+		wantDeployClusterValues bool   // whether deploy.sh should contain cluster-values.yaml for gpu-operator
+	}{
+		{
+			name:          "no dynamic values — cluster-values.yaml still generated (empty)",
+			dynamicValues: nil,
+			componentValues: map[string]map[string]any{
+				"cert-manager": {"crds": map[string]any{"enabled": true}},
+				"gpu-operator": {"driver": map[string]any{"version": testDriverVersion, "enabled": true}},
+			},
+			wantClusterValues:       true,
+			wantDeployClusterValues: true,
+		},
+		{
+			name: "dynamic values present — extracted into cluster-values.yaml",
+			dynamicValues: map[string][]string{
+				"gpu-operator": {"driver.version"},
+			},
+			componentValues: map[string]map[string]any{
+				"cert-manager": {"crds": map[string]any{"enabled": true}},
+				"gpu-operator": {"driver": map[string]any{"version": testDriverVersion, "enabled": true}},
+			},
+			wantClusterValues:       true,
+			wantClusterContains:     "version",
+			wantValuesLacksPath:     "version: \"570.86.16\"",
+			wantDeployClusterValues: true,
+		},
+		{
+			name: "dynamic path not in values",
+			dynamicValues: map[string][]string{
+				"gpu-operator": {"nonexistent.path"},
+			},
+			componentValues: map[string]map[string]any{
+				"cert-manager": {"crds": map[string]any{"enabled": true}},
+				"gpu-operator": {"driver": map[string]any{"enabled": true}},
+			},
+			wantClusterValues:       true,
+			wantClusterContains:     "nonexistent",
+			wantDeployClusterValues: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewGenerator()
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			input := &GeneratorInput{
+				RecipeResult:    createTestRecipeResult(),
+				ComponentValues: tt.componentValues,
+				Version:         "v1.0.0",
+				DynamicValues:   tt.dynamicValues,
+			}
+
+			_, err := g.Generate(ctx, input, outputDir)
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			clusterValuesPath := filepath.Join(outputDir, "gpu-operator", "cluster-values.yaml")
+			_, statErr := os.Stat(clusterValuesPath)
+			clusterExists := !os.IsNotExist(statErr)
+
+			if clusterExists != tt.wantClusterValues {
+				t.Errorf("cluster-values.yaml exists = %v, want %v", clusterExists, tt.wantClusterValues)
+			}
+
+			if tt.wantClusterContains != "" && clusterExists {
+				content, readErr := os.ReadFile(clusterValuesPath)
+				if readErr != nil {
+					t.Fatalf("failed to read cluster-values.yaml: %v", readErr)
+				}
+				if !strings.Contains(string(content), tt.wantClusterContains) {
+					t.Errorf("cluster-values.yaml missing %q, got:\n%s", tt.wantClusterContains, string(content))
+				}
+			}
+
+			if tt.wantValuesLacksPath != "" {
+				valuesContent, readErr := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "values.yaml"))
+				if readErr != nil {
+					t.Fatalf("failed to read values.yaml: %v", readErr)
+				}
+				if strings.Contains(string(valuesContent), tt.wantValuesLacksPath) {
+					t.Errorf("values.yaml should not contain %q after dynamic split, got:\n%s", tt.wantValuesLacksPath, string(valuesContent))
+				}
+			}
+
+			// cert-manager should also have cluster-values.yaml (all components get one)
+			certClusterPath := filepath.Join(outputDir, "cert-manager", "cluster-values.yaml")
+			if _, certStatErr := os.Stat(certClusterPath); os.IsNotExist(certStatErr) {
+				t.Error("cert-manager should have cluster-values.yaml (all components get one)")
+			}
+
+			// Verify deploy.sh content — all components always reference cluster-values.yaml
+			deployContent, readErr := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+			if readErr != nil {
+				t.Fatalf("failed to read deploy.sh: %v", readErr)
+			}
+			deployScript := string(deployContent)
+
+			gpuClusterRef := `gpu-operator/cluster-values.yaml`
+			if tt.wantDeployClusterValues {
+				if !strings.Contains(deployScript, gpuClusterRef) {
+					t.Error("deploy.sh should contain cluster-values.yaml reference for gpu-operator")
+				}
+			}
+
+			// All components always have cluster-values.yaml in deploy.sh
+			certClusterRef := `cert-manager/cluster-values.yaml`
+			if !strings.Contains(deployScript, certClusterRef) {
+				t.Error("deploy.sh should contain cluster-values.yaml reference for all components")
+			}
+		})
+	}
+}
+
+func TestGenerate_DynamicValuesContentVerification(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {
+				"driver": map[string]any{
+					"version": testDriverVersion,
+					"enabled": true,
+				},
+				"toolkit": map[string]any{
+					"version": "1.17.4",
+				},
+			},
+		},
+		Version: "v1.0.0",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version", "toolkit.version"},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Verify cluster-values.yaml has the extracted values
+	clusterContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "cluster-values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read cluster-values.yaml: %v", err)
+	}
+	clusterStr := string(clusterContent)
+
+	if !strings.Contains(clusterStr, testDriverVersion) {
+		t.Errorf("cluster-values.yaml missing driver.version value, got:\n%s", clusterStr)
+	}
+	if !strings.Contains(clusterStr, "1.17.4") {
+		t.Errorf("cluster-values.yaml missing toolkit.version value, got:\n%s", clusterStr)
+	}
+
+	// Verify values.yaml no longer has the dynamic values
+	valuesContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read values.yaml: %v", err)
+	}
+	valuesStr := string(valuesContent)
+
+	if strings.Contains(valuesStr, testDriverVersion) {
+		t.Errorf("values.yaml should not contain driver version after dynamic split, got:\n%s", valuesStr)
+	}
+	if strings.Contains(valuesStr, "1.17.4") {
+		t.Errorf("values.yaml should not contain toolkit version after dynamic split, got:\n%s", valuesStr)
+	}
+
+	// driver.enabled should still be in values.yaml
+	if !strings.Contains(valuesStr, "enabled") {
+		t.Errorf("values.yaml should still contain driver.enabled, got:\n%s", valuesStr)
+	}
+}
+
+func TestSetNestedValue(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		value    any
+		wantKeys []string
+	}{
+		{
+			name:     "single level",
+			path:     "version",
+			value:    "1.0.0",
+			wantKeys: []string{"version"},
+		},
+		{
+			name:     "nested path",
+			path:     "driver.version",
+			value:    testDriverVersion,
+			wantKeys: []string{"driver"},
+		},
+		{
+			name:     "deeply nested",
+			path:     "a.b.c",
+			value:    "deep",
+			wantKeys: []string{"a"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := make(map[string]any)
+			component.SetValueByPath(m, tt.path, tt.value)
+
+			for _, key := range tt.wantKeys {
+				if _, ok := m[key]; !ok {
+					t.Errorf("missing key %q in result map", key)
+				}
+			}
+		})
+	}
+
+	// Verify full structure for nested path
+	t.Run("verify nested structure", func(t *testing.T) {
+		m := make(map[string]any)
+		component.SetValueByPath(m, "driver.version", testDriverVersion)
+
+		driver, ok := m["driver"].(map[string]any)
+		if !ok {
+			t.Fatal("driver should be a map")
+		}
+		version, ok := driver["version"]
+		if !ok {
+			t.Fatal("driver.version should exist")
+		}
+		if version != testDriverVersion {
+			t.Errorf("driver.version = %v, want 570.86.16", version)
+		}
+	})
+
+	// Verify multiple paths into same parent
+	t.Run("multiple paths same parent", func(t *testing.T) {
+		m := make(map[string]any)
+		component.SetValueByPath(m, "driver.version", testDriverVersion)
+		component.SetValueByPath(m, "driver.enabled", true)
+
+		driver, ok := m["driver"].(map[string]any)
+		if !ok {
+			t.Fatal("driver should be a map")
+		}
+		if driver["version"] != testDriverVersion {
+			t.Errorf("driver.version = %v, want 570.86.16", driver["version"])
+		}
+		if driver["enabled"] != true {
+			t.Errorf("driver.enabled = %v, want true", driver["enabled"])
+		}
+	})
+}
+
+func TestGenerate_DynamicValuesDeeplyNested(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {
+				"a": map[string]any{
+					"b": map[string]any{
+						"c": map[string]any{
+							"d": "deep-value",
+						},
+					},
+				},
+				"driver": map[string]any{"enabled": true},
+			},
+		},
+		Version: "v1.0.0",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"a.b.c.d"},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Verify cluster-values.yaml was created with the deeply nested path
+	clusterContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "cluster-values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read cluster-values.yaml: %v", err)
+	}
+	clusterStr := string(clusterContent)
+
+	if !strings.Contains(clusterStr, "deep-value") {
+		t.Errorf("cluster-values.yaml missing deeply nested value, got:\n%s", clusterStr)
+	}
+
+	// Parse cluster-values.yaml and verify the YAML structure
+	var clusterMap map[string]any
+	// Strip the header comment and --- separator
+	yamlContent := strings.TrimPrefix(clusterStr, "# Generated by Cloud Native Stack\n---\n")
+	if unmarshalErr := yaml.Unmarshal([]byte(yamlContent), &clusterMap); unmarshalErr != nil {
+		t.Fatalf("failed to parse cluster-values.yaml: %v", unmarshalErr)
+	}
+
+	// Walk the nested path a.b.c.d
+	a, ok := clusterMap["a"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'a' to be a map in cluster-values.yaml")
+	}
+	b, ok := a["b"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'a.b' to be a map in cluster-values.yaml")
+	}
+	c, ok := b["c"].(map[string]any)
+	if !ok {
+		t.Fatal("expected 'a.b.c' to be a map in cluster-values.yaml")
+	}
+	d, ok := c["d"]
+	if !ok {
+		t.Fatal("expected 'a.b.c.d' to exist in cluster-values.yaml")
+	}
+	if d != "deep-value" {
+		t.Errorf("a.b.c.d = %v, want 'deep-value'", d)
+	}
+
+	// Verify values.yaml no longer contains the extracted value
+	valuesContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read values.yaml: %v", err)
+	}
+	if strings.Contains(string(valuesContent), "deep-value") {
+		t.Errorf("values.yaml should not contain deep-value after dynamic split, got:\n%s", string(valuesContent))
+	}
+
+	// driver.enabled should still be in values.yaml
+	if !strings.Contains(string(valuesContent), "enabled") {
+		t.Errorf("values.yaml should still contain driver.enabled, got:\n%s", string(valuesContent))
+	}
+}
+
+func TestGenerate_DynamicValuesWithSetOverride(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	// Simulate --set gpuoperator:driver.version=999.99.99 by providing the value
+	// in ComponentValues (--set is applied before dynamic extraction).
+	// Then --dynamic gpuoperator:driver.version should extract the --set value.
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {
+				"driver": map[string]any{
+					"version": "999.99.99",
+					"enabled": true,
+				},
+			},
+		},
+		Version: "v1.0.0",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version"},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// cluster-values.yaml should contain the --set value
+	clusterContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "cluster-values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read cluster-values.yaml: %v", err)
+	}
+	if !strings.Contains(string(clusterContent), "999.99.99") {
+		t.Errorf("cluster-values.yaml should contain --set value 999.99.99, got:\n%s", string(clusterContent))
+	}
+
+	// values.yaml should NOT contain the extracted value
+	valuesContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read values.yaml: %v", err)
+	}
+	if strings.Contains(string(valuesContent), "999.99.99") {
+		t.Errorf("values.yaml should not contain 999.99.99 after dynamic split, got:\n%s", string(valuesContent))
+	}
+
+	// driver.enabled should still be in values.yaml
+	if !strings.Contains(string(valuesContent), "enabled") {
+		t.Errorf("values.yaml should still contain driver.enabled, got:\n%s", string(valuesContent))
+	}
+}
+
+func TestGenerate_DynamicValuesRoundTrip(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	originalValues := map[string]any{
+		"driver": map[string]any{
+			"version": testDriverVersion,
+			"enabled": true,
+		},
+		"toolkit": map[string]any{
+			"version": "1.17.4",
+			"enabled": true,
+		},
+		"gds": map[string]any{
+			"enabled": false,
+		},
+	}
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {
+				"driver": map[string]any{
+					"version": testDriverVersion,
+					"enabled": true,
+				},
+				"toolkit": map[string]any{
+					"version": "1.17.4",
+					"enabled": true,
+				},
+				"gds": map[string]any{
+					"enabled": false,
+				},
+			},
+		},
+		Version: "v1.0.0",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version", "toolkit.version"},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	// Read and parse values.yaml
+	valuesContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read values.yaml: %v", err)
+	}
+	var staticValues map[string]any
+	if unmarshalErr := yaml.Unmarshal(valuesContent, &staticValues); unmarshalErr != nil {
+		t.Fatalf("failed to parse values.yaml: %v", unmarshalErr)
+	}
+
+	// Read and parse cluster-values.yaml
+	clusterContent, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "cluster-values.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read cluster-values.yaml: %v", err)
+	}
+	var dynamicValues map[string]any
+	if err := yaml.Unmarshal(clusterContent, &dynamicValues); err != nil {
+		t.Fatalf("failed to parse cluster-values.yaml: %v", err)
+	}
+
+	// Merge static + dynamic values (simulate helm install -f values.yaml -f cluster-values.yaml)
+	merged := deepMerge(staticValues, dynamicValues)
+
+	// Verify the merged result matches the original values
+	// Check driver.version was preserved through the round-trip
+	driverMerged, ok := merged["driver"].(map[string]any)
+	if !ok {
+		t.Fatal("merged result missing 'driver' map")
+	}
+	if driverMerged["version"] != testDriverVersion {
+		t.Errorf("merged driver.version = %v, want 570.86.16", driverMerged["version"])
+	}
+	if driverMerged["enabled"] != true {
+		t.Errorf("merged driver.enabled = %v, want true", driverMerged["enabled"])
+	}
+
+	// Check toolkit.version was preserved
+	toolkitMerged, ok := merged["toolkit"].(map[string]any)
+	if !ok {
+		t.Fatal("merged result missing 'toolkit' map")
+	}
+	if toolkitMerged["version"] != "1.17.4" {
+		t.Errorf("merged toolkit.version = %v, want 1.17.4", toolkitMerged["version"])
+	}
+	if toolkitMerged["enabled"] != true {
+		t.Errorf("merged toolkit.enabled = %v, want true", toolkitMerged["enabled"])
+	}
+
+	// Check gds.enabled was not affected (not a dynamic path)
+	gdsMerged, ok := merged["gds"].(map[string]any)
+	if !ok {
+		t.Fatal("merged result missing 'gds' map")
+	}
+	if gdsMerged["enabled"] != false {
+		t.Errorf("merged gds.enabled = %v, want false", gdsMerged["enabled"])
+	}
+
+	// Verify original values structure is fully recoverable
+	for key := range originalValues {
+		if _, exists := merged[key]; !exists {
+			t.Errorf("merged result missing top-level key %q", key)
+		}
+	}
+}
+
+// deepMerge recursively merges src into dst. src values take precedence.
+// This simulates Helm's behavior of merging multiple -f value files.
+func deepMerge(dst, src map[string]any) map[string]any {
+	result := make(map[string]any)
+	for k, v := range dst {
+		result[k] = v
+	}
+	for k, v := range src {
+		if srcMap, ok := v.(map[string]any); ok {
+			if dstMap, ok := result[k].(map[string]any); ok {
+				result[k] = deepMerge(dstMap, srcMap)
+				continue
+			}
+		}
+		result[k] = v
+	}
+	return result
+}
+
 func TestReverseComponents(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1668,5 +2211,42 @@ func TestReverseComponents(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGenerate_DoesNotMutateComponentValues verifies that Generate deep-copies
+// component values before extracting dynamic paths, so the input map is preserved.
+func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	originalValues := map[string]map[string]any{
+		"gpu-operator": {
+			"driver": map[string]any{"version": testDriverVersion, "enabled": true},
+		},
+	}
+
+	input := &GeneratorInput{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: originalValues,
+		Version:         "test",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version"},
+		},
+	}
+
+	_, err := g.Generate(ctx, input, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Original values should NOT be mutated — driver.version should still exist
+	driver, ok := originalValues["gpu-operator"]["driver"].(map[string]any)
+	if !ok {
+		t.Fatal("original driver should still be a map")
+	}
+	if _, hasVersion := driver["version"]; !hasVersion {
+		t.Error("original driver.version was mutated (removed) — deep copy is missing")
 	}
 }

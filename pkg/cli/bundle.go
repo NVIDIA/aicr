@@ -54,6 +54,9 @@ type bundleCmdOptions struct {
 	estimatedNodeCount         int
 	targetRevision             string
 
+	// dynamicValues declares value paths provided at install time.
+	dynamicValues map[string][]string
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -154,6 +157,12 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	opts.valueOverrides, err = config.ParseValueOverrides(cmd.StringSlice("set"))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --set flag", err)
+	}
+
+	// Parse dynamic value declarations from --dynamic flags
+	opts.dynamicValues, err = config.ParseDynamicValues(cmd.StringSlice("dynamic"))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --dynamic flag", err)
 	}
 
 	// Parse node selectors
@@ -275,6 +284,14 @@ Package with explicit tag (overrides CLI version):
 				Category: "Deployment",
 			},
 			&cli.StringSliceFlag{
+				Name: "dynamic",
+				Usage: `Declare value paths as install-time parameters
+	(format: component:path.to.field, e.g., --dynamic alloy:clusterName).
+	Dynamic paths are removed from values.yaml and placed in cluster-values.yaml
+	for the user to fill in at install time.`,
+				Category: "Deployment",
+			},
+			&cli.StringSliceFlag{
 				Name:     "system-node-selector",
 				Usage:    "Node selector for system components (format: key=value, can be repeated)",
 				Category: "Scheduling",
@@ -376,8 +393,13 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	outputType := "Helm per-component bundle"
-	if opts.deployer == config.DeployerArgoCD {
+	switch opts.deployer {
+	case config.DeployerHelm:
+		// default
+	case config.DeployerArgoCD:
 		outputType = "ArgoCD applications"
+	case config.DeployerArgoCDHelm:
+		outputType = "ArgoCD Helm chart app-of-apps"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),
@@ -410,6 +432,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
 		config.WithValueOverrides(opts.valueOverrides),
+		config.WithDynamicValues(opts.dynamicValues),
 		config.WithSystemNodeSelector(opts.systemNodeSelector),
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
 		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),

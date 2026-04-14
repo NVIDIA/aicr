@@ -523,6 +523,152 @@ func TestParseValueOverrides(t *testing.T) {
 	})
 }
 
+// TestWithDynamicValues verifies the functional option sets dynamic value paths
+// on the Config and that the getter returns a deep copy (mutations don't leak).
+func TestWithDynamicValues(t *testing.T) {
+	input := map[string][]string{
+		"alloy": {"clusterName", "subnetName"},
+	}
+	cfg := NewConfig(WithDynamicValues(input))
+
+	// HasDynamicValues should be true
+	if !cfg.HasDynamicValues() {
+		t.Error("HasDynamicValues() should be true after WithDynamicValues")
+	}
+
+	// DynamicValues should return a deep copy
+	got := cfg.DynamicValues()
+	if len(got["alloy"]) != 2 {
+		t.Fatalf("DynamicValues() returned %d paths, want 2", len(got["alloy"]))
+	}
+
+	// Mutating the returned copy should not affect the config
+	got["alloy"] = append(got["alloy"], "injected")
+	if len(cfg.DynamicValues()["alloy"]) != 2 {
+		t.Error("DynamicValues() should return independent copy; mutation leaked")
+	}
+}
+
+// TestWithDynamicValues_Nil verifies that nil input is a no-op.
+func TestWithDynamicValues_Nil(t *testing.T) {
+	cfg := NewConfig(WithDynamicValues(nil))
+	if cfg.HasDynamicValues() {
+		t.Error("HasDynamicValues() should be false for nil input")
+	}
+}
+
+// TestHasDynamicValues_Empty verifies default config has no dynamic values.
+func TestHasDynamicValues_Empty(t *testing.T) {
+	cfg := NewConfig()
+	if cfg.HasDynamicValues() {
+		t.Error("HasDynamicValues() should be false for default config")
+	}
+}
+
+func TestParseDynamicValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		inputs  []string
+		want    map[string][]string
+		wantErr bool
+	}{
+		{
+			name:   "single component single path",
+			inputs: []string{"alloy:clusterName"},
+			want:   map[string][]string{"alloy": {"clusterName"}},
+		},
+		{
+			name:   "single component multiple paths",
+			inputs: []string{"alloy:clusterName", "alloy:subnetName"},
+			want:   map[string][]string{"alloy": {"clusterName", "subnetName"}},
+		},
+		{
+			name:   "multiple components",
+			inputs: []string{"alloy:clusterName", "gpuoperator:driver.version"},
+			want:   map[string][]string{"alloy": {"clusterName"}, "gpuoperator": {"driver.version"}},
+		},
+		{
+			name:   "nested path",
+			inputs: []string{"gpuoperator:driver.version"},
+			want:   map[string][]string{"gpuoperator": {"driver.version"}},
+		},
+		{
+			name:    "missing colon",
+			inputs:  []string{"alloy-clusterName"},
+			wantErr: true,
+		},
+		{
+			name:    "empty component",
+			inputs:  []string{":clusterName"},
+			wantErr: true,
+		},
+		{
+			name:    "empty path",
+			inputs:  []string{"alloy:"},
+			wantErr: true,
+		},
+		{
+			name:   "empty input list",
+			inputs: []string{},
+			want:   map[string][]string{},
+		},
+		// Security: safePathPattern blocks dangerous path segments
+		{
+			name:    "template injection in path",
+			inputs:  []string{"gpuoperator:{{.Values.x}}"},
+			wantErr: true,
+		},
+		{
+			name:    "path traversal",
+			inputs:  []string{"gpuoperator:../../../etc/passwd"},
+			wantErr: true,
+		},
+		{
+			name:    "double dot segment",
+			inputs:  []string{"gpuoperator:foo..bar"},
+			wantErr: true,
+		},
+		{
+			name:    "space in path",
+			inputs:  []string{"gpuoperator:driver version"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseDynamicValues(tt.inputs)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseDynamicValues() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("ParseDynamicValues() returned %d components, want %d", len(got), len(tt.want))
+				return
+			}
+			for component, wantPaths := range tt.want {
+				gotPaths, ok := got[component]
+				if !ok {
+					t.Errorf("ParseDynamicValues() missing component %q", component)
+					continue
+				}
+				if len(gotPaths) != len(wantPaths) {
+					t.Errorf("ParseDynamicValues() component %q has %d paths, want %d", component, len(gotPaths), len(wantPaths))
+					continue
+				}
+				for i, wantPath := range wantPaths {
+					if gotPaths[i] != wantPath {
+						t.Errorf("ParseDynamicValues() component %q path[%d] = %q, want %q", component, i, gotPaths[i], wantPath)
+					}
+				}
+			}
+		})
+	}
+}
+
 func TestParseDeployerType(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -559,9 +705,9 @@ func TestParseDeployerType(t *testing.T) {
 func TestGetDeployerTypes(t *testing.T) {
 	types := GetDeployerTypes()
 
-	// Verify we get the expected types
-	if len(types) != 2 {
-		t.Errorf("GetDeployerTypes() returned %d types, want 2", len(types))
+	// Verify we get the expected types (helm, argocd, argocd-helm)
+	if len(types) != 3 {
+		t.Errorf("GetDeployerTypes() returned %d types, want 3", len(types))
 	}
 
 	// Verify types are sorted alphabetically
