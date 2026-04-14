@@ -2274,3 +2274,68 @@ func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
 		t.Error("original driver.version was mutated (removed) — deep copy is missing")
 	}
 }
+
+func TestGenerate_DataFiles(t *testing.T) {
+	t.Run("valid data file included in output", func(t *testing.T) {
+		ctx := context.Background()
+		outputDir := t.TempDir()
+
+		// Create a data file on disk so checksums can read it
+		dataDir := filepath.Join(outputDir, "data")
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dataDir, "overrides.yaml"), []byte("key: value"), 0600); err != nil {
+			t.Fatal(err)
+		}
+
+		g := &Generator{
+			RecipeResult: createTestRecipeResult(),
+			ComponentValues: map[string]map[string]any{
+				"cert-manager": {},
+				"gpu-operator": {},
+			},
+			Version:   "v1.0.0",
+			DataFiles: []string{"data/overrides.yaml"},
+		}
+
+		output, err := g.Generate(ctx, outputDir)
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+
+		found := false
+		for _, f := range output.Files {
+			if strings.HasSuffix(f, "data/overrides.yaml") {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("data file not included in output.Files")
+		}
+	})
+
+	t.Run("path traversal rejected", func(t *testing.T) {
+		ctx := context.Background()
+		outputDir := t.TempDir()
+
+		g := &Generator{
+			RecipeResult: createTestRecipeResult(),
+			ComponentValues: map[string]map[string]any{
+				"cert-manager": {},
+				"gpu-operator": {},
+			},
+			Version:   "v1.0.0",
+			DataFiles: []string{"../../../etc/passwd"},
+		}
+
+		_, err := g.Generate(ctx, outputDir)
+		if err == nil {
+			t.Fatal("Generate() should reject path traversal in DataFiles")
+		}
+		if !strings.Contains(err.Error(), "unsafe data file path") {
+			t.Errorf("expected 'unsafe data file path' error, got: %v", err)
+		}
+	})
+}

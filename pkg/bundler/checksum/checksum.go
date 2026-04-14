@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -63,7 +64,10 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 		checksums = append(checksums, fmt.Sprintf("%s  %s", hex.EncodeToString(digest), relPath))
 	}
 
-	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
+	checksumPath, joinErr := deployer.SafeJoin(bundleDir, ChecksumFileName)
+	if joinErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "unsafe checksum path", joinErr)
+	}
 	content := strings.Join(checksums, "\n") + "\n"
 
 	if err := os.WriteFile(checksumPath, []byte(content), 0600); err != nil {
@@ -80,6 +84,8 @@ func GenerateChecksums(ctx context.Context, bundleDir string, files []string) er
 
 // GetChecksumFilePath returns the full path to the checksums.txt file
 // in the given bundle directory.
+// filepath.Join is safe here: ChecksumFileName is a compile-time constant
+// and the return type (string) has no error channel for SafeJoin.
 func GetChecksumFilePath(bundleDir string) string {
 	return filepath.Join(bundleDir, ChecksumFileName)
 }
@@ -88,7 +94,10 @@ func GetChecksumFilePath(bundleDir string) string {
 // Returns a list of error descriptions for any mismatches or read failures.
 // An empty return means all checksums are valid.
 func VerifyChecksums(bundleDir string) []string {
-	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
+	checksumPath, joinErr := deployer.SafeJoin(bundleDir, ChecksumFileName)
+	if joinErr != nil {
+		return []string{fmt.Sprintf("unsafe checksum path: %v", joinErr)}
+	}
 	data, err := os.ReadFile(checksumPath)
 	if err != nil {
 		return []string{fmt.Sprintf("failed to read %s: %v", ChecksumFileName, err)}
@@ -116,20 +125,8 @@ func VerifyChecksumsFromData(bundleDir string, data []byte) []string {
 
 		expectedDigest := parts[0]
 		relativePath := parts[1]
-		filePath := filepath.Join(bundleDir, relativePath)
-
-		// Prevent path traversal — resolved path must stay within bundleDir
-		absBundle, absErr := filepath.Abs(bundleDir)
-		if absErr != nil {
-			errs = append(errs, fmt.Sprintf("failed to resolve bundle directory: %v", absErr))
-			continue
-		}
-		absFile, absErr := filepath.Abs(filePath)
-		if absErr != nil {
-			errs = append(errs, fmt.Sprintf("failed to resolve path %s: %v", relativePath, absErr))
-			continue
-		}
-		if !strings.HasPrefix(absFile, absBundle+string(filepath.Separator)) {
+		filePath, joinErr := deployer.SafeJoin(bundleDir, relativePath)
+		if joinErr != nil {
 			errs = append(errs, fmt.Sprintf("path traversal detected in checksum entry: %s", relativePath))
 			continue
 		}
@@ -150,6 +147,8 @@ func VerifyChecksumsFromData(bundleDir string, data []byte) []string {
 }
 
 // CountEntries returns the number of entries in a checksums.txt file.
+// filepath.Join is safe here: ChecksumFileName is a compile-time constant
+// and the return type (int) has no error channel for SafeJoin.
 func CountEntries(bundleDir string) int {
 	checksumPath := filepath.Join(bundleDir, ChecksumFileName)
 	data, err := os.ReadFile(checksumPath)

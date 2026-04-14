@@ -158,7 +158,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Include external data files in the file list (for checksums)
 	for _, dataFile := range g.DataFiles {
-		absPath := filepath.Join(outputDir, dataFile)
+		absPath, joinErr := deployer.SafeJoin(outputDir, dataFile)
+		if joinErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe data file path", joinErr)
+		}
 		output.Files = append(output.Files, absPath)
 	}
 
