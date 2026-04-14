@@ -13,6 +13,10 @@
 # limitations under the License.
 
 # Assert the CUJ1 recipe has the expected structure.
+#
+# Validates that `aicr recipe --service eks --accelerator h100 --intent training
+# --os ubuntu --platform kubeflow` produces a valid recipe with correct criteria,
+# kubeflow-specific components, and standard GPU stack components.
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
 criteria:
@@ -21,4 +25,40 @@ criteria:
   intent: training
   os: ubuntu
   platform: kubeflow
-(length(componentRefs) > `0`): true
+constraints:
+  - name: K8s.server.version
+    value: '>= 1.32.4'
+  - name: OS.release.ID
+    value: ubuntu
+  - name: OS.release.VERSION_ID
+    value: "24.04"
+  - name: OS.sysctl./proc/sys/kernel/osrelease
+    value: '>= 6.8'
+componentRefs: ## alphabetically sorted
+  - name: aws-ebs-csi-driver
+  - name: aws-efa
+  - name: cert-manager
+  - name: gpu-operator
+  - name: k8s-ephemeral-storage-metrics
+  - name: kai-scheduler
+  - name: kube-prometheus-stack
+  - name: kubeflow-trainer
+  - name: nvidia-dra-driver-gpu
+  - name: nvsentinel
+  - name: prometheus-adapter
+  - name: skyhook-customizations
+  - name: skyhook-operator
+deploymentOrder:
+  - aws-ebs-csi-driver
+  - aws-efa
+  - cert-manager
+  - kube-prometheus-stack
+  - k8s-ephemeral-storage-metrics
+  - prometheus-adapter
+  - skyhook-operator
+  - skyhook-customizations
+  - gpu-operator
+  - kai-scheduler
+  - kubeflow-trainer
+  - nvidia-dra-driver-gpu
+  - nvsentinel
