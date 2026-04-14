@@ -70,7 +70,7 @@ jobs:
       github.event.label.name == 'run-gpu-tests'
     name: GPU Inference Test (nvkind + H100)
     runs-on: linux-amd64-gpu-h100-latest-1
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     env:
       KIND_CLUSTER_NAME: gpu-inference-test
@@ -87,15 +87,18 @@ jobs:
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
+        with:
+          validator_phases: 'deployment,conformance'
 
-      - name: Install GPU operator (bundle)
+      - name: Install runtime bundle
+        id: bundle-install
         uses: ./.github/actions/gpu-operator-install
         with:
           method: bundle
           accelerator: h100
           platform: dynamo
 
-      # --- Snapshot and validation ---
+      # --- Snapshot and GPU validation ---
 
       - name: Snapshot and validate GPU
         uses: ./.github/actions/gpu-snapshot-validate
@@ -104,33 +107,16 @@ jobs:
           min_gpu_count: '1'
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # --- Install Karpenter before validation so cluster-autoscaling check passes ---
+      # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
 
-      - name: Install Karpenter + KWOK (setup)
+      - name: Install Karpenter + KWOK
         uses: ./.github/actions/install-karpenter-kwok
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
-      # Includes self-contained secure-accelerator-access check (creates its own
-      # DRA test resources, validates, and cleans up automatically).
+      # --- Health checks ---
 
-      - name: Validate cluster
-        run: |
-          AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
-          ./aicr validate \
-            --recipe recipe.yaml \
-            --phase deployment \
-            --phase conformance \
-            --namespace gpu-operator \
-            --kubeconfig="${HOME}/.kube/config" \
-            --require-gpu \
-            --image=ko.local:smoke-test \
-            --timeout=10m \
-            --output=validation-result.yaml \
-            --evidence-dir=conformance-evidence
-
-      - name: Load versions
+      - name: Prepare chainsaw
         id: versions
         uses: ./.github/actions/load-versions
 
@@ -146,7 +132,44 @@ jobs:
             --test-dir tests/chainsaw/ai-conformance/kind \
             --config tests/chainsaw/chainsaw-config.yaml
 
+      - name: Verify expected resources exist
+        run: |
+          go run ./tests/chainsaw/ai-conformance/ \
+            --dir tests/chainsaw/ai-conformance/kind \
+            --file tests/chainsaw/ai-conformance/cluster/assert-crds.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kgateway.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dynamo.yaml \
+            --kubeconfig="${HOME}/.kube/config" \
+            --debug
+
+      # --- CNCF AI Conformance validation ---
+      # Runs before Dynamo: the dra-support check needs to allocate a GPU via
+      # ResourceClaim, which conflicts with Dynamo's vllm-smoke-gpu-claim if
+      # Dynamo is deployed first (only 1 GPU on H100 x1).
+
+      - name: Validate CNCF AI Conformance
+        run: |
+          AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
+          ./aicr validate \
+            --recipe recipe.yaml \
+            --phase deployment \
+            --phase conformance \
+            --namespace gpu-operator \
+            --kubeconfig="${HOME}/.kube/config" \
+            --require-gpu \
+            --image=ko.local:smoke-test \
+            --timeout=10m \
+            --output=validation-result.yaml \
+            --evidence-dir=conformance-evidence
+
       # --- Dynamo vLLM inference smoke test ---
+      # Runs after conformance: Dynamo's DRA ResourceClaim consumes the GPU,
+      # which would block dra-support validation if deployed first.
 
       - name: Deploy Dynamo vLLM smoke test
         run: |
@@ -265,7 +288,7 @@ jobs:
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
-        if: always()
+        if: always() && steps.bundle-install.outcome == 'success'
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind \
@@ -282,7 +305,7 @@ jobs:
 
       - name: Upload conformance evidence
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: conformance-evidence
           path: |

@@ -63,6 +63,7 @@ area_assignees:
   area/docs: dims,mchmarny
   area/infra: mchmarny,dims
   area/recipes: yuanchen8911,mchmarny
+  area/security: mchmarny,dims
   area/tests: atif1996,mchmarny
   area/validator: xdu31,mchmarny
 

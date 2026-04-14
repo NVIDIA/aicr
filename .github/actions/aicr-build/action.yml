@@ -15,6 +15,16 @@
 name: 'AICR Build'
 description: 'Builds the aicr validator image (via Dockerfile) and CLI binary, and loads the image into kind.'
 
+inputs:
+  build_validators:
+    description: 'Deprecated: use validator_phases instead. Ignored when validator_phases is set.'
+    required: false
+    default: 'true'
+  validator_phases:
+    description: 'Comma-separated validator phases to build (e.g., "conformance,deployment"), or "none" to skip all. Takes precedence over build_validators.'
+    required: false
+    default: ''
+
 runs:
   using: 'composite'
   steps:
@@ -40,25 +50,41 @@ runs:
         ENTRYPOINT ["/usr/local/bin/aicr"]
         DOCKERFILE
 
-        # Load onto all nodes (validator Jobs tolerate all taints and may schedule on
-        # control-plane). The cuda:base image is ~250MB so 3-node loads are fast.
-        timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
+        # Load onto all nodes. The snapshot agent requests nvidia.com/gpu but
+        # does not set a node selector, so it can land on any GPU-capable node
+        # including the control-plane (e.g., T4 smoke test).
+        timeout 600 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
           echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
-          timeout 300 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+          timeout 600 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
         }
 
     - name: Build validator images and load into kind
+      if: "!(inputs.validator_phases == 'none' || (inputs.validator_phases == '' && inputs.build_validators == 'false'))"
       shell: bash
       env:
         GOFLAGS: -mod=vendor
       run: |
-        # Compile validator binaries on host (Go build cache) then COPY-only images.
-        mkdir -p dist/validator
-        CGO_ENABLED=0 go build -trimpath -o dist/validator/deployment ./validators/deployment
-        CGO_ENABLED=0 go build -trimpath -o dist/validator/performance ./validators/performance
-        CGO_ENABLED=0 go build -trimpath -o dist/validator/conformance ./validators/conformance
+        # Determine which validator phases to build.
+        # validator_phases takes precedence; build_validators is a deprecated fallback.
+        if [[ -n "${{ inputs.validator_phases }}" ]]; then
+          if [[ "${{ inputs.validator_phases }}" == "none" ]]; then
+            echo "Skipping validator builds (validator_phases=none)"
+            exit 0
+          fi
+          PHASES="${{ inputs.validator_phases }}"
+        else
+          # Default: build all phases (backwards compatible)
+          PHASES="deployment,performance,conformance"
+        fi
 
-        for phase in deployment performance conformance; do
+        # Compile only the requested validator binaries.
+        mkdir -p dist/validator
+        for phase in ${PHASES//,/ }; do
+          echo "Building validator binary: ${phase}"
+          CGO_ENABLED=0 go build -trimpath -o "dist/validator/${phase}" "./validators/${phase}"
+        done
+
+        for phase in ${PHASES//,/ }; do
           mkdir -p "validators/${phase}/testdata"
           docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
         FROM gcr.io/distroless/static-debian12:nonroot

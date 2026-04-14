@@ -24,12 +24,21 @@ name: Publish Fern Docs
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - 'docs/**'
+      - 'fern/**'
     tags:
       - 'docs/v*'
   workflow_dispatch: {}
 
 permissions:
   contents: read
+
+concurrency:
+  group: fern-publish
+  cancel-in-progress: true
 
 jobs:
   publish:

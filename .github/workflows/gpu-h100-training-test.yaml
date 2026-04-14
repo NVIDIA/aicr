@@ -66,7 +66,7 @@ jobs:
       github.event.label.name == 'run-gpu-tests'
     name: GPU Training Test (nvkind + H100 x2)
     runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     env:
       KIND_CLUSTER_NAME: gpu-training-test
@@ -83,15 +83,18 @@ jobs:
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
+        with:
+          validator_phases: 'conformance'
 
-      - name: Install GPU operator (bundle)
+      - name: Install runtime bundle
+        id: bundle-install
         uses: ./.github/actions/gpu-operator-install
         with:
           method: bundle
           accelerator: h100
           intent: training
 
-      # --- Snapshot and validation ---
+      # --- Snapshot and GPU validation ---
 
       - name: Snapshot and validate GPU
         uses: ./.github/actions/gpu-snapshot-validate
@@ -100,16 +103,16 @@ jobs:
           min_gpu_count: '2'
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # --- Install Karpenter before validation so cluster-autoscaling check passes ---
+      # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
 
-      - name: Install Karpenter + KWOK (setup)
+      - name: Install Karpenter + KWOK
         uses: ./.github/actions/install-karpenter-kwok
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # --- Health checks (run before conformance to give metrics pipeline time) ---
+      # --- Health checks ---
 
-      - name: Load versions
+      - name: Prepare chainsaw
         id: versions
         uses: ./.github/actions/load-versions
 
@@ -125,13 +128,23 @@ jobs:
             --test-dir tests/chainsaw/ai-conformance/kind-training \
             --config tests/chainsaw/chainsaw-config.yaml
 
-      # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
-      # Runs after chainsaw to ensure the DCGM → Prometheus → adapter pipeline
-      # has had time to bootstrap (pod-autoscaling check needs live metric data).
-      # Gang scheduling (PodGroup + 2 GPU pods) is exercised by the self-contained
-      # gang-scheduling conformance check — no separate deploy step needed.
+      - name: Verify expected resources exist
+        run: |
+          go run ./tests/chainsaw/ai-conformance/ \
+            --dir tests/chainsaw/ai-conformance/kind-training \
+            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
+            --kubeconfig="${HOME}/.kube/config" \
+            --debug
 
-      - name: Validate cluster
+      # --- CNCF AI Conformance validation ---
+      # Runs last to ensure the DCGM → Prometheus → adapter pipeline
+      # has had time to bootstrap (pod-autoscaling check needs live metric data).
+
+      - name: Validate CNCF AI Conformance
         run: |
           AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
           ./aicr validate \
@@ -148,7 +161,7 @@ jobs:
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
-        if: always()
+        if: always() && steps.bundle-install.outcome == 'success'
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind-training \
@@ -162,7 +175,7 @@ jobs:
 
       - name: Upload conformance evidence
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: conformance-evidence
           path: |
