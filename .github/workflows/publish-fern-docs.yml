@@ -59,4 +59,10 @@ jobs:
         env:
           FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
         working-directory: ./fern
-        run: fern generate --docs
+        run: |
+          OUTPUT=$(fern generate --docs 2>&1)
+          echo "$OUTPUT"
+          URL=$(echo "$OUTPUT" | grep -oP 'Published docs to \K.*(?= \()')
+          if [ -n "$URL" ]; then
+            echo "### Published: [$URL]($URL)" >> "$GITHUB_STEP_SUMMARY"
+          fi
