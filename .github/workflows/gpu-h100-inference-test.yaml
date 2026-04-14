@@ -54,6 +54,7 @@ jobs:
               - '.github/actions/gpu-cluster-setup/**'
               - '.github/actions/gpu-operator-install/**'
               - '.github/actions/aicr-build/**'
+              - '.github/actions/setup-build-tools/**'
               - 'validators/*/Dockerfile'
               - 'pkg/evidence/**'
               - 'pkg/validator/checks/conformance/**'
