@@ -371,7 +371,7 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
   curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 
-# Advanced: with value overrides and ArgoCD deployer
+# Advanced: with value overrides and Argo CD deployer
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
   curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator&deployer=argocd&repo=https://github.com/my-org/my-gitops-repo.git&set=gpuoperator:gds.enabled=true" \
     -H "Content-Type: application/json" -d @- -o bundles.zip

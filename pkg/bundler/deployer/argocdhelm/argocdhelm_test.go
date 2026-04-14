@@ -68,7 +68,7 @@ func TestGenerate(t *testing.T) {
 				if _, err := os.Stat(filepath.Join(outputDir, "templates", "gpu-operator.yaml")); os.IsNotExist(err) {
 					t.Error("templates/gpu-operator.yaml should exist")
 				}
-				// Should NOT have flat ArgoCD artifacts
+				// Should NOT have flat Argo CD artifacts
 				if _, err := os.Stat(filepath.Join(outputDir, "app-of-apps.yaml")); !os.IsNotExist(err) {
 					t.Error("app-of-apps.yaml should NOT exist in Helm chart output")
 				}
@@ -114,7 +114,7 @@ func TestGenerate(t *testing.T) {
 					t.Fatal("expected driver map in dynamic stubs")
 				}
 				// Dynamic path should have the resolved default value (not empty —
-				// the ArgoCD Helm chart preserves defaults so users see what to override)
+				// the Argo CD Helm chart preserves defaults so users see what to override)
 				if driver["version"] == nil {
 					t.Error("dynamic path driver.version should be present in root values.yaml")
 				}
@@ -170,7 +170,7 @@ func TestGenerate(t *testing.T) {
 					t.Error("template should use single 'source:', not multi-source 'sources:'")
 				}
 				if strings.Contains(tmplStr, "$values") {
-					t.Error("template should not reference $values (flat ArgoCD pattern)")
+					t.Error("template should not reference $values (flat Argo CD pattern)")
 				}
 			},
 		},
@@ -405,7 +405,7 @@ func TestSetValueByPath_StubBehavior(t *testing.T) {
 
 // TestFixValuesTemplate verifies that the raw Helm template expression in
 // helm.values survives yaml.Marshal → fixValuesTemplate without being
-// quoted or escaped. This is critical: ArgoCD needs the raw template text, not
+// quoted or escaped. This is critical: Argo CD needs the raw template text, not
 // a YAML string literal.
 func TestFixValuesTemplate(t *testing.T) {
 	tmpl := `{{- $static := (.Files.Get "static/gpu-operator.yaml") | fromYaml -}}

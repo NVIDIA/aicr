@@ -9,7 +9,7 @@ This section is for integrators who:
 - Build automation pipelines using the AICR API
 - Deploy and operate the AICR API server in Kubernetes
 - Create custom recipes for their environments
-- Integrate AICR into GitOps workflows (ArgoCD, Flux)
+- Integrate AICR into GitOps workflows (Argo CD, Flux)
 
 ## Documents
 

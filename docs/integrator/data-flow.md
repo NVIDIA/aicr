@@ -587,7 +587,7 @@ After bundlers generate artifacts, the deployer framework transforms them into d
 │  │ │   └─ Helm charts + README             │           │
 │  │ │                                       │           │
 │  │ └─ argocd                               │           │
-│  │     └─ ArgoCD Application + sync-wave   │           │
+│  │     └─ Argo CD Application + sync-wave   │           │
 │  └─────────────────────────────────────────┘           │
 │                                                        │
 └────────────────────────────────────────────────────────┘
@@ -618,7 +618,7 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 │         ┌────────────────┴────────────────┐             │
 │         ▼                                 ▼             │
 │  ┌────────────┐                    ┌────────────┐       │
-│  │    Helm    │                    │  ArgoCD    │       │
+│  │    Helm    │                    │  Argo CD    │       │
 │  │  Deployer  │                    │  Deployer  │       │
 │  │ (default)  │                    │            │       │
 │  └──────┬─────┘                    └──────┬─────┘       │
@@ -654,7 +654,7 @@ bundle-output/
     └── README.md
 ```
 
-**ArgoCD Deployer**:
+**Argo CD Deployer**:
 ```
 bundle-output/
 ├── app-of-apps.yaml       # Parent Application (bundle root)
@@ -670,7 +670,7 @@ bundle-output/
 └── README.md
 ```
 
-ArgoCD Application with multi-source:
+Argo CD Application with multi-source:
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application

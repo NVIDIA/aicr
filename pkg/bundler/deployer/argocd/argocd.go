@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package argocd provides ArgoCD Application generation for recipes.
+// Package argocd provides Argo CD Application generation for recipes.
 package argocd
 
 import (
@@ -38,7 +38,7 @@ var appOfAppsTemplate string
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
 
-// ApplicationData contains data for rendering an ArgoCD Application.
+// ApplicationData contains data for rendering an Argo CD Application.
 type ApplicationData struct {
 	Name           string
 	Namespace      string
@@ -67,7 +67,7 @@ type ReadmeData struct {
 	Components     []ApplicationData
 }
 
-// GeneratorInput contains all data needed to generate ArgoCD Applications.
+// GeneratorInput contains all data needed to generate Argo CD Applications.
 type GeneratorInput struct {
 	// RecipeResult contains the recipe metadata and component references.
 	RecipeResult *recipe.RecipeResult
@@ -89,7 +89,7 @@ type GeneratorInput struct {
 	IncludeChecksums bool
 }
 
-// GeneratorOutput contains the result of ArgoCD Application generation.
+// GeneratorOutput contains the result of Argo CD Application generation.
 type GeneratorOutput struct {
 	// Files contains the paths of generated files.
 	Files []string
@@ -107,10 +107,10 @@ type GeneratorOutput struct {
 	DeploymentNotes []string
 }
 
-// Generator creates ArgoCD Applications from recipe results.
+// Generator creates Argo CD Applications from recipe results.
 type Generator struct{}
 
-// NewGenerator creates a new ArgoCD application generator.
+// NewGenerator creates a new Argo CD application generator.
 func NewGenerator() *Generator {
 	return &Generator{}
 }
@@ -129,7 +129,7 @@ func resolveRepoSettings(input *GeneratorInput) (repoURL, targetRevision string)
 	return repoURL, targetRevision
 }
 
-// Generate creates ArgoCD Applications from the given input.
+// Generate creates Argo CD Applications from the given input.
 func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputDir string) (*GeneratorOutput, error) {
 	start := time.Now()
 

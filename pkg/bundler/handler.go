@@ -316,7 +316,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 		}
 	}
 
-	// Parse repo URL (for ArgoCD deployer)
+	// Parse repo URL (for Argo CD deployer)
 	params.repoURL = query.Get("repo")
 
 	// Parse workload-gate taint

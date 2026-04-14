@@ -129,7 +129,7 @@ function roleLinkLeave(e) {
 // ── Data arrays ────────────────────────────────────────────────────
 const workflowSteps = [
   { label: 'Recipe', desc: 'Generate an optimized, version-locked configuration for your specific environment.' },
-  { label: 'Bundle', desc: 'Convert the recipe into deployment-ready artifacts for Helm, ArgoCD, or OCI images.' },
+  { label: 'Bundle', desc: 'Convert the recipe into deployment-ready artifacts for Helm, Argo CD, or OCI images.' },
   { label: 'Deploy', desc: 'Apply through your existing CD pipeline. No new tooling required.' },
   { label: 'Validate', desc: 'Verify deployment, performance, and conformance checks against your live cluster.' },
 ]
@@ -140,7 +140,7 @@ const featureCards = [
   { title: 'Reproducible', description: 'Same inputs produce identical deployments every time.', icon: 'copy', delay: 160 },
   { title: 'Composable', description: 'Recipes compose from layered overlays: base defaults, cloud, accelerator, OS, and workload-specific tuning.', icon: 'layers', delay: 240 },
   { title: 'Secure', description: 'SLSA Level 3 provenance, SPDX SBOMs, and Sigstore cosign attestations on every release.', icon: 'shield', delay: 320 },
-  { title: 'Standards Based', description: 'Built on existing standards. Recipes are YAML, bundles produce Helm charts, and deployment works through Helm, ArgoCD, or any CD pipeline.', icon: 'git-branch', delay: 400 },
+  { title: 'Standards Based', description: 'Built on existing standards. Recipes are YAML, bundles produce Helm charts, and deployment works through Helm, Argo CD, or any CD pipeline.', icon: 'git-branch', delay: 400 },
 ]
 
 const environmentCols = [

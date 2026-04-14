@@ -31,7 +31,7 @@
 //
 // DeployerType constants define supported deployment methods:
 //   - DeployerHelm: Generates Helm per-component bundles (default)
-//   - DeployerArgoCD: Generates ArgoCD App of Apps manifests
+//   - DeployerArgoCD: Generates Argo CD App of Apps manifests
 //
 // Use ParseDeployerType() to parse user input and GetDeployerTypes() for CLI help.
 //

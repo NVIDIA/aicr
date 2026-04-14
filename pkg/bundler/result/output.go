@@ -23,7 +23,7 @@ import (
 // DeploymentInfo contains structured deployment instructions.
 // Deployers populate this to provide user-facing guidance.
 type DeploymentInfo struct {
-	// Type describes the deployment method (e.g., "Helm per-component bundle", "ArgoCD applications").
+	// Type describes the deployment method (e.g., "Helm per-component bundle", "Argo CD applications").
 	Type string `json:"type" yaml:"type"`
 
 	// Steps contains ordered deployment instructions (e.g., ["cd ./bundle", "helm install ..."]).

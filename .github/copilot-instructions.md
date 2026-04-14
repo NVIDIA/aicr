@@ -361,7 +361,7 @@ aicr bundle -r recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   -o ./bundles
 
-# GitOps deployment with ArgoCD (sync-wave ordering)
+# GitOps deployment with Argo CD (sync-wave ordering)
 aicr bundle -r recipe.yaml \
   --deployer argocd \
   --repo https://github.com/my-org/my-gitops-repo.git \

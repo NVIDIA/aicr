@@ -721,7 +721,7 @@ func TestMake_ArgoCD(t *testing.T) {
 		t.Fatal("Make() returned nil output")
 	}
 
-	// ArgoCD output should have results
+	// Argo CD output should have results
 	if len(output.Results) == 0 {
 		t.Error("expected at least 1 result")
 	}
@@ -740,8 +740,8 @@ func TestMake_ArgoCD(t *testing.T) {
 	if output.Deployment == nil {
 		t.Fatal("expected deployment info")
 	}
-	if output.Deployment.Type != "ArgoCD applications" {
-		t.Errorf("deployment type = %q, want %q", output.Deployment.Type, "ArgoCD applications")
+	if output.Deployment.Type != "Argo CD applications" {
+		t.Errorf("deployment type = %q, want %q", output.Deployment.Type, "Argo CD applications")
 	}
 
 	// Verify output directory has files

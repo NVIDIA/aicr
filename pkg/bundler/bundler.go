@@ -148,7 +148,7 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 
 // Make generates a deployment bundle from the given recipe.
 // By default, generates a Helm per-component bundle. If deployer is set to "argocd",
-// generates ArgoCD Application manifests.
+// generates Argo CD Application manifests.
 //
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
@@ -159,9 +159,9 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 //   - <component>/manifests/: Optional manifest files
 //   - checksums.txt: SHA256 checksums of generated files
 //
-// For ArgoCD output:
-//   - app-of-apps.yaml: Parent ArgoCD Application
-//   - <component>/application.yaml: ArgoCD Application per component
+// For Argo CD output:
+//   - app-of-apps.yaml: Parent Argo CD Application
+//   - <component>/application.yaml: Argo CD Application per component
 //   - <component>/values.yaml: Values for each component
 //   - README.md: Deployment instructions
 //
@@ -369,7 +369,7 @@ func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recip
 	return resultOutput, nil
 }
 
-// makeArgoCDHelmChart generates a Helm chart app-of-apps for ArgoCD with dynamic install-time values.
+// makeArgoCDHelmChart generates a Helm chart app-of-apps for Argo CD with dynamic install-time values.
 func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
 	// Reject flags not yet supported by the argocd-helm deployer.
 	if b.Config.Attest() {
@@ -429,7 +429,7 @@ func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *
 	resultOutput.Results = append(resultOutput.Results, argocdResult)
 
 	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "ArgoCD Helm chart app-of-apps",
+		Type:  "Argo CD Helm chart app-of-apps",
 		Steps: output.DeploymentSteps,
 		Notes: b.warnings,
 	}
@@ -437,14 +437,14 @@ func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *
 	return resultOutput, nil
 }
 
-// makeArgoCD generates ArgoCD Application manifests.
+// makeArgoCD generates Argo CD Application manifests.
 func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
 	slog.Debug("generating argocd applications",
 		"component_count", len(recipeResult.ComponentRefs),
 		"output_dir", dir,
 	)
 
-	// Generate ArgoCD applications
+	// Generate Argo CD applications
 	generator := argocd.NewGenerator()
 	generatorInput := &argocd.GeneratorInput{
 		RecipeResult:     recipeResult,
@@ -485,7 +485,7 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 		OutputDir:     dir,
 	}
 
-	// Add a single result for the ArgoCD applications
+	// Add a single result for the Argo CD applications
 	argocdResult := &result.Result{
 		Type:     "argocd-applications",
 		Success:  true,
@@ -504,7 +504,7 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 		notes = append(notes, b.warnings...)
 	}
 	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "ArgoCD applications",
+		Type:  "Argo CD applications",
 		Steps: output.DeploymentSteps,
 		Notes: notes,
 	}

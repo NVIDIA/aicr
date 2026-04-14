@@ -804,7 +804,7 @@ aicr bundle [flags]
 | `--recipe` | `-r` | string | Path to recipe file (required) |
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
-| `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
+| `--repo` | | string | Git repository URL for Argo CD applications (only used with `--deployer argocd`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -869,8 +869,8 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | Method | Description |
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
-| `argocd` | Generates ArgoCD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for ArgoCD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
+| `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
@@ -879,7 +879,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 All deployers respect the `deploymentOrder` field from the recipe, ensuring components are installed in the correct sequence:
 
 - **Helm**: Components listed in README in deployment order
-- **ArgoCD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
+- **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
 
 **Value Overrides (`--set`):**
 
@@ -970,10 +970,10 @@ aicr bundle -r recipe.yaml --attest -o ./bundles
 # In GitHub Actions (OIDC token detected automatically)
 aicr bundle -r recipe.yaml --attest -o ./bundles
 
-# Generate ArgoCD Application manifests for GitOps
+# Generate Argo CD Application manifests for GitOps
 aicr bundle -r recipe.yaml --deployer argocd -o ./bundles
 
-# ArgoCD with Git repository URL (avoids placeholder in app-of-apps.yaml)
+# Argo CD with Git repository URL (avoids placeholder in app-of-apps.yaml)
 aicr bundle -r recipe.yaml --deployer argocd \
   --repo https://github.com/my-org/my-gitops-repo.git \
   -o ./bundles
@@ -1015,7 +1015,7 @@ helm upgrade --install gpu-operator ... \
 
 Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
-**ArgoCD deployer behavior:**
+**Argo CD deployer behavior:**
 
 The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
 
@@ -1044,13 +1044,13 @@ aicr bundle -r recipe.yaml \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# ArgoCD Helm chart: all values overridable, --dynamic pre-populates specific paths
+# Argo CD Helm chart: all values overridable, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# ArgoCD Helm chart: without --dynamic, still fully overridable via helm --set
+# Argo CD Helm chart: without --dynamic, still fully overridable via helm --set
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   -o ./bundles
@@ -1068,13 +1068,13 @@ bundles/
 └── ...
 ```
 
-**ArgoCD Helm chart structure with `--dynamic`:**
+**Argo CD Helm chart structure with `--dynamic`:**
 ```
 bundles/
 ├── Chart.yaml                     # Helm chart metadata
 ├── values.yaml                    # Dynamic values only (defaults from recipe, override per cluster)
 ├── templates/
-│   ├── alloy.yaml                 # ArgoCD Application template with helm.values
+│   ├── alloy.yaml                 # Argo CD Application template with helm.values
 │   └── gpu-operator.yaml
 └── README.md
 ```
@@ -1099,7 +1099,7 @@ bundles/
     └── README.md
 ```
 
-**ArgoCD bundle structure** (with `--deployer argocd`):
+**Argo CD bundle structure** (with `--deployer argocd`):
 ```
 bundles/
 ├── app-of-apps.yaml               # Parent Application (bundle root)
@@ -1108,12 +1108,12 @@ bundles/
 │   ├── values.yaml                # Helm values for GPU Operator
 │   ├── manifests/                 # Additional manifests (ClusterPolicy, etc.)
 │   └── argocd/
-│       └── application.yaml       # ArgoCD Application (sync-wave: 0)
+│       └── application.yaml       # Argo CD Application (sync-wave: 0)
 ├── network-operator/
 │   ├── values.yaml                # Helm values for Network Operator
 │   └── argocd/
-│       └── application.yaml       # ArgoCD Application (sync-wave: 1)
-└── README.md                      # ArgoCD deployment guide
+│       └── application.yaml       # Argo CD Application (sync-wave: 1)
+└── README.md                      # Argo CD deployment guide
 ```
 
 **Day 2 Options:**
@@ -1209,7 +1209,7 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-ArgoCD Applications use multi-source to:
+Argo CD Applications use multi-source to:
 1. Pull Helm charts from upstream repositories
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)

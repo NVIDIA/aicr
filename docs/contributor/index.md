@@ -69,7 +69,7 @@ This directory contains architecture documentation for the AI Cluster Runtime (A
   - Deployment methods: `helm` (default), `argocd`
   - Deployment ordering: Respects `deploymentOrder` from recipe for correct component installation sequence
   - Helm: Generates Helm per-component bundle with individual values.yaml and deploy script
-  - ArgoCD: Uses `sync-wave` annotations for ordered deployment
+  - Argo CD: Uses `sync-wave` annotations for ordered deployment
 
 ## Overview
 
@@ -122,11 +122,11 @@ Generates deployment-ready bundles (Helm values, Kubernetes manifests, installat
 - **Available bundlers**: GPU Operator, Network Operator, Skyhook, Cert-Manager, NVSentinel, DRA Driver
 - **Deployment methods** (`--deployer` flag):
   - `helm` (default): Helm per-component bundle with individual values.yaml and deploy script
-  - `argocd`: ArgoCD Application manifests with sync-wave ordering (use `--repo` to set Git repository URL)
+  - `argocd`: Argo CD Application manifests with sync-wave ordering (use `--repo` to set Git repository URL)
 - **Deployment ordering**: Components deployed in sequence defined by recipe's `deploymentOrder` field
 - **Value Overrides**: Use `--set bundler:path.to.field=value` to customize generated bundles (CLI only)
 - **Node Scheduling**: Use `--system-node-selector`, `--accelerated-node-selector`, and toleration flags for workload placement (CLI only)
-- **Git Repository URL**: Use `--repo` to set the Git repository URL in ArgoCD `app-of-apps.yaml` (avoids placeholder)
+- **Git Repository URL**: Use `--repo` to set the Git repository URL in Argo CD `app-of-apps.yaml` (avoids placeholder)
 - **Output**: Complete deployment bundle with values, manifests, scripts, and checksums
 
 **Note:** The API Server supports recipe generation (Step 2) and bundle creation (Step 3). For snapshot capture, use the CLI.

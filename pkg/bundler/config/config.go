@@ -35,9 +35,9 @@ type DeployerType string
 const (
 	// DeployerHelm generates Helm per-component bundles (default).
 	DeployerHelm DeployerType = "helm"
-	// DeployerArgoCD generates ArgoCD App of Apps manifests.
+	// DeployerArgoCD generates Argo CD App of Apps manifests.
 	DeployerArgoCD DeployerType = "argocd"
-	// DeployerArgoCDHelm generates a Helm chart app-of-apps for ArgoCD.
+	// DeployerArgoCDHelm generates a Helm chart app-of-apps for Argo CD.
 	// All values are overridable at install time via helm --set.
 	// Use --dynamic to pre-populate specific paths in root values.yaml.
 	DeployerArgoCDHelm DeployerType = "argocd-helm"
@@ -110,10 +110,10 @@ type Config struct {
 	// deployer specifies the deployment method (default: DeployerHelm).
 	deployer DeployerType
 
-	// repoURL specifies the Git repository URL for ArgoCD applications.
+	// repoURL specifies the Git repository URL for Argo CD applications.
 	repoURL string
 
-	// targetRevision specifies the target revision for the ArgoCD repo (default: "main").
+	// targetRevision specifies the target revision for the Argo CD repo (default: "main").
 	targetRevision string
 
 	// workloadGateTaint specifies the taint for skyhook-operator runtime required feature.
@@ -223,12 +223,12 @@ func (c *Config) Deployer() DeployerType {
 	return c.deployer
 }
 
-// RepoURL returns the Git repository URL for ArgoCD applications.
+// RepoURL returns the Git repository URL for Argo CD applications.
 func (c *Config) RepoURL() string {
 	return c.repoURL
 }
 
-// TargetRevision returns the target revision for the ArgoCD repo.
+// TargetRevision returns the target revision for the Argo CD repo.
 func (c *Config) TargetRevision() string {
 	return c.targetRevision
 }
@@ -398,14 +398,14 @@ func WithDeployer(deployer DeployerType) Option {
 	}
 }
 
-// WithRepoURL sets the Git repository URL for ArgoCD applications.
+// WithRepoURL sets the Git repository URL for Argo CD applications.
 func WithRepoURL(repoURL string) Option {
 	return func(c *Config) {
 		c.repoURL = repoURL
 	}
 }
 
-// WithTargetRevision sets the target revision for the ArgoCD repo.
+// WithTargetRevision sets the target revision for the Argo CD repo.
 func WithTargetRevision(targetRevision string) Option {
 	return func(c *Config) {
 		c.targetRevision = targetRevision

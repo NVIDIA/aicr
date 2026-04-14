@@ -20,7 +20,7 @@ metadata:
 spec:
   description: |
     Tests --dynamic flag for install-time values in bundle output.
-    Covers Helm deployer (cluster-values.yaml split) and ArgoCD deployer
+    Covers Helm deployer (cluster-values.yaml split) and Argo CD deployer
     (Helm chart app-of-apps with helm.values). No cluster needed.
   timeouts:
     exec: 60s
@@ -115,7 +115,7 @@ spec:
                 --deployer argocd-helm \
                 --dynamic gpuoperator:driver.version
               test -d "${WORK}/argocd-dynamic/templates"
-              # Flat ArgoCD artifacts should NOT exist
+              # Flat Argo CD artifacts should NOT exist
               ! test -f "${WORK}/argocd-dynamic/app-of-apps.yaml"
 
     - name: assert-argocd-chart-yaml
@@ -133,7 +133,7 @@ spec:
                 --no-color --timeout 5s
 
     - name: argocd-template-has-values-object
-      description: At least one ArgoCD Application template references helm.values.
+      description: At least one Argo CD Application template references helm.values.
       try:
         - script:
             content: |
@@ -148,7 +148,7 @@ spec:
               ($error == null): true
 
     - name: argocd-no-dynamic-backwards-compatible
-      description: ArgoCD without --dynamic produces flat manifests (backwards compatible).
+      description: Argo CD without --dynamic produces flat manifests (backwards compatible).
       try:
         - script:
             content: |
@@ -162,7 +162,7 @@ spec:
               ($error == null): true
 
     - name: argocd-helm-template-roundtrip
-      description: Generated ArgoCD Helm chart is valid — helm template renders without errors.
+      description: Generated Argo CD Helm chart is valid — helm template renders without errors.
       try:
         - script:
             content: |
@@ -175,9 +175,9 @@ spec:
                 echo "$output" >&2
                 exit 1
               fi
-              # Output should contain ArgoCD Application resources
+              # Output should contain Argo CD Application resources
               echo "$output" | grep -q "kind: Application" \
-                || { echo "rendered output should contain ArgoCD Applications" >&2; exit 1; }
+                || { echo "rendered output should contain Argo CD Applications" >&2; exit 1; }
               # Output should contain values: (proves template references resolve)
               echo "$output" | grep -q "values:" \
                 || { echo "rendered output should contain values:" >&2; exit 1; }

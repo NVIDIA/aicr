@@ -142,7 +142,7 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		opts.outputDir = absOut
 	}
 
-	// When using ArgoCD deployer with OCI output and no explicit --repo,
+	// When using Argo CD deployer with OCI output and no explicit --repo,
 	// auto-populate repoURL from the OCI reference (issue #519).
 	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
 		opts.repoURL = opts.ociRef.Registry + "/" + opts.ociRef.Repository
@@ -217,7 +217,7 @@ func bundleCmd() *cli.Command {
 		Category: functionalCategoryName,
 		Usage:    "Generate deployment bundle from a given recipe.",
 		Description: `Generates a deployment bundle from a given recipe. 
-Use --deployer argocd to generate ArgoCD Applications.
+Use --deployer argocd to generate Argo CD Applications.
 
 Helm:
   - README.md: Root deployment guide with ordered steps
@@ -227,9 +227,9 @@ Helm:
   - <component>/README.md: Component install/upgrade/uninstall
   - checksums.txt: SHA256 checksums of generated files
 
-ArgoCD:
-  - app-of-apps.yaml: Parent ArgoCD Application
-  - <component>/application.yaml: ArgoCD Application per component
+Argo CD:
+  - app-of-apps.yaml: Parent Argo CD Application
+  - <component>/application.yaml: Argo CD Application per component
   - <component>/values.yaml: Values for each component
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files
@@ -239,7 +239,7 @@ Examples:
 Generate Helm per-component bundle (default):
   aicr bundle --recipe recipe.yaml --output ./my-bundle
 
-Generate ArgoCD App of Apps:
+Generate Argo CD App of Apps:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer argocd
 
 Override values in generated bundle:
@@ -337,7 +337,7 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name:     "repo",
 				Value:    "",
-				Usage:    "Git repository URL for ArgoCD applications (only used with --deployer argocd)",
+				Usage:    "Git repository URL for Argo CD applications (only used with --deployer argocd)",
 				Category: "Deployment",
 			},
 			&cli.BoolFlag{
@@ -397,9 +397,9 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	case config.DeployerHelm:
 		// default
 	case config.DeployerArgoCD:
-		outputType = "ArgoCD applications"
+		outputType = "Argo CD applications"
 	case config.DeployerArgoCDHelm:
-		outputType = "ArgoCD Helm chart app-of-apps"
+		outputType = "Argo CD Helm chart app-of-apps"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),

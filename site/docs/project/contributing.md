@@ -106,7 +106,7 @@ The same tools, same versions, and same validation run locally and in CI.
 
 The system integrates into how users already work. We provide validated configuration, not a new operational model.
 
-**What:** AICR outputs standard formats (Helm values, Kubernetes manifests) that work with existing tools (kubectl, ArgoCD, Flux). Users don't need to learn "the AICR way" of deploying.
+**What:** AICR outputs standard formats (Helm values, Kubernetes manifests) that work with existing tools (kubectl, Argo CD, Flux). Users don't need to learn "the AICR way" of deploying.
 
 **Why:** If adoption requires retraining users on a new workflow, our design has failed. Value comes from correctness, not from lock-in.
 
@@ -122,7 +122,7 @@ Given the same inputs, the same system version must always produce the same resu
 
 Validated configuration exists independent of how it is rendered, packaged, or deployed.
 
-**What:** Recipes define *what* is correct. Bundlers and deployers determine *how* to deliver it (Helm, ArgoCD, raw manifests). The recipe doesn't change based on the deployment mechanism.
+**What:** Recipes define *what* is correct. Bundlers and deployers determine *how* to deliver it (Helm, Argo CD, raw manifests). The recipe doesn't change based on the deployment mechanism.
 
 **Why:** This prevents tight coupling of correctness to a specific tool, workflow, or delivery mechanism. Users can adopt new deployment tools without re-validating their configurations.
 
