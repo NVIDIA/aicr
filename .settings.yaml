@@ -55,16 +55,17 @@ testing_tools:
 
 # Area Assignees (GitHub usernames assigned to issues by area label)
 area_assignees:
-  area/api: cullenmcdermott
-  area/bundler: ArangoGutierrez
-  area/ci: mchmarny
-  area/cli: lockwobr
-  area/collector: ayuskauskas
-  area/docs: dims
-  area/infra: mchmarny
-  area/recipes: yuanchen8911
-  area/tests: atif1996
-  area/validator: xdu31
+  area/api: cullenmcdermott,mchmarny
+  area/bundler: ArangoGutierrez,mchmarny
+  area/ci: mchmarny,mchmarny
+  area/cli: lockwobr,mchmarny
+  area/collector: ayuskauskas,mchmarny
+  area/docs: dims,mchmarny
+  area/infra: mchmarny,dims
+  area/recipes: yuanchen8911,mchmarny
+  area/security: mchmarny,dims
+  area/tests: atif1996,mchmarny
+  area/validator: xdu31,mchmarny
 
 # Quality Thresholds
 quality:

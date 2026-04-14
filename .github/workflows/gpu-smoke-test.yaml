@@ -73,6 +73,8 @@ jobs:
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
+        with:
+          validator_phases: 'none'
 
       - name: Install GPU operator (helm)
         uses: ./.github/actions/gpu-operator-install

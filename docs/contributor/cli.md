@@ -1067,9 +1067,9 @@ $ aicr recipe
 ### Recipe Command
 
 - **Store Loading**: Once per process (cached via `sync.Once`)
-- **Typical Duration**: <10ms after initial load
+- **Typical Duration**: &lt;10ms after initial load
 - **Memory Usage**: ~5-10MB (embedded YAML + parsed structure)
-- **Scalability**: O(m) with number of overlays (typically <100)
+- **Scalability**: O(m) with number of overlays (typically &lt;100)
 
 ## Build Configuration
 

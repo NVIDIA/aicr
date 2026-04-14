@@ -368,6 +368,21 @@ spec:
       "eks",
       "eks-training",
       "gb200-eks-training"
+    ],
+    "excludedOverlays": [
+      {
+        "name": "h100-eks-ubuntu-training",
+        "reason": "mixin-constraint-failed"
+      }
+    ],
+    "constraintWarnings": [
+      {
+        "overlay": "h100-eks-ubuntu-training",
+        "constraint": "OS.sysctl./proc/sys/kernel/osrelease",
+        "expected": ">= 6.8",
+        "actual": "5.15.0",
+        "reason": "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
+      }
     ]
   },
   "criteria": {
@@ -390,6 +405,8 @@ spec:
   }
 }
 ```
+
+`metadata.excludedOverlays` is optional. When present, it contains structured `{name, reason}` entries so API consumers can distinguish direct constraint failures from post-compose mixin fallback.
 
 **Error Response**: 400 Bad Request
 
@@ -773,7 +790,7 @@ spec:
 ### Throughput
 - **Rate Limit**: 100 requests/second per instance (configurable)
 - **Burst**: 200 requests (configurable)
-- **Target Latency**: p50 <10ms, p99 <50ms
+- **Target Latency**: p50 &lt;10ms, p99 &lt;50ms
 - **Max Concurrent**: Limited by rate limiter
 
 ### Resource Usage

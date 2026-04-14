@@ -1155,7 +1155,7 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 | Flag | Description |
 |------|-------------|
-| `--no-wait` | Skip `helm --wait` for each component (faster, no readiness check) |
+| `--no-wait` | Skip `helm --wait` for each component (keeps `--timeout` for hooks) |
 | `--best-effort` | Continue past individual component failures instead of exiting |
 | `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 

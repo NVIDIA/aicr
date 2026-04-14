@@ -250,6 +250,41 @@ func TestHydrateResult(t *testing.T) {
 		}
 	})
 
+	t.Run("excluded overlays include reasons", func(t *testing.T) {
+		result := &RecipeResult{
+			Kind:            "RecipeResult",
+			APIVersion:      "aicr.nvidia.com/v1alpha1",
+			DeploymentOrder: []string{},
+		}
+		result.Metadata.ExcludedOverlays = []ExcludedOverlay{
+			{Name: "eks-training", Reason: ExcludedOverlayReasonConstraintFailed},
+			{Name: "h100-eks-ubuntu-training", Reason: ExcludedOverlayReasonMixinConstraintFailed},
+		}
+
+		hydrated, err := HydrateResult(result)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		metadata, ok := hydrated["metadata"].(map[string]any)
+		if !ok {
+			t.Fatal("metadata is not a map")
+		}
+		excluded, ok := metadata["excludedOverlays"].([]ExcludedOverlay)
+		if !ok {
+			t.Fatalf("excludedOverlays has type %T, want []ExcludedOverlay", metadata["excludedOverlays"])
+		}
+		if len(excluded) != 2 {
+			t.Fatalf("got %d excluded overlays, want 2", len(excluded))
+		}
+		if excluded[0].Reason != ExcludedOverlayReasonConstraintFailed {
+			t.Fatalf("first reason = %q", excluded[0].Reason)
+		}
+		if excluded[1].Reason != ExcludedOverlayReasonMixinConstraintFailed {
+			t.Fatalf("second reason = %q", excluded[1].Reason)
+		}
+	})
+
 	t.Run("nil criteria", func(t *testing.T) {
 		result := &RecipeResult{
 			Kind:       "RecipeResult",

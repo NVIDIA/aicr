@@ -1,0 +1,80 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+instances:
+  - url: https://aicr.docs.buildwithfern.com
+
+title: NVIDIA AI Cluster Runtime
+
+footer: ./components/CustomFooter.tsx
+
+layout:
+  searchbar-placement: header
+  page-width: 1376px
+  sidebar-width: 248px
+  content-width: 812px
+  tabs-placement: header
+  hide-feedback: true
+
+colors:
+  accentPrimary:
+    dark: "#76B900"
+    light: "#76B900"
+  background:
+    light: "#FFFFFF"
+    dark: "#000000"
+
+theme:
+  page-actions: toolbar
+  footer-nav: minimal
+
+logo:
+  dark: ./assets/NVIDIA_dark.svg
+  light: ./assets/NVIDIA_light.svg
+  height: 20
+  href: /
+  right-text: AI Cluster Runtime
+
+favicon: ./assets/NVIDIA_symbol.svg
+
+# NVIDIA Adobe Launch (docs.nvidia.com analytics; matches NeMo Curator and other Fern docs)
+js:
+  - url: https://assets.adobedtm.com/5d4962a43b79/c1061d2c5e7b/launch-191c2462b890.min.js
+    strategy: beforeInteractive
+
+css:
+  - ./main.css
+
+navbar-links:
+  - type: github
+    value: https://github.com/NVIDIA/aicr
+
+products:
+  - display-name: AI Cluster Runtime
+    slug: /
+    path: ../docs/index.yml
+    versions:
+      - display-name: dev
+        path: ../docs/index.yml
+
+redirects:
+  - source: "/aicr/index.html"
+    destination: "/aicr/"
+  - source: "/aicr/dev/index.html"
+    destination: "/aicr/dev/"
+
+experimental:
+  basepath-aware: true
+  mdx-components:
+    - ./components

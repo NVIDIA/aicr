@@ -52,12 +52,6 @@ kubectl get svc -n aicr
 
 **Status**: Helm chart not yet available. Use Kustomize or manual deployment.
 
-<!-- Uncomment when Helm chart is published
-```shell
-helm repo add aicr https://nvidia.github.io/aicr
-helm install aicrd aicr/aicrd -n aicr --create-namespace
-```
--->
 
 ## Manual Deployment
 
