@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
@@ -64,8 +64,12 @@ type ComponentData struct {
 	Path         string // Path within the repository to the kustomization
 }
 
-// GeneratorInput contains all data needed to generate a per-component Helm bundle.
-type GeneratorInput struct {
+// compile-time interface check
+var _ deployer.Deployer = (*Generator)(nil)
+
+// Generator creates per-component Helm bundles from recipe results.
+// Configure it with the required fields, then call Generate.
+type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
 	RecipeResult *recipe.RecipeResult
 
@@ -92,39 +96,16 @@ type GeneratorInput struct {
 	DynamicValues map[string][]string
 }
 
-// GeneratorOutput contains the result of Helm bundle generation.
-type GeneratorOutput struct {
-	// Files contains the paths of generated files.
-	Files []string
-
-	// TotalSize is the total size of all generated files.
-	TotalSize int64
-
-	// Duration is the time taken to generate the bundle.
-	Duration time.Duration
-
-	// DeploymentSteps contains ordered deployment instructions for the user.
-	DeploymentSteps []string
-}
-
-// Generator creates per-component Helm bundles from recipe results.
-type Generator struct{}
-
-// NewGenerator creates a new Helm bundle generator.
-func NewGenerator() *Generator {
-	return &Generator{}
-}
-
-// Generate creates a per-component Helm bundle from the given input.
-func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputDir string) (*GeneratorOutput, error) {
+// Generate creates a per-component Helm bundle from the configured generator fields.
+func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 
-	output := &GeneratorOutput{
+	output := &deployer.Output{
 		Files: make([]string, 0),
 	}
 
-	if input == nil || input.RecipeResult == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "input and recipe result are required")
+	if g.RecipeResult == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
 
 	// Create output directory
@@ -134,13 +115,13 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	}
 
 	// Build sorted component data list (validates component names)
-	components, err := g.buildComponentDataList(input)
+	components, err := g.buildComponentDataList()
 	if err != nil {
 		return nil, err
 	}
 
 	// Generate per-component directories
-	files, size, err := g.generateComponentDirectories(ctx, input, components, outputDir)
+	files, size, err := g.generateComponentDirectories(ctx, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate component directories", err)
@@ -149,7 +130,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.TotalSize += size
 
 	// Generate root README.md
-	readmePath, readmeSize, err := g.generateRootREADME(ctx, input, components, outputDir)
+	readmePath, readmeSize, err := g.generateRootREADME(ctx, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate README.md", err)
@@ -158,7 +139,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.TotalSize += readmeSize
 
 	// Generate deploy.sh
-	deployPath, deploySize, err := g.generateDeployScript(ctx, input, components, outputDir)
+	deployPath, deploySize, err := g.generateDeployScript(ctx, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate deploy.sh", err)
@@ -167,7 +148,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.TotalSize += deploySize
 
 	// Generate undeploy.sh
-	undeployPath, undeploySize, err := g.generateUndeployScript(ctx, input, components, outputDir)
+	undeployPath, undeploySize, err := g.generateUndeployScript(ctx, components, outputDir)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to generate undeploy.sh", err)
@@ -176,13 +157,13 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.TotalSize += undeploySize
 
 	// Include external data files in the file list (for checksums)
-	for _, dataFile := range input.DataFiles {
+	for _, dataFile := range g.DataFiles {
 		absPath := filepath.Join(outputDir, dataFile)
 		output.Files = append(output.Files, absPath)
 	}
 
 	// Generate checksums.txt if requested
-	if input.IncludeChecksums {
+	if g.IncludeChecksums {
 		if err := checksum.GenerateChecksums(ctx, outputDir, output.Files); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				"failed to generate checksums", err)
@@ -215,28 +196,28 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 
 // buildComponentDataList builds a sorted list of ComponentData from the recipe.
 // It validates that all component names are safe for use as directory names.
-func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentData, error) {
+func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 	componentMap := make(map[string]recipe.ComponentRef)
-	for _, ref := range input.RecipeResult.ComponentRefs {
+	for _, ref := range g.RecipeResult.ComponentRefs {
 		componentMap[ref.Name] = ref
 	}
 
 	// Sort by deployment order
-	sorted := shared.SortComponentRefsByDeploymentOrder(
-		input.RecipeResult.ComponentRefs,
-		input.RecipeResult.DeploymentOrder,
+	sorted := deployer.SortComponentRefsByDeploymentOrder(
+		g.RecipeResult.ComponentRefs,
+		g.RecipeResult.DeploymentOrder,
 	)
 
 	components := make([]ComponentData, 0, len(sorted))
 	for _, ref := range sorted {
-		if !shared.IsSafePathComponent(ref.Name) {
+		if !deployer.IsSafePathComponent(ref.Name) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
 
 		hasManifests := false
-		if input.ComponentManifests != nil {
-			if m, ok := input.ComponentManifests[ref.Name]; ok && len(m) > 0 {
+		if g.ComponentManifests != nil {
+			if m, ok := g.ComponentManifests[ref.Name]; ok && len(m) > 0 {
 				hasManifests = true
 			}
 		}
@@ -259,7 +240,7 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 			Repository:   ref.Source,
 			ChartName:    chartName,
 			Version:      version,
-			ChartVersion: shared.NormalizeVersionWithDefault(ref.Version),
+			ChartVersion: deployer.NormalizeVersionWithDefault(ref.Version),
 			HasManifests: hasManifests,
 			HasChart:     !isKustomize && ref.Source != "",
 			IsOCI:        isOCI,
@@ -273,7 +254,7 @@ func (g *Generator) buildComponentDataList(input *GeneratorInput) ([]ComponentDa
 }
 
 // generateComponentDirectories creates per-component directories with values.yaml, README.md, and optional manifests.
-func (g *Generator) generateComponentDirectories(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) ([]string, int64, error) {
+func (g *Generator) generateComponentDirectories(ctx context.Context, components []ComponentData, outputDir string) ([]string, int64, error) {
 	files := make([]string, 0, len(components)*3)
 	var totalSize int64
 
@@ -284,7 +265,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		default:
 		}
 
-		componentDir, err := shared.SafeJoin(outputDir, comp.Name)
+		componentDir, err := deployer.SafeJoin(outputDir, comp.Name)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -295,19 +276,19 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 
 		// Deep-copy component values so writeClusterValuesFile can safely
 		// remove dynamic paths without mutating the caller's map.
-		values := component.DeepCopyMap(input.ComponentValues[comp.Name])
+		values := component.DeepCopyMap(g.ComponentValues[comp.Name])
 
 		// Extract dynamic paths (if any) from values into cluster-values.yaml.
 		// Every component gets a cluster-values.yaml — dynamic paths are pre-populated,
 		// and users can add any additional overrides. deploy.sh always passes it.
-		clusterFiles, clusterSize, clusterErr := writeClusterValuesFile(values, input.DynamicValues[comp.Name], componentDir, comp.Name)
+		clusterFiles, clusterSize, clusterErr := writeClusterValuesFile(values, g.DynamicValues[comp.Name], componentDir, comp.Name)
 		if clusterErr != nil {
 			return nil, 0, clusterErr
 		}
 		files = append(files, clusterFiles...)
 		totalSize += clusterSize
 
-		valuesPath, valuesSize, err := shared.WriteValuesFile(values, componentDir, "values.yaml")
+		valuesPath, valuesSize, err := deployer.WriteValuesFile(values, componentDir, "values.yaml")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write values.yaml for %s", comp.Name), err)
@@ -316,7 +297,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		totalSize += valuesSize
 
 		// Write component README.md
-		readmePath, readmeSize, err := shared.GenerateFromTemplate(componentReadmeTemplate, comp, componentDir, "README.md")
+		readmePath, readmeSize, err := deployer.GenerateFromTemplate(componentReadmeTemplate, comp, componentDir, "README.md")
 		if err != nil {
 			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write README.md for %s", comp.Name), err)
@@ -325,9 +306,9 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 		totalSize += readmeSize
 
 		// Write manifests if present
-		if input.ComponentManifests != nil {
-			if manifests, ok := input.ComponentManifests[comp.Name]; ok && len(manifests) > 0 {
-				manifestDir, manifestDirErr := shared.SafeJoin(componentDir, "manifests")
+		if g.ComponentManifests != nil {
+			if manifests, ok := g.ComponentManifests[comp.Name]; ok && len(manifests) > 0 {
+				manifestDir, manifestDirErr := deployer.SafeJoin(componentDir, "manifests")
 				if manifestDirErr != nil {
 					return nil, 0, manifestDirErr
 				}
@@ -347,7 +328,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 				for _, manifestPath := range manifestPaths {
 					content := manifests[manifestPath]
 					filename := filepath.Base(manifestPath)
-					outputPath, pathErr := shared.SafeJoin(manifestDir, filename)
+					outputPath, pathErr := deployer.SafeJoin(manifestDir, filename)
 					if pathErr != nil {
 						return nil, 0, errors.New(errors.ErrCodeInvalidRequest,
 							fmt.Sprintf("invalid manifest filename %q in component %s", filename, comp.Name))
@@ -358,7 +339,7 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 						Namespace:     comp.Namespace,
 						ChartName:     comp.ChartName,
 						ChartVersion:  comp.ChartVersion,
-						Values:        input.ComponentValues[comp.Name],
+						Values:        g.ComponentValues[comp.Name],
 					})
 					if renderErr != nil {
 						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to render manifest template", renderErr,
@@ -397,15 +378,15 @@ func (g *Generator) generateComponentDirectories(ctx context.Context, input *Gen
 }
 
 // generateRootREADME creates the root README.md with deployment instructions.
-func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) (string, int64, error) {
+func (g *Generator) generateRootREADME(ctx context.Context, components []ComponentData, outputDir string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
 
 	// Build criteria lines
 	criteriaLines := []string{}
-	if input.RecipeResult.Criteria != nil {
-		c := input.RecipeResult.Criteria
+	if g.RecipeResult.Criteria != nil {
+		c := g.RecipeResult.Criteria
 		if c.Service != "" && c.Service != criteriaAny {
 			criteriaLines = append(criteriaLines, fmt.Sprintf("- **Service**: %s", c.Service))
 		}
@@ -421,15 +402,15 @@ func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInpu
 	}
 
 	data := readmeTemplateData{
-		RecipeVersion:      input.RecipeResult.Metadata.Version,
-		BundlerVersion:     input.Version,
+		RecipeVersion:      g.RecipeResult.Metadata.Version,
+		BundlerVersion:     g.Version,
 		Components:         components,
 		ComponentsReversed: reverseComponents(components),
 		Criteria:           criteriaLines,
-		Constraints:        input.RecipeResult.Constraints,
+		Constraints:        g.RecipeResult.Constraints,
 	}
 
-	readmePath, readmeSize, err := shared.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
+	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, data, outputDir, "README.md")
 	if err != nil {
 		return "", 0, err
 	}
@@ -438,17 +419,17 @@ func (g *Generator) generateRootREADME(ctx context.Context, input *GeneratorInpu
 }
 
 // generateDeployScript creates the deploy.sh automation script.
-func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) (string, int64, error) {
+func (g *Generator) generateDeployScript(ctx context.Context, components []ComponentData, outputDir string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
 
 	data := deployTemplateData{
-		BundlerVersion: input.Version,
+		BundlerVersion: g.Version,
 		Components:     components,
 	}
 
-	deployPath, deploySize, err := shared.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
+	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
 	if err != nil {
 		return "", 0, err
 	}
@@ -462,19 +443,19 @@ func (g *Generator) generateDeployScript(ctx context.Context, input *GeneratorIn
 }
 
 // generateUndeployScript creates the undeploy.sh automation script.
-func (g *Generator) generateUndeployScript(ctx context.Context, input *GeneratorInput, components []ComponentData, outputDir string) (string, int64, error) {
+func (g *Generator) generateUndeployScript(ctx context.Context, components []ComponentData, outputDir string) (string, int64, error) {
 	if err := ctx.Err(); err != nil {
 		return "", 0, err
 	}
 
 	reversed := reverseComponents(components)
 	data := undeployTemplateData{
-		BundlerVersion:     input.Version,
+		BundlerVersion:     g.Version,
 		ComponentsReversed: reversed,
 		Namespaces:         uniqueNamespaces(reversed),
 	}
 
-	undeployPath, undeploySize, err := shared.GenerateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
+	undeployPath, undeploySize, err := deployer.GenerateFromTemplate(undeployScriptTemplate, data, outputDir, "undeploy.sh")
 	if err != nil {
 		return "", 0, err
 	}
@@ -551,7 +532,7 @@ func writeClusterValuesFile(values map[string]any, dynamicPaths []string, compon
 		component.SetValueByPath(clusterValues, path, val)
 	}
 
-	clusterPath, clusterSize, err := shared.WriteValuesFile(clusterValues, componentDir, "cluster-values.yaml")
+	clusterPath, clusterSize, err := deployer.WriteValuesFile(clusterValues, componentDir, "cluster-values.yaml")
 	if err != nil {
 		return nil, 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to write cluster-values.yaml for %s", componentName), err)

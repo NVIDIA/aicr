@@ -29,10 +29,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -247,256 +249,162 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	}
 
 	// Run component-specific validations
-	if err := b.runComponentValidations(ctx, recipeResult); err != nil {
+	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"component validation failed", err)
+			"component validation failed", validationErr)
 	}
 
-	// Route based on deployer
+	// Copy external data files before deployer construction so the file list
+	// is available for both the deployer (checksum tracking) and post-generation
+	// attestation. This is a no-op when --data is not set.
+	dataFiles, err := b.copyDataFiles(dir)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to copy external data files", err)
+	}
+
+	// Build the deployer and run it
+	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles)
+	if err != nil {
+		return nil, err
+	}
+	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, start)
+}
+
+// buildDeployer constructs the appropriate deployer.Deployer based on config.
+// It handles deployer-specific pre-flight validation and data collection.
+func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dataFiles []string) (deployer.Deployer, error) {
+	dynamicValues, err := b.buildDynamicValuesMap()
+	if err != nil {
+		return nil, err
+	}
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
-		return b.makeArgoCDHelmChart(ctx, recipeResult, componentValues, dir, start)
+		if b.Config.Attest() {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--attest is not yet supported with --deployer argocd-helm")
+		}
+		if provider := recipe.GetDataProvider(); provider != nil {
+			if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					"--data is not yet supported with --deployer argocd-helm")
+			}
+		}
+
+		slog.Debug("generating argocd helm chart app-of-apps",
+			"component_count", len(recipeResult.ComponentRefs),
+			"dynamic_components", len(dynamicValues),
+		)
+
+		return &argocdhelm.Generator{
+			RecipeResult:     recipeResult,
+			ComponentValues:  componentValues,
+			Version:          b.Config.Version(),
+			RepoURL:          b.Config.RepoURL(),
+			TargetRevision:   b.Config.TargetRevision(),
+			IncludeChecksums: b.Config.IncludeChecksums(),
+			DynamicValues:    dynamicValues,
+		}, nil
+
 	case config.DeployerArgoCD:
 		if b.Config.HasDynamicValues() {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
 		}
-		return b.makeArgoCD(ctx, recipeResult, componentValues, dir, start)
+
+		slog.Debug("generating argocd applications",
+			"component_count", len(recipeResult.ComponentRefs),
+		)
+
+		return &argocd.Generator{
+			RecipeResult:     recipeResult,
+			ComponentValues:  componentValues,
+			Version:          b.Config.Version(),
+			RepoURL:          b.Config.RepoURL(),
+			TargetRevision:   b.Config.TargetRevision(),
+			IncludeChecksums: b.Config.IncludeChecksums(),
+		}, nil
+
 	case config.DeployerHelm:
-		return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
+		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
+		if manifestErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", manifestErr)
+		}
+
+		slog.Debug("generating helm bundle",
+			"component_count", len(recipeResult.ComponentRefs),
+		)
+
+		return &helm.Generator{
+			RecipeResult:       recipeResult,
+			ComponentValues:    componentValues,
+			Version:            b.Config.Version(),
+			IncludeChecksums:   b.Config.IncludeChecksums(),
+			ComponentManifests: componentManifests,
+			DataFiles:          dataFiles,
+			DynamicValues:      dynamicValues,
+		}, nil
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
 	}
 }
 
-// makeHelmBundle generates a Helm per-component bundle.
-func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	slog.Debug("generating helm bundle",
-		"component_count", len(recipeResult.ComponentRefs),
-		"output_dir", dir,
-	)
-
-	// Collect manifest contents from components (keyed by component name)
-	componentManifests, err := b.collectComponentManifests(ctx, recipeResult)
+// runDeployer executes a deployer and builds the result output.
+// dataFiles is the list of external data file paths already copied by Make().
+func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
+	output, err := d.Generate(ctx, dir)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to collect component manifests", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
 
-	// Copy external data files into bundle (before checksums so they're included)
-	dataFiles, err := b.copyDataFiles(dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to copy external data files", err)
+	totalFiles := len(output.Files)
+	totalSize := output.TotalSize
+
+	// Write recipe file (helm-only, preserves original behavior)
+	if b.Config.Deployer() == config.DeployerHelm {
+		recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+		if writeErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
+		}
+		totalFiles++
+		totalSize += recipeSize
 	}
 
-	// Resolve dynamic values for Helm deployer
-	dynamicValues, dynErr := b.buildDynamicValuesMap()
-	if dynErr != nil {
-		return nil, dynErr
-	}
-
-	// Generate per-component bundle
-	generator := helm.NewGenerator()
-	generatorInput := &helm.GeneratorInput{
-		RecipeResult:       recipeResult,
-		ComponentValues:    componentValues,
-		Version:            b.Config.Version(),
-		IncludeChecksums:   b.Config.IncludeChecksums(),
-		ComponentManifests: componentManifests,
-		DataFiles:          dataFiles,
-		DynamicValues:      dynamicValues,
-	}
-
-	output, err := generator.Generate(ctx, generatorInput, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate helm bundle", err)
-	}
-
-	// Write recipe file
-	recipeSize, err := b.writeRecipeFile(recipeResult, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to write recipe file", err)
-	}
-
-	// Attest bundle (after checksums are generated by the deployer)
+	// Attest bundle (skips internally when not configured)
 	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
 	if err != nil {
 		return nil, err
 	}
+	totalFiles += len(attestFiles)
 
-	// Build result output
-	totalFiles := len(output.Files) + 1 + len(attestFiles) // +1 for recipe.yaml
+	// Map deployer type to result and deployment names
+	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
+
+	// Build result
 	resultOutput := &result.Output{
 		Results:       make([]*result.Result, 0),
 		Errors:        make([]result.BundleError, 0),
 		TotalDuration: time.Since(start),
-		TotalSize:     output.TotalSize + recipeSize,
+		TotalSize:     totalSize,
 		TotalFiles:    totalFiles,
 		OutputDir:     dir,
 	}
 
-	// Add a single result for the helm bundle
-	helmResult := &result.Result{
-		Type:     "helm-bundle",
+	bundleResult := &result.Result{
+		Type:     resultType,
 		Success:  true,
 		Files:    append(output.Files, attestFiles...),
 		Size:     output.TotalSize,
 		Duration: output.Duration,
 	}
-	resultOutput.Results = append(resultOutput.Results, helmResult)
+	resultOutput.Results = append(resultOutput.Results, bundleResult)
 
-	// Populate deployment info from generator output
+	// Deployment info
 	var notes []string
-	if len(b.warnings) > 0 {
-		notes = append(notes, b.warnings...)
-	}
-	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "Helm per-component bundle",
-		Steps: output.DeploymentSteps,
-		Notes: notes,
-	}
-
-	slog.Debug("helm bundle generation complete",
-		"files", len(output.Files),
-		"size_bytes", output.TotalSize,
-		"duration", output.Duration,
-	)
-
-	return resultOutput, nil
-}
-
-// makeArgoCDHelmChart generates a Helm chart app-of-apps for ArgoCD with dynamic install-time values.
-func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	// Reject flags not yet supported by the argocd-helm deployer.
-	if b.Config.Attest() {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"--attest is not yet supported with --deployer argocd-helm")
-	}
-	if provider := recipe.GetDataProvider(); provider != nil {
-		if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--data is not yet supported with --deployer argocd-helm")
-		}
-	}
-
-	dynamicValues, dynErr := b.buildDynamicValuesMap()
-	if dynErr != nil {
-		return nil, dynErr
-	}
-
-	slog.Debug("generating argocd helm chart app-of-apps",
-		"component_count", len(recipeResult.ComponentRefs),
-		"dynamic_components", len(dynamicValues),
-		"output_dir", dir,
-	)
-
-	generator := &argocdhelm.Generator{
-		RecipeResult:     recipeResult,
-		ComponentValues:  componentValues,
-		Version:          b.Config.Version(),
-		RepoURL:          b.Config.RepoURL(),
-		TargetRevision:   b.Config.TargetRevision(),
-		IncludeChecksums: b.Config.IncludeChecksums(),
-		DynamicValues:    dynamicValues,
-	}
-
-	output, err := generator.Generate(ctx, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate argocd helm chart", err)
-	}
-
-	resultOutput := &result.Output{
-		Results:       make([]*result.Result, 0),
-		Errors:        make([]result.BundleError, 0),
-		TotalDuration: time.Since(start),
-		TotalSize:     output.TotalSize,
-		TotalFiles:    len(output.Files),
-		OutputDir:     dir,
-	}
-
-	argocdResult := &result.Result{
-		Type:     "argocd-helm-chart",
-		Success:  true,
-		Files:    output.Files,
-		Size:     output.TotalSize,
-		Duration: output.Duration,
-	}
-	resultOutput.Results = append(resultOutput.Results, argocdResult)
-
-	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "ArgoCD Helm chart app-of-apps",
-		Steps: output.DeploymentSteps,
-		Notes: b.warnings,
-	}
-
-	return resultOutput, nil
-}
-
-// makeArgoCD generates ArgoCD Application manifests.
-func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	slog.Debug("generating argocd applications",
-		"component_count", len(recipeResult.ComponentRefs),
-		"output_dir", dir,
-	)
-
-	// Generate ArgoCD applications
-	generator := argocd.NewGenerator()
-	generatorInput := &argocd.GeneratorInput{
-		RecipeResult:     recipeResult,
-		ComponentValues:  componentValues,
-		Version:          b.Config.Version(),
-		RepoURL:          b.Config.RepoURL(),
-		TargetRevision:   b.Config.TargetRevision(),
-		IncludeChecksums: b.Config.IncludeChecksums(),
-	}
-
-	output, err := generator.Generate(ctx, generatorInput, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate argocd applications", err)
-	}
-
-	// Copy external data files into bundle (before attestation so they're included in checksums)
-	dataFiles, err := b.copyDataFiles(dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to copy external data files", err)
-	}
-
-	// Attest bundle (after checksums are generated by the deployer)
-	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build result output
-	totalFiles := len(output.Files) + len(attestFiles)
-	resultOutput := &result.Output{
-		Results:       make([]*result.Result, 0),
-		Errors:        make([]result.BundleError, 0),
-		TotalDuration: time.Since(start),
-		TotalSize:     output.TotalSize,
-		TotalFiles:    totalFiles,
-		OutputDir:     dir,
-	}
-
-	// Add a single result for the ArgoCD applications
-	argocdResult := &result.Result{
-		Type:     "argocd-applications",
-		Success:  true,
-		Files:    output.Files,
-		Size:     output.TotalSize,
-		Duration: output.Duration,
-	}
-	resultOutput.Results = append(resultOutput.Results, argocdResult)
-
-	// Populate deployment info from generator output
-	notes := make([]string, 0)
 	if len(output.DeploymentNotes) > 0 {
 		notes = append(notes, output.DeploymentNotes...)
 	}
@@ -504,18 +412,34 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 		notes = append(notes, b.warnings...)
 	}
 	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "ArgoCD applications",
+		Type:  deploymentType,
 		Steps: output.DeploymentSteps,
 		Notes: notes,
 	}
 
-	slog.Debug("argocd applications generation complete",
+	slog.Debug("bundle generation complete",
+		"deployer", b.Config.Deployer(),
 		"files", len(output.Files),
 		"size_bytes", output.TotalSize,
 		"duration", output.Duration,
 	)
 
 	return resultOutput, nil
+}
+
+// deployerResultNames returns the result type and deployment type display names
+// for a given deployer type, preserving the human-readable names used in output.
+func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
+	switch dt {
+	case config.DeployerHelm:
+		return "helm-bundle", "Helm per-component bundle"
+	case config.DeployerArgoCD:
+		return "argocd-applications", "ArgoCD applications"
+	case config.DeployerArgoCDHelm:
+		return "argocd-helm-chart", "ArgoCD Helm chart app-of-apps"
+	default:
+		return types.BundleType(dt), string(dt)
+	}
 }
 
 // extractComponentValues extracts and processes values for each component in the recipe.

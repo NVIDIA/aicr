@@ -23,7 +23,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -31,19 +31,11 @@ import (
 // testDriverVersion is a test constant for driver version strings to satisfy goconst.
 const testDriverVersion = "570.86.16"
 
-func TestNewGenerator(t *testing.T) {
-	g := NewGenerator()
-	if g == nil {
-		t.Fatal("NewGenerator returned nil")
-	}
-}
-
 func TestGenerate_Success(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
@@ -58,7 +50,7 @@ func TestGenerate_Success(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	output, err := g.Generate(ctx, input, outputDir)
+	output, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -114,53 +106,40 @@ func TestGenerate_Success(t *testing.T) {
 	}
 }
 
-func TestGenerate_NilInput(t *testing.T) {
-	g := NewGenerator()
-	ctx := context.Background()
-
-	_, err := g.Generate(ctx, nil, t.TempDir())
-	if err == nil {
-		t.Error("expected error for nil input")
-	}
-}
-
 func TestGenerate_NilRecipeResult(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: nil,
 	}
 
-	_, err := g.Generate(ctx, input, t.TempDir())
+	_, err := g.Generate(ctx, t.TempDir())
 	if err == nil {
 		t.Error("expected error for nil recipe result")
 	}
 }
 
 func TestGenerate_ContextCancellation(t *testing.T) {
-	g := NewGenerator()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult:    createEmptyRecipeResult(),
 		ComponentValues: map[string]map[string]any{},
 		Version:         "v1.0.0",
 	}
 
-	_, err := g.Generate(ctx, input, t.TempDir())
+	_, err := g.Generate(ctx, t.TempDir())
 	if err == nil {
 		t.Error("expected error for cancelled context")
 	}
 }
 
 func TestGenerate_WithChecksums(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
@@ -170,7 +149,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 		IncludeChecksums: true,
 	}
 
-	output, err := g.Generate(ctx, input, outputDir)
+	output, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -222,13 +201,12 @@ func TestGenerate_WithChecksums(t *testing.T) {
 }
 
 func TestGenerate_WithManifests(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
 	manifestContent := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  namespace: {{ .Release.Namespace }}\n  labels:\n    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}\n"
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {},
@@ -242,7 +220,7 @@ func TestGenerate_WithManifests(t *testing.T) {
 		},
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -297,14 +275,13 @@ func TestHasYAMLObjects(t *testing.T) {
 }
 
 func TestGenerate_EmptyManifestsSkipped(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
 	// Template that renders to empty when enabled=false
 	emptyTemplate := "# Comment\n{{- $cust := index .Values \"gpu-operator\" }}\n{{- if ne (toString (index $cust \"enabled\")) \"false\" }}\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test\n{{- end }}\n"
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {},
@@ -318,7 +295,7 @@ func TestGenerate_EmptyManifestsSkipped(t *testing.T) {
 		},
 	}
 
-	output, err := g.Generate(ctx, input, outputDir)
+	output, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -349,11 +326,10 @@ func TestGenerate_EmptyManifestsSkipped(t *testing.T) {
 }
 
 func TestGenerate_DeployScriptExecutable(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {},
@@ -362,7 +338,7 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -417,11 +393,10 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 }
 
 func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			Kind:       "RecipeResult",
 			APIVersion: "aicr.nvidia.com/v1alpha1",
@@ -443,7 +418,7 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -478,11 +453,10 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 }
 
 func TestGenerate_UndeployScriptExecutable(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {},
@@ -491,7 +465,7 @@ func TestGenerate_UndeployScriptExecutable(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -712,7 +686,7 @@ func TestNormalizeVersionWithDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := shared.NormalizeVersionWithDefault(tt.input)
+			result := deployer.NormalizeVersionWithDefault(tt.input)
 			if result != tt.expected {
 				t.Errorf("NormalizeVersionWithDefault(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
@@ -731,7 +705,7 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 		components := []string{gpuOperator, certManager, networkOperator}
 		deploymentOrder := []string{certManager, gpuOperator, networkOperator}
 
-		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
+		sorted := deployer.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 
 		if sorted[0] != certManager {
 			t.Errorf("expected first %s, got %s", certManager, sorted[0])
@@ -750,7 +724,7 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 		components := []string{"alpha", gpuOperator}
 		deploymentOrder := []string{gpuOperator}
 
-		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
+		sorted := deployer.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 		if sorted[0] != gpuOperator {
 			t.Errorf("expected ordered component first, got %s", sorted[0])
 		}
@@ -763,7 +737,7 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 		components := []string{certManager, "zebra"}
 		deploymentOrder := []string{certManager}
 
-		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
+		sorted := deployer.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 		if sorted[0] != certManager {
 			t.Errorf("expected ordered component first, got %s", sorted[0])
 		}
@@ -774,7 +748,7 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 		components := []string{"zebra", "alpha"}
 		deploymentOrder := []string{gpuOperator}
 
-		sorted := shared.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
+		sorted := deployer.SortComponentNamesByDeploymentOrder(components, deploymentOrder)
 		if sorted[0] != "alpha" {
 			t.Errorf("expected alphabetical first, got %s", sorted[0])
 		}
@@ -785,7 +759,7 @@ func TestSortComponentNamesByDeploymentOrder(t *testing.T) {
 
 	t.Run("empty deployment order", func(t *testing.T) {
 		components := []string{"b", "a"}
-		sorted := shared.SortComponentNamesByDeploymentOrder(components, nil)
+		sorted := deployer.SortComponentNamesByDeploymentOrder(components, nil)
 		if sorted[0] != "b" {
 			t.Errorf("expected original order preserved with empty order, got %s", sorted[0])
 		}
@@ -811,9 +785,9 @@ func TestIsSafePathComponent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shared.IsSafePathComponent(tt.input)
+			result := deployer.IsSafePathComponent(tt.input)
 			if result != tt.expected {
-				t.Errorf("shared.IsSafePathComponent(%q) = %v, want %v", tt.input, result, tt.expected)
+				t.Errorf("deployer.IsSafePathComponent(%q) = %v, want %v", tt.input, result, tt.expected)
 			}
 		})
 	}
@@ -839,21 +813,20 @@ func TestSafeJoin(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := shared.SafeJoin(tt.dir, tt.input)
+			result, err := deployer.SafeJoin(tt.dir, tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("shared.SafeJoin(%q, %q) error = %v, wantErr %v", tt.dir, tt.input, err, tt.wantErr)
+				t.Errorf("deployer.SafeJoin(%q, %q) error = %v, wantErr %v", tt.dir, tt.input, err, tt.wantErr)
 				return
 			}
 			if err == nil && result == "" {
-				t.Errorf("shared.SafeJoin(%q, %q) returned empty path", tt.dir, tt.input)
+				t.Errorf("deployer.SafeJoin(%q, %q) returned empty path", tt.dir, tt.input)
 			}
 		})
 	}
 }
 
 func TestBuildComponentDataListRejectsUnsafeNames(t *testing.T) {
-	g := NewGenerator()
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "../etc/passwd", Version: "v1.0.0", Source: "https://evil.com"},
@@ -861,7 +834,7 @@ func TestBuildComponentDataListRejectsUnsafeNames(t *testing.T) {
 		},
 	}
 
-	_, err := g.buildComponentDataList(input)
+	_, err := g.buildComponentDataList()
 	if err == nil {
 		t.Error("expected error for unsafe component name, got nil")
 	}
@@ -874,8 +847,7 @@ func TestBuildComponentDataList_NamespaceAndChart(t *testing.T) {
 		unknown = "unknown"
 	)
 
-	g := NewGenerator()
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: gpuOp, Namespace: gpuOp, Chart: gpuOp, Version: "v1.0.0", Source: "https://example.com"},
@@ -885,7 +857,7 @@ func TestBuildComponentDataList_NamespaceAndChart(t *testing.T) {
 		},
 	}
 
-	components, err := g.buildComponentDataList(input)
+	components, err := g.buildComponentDataList()
 	if err != nil {
 		t.Fatalf("buildComponentDataList failed: %v", err)
 	}
@@ -915,11 +887,10 @@ func TestBuildComponentDataList_NamespaceAndChart(t *testing.T) {
 }
 
 func TestGenerate_KustomizeOnly(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createKustomizeRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"my-kustomize-app": {},
@@ -927,7 +898,7 @@ func TestGenerate_KustomizeOnly(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	output, err := g.Generate(ctx, input, outputDir)
+	output, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1002,11 +973,10 @@ func TestGenerate_KustomizeOnly(t *testing.T) {
 }
 
 func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createMixedRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager":     {"crds": map[string]any{"enabled": true}},
@@ -1015,7 +985,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	output, err := g.Generate(ctx, input, outputDir)
+	output, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1075,9 +1045,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 }
 
 func TestBuildComponentDataList_Kustomize(t *testing.T) {
-	g := NewGenerator()
-
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{
 				{
@@ -1092,7 +1060,7 @@ func TestBuildComponentDataList_Kustomize(t *testing.T) {
 		},
 	}
 
-	components, err := g.buildComponentDataList(input)
+	components, err := g.buildComponentDataList()
 	if err != nil {
 		t.Fatalf("buildComponentDataList failed: %v", err)
 	}
@@ -1120,9 +1088,7 @@ func TestBuildComponentDataList_Kustomize(t *testing.T) {
 }
 
 func TestBuildComponentDataList_MixedTypes(t *testing.T) {
-	g := NewGenerator()
-
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: &recipe.RecipeResult{
 			ComponentRefs: []recipe.ComponentRef{
 				{
@@ -1145,7 +1111,7 @@ func TestBuildComponentDataList_MixedTypes(t *testing.T) {
 		},
 	}
 
-	components, err := g.buildComponentDataList(input)
+	components, err := g.buildComponentDataList()
 	if err != nil {
 		t.Fatalf("buildComponentDataList failed: %v", err)
 	}
@@ -1298,10 +1264,9 @@ func createEmptyRecipeResult() *recipe.RecipeResult {
 // TestGenerate_Reproducible verifies that Helm bundle generation is deterministic.
 // Running Generate() twice with the same input should produce identical output files.
 func TestGenerate_Reproducible(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {
@@ -1322,7 +1287,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		outputDir := t.TempDir()
 
-		_, err := g.Generate(ctx, input, outputDir)
+		_, err := g.Generate(ctx, outputDir)
 		if err != nil {
 			t.Fatalf("iteration %d: Generate() error = %v", i, err)
 		}
@@ -1375,11 +1340,10 @@ func TestGenerate_Reproducible(t *testing.T) {
 
 // TestGenerate_NoTimestampInOutput verifies that generated files don't contain timestamps.
 func TestGenerate_NoTimestampInOutput(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {},
@@ -1388,7 +1352,7 @@ func TestGenerate_NoTimestampInOutput(t *testing.T) {
 		Version: "v1.0.0",
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
@@ -1471,7 +1435,6 @@ func TestGenerateDeployScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGenerator()
 			ctx := context.Background()
 			if tt.cancelCtx {
 				var cancel context.CancelFunc
@@ -1484,11 +1447,11 @@ func TestGenerateDeployScript(t *testing.T) {
 				dir = t.TempDir()
 			}
 
-			input := &GeneratorInput{
+			g := &Generator{
 				Version: "v1.0.0",
 			}
 
-			path, size, err := g.generateDeployScript(ctx, input, tt.components, dir)
+			path, size, err := g.generateDeployScript(ctx, tt.components, dir)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -1515,7 +1478,6 @@ func TestGenerateDeployScript(t *testing.T) {
 }
 
 func TestGenerateDeployScript_EmptyVersionOmitsFlag(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -1530,8 +1492,8 @@ func TestGenerateDeployScript_EmptyVersionOmitsFlag(t *testing.T) {
 		},
 	}
 
-	input := &GeneratorInput{Version: "v1.0.0"}
-	path, _, err := g.generateDeployScript(ctx, input, components, dir)
+	g := &Generator{Version: "v1.0.0"}
+	path, _, err := g.generateDeployScript(ctx, components, dir)
 	if err != nil {
 		t.Fatalf("generateDeployScript failed: %v", err)
 	}
@@ -1551,7 +1513,6 @@ func TestGenerateDeployScript_EmptyVersionOmitsFlag(t *testing.T) {
 }
 
 func TestGenerateDeployScript_WithVersionIncludesFlag(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	dir := t.TempDir()
 
@@ -1566,8 +1527,8 @@ func TestGenerateDeployScript_WithVersionIncludesFlag(t *testing.T) {
 		},
 	}
 
-	input := &GeneratorInput{Version: "v1.0.0"}
-	path, _, err := g.generateDeployScript(ctx, input, components, dir)
+	g := &Generator{Version: "v1.0.0"}
+	path, _, err := g.generateDeployScript(ctx, components, dir)
 	if err != nil {
 		t.Fatalf("generateDeployScript failed: %v", err)
 	}
@@ -1634,7 +1595,6 @@ func TestGenerateUndeployScript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGenerator()
 			ctx := context.Background()
 			if tt.cancelCtx {
 				var cancel context.CancelFunc
@@ -1647,11 +1607,11 @@ func TestGenerateUndeployScript(t *testing.T) {
 				dir = t.TempDir()
 			}
 
-			input := &GeneratorInput{
+			g := &Generator{
 				Version: "v1.0.0",
 			}
 
-			path, size, err := g.generateUndeployScript(ctx, input, tt.components, dir)
+			path, size, err := g.generateUndeployScript(ctx, tt.components, dir)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -1744,18 +1704,17 @@ func TestGenerate_DynamicValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			g := NewGenerator()
 			ctx := context.Background()
 			outputDir := t.TempDir()
 
-			input := &GeneratorInput{
+			g := &Generator{
 				RecipeResult:    createTestRecipeResult(),
 				ComponentValues: tt.componentValues,
 				Version:         "v1.0.0",
 				DynamicValues:   tt.dynamicValues,
 			}
 
-			_, err := g.Generate(ctx, input, outputDir)
+			_, err := g.Generate(ctx, outputDir)
 			if err != nil {
 				t.Fatalf("Generate failed: %v", err)
 			}
@@ -1818,11 +1777,10 @@ func TestGenerate_DynamicValues(t *testing.T) {
 }
 
 func TestGenerate_DynamicValuesContentVerification(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
@@ -1842,7 +1800,7 @@ func TestGenerate_DynamicValuesContentVerification(t *testing.T) {
 		},
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -1959,11 +1917,10 @@ func TestSetNestedValue(t *testing.T) {
 }
 
 func TestGenerate_DynamicValuesDeeplyNested(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
@@ -1984,7 +1941,7 @@ func TestGenerate_DynamicValuesDeeplyNested(t *testing.T) {
 		},
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -2045,14 +2002,13 @@ func TestGenerate_DynamicValuesDeeplyNested(t *testing.T) {
 }
 
 func TestGenerate_DynamicValuesWithSetOverride(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
 	// Simulate --set gpuoperator:driver.version=999.99.99 by providing the value
 	// in ComponentValues (--set is applied before dynamic extraction).
 	// Then --dynamic gpuoperator:driver.version should extract the --set value.
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
@@ -2069,7 +2025,7 @@ func TestGenerate_DynamicValuesWithSetOverride(t *testing.T) {
 		},
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -2099,7 +2055,6 @@ func TestGenerate_DynamicValuesWithSetOverride(t *testing.T) {
 }
 
 func TestGenerate_DynamicValuesRoundTrip(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
@@ -2117,7 +2072,7 @@ func TestGenerate_DynamicValuesRoundTrip(t *testing.T) {
 		},
 	}
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult: createTestRecipeResult(),
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
@@ -2141,7 +2096,7 @@ func TestGenerate_DynamicValuesRoundTrip(t *testing.T) {
 		},
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -2287,7 +2242,6 @@ func TestReverseComponents(t *testing.T) {
 // TestGenerate_DoesNotMutateComponentValues verifies that Generate deep-copies
 // component values before extracting dynamic paths, so the input map is preserved.
 func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
-	g := NewGenerator()
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
@@ -2297,7 +2251,7 @@ func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
 		},
 	}
 
-	input := &GeneratorInput{
+	g := &Generator{
 		RecipeResult:    createTestRecipeResult(),
 		ComponentValues: originalValues,
 		Version:         "test",
@@ -2306,7 +2260,7 @@ func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
 		},
 	}
 
-	_, err := g.Generate(ctx, input, outputDir)
+	_, err := g.Generate(ctx, outputDir)
 	if err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
