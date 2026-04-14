@@ -103,6 +103,18 @@ function cleanup_helm_hooks() {
     local hook_val
     hook_val=$(echo "${job_json}" | grep -o '"helm.sh/hook"' || true)
     [[ -z "${hook_val}" ]] && continue
+    # Capture diagnostics before deleting. This helps diagnose transient hook
+    # failures (e.g., dynamo ssh-keygen) that are otherwise lost after cleanup.
+    echo "  --- Failed hook Job ${name} diagnostics ---"
+    kubectl describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+    local pod_names
+    pod_names=$(kubectl get pods -n "${namespace}" -l "job-name=${name}" \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+    for pod_name in ${pod_names}; do
+      echo "  --- Hook pod ${pod_name} describe ---"
+      kubectl describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+    done
+    echo "  --- End diagnostics for ${name} ---"
     # Delete any non-succeeded hook Job. This function only runs after a Helm
     # failure, so any hook Job without a successful completion is blocking the
     # retry — whether it failed, is stuck Pending (timed out before the pod
