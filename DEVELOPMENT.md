@@ -802,6 +802,48 @@ make validate-local RECIPE=recipe.yaml IMAGE_TAG=dev
    make qualify
    ```
 
+## Testing a New Component
+
+The component test harness validates that a component deploys and passes its
+health check in an isolated Kind cluster. No GPU hardware required for most
+components.
+
+### Quick Start
+
+```bash
+# Build aicr, then test your component
+make build
+make component-test COMPONENT=cert-manager
+```
+
+The harness auto-detects the test tier (`scheduling`, `deploy`, or `gpu-aware`),
+creates a Kind cluster, deploys the component, and runs its health check.
+
+### Available Targets
+
+```bash
+make component-test COMPONENT=cert-manager              # Full end-to-end test
+make component-detect COMPONENT=cert-manager            # Show detected tier
+make component-cluster                            # Create/reuse cluster
+make component-deploy COMPONENT=cert-manager            # Deploy only
+make component-health COMPONENT=cert-manager            # Health check only
+make component-cleanup COMPONENT=cert-manager           # Uninstall component
+```
+
+### Debugging
+
+```bash
+# Keep cluster for inspection
+KEEP_CLUSTER=true make component-test COMPONENT=cert-manager
+
+# Inspect and re-run
+kubectl -n cert-manager get pods
+make component-health COMPONENT=cert-manager
+```
+
+See [tools/component-test/README.md](tools/component-test/README.md) for full
+environment variable reference and troubleshooting.
+
 ## Validator Development
 
 For detailed information on adding validation checks and constraint validators, see:

@@ -1438,6 +1438,75 @@ func TestGenerateDeployScript(t *testing.T) {
 	}
 }
 
+func TestGenerateDeployScript_EmptyVersionOmitsFlag(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	components := []ComponentData{
+		{
+			Name:       "gpu-operator",
+			Namespace:  "gpu-operator",
+			Repository: "https://helm.ngc.nvidia.com/nvidia",
+			ChartName:  "gpu-operator",
+			Version:    "", // empty version — should not produce --version flag
+			HasChart:   true,
+		},
+	}
+
+	input := &GeneratorInput{Version: "v1.0.0"}
+	path, _, err := g.generateDeployScript(ctx, input, components, dir)
+	if err != nil {
+		t.Fatalf("generateDeployScript failed: %v", err)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading deploy.sh: %v", err)
+	}
+
+	script := string(content)
+	if strings.Contains(script, "--version") {
+		t.Errorf("deploy.sh should not contain --version when Version is empty, got:\n%s", script)
+	}
+	if !strings.Contains(script, "helm upgrade --install gpu-operator gpu-operator") {
+		t.Errorf("deploy.sh should contain helm install command for gpu-operator")
+	}
+}
+
+func TestGenerateDeployScript_WithVersionIncludesFlag(t *testing.T) {
+	g := NewGenerator()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	components := []ComponentData{
+		{
+			Name:       "cert-manager",
+			Namespace:  "cert-manager",
+			Repository: "https://charts.jetstack.io",
+			ChartName:  "cert-manager",
+			Version:    "v1.17.2",
+			HasChart:   true,
+		},
+	}
+
+	input := &GeneratorInput{Version: "v1.0.0"}
+	path, _, err := g.generateDeployScript(ctx, input, components, dir)
+	if err != nil {
+		t.Fatalf("generateDeployScript failed: %v", err)
+	}
+
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading deploy.sh: %v", err)
+	}
+
+	script := string(content)
+	if !strings.Contains(script, "--version v1.17.2") {
+		t.Errorf("deploy.sh should contain --version v1.17.2, got:\n%s", script)
+	}
+}
+
 func TestGenerateUndeployScript(t *testing.T) {
 	tests := []struct {
 		name       string

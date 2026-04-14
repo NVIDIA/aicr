@@ -44,6 +44,240 @@ jobs:
               labels: ['needs-triage']
             });
 
+      - name: Infer area label on new issue
+        if: github.event.action == 'opened'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const title = context.payload.issue.title || '';
+            const body = context.payload.issue.body || '';
+            const existingLabels = new Set((context.payload.issue.labels || []).map(label => label.name));
+
+            async function loadAreaAssignees() {
+              const { data: file } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: '.settings.yaml',
+              });
+              const content = Buffer.from(file.content, 'base64').toString('utf8');
+
+              const assignees = {};
+              let inBlock = false;
+              for (const line of content.split('\n')) {
+                if (line.startsWith('area_assignees:')) {
+                  inBlock = true;
+                  continue;
+                }
+                if (inBlock) {
+                  const m = line.match(/^\s+(area\/\S+):\s*(.+)/);
+                  if (m) {
+                    assignees[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
+                  } else if (/^\S/.test(line)) {
+                    break;
+                  }
+                }
+              }
+
+              return assignees;
+            }
+
+            const componentPatterns = [
+              { pattern: /\bcli\b/, label: 'area/cli' },
+              { pattern: /\bapi server\b|\baicrd\b/, label: 'area/api' },
+              { pattern: /\brecipe engine\b|\brecipe engine \/ data\b/, label: 'area/recipes' },
+              { pattern: /\bbundler\b|\bbundlers\b/, label: 'area/bundler' },
+              { pattern: /\bcollectors?\b|\bsnapshotter\b/, label: 'area/collector' },
+              { pattern: /\bvalidator\b/, label: 'area/validator' },
+              { pattern: /\bcore libraries\b/, label: 'area/infra' },
+              { pattern: /\bdocs\b|\bdocumentation\b/, label: 'area/docs' },
+            ];
+
+            const tokenMap = new Map([
+              ['api', 'area/api'],
+              ['aicrd', 'area/api'],
+              ['server', 'area/api'],
+              ['bundle', 'area/bundler'],
+              ['bundler', 'area/bundler'],
+              ['bundlers', 'area/bundler'],
+              ['argocd', 'area/bundler'],
+              ['chart', 'area/bundler'],
+              ['charts', 'area/bundler'],
+              ['helm', 'area/bundler'],
+              ['ci', 'area/ci'],
+              ['workflow', 'area/ci'],
+              ['workflows', 'area/ci'],
+              ['action', 'area/ci'],
+              ['actions', 'area/ci'],
+              ['cli', 'area/cli'],
+              ['command', 'area/cli'],
+              ['collector', 'area/collector'],
+              ['collectors', 'area/collector'],
+              ['snapshot', 'area/collector'],
+              ['snapshotter', 'area/collector'],
+              ['topology', 'area/collector'],
+              ['docs', 'area/docs'],
+              ['documentation', 'area/docs'],
+              ['readme', 'area/docs'],
+              ['infra', 'area/infra'],
+              ['infrastructure', 'area/infra'],
+              ['recipe', 'area/recipes'],
+              ['recipes', 'area/recipes'],
+              ['overlay', 'area/recipes'],
+              ['overlays', 'area/recipes'],
+              ['mixin', 'area/recipes'],
+              ['mixins', 'area/recipes'],
+              ['test', 'area/tests'],
+              ['tests', 'area/tests'],
+              ['chainsaw', 'area/tests'],
+              ['e2e', 'area/tests'],
+              ['kwok', 'area/tests'],
+              ['validate', 'area/validator'],
+              ['validation', 'area/validator'],
+              ['validator', 'area/validator'],
+              ['validators', 'area/validator'],
+              ['conformance', 'area/validator'],
+              ['deployment', 'area/validator'],
+              ['performance', 'area/validator'],
+            ]);
+
+            function normalize(value) {
+              return value.trim().toLowerCase();
+            }
+
+            // Sentinel values from issue templates that indicate ambiguous/unknown
+            // components. When these are selected, ignore the component field
+            // and continue inferring from title/body text.
+            const AMBIGUOUS_COMPONENTS = [
+              'multiple components',
+              'new component',
+              'other / unknown',
+              'other',
+              'unknown',
+            ];
+
+            function inferFromComponent() {
+              const match = body.match(/^#{2,3}\s+Component\s*$[\r\n]+(?:[\r\n]*)([^\r\n]+)/im);
+              if (!match) {
+                return null;
+              }
+              const component = normalize(match[1]);
+              if (AMBIGUOUS_COMPONENTS.includes(component)) {
+                core.info(`Component "${match[1].trim()}" is ambiguous — falling back to title/body inference`);
+                return null;
+              }
+              for (const { pattern, label } of componentPatterns) {
+                if (pattern.test(component)) {
+                  return label;
+                }
+              }
+              return null;
+            }
+
+            function inferFromScope() {
+              const scopeMatch = title.toLowerCase().match(/^[a-z]+\(([^)]+)\):/);
+              if (!scopeMatch) {
+                return null;
+              }
+              for (const token of scopeMatch[1].split(/[^a-z0-9]+/)) {
+                const label = tokenMap.get(token);
+                if (label) {
+                  return label;
+                }
+              }
+              return null;
+            }
+
+            function inferFromText(text) {
+              const normalized = text.toLowerCase();
+              const orderedPatterns = [
+                { pattern: /\b(pkg\/api|api\/|aicrd|api server)\b/, label: 'area/api' },
+                { pattern: /\b(pkg\/bundler|aicr bundle|bundle output|argocd|helm chart|oci bundle)\b/, label: 'area/bundler' },
+                { pattern: /\b(pkg\/cli|command line|cli)\b/, label: 'area/cli' },
+                { pattern: /\b(pkg\/collector|snapshotter|snapshot|collector|collectors|topology)\b/, label: 'area/collector' },
+                { pattern: /\b(docs\/|documentation|readme|docs)\b/, label: 'area/docs' },
+                { pattern: /\b(infra\/|infrastructure)\b/, label: 'area/infra' },
+                { pattern: /\b(tests\/|chainsaw|kwok|e2e|test trigger|gpu test)\b/, label: 'area/tests' },
+                { pattern: /(?:\.github\/|\bgithub actions\b|\bworkflow\b|\bworkflows\b|\bci\b)/, label: 'area/ci' },
+                {
+                  pattern: /\b(pkg\/validator|validators?\/|validators?|validation|validate command|aicr validate|conformance|deployment(?:-phase checks| validator)|performance check)\b/,
+                  label: 'area/validator'
+                },
+                { pattern: /\b(recipes\/|recipe engine|recipemetadata|reciperesult|registry\.yaml|overlay|overlays|mixin|mixins|recipe)\b/, label: 'area/recipes' },
+              ];
+
+              for (const { pattern, label } of orderedPatterns) {
+                if (pattern.test(normalized)) {
+                  return label;
+                }
+              }
+              return null;
+            }
+
+            let areaLabel = [...existingLabels].find(label => label.startsWith('area/')) || null;
+            if (!areaLabel) {
+              areaLabel = inferFromComponent();
+            }
+            if (!areaLabel && existingLabels.has('documentation')) {
+              areaLabel = 'area/docs';
+            }
+            if (!areaLabel) {
+              areaLabel = inferFromScope();
+            }
+            if (!areaLabel) {
+              areaLabel = inferFromText(title);
+            }
+            if (!areaLabel) {
+              areaLabel = inferFromText(body);
+            }
+
+            if (!areaLabel) {
+              core.info('No area label inferred for this issue');
+              return;
+            }
+
+            if (!existingLabels.has(areaLabel)) {
+              core.info(`Adding inferred area label: ${areaLabel}`);
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                labels: [areaLabel],
+              });
+            } else {
+              core.info(`Issue already has ${areaLabel}`);
+            }
+
+            const assignees = await loadAreaAssignees();
+            const value = assignees[areaLabel];
+            if (value) {
+              const users = [...new Set(value.split(',').map(u => u.trim()).filter(Boolean))];
+              core.info(`Assigning issue to [${users.join(', ')}] for ${areaLabel}`);
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                assignees: users,
+              });
+            } else {
+              core.info(`No assignee configured for ${areaLabel}`);
+            }
+
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                name: 'needs-triage',
+              });
+              core.info('Removed needs-triage after area assignment');
+            } catch (error) {
+              if (error.status === 404) {
+                core.info('needs-triage label not present');
+                return;
+              }
+              throw error;
+            }
+
       - name: Remove needs-triage when triaged
         if: >-
           github.event.action == 'labeled' &&
@@ -95,9 +329,9 @@ jobs:
                   continue;
                 }
                 if (inBlock) {
-                  const m = line.match(/^\s+(area\/\S+):\s*(\S+)/);
+                  const m = line.match(/^\s+(area\/\S+):\s*(.+)/);
                   if (m) {
-                    assignees[m[1]] = m[2];
+                    assignees[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
                   } else if (/^\S/.test(line)) {
                     break;
                   }
@@ -111,7 +345,7 @@ jobs:
                 return;
               }
 
-              const users = value.split(',').map(u => u.trim()).filter(Boolean);
+              const users = [...new Set(value.split(',').map(u => u.trim()).filter(Boolean))];
               core.info(`[assign] assigning [${users.join(', ')}] to issue #${issue}`);
 
               const result = await github.rest.issues.addAssignees({

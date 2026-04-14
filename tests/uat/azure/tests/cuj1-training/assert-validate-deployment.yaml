@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert multiphase CTRF validation report structure.
+# Assert deployment-phase CTRF validation report structure.
 #
 # NOTE: chainsaw assert --resource requires apiVersion/kind to parse the file.
 # CTRF JSON doesn't have these natively, so we inject them in the test script
