@@ -137,11 +137,11 @@ spec:
         grafana:
           resources:
             requests:
-              cpu: 50m
-              memory: 64Mi
+              cpu: 100m
+              memory: 128Mi
             limits:
-              cpu: 250m
-              memory: 256Mi
+              cpu: 500m
+              memory: 512Mi
         alertmanager:
           alertmanagerSpec:
             resources:

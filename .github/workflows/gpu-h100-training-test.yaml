@@ -188,6 +188,16 @@ jobs:
       - name: Debug diagnostics
         if: failure()
         run: |
+          echo "=== Grafana deployment ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get deployment grafana -o wide 2>/dev/null || true
+          echo "=== Grafana pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods \
+            -l app.kubernetes.io/name=grafana -o wide 2>/dev/null || true
+          echo "=== Grafana deployment describe ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe deployment grafana 2>/dev/null || true
+          echo "=== Grafana pod describe ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe pods \
+            -l app.kubernetes.io/name=grafana 2>/dev/null || true
           echo "=== KAI scheduler pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kai-scheduler get pods -o wide 2>/dev/null || true
           echo "=== KAI scheduler logs ==="
