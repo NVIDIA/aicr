@@ -574,6 +574,63 @@ func TestGenerate_UndeployScriptExecutable(t *testing.T) {
 	if !strings.Contains(afterTermWait, "delete_orphaned_webhooks_for_ns") {
 		t.Error("undeploy.sh missing post-namespace-deletion webhook cleanup")
 	}
+
+	// Verify jq is a hard requirement (not a soft check)
+	if strings.Contains(script, "HAS_JQ") {
+		t.Error("undeploy.sh should not use HAS_JQ soft check; jq must be a hard requirement")
+	}
+	if !strings.Contains(script, "command -v jq") {
+		t.Error("undeploy.sh missing jq availability check")
+	}
+
+	// Verify pre-flight check exists and runs before component uninstall
+	preflightIdx := strings.Index(script, "Pre-flight checks")
+	uninstallIdx := strings.Index(script, "Uninstall components in reverse order")
+	if preflightIdx < 0 {
+		t.Fatal("undeploy.sh missing pre-flight checks section")
+	}
+	if uninstallIdx < 0 {
+		t.Fatal("undeploy.sh missing component uninstall section")
+	}
+	if preflightIdx > uninstallIdx {
+		t.Error("undeploy.sh pre-flight checks must run before component uninstall")
+	}
+
+	// Verify pre-flight uses functions and exits on failure
+	preflightSection := script[preflightIdx:uninstallIdx]
+	if !strings.Contains(preflightSection, "check_release_for_stuck_crds") {
+		t.Error("undeploy.sh pre-flight should call check_release_for_stuck_crds")
+	}
+	if !strings.Contains(preflightSection, "PREFLIGHT_DETAILS") || !strings.Contains(preflightSection, "exit 1") {
+		t.Error("undeploy.sh pre-flight should detect stuck CRs and exit on failure")
+	}
+
+	// Verify pre-flight checks each Helm component with both release name and namespace args
+	if !strings.Contains(preflightSection, `check_release_for_stuck_crds "gpu-operator" "gpu-operator"`) {
+		t.Error("undeploy.sh pre-flight missing check for gpu-operator with namespace")
+	}
+	if !strings.Contains(preflightSection, `check_release_for_stuck_crds "cert-manager" "cert-manager"`) {
+		t.Error("undeploy.sh pre-flight missing check for cert-manager with namespace")
+	}
+
+	// Verify helper functions exist and use helm get manifest
+	if !strings.Contains(script, "check_crd_for_stuck_resources()") {
+		t.Error("undeploy.sh missing check_crd_for_stuck_resources function")
+	}
+	if !strings.Contains(script, "check_release_for_stuck_crds()") {
+		t.Error("undeploy.sh missing check_release_for_stuck_crds function")
+	}
+	if !strings.Contains(script, "helm get manifest") {
+		t.Error("undeploy.sh should use helm get manifest for CRD discovery")
+	}
+
+	// Verify stuck CRD handling warns instead of force-clearing
+	if strings.Contains(script, "Force-clearing finalizers on stuck CRD") {
+		t.Error("undeploy.sh should warn about stuck CRDs, not silently force-clear finalizers")
+	}
+	if !strings.Contains(script, "CRDs stuck in deleting state") {
+		t.Error("undeploy.sh missing warning about stuck CRDs")
+	}
 }
 
 func TestUniqueNamespaces(t *testing.T) {
