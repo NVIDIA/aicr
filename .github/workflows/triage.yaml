@@ -145,8 +145,8 @@ jobs:
             }
 
             // Sentinel values from issue templates that indicate ambiguous/unknown
-            // components. When these are selected, skip auto-inference and keep
-            // needs-triage for manual review.
+            // components. When these are selected, ignore the component field
+            // and continue inferring from title/body text.
             const AMBIGUOUS_COMPONENTS = [
               'multiple components',
               'new component',
@@ -162,8 +162,8 @@ jobs:
               }
               const component = normalize(match[1]);
               if (AMBIGUOUS_COMPONENTS.includes(component)) {
-                core.info(`Component "${match[1].trim()}" is ambiguous — skipping auto-inference`);
-                return 'SKIP';
+                core.info(`Component "${match[1].trim()}" is ambiguous — falling back to title/body inference`);
+                return null;
               }
               for (const { pattern, label } of componentPatterns) {
                 if (pattern.test(component)) {
@@ -192,12 +192,12 @@ jobs:
               const orderedPatterns = [
                 { pattern: /\b(pkg\/api|api\/|aicrd|api server)\b/, label: 'area/api' },
                 { pattern: /\b(pkg\/bundler|aicr bundle|bundle output|argocd|helm chart|oci bundle)\b/, label: 'area/bundler' },
-                { pattern: /(?:\.github\/|\bgithub actions\b|\bworkflow\b|\bworkflows\b|\bci\b)/, label: 'area/ci' },
                 { pattern: /\b(pkg\/cli|command line|cli)\b/, label: 'area/cli' },
                 { pattern: /\b(pkg\/collector|snapshotter|snapshot|collector|collectors|topology)\b/, label: 'area/collector' },
                 { pattern: /\b(docs\/|documentation|readme|docs)\b/, label: 'area/docs' },
                 { pattern: /\b(infra\/|infrastructure)\b/, label: 'area/infra' },
                 { pattern: /\b(tests\/|chainsaw|kwok|e2e|test trigger|gpu test)\b/, label: 'area/tests' },
+                { pattern: /(?:\.github\/|\bgithub actions\b|\bworkflow\b|\bworkflows\b|\bci\b)/, label: 'area/ci' },
                 {
                   pattern: /\b(pkg\/validator|validators?\/|validators?|validation|validate command|aicr validate|conformance|deployment(?:-phase checks| validator)|performance check)\b/,
                   label: 'area/validator'
@@ -216,12 +216,6 @@ jobs:
             let areaLabel = [...existingLabels].find(label => label.startsWith('area/')) || null;
             if (!areaLabel) {
               areaLabel = inferFromComponent();
-            }
-            // If component is ambiguous (Multiple, New, Other/Unknown), stop
-            // inference and keep needs-triage for manual review.
-            if (areaLabel === 'SKIP') {
-              core.info('Ambiguous component selected — keeping needs-triage for manual review');
-              return;
             }
             if (!areaLabel && existingLabels.has('documentation')) {
               areaLabel = 'area/docs';
