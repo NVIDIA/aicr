@@ -352,7 +352,8 @@ fi
 {{ if .IsOCI -}}
 helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
-  --version {{ .Version }} \
+  {{ if .Version }}--version {{ .Version }} \
+  {{ end -}}
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
   ${COMPONENT_WAIT_ARGS} \
@@ -361,7 +362,8 @@ helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
 helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
-  --version {{ .Version }} \
+  {{ if .Version }}--version {{ .Version }} \
+  {{ end -}}
   -n {{ .Namespace }} --create-namespace \
   -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
   ${COMPONENT_WAIT_ARGS} \
