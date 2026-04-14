@@ -4,7 +4,7 @@
 [![On Tag Release](https://github.com/NVIDIA/aicr/actions/workflows/on-tag.yaml/badge.svg)](https://github.com/NVIDIA/aicr/actions/workflows/on-tag.yaml)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-AI Cluster Runtime (AICR) makes it easy to stand up GPU-accelerated Kubernetes clusters. It captures known-good combinations of drivers, operators, kernels, and system configurations and publishes them as version-locked **recipes** — reproducible artifacts for Helm, ArgoCD, and other deployment frameworks.
+AI Cluster Runtime (AICR) makes it easy to stand up GPU-accelerated Kubernetes clusters. It captures known-good combinations of drivers, operators, kernels, and system configurations and publishes them as version-locked **recipes** — reproducible artifacts for Helm, Argo CD, and other deployment frameworks.
 
 ## Why We Built This
 
@@ -53,7 +53,7 @@ aicr validate --recipe recipe.yaml --phase all --output report.json
 
 ```
 
-The `bundles/` directory contains per-component Helm charts with values files, checksums, and deployer configs. Deploy with `helm install`, commit to a GitOps repo, or use the built-in ArgoCD deployer.
+The `bundles/` directory contains per-component Helm charts with values files, checksums, and deployer configs. Deploy with `helm install`, commit to a GitOps repo, or use the built-in Argo CD deployer.
 
 See the [Installation Guide](docs/user/installation.md) for manual installation, building from source, and container images.
 
@@ -86,7 +86,7 @@ A **recipe** is a version-locked configuration for a specific environment. You d
 
 The **bundler** materializes a recipe into deployment-ready artifacts: one folder per component, each with Helm values, checksums, and a README. The **validator** compares a recipe against a live cluster snapshot and flags anything out of spec.
 
-This separation means the same validated configuration works whether you deploy with Helm, ArgoCD, Flux, or a custom pipeline.
+This separation means the same validated configuration works whether you deploy with Helm, Argo CD, Flux, or a custom pipeline.
 
 ## What AI Cluster Runtime Is Not
 
