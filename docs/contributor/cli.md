@@ -2007,10 +2007,11 @@ pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 
 ```bash
 # Build with profiling enabled
-go build -o aicr cmd/aicr/main.go
+mkdir -p bin
+go build -o bin/aicr cmd/aicr/main.go
 
 # Capture CPU profile
-./aicr snapshot --cpuprofile=cpu.prof
+./bin/aicr snapshot --cpuprofile=cpu.prof
 
 # Analyze profile
 go tool pprof cpu.prof
@@ -2034,7 +2035,7 @@ go tool pprof cpu.prof
 
 ```bash
 # Capture memory profile
-./aicr snapshot --memprofile=mem.prof
+./bin/aicr snapshot --memprofile=mem.prof
 
 # Analyze allocations
 go tool pprof -alloc_space mem.prof

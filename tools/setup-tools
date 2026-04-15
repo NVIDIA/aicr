@@ -287,6 +287,7 @@ HELM_VERSION=$(yq '.testing_tools.helm' .settings.yaml)
 CHAINSAW_VERSION=$(yq '.testing_tools.chainsaw' .settings.yaml)
 KO_VERSION=$(yq '.build_tools.ko' .settings.yaml)
 CRANE_VERSION=$(yq '.build_tools.crane' .settings.yaml)
+GORELEASER_VERSION=$(yq '.build_tools.goreleaser' .settings.yaml)
 GIT_CLIFF_VERSION=$(yq '.build_tools.git_cliff' .settings.yaml)
 
 echo ""
@@ -301,6 +302,7 @@ echo "  kubectl:         ${KUBECTL_VERSION}"
 echo "  tilt:            ${TILT_VERSION}"
 echo "  helm:            ${HELM_VERSION}"
 echo "  chainsaw:        ${CHAINSAW_VERSION}"
+echo "  goreleaser:      ${GORELEASER_VERSION}"
 echo "  git-cliff:       ${GIT_CLIFF_VERSION}"
 echo ""
 
@@ -680,13 +682,13 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     if command_exists goreleaser && [[ "${UPGRADE}" != "true" ]]; then
         log_success "goreleaser already installed: $(goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p')"
     else
-        log_info "Installing goreleaser..."
+        log_info "Installing goreleaser ${GORELEASER_VERSION}..."
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install goreleaser
             elif [[ "${OS}" == "linux" ]]; then
                 if command_exists go; then
-                    go install github.com/goreleaser/goreleaser/v2@latest
+                    go install github.com/goreleaser/goreleaser/v2@"${GORELEASER_VERSION}"
                     sudo cp "$(go env GOPATH)/bin/goreleaser" /usr/local/bin/
                 else
                     log_warning "Go not installed, skipping goreleaser"
