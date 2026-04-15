@@ -41,6 +41,7 @@ KARPENTER_VERSION="${KARPENTER_VERSION:-v1.8.0}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:?KIND_CLUSTER_NAME must be set}"
 KARPENTER_NAMESPACE="${KARPENTER_NAMESPACE:-karpenter}"
 KARPENTER_CLONE_DIR="${KARPENTER_CLONE_DIR:-/tmp/karpenter}"
+KO_BUILD_TIMEOUT="${KO_BUILD_TIMEOUT:-900}"  # 15 minutes
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -96,9 +97,14 @@ build_karpenter() {
     # ko build with kind.local side-loads the image directly into the kind cluster.
     # Redirect stderr to avoid Go compilation warnings corrupting the image reference.
     # Output format: kind.local/<name>:<content-hash>
-    CONTROLLER_IMG=$(KO_DOCKER_REPO=kind.local \
+    # Hard timeout prevents a slow/stuck compilation from consuming the entire job.
+    CONTROLLER_IMG=$(timeout "${KO_BUILD_TIMEOUT}" \
+        env KO_DOCKER_REPO=kind.local \
         KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME}" \
-        ko build sigs.k8s.io/karpenter/kwok 2>/dev/null)
+        ko build sigs.k8s.io/karpenter/kwok 2>/dev/null) || {
+        log_error "ko build failed or timed out after ${KO_BUILD_TIMEOUT}s"
+        exit 1
+    }
 
     popd >/dev/null
 

@@ -462,6 +462,19 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"`) {
 		t.Error("deploy.sh missing default COMPONENT_HELM_TIMEOUT")
 	}
+	// kai-scheduler should use a reduced retry budget to fail faster on slow hooks
+	if !strings.Contains(script, `COMPONENT_MAX_RETRIES="1"`) {
+		t.Error("deploy.sh missing kai-scheduler retry override")
+	}
+	if !strings.Contains(script, `dump_kai_scheduler_helm_diagnostics "${namespace}"`) {
+		t.Error("deploy.sh missing kai-scheduler diagnostics hook")
+	}
+	if !strings.Contains(script, `kubectl get jobs -n "${namespace}"`) {
+		t.Error("deploy.sh missing job diagnostics")
+	}
+	if !strings.Contains(script, `kubectl describe pods -n "${namespace}"`) {
+		t.Error("deploy.sh missing pod diagnostics")
+	}
 }
 
 func TestGenerate_UndeployScriptExecutable(t *testing.T) {

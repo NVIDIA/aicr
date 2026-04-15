@@ -26,6 +26,9 @@ inputs:
     description: 'Kind version to install'
     required: false
     default: '0.31.0'
+  goreleaser_version:
+    description: 'GoReleaser version to install (from .settings.yaml)'
+    required: true
   helm_version:
     description: 'Helm version to install'
     required: false
@@ -89,6 +92,7 @@ runs:
         install_yq: 'true'
         yq_version: '${{ inputs.yq_version }}'
         install_goreleaser: 'true'
+        goreleaser_version: '${{ inputs.goreleaser_version }}'
 
     - name: Build aicr binary
       shell: bash

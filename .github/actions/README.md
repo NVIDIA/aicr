@@ -72,6 +72,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - `install_crane` (optional): Install crane (default: "false")
 - `crane_version` (optional): crane version (default: "v0.20.6")
 - `install_goreleaser` (optional): Install goreleaser (default: "false")
+- `goreleaser_version` (required when `install_goreleaser: "true"`): GoReleaser version from `load-versions`
 
 **Example**:
 ```yaml
@@ -87,6 +88,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **When to use**: Release workflows that build and publish artifacts
 **Inputs**:
 - `registry` (optional): Container registry (default: "ghcr.io")
+- `goreleaser_version` (required): GoReleaser version from `load-versions`
 
 **Outputs**:
 - `release_outcome`: Release step outcome (success/failure)
@@ -95,8 +97,12 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 
 **Example**:
 ```yaml
+- uses: ./.github/actions/load-versions
+  id: versions
 - uses: ./.github/actions/go-build-release
   id: release
+  with:
+    goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
 - if: steps.release.outputs.release_outcome == 'success'
   run: echo "Release succeeded"
 ```
@@ -157,6 +163,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **Inputs**:
 - `recipe` (optional): Recipe name to test (empty = all testable recipes)
 - `go_version` (required): Go version to install
+- `goreleaser_version` (required): GoReleaser version from `load-versions`
 - `kind_version` (optional): Kind version (default: "0.31.0")
 - `helm_version` (optional): Helm version (default: "v4.1.0")
 - `kwok_version` (optional): KWOK version (default: "v0.7.0")
@@ -169,6 +176,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - uses: ./.github/actions/kwok-test
   with:
     go_version: ${{ steps.versions.outputs.go }}
+    goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
     kind_version: ${{ steps.versions.outputs.kind }}
     helm_version: ${{ steps.versions.outputs.helm }}
 ```
@@ -317,6 +325,8 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
       - uses: ./.github/actions/go-build-release
         id: release
+        with:
+          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
       - uses: ./.github/actions/attest-image-from-tag
         with:
           image_name: ghcr.io/nvidia/aicrd

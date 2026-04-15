@@ -15,21 +15,28 @@
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
-  name: h100-kind-training
+  name: h100-kind-training-kubeflow
 
 spec:
-  # Inherits from kind recipe (kind-specific GPU operator + monitoring settings)
-  base: kind
+  # Inherits from h100-kind-training (H100 + kind + training settings)
+  # Adds Kubeflow Trainer for distributed training with TrainJob.
+  base: h100-kind-training
 
   criteria:
     service: kind
     accelerator: h100
     intent: training
+    platform: kubeflow
+
+  mixins:
+    - platform-kubeflow
 
   # DRA requires Kubernetes 1.34+ (GA)
   constraints:
     - name: K8s.server.version
       value: ">= 1.34"
+
+  componentRefs: []
 
   validation:
     conformance:
@@ -43,3 +50,4 @@ spec:
         - secure-accelerator-access
         - pod-autoscaling
         - cluster-autoscaling
+        - robust-controller

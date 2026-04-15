@@ -19,6 +19,9 @@ inputs:
   go_version:
     description: 'Go version to install (e.g., 1.25)'
     required: true
+  goreleaser_version:
+    description: 'GoReleaser version (from .settings.yaml)'
+    required: true
   helm_version:
     description: 'Helm version to install (e.g., v4.1.0)'
     required: false
@@ -49,6 +52,7 @@ runs:
       uses: ./.github/actions/setup-build-tools
       with:
         install_goreleaser: 'true'
+        goreleaser_version: '${{ inputs.goreleaser_version }}'
         install_helm: 'true'
         helm_version: '${{ inputs.helm_version }}'
         install_chainsaw: 'true'
