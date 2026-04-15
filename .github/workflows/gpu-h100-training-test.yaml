@@ -27,10 +27,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
 
   # Gate GPU tests on actual PR diff (against main), not the push diff.
@@ -94,6 +90,9 @@ jobs:
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
       )
     name: GPU Training Test (nvkind + H100 x2)
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: linux-amd64-gpu-h100-latest-2
     timeout-minutes: 120
 

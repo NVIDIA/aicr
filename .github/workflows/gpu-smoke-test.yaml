@@ -27,10 +27,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
 
   # Gate GPU tests on actual PR diff (against main), not the push diff.
@@ -74,6 +70,9 @@ jobs:
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
       )
     name: GPU Smoke Test (nvkind + T4)
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: linux-amd64-gpu-t4-latest-1
     timeout-minutes: 30
 
