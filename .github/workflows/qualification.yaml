@@ -106,6 +106,7 @@ jobs:
         uses: ./.github/actions/cli-e2e
         with:
           go_version: ${{ steps.versions.outputs.go }}
+          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           chainsaw_version: ${{ steps.versions.outputs.chainsaw }}
           chainsaw_sha256: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
 
