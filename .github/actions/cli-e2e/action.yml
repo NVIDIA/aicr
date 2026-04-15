@@ -19,6 +19,9 @@ inputs:
   go_version:
     description: 'Go version (e.g., 1.25)'
     required: true
+  goreleaser_version:
+    description: 'GoReleaser version (e.g., v2.15.3)'
+    required: true
   chainsaw_version:
     description: 'Chainsaw version (e.g., v0.2.14)'
     required: true
@@ -42,6 +45,7 @@ runs:
     - name: Install GoReleaser
       uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29  # v7.0.0
       with:
+        version: ${{ inputs.goreleaser_version }}
         install-only: true
 
     - name: Install Chainsaw

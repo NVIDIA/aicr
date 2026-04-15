@@ -18,7 +18,7 @@ languages:
 
 # Build Tools
 build_tools:
-  goreleaser: 'v2'
+  goreleaser: 'v2.15.3'
   ko: 'v0.18.0'
   crane: 'v0.21.0'
   git_cliff: '2.12.0'
