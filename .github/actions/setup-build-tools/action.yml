@@ -40,6 +40,10 @@ inputs:
     description: 'Install goreleaser (true/false)'
     required: false
     default: 'false'
+  goreleaser_version:
+    description: 'GoReleaser version (from .settings.yaml)'
+    required: false
+    default: ''
   install_chainsaw:
     description: 'Install chainsaw (true/false)'
     required: false
@@ -144,10 +148,23 @@ runs:
         rm -rf "$CRANE_TMP"
         echo "crane installed: $(crane version 2>&1 || echo '${{ inputs.crane_version }}')"
 
+    - name: Validate GoReleaser version input
+      if: inputs.install_goreleaser == 'true'
+      shell: bash
+      env:
+        GORELEASER_VERSION: ${{ inputs.goreleaser_version }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${GORELEASER_VERSION}" ]]; then
+          echo "::error::goreleaser_version is required when install_goreleaser=true"
+          exit 1
+        fi
+
     - name: Install GoReleaser
       if: inputs.install_goreleaser == 'true'
       uses: goreleaser/goreleaser-action@ec59f474b9834571250b370d4735c50f8e2d1e29  # v7.0.0
       with:
+        version: ${{ inputs.goreleaser_version }}
         install-only: true
 
     - name: Install Chainsaw

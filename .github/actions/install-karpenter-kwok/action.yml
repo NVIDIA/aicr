@@ -23,12 +23,30 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Resolve versions
+      id: versions
+      shell: bash
+      run: |
+        echo "karpenter=$(yq eval '.testing_tools.karpenter' .settings.yaml)" >> "$GITHUB_OUTPUT"
+        echo "go=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Karpenter Go build cache
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+      with:
+        path: |
+          ~/.cache/go-build
+        key: karpenter-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ steps.versions.outputs.karpenter }}-gobuild-v2
+        restore-keys: |
+          karpenter-${{ runner.os }}-${{ steps.versions.outputs.go }}-${{ steps.versions.outputs.karpenter }}-gobuild-
+          karpenter-${{ runner.os }}-${{ steps.versions.outputs.go }}-gobuild-
+          karpenter-${{ runner.os }}-gobuild-
+
     - name: Install Karpenter + KWOK
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        KARPENTER_VERSION: ${{ steps.versions.outputs.karpenter }}
       run: |
         set -euo pipefail
-        export KARPENTER_VERSION=$(yq eval '.testing_tools.karpenter' .settings.yaml)
         bash kwok/scripts/install-karpenter-kwok.sh
         kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f kwok/manifests/karpenter/nodepool.yaml

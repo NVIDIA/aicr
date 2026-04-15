@@ -24,6 +24,9 @@ inputs:
     description: 'ko version (e.g. v0.18.0)'
     required: false
     default: 'v0.18.0'
+  goreleaser_version:
+    description: 'GoReleaser version (from .settings.yaml)'
+    required: true
   homebrew_deploy_key:
     description: 'SSH deploy key for pushing Homebrew formula'
     required: false
@@ -44,6 +47,7 @@ runs:
         ko_version: ${{ inputs.ko_version }}
         install_syft: 'true'
         install_goreleaser: 'true'
+        goreleaser_version: ${{ inputs.goreleaser_version }}
 
     - name: Authenticate to registry
       uses: ./.github/actions/ghcr-login

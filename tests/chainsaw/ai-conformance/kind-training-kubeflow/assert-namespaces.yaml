@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert that all namespaces created by the kind training stack exist.
-# Compared to the kind inference test:
-#   Removed: dynamo-system (no Dynamo dependency in kind training validation)
+# Assert that all namespaces created by the kind training + Kubeflow stack exist.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -26,6 +24,13 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: gpu-operator
+status:
+  phase: Active
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeflow
 status:
   phase: Active
 ---
