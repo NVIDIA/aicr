@@ -102,6 +102,11 @@ type LayeredDataProvider struct {
 	mergedRegistry     []byte
 	mergedRegistryErr  error
 
+	// Cached merged catalog (computed once on first access)
+	mergedCatalogOnce sync.Once
+	mergedCatalog     []byte
+	mergedCatalogErr  error
+
 	// Track which files came from external (for debugging)
 	externalFiles map[string]bool
 }
@@ -128,8 +133,14 @@ const (
 	// sourceExternal is the source name for external files.
 	sourceExternal = "external"
 
+	// sourceMerged is the source name for files merged from both embedded and external.
+	sourceMerged = "merged (" + sourceEmbedded + " + " + sourceExternal + ")"
+
 	// registryFileName is the name of the component registry file.
 	registryFileName = "registry.yaml"
+
+	// catalogFileName is the name of the validator catalog file.
+	catalogFileName = "validators/catalog.yaml"
 )
 
 // NewLayeredDataProvider creates a provider that layers external data over embedded.
@@ -268,6 +279,12 @@ func (p *LayeredDataProvider) ReadFile(path string) ([]byte, error) {
 		return p.getMergedRegistry()
 	}
 
+	// Special handling for catalog file - merge instead of replace (when external exists)
+	if path == catalogFileName && p.externalFiles[catalogFileName] {
+		slog.Debug("reading merged catalog file")
+		return p.getMergedCatalog()
+	}
+
 	// Check external directory first
 	if p.externalFiles[path] {
 		externalPath := filepath.Join(p.externalDir, path)
@@ -344,7 +361,11 @@ func (p *LayeredDataProvider) Source(path string) string {
 	var source string
 	switch {
 	case path == registryFileName:
-		source = "merged (" + sourceEmbedded + " + " + sourceExternal + ")"
+		// Always merged: registry.yaml is required in external dir (enforced by constructor).
+		source = sourceMerged
+	case path == catalogFileName && p.externalFiles[catalogFileName]:
+		// Merged only when external catalog exists (catalog is optional).
+		source = sourceMerged
 	case p.externalFiles[path]:
 		source = sourceExternal
 	default:
@@ -354,63 +375,103 @@ func (p *LayeredDataProvider) Source(path string) string {
 	return source
 }
 
+// fileReader is a minimal interface for reading a file by path.
+type fileReader interface {
+	ReadFile(path string) ([]byte, error)
+}
+
+// mergeEmbeddedAndExternal loads a YAML file from both embedded and external sources,
+// unmarshals each into type T, merges them using the provided function, and serializes
+// the result back to YAML bytes.
+func mergeEmbeddedAndExternal[T any](
+	embedded fileReader, externalDir string,
+	fileName string, merge func(embedded, external *T) *T,
+) ([]byte, error) {
+
+	kind := filepath.Base(fileName)
+	slog.Debug("merging files", "file", kind)
+
+	// Load embedded
+	embeddedData, err := embedded.ReadFile(fileName)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read embedded "+kind, err)
+	}
+
+	var embeddedVal T
+	if unmarshalErr := yaml.Unmarshal(embeddedData, &embeddedVal); unmarshalErr != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse embedded "+kind, unmarshalErr)
+	}
+
+	// Load external
+	externalPath := filepath.Join(externalDir, fileName)
+	externalData, err := os.ReadFile(externalPath)
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external "+kind, err)
+	}
+
+	var externalVal T
+	if unmarshalErr := yaml.Unmarshal(externalData, &externalVal); unmarshalErr != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse external "+kind, unmarshalErr)
+	}
+
+	// Merge: external overrides embedded
+	merged := merge(&embeddedVal, &externalVal)
+
+	// Serialize merged result
+	data, marshalErr := yaml.Marshal(merged)
+	if marshalErr != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to serialize merged "+kind, marshalErr)
+	}
+
+	return data, nil
+}
+
 // getMergedRegistry returns the merged registryFileName content.
 // External registry components are merged with embedded, with external taking precedence.
 func (p *LayeredDataProvider) getMergedRegistry() ([]byte, error) {
 	p.mergedRegistryOnce.Do(func() {
-		slog.Debug("merging registry files")
-
-		// Load embedded registry
-		embeddedData, err := p.embedded.ReadFile(registryFileName)
-		if err != nil {
-			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read embedded registry", err)
-			return
-		}
-
-		var embeddedReg ComponentRegistry
-		if unmarshalErr := yaml.Unmarshal(embeddedData, &embeddedReg); unmarshalErr != nil {
-			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse embedded registry", unmarshalErr)
-			return
-		}
-
-		// Load external registry
-		externalPath := filepath.Join(p.externalDir, registryFileName)
-		externalData, err := os.ReadFile(externalPath)
-		if err != nil {
-			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to read external registry", err)
-			return
-		}
-
-		var externalReg ComponentRegistry
-		if unmarshalErr := yaml.Unmarshal(externalData, &externalReg); unmarshalErr != nil {
-			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse external registry", unmarshalErr)
-			return
-		}
-
-		// Validate schema version compatibility
-		if externalReg.APIVersion != "" && externalReg.APIVersion != embeddedReg.APIVersion {
-			slog.Warn("external registry has different API version",
-				"embedded", embeddedReg.APIVersion,
-				"external", externalReg.APIVersion)
-		}
-
-		// Merge: external components override embedded by name
-		merged := mergeRegistries(&embeddedReg, &externalReg)
-
-		// Serialize merged registry
-		p.mergedRegistry, p.mergedRegistryErr = yaml.Marshal(merged)
-		if p.mergedRegistryErr != nil {
-			p.mergedRegistryErr = aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to serialize merged registry", p.mergedRegistryErr)
-			return
-		}
-
-		slog.Info("merged component registries",
-			"embedded_components", len(embeddedReg.Components),
-			"external_components", len(externalReg.Components),
-			"merged_components", len(merged.Components))
+		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
+			p.embedded, p.externalDir, registryFileName, mergeRegistries,
+		)
 	})
 
 	return p.mergedRegistry, p.mergedRegistryErr
+}
+
+// mergeByName merges two slices by a name key. Items from external override
+// embedded items with the same name. New items from external are appended.
+// Embedded order is preserved.
+func mergeByName[T any](embedded, external []T, getName func(T) string) []T {
+	result := make([]T, 0, len(embedded)+len(external))
+
+	extByName := make(map[string]T, len(external))
+	for _, item := range external {
+		if name := getName(item); name != "" {
+			extByName[name] = item
+		}
+	}
+
+	addedNames := make(map[string]bool, len(embedded))
+	for _, item := range embedded {
+		name := getName(item)
+		if ext, found := extByName[name]; found {
+			result = append(result, ext)
+			slog.Debug("item overridden from external", "name", name)
+		} else {
+			result = append(result, item)
+			slog.Debug("item retained from embedded", "name", name)
+		}
+		addedNames[name] = true
+	}
+
+	for _, item := range external {
+		if name := getName(item); !addedNames[name] {
+			result = append(result, item)
+			slog.Debug("item added from external", "name", name)
+		}
+	}
+
+	return result
 }
 
 // mergeRegistries merges external registry into embedded.
@@ -421,42 +482,64 @@ func mergeRegistries(embedded, external *ComponentRegistry) *ComponentRegistry {
 		"embedded_count", len(embedded.Components),
 		"external_count", len(external.Components))
 
-	result := &ComponentRegistry{
+	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
+		slog.Warn("external registry has different API version",
+			"embedded", embedded.APIVersion,
+			"external", external.APIVersion)
+	}
+
+	return &ComponentRegistry{
 		APIVersion: embedded.APIVersion,
 		Kind:       embedded.Kind,
-		Components: make([]ComponentConfig, 0, len(embedded.Components)+len(external.Components)),
+		Components: mergeByName(embedded.Components, external.Components,
+			func(c ComponentConfig) string { return c.Name }),
+	}
+}
+
+// catalogForMerge is a minimal representation for catalog merge operations.
+// Uses generic map types to avoid importing pkg/validator/catalog (which would
+// create a circular dependency). All validator entry fields are preserved through
+// the map[string]interface{} round-trip.
+type catalogForMerge struct {
+	APIVersion string                   `yaml:"apiVersion"`
+	Kind       string                   `yaml:"kind"`
+	Metadata   map[string]interface{}   `yaml:"metadata"`
+	Validators []map[string]interface{} `yaml:"validators"`
+}
+
+// getMergedCatalog returns the merged catalogFileName content.
+// External catalog validators are merged with embedded, with external taking precedence by name.
+func (p *LayeredDataProvider) getMergedCatalog() ([]byte, error) {
+	p.mergedCatalogOnce.Do(func() {
+		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
+			p.embedded, p.externalDir, catalogFileName, mergeCatalogs,
+		)
+	})
+
+	return p.mergedCatalog, p.mergedCatalogErr
+}
+
+// mergeCatalogs merges external catalog into embedded.
+// Validators with the same name are replaced by external version.
+// New validators from external are added.
+func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
+	slog.Debug("starting catalog merge",
+		"embedded_count", len(embedded.Validators),
+		"external_count", len(external.Validators))
+
+	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
+		slog.Warn("external catalog has different API version",
+			"embedded", embedded.APIVersion,
+			"external", external.APIVersion)
 	}
 
-	// Index external components by name
-	externalByName := make(map[string]*ComponentConfig)
-	for i := range external.Components {
-		comp := &external.Components[i]
-		externalByName[comp.Name] = comp
-		slog.Debug("indexed external component", "name", comp.Name)
+	return &catalogForMerge{
+		APIVersion: embedded.APIVersion,
+		Kind:       embedded.Kind,
+		Metadata:   embedded.Metadata,
+		Validators: mergeByName(embedded.Validators, external.Validators,
+			func(v map[string]interface{}) string { s, _ := v["name"].(string); return s }),
 	}
-
-	// Add embedded components, replacing with external if present
-	addedNames := make(map[string]bool)
-	for _, comp := range embedded.Components {
-		if ext, found := externalByName[comp.Name]; found {
-			result.Components = append(result.Components, *ext)
-			slog.Debug("component overridden from external", "name", comp.Name)
-		} else {
-			result.Components = append(result.Components, comp)
-			slog.Debug("component retained from embedded", "name", comp.Name)
-		}
-		addedNames[comp.Name] = true
-	}
-
-	// Add new components from external that aren't in embedded
-	for _, comp := range external.Components {
-		if !addedNames[comp.Name] {
-			result.Components = append(result.Components, comp)
-			slog.Debug("component added from external", "name", comp.Name)
-		}
-	}
-
-	return result
 }
 
 // Global data provider (defaults to embedded, can be set for layered)
