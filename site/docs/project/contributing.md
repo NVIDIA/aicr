@@ -188,7 +188,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - Go tests with race detector
    - golangci-lint
    - YAML linting
-   - Security scans (Trivy in CI, Grype in `make scan`)
+   - Security scans (Anchore in CI, Grype in `make scan`)
    - Coverage tracking
    - E2E tests
 

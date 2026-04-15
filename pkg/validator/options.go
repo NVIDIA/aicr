@@ -65,10 +65,20 @@ func WithNoCluster(noCluster bool) Option {
 	}
 }
 
-// WithTolerations sets tolerations for validator Jobs.
-// Default: tolerate-all.
+// WithTolerations sets tolerations to override inner workload scheduling.
+// When set, validators pass these tolerations to the workloads they create (e.g., NCCL
+// benchmark pods), replacing default tolerate-all policy. Does not affect the orchestrator Job.
 func WithTolerations(tolerations []corev1.Toleration) Option {
 	return func(v *Validator) {
 		v.Tolerations = tolerations
+	}
+}
+
+// WithNodeSelector sets node selector labels to override inner workload scheduling.
+// When set, validators pass these selectors to the workloads they create (e.g., NCCL
+// benchmark pods), replacing platform-specific defaults. Does not affect the orchestrator Job.
+func WithNodeSelector(nodeSelector map[string]string) Option {
+	return func(v *Validator) {
+		v.NodeSelector = nodeSelector
 	}
 }

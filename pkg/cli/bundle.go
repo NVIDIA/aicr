@@ -52,6 +52,10 @@ type bundleCmdOptions struct {
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
+	targetRevision             string
+
+	// dynamicValues declares value paths provided at install time.
+	dynamicValues map[string][]string
 
 	// attest enables bundle attestation and binary verification.
 	attest bool
@@ -138,10 +142,27 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		opts.outputDir = absOut
 	}
 
+	// When using ArgoCD deployer with OCI output and no explicit --repo,
+	// auto-populate repoURL from the OCI reference (issue #519).
+	if opts.deployer == config.DeployerArgoCD && opts.ociRef != nil && opts.repoURL == "" {
+		opts.repoURL = opts.ociRef.Registry + "/" + opts.ociRef.Repository
+	}
+
+	// Derive target revision: use OCI tag when available
+	if opts.ociRef != nil && opts.ociRef.Tag != "" {
+		opts.targetRevision = opts.ociRef.Tag
+	}
+
 	// Parse value overrides from --set flags
 	opts.valueOverrides, err = config.ParseValueOverrides(cmd.StringSlice("set"))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --set flag", err)
+	}
+
+	// Parse dynamic value declarations from --dynamic flags
+	opts.dynamicValues, err = config.ParseDynamicValues(cmd.StringSlice("dynamic"))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --dynamic flag", err)
 	}
 
 	// Parse node selectors
@@ -263,6 +284,14 @@ Package with explicit tag (overrides CLI version):
 				Category: "Deployment",
 			},
 			&cli.StringSliceFlag{
+				Name: "dynamic",
+				Usage: `Declare value paths as install-time parameters
+	(format: component:path.to.field, e.g., --dynamic alloy:clusterName).
+	Dynamic paths are removed from values.yaml and placed in cluster-values.yaml
+	for the user to fill in at install time.`,
+				Category: "Deployment",
+			},
+			&cli.StringSliceFlag{
 				Name:     "system-node-selector",
 				Usage:    "Node selector for system components (format: key=value, can be repeated)",
 				Category: "Scheduling",
@@ -298,13 +327,13 @@ Package with explicit tag (overrides CLI version):
 				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
 				Category: "Scheduling",
 			},
-			&cli.StringFlag{
+			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
 				Value:    string(config.DeployerHelm),
 				Usage:    fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
 				Category: "Deployment",
-			},
+			}, config.GetDeployerTypes),
 			&cli.StringFlag{
 				Name:     "repo",
 				Value:    "",
@@ -364,8 +393,13 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	outputType := "Helm per-component bundle"
-	if opts.deployer == config.DeployerArgoCD {
+	switch opts.deployer {
+	case config.DeployerHelm:
+		// default
+	case config.DeployerArgoCD:
 		outputType = "ArgoCD applications"
+	case config.DeployerArgoCDHelm:
+		outputType = "ArgoCD Helm chart app-of-apps"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),
@@ -394,9 +428,11 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithVersion(version),
 		config.WithDeployer(opts.deployer),
 		config.WithRepoURL(opts.repoURL),
+		config.WithTargetRevision(opts.targetRevision),
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
 		config.WithValueOverrides(opts.valueOverrides),
+		config.WithDynamicValues(opts.dynamicValues),
 		config.WithSystemNodeSelector(opts.systemNodeSelector),
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
 		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),

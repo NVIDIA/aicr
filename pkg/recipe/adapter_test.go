@@ -117,6 +117,36 @@ func TestMergeValues(t *testing.T) {
 				"value": "string",
 			},
 		},
+		{
+			name: "null override deletes key",
+			base: map[string]any{
+				"storageSpec": map[string]any{
+					"emptyDir": map[string]any{
+						"medium":    "",
+						"sizeLimit": "10Gi",
+					},
+				},
+			},
+			overlay: map[string]any{
+				"storageSpec": map[string]any{
+					"emptyDir": nil,
+					"volumeClaimTemplate": map[string]any{
+						"spec": map[string]any{
+							"storageClassName": "managed-csi",
+						},
+					},
+				},
+			},
+			expected: map[string]any{
+				"storageSpec": map[string]any{
+					"volumeClaimTemplate": map[string]any{
+						"spec": map[string]any{
+							"storageClassName": "managed-csi",
+						},
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

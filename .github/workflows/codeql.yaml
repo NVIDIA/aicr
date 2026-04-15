@@ -53,14 +53,14 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/load-versions
         id: versions
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417  # v6.3.0
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false  # vendor/ provides deps; disable to save disk on constrained runners
-      - uses: github/codeql-action/init@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
+      - uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13  # v4.35.1
         with:
           languages: go
       - run: go build ./...
         env:
           GOFLAGS: -mod=vendor
-      - uses: github/codeql-action/analyze@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
+      - uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13  # v4.35.1

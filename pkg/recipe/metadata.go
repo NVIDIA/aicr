@@ -16,6 +16,7 @@
 package recipe
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -23,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"gopkg.in/yaml.v3"
 )
 
 // RecipeMetadataKind is the kind value for RecipeMetadata resources.
@@ -238,6 +240,13 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 			ref.Path = config.Kustomize.DefaultPath
 		}
 	}
+
+	// NOTE: healthCheck.assertFile content is intentionally NOT loaded here.
+	// The deployment validator image (distroless) does not include the chainsaw
+	// binary required to execute Chainsaw Test format assertions. Loading the
+	// content would activate chainsaw-based checks in expected-resources, causing
+	// runtime failures. Health check files are used by the conformance validator,
+	// which has its own chainsaw execution path.
 }
 
 // RecipeMetadataSpec contains the specification for a recipe.
@@ -252,6 +261,12 @@ type RecipeMetadataSpec struct {
 	// Only present in overlay files, not in base.
 	Criteria *Criteria `json:"criteria,omitempty" yaml:"criteria,omitempty"`
 
+	// Mixins is a list of mixin names to compose into this overlay.
+	// Mixins are loaded from recipes/mixins/ and carry only constraints
+	// and componentRefs. This field is loader metadata and is stripped
+	// from the materialized recipe result.
+	Mixins []string `json:"mixins,omitempty" yaml:"mixins,omitempty"`
+
 	// Constraints are deployment assumptions/requirements.
 	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 
@@ -261,6 +276,24 @@ type RecipeMetadataSpec struct {
 	// Validation defines multi-phase validation configuration.
 	// Presence of a phase implies it is enabled.
 	Validation *ValidationConfig `json:"validation,omitempty" yaml:"validation,omitempty"`
+}
+
+// RecipeMixinKind is the kind value for mixin files.
+const RecipeMixinKind = "RecipeMixin"
+
+// RecipeMixin represents a composable fragment that carries only constraints
+// and componentRefs. Mixins live in recipes/mixins/ and are referenced by
+// overlay spec.mixins fields.
+type RecipeMixin struct {
+	Kind       string `json:"kind" yaml:"kind"`
+	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
+	Metadata   struct {
+		Name string `json:"name" yaml:"name"`
+	} `json:"metadata" yaml:"metadata"`
+	Spec struct {
+		Constraints   []Constraint   `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+		ComponentRefs []ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
+	} `json:"spec" yaml:"spec"`
 }
 
 // RecipeMetadataHeader contains the Kubernetes-style header fields.
@@ -304,6 +337,67 @@ type ConstraintWarning struct {
 	Reason string `json:"reason" yaml:"reason"`
 }
 
+// ExcludedOverlayReason indicates why a matching overlay was dropped.
+type ExcludedOverlayReason string
+
+const (
+	// ExcludedOverlayReasonConstraintFailed is used when an overlay's own
+	// constraints fail pre-merge evaluation.
+	ExcludedOverlayReasonConstraintFailed ExcludedOverlayReason = "constraint-failed"
+	// ExcludedOverlayReasonMixinConstraintFailed is used when a candidate chain
+	// is excluded during post-compose mixin constraint evaluation.
+	ExcludedOverlayReasonMixinConstraintFailed ExcludedOverlayReason = "mixin-constraint-failed"
+)
+
+// ExcludedOverlay records a matching overlay that was excluded from the final
+// recipe result, along with a machine-readable reason.
+type ExcludedOverlay struct {
+	// Name is the excluded overlay name.
+	Name string `json:"name" yaml:"name"`
+
+	// Reason identifies why the overlay was excluded.
+	Reason ExcludedOverlayReason `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// UnmarshalYAML accepts both the legacy scalar string form:
+//   - excludedOverlays: ["overlay-name"]
+//
+// and the current object form:
+//   - excludedOverlays: [{name: overlay-name, reason: constraint-failed}]
+func (e *ExcludedOverlay) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		e.Name = node.Value
+		e.Reason = ""
+		return nil
+	}
+
+	type rawExcludedOverlay ExcludedOverlay
+	var raw rawExcludedOverlay
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	*e = ExcludedOverlay(raw)
+	return nil
+}
+
+// UnmarshalJSON accepts both the legacy string form and the current object form.
+func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
+	var name string
+	if err := json.Unmarshal(data, &name); err == nil {
+		e.Name = name
+		e.Reason = ""
+		return nil
+	}
+
+	type rawExcludedOverlay ExcludedOverlay
+	var raw rawExcludedOverlay
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*e = ExcludedOverlay(raw)
+	return nil
+}
+
 // RecipeResult represents the final merged recipe output.
 type RecipeResult struct {
 	// Kind is always "RecipeResult".
@@ -321,9 +415,9 @@ type RecipeResult struct {
 		AppliedOverlays []string `json:"appliedOverlays,omitempty" yaml:"appliedOverlays,omitempty"`
 
 		// ExcludedOverlays lists overlays that matched criteria but were excluded
-		// due to failing constraint validation against the snapshot.
+		// from the final recipe, along with the machine-readable exclusion reason.
 		// Only populated when a snapshot is provided during recipe generation.
-		ExcludedOverlays []string `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
+		ExcludedOverlays []ExcludedOverlay `json:"excludedOverlays,omitempty" yaml:"excludedOverlays,omitempty"`
 
 		// ConstraintWarnings contains details about why specific overlays were excluded.
 		// Helps users understand why certain environment-specific configurations
@@ -412,6 +506,23 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 			}
 			if other.Validation.Conformance != nil {
 				s.Validation.Conformance = other.Validation.Conformance
+			}
+		}
+	}
+
+	// Accumulate mixins (deduplicated, preserving order).
+	// Both leaf and intermediate overlays can declare mixins. When an
+	// intermediate overlay (e.g., eks-inference) declares a mixin, it is
+	// accumulated into all descendants during inheritance chain merging.
+	if len(other.Mixins) > 0 {
+		seen := make(map[string]bool)
+		for _, m := range s.Mixins {
+			seen[m] = true
+		}
+		for _, m := range other.Mixins {
+			if !seen[m] {
+				s.Mixins = append(s.Mixins, m)
+				seen[m] = true
 			}
 		}
 	}

@@ -126,7 +126,7 @@ All releases must pass:
 - **Unit tests**: With race detector enabled
 - **Linting**: golangci-lint + yamllint
 - **License headers**: All source files verified
-- **Security scans**: Trivy in release workflows, Grype in `make scan`
+- **Security scans**: Anchore in release workflows, Grype in `make scan`
 
 ## Verification
 

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -54,6 +55,12 @@ const (
 
 	// trainerCRDName is the CRD that signals the Trainer operator is installed.
 	trainerCRDName = "trainjobs.trainer.kubeflow.org"
+
+	// trainerControllerDeployment is the Deployment name for the Trainer controller-manager.
+	trainerControllerDeployment = "kubeflow-trainer-controller-manager"
+
+	// trainerNamespace is the namespace where the Trainer operator is installed.
+	trainerNamespace = "kubeflow-system"
 
 	// maxExtractedFileSize caps individual file sizes during tar extraction (50 MB).
 	maxExtractedFileSize = 50 * 1024 * 1024
@@ -178,6 +185,12 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 		return applied, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "Trainer CRDs not ready after install", err)
 	}
 
+	// Wait for the controller-manager to be ready so the ValidatingWebhookConfiguration
+	// backing Service can serve requests before the caller creates TrainingRuntime resources.
+	if err := waitForTrainerControllerReady(ctx, dynamicClient); err != nil {
+		return applied, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "Trainer controller not ready after install", err)
+	}
+
 	return applied, nil
 }
 
@@ -223,6 +236,40 @@ func waitForTrainerCRDsEstablished(ctx context.Context, dynamicClient dynamic.In
 		}
 	}
 	return nil
+}
+
+// waitForTrainerControllerReady polls the controller-manager Deployment until at
+// least one replica is ready, ensuring the ValidatingWebhookConfiguration can
+// serve admission requests before the caller creates Trainer custom resources.
+func waitForTrainerControllerReady(ctx context.Context, dynamicClient dynamic.Interface) error {
+	slog.Info("Waiting for Trainer controller-manager to become ready",
+		"deployment", trainerControllerDeployment, "namespace", trainerNamespace)
+
+	deployGVR := schema.GroupVersionResource{
+		Group: "apps", Version: "v1", Resource: "deployments",
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.TrainerControllerReadyTimeout)
+	defer cancel()
+
+	for {
+		deploy, err := dynamicClient.Resource(deployGVR).Namespace(trainerNamespace).
+			Get(waitCtx, trainerControllerDeployment, metav1.GetOptions{})
+		if err == nil {
+			readyReplicas, _, _ := unstructured.NestedInt64(deploy.Object, "status", "readyReplicas")
+			if readyReplicas >= 1 {
+				slog.Info("Trainer controller-manager is ready", "readyReplicas", readyReplicas)
+				return nil
+			}
+		}
+
+		select {
+		case <-waitCtx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"timed out waiting for Trainer controller-manager to become ready", waitCtx.Err())
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // waitForCRDEstablished watches a CRD until its Established condition is True.

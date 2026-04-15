@@ -54,6 +54,8 @@ func ExtractCriteriaFromSnapshot(snap *snapshotter.Snapshot) *Criteria {
 							criteria.Service = CriteriaServiceGKE
 						case strings.Contains(versionStr, "-aks"):
 							criteria.Service = CriteriaServiceAKS
+						case strings.Contains(versionStr, "+lke"):
+							criteria.Service = CriteriaServiceLKE
 						}
 					}
 				}
@@ -105,6 +107,8 @@ func matchAccelerator(model string) CriteriaAcceleratorType {
 	// Follow this pattern when adding future Blackwell variants (e.g., check "gb300" before "b300").
 	case strings.Contains(lower, "b200"):
 		return CriteriaAcceleratorB200
+	case strings.Contains(lower, "rtx pro 6000"):
+		return CriteriaAcceleratorRTXPro6000
 	case strings.Contains(lower, "h100"):
 		return CriteriaAcceleratorH100
 	case strings.Contains(lower, "a100"):

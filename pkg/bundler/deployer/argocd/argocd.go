@@ -40,15 +40,17 @@ var readmeTemplate string
 
 // ApplicationData contains data for rendering an ArgoCD Application.
 type ApplicationData struct {
-	Name        string
-	Namespace   string
-	Repository  string
-	Chart       string
-	Version     string
-	SyncWave    int
-	IsKustomize bool   // True when the component uses Kustomize instead of Helm
-	Tag         string // Git ref for Kustomize components (tag, branch, or commit)
-	Path        string // Path within the repository to the kustomization
+	Name           string
+	Namespace      string
+	Repository     string
+	Chart          string
+	Version        string
+	SyncWave       int
+	IsKustomize    bool   // True when the component uses Kustomize instead of Helm
+	Tag            string // Git ref for Kustomize components (tag, branch, or commit)
+	Path           string // Path within the repository to the kustomization
+	RepoURL        string // Values repo URL for multi-source Helm apps
+	TargetRevision string // Target revision for values repo
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -80,6 +82,9 @@ type GeneratorInput struct {
 	// If empty, a placeholder URL will be used.
 	RepoURL string
 
+	// TargetRevision is the target revision for the repo (default: "main").
+	TargetRevision string
+
 	// IncludeChecksums indicates whether to generate a checksums.txt file.
 	IncludeChecksums bool
 }
@@ -110,6 +115,20 @@ func NewGenerator() *Generator {
 	return &Generator{}
 }
 
+// resolveRepoSettings returns the effective repoURL and targetRevision,
+// applying defaults when the input values are empty.
+func resolveRepoSettings(input *GeneratorInput) (repoURL, targetRevision string) {
+	repoURL = input.RepoURL
+	if repoURL == "" {
+		repoURL = "https://github.com/YOUR-ORG/YOUR-REPO.git"
+	}
+	targetRevision = input.TargetRevision
+	if targetRevision == "" {
+		targetRevision = "main"
+	}
+	return repoURL, targetRevision
+}
+
 // Generate creates ArgoCD Applications from the given input.
 func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputDir string) (*GeneratorOutput, error) {
 	start := time.Now()
@@ -127,6 +146,8 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to create output directory", err)
 	}
+
+	repoURL, targetRevision := resolveRepoSettings(input)
 
 	// Sort components by deployment order
 	components := shared.SortComponentRefsByDeploymentOrder(
@@ -150,15 +171,17 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		}
 
 		appData := ApplicationData{
-			Name:        comp.Name,
-			Namespace:   comp.Namespace,
-			Repository:  comp.Source,
-			Chart:       chartName,
-			Version:     shared.NormalizeVersion(comp.Version),
-			SyncWave:    i, // Use index as sync wave
-			IsKustomize: isKustomize,
-			Tag:         comp.Tag,
-			Path:        comp.Path,
+			Name:           comp.Name,
+			Namespace:      comp.Namespace,
+			Repository:     comp.Source,
+			Chart:          chartName,
+			Version:        shared.NormalizeVersion(comp.Version),
+			SyncWave:       i, // Use index as sync wave
+			IsKustomize:    isKustomize,
+			Tag:            comp.Tag,
+			Path:           comp.Path,
+			RepoURL:        repoURL,
+			TargetRevision: targetRevision,
 		}
 		appDataList = append(appDataList, appData)
 	}
@@ -206,13 +229,9 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	}
 
 	// Generate app-of-apps.yaml
-	repoURL := input.RepoURL
-	if repoURL == "" {
-		repoURL = "https://github.com/YOUR-ORG/YOUR-REPO.git"
-	}
 	appOfAppsData := AppOfAppsData{
 		RepoURL:        repoURL,
-		TargetRevision: "main",
+		TargetRevision: targetRevision,
 		Path:           ".",
 	}
 	appOfAppsPath, appOfAppsSize, err := shared.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")

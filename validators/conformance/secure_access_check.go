@@ -112,7 +112,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	}
 
 	// Deploy DRA test resources and ensure cleanup.
-	if err = deployDRATestResources(ctx.Ctx, ctx.Clientset, dynClient, run); err != nil {
+	if err = deployDRATestResources(ctx.Ctx, ctx.Clientset, dynClient, run, ctx.Tolerations); err != nil {
 		return err
 	}
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup
@@ -240,7 +240,8 @@ func collectSecureAccessBaselineArtifacts(ctx *validators.Context, dynClient dyn
 }
 
 // deployDRATestResources creates the namespace, ResourceClaim, and Pod for the DRA test.
-func deployDRATestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *draTestRun) error {
+// tolerations, when non-nil, replace the default tolerate-all policy on the test pod.
+func deployDRATestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *draTestRun, tolerations []corev1.Toleration) error {
 	// 1. Create namespace (idempotent).
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: draTestNamespace},
@@ -257,7 +258,7 @@ func deployDRATestResources(ctx context.Context, clientset kubernetes.Interface,
 	}
 
 	// 3. Create Pod with unique name.
-	pod := buildDRATestPod(run)
+	pod := buildDRATestPod(run, tolerations)
 	if _, err := clientset.CoreV1().Pods(draTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create DRA test pod", err)
 	}
@@ -509,7 +510,11 @@ func cleanupDRATestResources(ctx context.Context, clientset kubernetes.Interface
 }
 
 // buildDRATestPod returns the Pod spec for the DRA GPU allocation test.
-func buildDRATestPod(run *draTestRun) *corev1.Pod {
+// tolerations, when non-nil, replace the default tolerate-all policy.
+func buildDRATestPod(run *draTestRun, tolerations []corev1.Toleration) *corev1.Pod {
+	if tolerations == nil {
+		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.podName,
@@ -517,9 +522,7 @@ func buildDRATestPod(run *draTestRun) *corev1.Pod {
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations: []corev1.Toleration{
-				{Operator: corev1.TolerationOpExists},
-			},
+			Tolerations:   tolerations,
 			ResourceClaims: []corev1.PodResourceClaim{
 				{
 					Name:              "gpu",

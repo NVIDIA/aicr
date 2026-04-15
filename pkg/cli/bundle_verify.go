@@ -61,13 +61,13 @@ Output as JSON:
   aicr verify ./my-bundle --format json
 `,
 		Flags: []cli.Flag{
-			&cli.StringFlag{
+			withCompletions(&cli.StringFlag{
 				Name:  "min-trust-level",
 				Value: "max",
 				Usage: `Minimum required trust level. "max" (default) auto-detects the highest
 	achievable level for this bundle and verifies against it.
 	Explicit levels: verified, attested, unverified, unknown`,
-			},
+			}, verifier.GetTrustLevels),
 			&cli.StringFlag{
 				Name:  "require-creator",
 				Usage: "Require a specific creator identity (matched against bundle attestation certificate)",
@@ -83,11 +83,11 @@ Output as JSON:
 				Usage: `Override the certificate identity pattern for binary attestation verification.
 	Must contain "NVIDIA/aicr". Default pins to the release workflow on tag refs.`,
 			},
-			&cli.StringFlag{
+			withCompletions(&cli.StringFlag{
 				Name:  "format",
 				Value: "text",
 				Usage: "Output format: text, json",
-			},
+			}, func() []string { return []string{"json", "text"} }),
 		},
 		Action: runBundleVerifyCmd,
 	}

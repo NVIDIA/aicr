@@ -145,7 +145,6 @@ All notable changes to this project will be documented in this file.
 - Deps: bump actions/download-artifact from 4.1.8 to 8.0.1  by [@dependabot[bot]](https://github.com/dependabot[bot])
 - Deps: bump actions/upload-artifact from 6.0.0 to 7.0.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
 - Deps: bump actions/setup-go from 6.2.0 to 6.3.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
-- Deps: bump aquasecurity/trivy-action from 0.34.1 to 0.35.0  by [@dependabot[bot]](https://github.com/dependabot[bot])
 - Deps: update hashicorp/aws requirement from ~> 5.0 to ~> 6.36 in /infra/uat-aws-account  by [@dependabot[bot]](https://github.com/dependabot[bot])
 
 ## [0.10.10] - 2026-03-11

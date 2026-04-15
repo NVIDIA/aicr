@@ -564,8 +564,8 @@ aicr validate [flags]
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Name for the validation Job |
 | `--service-account-name` | | string | aicr | ServiceAccount name for validation Job |
-| `--node-selector` | | string[] | | Node selector for validation scheduling (key=value, repeatable) |
-| `--toleration` | | string[] | | Tolerations for validation scheduling (key=value:effect, repeatable) |
+| `--node-selector` | | string[] | | Override GPU node selection for validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
+| `--toleration` | | string[] | | Override tolerations for validation workloads. Replaces the default tolerate-all policy on inner workloads like NCCL benchmark pods and conformance test pods. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
 | `--no-cleanup` | | bool | false | Skip removal of Job and RBAC resources on completion |
 | `--require-gpu` | | bool | false | Require GPU resources on the validation pod |
@@ -667,7 +667,42 @@ aicr validate \
   --recipe recipe.yaml \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --kubeconfig ~/.kube/prod-cluster
+
+# Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
+# recognize by default, e.g., using a custom node pool label instead of cloud-provider defaults)
+aicr validate \
+  --recipe recipe.yaml \
+  --node-selector my-org/gpu-pool=true \
+  --phase performance
+
+# Override both node selector and tolerations for a non-standard taint setup
+aicr validate \
+  --recipe recipe.yaml \
+  --node-selector gpu-type=h100 \
+  --toleration gpu-type=h100:NoSchedule
 ```
+
+**Workload Scheduling:**
+
+The `--node-selector` and `--toleration` flags control scheduling for **validation
+workloads** — the inner pods that validators create to test cluster functionality
+(e.g., NCCL benchmark workers, conformance test pods). They do **not** affect the
+validator orchestrator Job, which runs lightweight check logic and is placed on
+CPU-preferred nodes automatically.
+
+When `--node-selector` is provided, it replaces the platform-specific selectors
+that validators use by default:
+
+| Platform | Default Selector (replaced) | Use Case |
+|----------|-----------------------------|----------|
+| GKE | `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb` | Non-standard GPU node pool labels |
+| EKS | `node.kubernetes.io/instance-type: <discovered>` | Custom node pool labels |
+
+When `--toleration` is provided, it replaces the default tolerate-all policy
+(`operator: Exists`) on workloads that need to land on tainted GPU nodes.
+
+Validators that use `nodeName` pinning (nvidia-smi, DRA isolation test) or
+DRA ResourceClaims for placement (gang scheduling) are not affected by these flags.
 
 **Output Structure ([CTRF](https://ctrf.io/) JSON):**
 
@@ -771,6 +806,7 @@ aicr bundle [flags]
 | `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
 | `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -832,8 +868,11 @@ The `--deployer` flag controls how deployment artifacts are generated:
 
 | Method | Description |
 |--------|-------------|
-| `helm` | (Default) Generates Helm charts with values for deployment |
-| `argocd` | Generates ArgoCD Application manifests for GitOps deployment |
+| `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
+| `argocd` | Generates ArgoCD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
+| `argocd-helm` | Generates a Helm chart app-of-apps for ArgoCD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
+
+> **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
 **Deployment Order:**
 
@@ -943,6 +982,101 @@ aicr bundle -r recipe.yaml --deployer argocd \
 aicr bundle -r recipe.yaml \
   --deployer argocd \
   -o ./bundles
+```
+
+**Dynamic Install-Time Values (`--dynamic`):**
+
+The `--dynamic` flag declares value paths that are cluster-specific and should be provided at install time rather than baked into the bundle at build time. This enables building a single bundle that can be deployed to multiple clusters with different configurations.
+
+Use `--dynamic` for values that genuinely vary per cluster — cluster names, subnet IDs, endpoint URLs, region-specific settings. For values that are static per bundle but differ from the recipe default (e.g., a specific driver version), use `--set` instead.
+
+| Use case | Flag | Example |
+|----------|------|---------|
+| Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
+| Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
+
+```shell
+--dynamic component:path.to.field
+```
+
+**Format:** `component:path` where:
+- `component` - Component name or override key (same keys as `--set`, e.g., `gpuoperator`, `alloy`)
+- `path` - Dot-separated path to the value that varies per cluster
+
+**Helm deployer behavior:**
+
+Dynamic paths are removed from `values.yaml` and written to a separate `cluster-values.yaml` per component. The generated `deploy.sh` passes both files to Helm:
+
+```shell
+helm upgrade --install gpu-operator ... \
+  -f values.yaml \
+  -f cluster-values.yaml
+```
+
+Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
+
+**ArgoCD deployer behavior:**
+
+The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
+
+```shell
+helm install aicr-bundle ./bundle \
+  --set alloy.clusterName=prod-east \
+  --set alloy.subnetName=subnet-abc123
+```
+
+**Examples:**
+```shell
+# Helm: declare cluster name as install-time parameter
+aicr bundle -r recipe.yaml \
+  --dynamic alloy:clusterName \
+  -o ./bundles
+
+# Helm: multiple dynamic paths across components
+aicr bundle -r recipe.yaml \
+  --dynamic alloy:clusterName \
+  --dynamic alloy:subnetName \
+  -o ./bundles
+
+# Helm: combine with --set (static overrides + dynamic cluster-specific values)
+aicr bundle -r recipe.yaml \
+  --set gpuoperator:driver.version=580.105.08 \
+  --dynamic alloy:clusterName \
+  -o ./bundles
+
+# ArgoCD Helm chart: all values overridable, --dynamic pre-populates specific paths
+aicr bundle -r recipe.yaml \
+  --deployer argocd-helm \
+  --dynamic alloy:clusterName \
+  -o ./bundles
+
+# ArgoCD Helm chart: without --dynamic, still fully overridable via helm --set
+aicr bundle -r recipe.yaml \
+  --deployer argocd-helm \
+  -o ./bundles
+```
+
+**Bundle structure with `--dynamic`** (Helm deployer):
+```
+bundles/
+├── alloy/
+│   ├── values.yaml                # Static values (clusterName removed)
+│   └── cluster-values.yaml        # Dynamic values (override before deploying)
+├── gpu-operator/
+│   └── values.yaml                # No dynamic values, no cluster-values.yaml
+├── deploy.sh                      # Passes -f cluster-values.yaml when present
+└── ...
+```
+
+**ArgoCD Helm chart structure with `--dynamic`:**
+```
+bundles/
+├── Chart.yaml                     # Helm chart metadata
+├── values.yaml                    # Dynamic values only (defaults from recipe, override per cluster)
+├── templates/
+│   ├── alloy.yaml                 # ArgoCD Application template with helm.values
+│   └── gpu-operator.yaml
+└── README.md
 ```
 
 **Bundle structure** (with default Helm deployer):
@@ -1120,7 +1254,7 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 | Flag | Description |
 |------|-------------|
-| `--no-wait` | Skip `helm --wait` for each component (faster, no readiness check) |
+| `--no-wait` | Skip `helm --wait` for each component (keeps `--timeout` for hooks) |
 | `--best-effort` | Continue past individual component failures instead of exiting |
 | `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 

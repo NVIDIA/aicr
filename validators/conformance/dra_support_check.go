@@ -38,9 +38,11 @@ func CheckDRASupport(ctx *validators.Context) error {
 	}
 
 	// 0. Check if DRA API is available (skip gracefully if not).
-	_, draAPIErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion("resource.k8s.io/v1beta1")
+	// DRA graduated to GA (resource.k8s.io/v1) in K8s 1.34.
+	// All downstream code (ResourceSlices, ResourceClaims) uses v1.
+	_, draAPIErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion("resource.k8s.io/v1")
 	if draAPIErr != nil {
-		return validators.Skip("DRA API (resource.k8s.io/v1beta1) not available — cluster may not support Dynamic Resource Allocation")
+		return validators.Skip("DRA API (resource.k8s.io/v1) not available — cluster may not support Dynamic Resource Allocation (requires K8s 1.34+)")
 	}
 
 	// 0b. Check if nvidia DRA driver is installed.
@@ -148,7 +150,7 @@ func validateDRAAllocation(ctx *validators.Context, dynClient dynamic.Interface)
 		fmt.Sprintf("Created Namespace=%s ResourceClaim=%s Pod=%s via Kubernetes API",
 			draTestNamespace, run.claimName, run.podName))
 
-	if err = deployDRATestResources(ctx.Ctx, ctx.Clientset, dynClient, run); err != nil {
+	if err = deployDRATestResources(ctx.Ctx, ctx.Clientset, dynClient, run, ctx.Tolerations); err != nil {
 		return err
 	}
 	defer func() { //nolint:contextcheck // Fresh context: parent may be canceled during cleanup

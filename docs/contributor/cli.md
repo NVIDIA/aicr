@@ -1067,9 +1067,9 @@ $ aicr recipe
 ### Recipe Command
 
 - **Store Loading**: Once per process (cached via `sync.Once`)
-- **Typical Duration**: <10ms after initial load
+- **Typical Duration**: &lt;10ms after initial load
 - **Memory Usage**: ~5-10MB (embedded YAML + parsed structure)
-- **Scalability**: O(m) with number of overlays (typically <100)
+- **Scalability**: O(m) with number of overlays (typically &lt;100)
 
 ## Build Configuration
 
@@ -2007,10 +2007,11 @@ pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 
 ```bash
 # Build with profiling enabled
-go build -o aicr cmd/aicr/main.go
+mkdir -p bin
+go build -o bin/aicr cmd/aicr/main.go
 
 # Capture CPU profile
-./aicr snapshot --cpuprofile=cpu.prof
+./bin/aicr snapshot --cpuprofile=cpu.prof
 
 # Analyze profile
 go tool pprof cpu.prof
@@ -2034,7 +2035,7 @@ go tool pprof cpu.prof
 
 ```bash
 # Capture memory profile
-./aicr snapshot --memprofile=mem.prof
+./bin/aicr snapshot --memprofile=mem.prof
 
 # Analyze allocations
 go tool pprof -alloc_space mem.prof

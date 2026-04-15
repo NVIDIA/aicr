@@ -34,10 +34,10 @@ sync_section "${DOCS}/user" "${SITE_DOCS}/user"
 sync_section "${DOCS}/integrator" "${SITE_DOCS}/integrator"
 sync_section "${DOCS}/contributor" "${SITE_DOCS}/contributor"
 
-# Conformance: flatten cncf/ prefix (docs/conformance/cncf/ → site/docs/conformance/)
-mkdir -p "${SITE_DOCS}/conformance"
-rm -rf "${SITE_DOCS}/conformance/evidence" "${SITE_DOCS}/conformance/index.md"
-cp -R "${DOCS}/conformance/cncf/evidence" "${SITE_DOCS}/conformance/evidence"
-cp "${DOCS}/conformance/cncf/index.md" "${SITE_DOCS}/conformance/index.md"
+# Conformance: flatten cncf/ prefix (docs/conformance/cncf/ → site/docs/conformance/).
+# Copies the entire cncf/ subtree so new subdirectories (e.g., v1.35/) are picked up
+# automatically without maintaining an explicit file list.
+rm -rf "${SITE_DOCS}/conformance"
+cp -R "${DOCS}/conformance/cncf" "${SITE_DOCS}/conformance"
 
 echo "OK: synced docs/ → site/docs/"

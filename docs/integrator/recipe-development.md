@@ -74,11 +74,12 @@ make qualify  # Includes end to end tests before submitting
 
 ## Overview
 
-Recipe metadata files define component configurations for GPU-accelerated Kubernetes deployments using a **base-plus-overlay architecture** with **multi-level inheritance**:
+Recipe metadata files define component configurations for GPU-accelerated Kubernetes deployments using a **base-plus-overlay architecture** with **multi-level inheritance** and **mixin composition**:
 
 - **Base values** (`overlays/base.yaml`) - universal defaults
 - **Intermediate recipes** (`eks.yaml`, `eks-training.yaml`) - shared configurations for categories
 - **Leaf recipes** (`gb200-eks-ubuntu-training.yaml`) - hardware/workload-specific overrides
+- **Mixins** (`mixins/*.yaml`) - composable fragments (OS constraints, platform components) that leaf overlays reference via `spec.mixins` instead of duplicating content
 - **Inline overrides** - per-recipe customization without new files
 
 Recipe files in `recipes/` are embedded at compile time. Integrators can extend or override using the `--data` flag (see [Advanced Topics](#advanced-topics)).
@@ -125,12 +126,31 @@ spec:
           version: "580.82.07"  # Hardware-specific override
 ```
 
-**Merge order:** `base.yaml` (lowest) → intermediate → leaf (highest)
+**Leaf recipes with mixins** compose shared fragments:
+```yaml
+# h100-eks-ubuntu-training-kubeflow.yaml
+spec:
+  base: h100-eks-ubuntu-training
+  mixins:
+    - os-ubuntu          # Shared Ubuntu constraints (from recipes/mixins/)
+    - platform-kubeflow  # Kubeflow trainer component (from recipes/mixins/)
+  criteria:
+    service: eks
+    accelerator: h100
+    os: ubuntu
+    intent: training
+    platform: kubeflow
+```
+
+Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/data.md#mixin-composition) for details.
+
+**Merge order:** `base.yaml` (lowest) → intermediate → leaf → mixins (highest)
 
 **Merge rules:**
 - Constraints: same-named overridden, new added
 - ComponentRefs: same-named merged field-by-field, new added
 - Criteria: not inherited (each recipe defines its own)
+- Mixin constraints/components must not conflict with the inheritance chain or other mixins
 
 ### Component Types
 
@@ -219,6 +239,8 @@ File names are for human readability—matching uses `spec.criteria`, not file n
 | Service + intent | `{service}-{intent}.yaml` | `eks-training.yaml` |
 | Full criteria | `{accel}-{service}-{os}-{intent}.yaml` | `gb200-eks-ubuntu-training.yaml` |
 | + platform | `{accel}-{service}-{os}-{intent}-{platform}.yaml` | `gb200-eks-ubuntu-training-kubeflow.yaml` |
+| Mixin (OS) | `os-{os}.yaml` | `os-ubuntu.yaml` |
+| Mixin (platform) | `platform-{platform}.yaml` | `platform-kubeflow.yaml` |
 | Component values | `values-{service}-{intent}.yaml` | `values-eks-training.yaml` |
 
 ## Constraints and Validation
@@ -298,9 +320,10 @@ go test -v ./pkg/recipe/... -run TestConstraintPathsUseValidMeasurementTypes
 
 **Steps:**
 1. Create overlay in `recipes/overlays/` with criteria and componentRefs
-2. Create component values files if using `valuesFile`
-3. Run tests: `make test`
-4. Test generation: `aicr recipe --service eks --accelerator gb200 --format yaml`
+2. If the recipe shares OS constraints or platform components with other overlays, reference existing mixins via `spec.mixins` instead of duplicating (or create new mixins in `recipes/mixins/`)
+3. Create component values files if using `valuesFile`
+4. Run tests: `make test`
+5. Test generation: `aicr recipe --service eks --accelerator gb200 --format yaml`
 
 **Example:**
 ```yaml
@@ -348,6 +371,7 @@ componentRefs:
 **Do:**
 - Use minimum criteria fields needed for matching
 - Keep base recipe universal and conservative
+- Use mixins for shared OS constraints or platform components instead of duplicating across leaf overlays
 - Always explain why settings exist (1-2 sentences)
 - Follow naming conventions (`{accel}-{service}-{os}-{intent}-{platform}`)
 - Run `make test` before committing
@@ -357,6 +381,7 @@ componentRefs:
 - Add environment-specific settings to base
 - Over-specify criteria (too narrow = fewer matches)
 - Create duplicate criteria combinations
+- Duplicate OS or platform content across leaf overlays (use mixins instead)
 - Skip validation tests
 - Forget to update context when values change
 
@@ -406,6 +431,8 @@ Integrators can extend or override embedded recipe data using the `--data` flag 
 ├── registry.yaml              # Extends/overrides component registry
 ├── overlays/
 │   └── custom-recipe.yaml     # New or override existing recipe
+├── mixins/
+│   └── os-custom.yaml         # Custom mixin fragments
 └── components/
     └── my-operator/
         └── values.yaml        # Component values

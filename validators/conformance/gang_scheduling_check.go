@@ -195,7 +195,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		fmt.Sprintf("Created PodGroup=%s ResourceClaims=%s,%s Pods=%s,%s in namespace=%s",
 			run.groupName, run.claims[0], run.claims[1], run.pods[0], run.pods[1], gangTestNamespace))
 
-	if err = deployGangTestResources(ctx.Ctx, ctx.Clientset, dynClient, run); err != nil {
+	if err = deployGangTestResources(ctx.Ctx, ctx.Clientset, dynClient, run, ctx.Tolerations); err != nil {
 		return err
 	}
 
@@ -275,7 +275,8 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 }
 
 // deployGangTestResources creates the namespace, PodGroup, ResourceClaims, and Pods.
-func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun) error {
+// tolerations, when non-nil, replace the default tolerate-all policy on test pods.
+func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun, tolerations []corev1.Toleration) error {
 	// 1. Create namespace (idempotent).
 	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: gangTestNamespace},
@@ -300,7 +301,7 @@ func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface
 				fmt.Sprintf("failed to create ResourceClaim %s", run.claims[i]), err)
 		}
 
-		pod := buildGangTestPod(run, i)
+		pod := buildGangTestPod(run, i, tolerations)
 		if _, err := clientset.CoreV1().Pods(gangTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to create gang test pod %s", run.pods[i]), err)
@@ -505,7 +506,11 @@ func buildGangResourceClaim(run *gangTestRun, index int) *unstructured.Unstructu
 }
 
 // buildGangTestPod returns the Pod spec for a gang scheduling test worker.
-func buildGangTestPod(run *gangTestRun, index int) *corev1.Pod {
+// tolerations, when non-nil, replace the default tolerate-all policy.
+func buildGangTestPod(run *gangTestRun, index int, tolerations []corev1.Toleration) *corev1.Pod {
+	if tolerations == nil {
+		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.pods[index],
@@ -518,9 +523,7 @@ func buildGangTestPod(run *gangTestRun, index int) *corev1.Pod {
 		Spec: corev1.PodSpec{
 			SchedulerName: "kai-scheduler",
 			RestartPolicy: corev1.RestartPolicyNever,
-			Tolerations: []corev1.Toleration{
-				{Operator: corev1.TolerationOpExists},
-			},
+			Tolerations:   tolerations,
 			ResourceClaims: []corev1.PodResourceClaim{
 				{
 					Name:              "gpu",

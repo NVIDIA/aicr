@@ -25,6 +25,11 @@ const (
 	// CollectorK8sTimeout is the timeout for Kubernetes API calls in collectors.
 	// Covers 6 sequential sub-collectors (server, image, policy, node, helm, argocd).
 	CollectorK8sTimeout = 60 * time.Second
+
+	// NFDDetectionTimeout is the timeout for NFD-based hardware detection.
+	// PCI enumeration and kernel module listing are fast local operations
+	// reading from sysfs/procfs, so a short timeout is sufficient.
+	NFDDetectionTimeout = 5 * time.Second
 )
 
 // Node topology collector constants.
@@ -226,6 +231,10 @@ const (
 	// TrainerCRDEstablishedTimeout is the time to wait for Kubeflow Trainer CRDs
 	// to reach the Established condition after installation.
 	TrainerCRDEstablishedTimeout = 2 * time.Minute
+
+	// TrainerControllerReadyTimeout is the time to wait for the Kubeflow Trainer
+	// controller-manager Deployment to have at least one ready replica after installation.
+	TrainerControllerReadyTimeout = 2 * time.Minute
 
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute

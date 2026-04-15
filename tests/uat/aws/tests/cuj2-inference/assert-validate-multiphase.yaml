@@ -12,10 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert the validation result is a valid CTRF report.
+# Assert multiphase CTRF validation report structure.
+#
+# NOTE: chainsaw assert --resource requires apiVersion/kind to parse the file.
+# CTRF JSON doesn't have these natively, so we inject them in the test script
+# before asserting. These two fields are not part of the actual CTRF output.
+#
+# With --no-cluster, all checks are skipped (none passed/failed). Assert that
+# the report is well-formed and contains no failures.
+apiVersion: ctrf/v1
+kind: CTRFReport
 reportFormat: CTRF
 results:
   tool:
     name: aicr
   summary:
-    tests: (@ > 0)
+    failed: 0
+    pending: 0
+    other: 0
+(results.summary.tests > `0`): true
+(results.summary.skipped == results.summary.tests): true

@@ -98,7 +98,7 @@ cat sbom.json | jq .
 
 **SBOM Use Cases:**
 
-1. **Vulnerability Scanning** – Feed SBOM to Grype, Trivy, or Snyk
+1. **Vulnerability Scanning** – Feed SBOM to Grype, Anchore, or Snyk
    ```shell
    grype sbom:./sbom.json
    ```

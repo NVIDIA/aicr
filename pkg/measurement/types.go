@@ -31,6 +31,11 @@ const (
 	KeyGPUDriver = "driver"
 	KeyGPUModel  = "model"
 	KeyGPUCount  = "gpu-count"
+
+	// GPU hardware detection keys (NFD-based, no driver required)
+	KeyGPUPresent         = "gpu-present"
+	KeyGPUDriverLoaded    = "driver-loaded"
+	KeyGPUDetectionSource = "detection-source"
 )
 
 // Internal measurement keys used only within this package.

@@ -46,8 +46,15 @@ type Validator struct {
 	// NoCluster controls whether to skip cluster operations (dry-run mode).
 	NoCluster bool
 
-	// Tolerations are applied to validator Jobs for scheduling.
+	// Tolerations are passed to validation workloads (e.g., NCCL benchmark pods)
+	// to override their default scheduling constraints. Does not affect the
+	// orchestrator Job itself.
 	Tolerations []corev1.Toleration
+
+	// NodeSelector is passed to validation workloads (e.g., NCCL benchmark pods)
+	// to override platform-specific node selectors. Use when GPU nodes have
+	// non-standard labels. Does not affect the orchestrator Job itself.
+	NodeSelector map[string]string
 }
 
 // PhaseResult is the outcome of running all validators in a single phase.

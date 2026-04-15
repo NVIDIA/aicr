@@ -29,7 +29,7 @@ Every release must pass these automated gates before artifacts are published:
 - Unit tests with race detector
 - golangci-lint + yamllint
 - License header verification
-- Vulnerability scans (Trivy in release workflows, Grype in `make scan`)
+- Vulnerability scans (Anchore in release workflows, Grype in `make scan`)
 - E2E tests on Kind cluster
 
 If any gate fails, the release pipeline stops. Fix forward on `main` and cut a new tag.

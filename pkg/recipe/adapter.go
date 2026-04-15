@@ -188,8 +188,14 @@ func (r *RecipeResult) GetValuesForComponent(name string) (map[string]any, error
 // mergeValues recursively merges src into dst.
 // For maps, it recursively merges nested keys.
 // For other types, src values override dst values.
+// A nil value in src deletes the key from dst (explicit null override).
 func mergeValues(dst, src map[string]any) {
 	for key, srcVal := range src {
+		// Explicit null in overlay means "delete this key"
+		if srcVal == nil {
+			delete(dst, key)
+			continue
+		}
 		if dstVal, exists := dst[key]; exists {
 			// If both are maps, merge recursively
 			if dstMap, dstOK := dstVal.(map[string]any); dstOK {

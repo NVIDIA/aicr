@@ -251,10 +251,15 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 │     ├─ + gb200-eks-training (GB200 overrides)          │
 │     └─ + gb200-eks-ubuntu-training (Ubuntu specifics)  │
 │                                                        │
-│  4. Strip context (if !context)                        │
+│  4. Apply mixins (if spec.mixins declared)             │
+│     ├─ Load mixin files from recipes/mixins/           │
+│     ├─ Append mixin constraints and componentRefs      │
+│     └─ If snapshot provided, evaluate mixin constraints│
+│                                                        │
+│  5. Strip context (if !context)                        │
 │     └─ Remove context maps from all subtypes           │
 │                                                        │
-│  5. Return recipe                                      │
+│  6. Return recipe                                      │
 │                                                        │
 └────────────────────────────────────────────────────────┘
 ```
@@ -812,7 +817,7 @@ X-RateLimit-Reset: 1735650000
 ### Embedded Data
 
 **Recipe Data:**
-- Location: `recipes/overlays/*.yaml` (including `base.yaml`)
+- Location: `recipes/overlays/*.yaml` (including `base.yaml`), `recipes/mixins/*.yaml`
 - Embedded at compile time via `//go:embed` directives
 - Loaded once per process, cached in memory
 - TTL: 5 minutes (in-memory cache)
@@ -841,22 +846,22 @@ X-RateLimit-Reset: 1735650000
 
 - **Cached**: Recipe data cached in memory (5min TTL)
 - **Overlay Matching**: O(n) where n = number of overlays
-- **Memory**: <1MB per request
-- **Duration**: <100ms typical (in-memory only)
+- **Memory**: &lt;1MB per request
+- **Duration**: &lt;100ms typical (in-memory only)
 
 ### Bundle Generation
 
 - **Parallel**: All bundlers run concurrently
-- **Template Rendering**: Minimal overhead (<10ms per template)
+- **Template Rendering**: Minimal overhead (&lt;10ms per template)
 - **File I/O**: ~10-20 files per bundler
-- **Duration**: <1 second typical
+- **Duration**: &lt;1 second typical
 
 ### API Server
 
 - **Concurrency**: 100 req/s sustained, 200 burst
 - **Latency**: p50: 50ms, p95: 150ms, p99: 300ms
 - **Memory**: ~100MB baseline + 1MB per concurrent request
-- **CPU**: Minimal (<5% single core at 100 req/s)
+- **CPU**: Minimal (&lt;5% single core at 100 req/s)
 
 ## Data Validation
 

@@ -532,7 +532,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		base := RecipeMetadataSpec{
 			Validation: &ValidationConfig{
 				Readiness: &ValidationPhase{
-					Constraints: []Constraint{{Name: "K8s.server.version", Value: ">= 1.30"}},
+					Constraints: []Constraint{{Name: testK8sVersionConstant, Value: ">= 1.30"}},
 				},
 				Deployment: &ValidationPhase{
 					Timeout: "5m",
@@ -560,7 +560,7 @@ func TestMergeValidationConfig(t *testing.T) {
 		if base.Validation.Readiness == nil {
 			t.Fatal("readiness should be preserved from base")
 		}
-		if base.Validation.Readiness.Constraints[0].Name != "K8s.server.version" {
+		if base.Validation.Readiness.Constraints[0].Name != testK8sVersionConstant {
 			t.Error("readiness constraints should be preserved from base")
 		}
 		if base.Validation.Deployment.Timeout != "10m" {
@@ -1238,6 +1238,46 @@ func TestComponentRefApplyRegistryDefaults_NamespaceAndChart(t *testing.T) {
 
 		if ref.Chart != "kube-prometheus-stack" {
 			t.Errorf("Chart = %q, want %q (should extract after /)", ref.Chart, "kube-prometheus-stack")
+		}
+	})
+}
+
+// TestComponentRefApplyRegistryDefaults_HealthCheckAsserts verifies that
+// ApplyRegistryDefaults does NOT load healthCheck.assertFile into HealthCheckAsserts.
+// The deployment validator image is distroless and lacks the chainsaw binary,
+// so loading assert content would cause runtime failures in expected-resources.
+func TestComponentRefApplyRegistryDefaults_HealthCheckAsserts(t *testing.T) {
+	t.Run("does not load assert file content", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name: "test-component",
+			HealthCheck: HealthCheckConfig{
+				AssertFile: "checks/test-component/health-check.yaml",
+			},
+			Helm: HelmConfig{DefaultRepository: "https://example.com"},
+		}
+		ref := &ComponentRef{Name: "test-component"}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.HealthCheckAsserts != "" {
+			t.Errorf("HealthCheckAsserts = %q, want empty (assert files should not be loaded in ApplyRegistryDefaults)", ref.HealthCheckAsserts)
+		}
+	})
+
+	t.Run("preserves existing HealthCheckAsserts", func(t *testing.T) {
+		config := &ComponentConfig{
+			Name: "test-component",
+			HealthCheck: HealthCheckConfig{
+				AssertFile: "checks/test-component/health-check.yaml",
+			},
+		}
+		ref := &ComponentRef{
+			Name:               "test-component",
+			HealthCheckAsserts: "existing-content",
+		}
+		ref.ApplyRegistryDefaults(config)
+
+		if ref.HealthCheckAsserts != "existing-content" {
+			t.Errorf("HealthCheckAsserts = %q, want %q (should preserve existing)", ref.HealthCheckAsserts, "existing-content")
 		}
 	})
 }

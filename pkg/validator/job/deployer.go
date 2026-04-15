@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ type Deployer struct {
 	jobName          string // Unique name generated client-side (set by DeployJob)
 	imagePullSecrets []string
 	tolerations      []corev1.Toleration
+	nodeSelector     map[string]string // passed through to inner workloads via AICR_NODE_SELECTOR env var
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -60,6 +62,7 @@ func NewDeployer(
 	entry catalog.ValidatorEntry,
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
+	nodeSelector map[string]string,
 ) *Deployer {
 
 	return &Deployer{
@@ -70,6 +73,7 @@ func NewDeployer(
 		entry:            entry,
 		imagePullSecrets: imagePullSecrets,
 		tolerations:      tolerations,
+		nodeSelector:     nodeSelector,
 	}
 }
 
@@ -149,13 +153,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 					labels.Component: labels.ValueValidation,
 					labels.Validator: d.entry.Name,
 				}).
-				WithSpec(applycorev1.PodSpec().
-					WithServiceAccountName(ServiceAccountName).
-					WithRestartPolicy(corev1.RestartPolicyNever).
-					WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
-					WithImagePullSecrets(d.buildImagePullSecretsApply()...).
-					WithTolerations(d.buildTolerationsApply()...).
-					WithAffinity(preferCPUNodeAffinityApply()).
+				WithSpec(d.buildPodSpecApply().
 					WithContainers(applycorev1.Container().
 						WithName("validator").
 						WithImage(d.entry.Image).
@@ -191,7 +189,7 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 }
 
 func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
-	orchestratorEnvCount := 6
+	orchestratorEnvCount := 8
 	env := make([]*applycorev1.EnvVarApplyConfiguration, 0, orchestratorEnvCount+len(d.entry.Env))
 	env = append(env,
 		applycorev1.EnvVar().WithName("AICR_SNAPSHOT_PATH").WithValue("/data/snapshot/snapshot.yaml"),
@@ -203,27 +201,70 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 			WithValueFrom(applycorev1.EnvVarSource().
 				WithFieldRef(applycorev1.ObjectFieldSelector().WithFieldPath("metadata.namespace"))),
 	)
+	// Pass scheduling overrides to the validator container so it can apply them
+	// to the inner workloads it creates (e.g., NCCL benchmark pods). These env
+	// vars are NOT used to schedule the orchestrator Job itself.
+	if len(d.nodeSelector) > 0 {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_NODE_SELECTOR").WithValue(serializeNodeSelector(d.nodeSelector)))
+	}
+	if len(d.tolerations) > 0 {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_TOLERATIONS").WithValue(serializeTolerations(d.tolerations)))
+	}
 	for _, e := range d.entry.Env {
 		env = append(env, applycorev1.EnvVar().WithName(e.Name).WithValue(e.Value))
 	}
 	return env
 }
 
+// serializeNodeSelector encodes a nodeSelector map as a comma-separated key=value string.
+// Keys are sorted for deterministic output. This matches the format expected by
+// snapshotter.ParseNodeSelectors on the receiving end.
+func serializeNodeSelector(ns map[string]string) string {
+	keys := make([]string, 0, len(ns))
+	for k := range ns {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	pairs := make([]string, 0, len(ns))
+	for _, k := range keys {
+		pairs = append(pairs, k+"="+ns[k])
+	}
+	return strings.Join(pairs, ",")
+}
+
+// serializeTolerations encodes tolerations as a comma-separated list.
+// Format per toleration: key=value:Effect or key:Effect (for tolerations without value).
+// This matches the format expected by snapshotter.ParseTolerations on the receiving end.
+func serializeTolerations(tols []corev1.Toleration) string {
+	parts := make([]string, 0, len(tols))
+	for _, t := range tols {
+		var part string
+		switch {
+		case t.Key == "" && t.Operator == corev1.TolerationOpExists:
+			part = "*"
+		case t.Value != "":
+			part = t.Key + "=" + t.Value + ":" + string(t.Effect)
+		default:
+			part = t.Key + ":" + string(t.Effect)
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, ",")
+}
+
 // imagePullPolicy returns the appropriate pull policy based on the image reference.
-// Local images (ko.local, kind.local, localhost) always use IfNotPresent since they
-// are side-loaded into the cluster and cannot be pulled from a registry.
-// Remote images with :latest tag use Always to avoid stale cached images.
+// Side-loaded images (ko.local, kind.local) use Never since they are loaded
+// via `kind load docker-image` and no registry exists to pull from.
+// All other images (including localhost registry) follow the standard policy:
+// :latest tag uses Always to ensure fresh images, versioned tags use IfNotPresent.
 func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
 	img := d.entry.Image
-	// Local images side-loaded into kind/nvkind — never pull from registry.
+	// Side-loaded images via kind load — no registry exists, never pull.
 	if strings.HasPrefix(img, "ko.local") ||
-		strings.HasPrefix(img, "kind.local") ||
-		strings.HasPrefix(img, "localhost/") ||
-		strings.HasPrefix(img, "localhost:") {
+		strings.HasPrefix(img, "kind.local") {
 
-		return corev1.PullIfNotPresent
+		return corev1.PullNever
 	}
-
 	if strings.HasSuffix(img, ":latest") {
 		return corev1.PullAlways
 	}
@@ -238,26 +279,17 @@ func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectRefere
 	return refs
 }
 
-func (d *Deployer) buildTolerationsApply() []*applycorev1.TolerationApplyConfiguration {
-	tols := make([]*applycorev1.TolerationApplyConfiguration, 0, len(d.tolerations))
-	for i := range d.tolerations {
-		t := &d.tolerations[i]
-		tol := applycorev1.Toleration().WithOperator(t.Operator)
-		if t.Key != "" {
-			tol = tol.WithKey(t.Key)
-		}
-		if t.Value != "" {
-			tol = tol.WithValue(t.Value)
-		}
-		if t.Effect != "" {
-			tol = tol.WithEffect(t.Effect)
-		}
-		if t.TolerationSeconds != nil {
-			tol = tol.WithTolerationSeconds(*t.TolerationSeconds)
-		}
-		tols = append(tols, tol)
-	}
-	return tols
+func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
+	// The orchestrator Job always tolerates all taints so it can schedule on any
+	// available CPU node. User-provided tolerations (--toleration flag) are forwarded
+	// to inner workloads via AICR_TOLERATIONS and do not affect orchestrator scheduling.
+	return applycorev1.PodSpec().
+		WithServiceAccountName(ServiceAccountName).
+		WithRestartPolicy(corev1.RestartPolicyNever).
+		WithTerminationGracePeriodSeconds(int64(defaults.ValidatorTerminationGracePeriod.Seconds())).
+		WithImagePullSecrets(d.buildImagePullSecretsApply()...).
+		WithTolerations(applycorev1.Toleration().WithOperator(corev1.TolerationOpExists)).
+		WithAffinity(preferCPUNodeAffinityApply())
 }
 
 // WaitForCompletion watches the Job until it reaches a terminal state

@@ -12,50 +12,44 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: 'Security Scan with Trivy'
-description: 'Run Trivy vulnerability scan and upload SARIF results to GitHub Security'
+name: 'Security Scan with Anchore'
+description: 'Run Anchore/Grype vulnerability scan and upload SARIF results to GitHub Security'
 
 inputs:
-  scan_type:
-    description: 'Scan type (fs, image, config, etc.)'
-    required: false
-    default: 'fs'
-  scan_ref:
-    description: 'Scan reference (path or image)'
+  path:
+    description: 'Filesystem path to scan (mutually exclusive with image)'
     required: false
     default: '.'
-  severity:
-    description: 'Severity levels to report (UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL)'
+  image:
+    description: 'Container image to scan (mutually exclusive with path)'
     required: false
-    default: 'HIGH,CRITICAL'
+    default: ''
+  severity-cutoff:
+    description: 'Minimum severity to report (negligible, low, medium, high, critical)'
+    required: false
+    default: 'high'
   output_file:
     description: 'Output SARIF file name'
     required: false
-    default: 'trivy-results.sarif'
+    default: 'scan-results.sarif'
   category:
     description: 'GitHub Security category for upload'
     required: false
-    default: 'trivy'
-  skip_dirs:
-    description: 'Comma-separated list of directories to skip'
-    required: false
-    default: ''
+    default: 'anchore'
 
 runs:
   using: 'composite'
   steps:
-    - name: Run Trivy Security Scan
-      uses: aquasecurity/trivy-action@e368e328979b113139d6f9068e03accaed98a518  # v0.34.1
+    - name: Run Anchore Security Scan
+      id: scan
+      uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
       with:
-        scan-type: ${{ inputs.scan_type }}
-        scan-ref: ${{ inputs.scan_ref }}
-        ignore-unfixed: true
-        hide-progress: true
-        format: 'sarif'
-        output: ${{ inputs.output_file }}
-        severity: ${{ inputs.severity }}
-        exit-code: '0'
-        skip-dirs: ${{ inputs.skip_dirs }}
+        path: ${{ inputs.image == '' && inputs.path || '' }}
+        image: ${{ inputs.image }}
+        severity-cutoff: ${{ inputs.severity-cutoff }}
+        output-format: sarif
+        only-fixed: true
+        fail-build: false
       continue-on-error: true
 
     - name: Check SARIF file exists
@@ -63,7 +57,8 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        if [[ -f "${{ inputs.output_file }}" ]]; then
+        if [[ -f "${{ steps.scan.outputs.sarif }}" ]]; then
+          cp "${{ steps.scan.outputs.sarif }}" "${{ inputs.output_file }}"
           echo "exists=true" >> "$GITHUB_OUTPUT"
         else
           echo "exists=false" >> "$GITHUB_OUTPUT"

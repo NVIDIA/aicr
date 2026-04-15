@@ -20,8 +20,8 @@ spec:
       helm:
         valueFiles:
           - $values/{{ .Name }}/values.yaml
-    - repoURL: '{{ `{{ .RepoURL }}` }}'
-      targetRevision: main
+    - repoURL: '{{ .RepoURL }}'
+      targetRevision: {{ .TargetRevision }}
       ref: values
 {{- end }}
   destination:

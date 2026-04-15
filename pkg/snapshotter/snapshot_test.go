@@ -191,6 +191,44 @@ func TestNodeSnapshotter_RequireGPU(t *testing.T) {
 			t.Errorf("expected no error without require-gpu, got: %v", err)
 		}
 	})
+
+	t.Run("succeeds when NFD hardware detects GPUs but nvidia-smi reports zero", func(t *testing.T) {
+		// Day-0 scenario: NFD detects GPU hardware via PCI, but drivers
+		// aren't installed yet so nvidia-smi reports 0 GPUs.
+		factory := &mockFactory{
+			gpuMeasurement: &measurement.Measurement{
+				Type: measurement.TypeGPU,
+				Subtypes: []measurement.Subtype{
+					{
+						Name: "hardware",
+						Data: map[string]measurement.Reading{
+							measurement.KeyGPUPresent:         measurement.Bool(true),
+							measurement.KeyGPUCount:           measurement.Int(2),
+							measurement.KeyGPUDriverLoaded:    measurement.Bool(false),
+							measurement.KeyGPUDetectionSource: measurement.Str("nfd"),
+						},
+					},
+					{
+						Name: "smi",
+						Data: map[string]measurement.Reading{
+							measurement.KeyGPUCount: measurement.Int(0),
+						},
+					},
+				},
+			},
+		}
+		snapshotter := &NodeSnapshotter{
+			Version:    "1.0.0",
+			Factory:    factory,
+			Serializer: &mockSerializer{},
+			RequireGPU: true,
+		}
+
+		err := snapshotter.Measure(context.Background())
+		if err != nil {
+			t.Errorf("expected no error when NFD detects GPUs (day-0), got: %v", err)
+		}
+	})
 }
 
 func TestSnapshot_Init(t *testing.T) {

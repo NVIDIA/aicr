@@ -20,38 +20,81 @@ on:
   push:
     branches:
       - "pull-request/[0-9]+"
-    paths:
-      - '.github/workflows/gpu-h100-training-test.yaml'
-      - '.github/actions/gpu-cluster-setup/**'
-      - '.github/actions/gpu-operator-install/**'
-      - '.github/actions/aicr-build/**'
-      - 'validators/*/Dockerfile'
-      - 'pkg/evidence/**'
-      - 'pkg/validator/checks/conformance/**'
-      - 'pkg/validator/checks/deployment/**'
-      - '.github/actions/gpu-test-cleanup/**'
-      - '.github/actions/load-versions/**'
-      - 'tests/chainsaw/ai-conformance/kind-training/**'
-      - 'recipes/overlays/kind.yaml'
-      - 'recipes/overlays/h100-kind-training.yaml'
-      - 'kwok/manifests/karpenter/**'
-      - 'kwok/scripts/install-karpenter-kwok.sh'
-      - 'recipes/components/prometheus-adapter/**'
+  pull_request:
+    types: [labeled]
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
 
+  # Gate GPU tests on actual PR diff (against main), not the push diff.
+  # Without this, rebasing a pull-request/* branch includes merged changes
+  # in the push diff, causing GPU tests to trigger for unrelated PRs.
+  check-paths:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      should-run: ${{ steps.filter.outputs.matched }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+        id: filter
+        with:
+          base: main
+          filters: |
+            matched:
+              - '.github/workflows/gpu-h100-training-test.yaml'
+              - '.github/actions/gpu-cluster-setup/**'
+              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/aicr-build/**'
+              - '.github/actions/setup-build-tools/**'
+              - 'validators/*/Dockerfile'
+              - 'pkg/evidence/**'
+              - 'pkg/validator/checks/conformance/**'
+              - 'pkg/validator/checks/deployment/**'
+              - '.github/actions/gpu-test-cleanup/**'
+              - '.github/actions/load-versions/**'
+              - 'tests/chainsaw/ai-conformance/main.go'
+              - 'tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml'
+              - 'tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml'
+              - 'tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml'
+              - 'tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml'
+              - 'tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml'
+              - 'tests/chainsaw/ai-conformance/kind/assert-gpu-operator.yaml'
+              - 'tests/chainsaw/ai-conformance/kind/assert-nvsentinel.yaml'
+              - 'tests/chainsaw/ai-conformance/kind/assert-network-operator.yaml'
+              - 'tests/chainsaw/ai-conformance/kind-training/**'
+              - 'recipes/overlays/kind.yaml'
+              - 'recipes/overlays/h100-kind-training.yaml'
+              - 'kwok/manifests/karpenter/**'
+              - 'kwok/scripts/install-karpenter-kwok.sh'
+              - 'recipes/components/prometheus-adapter/**'
+              - 'pkg/collector/**'
+              - 'pkg/snapshotter/**'
+              - '.github/actions/gpu-snapshot-validate/**'
+              - 'pkg/validator/job/**'
+              - 'pkg/validator/catalog/**'
+              - 'pkg/defaults/timeouts.go'
+              - 'validators/conformance/**'
+
   gpu-training-test:
+    needs: [check-paths]
+    if: >
+      always() && (
+        github.event_name == 'schedule' ||
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && github.event.label.name == 'run-gpu-tests') ||
+        (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
+      )
     name: GPU Training Test (nvkind + H100 x2)
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+      cancel-in-progress: true
     runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     env:
       KIND_CLUSTER_NAME: gpu-training-test
@@ -68,15 +111,18 @@ jobs:
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
+        with:
+          validator_phases: 'conformance'
 
-      - name: Install GPU operator (bundle)
+      - name: Install runtime bundle
+        id: bundle-install
         uses: ./.github/actions/gpu-operator-install
         with:
           method: bundle
           accelerator: h100
           intent: training
 
-      # --- Snapshot and validation ---
+      # --- Snapshot and GPU validation ---
 
       - name: Snapshot and validate GPU
         uses: ./.github/actions/gpu-snapshot-validate
@@ -85,16 +131,16 @@ jobs:
           min_gpu_count: '2'
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # --- Install Karpenter before validation so cluster-autoscaling check passes ---
+      # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
 
-      - name: Install Karpenter + KWOK (setup)
+      - name: Install Karpenter + KWOK
         uses: ./.github/actions/install-karpenter-kwok
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      # --- Health checks (run before conformance to give metrics pipeline time) ---
+      # --- Health checks ---
 
-      - name: Load versions
+      - name: Prepare chainsaw
         id: versions
         uses: ./.github/actions/load-versions
 
@@ -110,13 +156,23 @@ jobs:
             --test-dir tests/chainsaw/ai-conformance/kind-training \
             --config tests/chainsaw/chainsaw-config.yaml
 
-      # --- Validate cluster (Go conformance checks run inside K8s Jobs) ---
-      # Runs after chainsaw to ensure the DCGM → Prometheus → adapter pipeline
-      # has had time to bootstrap (pod-autoscaling check needs live metric data).
-      # Gang scheduling (PodGroup + 2 GPU pods) is exercised by the self-contained
-      # gang-scheduling conformance check — no separate deploy step needed.
+      - name: Verify expected resources exist
+        run: |
+          go run ./tests/chainsaw/ai-conformance/ \
+            --dir tests/chainsaw/ai-conformance/kind-training \
+            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
+            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
+            --kubeconfig="${HOME}/.kube/config" \
+            --debug
 
-      - name: Validate cluster
+      # --- CNCF AI Conformance validation ---
+      # Runs last to ensure the DCGM → Prometheus → adapter pipeline
+      # has had time to bootstrap (pod-autoscaling check needs live metric data).
+
+      - name: Validate CNCF AI Conformance
         run: |
           AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
           ./aicr validate \
@@ -133,7 +189,7 @@ jobs:
       # --- Evidence collection ---
 
       - name: Collect AI conformance evidence
-        if: always()
+        if: always() && steps.bundle-install.outcome == 'success'
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind-training \
@@ -147,7 +203,7 @@ jobs:
 
       - name: Upload conformance evidence
         if: always()
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f  # v7.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: conformance-evidence
           path: |
@@ -160,6 +216,16 @@ jobs:
       - name: Debug diagnostics
         if: failure()
         run: |
+          echo "=== Grafana deployment ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get deployment grafana -o wide 2>/dev/null || true
+          echo "=== Grafana pods ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods \
+            -l app.kubernetes.io/name=grafana -o wide 2>/dev/null || true
+          echo "=== Grafana deployment describe ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe deployment grafana 2>/dev/null || true
+          echo "=== Grafana pod describe ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe pods \
+            -l app.kubernetes.io/name=grafana 2>/dev/null || true
           echo "=== KAI scheduler pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kai-scheduler get pods -o wide 2>/dev/null || true
           echo "=== KAI scheduler logs ==="

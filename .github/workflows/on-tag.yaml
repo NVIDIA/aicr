@@ -71,13 +71,13 @@ jobs:
         uses: ./.github/actions/load-versions
 
       - name: Setup Go
-        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417  # v6.3.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@ba7bc0a3fef59531c69a25acd34668d6d3fe6f22  # v4.1.0
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
 
       - name: Generate SLSA predicate
         uses: ./.github/actions/generate-slsa-predicate
@@ -135,7 +135,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Build and push
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
           context: .
           file: validators/${{ matrix.phase }}/Dockerfile
@@ -227,29 +227,26 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Scan container image
-        id: trivy
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1  # v0.35.0
+        id: scan
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
         with:
-          scan-type: 'image'
-          image-ref: '${{ matrix.image }}:${{ github.ref_name }}'
-          scanners: 'vuln'
-          ignore-unfixed: true
-          format: 'sarif'
-          output: 'image-scan-results.sarif'
-          severity: 'MEDIUM,HIGH,CRITICAL'
-          limit-severities-for-sarif: true
+          image: '${{ matrix.image }}:${{ github.ref_name }}'
+          severity-cutoff: 'medium'
+          output-format: sarif
+          only-fixed: true
+          fail-build: true
         continue-on-error: true
 
       - name: Upload SARIF to GitHub Security
-        if: hashFiles('image-scan-results.sarif') != ''
-        uses: github/codeql-action/upload-sarif@b1bff81932f5cdfc8695c7752dcee935dcd061c8  # v4.33.0
+        if: hashFiles('results.sarif') != '' || steps.scan.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13  # v4.35.1
         with:
-          sarif_file: image-scan-results.sarif
-          category: 'trivy-image-${{ matrix.image }}'
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+          category: 'anchore-image-${{ matrix.image }}'
         continue-on-error: true
 
       - name: Fail on vulnerabilities
-        if: steps.trivy.outcome == 'failure'
+        if: steps.scan.outcome == 'failure'
         shell: bash
         env:
           IMAGE_REF: '${{ matrix.image }}:${{ github.ref_name }}'
