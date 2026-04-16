@@ -15,8 +15,10 @@
 package helm
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -2318,5 +2320,124 @@ func TestGenerate_DoesNotMutateComponentValues(t *testing.T) {
 	}
 	if _, hasVersion := driver["version"]; !hasVersion {
 		t.Error("original driver.version was mutated (removed) — deep copy is missing")
+	}
+}
+
+// TestUndeployScript_TransientFailureWarnsAndContinues asserts that the three
+// post-uninstall cleanup pipelines tolerate a transient kubectl failure instead
+// of letting set -euo pipefail kill the script.
+//
+// Sites covered (matching the warn-on-failure pattern added in this PR):
+//   - delete_release_cluster_resources (per-release per-kind cleanup helper)
+//   - force_clear_namespace_finalizers (last-resort namespace unstick helper)
+//   - per-component orphan-CRD cleanup loop in the script body
+//
+// Setup: stub `kubectl` to always exit non-zero (simulating a 502/timeout/auth
+// hiccup). For each site, source the relevant section of the generated script,
+// invoke it, and assert (a) the wrapper exits 0 — proving set -e was not
+// triggered — and (b) the descriptive `Warning:` is on stderr — proving the
+// failure was visible to the operator.
+func TestUndeployScript_TransientFailureWarnsAndContinues(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available; skipping shell-behavior test")
+	}
+	if _, err := exec.LookPath("awk"); err != nil {
+		t.Skip("awk not available; skipping shell-behavior test")
+	}
+	if _, err := exec.LookPath("sed"); err != nil {
+		t.Skip("sed not available; skipping shell-behavior test")
+	}
+
+	g := NewGenerator()
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	input := &GeneratorInput{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, input, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	undeployPath := filepath.Join(outputDir, "undeploy.sh")
+
+	// Stub kubectl: `api-resources` succeeds with a minimal kind list (so the
+	// helpers reach the inner pipeline we want to exercise); every other
+	// invocation fails to simulate a transient API hiccup. Placed at the
+	// front of PATH so it shadows the real kubectl. jq is left alone — the
+	// pipelines pipe-fail at the kubectl stage either way.
+	stubDir := t.TempDir()
+	stubKubectl := filepath.Join(stubDir, "kubectl")
+	stubScript := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"api-resources\" ]; then\n" +
+		"  echo configmaps\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"echo 'simulated transient API failure' >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(stubKubectl, []byte(stubScript), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		bashSnippet string
+		wantStderr  string
+	}{
+		{
+			// L97-L103 in template: the helper's outer pipeline must end in `done || echo "Warning: ..." >&2`.
+			name: "delete_release_cluster_resources",
+			bashSnippet: `
+                source <(awk '/^delete_release_cluster_resources\(\) \{/,/^}/' "$UNDEPLOY")
+                HELM_TIMEOUT=10
+                delete_release_cluster_resources "gpu-operator" "gpu-operator"
+            `,
+			wantStderr: "Warning: customresourcedefinitions cleanup pipeline for release gpu-operator/gpu-operator failed",
+		},
+		{
+			// L150-L154 in template: same pattern in the namespace finalizer-unstick helper.
+			name: "force_clear_namespace_finalizers",
+			bashSnippet: `
+                source <(awk '/^force_clear_namespace_finalizers\(\) \{/,/^}/' "$UNDEPLOY")
+                force_clear_namespace_finalizers "gpu-operator"
+            `,
+			wantStderr: "Warning: finalizer-clear pipeline for",
+		},
+		{
+			// L296-L302 in template: the per-Helm-component orphan-CRD loop in the script body.
+			// Extract from the section header through (but not including) the next section.
+			name: "orphan_crd_inline_loop",
+			bashSnippet: `
+                snippet=$(sed -n '/^# Clean up orphaned CRDs that were owned by this bundle/,/^# Clean up CRDs created by operators at runtime/p' "$UNDEPLOY" | sed '$d')
+                eval "$snippet"
+            `,
+			wantStderr: "Warning: orphan-CRD cleanup for",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cmd := exec.CommandContext(ctx, "bash", "-c", "set -euo pipefail\n"+tt.bashSnippet)
+			cmd.Env = append(os.Environ(),
+				"PATH="+stubDir+":"+os.Getenv("PATH"),
+				"UNDEPLOY="+undeployPath,
+			)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if err != nil {
+				t.Fatalf("regression: cleanup pipeline killed the script with set -e instead of warning.\nerr: %v\nstdout: %s\nstderr: %s",
+					err, stdout.String(), stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantStderr) {
+				t.Errorf("expected %q in stderr (proves operators get a visible signal on transient failure), got:\nstderr: %s",
+					tt.wantStderr, stderr.String())
+			}
+		})
 	}
 }

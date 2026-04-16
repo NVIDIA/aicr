@@ -100,7 +100,7 @@ delete_release_cluster_resources() {
       | while read -r name; do
           echo "Deleting ${kind}/${name}..."
           kubectl delete "${kind}" "${name}" --ignore-not-found --timeout="${HELM_TIMEOUT}s" || true
-        done
+        done || echo "Warning: ${kind} cleanup pipeline for release ${release}/${ns} failed (kubectl get / jq error); leftovers will surface in post-flight" >&2
   done
 }
 
@@ -151,7 +151,7 @@ force_clear_namespace_finalizers() {
       | jq -r '.items[] | select(.metadata.finalizers // [] | length > 0) | .kind + "/" + .metadata.name' 2>/dev/null \
       | while read -r resource; do
           kubectl patch "${resource}" -n "${ns}" --type merge -p '{"metadata":{"finalizers":null}}' 2>/dev/null || true
-        done
+        done || echo "Warning: finalizer-clear pipeline for ${kind} in ${ns} failed (kubectl get / jq error); namespace may stay Terminating" >&2
   done
 }
 
@@ -298,8 +298,8 @@ kubectl get crd -o json 2>/dev/null \
     '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns) | .metadata.name' 2>/dev/null \
   | while read -r name; do
       echo "Deleting CRD ${name} (owned by {{ .Name }}/{{ .Namespace }})..."
-      kubectl delete crd "${name}" --ignore-not-found --wait=false
-    done
+      kubectl delete crd "${name}" --ignore-not-found --wait=false || true
+    done || echo "Warning: orphan-CRD cleanup for {{ .Name }}/{{ .Namespace }} failed (kubectl get / jq error); leftovers will surface in post-flight" >&2
 {{- end }}{{ end }}
 
 # Clean up CRDs created by operators at runtime (not Helm-managed).
