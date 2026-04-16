@@ -52,7 +52,7 @@ spec:
       description: Verify cert-manager controller, webhook, and cainjector are available.
       try:
         - assert:
-            file: assert-cert-manager.yaml
+            file: ../common/assert-cert-manager.yaml
 
     # ── GPU Operator ───────────────────────────────────────────────────
     - name: assert-gpu-operator
@@ -68,7 +68,7 @@ spec:
       description: Verify kube-prometheus-stack, ephemeral storage metrics, and prometheus-adapter.
       try:
         - assert:
-            file: assert-monitoring.yaml
+            file: ../common/assert-monitoring.yaml
 
     # ── kube-system (AWS EFA) ──────────────────────────────────────────
     - name: assert-kube-system
@@ -89,7 +89,7 @@ spec:
       description: Verify Skyhook operator controller-manager is available.
       try:
         - assert:
-            file: assert-skyhook.yaml
+            file: ../common/assert-skyhook.yaml
 
     # ── NVSentinel ─────────────────────────────────────────────────────
     - name: assert-nvsentinel
@@ -105,14 +105,14 @@ spec:
         assert: 600s
       try:
         - assert:
-            file: assert-dra-driver.yaml
+            file: ../common/assert-dra-driver.yaml
 
     # ── KAI Scheduler ──────────────────────────────────────────────────
     - name: assert-kai-scheduler
       description: Verify KAI scheduler is available.
       try:
         - assert:
-            file: assert-kai-scheduler.yaml
+            file: ../common/assert-kai-scheduler.yaml
 
     # ── Dynamo Platform ────────────────────────────────────────────────
     - name: assert-dynamo

@@ -45,14 +45,14 @@ spec:
         assert: 120s
       try:
         - assert:
-            file: ../cluster/assert-crds.yaml
+            file: assert-crds.yaml
 
     # ── cert-manager ───────────────────────────────────────────────────
     - name: assert-cert-manager
       description: Verify cert-manager controller, webhook, and cainjector are available.
       try:
         - assert:
-            file: ../cluster/assert-cert-manager.yaml
+            file: ../common/assert-cert-manager.yaml
 
     # ── GPU Operator ───────────────────────────────────────────────────
     - name: assert-gpu-operator
@@ -68,21 +68,21 @@ spec:
       description: Verify kube-prometheus-stack, ephemeral storage metrics, and prometheus-adapter.
       try:
         - assert:
-            file: ../cluster/assert-monitoring.yaml
+            file: ../common/assert-monitoring.yaml
 
     # ── kgateway ───────────────────────────────────────────────────────
     - name: assert-kgateway
       description: Verify kgateway controller is available.
       try:
         - assert:
-            file: ../cluster/assert-kgateway.yaml
+            file: assert-kgateway.yaml
 
     # ── Skyhook ────────────────────────────────────────────────────────
     - name: assert-skyhook
       description: Verify Skyhook operator controller-manager is available.
       try:
         - assert:
-            file: ../cluster/assert-skyhook.yaml
+            file: ../common/assert-skyhook.yaml
 
     # ── NVSentinel ─────────────────────────────────────────────────────
     - name: assert-nvsentinel
@@ -98,7 +98,7 @@ spec:
         assert: 600s
       try:
         - assert:
-            file: ../cluster/assert-dra-driver.yaml
+            file: ../common/assert-dra-driver.yaml
 
     # ── Network Operator ───────────────────────────────────────────────
     - name: assert-network-operator
@@ -112,11 +112,11 @@ spec:
       description: Verify KAI scheduler is available.
       try:
         - assert:
-            file: ../cluster/assert-kai-scheduler.yaml
+            file: ../common/assert-kai-scheduler.yaml
 
     # ── Dynamo Platform ────────────────────────────────────────────────
     - name: assert-dynamo
       description: Verify Dynamo operator, etcd, and NATS are healthy.
       try:
         - assert:
-            file: ../cluster/assert-dynamo.yaml
+            file: assert-dynamo.yaml
