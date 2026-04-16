@@ -53,9 +53,14 @@ runs:
         # Load onto all nodes. The snapshot agent requests nvidia.com/gpu but
         # does not set a node selector, so it can land on any GPU-capable node
         # including the control-plane (e.g., T4 smoke test).
-        timeout 600 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
+        #
+        # Timeout is intentionally generous (900s per attempt). H100 self-hosted
+        # runners transfer images over a shared Docker-in-Docker bridge; large
+        # CUDA base images (~250MB compressed) combined with I/O contention from
+        # parallel GPU operator pods regularly exceed the previous 600s limit.
+        timeout 900 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
           echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
-          timeout 600 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
+          timeout 900 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
         }
 
     - name: Build validator images and load into kind
@@ -94,9 +99,12 @@ runs:
         USER nonroot
         ENTRYPOINT ["/${phase}"]
         DOCKERFILE
-          timeout 300 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {
+          # Validator images are small (~30MB distroless), but share the same
+          # Docker-in-Docker bridge as the smoke-test load above. 600s per
+          # attempt accommodates I/O queuing behind concurrent image pulls.
+          timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {
             echo "::warning::kind load attempt 1 failed for ko.local/aicr-validators/${phase}:latest, retrying..."
-            timeout 300 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
+            timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
           }
         done
 

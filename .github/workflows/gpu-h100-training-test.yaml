@@ -59,13 +59,8 @@ jobs:
               - '.github/actions/load-versions/**'
               - 'tests/chainsaw/chainsaw-config.yaml'
               - 'tests/chainsaw/ai-conformance/main.go'
+              - 'tests/chainsaw/ai-conformance/common/**'
               - 'tests/chainsaw/ai-conformance/kind-common/**'
-              - 'tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml'
-              - 'tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml'
-              - 'tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml'
-              - 'tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml'
-              - 'tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml'
-              - 'tests/chainsaw/ai-conformance/cluster/assert-kubeflow-trainer.yaml'
               - 'tests/chainsaw/ai-conformance/kind-training-kubeflow/**'
               - 'recipes/overlays/kind.yaml'
               - 'recipes/overlays/h100-kind-training.yaml'
@@ -160,22 +155,18 @@ jobs:
             --test-dir tests/chainsaw/ai-conformance/kind-training-kubeflow \
             --config tests/chainsaw/chainsaw-config.yaml
 
+      # --- CNCF AI Conformance validation ---
+      # Runs last to ensure the DCGM → Prometheus → adapter pipeline
+      # has had time to bootstrap (pod-autoscaling check needs live metric data).
+
       - name: Verify expected resources exist
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind-training-kubeflow \
-            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-kubeflow-trainer.yaml \
+            --dir tests/chainsaw/ai-conformance/common \
+            --dir tests/chainsaw/ai-conformance/kind-common \
             --kubeconfig="${HOME}/.kube/config" \
             --debug
-
-      # --- CNCF AI Conformance validation ---
-      # Runs last to ensure the DCGM → Prometheus → adapter pipeline
-      # has had time to bootstrap (pod-autoscaling check needs live metric data).
 
       - name: Validate CNCF AI Conformance
         id: validate-conformance
@@ -192,26 +183,28 @@ jobs:
             --output=validation-result.yaml \
             --evidence-dir=conformance-evidence
 
-      # --- Evidence collection ---
+      # --- Validation artifacts ---
 
-      - name: Collect AI conformance evidence
+      # Collect a post-run resource snapshot regardless of whether conformance
+      # validation ran, so triage always has a cluster-state artifact.
+      - name: Collect validation artifacts
         if: >-
-          !cancelled()
+          always()
+          && !cancelled()
           && steps.bundle-install.outcome == 'success'
-          && (steps.validate-conformance.outcome == 'success' || steps.validate-conformance.outcome == 'failure')
+        continue-on-error: true
+        shell: bash
         run: |
+          set -o pipefail
+          mkdir -p conformance-evidence
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind-training-kubeflow \
-            --file tests/chainsaw/ai-conformance/cluster/assert-cert-manager.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-monitoring.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-skyhook.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-dra-driver.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-kai-scheduler.yaml \
-            --file tests/chainsaw/ai-conformance/cluster/assert-kubeflow-trainer.yaml \
+            --dir tests/chainsaw/ai-conformance/common \
+            --dir tests/chainsaw/ai-conformance/kind-common \
             --kubeconfig="${HOME}/.kube/config" \
-            --debug
+            --debug | tee conformance-evidence/resource-existence-post.txt
 
-      - name: Upload conformance evidence
+      - name: Upload validation artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:

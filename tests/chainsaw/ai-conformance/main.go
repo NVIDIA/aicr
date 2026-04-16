@@ -80,6 +80,26 @@ type checkResult struct {
 	Version  string // container image, label version, or CRD versions (best-effort)
 }
 
+type chainsawTestFile struct {
+	Spec struct {
+		Steps []chainsawStep `yaml:"steps"`
+	} `yaml:"spec"`
+}
+
+type chainsawStep struct {
+	Try     []chainsawOperation `yaml:"try"`
+	Catch   []chainsawOperation `yaml:"catch"`
+	Finally []chainsawOperation `yaml:"finally"`
+}
+
+type chainsawOperation struct {
+	Assert *chainsawAssert `yaml:"assert"`
+}
+
+type chainsawAssert struct {
+	File string `yaml:"file"`
+}
+
 func main() {
 	cmd := &cli.Command{
 		Name:  "ai-conformance-check",
@@ -214,16 +234,33 @@ func parseAssertFiles(dir string) ([]resourceIdentity, error) {
 	}
 
 	var resources []resourceIdentity
+	parsedFiles := make(map[string]bool)
 	for _, entry := range entries {
 		name := entry.Name()
 		if !strings.HasPrefix(name, "assert-") || !strings.HasSuffix(name, ".yaml") {
 			continue
 		}
 
-		path := filepath.Join(dir, name)
-		parsed, err := parseYAMLFile(path, name)
-		if err != nil {
-			return nil, err
+		path := filepath.Clean(filepath.Join(dir, name))
+		parsedFiles[path] = true
+		parsed, parseErr := parseYAMLFile(path, name)
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		resources = append(resources, parsed...)
+	}
+
+	referencedFiles, err := referencedAssertFiles(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, path := range referencedFiles {
+		if parsedFiles[path] {
+			continue
+		}
+		parsed, parseErr := parseYAMLFile(path, filepath.Base(path))
+		if parseErr != nil {
+			return nil, parseErr
 		}
 		resources = append(resources, parsed...)
 	}
@@ -232,6 +269,60 @@ func parseAssertFiles(dir string) ([]resourceIdentity, error) {
 		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf("no resources found in assert-*.yaml files under %s", dir))
 	}
 	return resources, nil
+}
+
+func referencedAssertFiles(dir string) ([]string, error) {
+	path := filepath.Join(dir, "chainsaw-test.yaml")
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to open %s", path), err)
+	}
+	defer f.Close()
+
+	seen := make(map[string]bool)
+	var files []string
+	dec := yaml.NewDecoder(f)
+	for {
+		var testFile chainsawTestFile
+		if err := dec.Decode(&testFile); err != nil {
+			if stderrors.Is(err, io.EOF) {
+				break
+			}
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse %s", path), err)
+		}
+		for _, step := range testFile.Spec.Steps {
+			files = appendReferencedAssertFiles(files, seen, dir, step.Try)
+			files = appendReferencedAssertFiles(files, seen, dir, step.Catch)
+			files = appendReferencedAssertFiles(files, seen, dir, step.Finally)
+		}
+	}
+
+	return files, nil
+}
+
+func appendReferencedAssertFiles(files []string, seen map[string]bool, dir string, ops []chainsawOperation) []string {
+	for _, op := range ops {
+		if op.Assert == nil || op.Assert.File == "" {
+			continue
+		}
+
+		name := filepath.Base(op.Assert.File)
+		if !strings.HasPrefix(name, "assert-") || !strings.HasSuffix(name, ".yaml") {
+			continue
+		}
+
+		path := filepath.Clean(filepath.Join(dir, op.Assert.File))
+		if seen[path] {
+			continue
+		}
+		seen[path] = true
+		files = append(files, path)
+	}
+
+	return files
 }
 
 // parseYAMLFile decodes a multi-document YAML file into resource identities.

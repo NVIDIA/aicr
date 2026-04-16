@@ -49,7 +49,7 @@ spec:
       description: Verify cert-manager controller, webhook, and cainjector are available.
       try:
         - assert:
-            file: ../cluster/assert-cert-manager.yaml
+            file: ../common/assert-cert-manager.yaml
 
     - name: assert-gpu-operator
       description: Verify GPU operator and managed components are healthy (kind profile — no driver DaemonSet).
@@ -63,19 +63,19 @@ spec:
       description: Verify kube-prometheus-stack, ephemeral storage metrics, and prometheus-adapter.
       try:
         - assert:
-            file: ../cluster/assert-monitoring.yaml
+            file: ../common/assert-monitoring.yaml
 
     - name: assert-skyhook
       description: Verify Skyhook operator controller-manager is available.
       try:
         - assert:
-            file: ../cluster/assert-skyhook.yaml
+            file: ../common/assert-skyhook.yaml
 
     - name: assert-kubeflow-trainer
       description: Verify Kubeflow Trainer controller, validating webhook, and TrainJob CRD are available.
       try:
         - assert:
-            file: ../cluster/assert-kubeflow-trainer.yaml
+            file: assert-kubeflow-trainer.yaml
 
     - name: assert-nvsentinel
       description: Verify NVSentinel controller and platform connector are healthy (kind profile).
@@ -89,7 +89,7 @@ spec:
         assert: 600s
       try:
         - assert:
-            file: ../cluster/assert-dra-driver.yaml
+            file: ../common/assert-dra-driver.yaml
 
     - name: assert-network-operator
       description: Verify NVIDIA Network Operator is available.
@@ -101,4 +101,4 @@ spec:
       description: Verify KAI scheduler is available.
       try:
         - assert:
-            file: ../cluster/assert-kai-scheduler.yaml
+            file: ../common/assert-kai-scheduler.yaml
