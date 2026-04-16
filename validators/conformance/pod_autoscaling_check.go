@@ -101,7 +101,7 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 
 	// 2. GPU custom metrics have data (poll with retries — adapter relist is 30s)
 	metrics := []string{"gpu_utilization", "gpu_memory_used", "gpu_power_usage"}
-	namespaces := []string{"gpu-operator", "dynamo-system"}
+	namespaces := []string{defaults.GPUOperatorNamespace, "dynamo-system"}
 
 	var found bool
 	var foundPath string

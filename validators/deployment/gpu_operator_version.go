@@ -79,8 +79,8 @@ func findDeploymentConstraint(ctx *validators.Context, name string) (string, boo
 }
 
 func getGPUOperatorVersion(ctx context.Context, clientset kubernetes.Interface) (string, error) {
-	deploymentNames := []string{"gpu-operator", "nvidia-gpu-operator"}
-	namespaces := []string{"gpu-operator", "nvidia-gpu-operator", "kube-system"}
+	deploymentNames := []string{gpuOperatorNamespace, "nvidia-gpu-operator"}
+	namespaces := []string{gpuOperatorNamespace, "nvidia-gpu-operator", "kube-system"}
 
 	var lastErr error
 	for _, ns := range namespaces {
