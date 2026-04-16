@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
@@ -34,7 +35,8 @@ func TestSysctlCollector_Collect_ContextCancellation(t *testing.T) {
 
 	// Start collection and cancel mid-way
 	go func() {
-		// Give it a moment to start walking
+		// Give it a moment to start walking before canceling
+		time.Sleep(10 * time.Millisecond)
 		cancel()
 	}()
 

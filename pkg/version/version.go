@@ -81,7 +81,7 @@ func (v Version) String() string {
 func ParseVersion(s string) (Version, error) {
 	// Check for empty string
 	if s == "" {
-		return Version{}, ErrEmptyVersion
+		return Version{}, pkgerrors.Wrap(pkgerrors.ErrCodeInvalidRequest, "empty version string", ErrEmptyVersion)
 	}
 
 	// Strip 'v' prefix if present
@@ -107,7 +107,7 @@ func ParseVersion(s string) (Version, error) {
 	// Split by dots
 	parts := strings.Split(mainPart, ".")
 	if len(parts) > 3 {
-		return Version{}, ErrTooManyComponents
+		return Version{}, pkgerrors.Wrap(pkgerrors.ErrCodeInvalidRequest, "too many version components", ErrTooManyComponents)
 	}
 
 	// Parse each component

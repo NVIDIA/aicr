@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -104,8 +105,8 @@ func runCheck(checkFn CheckFunc) int {
 func writeTerminationLog(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	slog.Error("FAIL", "message", msg)
-	if len(msg) > 4096 {
-		msg = msg[:4096]
+	if len(msg) > defaults.TerminationLogMaxSize {
+		msg = msg[:defaults.TerminationLogMaxSize]
 	}
 	_ = os.WriteFile(filepath.Clean(terminationLogPath), []byte(msg), 0o600) //nolint:gosec // Fixed path, not user-controlled
 }

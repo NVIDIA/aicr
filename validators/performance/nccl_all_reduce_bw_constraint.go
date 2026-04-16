@@ -594,7 +594,7 @@ func waitForTrainingRuntime(ctx context.Context, dynamicClient dynamic.Interface
 		select {
 		case <-waitCtx.Done():
 			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for TrainingRuntime to be visible", waitCtx.Err())
-		case <-time.After(500 * time.Millisecond):
+		case <-time.After(defaults.TrainingRuntimePollInterval):
 		}
 	}
 }

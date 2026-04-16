@@ -588,7 +588,7 @@ func runCNCFSubmission(ctx context.Context, evidenceDir string, features []strin
 		}
 	}
 
-	cncfTimeout := 20 * time.Minute //nolint:mnd // CNCF submission deploys GPU workloads and runs HPA tests
+	cncfTimeout := defaults.CNCFSubmissionTimeout
 	ctx, cancel := context.WithTimeout(ctx, cncfTimeout)
 	defer cancel()
 
