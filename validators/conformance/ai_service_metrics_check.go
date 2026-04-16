@@ -185,8 +185,8 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 	}
 	var resources strings.Builder
 	limit := len(customMetricsResp.Resources)
-	if limit > 20 {
-		limit = 20
+	if limit > defaults.MetricsDisplayLimit {
+		limit = defaults.MetricsDisplayLimit
 	}
 	for i := 0; i < limit; i++ {
 		r := customMetricsResp.Resources[i]

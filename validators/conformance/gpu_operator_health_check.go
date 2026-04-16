@@ -17,6 +17,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -33,12 +34,12 @@ func CheckGPUOperatorHealth(ctx *validators.Context) error {
 
 	// 1. GPU Operator Deployment running
 	// Check by listing deployments with the gpu-operator label in the namespace.
-	deploys, err := ctx.Clientset.AppsV1().Deployments("gpu-operator").List(ctx.Ctx, metav1.ListOptions{
+	deploys, err := ctx.Clientset.AppsV1().Deployments(defaults.GPUOperatorNamespace).List(ctx.Ctx, metav1.ListOptions{
 		LabelSelector: "app.kubernetes.io/name=gpu-operator",
 	})
 	if err != nil || len(deploys.Items) == 0 {
 		// Fallback: try exact name match.
-		if verifyErr := verifyDeploymentAvailable(ctx, "gpu-operator", "gpu-operator"); verifyErr != nil {
+		if verifyErr := verifyDeploymentAvailable(ctx, defaults.GPUOperatorNamespace, "gpu-operator"); verifyErr != nil {
 			return errors.Wrap(errors.ErrCodeNotFound, "GPU operator deployment not found (checked label app.kubernetes.io/name=gpu-operator and exact name)", verifyErr)
 		}
 	}
@@ -65,7 +66,7 @@ func CheckGPUOperatorHealth(ctx *validators.Context) error {
 	}
 
 	// 3. DCGM exporter DaemonSet running
-	if err := verifyDaemonSetReady(ctx, "gpu-operator", "nvidia-dcgm-exporter"); err != nil {
+	if err := verifyDaemonSetReady(ctx, defaults.GPUOperatorNamespace, "nvidia-dcgm-exporter"); err != nil {
 		return errors.Wrap(errors.ErrCodeNotFound, "DCGM exporter check failed", err)
 	}
 

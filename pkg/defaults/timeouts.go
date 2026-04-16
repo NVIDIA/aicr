@@ -369,6 +369,59 @@ const (
 	FileParserMaxSize = 1 << 20 // 1MB
 )
 
+// Validator runtime class check timeout.
+const (
+	// RuntimeClassCheckTimeout is the timeout for verifying RuntimeClass
+	// existence in the cluster during agent deployment.
+	RuntimeClassCheckTimeout = 5 * time.Second
+)
+
+// CNCF conformance submission timeout.
+const (
+	// CNCFSubmissionTimeout is the timeout for CNCF submission evidence
+	// collection. CNCF submission deploys GPU workloads and runs HPA tests.
+	CNCFSubmissionTimeout = 20 * time.Minute
+)
+
+// Retry poll intervals for validator wait loops.
+const (
+	// TrainerControllerPollInterval is the retry interval when waiting
+	// for the Kubeflow Trainer controller-manager to become ready.
+	TrainerControllerPollInterval = 2 * time.Second
+
+	// TrainingRuntimePollInterval is the retry interval when waiting
+	// for a TrainingRuntime resource to become visible via the API.
+	TrainingRuntimePollInterval = 500 * time.Millisecond
+)
+
+// Termination and truncation limits for validator output.
+const (
+	// TerminationLogMaxSize is the maximum size in bytes of the K8s
+	// termination log message written to /dev/termination-log.
+	TerminationLogMaxSize = 4096
+
+	// ConfigMapStatusTruncateLen is the maximum length for ConfigMap
+	// status data before truncation in autoscaler status collection.
+	ConfigMapStatusTruncateLen = 2000
+
+	// AutoscalerMaxEvents is the maximum number of autoscaler events
+	// to capture when collecting cluster autoscaler evidence.
+	AutoscalerMaxEvents = 10
+
+	// MetricsDisplayLimit is the maximum number of custom metrics
+	// resources to display in AI service metrics evidence.
+	MetricsDisplayLimit = 20
+)
+
+// Well-known Kubernetes resource names shared across validators.
+const (
+	// GPUOperatorNamespace is the default namespace for the GPU operator.
+	GPUOperatorNamespace = "gpu-operator"
+
+	// KubeSystemNamespace is the standard kube-system namespace.
+	KubeSystemNamespace = "kube-system"
+)
+
 // Attestation file size limits.
 const (
 	// MaxSigstoreBundleSize is the maximum size in bytes for a .sigstore.json file.
