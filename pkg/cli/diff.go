@@ -142,21 +142,24 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 }
 
 // writeDiffResult serializes the diff result, using a custom table formatter
-// when the output format is table.
-func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer.Format, result *diff.Result) error {
+// when the output format is table. Uses a named return so Close() failures
+// on writable handles are promoted to the return value — data-loss on flush
+// must surface as an error, not a silent exit 0.
+func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer.Format, result *diff.Result) (err error) {
 	output := cmd.String("output")
 
 	// Use custom table writer for human-readable output
 	if outFormat == serializer.FormatTable {
 		w := os.Stdout
 		if output != "" {
-			f, err := os.Create(output)
+			var f *os.File
+			f, err = os.Create(output)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output file", err)
 			}
 			defer func() {
-				if closeErr := f.Close(); closeErr != nil {
-					slog.Error("failed to close output file", "error", closeErr)
+				if closeErr := f.Close(); closeErr != nil && err == nil {
+					err = errors.Wrap(errors.ErrCodeInternal, "failed to close output file", closeErr)
 				}
 			}()
 			w = f
@@ -171,8 +174,8 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 	}
 	defer func() {
 		if closer, ok := ser.(interface{ Close() error }); ok {
-			if closeErr := closer.Close(); closeErr != nil {
-				slog.Error("failed to close serializer", "error", closeErr)
+			if closeErr := closer.Close(); closeErr != nil && err == nil {
+				err = errors.Wrap(errors.ErrCodeInternal, "failed to close serializer", closeErr)
 			}
 		}
 	}()

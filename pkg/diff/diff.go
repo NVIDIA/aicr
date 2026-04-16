@@ -152,6 +152,9 @@ func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 func indexMeasurements(measurements []*measurement.Measurement) map[string]*measurement.Measurement {
 	idx := make(map[string]*measurement.Measurement, len(measurements))
 	for _, m := range measurements {
+		if m == nil {
+			continue
+		}
 		idx[string(m.Type)] = m
 	}
 	return idx

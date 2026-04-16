@@ -19,21 +19,52 @@ import (
 	"io"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// errWriter wraps an io.Writer and retains the first write error encountered.
+// Subsequent writes become no-ops after an error so callers can check err once.
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (ew *errWriter) printf(format string, args ...any) {
+	if ew.err != nil {
+		return
+	}
+	_, ew.err = fmt.Fprintf(ew.w, format, args...)
+}
+
+func (ew *errWriter) println(s string) {
+	if ew.err != nil {
+		return
+	}
+	_, ew.err = fmt.Fprintln(ew.w, s)
+}
+
 // WriteTable writes the diff result as a human-readable table.
+// Returns a structured error wrapping the first write failure encountered
+// (useful for broken-pipe or full-disk scenarios on the target writer).
 func WriteTable(w io.Writer, result *Result) error {
+	ew := &errWriter{w: w}
+
 	if len(result.Changes) == 0 {
-		fmt.Fprintln(w, "NO CHANGES")
-		return nil
+		ew.println("NO CHANGES")
+		return wrapTableErr(ew.err)
 	}
 
-	fmt.Fprintf(w, "CHANGES (%d added, %d removed, %d modified)\n",
+	ew.printf("CHANGES (%d added, %d removed, %d modified)\n",
 		result.Summary.Added, result.Summary.Removed, result.Summary.Modified)
 
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "KIND\tPATH\tBASELINE\tTARGET")
-	fmt.Fprintln(tw, "----\t----\t--------\t------")
+	if _, err := fmt.Fprintln(tw, "KIND\tPATH\tBASELINE\tTARGET"); err != nil {
+		return wrapTableErr(err)
+	}
+	if _, err := fmt.Fprintln(tw, "----\t----\t--------\t------"); err != nil {
+		return wrapTableErr(err)
+	}
 
 	for _, c := range result.Changes {
 		baseline := c.Baseline
@@ -44,16 +75,25 @@ func WriteTable(w io.Writer, result *Result) error {
 		if target == "" {
 			target = "-"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			strings.ToUpper(string(c.Kind)), c.Path, baseline, target)
+		if _, err := fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
+			strings.ToUpper(string(c.Kind)), c.Path, baseline, target); err != nil {
+			return wrapTableErr(err)
+		}
 	}
 
 	if err := tw.Flush(); err != nil {
-		return err
+		return wrapTableErr(err)
 	}
 
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "DRIFT DETECTED")
+	ew.println("")
+	ew.println("DRIFT DETECTED")
 
-	return nil
+	return wrapTableErr(ew.err)
+}
+
+func wrapTableErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.Wrap(errors.ErrCodeInternal, "failed to write diff table output", err)
 }

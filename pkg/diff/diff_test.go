@@ -16,6 +16,7 @@ package diff
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -202,6 +203,28 @@ func TestSnapshots_NilInputs(t *testing.T) {
 	}
 }
 
+func TestSnapshots_NilMeasurementEntries(t *testing.T) {
+	// Snapshots loaded from malformed YAML may contain nil entries.
+	// Should skip them without panicking.
+	baseline := makeSnapshot(
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.32.4")}),
+		),
+		nil, // malformed entry
+	)
+	target := makeSnapshot(
+		nil,
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.32.4")}),
+		),
+	)
+
+	result := Snapshots(baseline, target)
+	if result.HasDrift() {
+		t.Errorf("expected no drift — nil entries should be skipped, got %d changes", result.Summary.Total)
+	}
+}
+
 func TestSnapshots_DeterministicOrder(t *testing.T) {
 	baseline := makeSnapshot(
 		makeMeasurement(measurement.TypeOS,
@@ -347,5 +370,60 @@ func TestWriteTable_DriftDetected(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "DRIFT DETECTED") {
 		t.Errorf("expected DRIFT DETECTED footer")
+	}
+}
+
+// failingWriter returns an error after N successful writes. Used to simulate
+// broken pipes and full disks during table output.
+type failingWriter struct {
+	successes int
+	calls     int
+}
+
+func (fw *failingWriter) Write(p []byte) (int, error) {
+	fw.calls++
+	if fw.calls > fw.successes {
+		return 0, fmt.Errorf("simulated write failure")
+	}
+	return len(p), nil
+}
+
+func TestWriteTable_PropagatesWriteErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		result    *Result
+		successes int
+	}{
+		{
+			name: "no changes path fails on first write",
+			result: &Result{
+				Changes: []Change{},
+				Summary: Summary{},
+			},
+			successes: 0,
+		},
+		{
+			name: "with changes path fails mid-table",
+			result: &Result{
+				Changes: []Change{
+					{Kind: Modified, Severity: SeverityInfo, Path: "K8s.server.version", Baseline: "1.31.0", Target: "1.32.4"},
+				},
+				Summary: Summary{Modified: 1, Total: 1},
+			},
+			successes: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fw := &failingWriter{successes: tt.successes}
+			err := WriteTable(fw, tt.result)
+			if err == nil {
+				t.Fatal("expected error from failing writer, got nil")
+			}
+			if !strings.Contains(err.Error(), "failed to write diff table output") {
+				t.Errorf("expected wrapped error, got: %v", err)
+			}
+		})
 	}
 }
