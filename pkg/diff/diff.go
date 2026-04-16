@@ -12,20 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package diff compares AICR snapshots and evaluates them against recipe
-// constraints to detect configuration drift. It supports two modes:
-//
-//   - Snapshot-vs-snapshot: raw field-level comparison between two states.
-//   - Recipe-vs-snapshot: evaluate recipe constraints and component versions
-//     against a snapshot to detect drift from the recipe-defined desired state.
+// Package diff compares AICR snapshots to detect configuration drift.
+// It performs field-level comparison between two snapshots, reporting
+// added, removed, and modified readings across all measurement types.
 package diff
 
 import (
 	"sort"
 
-	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -45,19 +40,15 @@ const (
 type Severity string
 
 const (
-	// SeverityInfo indicates an informational change that does not violate constraints.
+	// SeverityInfo indicates an informational change.
 	SeverityInfo Severity = "info"
-	// SeverityWarning indicates the change violates a warning-level constraint.
-	SeverityWarning Severity = "warning"
-	// SeverityError indicates the change violates an error-level constraint.
-	SeverityError Severity = "error"
 )
 
 // Change represents a single field-level difference between two snapshots.
 type Change struct {
 	// Kind is the type of change (added, removed, modified).
 	Kind ChangeKind `json:"kind" yaml:"kind"`
-	// Severity classifies the impact (info, warning, error).
+	// Severity classifies the impact.
 	Severity Severity `json:"severity" yaml:"severity"`
 	// Path is the dot-separated location (e.g., "K8s.server.version").
 	Path string `json:"path" yaml:"path"`
@@ -67,71 +58,14 @@ type Change struct {
 	Target string `json:"target,omitempty" yaml:"target,omitempty"`
 }
 
-// ConstraintResult represents the evaluation of a single recipe constraint against a snapshot.
-type ConstraintResult struct {
-	// Name is the constraint path (e.g., "K8s.server.version").
-	Name string `json:"name" yaml:"name"`
-	// Expected is the constraint expression (e.g., ">= 1.30").
-	Expected string `json:"expected" yaml:"expected"`
-	// Actual is the value found in the snapshot.
-	Actual string `json:"actual" yaml:"actual"`
-	// Passed indicates if the constraint is satisfied.
-	Passed bool `json:"passed" yaml:"passed"`
-	// Severity is the constraint severity from the recipe.
-	Severity Severity `json:"severity" yaml:"severity"`
-	// Remediation is guidance from the recipe for fixing violations.
-	Remediation string `json:"remediation,omitempty" yaml:"remediation,omitempty"`
-	// Error is the evaluation error if any.
-	Error string `json:"error,omitempty" yaml:"error,omitempty"`
-}
-
-// Component drift status constants.
-const (
-	ComponentStatusOK          = "ok"
-	ComponentStatusMismatch    = "version-mismatch"
-	ComponentStatusNotObserved = "not-observed"
-)
-
-// ComponentDrift represents drift in a recipe component's version or presence.
-type ComponentDrift struct {
-	// Name is the component name (e.g., "gpu-operator").
-	Name string `json:"name" yaml:"name"`
-	// ExpectedVersion is the version from the recipe.
-	ExpectedVersion string `json:"expectedVersion,omitempty" yaml:"expectedVersion,omitempty"`
-	// ActualVersion is the version found in the snapshot (empty if not found).
-	ActualVersion string `json:"actualVersion,omitempty" yaml:"actualVersion,omitempty"`
-	// Namespace is the expected deployment namespace.
-	Namespace string `json:"namespace,omitempty" yaml:"namespace,omitempty"`
-	// Status describes the drift (ComponentStatusOK, ComponentStatusMismatch, ComponentStatusNotObserved).
-	Status string `json:"status" yaml:"status"`
-}
-
-// ValidationPhaseSummary summarizes drift in a validation phase's configuration.
-type ValidationPhaseSummary struct {
-	// Phase name (deployment, performance, conformance).
-	Phase string `json:"phase" yaml:"phase"`
-	// Checks listed in the recipe for this phase.
-	Checks []string `json:"checks" yaml:"checks"`
-	// Constraints for this phase, if any.
-	ConstraintResults []ConstraintResult `json:"constraintResults,omitempty" yaml:"constraintResults,omitempty"`
-}
-
 // Result contains the complete diff output.
 type Result struct {
-	// Mode describes the comparison mode ("snapshot-vs-snapshot" or "recipe-vs-snapshot").
-	Mode string `json:"mode" yaml:"mode"`
-	// BaselineSource identifies the baseline (file path, recipe name, etc.).
+	// BaselineSource identifies the baseline (file path, ConfigMap URI, etc.).
 	BaselineSource string `json:"baselineSource,omitempty" yaml:"baselineSource,omitempty"`
 	// TargetSource identifies the target snapshot.
 	TargetSource string `json:"targetSource,omitempty" yaml:"targetSource,omitempty"`
-	// Changes is the list of field-level differences (snapshot-vs-snapshot mode).
-	Changes []Change `json:"changes,omitempty" yaml:"changes,omitempty"`
-	// ConstraintResults is the list of top-level constraint evaluations (recipe-vs-snapshot mode).
-	ConstraintResults []ConstraintResult `json:"constraintResults,omitempty" yaml:"constraintResults,omitempty"`
-	// ComponentDrifts reports per-component drift (recipe-vs-snapshot mode).
-	ComponentDrifts []ComponentDrift `json:"componentDrifts,omitempty" yaml:"componentDrifts,omitempty"`
-	// ValidationPhases reports per-phase constraint and check status (recipe-vs-snapshot mode).
-	ValidationPhases []ValidationPhaseSummary `json:"validationPhases,omitempty" yaml:"validationPhases,omitempty"`
+	// Changes is the list of field-level differences.
+	Changes []Change `json:"changes" yaml:"changes"`
 	// Summary contains aggregate counts.
 	Summary Summary `json:"summary" yaml:"summary"`
 }
@@ -142,20 +76,10 @@ type Summary struct {
 	Removed  int `json:"removed" yaml:"removed"`
 	Modified int `json:"modified" yaml:"modified"`
 	Total    int `json:"total" yaml:"total"`
-	// Constraint-specific counts (recipe-vs-snapshot mode).
-	ConstraintsPassed int `json:"constraintsPassed,omitempty" yaml:"constraintsPassed,omitempty"`
-	ConstraintsFailed int `json:"constraintsFailed,omitempty" yaml:"constraintsFailed,omitempty"`
-	ConstraintsError  int `json:"constraintsError,omitempty" yaml:"constraintsError,omitempty"`
-	// Component-specific counts (recipe-vs-snapshot mode).
-	ComponentsOK      int `json:"componentsOk,omitempty" yaml:"componentsOk,omitempty"`
-	ComponentsDrifted int `json:"componentsDrifted,omitempty" yaml:"componentsDrifted,omitempty"`
 }
 
-// HasDrift returns true if any field-level changes or constraint violations were detected.
+// HasDrift returns true if any field-level changes were detected.
 func (r *Result) HasDrift() bool {
-	if r.Mode == "recipe-vs-snapshot" {
-		return r.Summary.ConstraintsFailed > 0 || r.Summary.ConstraintsError > 0 || r.Summary.ComponentsDrifted > 0
-	}
 	return r.Summary.Total > 0
 }
 
@@ -164,11 +88,10 @@ func (r *Result) HasDrift() bool {
 // Both baseline and target must be non-nil.
 func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 	if baseline == nil || target == nil {
-		return &Result{Mode: "snapshot-vs-snapshot", Changes: make([]Change, 0)}
+		return &Result{Changes: make([]Change, 0)}
 	}
 
 	result := &Result{
-		Mode:    "snapshot-vs-snapshot",
 		Changes: make([]Change, 0),
 	}
 
@@ -224,209 +147,7 @@ func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 	return result
 }
 
-// RecipeVsSnapshot evaluates a recipe's constraints and components against a snapshot
-// to detect drift from the recipe-defined desired state. This uses the same constraint
-// evaluation path as `aicr validate --readiness` (pkg/constraints.Evaluate).
-func RecipeVsSnapshot(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) *Result {
-	result := &Result{
-		Mode:              "recipe-vs-snapshot",
-		ConstraintResults: make([]ConstraintResult, 0, len(rec.Constraints)),
-		ComponentDrifts:   make([]ComponentDrift, 0),
-		ValidationPhases:  make([]ValidationPhaseSummary, 0),
-	}
-
-	// 1. Evaluate top-level constraints (same path as validator.checkReadiness)
-	for _, constraint := range rec.Constraints {
-		cr := evaluateConstraint(constraint, snap)
-		result.ConstraintResults = append(result.ConstraintResults, cr)
-
-		if cr.Error != "" {
-			result.Summary.ConstraintsError++
-		} else if cr.Passed {
-			result.Summary.ConstraintsPassed++
-		} else {
-			result.Summary.ConstraintsFailed++
-		}
-	}
-
-	sort.Slice(result.ConstraintResults, func(i, j int) bool {
-		return result.ConstraintResults[i].Name < result.ConstraintResults[j].Name
-	})
-
-	// 2. Check component drift (version and presence from componentRefs)
-	result.ComponentDrifts = checkComponentDrift(rec, snap)
-	for _, cd := range result.ComponentDrifts {
-		switch cd.Status {
-		case ComponentStatusOK:
-			result.Summary.ComponentsOK++
-		default:
-			result.Summary.ComponentsDrifted++
-		}
-	}
-
-	// 3. Summarize validation phase configuration and count phase-level constraints
-	result.ValidationPhases = checkValidationPhases(rec, snap)
-	for _, vp := range result.ValidationPhases {
-		for _, cr := range vp.ConstraintResults {
-			if cr.Error != "" {
-				result.Summary.ConstraintsError++
-			} else if cr.Passed {
-				result.Summary.ConstraintsPassed++
-			} else {
-				result.Summary.ConstraintsFailed++
-			}
-		}
-	}
-
-	result.Summary.Total = len(result.ConstraintResults)
-
-	return result
-}
-
-// checkComponentDrift compares recipe componentRefs against snapshot container images.
-// The K8s collector captures deployed container images in K8s.image (image name → tag).
-// Component names are matched against image names using the chart name or component name.
-func checkComponentDrift(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) []ComponentDrift {
-	drifts := make([]ComponentDrift, 0, len(rec.ComponentRefs))
-
-	// Build index of deployed container images from snapshot (K8s.image subtype)
-	deployedImages := extractContainerImages(snap)
-
-	for _, ref := range rec.ComponentRefs {
-		if !ref.IsEnabled() {
-			continue
-		}
-
-		cd := ComponentDrift{
-			Name:            ref.Name,
-			ExpectedVersion: ref.Version,
-			Namespace:       ref.Namespace,
-		}
-
-		// Try to find the component's container image in the snapshot.
-		// Match by component name or chart name against image names.
-		actualVersion, found := deployedImages[ref.Name]
-		if !found && ref.Chart != "" {
-			actualVersion, found = deployedImages[ref.Chart]
-		}
-
-		if !found {
-			cd.Status = ComponentStatusNotObserved
-			cd.ActualVersion = ""
-		} else {
-			cd.ActualVersion = actualVersion
-			if ref.Version != "" && actualVersion != "" && actualVersion != ref.Version {
-				cd.Status = ComponentStatusMismatch
-			} else {
-				cd.Status = ComponentStatusOK
-			}
-		}
-
-		drifts = append(drifts, cd)
-	}
-
-	sort.Slice(drifts, func(i, j int) bool {
-		return drifts[i].Name < drifts[j].Name
-	})
-
-	return drifts
-}
-
-// extractContainerImages builds a map of image-name → tag from snapshot's K8s.image subtype.
-// The K8s collector strips registry prefixes and splits name:tag, so entries look like:
-//
-//	"gpu-operator": "v24.9.0"
-//	"cert-manager-controller": "v1.14.0"
-func extractContainerImages(snap *snapshotter.Snapshot) map[string]string {
-	images := make(map[string]string)
-
-	for _, m := range snap.Measurements {
-		if m.Type != measurement.TypeK8s {
-			continue
-		}
-		st := m.GetSubtype("image")
-		if st == nil {
-			continue
-		}
-		for key, reading := range st.Data {
-			images[key] = reading.String()
-		}
-	}
-
-	return images
-}
-
-// checkValidationPhases summarizes validation phase config and evaluates phase-level constraints.
-func checkValidationPhases(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) []ValidationPhaseSummary {
-	if rec.Validation == nil {
-		return nil
-	}
-
-	phases := make([]ValidationPhaseSummary, 0, 3)
-
-	type phaseInfo struct {
-		name  string
-		phase *recipe.ValidationPhase
-	}
-
-	for _, p := range []phaseInfo{
-		{"deployment", rec.Validation.Deployment},
-		{"performance", rec.Validation.Performance},
-		{"conformance", rec.Validation.Conformance},
-	} {
-		if p.phase == nil {
-			continue
-		}
-
-		summary := ValidationPhaseSummary{
-			Phase:  p.name,
-			Checks: p.phase.Checks,
-		}
-
-		// Evaluate phase-level constraints if any
-		if len(p.phase.Constraints) > 0 {
-			summary.ConstraintResults = make([]ConstraintResult, 0, len(p.phase.Constraints))
-			for _, c := range p.phase.Constraints {
-				cr := evaluateConstraint(c, snap)
-				summary.ConstraintResults = append(summary.ConstraintResults, cr)
-			}
-		}
-
-		phases = append(phases, summary)
-	}
-
-	return phases
-}
-
-// evaluateConstraint evaluates a single recipe constraint against a snapshot.
-// Uses the same constraints.Evaluate path as validator.checkReadiness.
-func evaluateConstraint(c recipe.Constraint, snap *snapshotter.Snapshot) ConstraintResult {
-	cr := ConstraintResult{
-		Name:        c.Name,
-		Expected:    c.Value,
-		Remediation: c.Remediation,
-	}
-
-	switch c.Severity {
-	case "warning":
-		cr.Severity = SeverityWarning
-	default:
-		cr.Severity = SeverityError
-	}
-
-	eval := constraints.Evaluate(c, snap)
-	if eval.Error != nil {
-		cr.Error = eval.Error.Error()
-		cr.Actual = eval.Actual
-		return cr
-	}
-
-	cr.Actual = eval.Actual
-	cr.Passed = eval.Passed
-	return cr
-}
-
-// --- snapshot-vs-snapshot helpers ---
+// --- helpers ---
 
 func indexMeasurements(measurements []*measurement.Measurement) map[string]*measurement.Measurement {
 	idx := make(map[string]*measurement.Measurement, len(measurements))
@@ -550,4 +271,3 @@ func mergeKeys[V any](a, b map[string]V) []string {
 	}
 	return keys
 }
-

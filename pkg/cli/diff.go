@@ -22,9 +22,9 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/diff"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -34,30 +34,19 @@ func diffCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "diff",
 		Category: functionalCategoryName,
-		Usage:    "Detect configuration drift by comparing snapshots or evaluating recipe constraints",
-		Description: `Detect configuration drift in two modes:
-
-  Recipe mode (--recipe + --snapshot):
-    Evaluate recipe constraints against a snapshot to determine if the
-    cluster still meets the recipe's requirements. Checks top-level
-    constraints, component versions, and validation phase configuration.
-    Reports pass/fail per constraint with severity and remediation.
-
-  Snapshot mode (--baseline + --target):
-    Compare two snapshots field-by-field to see what changed.
+		Usage:    "Compare two snapshots to detect configuration drift",
+		Description: `Compare two snapshots field-by-field to see what changed between
+cluster states. Reports added, removed, and modified readings.
 
 Examples:
-  # Check if cluster matches recipe requirements (primary use case)
-  aicr diff --recipe recipe.yaml --snapshot current.yaml
+  # Compare two snapshots
+  aicr diff --baseline before.yaml --target after.yaml
 
   # Human-readable table output
-  aicr diff --recipe recipe.yaml --snapshot current.yaml --format table
+  aicr diff --baseline before.yaml --target after.yaml --format table
 
   # JSON output for CI/CD pipelines with non-zero exit on drift
-  aicr diff --recipe recipe.yaml --snapshot current.yaml --format json --fail-on-drift
-
-  # Compare two snapshots to see what changed
-  aicr diff --baseline before.yaml --target after.yaml
+  aicr diff --baseline before.yaml --target after.yaml --format json --fail-on-drift
 
   # Compare snapshots from ConfigMaps
   aicr diff --baseline cm://default/baseline --target cm://default/current`,
@@ -71,41 +60,21 @@ Examples:
 // diffCmdFlags returns the flags for the diff command.
 func diffCmdFlags() []cli.Flag {
 	return []cli.Flag{
-		// Recipe mode flags
 		&cli.StringFlag{
-			Name:     "recipe",
-			Aliases:  []string{"r"},
-			Usage:    "recipe file: evaluate constraints against snapshot (recipe mode)",
-			Category: "Recipe Mode",
+			Name:    "baseline",
+			Aliases: []string{"b"},
+			Usage:   "baseline snapshot (file path or ConfigMap URI)",
 		},
 		&cli.StringFlag{
-			Name:     "snapshot",
-			Aliases:  []string{"s"},
-			Usage:    "snapshot to evaluate against recipe constraints (recipe mode)",
-			Category: "Recipe Mode",
+			Name:  "target",
+			Usage: "target snapshot (file path or ConfigMap URI)",
 		},
-
-		// Snapshot mode flags
-		&cli.StringFlag{
-			Name:     "baseline",
-			Aliases:  []string{"b"},
-			Usage:    "baseline snapshot for field-level comparison (snapshot mode)",
-			Category: "Snapshot Mode",
-		},
-		&cli.StringFlag{
-			Name:     "target",
-			Usage:    "target snapshot for field-level comparison (snapshot mode)",
-			Category: "Snapshot Mode",
-		},
-
-		// Common flags
 		&cli.BoolFlag{
-			Name:     "fail-on-drift",
-			Usage:    "exit with non-zero status if drift is detected",
-			Category: "Output",
+			Name:  "fail-on-drift",
+			Usage: "exit with non-zero status if drift is detected",
 		},
 		outputFlag,
-		formatFlag,
+		formatFlag(),
 		kubeconfigFlag,
 		dataFlag,
 	}
@@ -113,103 +82,35 @@ func diffCmdFlags() []cli.Flag {
 
 // runDiffCmd executes the diff command.
 func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
-	if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "baseline", "target", "output", "format"); err != nil {
+	if err := validateSingleValueFlags(cmd, "baseline", "target", "output", "format"); err != nil {
 		return err
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.CLISnapshotTimeout)
+	defer cancel()
 
 	outFormat, err := parseOutputFormat(cmd)
 	if err != nil {
 		return err
 	}
 
-	recipePath := cmd.String("recipe")
-	snapshotPath := cmd.String("snapshot")
 	baselinePath := cmd.String("baseline")
 	targetPath := cmd.String("target")
+
+	if baselinePath == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "--baseline is required")
+	}
+	if targetPath == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "--target is required")
+	}
 
 	if err := initDataProvider(cmd); err != nil {
 		return err
 	}
 
-	hasRecipeMode := recipePath != "" || snapshotPath != ""
-	hasSnapshotMode := baselinePath != "" || targetPath != ""
-
-	if hasRecipeMode && hasSnapshotMode {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"cannot mix recipe mode (--recipe/--snapshot) with snapshot mode (--baseline/--target)")
-	}
-
-	if hasRecipeMode {
-		return runRecipeDiff(ctx, cmd, recipePath, snapshotPath, outFormat)
-	}
-
-	if hasSnapshotMode {
-		return runSnapshotDiff(ctx, cmd, baselinePath, targetPath, outFormat)
-	}
-
-	return errors.New(errors.ErrCodeInvalidRequest,
-		"specify either --recipe and --snapshot (recipe mode) or --baseline and --target (snapshot mode)")
-}
-
-// runRecipeDiff evaluates recipe constraints against a snapshot.
-func runRecipeDiff(ctx context.Context, cmd *cli.Command, recipePath, snapshotPath string, outFormat serializer.Format) error {
-	if recipePath == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required in recipe mode")
-	}
-	if snapshotPath == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "--snapshot is required in recipe mode")
-	}
-
 	kubeconfig := cmd.String("kubeconfig")
 
-	slog.Debug("recipe mode", slog.String("recipe", recipePath), slog.String("snapshot", snapshotPath))
-
-	rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](recipePath, kubeconfig)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load recipe from %q", recipePath), err)
-	}
-
-	snap, err := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapshotPath, kubeconfig)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapshotPath), err)
-	}
-
-	result := diff.RecipeVsSnapshot(rec, snap)
-	result.BaselineSource = recipePath
-	result.TargetSource = snapshotPath
-
-	slog.Info("recipe diff complete",
-		slog.Int("passed", result.Summary.ConstraintsPassed),
-		slog.Int("failed", result.Summary.ConstraintsFailed),
-		slog.Int("errors", result.Summary.ConstraintsError),
-		slog.Int("componentsOk", result.Summary.ComponentsOK),
-		slog.Int("componentsDrifted", result.Summary.ComponentsDrifted))
-
-	if err := writeDiffResult(ctx, cmd, outFormat, result); err != nil {
-		return err
-	}
-
-	if cmd.Bool("fail-on-drift") && result.HasDrift() {
-		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("drift detected: %d constraint(s) failed, %d component(s) drifted",
-				result.Summary.ConstraintsFailed, result.Summary.ComponentsDrifted))
-	}
-
-	return nil
-}
-
-// runSnapshotDiff compares two snapshots field-by-field.
-func runSnapshotDiff(ctx context.Context, cmd *cli.Command, baselinePath, targetPath string, outFormat serializer.Format) error {
-	if baselinePath == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "--baseline is required in snapshot mode")
-	}
-	if targetPath == "" {
-		return errors.New(errors.ErrCodeInvalidRequest, "--target is required in snapshot mode")
-	}
-
-	kubeconfig := cmd.String("kubeconfig")
-
-	slog.Debug("snapshot mode", slog.String("baseline", baselinePath), slog.String("target", targetPath))
+	slog.Debug("snapshot diff", slog.String("baseline", baselinePath), slog.String("target", targetPath))
 
 	baseline, err := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](baselinePath, kubeconfig)
 	if err != nil {
@@ -255,7 +156,11 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output file", err)
 			}
-			defer f.Close()
+			defer func() {
+				if closeErr := f.Close(); closeErr != nil {
+					slog.Error("failed to close output file", "error", closeErr)
+				}
+			}()
 			w = f
 		}
 		return diff.WriteTable(w, result)
@@ -268,7 +173,9 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 	}
 	defer func() {
 		if closer, ok := ser.(interface{ Close() error }); ok {
-			_ = closer.Close()
+			if closeErr := closer.Close(); closeErr != nil {
+				slog.Error("failed to close serializer", "error", closeErr)
+			}
 		}
 	}()
 

@@ -21,7 +21,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -50,8 +49,6 @@ func makeSubtype(name string, data map[string]measurement.Reading) measurement.S
 	}
 }
 
-// --- Snapshot-vs-Snapshot Tests ---
-
 func TestSnapshots_IdenticalSnapshots(t *testing.T) {
 	snap := makeSnapshot(
 		makeMeasurement(measurement.TypeK8s,
@@ -66,9 +63,6 @@ func TestSnapshots_IdenticalSnapshots(t *testing.T) {
 
 	if result.HasDrift() {
 		t.Errorf("expected no drift for identical snapshots, got %d changes", result.Summary.Total)
-	}
-	if result.Mode != "snapshot-vs-snapshot" {
-		t.Errorf("expected mode snapshot-vs-snapshot, got %s", result.Mode)
 	}
 }
 
@@ -198,6 +192,16 @@ func TestSnapshots_EmptySnapshots(t *testing.T) {
 	}
 }
 
+func TestSnapshots_NilInputs(t *testing.T) {
+	result := Snapshots(nil, nil)
+	if result.HasDrift() {
+		t.Errorf("expected no drift for nil snapshots")
+	}
+	if result.Changes == nil {
+		t.Errorf("expected non-nil changes slice")
+	}
+}
+
 func TestSnapshots_DeterministicOrder(t *testing.T) {
 	baseline := makeSnapshot(
 		makeMeasurement(measurement.TypeOS,
@@ -227,274 +231,67 @@ func TestSnapshots_DeterministicOrder(t *testing.T) {
 	}
 }
 
-// --- Recipe-vs-Snapshot Tests ---
-
-func TestRecipeVsSnapshot_AllConstraintsPassed(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		Constraints: []recipe.Constraint{
-			{Name: "K8s.server.version", Value: ">= 1.30", Severity: "error"},
-			{Name: "OS.release.ID", Value: "ubuntu", Severity: "error"},
-		},
-	}
-
-	snap := makeSnapshot(
+func TestSnapshots_AddedMeasurementType(t *testing.T) {
+	baseline := makeSnapshot(
 		makeMeasurement(measurement.TypeK8s,
 			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.32.4")}),
 		),
-		makeMeasurement(measurement.TypeOS,
-			makeSubtype("release", map[string]measurement.Reading{"ID": measurement.Str("ubuntu")}),
-		),
 	)
-
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.Mode != "recipe-vs-snapshot" {
-		t.Errorf("expected mode recipe-vs-snapshot, got %s", result.Mode)
-	}
-	if result.Summary.ConstraintsPassed != 2 {
-		t.Errorf("expected 2 passed, got %d", result.Summary.ConstraintsPassed)
-	}
-	if result.HasDrift() {
-		t.Errorf("expected no drift when all constraints pass")
-	}
-}
-
-func TestRecipeVsSnapshot_ConstraintFailed(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		Constraints: []recipe.Constraint{
-			{Name: "K8s.server.version", Value: ">= 1.32", Severity: "error", Remediation: "Upgrade K8s to 1.32+"},
-		},
-	}
-
-	snap := makeSnapshot(
+	target := makeSnapshot(
 		makeMeasurement(measurement.TypeK8s,
-			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.31.0")}),
+			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.32.4")}),
 		),
-	)
-
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.Summary.ConstraintsFailed != 1 {
-		t.Fatalf("expected 1 failed, got %d", result.Summary.ConstraintsFailed)
-	}
-	if !result.HasDrift() {
-		t.Errorf("expected drift when constraint fails")
-	}
-
-	cr := result.ConstraintResults[0]
-	if cr.Passed || cr.Severity != SeverityError || cr.Actual != "1.31.0" {
-		t.Errorf("unexpected constraint result: passed=%v severity=%s actual=%s", cr.Passed, cr.Severity, cr.Actual)
-	}
-	if cr.Remediation != "Upgrade K8s to 1.32+" {
-		t.Errorf("expected remediation guidance, got %s", cr.Remediation)
-	}
-}
-
-func TestRecipeVsSnapshot_WarningSeverity(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		Constraints: []recipe.Constraint{
-			{Name: "GPU.device.driver", Value: ">= 550.0", Severity: "warning"},
-		},
-	}
-
-	snap := makeSnapshot(
 		makeMeasurement(measurement.TypeGPU,
 			makeSubtype("device", map[string]measurement.Reading{"driver": measurement.Str("535.129.03")}),
 		),
 	)
 
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.ConstraintResults[0].Severity != SeverityWarning {
-		t.Errorf("expected severity warning, got %s", result.ConstraintResults[0].Severity)
+	result := Snapshots(baseline, target)
+	if result.Summary.Added != 1 {
+		t.Errorf("expected 1 added (new measurement type), got %d", result.Summary.Added)
 	}
 }
 
-func TestRecipeVsSnapshot_MissingMeasurement(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		Constraints: []recipe.Constraint{
-			{Name: "GPU.device.driver", Value: ">= 535.0", Severity: "error"},
-		},
-	}
-
-	snap := makeSnapshot(
+func TestSnapshots_RemovedMeasurementType(t *testing.T) {
+	baseline := makeSnapshot(
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.32.4")}),
+		),
+		makeMeasurement(measurement.TypeGPU,
+			makeSubtype("device", map[string]measurement.Reading{"driver": measurement.Str("535.129.03")}),
+		),
+	)
+	target := makeSnapshot(
 		makeMeasurement(measurement.TypeK8s,
 			makeSubtype("server", map[string]measurement.Reading{"version": measurement.Str("1.32.4")}),
 		),
 	)
 
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.Summary.ConstraintsError != 1 {
-		t.Fatalf("expected 1 error, got %d", result.Summary.ConstraintsError)
-	}
-	if result.ConstraintResults[0].Error == "" {
-		t.Errorf("expected error for missing measurement")
+	result := Snapshots(baseline, target)
+	if result.Summary.Removed != 1 {
+		t.Errorf("expected 1 removed (dropped measurement type), got %d", result.Summary.Removed)
 	}
 }
 
-func TestRecipeVsSnapshot_EmptyConstraints(t *testing.T) {
-	rec := &recipe.RecipeResult{Constraints: []recipe.Constraint{}}
-	result := RecipeVsSnapshot(rec, makeSnapshot())
-	if result.HasDrift() {
-		t.Errorf("expected no drift with no constraints")
+func TestSnapshots_MetadataSourceNode(t *testing.T) {
+	baseline := makeSnapshot()
+	baseline.Metadata = map[string]string{"source-node": "node-a"}
+	target := makeSnapshot()
+	target.Metadata = map[string]string{"source-node": "node-b"}
+
+	result := Snapshots(baseline, target)
+	if result.BaselineSource != "node-a" {
+		t.Errorf("expected baseline source node-a, got %s", result.BaselineSource)
 	}
-}
-
-// --- Component Drift Tests ---
-
-func TestRecipeVsSnapshot_ComponentPresent(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "gpu-operator", Version: "24.9.0", Namespace: "gpu-operator"},
-		},
-	}
-
-	snap := makeSnapshot(
-		makeMeasurement(measurement.TypeK8s,
-			makeSubtype("image", map[string]measurement.Reading{
-				"gpu-operator": measurement.Str("24.9.0"),
-			}),
-		),
-	)
-
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.Summary.ComponentsOK != 1 {
-		t.Errorf("expected 1 component ok, got %d", result.Summary.ComponentsOK)
-	}
-	if result.ComponentDrifts[0].Status != "ok" {
-		t.Errorf("expected status ok, got %s", result.ComponentDrifts[0].Status)
-	}
-}
-
-func TestRecipeVsSnapshot_ComponentMissing(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "gpu-operator", Version: "24.9.0", Namespace: "gpu-operator"},
-		},
-	}
-
-	snap := makeSnapshot(
-		makeMeasurement(measurement.TypeK8s,
-			makeSubtype("image", map[string]measurement.Reading{
-				"cert-manager": measurement.Str("1.14.0"),
-			}),
-		),
-	)
-
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.Summary.ComponentsDrifted != 1 {
-		t.Errorf("expected 1 component drifted, got %d", result.Summary.ComponentsDrifted)
-	}
-	if result.ComponentDrifts[0].Status != ComponentStatusNotObserved {
-		t.Errorf("expected status missing, got %s", result.ComponentDrifts[0].Status)
-	}
-	if !result.HasDrift() {
-		t.Errorf("expected drift when component is missing")
-	}
-}
-
-func TestRecipeVsSnapshot_ComponentVersionMismatch(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "gpu-operator", Version: "24.9.0", Namespace: "gpu-operator"},
-		},
-	}
-
-	snap := makeSnapshot(
-		makeMeasurement(measurement.TypeK8s,
-			makeSubtype("image", map[string]measurement.Reading{
-				"gpu-operator": measurement.Str("24.6.0"),
-			}),
-		),
-	)
-
-	result := RecipeVsSnapshot(rec, snap)
-
-	if result.ComponentDrifts[0].Status != ComponentStatusMismatch {
-		t.Errorf("expected status version-mismatch, got %s", result.ComponentDrifts[0].Status)
-	}
-	if result.ComponentDrifts[0].ExpectedVersion != "24.9.0" || result.ComponentDrifts[0].ActualVersion != "24.6.0" {
-		t.Errorf("expected 24.9.0 vs 24.6.0, got %s vs %s",
-			result.ComponentDrifts[0].ExpectedVersion, result.ComponentDrifts[0].ActualVersion)
-	}
-}
-
-func TestRecipeVsSnapshot_DisabledComponentSkipped(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "gpu-operator", Version: "24.9.0", Overrides: map[string]any{"enabled": false}},
-		},
-	}
-
-	snap := makeSnapshot()
-	result := RecipeVsSnapshot(rec, snap)
-
-	if len(result.ComponentDrifts) != 0 {
-		t.Errorf("expected disabled component to be skipped, got %d drifts", len(result.ComponentDrifts))
-	}
-}
-
-// --- Validation Phase Tests ---
-
-func TestRecipeVsSnapshot_ValidationPhases(t *testing.T) {
-	rec := &recipe.RecipeResult{
-		Validation: &recipe.ValidationConfig{
-			Deployment: &recipe.ValidationPhase{
-				Checks: []string{"operator-health", "expected-resources"},
-			},
-			Performance: &recipe.ValidationPhase{
-				Checks: []string{"nccl-all-reduce-bw"},
-				Constraints: []recipe.Constraint{
-					{Name: "GPU.device.driver", Value: ">= 535.0", Severity: "error"},
-				},
-			},
-		},
-	}
-
-	snap := makeSnapshot(
-		makeMeasurement(measurement.TypeGPU,
-			makeSubtype("device", map[string]measurement.Reading{
-				"driver": measurement.Str("535.129.03"),
-			}),
-		),
-	)
-
-	result := RecipeVsSnapshot(rec, snap)
-
-	if len(result.ValidationPhases) != 2 {
-		t.Fatalf("expected 2 validation phases, got %d", len(result.ValidationPhases))
-	}
-
-	// Deployment phase
-	dp := result.ValidationPhases[0]
-	if dp.Phase != "deployment" {
-		t.Errorf("expected deployment phase, got %s", dp.Phase)
-	}
-	if len(dp.Checks) != 2 {
-		t.Errorf("expected 2 checks, got %d", len(dp.Checks))
-	}
-
-	// Performance phase with constraints
-	pp := result.ValidationPhases[1]
-	if pp.Phase != "performance" {
-		t.Errorf("expected performance phase, got %s", pp.Phase)
-	}
-	if len(pp.ConstraintResults) != 1 {
-		t.Fatalf("expected 1 phase constraint, got %d", len(pp.ConstraintResults))
-	}
-	if !pp.ConstraintResults[0].Passed {
-		t.Errorf("expected phase constraint to pass")
+	if result.TargetSource != "node-b" {
+		t.Errorf("expected target source node-b, got %s", result.TargetSource)
 	}
 }
 
 // --- Table Output Tests ---
 
-func TestWriteTable_SnapshotMode(t *testing.T) {
+func TestWriteTable_WithChanges(t *testing.T) {
 	result := &Result{
-		Mode: "snapshot-vs-snapshot",
 		Changes: []Change{
 			{Kind: Modified, Severity: SeverityInfo, Path: "K8s.server.version", Baseline: "1.31.0", Target: "1.32.4"},
 			{Kind: Added, Severity: SeverityInfo, Path: "GPU.device.memory", Target: "81559 MiB"},
@@ -519,45 +316,8 @@ func TestWriteTable_SnapshotMode(t *testing.T) {
 	}
 }
 
-func TestWriteTable_RecipeMode(t *testing.T) {
-	result := &Result{
-		Mode: "recipe-vs-snapshot",
-		ConstraintResults: []ConstraintResult{
-			{Name: "K8s.server.version", Expected: ">= 1.32", Actual: "1.31.0", Passed: false, Severity: SeverityError, Remediation: "Upgrade K8s"},
-			{Name: "OS.release.ID", Expected: "ubuntu", Actual: "ubuntu", Passed: true, Severity: SeverityError},
-		},
-		ComponentDrifts: []ComponentDrift{
-			{Name: "gpu-operator", ExpectedVersion: "24.9.0", ActualVersion: "24.6.0", Status: ComponentStatusMismatch},
-		},
-		Summary: Summary{ConstraintsPassed: 1, ConstraintsFailed: 1, ComponentsDrifted: 1},
-	}
-
-	var buf bytes.Buffer
-	if err := WriteTable(&buf, result); err != nil {
-		t.Fatalf("WriteTable failed: %v", err)
-	}
-
-	output := buf.String()
-	if !strings.Contains(output, "CONSTRAINTS") {
-		t.Errorf("expected CONSTRAINTS header")
-	}
-	if !strings.Contains(output, "FAIL") {
-		t.Errorf("expected FAIL status")
-	}
-	if !strings.Contains(output, "COMPONENTS") {
-		t.Errorf("expected COMPONENTS header")
-	}
-	if !strings.Contains(output, "VERSION-MISMATCH") {
-		t.Errorf("expected VERSION-MISMATCH status")
-	}
-	if !strings.Contains(output, "DRIFT DETECTED") {
-		t.Errorf("expected DRIFT DETECTED")
-	}
-}
-
 func TestWriteTable_NoChanges(t *testing.T) {
 	result := &Result{
-		Mode:    "snapshot-vs-snapshot",
 		Changes: []Change{},
 		Summary: Summary{},
 	}
@@ -569,5 +329,23 @@ func TestWriteTable_NoChanges(t *testing.T) {
 
 	if !strings.Contains(buf.String(), "NO CHANGES") {
 		t.Errorf("expected NO CHANGES for empty diff")
+	}
+}
+
+func TestWriteTable_DriftDetected(t *testing.T) {
+	result := &Result{
+		Changes: []Change{
+			{Kind: Modified, Severity: SeverityInfo, Path: "K8s.server.version", Baseline: "1.31.0", Target: "1.32.4"},
+		},
+		Summary: Summary{Modified: 1, Total: 1},
+	}
+
+	var buf bytes.Buffer
+	if err := WriteTable(&buf, result); err != nil {
+		t.Fatalf("WriteTable failed: %v", err)
+	}
+
+	if !strings.Contains(buf.String(), "DRIFT DETECTED") {
+		t.Errorf("expected DRIFT DETECTED footer")
 	}
 }

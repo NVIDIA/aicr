@@ -33,11 +33,11 @@ func TestDiffCmd_CommandStructure(t *testing.T) {
 	}
 }
 
-func TestDiffCmd_RecipeModeFlags(t *testing.T) {
+func TestDiffCmd_Flags(t *testing.T) {
 	cmd := diffCmd()
 
-	recipeFlags := []string{"recipe", "snapshot"}
-	for _, flagName := range recipeFlags {
+	requiredFlags := []string{"baseline", "target", "fail-on-drift", "output", "format", "kubeconfig", "data"}
+	for _, flagName := range requiredFlags {
 		found := false
 		for _, flag := range cmd.Flags {
 			if hasFlag(flag, flagName) {
@@ -46,58 +46,19 @@ func TestDiffCmd_RecipeModeFlags(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("missing recipe mode flag: %s", flagName)
+			t.Errorf("missing flag: %s", flagName)
 		}
 	}
 
-	// Check aliases
+	// Check baseline alias
 	for _, flag := range cmd.Flags {
-		if hasFlag(flag, "recipe") && !hasFlag(flag, "r") {
-			t.Error("--recipe flag missing -r alias")
-		}
-		if hasFlag(flag, "snapshot") && !hasFlag(flag, "s") {
-			t.Error("--snapshot flag missing -s alias")
+		if hasFlag(flag, "baseline") && !hasFlag(flag, "b") {
+			t.Error("--baseline flag missing -b alias")
 		}
 	}
 }
 
-func TestDiffCmd_SnapshotModeFlags(t *testing.T) {
-	cmd := diffCmd()
-
-	snapshotFlags := []string{"baseline", "target"}
-	for _, flagName := range snapshotFlags {
-		found := false
-		for _, flag := range cmd.Flags {
-			if hasFlag(flag, flagName) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("missing snapshot mode flag: %s", flagName)
-		}
-	}
-}
-
-func TestDiffCmd_CommonFlags(t *testing.T) {
-	cmd := diffCmd()
-
-	commonFlags := []string{"fail-on-drift", "output", "format", "kubeconfig", "data"}
-	for _, flagName := range commonFlags {
-		found := false
-		for _, flag := range cmd.Flags {
-			if hasFlag(flag, flagName) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("missing common flag: %s", flagName)
-		}
-	}
-}
-
-func TestDiffCmd_ModeValidation(t *testing.T) {
+func TestDiffCmd_Validation(t *testing.T) {
 	tests := []struct {
 		name       string
 		args       []string
@@ -108,37 +69,13 @@ func TestDiffCmd_ModeValidation(t *testing.T) {
 			name:       "no flags",
 			args:       []string{"aicr", "diff"},
 			wantErr:    true,
-			errContain: "specify either",
-		},
-		{
-			name:       "mixed modes",
-			args:       []string{"aicr", "diff", "--recipe", "r.yaml", "--baseline", "b.yaml"},
-			wantErr:    true,
-			errContain: "cannot mix",
-		},
-		{
-			name:       "recipe without snapshot",
-			args:       []string{"aicr", "diff", "--recipe", "r.yaml"},
-			wantErr:    true,
-			errContain: "--snapshot is required",
-		},
-		{
-			name:       "snapshot without recipe",
-			args:       []string{"aicr", "diff", "--snapshot", "s.yaml"},
-			wantErr:    true,
-			errContain: "--recipe is required",
+			errContain: "--baseline is required",
 		},
 		{
 			name:       "baseline without target",
 			args:       []string{"aicr", "diff", "--baseline", "b.yaml"},
 			wantErr:    true,
 			errContain: "--target is required",
-		},
-		{
-			name:       "target without baseline",
-			args:       []string{"aicr", "diff", "--target", "t.yaml"},
-			wantErr:    true,
-			errContain: "--baseline is required",
 		},
 	}
 
