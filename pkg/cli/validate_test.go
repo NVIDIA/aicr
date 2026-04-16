@@ -15,6 +15,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -247,6 +249,88 @@ func TestValidateCmd_CNCFSubmissionFlagValidation(t *testing.T) {
 			if tt.wantErr && tt.errContain != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errContain) {
 					t.Errorf("error = %v, want error containing %q", err, tt.errContain)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateCmd_RecipeKindHandling(t *testing.T) {
+	tests := []struct {
+		name        string
+		yamlContent string
+		wantErr     bool
+		errContain  string
+		errAbsent   string
+	}{
+		{
+			name:        "RecipeMetadata without criteria returns clear error",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec: {}\n",
+			wantErr:     true,
+			errContain:  "has no criteria",
+		},
+		{
+			name:        "RecipeMetadata with criteria auto-hydrates",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			wantErr:     true,
+			errContain:  "kubernetes client",
+			errAbsent:   "has no criteria",
+		},
+		{
+			name:        "RecipeMixin kind is rejected",
+			yamlContent: "kind: RecipeMixin\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec: {}\n",
+			wantErr:     true,
+			errContain:  `kind "RecipeMixin"`,
+		},
+		{
+			name:        "unknown kind is rejected",
+			yamlContent: "kind: SomethingElse\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			wantErr:     true,
+			errContain:  `kind "SomethingElse"`,
+		},
+		{
+			name:        "RecipeResult kind passes kind check",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\n",
+			wantErr:     true,
+			errContain:  "kubernetes client",
+			errAbsent:   "is required",
+		},
+		{
+			name:        "empty kind passes kind check",
+			yamlContent: "apiVersion: aicr.nvidia.com/v1alpha1\n",
+			wantErr:     true,
+			errContain:  "kubernetes client",
+			errAbsent:   "is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			recipeFile := filepath.Join(dir, "recipe.yaml")
+			if err := os.WriteFile(recipeFile, []byte(tt.yamlContent), 0o600); err != nil {
+				t.Fatalf("failed to write test recipe file: %v", err)
+			}
+
+			cmd := validateCmd()
+			app := &cli.Command{
+				Name:     "aicr",
+				Commands: []*cli.Command{cmd},
+			}
+			err := app.Run(t.Context(), []string{"aicr", "validate", "--recipe", recipeFile, "--no-cluster"})
+
+			if tt.wantErr && err == nil {
+				t.Error("expected error but got nil")
+				return
+			}
+			if tt.errContain != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.errContain) {
+					t.Errorf("error = %v, want error containing %q", err, tt.errContain)
+				}
+			}
+			if tt.errAbsent != "" && err != nil {
+				if strings.Contains(err.Error(), tt.errAbsent) {
+					t.Errorf("error = %v, should NOT contain %q", err, tt.errAbsent)
 				}
 			}
 		})

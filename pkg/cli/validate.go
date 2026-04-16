@@ -509,9 +509,9 @@ Run validation without failing on check errors (informational mode):
 
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
-			rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](recipeFilePath, kubeconfig)
+			rec, err := recipe.LoadFromFile(ctx, recipeFilePath, kubeconfig, version)
 			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load recipe from %q", recipeFilePath), err)
+				return err
 			}
 
 			var snap *snapshotter.Snapshot
