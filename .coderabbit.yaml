@@ -16,16 +16,29 @@ language: en-US
 
 reviews:
   profile: assertive
+  request_changes_workflow: false
+  high_level_summary: false
+  poem: false
+  review_status: false
+  collapse_walkthrough: true
+  changed_files_summary: false
+  sequence_diagrams: false
   auto_review:
     enabled: true
     drafts: false
+    base_branches:
+      - ".*"
   path_filters:
     - "!vendor/**"
     - "!testdata/**"
     - "!dist/**"
+    - "!**/*_generated.go"
+    - "!**/zz_generated_*.go"
   tools:
     golangci-lint:
-      enabled: true
+      enabled: false
+    yamllint:
+      enabled: false
     shellcheck:
       enabled: true
 
