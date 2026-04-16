@@ -193,7 +193,7 @@ func collectSecureAccessBaselineArtifacts(ctx *validators.Context, dynClient dyn
 	}
 
 	// GPU operator pods.
-	operatorPods, err := ctx.Clientset.CoreV1().Pods("gpu-operator").List(ctx.Ctx, metav1.ListOptions{})
+	operatorPods, err := ctx.Clientset.CoreV1().Pods(defaults.GPUOperatorNamespace).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
 		recordRawTextArtifact(ctx, "GPU operator pods", "kubectl get pods -n gpu-operator -o wide",
 			fmt.Sprintf("failed to list gpu-operator pods: %v", err))
@@ -207,7 +207,7 @@ func collectSecureAccessBaselineArtifacts(ctx *validators.Context, dynClient dyn
 	}
 
 	// GPU operator DaemonSets.
-	daemonSets, err := ctx.Clientset.AppsV1().DaemonSets("gpu-operator").List(ctx.Ctx, metav1.ListOptions{})
+	daemonSets, err := ctx.Clientset.AppsV1().DaemonSets(defaults.GPUOperatorNamespace).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
 		recordRawTextArtifact(ctx, "GPU operator DaemonSets", "kubectl get ds -n gpu-operator",
 			fmt.Sprintf("failed to list gpu-operator DaemonSets: %v", err))

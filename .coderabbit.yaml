@@ -12,20 +12,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-enabled: true
-additional_trustees:
-  - atif1996
-  - ayuskauskas
-  - coffeepac
-  - cullenmcdermott
-  - dims
-  - Kevin-Hawkins
-  - lockwobr
-  - mchmarny
-  - njhensley
-  - sttts
-  - svcsectool
-  - tabern
-  - valcharry
-  - xdu31
-  - yuanchen8911
+language: en-US
+
+reviews:
+  profile: assertive
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!vendor/**"
+    - "!testdata/**"
+    - "!dist/**"
+  tools:
+    golangci-lint:
+      enabled: true
+    shellcheck:
+      enabled: true
+
+knowledge_base:
+  opt_out: false
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - CLAUDE.md
+      - CONTRIBUTING.md
+      - DEVELOPMENT.md
+
+chat:
+  auto_reply: true

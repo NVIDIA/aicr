@@ -12,12 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert that critical CRDs are installed by the kind training stack.
-# Compared to the cluster (inference) assert-crds:
-#   Removed: dynamo-crds — no Dynamo dependency in kind training validation
+# Assert that critical CRDs are installed for the kind training + Kubeflow stack.
 
 # ── GPU Operator ───────────────────────────────────────────────────────
-# ClusterPolicy CRD — the GPU operator's primary configuration object
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -38,6 +35,12 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   name: clusterissuers.cert-manager.io
+---
+# ── Kubeflow Trainer ───────────────────────────────────────────────────
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: trainjobs.trainer.kubeflow.org
 ---
 # ── Skyhook ────────────────────────────────────────────────────────────
 apiVersion: apiextensions.k8s.io/v1

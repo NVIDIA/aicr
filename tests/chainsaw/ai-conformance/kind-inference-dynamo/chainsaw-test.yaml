@@ -16,7 +16,7 @@
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: kind-cluster-health
+  name: kind-inference-dynamo-cluster-health
 spec:
   description: |
     Kind Inference Stack — Cluster Health Check.
@@ -24,7 +24,7 @@ spec:
     are healthy on a kind cluster with GPU passthrough. This test does NOT
     deploy anything — it validates already-deployed resources.
     Prerequisites: kind cluster with the inference stack deployed.
-    Run with: chainsaw test --test-dir tests/chainsaw/ai-conformance/kind
+    Run with: chainsaw test --test-dir tests/chainsaw/ai-conformance/kind-inference-dynamo
   timeouts:
     assert: 300s
   steps:
@@ -61,7 +61,7 @@ spec:
         assert: 600s
       try:
         - assert:
-            file: assert-gpu-operator.yaml
+            file: ../kind-common/assert-gpu-operator.yaml
 
     # ── Monitoring ─────────────────────────────────────────────────────
     - name: assert-monitoring
@@ -89,7 +89,7 @@ spec:
       description: Verify NVSentinel controller and platform connector are healthy (kind profile).
       try:
         - assert:
-            file: assert-nvsentinel.yaml
+            file: ../kind-common/assert-nvsentinel.yaml
 
     # ── NVIDIA DRA Driver ──────────────────────────────────────────────
     - name: assert-dra-driver
@@ -105,7 +105,7 @@ spec:
       description: Verify NVIDIA Network Operator is available.
       try:
         - assert:
-            file: assert-network-operator.yaml
+            file: ../kind-common/assert-network-operator.yaml
 
     # ── KAI Scheduler ──────────────────────────────────────────────────
     - name: assert-kai-scheduler
