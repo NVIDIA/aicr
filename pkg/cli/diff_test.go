@@ -36,8 +36,8 @@ func TestDiffCmd_CommandStructure(t *testing.T) {
 func TestDiffCmd_Flags(t *testing.T) {
 	cmd := diffCmd()
 
-	requiredFlags := []string{"baseline", "target", "fail-on-drift", "output", "format", "kubeconfig", "data"}
-	for _, flagName := range requiredFlags {
+	expectedFlags := []string{"baseline", "target", "fail-on-drift", "output", "format", "kubeconfig", "data"}
+	for _, flagName := range expectedFlags {
 		found := false
 		for _, flag := range cmd.Flags {
 			if hasFlag(flag, flagName) {

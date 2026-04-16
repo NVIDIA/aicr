@@ -85,7 +85,7 @@ func (r *Result) HasDrift() bool {
 
 // Snapshots compares two snapshots and returns a structured diff result.
 // The baseline is the reference state; the target is the current state.
-// Both baseline and target must be non-nil.
+// If either baseline or target is nil, returns an empty Result (no drift).
 func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 	if baseline == nil || target == nil {
 		return &Result{Changes: make([]Change, 0)}
@@ -218,7 +218,7 @@ func compareReadings(prefix string, base, target map[string]measurement.Reading)
 }
 
 func addedMeasurement(m *measurement.Measurement) []Change {
-	var changes []Change
+	changes := make([]Change, 0, len(m.Subtypes))
 	for _, st := range m.Subtypes {
 		changes = append(changes, addedSubtype(string(m.Type)+"."+st.Name, &st)...)
 	}
@@ -226,7 +226,7 @@ func addedMeasurement(m *measurement.Measurement) []Change {
 }
 
 func removedMeasurement(m *measurement.Measurement) []Change {
-	var changes []Change
+	changes := make([]Change, 0, len(m.Subtypes))
 	for _, st := range m.Subtypes {
 		changes = append(changes, removedSubtype(string(m.Type)+"."+st.Name, &st)...)
 	}

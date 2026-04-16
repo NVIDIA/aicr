@@ -53,11 +53,7 @@ func WriteTable(w io.Writer, result *Result) error {
 	}
 
 	fmt.Fprintln(w)
-	if result.HasDrift() {
-		fmt.Fprintln(w, "DRIFT DETECTED")
-	} else {
-		fmt.Fprintln(w, "NO DRIFT")
-	}
+	fmt.Fprintln(w, "DRIFT DETECTED")
 
 	return nil
 }

@@ -50,10 +50,8 @@ Examples:
 
   # Compare snapshots from ConfigMaps
   aicr diff --baseline cm://default/baseline --target cm://default/current`,
-		Flags: diffCmdFlags(),
-		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return runDiffCmd(ctx, cmd)
-		},
+		Flags:  diffCmdFlags(),
+		Action: runDiffCmd,
 	}
 }
 
@@ -104,7 +102,7 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "--target is required")
 	}
 
-	if err := initDataProvider(cmd); err != nil {
+	if err = initDataProvider(cmd); err != nil {
 		return err
 	}
 
@@ -136,7 +134,7 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	if cmd.Bool("fail-on-drift") && result.HasDrift() {
-		return errors.New(errors.ErrCodeInternal,
+		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("drift detected: %d change(s) found", result.Summary.Total))
 	}
 
