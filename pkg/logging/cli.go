@@ -21,6 +21,8 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // ANSI color codes
@@ -87,7 +89,7 @@ func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 	}
 
 	if _, err := fmt.Fprintln(h.writer, msg); err != nil {
-		return fmt.Errorf("failed to write log output: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write log output", err)
 	}
 	return nil
 }

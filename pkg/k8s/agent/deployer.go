@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -157,7 +158,7 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 
 // validateRuntimeClass checks that the specified RuntimeClass exists in the cluster.
 func (d *Deployer) validateRuntimeClass(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, defaults.RuntimeClassCheckTimeout)
 	defer cancel()
 
 	_, err := d.clientset.NodeV1().RuntimeClasses().Get(ctx, d.config.RuntimeClassName, metav1.GetOptions{})

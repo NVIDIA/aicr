@@ -554,7 +554,7 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 
 	// Check for Cluster Autoscaler deployment (optional — EKS may use Karpenter or managed scaling).
 	// Search common namespaces since Cluster Autoscaler can be deployed anywhere.
-	caNamespaces := []string{"kube-system", "cluster-autoscaler", "system"}
+	caNamespaces := []string{defaults.KubeSystemNamespace, "cluster-autoscaler", "system"}
 	caDeployNames := []string{"cluster-autoscaler", "cluster-autoscaler-aws-cluster-autoscaler"}
 	var caFound bool
 	for _, caNS := range caNamespaces {
@@ -642,8 +642,8 @@ func checkGKEAutoscaling(ctx *validators.Context) error {
 	if caErr == nil && caStatus != nil {
 		caStatusFound = true
 		statusData := caStatus.Data["status"]
-		if len(statusData) > 2000 {
-			statusData = statusData[:2000] + "\n... [truncated]"
+		if len(statusData) > defaults.ConfigMapStatusTruncateLen {
+			statusData = statusData[:defaults.ConfigMapStatusTruncateLen] + "\n... [truncated]"
 		}
 		recordRawTextArtifact(ctx, "Cluster Autoscaler Status",
 			"kubectl get configmap cluster-autoscaler-status -n kube-system -o jsonpath='{.data.status}'",
@@ -670,7 +670,7 @@ func checkGKEAutoscaling(ctx *validators.Context) error {
 	if evErr == nil {
 		var autoscalerEvents strings.Builder
 		count := 0
-		for i := len(events.Items) - 1; i >= 0 && count < 10; i-- {
+		for i := len(events.Items) - 1; i >= 0 && count < defaults.AutoscalerMaxEvents; i-- {
 			ev := events.Items[i]
 			if ev.Reason == "NotTriggerScaleUp" || ev.Reason == "ScaledUpGroup" ||
 				ev.Reason == "ScaleDown" || ev.Reason == "TriggeredScaleUp" {
