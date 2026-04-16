@@ -136,6 +136,9 @@ site/docs/conformance/index.md
 docs/plans
 .worktrees/
 
+# Per-clone local agent overlay (see AGENTS.md "Local Overlay" section)
+/AGENTS.local.md
+
 # Validator generator scaffolding output
 pkg/validator/checks/**/*_README.md
 pkg/validator/checks/**/*_recipe.yaml
