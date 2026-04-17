@@ -16,17 +16,12 @@ package config
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 )
-
-// safePathPattern validates that dynamic value path segments contain only safe characters.
-// Prevents injection of template expressions ({{ }}) or path traversal (../).
-var safePathPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
 
 // DeployerType represents the type of deployment method used for generated bundles.
 type DeployerType string
@@ -495,74 +490,41 @@ func NewConfig(options ...Option) *Config {
 }
 
 // ParseValueOverrides parses value override strings in format "bundler:path.to.field=value".
-// Returns a map of bundler -> (path -> value).
+// Returns a slice of ComponentPath where every entry has Value != nil.
 // This function is used by both CLI and API handlers to parse --set flags and query parameters.
-func ParseValueOverrides(overrides []string) (map[string]map[string]string, error) {
-	result := make(map[string]map[string]string)
-
+// Pass the result to WithComponentPaths to apply the overrides to a Config.
+func ParseValueOverrides(overrides []string) ([]ComponentPath, error) {
+	result := make([]ComponentPath, 0, len(overrides))
 	for _, override := range overrides {
-		// Split on first ':' to get bundler and path=value
-		parts := strings.SplitN(override, ":", 2)
-		if len(parts) != 2 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': expected 'bundler:path=value'", override))
+		var cp ComponentPath
+		if err := cp.Parse(override); err != nil {
+			return nil, err
 		}
-
-		bundlerName := parts[0]
-		pathValue := parts[1]
-
-		// Split on first '=' to get path and value
-		kvParts := strings.SplitN(pathValue, "=", 2)
-		if len(kvParts) != 2 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': expected 'bundler:path=value'", override))
+		if cp.Value == nil {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid format %q: --set requires 'bundler:path=value'", override))
 		}
-
-		path := kvParts[0]
-		value := kvParts[1]
-
-		if path == "" || value == "" {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': path and value cannot be empty", override))
-		}
-
-		// Initialize bundler map if needed
-		if result[bundlerName] == nil {
-			result[bundlerName] = make(map[string]string)
-		}
-
-		result[bundlerName][path] = value
+		result = append(result, cp)
 	}
-
 	return result, nil
 }
 
 // ParseDynamicValues parses dynamic value declarations in format "component:path.to.field".
-// Returns a map of component -> list of paths.
+// Returns a slice of ComponentPath where every entry has Value == nil.
 // This function is used by both CLI and API handlers to parse --dynamic flags.
-func ParseDynamicValues(inputs []string) (map[string][]string, error) {
-	result := make(map[string][]string)
-
+// Pass the result to WithComponentPaths to apply the declarations to a Config.
+func ParseDynamicValues(inputs []string) ([]ComponentPath, error) {
+	result := make([]ComponentPath, 0, len(inputs))
 	for _, input := range inputs {
-		parts := strings.SplitN(input, ":", 2)
-		if len(parts) != 2 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': expected 'component:path'", input))
+		var cp ComponentPath
+		if err := cp.Parse(input); err != nil {
+			return nil, err
 		}
-
-		component := parts[0]
-		path := parts[1]
-
-		if component == "" || path == "" {
-			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format '%s': component and path cannot be empty", input))
+		if cp.Value != nil {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid format %q: --dynamic does not accept '=value'", input))
 		}
-
-		// Validate path segments contain only safe characters
-		for _, segment := range strings.Split(path, ".") {
-			if !safePathPattern.MatchString(segment) {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid path segment %q in '%s': must contain only alphanumeric, dot, hyphen, or underscore characters", segment, input))
-			}
-		}
-
-		result[component] = append(result[component], path)
+		result = append(result, cp)
 	}
-
 	return result, nil
 }

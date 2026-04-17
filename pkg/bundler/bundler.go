@@ -946,7 +946,7 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 	if joinErr != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}
-	if err := os.WriteFile(recipePath, recipeData, 0600); err != nil {
+	if err := os.WriteFile(recipePath, recipeData, 0600); err != nil { //nolint:gosec // path validated by SafeJoin
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", err)
 	}
 

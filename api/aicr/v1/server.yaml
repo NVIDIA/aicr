@@ -762,6 +762,26 @@ paths:
             multiple:
               summary: Multiple overrides
               value: ["gpuoperator:gds.enabled=true", "gpuoperator:driver.version=570.86.16"]
+        - name: dynamic
+          in: query
+          required: false
+          description: >
+            Declare value paths as install-time parameters (format: component:path.to.field).
+            Can be repeated. Dynamic paths are removed from values.yaml and placed
+            in cluster-values.yaml for the user to fill in at install time.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          examples:
+            single:
+              summary: Single declaration
+              value: ["gpuoperator:driver.version"]
+            multiple:
+              summary: Multiple declarations
+              value: ["gpuoperator:driver.version", "gpuoperator:mig.strategy"]
         - name: system-node-selector
           in: query
           required: false
@@ -819,10 +839,10 @@ paths:
           required: false
           description: >
             Deployment method for generated components.
-            Supported values: helm (default), argocd.
+            Supported values: helm (default), argocd, argocd-helm.
           schema:
             type: string
-            enum: [helm, argocd]
+            enum: [helm, argocd, argocd-helm]
             default: helm
         - name: repo
           in: query

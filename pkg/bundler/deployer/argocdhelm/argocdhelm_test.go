@@ -307,15 +307,20 @@ func TestConvertToSingleSourceWithValues(t *testing.T) {
 		t.Errorf("targetRevision = %v, want v24.9.0", source["targetRevision"])
 	}
 
-	// Verify helm.values contains template expressions
+	// Verify helm.values contains template expressions. It's a *yaml.Node with
+	// LiteralStyle so yaml.Marshal emits it as a block scalar (not a quoted string).
 	helm, ok := source["helm"].(map[string]any)
 	if !ok {
 		t.Fatal("source should have 'helm' map")
 	}
-	valuesStr, ok := helm["values"].(string)
+	valuesNode, ok := helm["values"].(*yaml.Node)
 	if !ok {
-		t.Fatal("helm should have 'values' string")
+		t.Fatalf("helm.values should be *yaml.Node, got %T", helm["values"])
 	}
+	if valuesNode.Style != yaml.LiteralStyle {
+		t.Errorf("helm.values should use LiteralStyle to render as block scalar, got %v", valuesNode.Style)
+	}
+	valuesStr := valuesNode.Value
 	if !strings.Contains(valuesStr, "static/gpu-operator.yaml") {
 		t.Error("values should reference static file")
 	}
@@ -403,44 +408,47 @@ func TestSetValueByPath_StubBehavior(t *testing.T) {
 	}
 }
 
-// TestFixValuesTemplate verifies that the raw Helm template expression in
-// helm.values survives yaml.Marshal → fixValuesTemplate without being
-// quoted or escaped. This is critical: Argo CD needs the raw template text, not
-// a YAML string literal.
-func TestFixValuesTemplate(t *testing.T) {
-	tmpl := `{{- $static := (.Files.Get "static/gpu-operator.yaml") | fromYaml -}}
-{{- $dynamic := index .Values "gpuOperator" | default dict -}}
-{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}`
-
+// TestValuesBlockScalarMarshal verifies that the raw Helm template expression
+// in helm.values survives yaml.Marshal as a block scalar (not a quoted string).
+// Argo CD needs the raw template text so Helm evaluates it at render time.
+func TestValuesBlockScalarMarshal(t *testing.T) {
 	app := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
 		"spec": map[string]any{
-			"source": map[string]any{
-				"helm": map[string]any{
-					"values": tmpl,
+			"sources": []any{
+				map[string]any{
+					"repoURL":        "https://helm.ngc.nvidia.com/nvidia",
+					"chart":          "gpu-operator",
+					"targetRevision": "v24.9.0",
 				},
 			},
 		},
 	}
 
-	// yaml.Marshal will quote the template (it contains {{ }})
+	if err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator"); err != nil {
+		t.Fatalf("convertToSingleSourceWithValues error: %v", err)
+	}
+
 	marshaled, err := yaml.Marshal(app)
 	if err != nil {
 		t.Fatalf("yaml.Marshal error: %v", err)
 	}
 
-	// Apply the fix
-	fixed := fixValuesTemplate(marshaled, app)
-
-	// The fixed output should contain the raw template as a block scalar
-	fixedStr := string(fixed)
-	if !strings.Contains(fixedStr, "values: |-") {
-		t.Error("fixed output should use block scalar (|-) for values")
+	out := string(marshaled)
+	// Block scalar indicator must be present so Helm sees raw template text.
+	if !strings.Contains(out, "values: |") {
+		t.Errorf("marshaled output should use block scalar (|) for values, got:\n%s", out)
 	}
-	if !strings.Contains(fixedStr, "{{- $static") {
-		t.Error("fixed output should contain raw template expression")
+	// Helm template expressions must NOT be quoted.
+	if strings.Contains(out, `values: "{{-`) || strings.Contains(out, `values: '{{-`) {
+		t.Errorf("marshaled output must not quote the template, got:\n%s", out)
 	}
-	if !strings.Contains(fixedStr, "mustMergeOverwrite") {
-		t.Error("fixed output should contain mustMergeOverwrite")
+	if !strings.Contains(out, "{{- $static") {
+		t.Error("marshaled output should contain raw template expression")
+	}
+	if !strings.Contains(out, "mustMergeOverwrite") {
+		t.Error("marshaled output should contain mustMergeOverwrite")
 	}
 }
 

@@ -44,7 +44,7 @@ type bundleCmdOptions struct {
 	kubeconfig                 string
 	deployer                   config.DeployerType
 	repoURL                    string
-	valueOverrides             map[string]map[string]string
+	valueOverrides             []config.ComponentPath
 	systemNodeSelector         map[string]string
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
@@ -55,7 +55,7 @@ type bundleCmdOptions struct {
 	targetRevision             string
 
 	// dynamicValues declares value paths provided at install time.
-	dynamicValues map[string][]string
+	dynamicValues []config.ComponentPath
 
 	// attest enables bundle attestation and binary verification.
 	attest bool
@@ -430,8 +430,8 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithTargetRevision(opts.targetRevision),
 		config.WithAttest(opts.attest),
 		config.WithCertificateIdentityRegexp(opts.certificateIdentityRegexp),
-		config.WithValueOverrides(opts.valueOverrides),
-		config.WithDynamicValues(opts.dynamicValues),
+		config.WithValueOverridePaths(opts.valueOverrides),
+		config.WithDynamicValuePaths(opts.dynamicValues),
 		config.WithSystemNodeSelector(opts.systemNodeSelector),
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
 		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
