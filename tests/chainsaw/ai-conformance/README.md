@@ -4,6 +4,7 @@ This directory contains the Chainsaw suites used to validate AI conformance flow
 
 - `offline/`: no-cluster recipe and bundle generation checks
 - `cluster/`: deployed inference-stack health checks for the external cluster flow
+- `common/`: cross-environment shared assertions used by the cluster suite and both Kind GPU suites
 - `kind-inference-dynamo/`: H100 Kind inference leaf-suite checks used by GPU CI
 - `kind-training-kubeflow/`: H100 Kind training leaf-suite checks used by GPU CI
 - `kind-common/`: shared Kind-only assertions consumed by both GPU CI leaf suites
@@ -68,16 +69,26 @@ The Kind GPU workflows use these leaf recipes instead:
 ```
 tests/chainsaw/ai-conformance/
 ├── README.md
+├── common/                              # Shared across cluster + Kind GPU suites
+│   ├── assert-cert-manager.yaml         # cert-manager healthy
+│   ├── assert-dra-driver.yaml           # DRA driver healthy
+│   ├── assert-kai-scheduler.yaml        # KAI scheduler healthy
+│   ├── assert-monitoring.yaml           # Prometheus stack healthy
+│   └── assert-skyhook.yaml              # Skyhook operator healthy
 ├── kind-common/                         # Shared Kind-only assertions
 │   ├── assert-gpu-operator.yaml         # GPU operator healthy on kind
 │   ├── assert-network-operator.yaml     # Network operator healthy on kind
 │   └── assert-nvsentinel.yaml           # NVSentinel healthy on kind
 ├── kind-inference-dynamo/               # Kind + H100 + inference + dynamo leaf suite
 │   ├── chainsaw-test.yaml               # Inference leaf health check orchestration
+│   ├── assert-crds.yaml                 # Inference-specific CRDs installed
+│   ├── assert-dynamo.yaml               # Dynamo platform healthy on kind
+│   ├── assert-kgateway.yaml             # kgateway healthy on kind
 │   └── assert-namespaces.yaml           # Inference-specific namespaces exist
 ├── kind-training-kubeflow/              # Kind + H100 + training + kubeflow leaf suite
 │   ├── chainsaw-test.yaml               # Training leaf health check orchestration
 │   ├── assert-crds.yaml                 # Training-specific CRDs installed
+│   ├── assert-kubeflow-trainer.yaml     # Kubeflow trainer healthy on kind
 │   └── assert-namespaces.yaml           # Training-specific namespaces exist
 ├── offline/                             # No cluster needed
 │   ├── chainsaw-test.yaml               # Recipe + bundle generation
@@ -86,17 +97,20 @@ tests/chainsaw/ai-conformance/
     ├── chainsaw-test.yaml               # Cluster health check orchestration
     ├── assert-namespaces.yaml           # 9 namespaces exist
     ├── assert-crds.yaml                 # Critical CRDs installed
-    ├── assert-cert-manager.yaml         # cert-manager healthy
     ├── assert-gpu-operator.yaml         # GPU operator + DaemonSets healthy
-    ├── assert-monitoring.yaml           # Prometheus stack healthy
     ├── assert-kube-system.yaml          # AWS EFA healthy
     ├── assert-kgateway.yaml             # kgateway healthy
-    ├── assert-skyhook.yaml              # Skyhook operator healthy
     ├── assert-nvsentinel.yaml           # NVSentinel healthy
-    ├── assert-dra-driver.yaml           # DRA driver healthy
-    ├── assert-kai-scheduler.yaml        # KAI scheduler healthy
     └── assert-dynamo.yaml               # Dynamo platform healthy
 ```
+
+Ownership model:
+
+- `common/`: shared across the external cluster suite and both Kind GPU suites
+- `kind-common/`: shared only by the Kind GPU suites
+- `kind-inference-dynamo/`: inference-only Kind assertions
+- `kind-training-kubeflow/`: training-only Kind assertions
+- `cluster/`: external-cluster-only assertions
 
 ## Prerequisites
 

@@ -87,9 +87,10 @@ var (
 	dataFlag = &cli.StringFlag{
 		Name: "data",
 		Usage: `Path to external data directory to overlay on embedded recipe data.
-	The directory must contain registry.yaml (required). Registry components are merged
-	with embedded (external takes precedence by name). All other files (base.yaml,
-	overlays, component values) fully replace embedded files or add new ones.`,
+	The directory must contain registry.yaml (required). Registry components and
+	validator catalog entries are merged with embedded (external takes precedence
+	by name). All other files (base.yaml, overlays, component values) fully
+	replace embedded files or add new ones.`,
 		Category: "Input",
 	}
 )
