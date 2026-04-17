@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -35,6 +34,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/trust"
@@ -111,7 +111,10 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	slog.Debug("checksums verified", "files", result.ChecksumFiles)
 
 	// Step 2: Check for bundle attestation
-	bundleAttestPath := filepath.Join(bundleDir, attestation.BundleAttestationFile)
+	bundleAttestPath, joinErr := deployer.SafeJoin(bundleDir, attestation.BundleAttestationFile)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe bundle attestation path", joinErr)
+	}
 	if _, statErr := os.Stat(bundleAttestPath); os.IsNotExist(statErr) {
 		// No attestation — checksums valid but unverified
 		result.TrustLevel = TrustUnverified
@@ -140,7 +143,10 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	slog.Debug("bundle attestation verified", "creator", bundleCreator, "toolVersion", result.ToolVersion)
 
 	// Step 4: Check for binary attestation
-	binaryAttestPath := filepath.Join(bundleDir, attestation.BinaryAttestationFile)
+	binaryAttestPath, joinErr := deployer.SafeJoin(bundleDir, attestation.BinaryAttestationFile)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
+	}
 	if _, statErr := os.Stat(binaryAttestPath); os.IsNotExist(statErr) {
 		// Bundle attested but no binary attestation — chain incomplete
 		result.TrustLevel = TrustAttested
@@ -171,7 +177,10 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	slog.Debug("binary attestation verified", "builder", binaryBuilder)
 
 	// Full chain verified — check if external data caps trust at attested
-	dataDir := filepath.Join(bundleDir, "data")
+	dataDir, joinErr := deployer.SafeJoin(bundleDir, "data")
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe data directory path", joinErr)
+	}
 	if _, dataDirErr := os.Stat(dataDir); dataDirErr == nil {
 		result.HasExternalData = true
 		result.TrustLevel = TrustAttested
@@ -186,7 +195,12 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 // Returns the raw checksum data and whether Verify should return early (done=true
 // means result is populated with either an error or TrustUnknown).
 func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
-	checksumPath := filepath.Join(bundleDir, checksum.ChecksumFileName)
+	checksumPath, joinErr := deployer.SafeJoin(bundleDir, checksum.ChecksumFileName)
+	if joinErr != nil {
+		result.TrustLevel = TrustUnknown
+		result.Errors = append(result.Errors, fmt.Sprintf("unsafe checksum path: %v", joinErr))
+		return nil, true
+	}
 	checksumData, err := os.ReadFile(checksumPath)
 	if err != nil {
 		if os.IsNotExist(err) {

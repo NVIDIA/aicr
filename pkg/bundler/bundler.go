@@ -29,10 +29,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
+	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -247,256 +249,162 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 	}
 
 	// Run component-specific validations
-	if err := b.runComponentValidations(ctx, recipeResult); err != nil {
+	if validationErr := b.runComponentValidations(ctx, recipeResult); validationErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"component validation failed", err)
+			"component validation failed", validationErr)
 	}
 
-	// Route based on deployer
+	// Copy external data files before deployer construction so the file list
+	// is available for both the deployer (checksum tracking) and post-generation
+	// attestation. This is a no-op when --data is not set.
+	dataFiles, err := b.copyDataFiles(dir)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to copy external data files", err)
+	}
+
+	// Build the deployer and run it
+	d, err := b.buildDeployer(ctx, recipeResult, componentValues, dataFiles)
+	if err != nil {
+		return nil, err
+	}
+	return b.runDeployer(ctx, d, recipeResult, dir, dataFiles, start)
+}
+
+// buildDeployer constructs the appropriate deployer.Deployer based on config.
+// It handles deployer-specific pre-flight validation and data collection.
+func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dataFiles []string) (deployer.Deployer, error) {
+	dynamicValues, err := b.buildDynamicValuesMap()
+	if err != nil {
+		return nil, err
+	}
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
-		return b.makeArgoCDHelmChart(ctx, recipeResult, componentValues, dir, start)
+		if b.Config.Attest() {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--attest is not yet supported with --deployer argocd-helm")
+		}
+		if provider := recipe.GetDataProvider(); provider != nil {
+			if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					"--data is not yet supported with --deployer argocd-helm")
+			}
+		}
+
+		slog.Debug("generating argocd helm chart app-of-apps",
+			"component_count", len(recipeResult.ComponentRefs),
+			"dynamic_components", len(dynamicValues),
+		)
+
+		return &argocdhelm.Generator{
+			RecipeResult:     recipeResult,
+			ComponentValues:  componentValues,
+			Version:          b.Config.Version(),
+			RepoURL:          b.Config.RepoURL(),
+			TargetRevision:   b.Config.TargetRevision(),
+			IncludeChecksums: b.Config.IncludeChecksums(),
+			DynamicValues:    dynamicValues,
+		}, nil
+
 	case config.DeployerArgoCD:
 		if b.Config.HasDynamicValues() {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
 		}
-		return b.makeArgoCD(ctx, recipeResult, componentValues, dir, start)
+
+		slog.Debug("generating argocd applications",
+			"component_count", len(recipeResult.ComponentRefs),
+		)
+
+		return &argocd.Generator{
+			RecipeResult:     recipeResult,
+			ComponentValues:  componentValues,
+			Version:          b.Config.Version(),
+			RepoURL:          b.Config.RepoURL(),
+			TargetRevision:   b.Config.TargetRevision(),
+			IncludeChecksums: b.Config.IncludeChecksums(),
+		}, nil
+
 	case config.DeployerHelm:
-		return b.makeHelmBundle(ctx, recipeResult, componentValues, dir, start)
+		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
+		if manifestErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", manifestErr)
+		}
+
+		slog.Debug("generating helm bundle",
+			"component_count", len(recipeResult.ComponentRefs),
+		)
+
+		return &helm.Generator{
+			RecipeResult:       recipeResult,
+			ComponentValues:    componentValues,
+			Version:            b.Config.Version(),
+			IncludeChecksums:   b.Config.IncludeChecksums(),
+			ComponentManifests: componentManifests,
+			DataFiles:          dataFiles,
+			DynamicValues:      dynamicValues,
+		}, nil
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
 	}
 }
 
-// makeHelmBundle generates a Helm per-component bundle.
-func (b *DefaultBundler) makeHelmBundle(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	slog.Debug("generating helm bundle",
-		"component_count", len(recipeResult.ComponentRefs),
-		"output_dir", dir,
-	)
-
-	// Collect manifest contents from components (keyed by component name)
-	componentManifests, err := b.collectComponentManifests(ctx, recipeResult)
+// runDeployer executes a deployer and builds the result output.
+// dataFiles is the list of external data file paths already copied by Make().
+func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
+	output, err := d.Generate(ctx, dir)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to collect component manifests", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
 
-	// Copy external data files into bundle (before checksums so they're included)
-	dataFiles, err := b.copyDataFiles(dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to copy external data files", err)
+	totalFiles := len(output.Files)
+	totalSize := output.TotalSize
+
+	// Write recipe file (helm-only, preserves original behavior)
+	if b.Config.Deployer() == config.DeployerHelm {
+		recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+		if writeErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
+		}
+		totalFiles++
+		totalSize += recipeSize
 	}
 
-	// Resolve dynamic values for Helm deployer
-	dynamicValues, dynErr := b.buildDynamicValuesMap()
-	if dynErr != nil {
-		return nil, dynErr
-	}
-
-	// Generate per-component bundle
-	generator := helm.NewGenerator()
-	generatorInput := &helm.GeneratorInput{
-		RecipeResult:       recipeResult,
-		ComponentValues:    componentValues,
-		Version:            b.Config.Version(),
-		IncludeChecksums:   b.Config.IncludeChecksums(),
-		ComponentManifests: componentManifests,
-		DataFiles:          dataFiles,
-		DynamicValues:      dynamicValues,
-	}
-
-	output, err := generator.Generate(ctx, generatorInput, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate helm bundle", err)
-	}
-
-	// Write recipe file
-	recipeSize, err := b.writeRecipeFile(recipeResult, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to write recipe file", err)
-	}
-
-	// Attest bundle (after checksums are generated by the deployer)
+	// Attest bundle (skips internally when not configured)
 	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
 	if err != nil {
 		return nil, err
 	}
+	totalFiles += len(attestFiles)
 
-	// Build result output
-	totalFiles := len(output.Files) + 1 + len(attestFiles) // +1 for recipe.yaml
+	// Map deployer type to result and deployment names
+	resultType, deploymentType := deployerResultNames(b.Config.Deployer())
+
+	// Build result
 	resultOutput := &result.Output{
 		Results:       make([]*result.Result, 0),
 		Errors:        make([]result.BundleError, 0),
 		TotalDuration: time.Since(start),
-		TotalSize:     output.TotalSize + recipeSize,
+		TotalSize:     totalSize,
 		TotalFiles:    totalFiles,
 		OutputDir:     dir,
 	}
 
-	// Add a single result for the helm bundle
-	helmResult := &result.Result{
-		Type:     "helm-bundle",
+	bundleResult := &result.Result{
+		Type:     resultType,
 		Success:  true,
 		Files:    append(output.Files, attestFiles...),
 		Size:     output.TotalSize,
 		Duration: output.Duration,
 	}
-	resultOutput.Results = append(resultOutput.Results, helmResult)
+	resultOutput.Results = append(resultOutput.Results, bundleResult)
 
-	// Populate deployment info from generator output
+	// Deployment info
 	var notes []string
-	if len(b.warnings) > 0 {
-		notes = append(notes, b.warnings...)
-	}
-	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "Helm per-component bundle",
-		Steps: output.DeploymentSteps,
-		Notes: notes,
-	}
-
-	slog.Debug("helm bundle generation complete",
-		"files", len(output.Files),
-		"size_bytes", output.TotalSize,
-		"duration", output.Duration,
-	)
-
-	return resultOutput, nil
-}
-
-// makeArgoCDHelmChart generates a Helm chart app-of-apps for Argo CD with dynamic install-time values.
-func (b *DefaultBundler) makeArgoCDHelmChart(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	// Reject flags not yet supported by the argocd-helm deployer.
-	if b.Config.Attest() {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"--attest is not yet supported with --deployer argocd-helm")
-	}
-	if provider := recipe.GetDataProvider(); provider != nil {
-		if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--data is not yet supported with --deployer argocd-helm")
-		}
-	}
-
-	dynamicValues, dynErr := b.buildDynamicValuesMap()
-	if dynErr != nil {
-		return nil, dynErr
-	}
-
-	slog.Debug("generating argocd helm chart app-of-apps",
-		"component_count", len(recipeResult.ComponentRefs),
-		"dynamic_components", len(dynamicValues),
-		"output_dir", dir,
-	)
-
-	generator := &argocdhelm.Generator{
-		RecipeResult:     recipeResult,
-		ComponentValues:  componentValues,
-		Version:          b.Config.Version(),
-		RepoURL:          b.Config.RepoURL(),
-		TargetRevision:   b.Config.TargetRevision(),
-		IncludeChecksums: b.Config.IncludeChecksums(),
-		DynamicValues:    dynamicValues,
-	}
-
-	output, err := generator.Generate(ctx, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate argocd helm chart", err)
-	}
-
-	resultOutput := &result.Output{
-		Results:       make([]*result.Result, 0),
-		Errors:        make([]result.BundleError, 0),
-		TotalDuration: time.Since(start),
-		TotalSize:     output.TotalSize,
-		TotalFiles:    len(output.Files),
-		OutputDir:     dir,
-	}
-
-	argocdResult := &result.Result{
-		Type:     "argocd-helm-chart",
-		Success:  true,
-		Files:    output.Files,
-		Size:     output.TotalSize,
-		Duration: output.Duration,
-	}
-	resultOutput.Results = append(resultOutput.Results, argocdResult)
-
-	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "Argo CD Helm chart app-of-apps",
-		Steps: output.DeploymentSteps,
-		Notes: b.warnings,
-	}
-
-	return resultOutput, nil
-}
-
-// makeArgoCD generates Argo CD Application manifests.
-func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any, dir string, start time.Time) (*result.Output, error) {
-	slog.Debug("generating argocd applications",
-		"component_count", len(recipeResult.ComponentRefs),
-		"output_dir", dir,
-	)
-
-	// Generate Argo CD applications
-	generator := argocd.NewGenerator()
-	generatorInput := &argocd.GeneratorInput{
-		RecipeResult:     recipeResult,
-		ComponentValues:  componentValues,
-		Version:          b.Config.Version(),
-		RepoURL:          b.Config.RepoURL(),
-		TargetRevision:   b.Config.TargetRevision(),
-		IncludeChecksums: b.Config.IncludeChecksums(),
-	}
-
-	output, err := generator.Generate(ctx, generatorInput, dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate argocd applications", err)
-	}
-
-	// Copy external data files into bundle (before attestation so they're included in checksums)
-	dataFiles, err := b.copyDataFiles(dir)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to copy external data files", err)
-	}
-
-	// Attest bundle (after checksums are generated by the deployer)
-	attestFiles, err := b.attestBundle(ctx, dir, dataFiles, recipeResult)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build result output
-	totalFiles := len(output.Files) + len(attestFiles)
-	resultOutput := &result.Output{
-		Results:       make([]*result.Result, 0),
-		Errors:        make([]result.BundleError, 0),
-		TotalDuration: time.Since(start),
-		TotalSize:     output.TotalSize,
-		TotalFiles:    totalFiles,
-		OutputDir:     dir,
-	}
-
-	// Add a single result for the Argo CD applications
-	argocdResult := &result.Result{
-		Type:     "argocd-applications",
-		Success:  true,
-		Files:    output.Files,
-		Size:     output.TotalSize,
-		Duration: output.Duration,
-	}
-	resultOutput.Results = append(resultOutput.Results, argocdResult)
-
-	// Populate deployment info from generator output
-	notes := make([]string, 0)
 	if len(output.DeploymentNotes) > 0 {
 		notes = append(notes, output.DeploymentNotes...)
 	}
@@ -504,18 +412,34 @@ func (b *DefaultBundler) makeArgoCD(ctx context.Context, recipeResult *recipe.Re
 		notes = append(notes, b.warnings...)
 	}
 	resultOutput.Deployment = &result.DeploymentInfo{
-		Type:  "Argo CD applications",
+		Type:  deploymentType,
 		Steps: output.DeploymentSteps,
 		Notes: notes,
 	}
 
-	slog.Debug("argocd applications generation complete",
+	slog.Debug("bundle generation complete",
+		"deployer", b.Config.Deployer(),
 		"files", len(output.Files),
 		"size_bytes", output.TotalSize,
 		"duration", output.Duration,
 	)
 
 	return resultOutput, nil
+}
+
+// deployerResultNames returns the result type and deployment type display names
+// for a given deployer type, preserving the human-readable names used in output.
+func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
+	switch dt {
+	case config.DeployerHelm:
+		return "helm-bundle", "Helm per-component bundle"
+	case config.DeployerArgoCD:
+		return "argocd-applications", "ArgoCD applications"
+	case config.DeployerArgoCDHelm:
+		return "argocd-helm-chart", "ArgoCD Helm chart app-of-apps"
+	default:
+		return types.BundleType(dt), string(dt)
+	}
 }
 
 // extractComponentValues extracts and processes values for each component in the recipe.
@@ -807,7 +731,10 @@ func (b *DefaultBundler) copyDataFiles(dir string) ([]string, error) {
 	}
 
 	// Copy the entire external directory into bundle/data/ using os.CopyFS
-	dataDir := filepath.Join(dir, "data")
+	dataDir, joinErr := deployer.SafeJoin(dir, "data")
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe data directory path", joinErr)
+	}
 	externalFS := os.DirFS(layered.ExternalDir())
 	if err := os.CopyFS(dataDir, externalFS); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to copy external data files", err)
@@ -816,6 +743,9 @@ func (b *DefaultBundler) copyDataFiles(dir string) ([]string, error) {
 	// Build the list of copied files (relative to bundle dir)
 	copiedFiles := make([]string, 0, len(externalFiles))
 	for _, relPath := range externalFiles {
+		if _, pathErr := deployer.SafeJoin(dataDir, relPath); pathErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe external data path", pathErr)
+		}
 		copiedFiles = append(copiedFiles, filepath.Join("data", relPath))
 	}
 
@@ -833,7 +763,11 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	}
 
 	// Read checksums.txt and compute its digest
-	digest, err := attestation.ComputeFileDigest(filepath.Join(dir, checksum.ChecksumFileName))
+	checksumPath, joinErr := deployer.SafeJoin(dir, checksum.ChecksumFileName)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe checksum path", joinErr)
+	}
+	digest, err := attestation.ComputeFileDigest(checksumPath)
 	if err != nil {
 		// If checksums don't exist (IncludeChecksums=false), attestation is not possible
 		slog.Debug("attestation not possible: checksums not available", "error", err)
@@ -883,7 +817,10 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	// Add data files as resolved dependencies
 	for _, dataFile := range dataFiles {
-		dataPath := fmt.Sprintf("%s/%s", dir, dataFile)
+		dataPath, pathErr := deployer.SafeJoin(dir, dataFile)
+		if pathErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe data file path in attestation", pathErr)
+		}
 		dataDigest, digestErr := attestation.ComputeFileDigest(dataPath)
 		if digestErr == nil {
 			subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
@@ -907,14 +844,20 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	var attestFiles []string
 
 	// Create attestation subdirectory
-	attestDir := filepath.Join(dir, attestation.AttestationDir)
-	if mkdirErr := os.MkdirAll(attestDir, 0755); mkdirErr != nil { //nolint:gosec // dir is filepath.Clean'd on entry; attestDir uses constant subpath
+	attestDir, joinErr := deployer.SafeJoin(dir, attestation.AttestationDir)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe attestation directory path", joinErr)
+	}
+	if mkdirErr := os.MkdirAll(attestDir, 0755); mkdirErr != nil { //nolint:gosec // attestDir validated by SafeJoin
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create attestation directory", mkdirErr)
 	}
 
 	// Write bundle attestation
-	bundleAttestPath := filepath.Join(dir, attestation.BundleAttestationFile)
-	if writeErr := os.WriteFile(bundleAttestPath, bundleJSON, 0600); writeErr != nil { //nolint:gosec // path built from filepath.Clean'd dir + constant filename
+	bundleAttestPath, joinErr := deployer.SafeJoin(dir, attestation.BundleAttestationFile)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe bundle attestation path", joinErr)
+	}
+	if writeErr := os.WriteFile(bundleAttestPath, bundleJSON, 0600); writeErr != nil { //nolint:gosec // path validated by SafeJoin
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write bundle attestation", writeErr)
 	}
 	attestFiles = append(attestFiles, attestation.BundleAttestationFile)
@@ -922,15 +865,26 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	// Copy binary attestation into bundle — errors are fatal since the user
 	// opted into attestation (remove --attest to skip).
+	if err := b.verifyAndCopyBinaryAttestation(ctx, dir); err != nil {
+		return nil, err
+	}
+	attestFiles = append(attestFiles, attestation.BinaryAttestationFile)
+
+	return attestFiles, nil
+}
+
+// verifyAndCopyBinaryAttestation resolves the running binary's attestation,
+// cryptographically verifies it (REQ-6), and copies it into the bundle directory.
+func (b *DefaultBundler) verifyAndCopyBinaryAttestation(ctx context.Context, dir string) error {
 	binaryPath, execErr := os.Executable()
 	if execErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
+		return errors.Wrap(errors.ErrCodeInternal,
 			"could not resolve executable path; remove --attest to skip", execErr)
 	}
 
 	binaryAttestPath, findErr := attestation.FindBinaryAttestation(binaryPath)
 	if findErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeNotFound,
+		return errors.Wrap(errors.ErrCodeNotFound,
 			"binary attestation not found; reinstall from a release archive or remove --attest to skip", findErr)
 	}
 
@@ -939,7 +893,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	// attestation binds to this specific binary's content.
 	binaryDigest, digestErr := checksum.SHA256Raw(binaryPath)
 	if digestErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
+		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to compute binary digest for provenance verification", digestErr)
 	}
 
@@ -947,7 +901,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 	if b.Config.CertificateIdentityRegexp() != "" {
 		identityPattern = b.Config.CertificateIdentityRegexp()
 		if err := verifier.ValidateIdentityPattern(identityPattern); err != nil {
-			return nil, err
+			return err
 		}
 		slog.Warn("using custom certificate identity pattern for binary attestation — "+
 			"bundle will not pass verification with default settings",
@@ -956,7 +910,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	binaryBuilder, verifyErr := verifier.VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
 	if verifyErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeUnauthorized,
+		return errors.Wrap(errors.ErrCodeUnauthorized,
 			"binary attestation verification failed; only NVIDIA-built binaries can attest bundles — "+
 				"remove --attest to skip", verifyErr)
 	}
@@ -964,19 +918,21 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	binaryAttestData, readErr := os.ReadFile(binaryAttestPath)
 	if readErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
+		return errors.Wrap(errors.ErrCodeInternal,
 			"binary attestation exists but cannot be read: "+binaryAttestPath, readErr)
 	}
 
-	destPath := filepath.Join(dir, attestation.BinaryAttestationFile)
-	if copyErr := os.WriteFile(destPath, binaryAttestData, 0600); copyErr != nil { //nolint:gosec // path built from filepath.Clean'd dir + constant filename
-		return nil, errors.Wrap(errors.ErrCodeInternal,
+	destPath, joinErr := deployer.SafeJoin(dir, attestation.BinaryAttestationFile)
+	if joinErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "unsafe binary attestation path", joinErr)
+	}
+	if copyErr := os.WriteFile(destPath, binaryAttestData, 0600); copyErr != nil { //nolint:gosec // path validated by SafeJoin
+		return errors.Wrap(errors.ErrCodeInternal,
 			"failed to copy binary attestation into bundle", copyErr)
 	}
-	attestFiles = append(attestFiles, attestation.BinaryAttestationFile)
 	slog.Info("binary attestation copied into bundle", "path", destPath)
 
-	return attestFiles, nil
+	return nil
 }
 
 // writeRecipeFile serializes the recipe to the bundle directory.
@@ -986,7 +942,10 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
 	}
 
-	recipePath := fmt.Sprintf("%s/recipe.yaml", dir)
+	recipePath, joinErr := deployer.SafeJoin(dir, "recipe.yaml")
+	if joinErr != nil {
+		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
+	}
 	if err := os.WriteFile(recipePath, recipeData, 0600); err != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", err)
 	}

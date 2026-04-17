@@ -12,20 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-enabled: true
-additional_trustees:
-  - atif1996
-  - ayuskauskas
-  - coffeepac
-  - cullenmcdermott
-  - dims
-  - Kevin-Hawkins
-  - lockwobr
-  - mchmarny
-  - njhensley
-  - sttts
-  - svcsectool
-  - tabern
-  - valcharry
-  - xdu31
-  - yuanchen8911
+# Assert Dynamo platform components are healthy on the kind inference stack.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dynamo-platform-dynamo-operator-controller-manager
+  namespace: dynamo-system
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grove-operator
+  namespace: dynamo-system
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"

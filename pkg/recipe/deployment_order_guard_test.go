@@ -157,6 +157,24 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
+		{
+			name: "h100-kind-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceKind
+				c.Accelerator = CriteriaAcceleratorH100
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"kubeflow-trainer": {"cert-manager", "kube-prometheus-stack", "gpu-operator"},
+			},
+			requiredOrdering: [][2]string{
+				{"gpu-operator", "kubeflow-trainer"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
 	}
 
 	for _, tt := range tests {

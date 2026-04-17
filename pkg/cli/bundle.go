@@ -409,11 +409,10 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		slog.Bool("oci", opts.ociRef != nil),
 	)
 
-	// Load recipe from file/URL/ConfigMap
-	rec, err := serializer.FromFileWithKubeconfig[recipe.RecipeResult](opts.recipeFilePath, opts.kubeconfig)
+	// Load recipe from file/URL/ConfigMap; auto-hydrates RecipeMetadata overlays.
+	rec, err := recipe.LoadFromFile(ctx, opts.recipeFilePath, opts.kubeconfig, version)
 	if err != nil {
-		slog.Error("failed to load recipe file", "error", err, "path", opts.recipeFilePath)
-		return errors.Wrap(errors.ErrCodeInternal, "failed to load recipe file", err)
+		return err
 	}
 
 	// Validate custom identity pattern if provided

@@ -267,7 +267,7 @@ func waitForTrainerControllerReady(ctx context.Context, dynamicClient dynamic.In
 		case <-waitCtx.Done():
 			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
 				"timed out waiting for Trainer controller-manager to become ready", waitCtx.Err())
-		case <-time.After(2 * time.Second):
+		case <-time.After(defaults.TrainerControllerPollInterval):
 		}
 	}
 }

@@ -144,6 +144,7 @@ linters:
           - errcheck
           - funlen
           - gocognit
+          - goconst
           - gocyclo
           - gosec
           - noctx

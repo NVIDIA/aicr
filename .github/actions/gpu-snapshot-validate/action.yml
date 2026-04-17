@@ -59,3 +59,27 @@ runs:
           exit 1
         fi
         echo "Snapshot correctly detected ${GPU_COUNT}x ${GPU_MODEL}"
+
+    - name: Debug snapshot Job
+      if: failure()
+      shell: bash
+      run: |
+        echo "=== Snapshot Job ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default get job aicr -o yaml || true
+        echo "=== Snapshot Pods ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          get pods -l app.kubernetes.io/name=aicr -o wide || true
+        echo "=== Snapshot Job describe ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default describe job aicr || true
+        echo "=== Snapshot Pod describe ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          describe pods -l app.kubernetes.io/name=aicr || true
+        echo "=== Snapshot current logs ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          logs -l app.kubernetes.io/name=aicr --all-containers --tail=200 || true
+        echo "=== Snapshot previous logs ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          logs -l app.kubernetes.io/name=aicr --all-containers --previous --tail=200 || true
+        echo "=== Snapshot ConfigMap ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          get configmap aicr-snapshot -o yaml || true

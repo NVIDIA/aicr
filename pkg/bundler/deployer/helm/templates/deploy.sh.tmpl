@@ -124,24 +124,51 @@ function cleanup_helm_hooks() {
   done <<< "${job_names}"
 }
 
+function dump_kai_scheduler_helm_diagnostics() {
+  local namespace="$1"
+  if [[ "${namespace}" != "kai-scheduler" ]]; then
+    return
+  fi
+
+  echo "  --- ${namespace} diagnostics ---"
+  echo "  Jobs:"
+  kubectl get jobs -n "${namespace}" 2>/dev/null || true
+  echo "  Job descriptions:"
+  kubectl describe jobs -n "${namespace}" 2>/dev/null || true
+  echo "  Pods:"
+  kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
+  echo "  Pod descriptions:"
+  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  echo "  Recent events:"
+  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+  echo "  --- End ${namespace} diagnostics ---"
+}
+
+# helm_retry contract:
+#   helm_retry "<description>" "<namespace>" "<max_retries>" <command> [args...]
+# Callers must pass the retry budget as the third positional argument before the
+# command to execute. This keeps per-component retry tuning explicit at the
+# callsite instead of relying on the global MAX_RETRIES fallback.
 function helm_retry() {
   local desc="$1"
   local namespace="$2"
-  shift 2
+  local max_retries="$3"
+  shift 3
   local attempt=0
   while true; do
     if "$@"; then
       return 0
     fi
     attempt=$((attempt + 1))
-    if [[ ${attempt} -gt ${MAX_RETRIES} ]]; then
+    dump_kai_scheduler_helm_diagnostics "${namespace}"
+    if [[ ${attempt} -gt ${max_retries} ]]; then
       echo "ERROR: ${desc} failed after ${attempt} attempts"
       return 1
     fi
     cleanup_helm_hooks "${namespace}"
     local wait_secs
     wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${desc} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${wait_secs}s..."
+    echo "RETRY: ${desc} failed (attempt ${attempt}/${max_retries}), retrying in ${wait_secs}s..."
     sleep "${wait_secs}"
   done
 }
@@ -347,8 +374,10 @@ retry "{{ .Name }} pre-install manifests" apply_ignoring_crd_race "${SCRIPT_DIR}
 # Components with slow hooks (e.g., kai-scheduler crd-upgrader image pull
 # on cold runners) get a longer timeout to avoid unnecessary retry cycles.
 COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
+COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
 {{ if eq .Name "kai-scheduler" -}}
 COMPONENT_HELM_TIMEOUT="20m"
+COMPONENT_MAX_RETRIES="1"
 {{ end -}}
 # Derive wait args: global --wait/--no-wait behavior + component timeout.
 if [[ "${NO_WAIT}" == "true" ]]; then
@@ -363,6 +392,7 @@ if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then
 fi
 {{ if .IsOCI -}}
 helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
+  "${COMPONENT_MAX_RETRIES}" \
   helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   {{ if .Version }}--version {{ .Version }} \
   {{ end -}}
@@ -373,6 +403,7 @@ helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   || helm_failed "{{ .Name }}"
 {{ else -}}
 helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
+  "${COMPONENT_MAX_RETRIES}" \
   helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --repo {{ .Repository }} \
   {{ if .Version }}--version {{ .Version }} \

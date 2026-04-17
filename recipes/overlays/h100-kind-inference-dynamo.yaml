@@ -70,6 +70,7 @@ spec:
         - dra-support
         - accelerator-metrics
         - ai-service-metrics
+        - gang-scheduling
         - inference-gateway
         - robust-controller
         - secure-accelerator-access

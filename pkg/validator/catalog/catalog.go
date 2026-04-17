@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/recipes"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
 )
 
@@ -91,7 +91,11 @@ type EnvVar struct {
 	Value string `yaml:"value"`
 }
 
-// Load reads and parses the embedded catalog.
+// Load reads and parses the validator catalog from the global DataProvider.
+// When the --data flag provides an external directory containing
+// validators/catalog.yaml, the external catalog is merged with the embedded
+// catalog using merge-by-name semantics: external validators override embedded
+// by name, and new validators are appended.
 //
 // Image tag resolution (applied in order):
 //  1. If a catalog entry uses :latest and version is a release (vX.Y.Z),
@@ -100,9 +104,9 @@ type EnvVar struct {
 //
 // Entries with explicit version tags (e.g., :v1.2.3) are never modified.
 func Load(version string) (*ValidatorCatalog, error) {
-	data, err := recipes.FS.ReadFile("validators/catalog.yaml")
+	data, err := recipe.GetDataProvider().ReadFile("validators/catalog.yaml")
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read embedded catalog", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read catalog", err)
 	}
 
 	cat, err := Parse(data)

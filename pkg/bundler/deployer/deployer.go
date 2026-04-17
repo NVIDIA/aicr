@@ -19,8 +19,8 @@
 // data, then Generate is called to produce the output.
 //
 // The Deployer interface enables mockability in bundler tests and provides a
-// consistent contract across deployer implementations. Existing deployers
-// (helm, argocd) do not yet implement this interface — argocdhelm is the first.
+// consistent contract across deployer implementations. All three deployers
+// (helm, argocd, argocdhelm) implement this interface.
 package deployer
 
 import (
@@ -50,8 +50,4 @@ type Output struct {
 // Implementations are configured as structs, then Generate is called.
 type Deployer interface {
 	Generate(ctx context.Context, outputDir string) (*Output, error)
-
-	// HasDynamicValues reports whether this deployer has install-time value
-	// paths that will be split out for the user to fill in at deploy time.
-	HasDynamicValues() bool
 }

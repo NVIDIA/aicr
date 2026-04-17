@@ -248,6 +248,7 @@ jobs:
         with:
           recipe: ${{ matrix.recipe }}
           go_version: ${{ steps.versions.outputs.go }}
+          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           kind_version: ${{ steps.versions.outputs.kind }}
           helm_version: ${{ steps.versions.outputs.helm }}
           kwok_version: ${{ steps.versions.outputs.kwok }}
@@ -284,6 +285,7 @@ jobs:
         with:
           recipe: ${{ matrix.recipe }}
           go_version: ${{ steps.versions.outputs.go }}
+          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           kind_version: ${{ steps.versions.outputs.kind }}
           helm_version: ${{ steps.versions.outputs.helm }}
           kwok_version: ${{ steps.versions.outputs.kwok }}
@@ -325,6 +327,7 @@ jobs:
         with:
           recipe: ${{ matrix.recipe }}
           go_version: ${{ steps.versions.outputs.go }}
+          goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
           kind_version: ${{ steps.versions.outputs.kind }}
           helm_version: ${{ steps.versions.outputs.helm }}
           kwok_version: ${{ steps.versions.outputs.kwok }}

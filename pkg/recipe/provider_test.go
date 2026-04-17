@@ -901,3 +901,308 @@ func TestLayeredDataProvider_ExternalDir(t *testing.T) {
 		t.Errorf("ExternalDir() = %q, want %q", provider.ExternalDir(), tmpDir)
 	}
 }
+
+// testExternalCatalogContent is a minimal catalog.yaml for testing.
+const testExternalCatalogContent = `apiVersion: aicr.nvidia.com/v1
+kind: ValidatorCatalog
+metadata:
+  name: custom-validators
+  version: "1.0.0"
+validators:
+  - name: custom-check
+    phase: deployment
+    description: "Custom deployment check"
+    image: example.com/custom/validator:v1.0.0
+    timeout: 3m
+    args: ["custom-check"]
+    env: []
+`
+
+// setupCatalogTestDir creates a temp directory with registry.yaml and optionally
+// validators/catalog.yaml for catalog merge tests.
+func setupCatalogTestDir(t *testing.T, catalogContent string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+
+	// Create required registry.yaml
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(testEmptyRegistryContent), 0600); err != nil {
+		t.Fatalf("failed to write registry.yaml: %v", err)
+	}
+
+	if catalogContent != "" {
+		validatorsDir := filepath.Join(tmpDir, "validators")
+		if err := os.MkdirAll(validatorsDir, 0755); err != nil {
+			t.Fatalf("failed to create validators dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(validatorsDir, "catalog.yaml"), []byte(catalogContent), 0600); err != nil {
+			t.Fatalf("failed to write catalog.yaml: %v", err)
+		}
+	}
+
+	return tmpDir
+}
+
+// TestLayeredDataProvider_MergesCatalog tests catalog merging with external data.
+func TestLayeredDataProvider_MergesCatalog(t *testing.T) {
+	tmpDir := setupCatalogTestDir(t, testExternalCatalogContent)
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	// Read merged catalog
+	data, err := provider.ReadFile("validators/catalog.yaml")
+	if err != nil {
+		t.Fatalf("failed to read catalog: %v", err)
+	}
+
+	content := string(data)
+
+	// Should contain custom validator from external
+	if !strings.Contains(content, "custom-check") {
+		t.Error("merged catalog should contain custom-check from external")
+	}
+
+	// Should contain embedded validators
+	if !strings.Contains(content, "operator-health") {
+		t.Error("merged catalog should contain operator-health from embedded")
+	}
+	if !strings.Contains(content, "nccl-all-reduce-bw") {
+		t.Error("merged catalog should contain nccl-all-reduce-bw from embedded")
+	}
+}
+
+// TestLayeredDataProvider_CatalogOverrideByName tests that external validators
+// override embedded validators with the same name.
+func TestLayeredDataProvider_CatalogOverrideByName(t *testing.T) {
+	// Override operator-health with a custom image and timeout
+	overrideCatalog := `apiVersion: aicr.nvidia.com/v1
+kind: ValidatorCatalog
+metadata:
+  name: custom-validators
+  version: "1.0.0"
+validators:
+  - name: operator-health
+    phase: deployment
+    description: "Custom operator health check"
+    image: example.com/custom/deployment:v2.0.0
+    timeout: 5m
+    args: ["operator-health", "--custom"]
+    env: []
+`
+	tmpDir := setupCatalogTestDir(t, overrideCatalog)
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	data, err := provider.ReadFile("validators/catalog.yaml")
+	if err != nil {
+		t.Fatalf("failed to read catalog: %v", err)
+	}
+
+	// Parse the merged result
+	var cat catalogForMerge
+	if err := yaml.Unmarshal(data, &cat); err != nil {
+		t.Fatalf("failed to parse merged catalog: %v", err)
+	}
+
+	// Find operator-health — should have the external image
+	for _, v := range cat.Validators {
+		name, _ := v["name"].(string)
+		if name == "operator-health" {
+			image, _ := v["image"].(string)
+			if image != "example.com/custom/deployment:v2.0.0" {
+				t.Errorf("operator-health image = %q, want %q", image, "example.com/custom/deployment:v2.0.0")
+			}
+			desc, _ := v["description"].(string)
+			if desc != "Custom operator health check" {
+				t.Errorf("operator-health description = %q, want %q", desc, "Custom operator health check")
+			}
+			return
+		}
+	}
+	t.Error("operator-health not found in merged catalog")
+}
+
+// TestLayeredDataProvider_CatalogNoCatalogInExternal tests fallback when external
+// directory does not contain validators/catalog.yaml.
+func TestLayeredDataProvider_CatalogNoCatalogInExternal(t *testing.T) {
+	tmpDir := setupCatalogTestDir(t, "") // No catalog in external
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	// Should fall back to embedded catalog
+	data, err := provider.ReadFile("validators/catalog.yaml")
+	if err != nil {
+		t.Fatalf("failed to read catalog: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "operator-health") {
+		t.Error("catalog should fall back to embedded when external has no catalog")
+	}
+
+	// Source should be embedded
+	source := provider.Source("validators/catalog.yaml")
+	if source != sourceEmbedded {
+		t.Errorf("expected source %q, got %q", sourceEmbedded, source)
+	}
+}
+
+// TestLayeredDataProvider_CatalogSourceMerged tests Source() for catalog when external exists.
+func TestLayeredDataProvider_CatalogSourceMerged(t *testing.T) {
+	tmpDir := setupCatalogTestDir(t, testExternalCatalogContent)
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	source := provider.Source("validators/catalog.yaml")
+	if !strings.Contains(source, "merged") {
+		t.Errorf("expected source to contain 'merged', got %q", source)
+	}
+	if !strings.Contains(source, "embedded") {
+		t.Errorf("expected source to contain 'embedded', got %q", source)
+	}
+	if !strings.Contains(source, "external") {
+		t.Errorf("expected source to contain 'external', got %q", source)
+	}
+}
+
+// TestLayeredDataProvider_CachedCatalog tests that merged catalog is cached.
+func TestLayeredDataProvider_CachedCatalog(t *testing.T) {
+	tmpDir := setupCatalogTestDir(t, testExternalCatalogContent)
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	// First read
+	data1, err := provider.ReadFile("validators/catalog.yaml")
+	if err != nil {
+		t.Fatalf("first read failed: %v", err)
+	}
+
+	// Second read should return cached result
+	data2, err := provider.ReadFile("validators/catalog.yaml")
+	if err != nil {
+		t.Fatalf("second read failed: %v", err)
+	}
+
+	if string(data1) != string(data2) {
+		t.Error("cached catalog should return same content")
+	}
+}
+
+// TestLayeredDataProvider_InvalidExternalCatalog tests error handling for invalid catalog YAML.
+func TestLayeredDataProvider_InvalidExternalCatalog(t *testing.T) {
+	invalidCatalog := `apiVersion: aicr.nvidia.com/v1
+kind: ValidatorCatalog
+validators:
+  - name: [invalid yaml structure
+`
+	tmpDir := setupCatalogTestDir(t, invalidCatalog)
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	_, err = provider.ReadFile("validators/catalog.yaml")
+	if err == nil {
+		t.Error("expected error for invalid external catalog YAML")
+	}
+}
+
+// TestLayeredDataProvider_CatalogMergePreservesOrder tests that embedded validator
+// order is preserved and new external validators are appended.
+func TestLayeredDataProvider_CatalogMergePreservesOrder(t *testing.T) {
+	// Add a new validator and override an existing one
+	externalCatalog := `apiVersion: aicr.nvidia.com/v1
+kind: ValidatorCatalog
+metadata:
+  name: custom-validators
+  version: "1.0.0"
+validators:
+  - name: operator-health
+    phase: deployment
+    description: "Overridden operator health"
+    image: example.com/custom/deployment:v2.0.0
+    timeout: 5m
+    args: ["operator-health"]
+    env: []
+  - name: new-custom-validator
+    phase: conformance
+    description: "Brand new validator"
+    image: example.com/custom/conformance:v1.0.0
+    timeout: 3m
+    args: ["custom"]
+    env: []
+`
+	tmpDir := setupCatalogTestDir(t, externalCatalog)
+
+	embedded := NewEmbeddedDataProvider(GetEmbeddedFS(), ".")
+	provider, err := NewLayeredDataProvider(embedded, LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	data, err := provider.ReadFile("validators/catalog.yaml")
+	if err != nil {
+		t.Fatalf("failed to read catalog: %v", err)
+	}
+
+	var cat catalogForMerge
+	if err := yaml.Unmarshal(data, &cat); err != nil {
+		t.Fatalf("failed to parse merged catalog: %v", err)
+	}
+
+	// First validator should still be operator-health (embedded order preserved)
+	if len(cat.Validators) == 0 {
+		t.Fatal("expected validators in merged catalog")
+	}
+	firstName, _ := cat.Validators[0]["name"].(string)
+	if firstName != "operator-health" {
+		t.Errorf("first validator = %q, want %q", firstName, "operator-health")
+	}
+
+	// Last validator should be the new external one (appended)
+	lastName, _ := cat.Validators[len(cat.Validators)-1]["name"].(string)
+	if lastName != "new-custom-validator" {
+		t.Errorf("last validator = %q, want %q", lastName, "new-custom-validator")
+	}
+
+	// Overridden operator-health should have external image
+	firstImage, _ := cat.Validators[0]["image"].(string)
+	if firstImage != "example.com/custom/deployment:v2.0.0" {
+		t.Errorf("operator-health image = %q, want %q", firstImage, "example.com/custom/deployment:v2.0.0")
+	}
+}

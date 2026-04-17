@@ -15,9 +15,13 @@
 package catalog
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
@@ -357,5 +361,91 @@ func TestLoadWithoutRegistryOverride(t *testing.T) {
 		if strings.HasPrefix(v.Image, "localhost:5001/") {
 			t.Errorf("Validators[%d].Image should not have localhost prefix: %q", i, v.Image)
 		}
+	}
+}
+
+func TestLoadWithExternalCatalog(t *testing.T) {
+	// Create external data directory with registry.yaml (required) and catalog
+	tmpDir := t.TempDir()
+
+	registryContent := `apiVersion: aicr.nvidia.com/v1alpha1
+kind: ComponentRegistry
+components: []
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
+		t.Fatalf("failed to write registry.yaml: %v", err)
+	}
+
+	validatorsDir := filepath.Join(tmpDir, "validators")
+	if err := os.MkdirAll(validatorsDir, 0755); err != nil {
+		t.Fatalf("failed to create validators dir: %v", err)
+	}
+
+	externalCatalog := `apiVersion: aicr.nvidia.com/v1
+kind: ValidatorCatalog
+metadata:
+  name: external-validators
+  version: "1.0.0"
+validators:
+  - name: dynamo-cluster-check
+    phase: conformance
+    description: "Custom Dynamo cluster validation"
+    image: example.com/dynamo/validators:v1.0.0
+    timeout: 5m
+    args: ["dynamo-cluster"]
+    env: []
+`
+	if err := os.WriteFile(filepath.Join(validatorsDir, "catalog.yaml"), []byte(externalCatalog), 0600); err != nil {
+		t.Fatalf("failed to write catalog.yaml: %v", err)
+	}
+
+	// Set up layered provider
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
+		ExternalDir: tmpDir,
+	})
+	if err != nil {
+		t.Fatalf("failed to create layered provider: %v", err)
+	}
+
+	// Save and restore global provider
+	originalProvider := recipe.GetDataProvider()
+	recipe.SetDataProvider(layered)
+	defer recipe.SetDataProvider(originalProvider)
+
+	// Load catalog — should merge embedded + external
+	cat, err := Load("")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+
+	// Should contain the new external validator
+	found := false
+	for _, v := range cat.Validators {
+		if v.Name == "dynamo-cluster-check" {
+			found = true
+			if v.Image != "example.com/dynamo/validators:v1.0.0" {
+				t.Errorf("dynamo-cluster-check image = %q, want %q", v.Image, "example.com/dynamo/validators:v1.0.0")
+			}
+			if v.Phase != "conformance" {
+				t.Errorf("dynamo-cluster-check phase = %q, want %q", v.Phase, "conformance")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected dynamo-cluster-check from external catalog")
+	}
+
+	// Should still contain embedded validators
+	foundEmbedded := false
+	for _, v := range cat.Validators {
+		if v.Name == "operator-health" {
+			foundEmbedded = true
+			break
+		}
+	}
+	if !foundEmbedded {
+		t.Error("expected operator-health from embedded catalog")
 	}
 }

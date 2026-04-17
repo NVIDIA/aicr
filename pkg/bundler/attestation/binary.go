@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -47,7 +48,10 @@ func FindBinaryAttestation(binaryPath string) (string, error) {
 	// in the same directory as the binary.
 	dir := filepath.Dir(binaryPath)
 	base := filepath.Base(binaryPath)
-	attestPath := filepath.Join(dir, base+AttestationFileSuffix)
+	attestPath, joinErr := deployer.SafeJoin(dir, base+AttestationFileSuffix)
+	if joinErr != nil {
+		return "", errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe attestation path", joinErr)
+	}
 
 	if _, err := os.Stat(attestPath); err != nil {
 		if os.IsNotExist(err) {

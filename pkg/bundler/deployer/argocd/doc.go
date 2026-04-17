@@ -34,9 +34,7 @@ sync-wave annotations starting from 0.
 
 # Usage
 
-	generator := argocd.NewGenerator()
-
-	input := &argocd.GeneratorInput{
+	generator := &argocd.Generator{
 		RecipeResult:     recipeResult,
 		ComponentValues:  componentValues,
 		Version:          "v0.9.0",
@@ -44,7 +42,7 @@ sync-wave annotations starting from 0.
 		IncludeChecksums: true,
 	}
 
-	output, err := generator.Generate(ctx, input, "/path/to/output")
+	output, err := generator.Generate(ctx, "/path/to/output")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -69,7 +67,7 @@ sync-wave annotations starting from 0.
 
 # Configuration
 
-The RepoURL field in GeneratorInput sets the Git repository URL in the
+The RepoURL field in Generator sets the Git repository URL in the
 app-of-apps.yaml manifest. If not provided, a placeholder URL is used
 that must be updated manually before deployment.
 */
