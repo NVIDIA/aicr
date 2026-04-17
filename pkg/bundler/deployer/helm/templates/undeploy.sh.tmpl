@@ -434,6 +434,30 @@ if [[ -n "${orphaned_crds}" ]]; then
   postflight_issues=true
 fi
 
+# Check for Helm-annotated CRDs from uninstalled releases.
+# Mirrors the per-component CRD deletion loop above: if cleanup succeeded,
+# every annotated CRD is gone and this check stays silent. Catches cases
+# where the deletion loop logged a transient kubectl/jq warning and moved on.
+# CRDs already being deleted (non-null .metadata.deletionTimestamp) are excluded --
+# the earlier `kubectl delete crd ... --wait=false` returns immediately, so a slow
+# finalizer can leave the CRD still listed here even though it is being cleaned up
+# normally. Only truly stuck (not-yet-terminating) CRDs should be surfaced.
+helm_orphaned_crds=""
+{{- range .ComponentsReversed }}{{ if .HasChart }}
+remaining_helm_crds=$(kubectl get crd -o json 2>/dev/null \
+  | jq -r --arg rel "{{ .Name }}" --arg ns "{{ .Namespace }}" \
+    '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns and .metadata.deletionTimestamp==null) | .metadata.name' 2>/dev/null || true)
+if [[ -n "${remaining_helm_crds}" ]]; then
+  helm_orphaned_crds="${helm_orphaned_crds} ${remaining_helm_crds}"
+fi
+{{- end }}{{ end }}
+if [[ -n "${helm_orphaned_crds}" ]]; then
+  echo "WARNING: Helm-annotated CRDs from uninstalled releases still present:${helm_orphaned_crds}"
+  echo "  Cleanup did not remove all CRDs owned by this bundle's releases."
+  echo "  Delete with: kubectl delete crd <name>"
+  postflight_issues=true
+fi
+
 if [[ "${postflight_issues}" == "true" ]]; then
   echo ""
   echo "Post-flight: some stale resources remain. Run deploy.sh pre-flight checks to verify before redeploying."
