@@ -25,12 +25,11 @@
 //
 // Usage:
 //
-//	generator := helm.NewGenerator()
-//	input := &helm.GeneratorInput{
+//	generator := &helm.Generator{
 //	    RecipeResult:     recipeResult,
 //	    ComponentValues:  componentValues,
 //	    Version:          "1.0.0",
 //	    IncludeChecksums: true,
 //	}
-//	output, err := generator.Generate(ctx, input, "/path/to/output")
+//	output, err := generator.Generate(ctx, "/path/to/output")
 package helm

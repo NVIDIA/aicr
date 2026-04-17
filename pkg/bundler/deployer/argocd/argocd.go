@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -67,8 +67,12 @@ type ReadmeData struct {
 	Components     []ApplicationData
 }
 
-// GeneratorInput contains all data needed to generate ArgoCD Applications.
-type GeneratorInput struct {
+// compile-time interface check
+var _ deployer.Deployer = (*Generator)(nil)
+
+// Generator creates ArgoCD Applications from recipe results.
+// Configure it with the required fields, then call Generate.
+type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
 	RecipeResult *recipe.RecipeResult
 
@@ -89,56 +93,30 @@ type GeneratorInput struct {
 	IncludeChecksums bool
 }
 
-// GeneratorOutput contains the result of ArgoCD Application generation.
-type GeneratorOutput struct {
-	// Files contains the paths of generated files.
-	Files []string
-
-	// TotalSize is the total size of all generated files.
-	TotalSize int64
-
-	// Duration is the time taken to generate the applications.
-	Duration time.Duration
-
-	// DeploymentSteps contains ordered deployment instructions for the user.
-	DeploymentSteps []string
-
-	// DeploymentNotes contains optional notes (e.g., "Update repo URL").
-	DeploymentNotes []string
-}
-
-// Generator creates ArgoCD Applications from recipe results.
-type Generator struct{}
-
-// NewGenerator creates a new ArgoCD application generator.
-func NewGenerator() *Generator {
-	return &Generator{}
-}
-
 // resolveRepoSettings returns the effective repoURL and targetRevision,
 // applying defaults when the input values are empty.
-func resolveRepoSettings(input *GeneratorInput) (repoURL, targetRevision string) {
-	repoURL = input.RepoURL
+func resolveRepoSettings(g *Generator) (repoURL, targetRevision string) {
+	repoURL = g.RepoURL
 	if repoURL == "" {
 		repoURL = "https://github.com/YOUR-ORG/YOUR-REPO.git"
 	}
-	targetRevision = input.TargetRevision
+	targetRevision = g.TargetRevision
 	if targetRevision == "" {
 		targetRevision = "main"
 	}
 	return repoURL, targetRevision
 }
 
-// Generate creates ArgoCD Applications from the given input.
-func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputDir string) (*GeneratorOutput, error) {
+// Generate creates ArgoCD Applications from the configured generator fields.
+func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 
-	output := &GeneratorOutput{
+	output := &deployer.Output{
 		Files: make([]string, 0),
 	}
 
-	if input == nil || input.RecipeResult == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "input and recipe result are required")
+	if g.RecipeResult == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
 
 	// Create output directory
@@ -147,18 +125,18 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 			"failed to create output directory", err)
 	}
 
-	repoURL, targetRevision := resolveRepoSettings(input)
+	repoURL, targetRevision := resolveRepoSettings(g)
 
 	// Sort components by deployment order
-	components := shared.SortComponentRefsByDeploymentOrder(
-		input.RecipeResult.ComponentRefs,
-		input.RecipeResult.DeploymentOrder,
+	components := deployer.SortComponentRefsByDeploymentOrder(
+		g.RecipeResult.ComponentRefs,
+		g.RecipeResult.DeploymentOrder,
 	)
 
 	// Generate application data for each component (validate names early)
 	appDataList := make([]ApplicationData, 0, len(components))
 	for i, comp := range components {
-		if !shared.IsSafePathComponent(comp.Name) {
+		if !deployer.IsSafePathComponent(comp.Name) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", comp.Name))
 		}
@@ -175,7 +153,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 			Namespace:      comp.Namespace,
 			Repository:     comp.Source,
 			Chart:          chartName,
-			Version:        shared.NormalizeVersion(comp.Version),
+			Version:        deployer.NormalizeVersion(comp.Version),
 			SyncWave:       i, // Use index as sync wave
 			IsKustomize:    isKustomize,
 			Tag:            comp.Tag,
@@ -194,7 +172,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		default:
 		}
 
-		componentDir, err := shared.SafeJoin(outputDir, appData.Name)
+		componentDir, err := deployer.SafeJoin(outputDir, appData.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -204,7 +182,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		}
 
 		// Generate application.yaml
-		appPath, appSize, err := shared.GenerateFromTemplate(applicationTemplate, appData, componentDir, "application.yaml")
+		appPath, appSize, err := deployer.GenerateFromTemplate(applicationTemplate, appData, componentDir, "application.yaml")
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to generate application.yaml for %s", appData.Name), err)
@@ -214,11 +192,11 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 
 		// Generate values.yaml only for Helm components (kustomize uses source directly)
 		if !appData.IsKustomize {
-			values := input.ComponentValues[appData.Name]
+			values := g.ComponentValues[appData.Name]
 			if values == nil {
 				values = make(map[string]any)
 			}
-			valuesPath, valuesSize, err := shared.WriteValuesFile(values, componentDir, "values.yaml")
+			valuesPath, valuesSize, err := deployer.WriteValuesFile(values, componentDir, "values.yaml")
 			if err != nil {
 				return nil, errors.Wrap(errors.ErrCodeInternal,
 					fmt.Sprintf("failed to generate values.yaml for %s", appData.Name), err)
@@ -234,7 +212,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		TargetRevision: targetRevision,
 		Path:           ".",
 	}
-	appOfAppsPath, appOfAppsSize, err := shared.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
+	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate app-of-apps.yaml", err)
 	}
@@ -243,11 +221,11 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 
 	// Generate README.md
 	readmeData := ReadmeData{
-		RecipeVersion:  input.RecipeResult.Metadata.Version,
-		BundlerVersion: input.Version,
+		RecipeVersion:  g.RecipeResult.Metadata.Version,
+		BundlerVersion: g.Version,
 		Components:     appDataList,
 	}
-	readmePath, readmeSize, err := shared.GenerateFromTemplate(readmeTemplate, readmeData, outputDir, "README.md")
+	readmePath, readmeSize, err := deployer.GenerateFromTemplate(readmeTemplate, readmeData, outputDir, "README.md")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate README.md", err)
 	}
@@ -255,7 +233,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 	output.TotalSize += readmeSize
 
 	// Generate checksums if requested
-	if input.IncludeChecksums {
+	if g.IncludeChecksums {
 		if err := checksum.GenerateChecksums(ctx, outputDir, output.Files); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", err)
 		}
@@ -276,7 +254,7 @@ func (g *Generator) Generate(ctx context.Context, input *GeneratorInput, outputD
 		fmt.Sprintf("kubectl apply -f %s/app-of-apps.yaml", outputDir),
 	}
 	// Add note if repo URL needs to be updated
-	if input.RepoURL == "" {
+	if g.RepoURL == "" {
 		output.DeploymentNotes = []string{
 			"Update app-of-apps.yaml with your repository URL before applying",
 		}

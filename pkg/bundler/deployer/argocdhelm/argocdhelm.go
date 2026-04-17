@@ -54,7 +54,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/shared"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -62,11 +61,6 @@ import (
 
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
-
-// HasDynamicValues reports whether this deployer has dynamic install-time values.
-func (g *Generator) HasDynamicValues() bool {
-	return len(g.DynamicValues) > 0
-}
 
 // Generator creates Helm chart app-of-apps bundles by transforming flat ArgoCD output.
 // Configure it with the required fields, then call Generate.
@@ -99,7 +93,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	defer os.RemoveAll(tmpDir)
 
-	argocdInput := &argocd.GeneratorInput{
+	argocdGen := &argocd.Generator{
 		RecipeResult:     g.RecipeResult,
 		ComponentValues:  g.ComponentValues,
 		Version:          g.Version,
@@ -108,8 +102,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		IncludeChecksums: false, // we generate our own checksums
 	}
 
-	argocdGen := argocd.NewGenerator()
-	if _, genErr := argocdGen.Generate(ctx, argocdInput, tmpDir); genErr != nil {
+	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base ArgoCD output", genErr)
 	}
 
@@ -121,7 +114,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output := &deployer.Output{Files: make([]string, 0)}
 
 	// Write Chart.yaml
-	chartPath, chartSize, err := writeChartYAML(outputDir, shared.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version))
+	chartPath, chartSize, err := writeChartYAML(outputDir, deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write Chart.yaml", err)
 	}
@@ -136,7 +129,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, staticFiles...)
 	output.TotalSize += staticSize
 
-	valuesPath, valuesSize, err := shared.WriteValuesFile(dynamicOnlyValues, outputDir, "values.yaml")
+	valuesPath, valuesSize, err := deployer.WriteValuesFile(dynamicOnlyValues, outputDir, "values.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write root values.yaml", err)
 	}
@@ -144,7 +137,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.TotalSize += valuesSize
 
 	// Step 4: Transform Application manifests into Helm templates
-	templatesDir, err := shared.SafeJoin(outputDir, "templates")
+	templatesDir, err := deployer.SafeJoin(outputDir, "templates")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve templates directory", err)
 	}
@@ -231,7 +224,7 @@ func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output,
 // writeStaticValuesAndBuildStubs writes each component's values to static/<name>.yaml
 // and builds the dynamic-only stubs map for the root values.yaml.
 func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, int64, map[string]any, error) {
-	staticDir, err := shared.SafeJoin(outputDir, "static")
+	staticDir, err := deployer.SafeJoin(outputDir, "static")
 	if err != nil {
 		return nil, 0, nil, err
 	}
@@ -280,7 +273,7 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		}
 
 		// Write static values (dynamic paths removed)
-		staticPath, staticSize, staticErr := shared.WriteValuesFile(staticValues, staticDir, ref.Name+".yaml")
+		staticPath, staticSize, staticErr := deployer.WriteValuesFile(staticValues, staticDir, ref.Name+".yaml")
 		if staticErr != nil {
 			return nil, 0, nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write static values for %s", ref.Name), staticErr)
@@ -296,15 +289,15 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 // structured YAML, replaces the multi-source block with a single-source +
 // helm.values Helm template, and writes the result as a chart template file.
 func transformApplication(srcDir, templatesDir, componentName, overrideKey string) (string, int64, error) {
-	if !shared.IsSafePathComponent(componentName) {
+	if !deployer.IsSafePathComponent(componentName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", componentName))
 	}
-	componentDir, joinErr := shared.SafeJoin(srcDir, componentName)
+	componentDir, joinErr := deployer.SafeJoin(srcDir, componentName)
 	if joinErr != nil {
 		return "", 0, joinErr
 	}
-	srcPath, joinErr := shared.SafeJoin(componentDir, "application.yaml")
+	srcPath, joinErr := deployer.SafeJoin(componentDir, "application.yaml")
 	if joinErr != nil {
 		return "", 0, joinErr
 	}
@@ -337,7 +330,7 @@ func transformApplication(srcDir, templatesDir, componentName, overrideKey strin
 	}
 	out = fixValuesTemplate(out, app)
 
-	destPath, pathErr := shared.SafeJoin(templatesDir, componentName+".yaml")
+	destPath, pathErr := deployer.SafeJoin(templatesDir, componentName+".yaml")
 	if pathErr != nil {
 		return "", 0, pathErr
 	}
@@ -456,15 +449,15 @@ func fixValuesTemplate(marshaled []byte, app map[string]any) []byte {
 }
 
 func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, error) {
-	if !shared.IsSafePathComponent(componentName) {
+	if !deployer.IsSafePathComponent(componentName) {
 		return "", 0, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", componentName))
 	}
-	componentDir, joinErr := shared.SafeJoin(srcDir, componentName)
+	componentDir, joinErr := deployer.SafeJoin(srcDir, componentName)
 	if joinErr != nil {
 		return "", 0, joinErr
 	}
-	srcPath, joinErr := shared.SafeJoin(componentDir, "application.yaml")
+	srcPath, joinErr := deployer.SafeJoin(componentDir, "application.yaml")
 	if joinErr != nil {
 		return "", 0, joinErr
 	}
@@ -474,7 +467,7 @@ func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, 
 			fmt.Sprintf("failed to read application.yaml for %s", componentName), err)
 	}
 
-	destPath, pathErr := shared.SafeJoin(templatesDir, componentName+".yaml")
+	destPath, pathErr := deployer.SafeJoin(templatesDir, componentName+".yaml")
 	if pathErr != nil {
 		return "", 0, pathErr
 	}
@@ -487,7 +480,7 @@ func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, 
 }
 
 func writeChartYAML(outputDir, version string) (string, int64, error) {
-	chartPath, err := shared.SafeJoin(outputDir, "Chart.yaml")
+	chartPath, err := deployer.SafeJoin(outputDir, "Chart.yaml")
 	if err != nil {
 		return "", 0, err
 	}
@@ -507,7 +500,7 @@ func writeChartYAML(outputDir, version string) (string, int64, error) {
 }
 
 func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
-	readmePath, err := shared.SafeJoin(outputDir, "README.md")
+	readmePath, err := deployer.SafeJoin(outputDir, "README.md")
 	if err != nil {
 		return "", 0, err
 	}

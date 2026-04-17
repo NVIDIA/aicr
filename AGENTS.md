@@ -3,6 +3,10 @@
 This file provides guidance to Codex and other coding agents when working with code in this repository.
 <!-- AUTO-SYNCED: canonical source is .claude/CLAUDE.md. Only the first 4 lines differ. CI enforced sync. -->
 
+## Local Overlay
+
+If present, also read `AGENTS.local.md` at the repo root. The file is gitignored repo-wide so personal overlays stay local — agents must check the exact path directly (e.g., `Read` or `cat`), not rely on ignore-respecting discovery tools such as `rg`, `fd`, or `git ls-files`. Treat it as a local overlay for this working copy: follow it when it does not conflict with higher-priority instructions or this shared `AGENTS.md`.
+
 ## Role & Expertise
 
 Act as a Principal Distributed Systems Architect with deep expertise in Go and cloud-native architectures. Focus on correctness, resiliency, and operational simplicity. All code must be production-grade, not illustrative pseudo-code.
@@ -296,6 +300,18 @@ return err
 
 **Exception:** Wrapping is unnecessary for read-only `Close()` returns and K8s helpers like `k8s.IgnoreNotFound(err)`.
 
+**Always use `errors.Is()` for sentinel error checks.** `golangci-lint` enforces the `errorlint` rule — comparing errors with `==` fails on wrapped errors and will be rejected by CI:
+
+```go
+// BAD - fails errorlint, breaks on wrapped errors
+if err == io.EOF {
+
+// GOOD - works with wrapped errors, passes linter
+if errors.Is(err, io.EOF) {
+```
+
+Note: in files that import `pkg/errors`, the standard library `errors` package is aliased as `stderrors`, so use `stderrors.Is(...)` there.
+
 **Writable file handles must check `Close()` errors.** If a file handle is writable (e.g., from `os.Create` or `os.OpenFile`), closing it may flush buffered data; always capture and check the error:
 ```go
 // BAD - writable Close() error ignored
@@ -470,6 +486,7 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 | Guess at missing parameters | Ask for clarification |
 | Continue after 3 failed fix attempts | Stop, reassess approach, explain blockers |
 | Use polling loops for K8s operations | Use watch API for efficiency |
+| Compare errors with `==` (e.g., `err == io.EOF`) | Use `errors.Is(err, io.EOF)` (`stderrors.Is` in files that alias stdlib errors) — `errorlint` enforced by CI |
 | Duplicate K8s utilities across packages | Use shared utilities from `pkg/k8s/pod` |
 | Run tests that connect to live clusters | Always use `--no-cluster` flag in tests |
 | Use boolean flags to track options | Use pointer pattern (nil = not set, &value = set) |
@@ -481,6 +498,8 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 ## Pull Request Requirements
 
 **Pre-push checklist:** Always run `make qualify` before pushing. This is the CI-equivalent gate that covers tests, linting (golangci-lint + yamllint), e2e, vulnerability scan, and repo-specific checks (docs sidebar, agents sync). Do not substitute a subset of commands — if `make qualify` passes locally, CI will pass.
+
+**Mandatory lint gate for Go changes:** If your PR changes any `.go` files, you MUST run `golangci-lint run -c .golangci.yaml` on each affected package path (e.g., `./pkg/recipe/...`, `./cmd/aicr/...`, `./tests/chainsaw/...`) and confirm zero issues before creating or pushing the PR. For a full module scan, use `./...`. Do not rely on CI to catch lint failures — fix them locally first. This applies even to PRs labeled as "documentation only" if they include Go code changes.
 
 **Branch hygiene:**
 - Always rebase onto the target branch before pushing: `git fetch origin main && git rebase origin/main`
