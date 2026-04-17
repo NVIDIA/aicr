@@ -1302,6 +1302,7 @@ The undeploy script removes components in reverse deployment order.
 |------|-------------|
 | `--keep-namespaces` | Skip namespace deletion after component removal |
 | `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
+| `--skip-preflight` | Skip pre-flight CRD/finalizer checks (use with caution) |
 | `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
 
 **PVC preservation (default):**
