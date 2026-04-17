@@ -139,6 +139,9 @@ docs/plans
 # Per-clone local agent overlay (see AGENTS.md "Local Overlay" section)
 /AGENTS.local.md
 
+# Per-clone Claude Code personal overlay (auto-loaded alongside .claude/CLAUDE.md)
+/CLAUDE.local.md
+
 # Validator generator scaffolding output
 pkg/validator/checks/**/*_README.md
 pkg/validator/checks/**/*_recipe.yaml
