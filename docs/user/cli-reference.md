@@ -1271,11 +1271,13 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 | Flag | Description |
 |------|-------------|
-| `--no-wait` | Skip `helm --wait` for each component (keeps `--timeout` for hooks) |
+| `--no-wait` | Skip Helm chart-level wait (`helm --wait`) where AICR uses it. Keeps `--timeout` for hooks. |
 | `--best-effort` | Continue past individual component failures instead of exiting |
 | `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 
-Unknown flags are rejected with an error to catch typos (e.g., `--best-effrot`).
+Unknown flags are rejected with an error to catch typos (e.g., `--best-effort`).
+
+> **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Skyhook node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
 
 **Retry behavior:**
 
