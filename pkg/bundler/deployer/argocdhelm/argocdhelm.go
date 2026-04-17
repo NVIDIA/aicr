@@ -62,7 +62,7 @@ import (
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
-// Generator creates Helm chart app-of-apps bundles by transforming flat ArgoCD output.
+// Generator creates Helm chart app-of-apps bundles by transforming flat Argo CD output.
 // Configure it with the required fields, then call Generate.
 type Generator struct {
 	RecipeResult     *recipe.RecipeResult
@@ -103,7 +103,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base ArgoCD output", genErr)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base Argo CD output", genErr)
 	}
 
 	// Step 2: Create Helm chart output structure

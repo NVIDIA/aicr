@@ -37,7 +37,7 @@ All notable changes to this project will be documented in this file.
 - Add conformance evidence renderer and fix check false-positives  by [@dims](https://github.com/dims)
 - *(validator)* Replace helm CLI subprocess with Helm Go SDK for chart rendering  by [@xdu31](https://github.com/xdu31)
 - Add HPA pod autoscaling evidence for CNCF AI Conformance  by [@yuanchen8911](https://github.com/yuanchen8911)
-- *(collector)* Add Helm release and ArgoCD Application collectors  by [@mchmarny](https://github.com/mchmarny)
+- *(collector)* Add Helm release and Argo CD Application collectors  by [@mchmarny](https://github.com/mchmarny)
 - Add cluster autoscaling evidence for CNCF AI Conformance  by [@yuanchen8911](https://github.com/yuanchen8911)
 - *(ci)* Binary attestation with SLSA Build Provenance v1  by [@lockwobr](https://github.com/lockwobr)
 
@@ -72,7 +72,7 @@ All notable changes to this project will be documented in this file.
 - Add conformance evidence renderer and fix check false-positives  by [@dims](https://github.com/dims)
 - *(validator)* Replace helm CLI subprocess with Helm Go SDK for chart rendering  by [@xdu31](https://github.com/xdu31)
 - Add HPA pod autoscaling evidence for CNCF AI Conformance  by [@yuanchen8911](https://github.com/yuanchen8911)
-- *(collector)* Add Helm release and ArgoCD Application collectors  by [@mchmarny](https://github.com/mchmarny)
+- *(collector)* Add Helm release and Argo CD Application collectors  by [@mchmarny](https://github.com/mchmarny)
 - Add cluster autoscaling evidence for CNCF AI Conformance  by [@yuanchen8911](https://github.com/yuanchen8911)
 
 ### Tasks

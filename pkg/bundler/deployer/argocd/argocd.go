@@ -70,7 +70,7 @@ type ReadmeData struct {
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
-// Generator creates ArgoCD Applications from recipe results.
+// Generator creates Argo CD Applications from recipe results.
 // Configure it with the required fields, then call Generate.
 type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
@@ -107,7 +107,7 @@ func resolveRepoSettings(g *Generator) (repoURL, targetRevision string) {
 	return repoURL, targetRevision
 }
 
-// Generate creates ArgoCD Applications from the configured generator fields.
+// Generate creates Argo CD Applications from the configured generator fields.
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 

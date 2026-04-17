@@ -434,9 +434,9 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 	case config.DeployerHelm:
 		return "helm-bundle", "Helm per-component bundle"
 	case config.DeployerArgoCD:
-		return "argocd-applications", "ArgoCD applications"
+		return "argocd-applications", "Argo CD applications"
 	case config.DeployerArgoCDHelm:
-		return "argocd-helm-chart", "ArgoCD Helm chart app-of-apps"
+		return "argocd-helm-chart", "Argo CD Helm chart app-of-apps"
 	default:
 		return types.BundleType(dt), string(dt)
 	}
