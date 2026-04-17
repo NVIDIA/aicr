@@ -188,16 +188,33 @@ check_crd_for_stuck_resources() {
 }
 
 # Check a Helm release for CRDs whose custom resources have active finalizers.
-# Extracts CRD names from the release manifest and checks each one.
-# Silently skips releases that are not installed (helm get manifest fails).
+# Discovers CRDs from two sources:
+#   1. The chart's templates/ section, via `helm get manifest`. Misses CRDs
+#      installed from the chart's crds/ directory (the Helm-recommended layout
+#      that most operator charts use), which never appear in `helm get manifest`.
+#   2. CRDs annotated with meta.helm.sh/release-name == this release. Catches
+#      crds/-installed CRDs and any CRD owned by the release at runtime, so
+#      workload CRs (e.g., NIMService) get scanned for finalizers before the
+#      operator is removed.
+# Silently skips releases that are not installed.
 # Args: $1 = release name, $2 = namespace
 check_release_for_stuck_crds() {
   local release="$1"
   local ns="$2"
-  local manifest
+  local manifest manifest_crds annotated_crds
   manifest=$(helm get manifest "${release}" -n "${ns}" 2>/dev/null) || return 0
-  echo "${manifest}" \
-    | awk '/^kind:/{kind=$2} /^  name:/ && kind=="CustomResourceDefinition"{print $2; kind=""}' \
+  manifest_crds=$(echo "${manifest}" \
+    | awk '/^kind:/{kind=$2} /^  name:/ && kind=="CustomResourceDefinition"{print $2; kind=""}')
+  annotated_crds=$(kubectl get crd -o json 2>/dev/null \
+    | jq -r --arg rel "${release}" --arg ns "${ns}" \
+      '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns) | .metadata.name' 2>/dev/null || true)
+  # awk 'NF' drops empty lines without the exit-1-on-no-match behavior of
+  # `grep -v '^$'`, which would abort under `set -euo pipefail` when a release
+  # has no CRDs (e.g., chart ships none, installed with --skip-crds, already
+  # cleaned up).
+  printf '%s\n%s\n' "${manifest_crds}" "${annotated_crds}" \
+    | awk 'NF' \
+    | sort -u \
     | while read -r crd_name; do
         check_crd_for_stuck_resources "${crd_name}" "${release}"
       done
