@@ -516,6 +516,16 @@ Run validation without failing on check errors (informational mode):
 
 			var snap *snapshotter.Snapshot
 
+			// --no-cluster means "do not touch the cluster". The agent-deploy
+			// branch below contradicts that (it creates a Job and captures a
+			// snapshot from the live API), so a snapshot file is the only valid
+			// data source in that mode. Placed after recipe.LoadFromFile so
+			// recipe kind-check and auto-hydration still run for CLI coverage.
+			if snapshotFilePath == "" && cmd.Bool("no-cluster") {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					"--no-cluster requires --snapshot (cannot deploy the snapshot-capture agent without cluster access)")
+			}
+
 			if snapshotFilePath != "" {
 				slog.Info("loading snapshot", "uri", snapshotFilePath)
 				snap, err = serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapshotFilePath, kubeconfig)

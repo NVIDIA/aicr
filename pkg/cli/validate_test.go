@@ -273,7 +273,7 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 			name:        "RecipeMetadata with criteria auto-hydrates",
 			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.nvidia.com/v1alpha1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     true,
-			errContain:  "kubernetes client",
+			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "has no criteria",
 		},
 		{
@@ -292,14 +292,14 @@ func TestValidateCmd_RecipeKindHandling(t *testing.T) {
 			name:        "RecipeResult kind passes kind check",
 			yamlContent: "kind: RecipeResult\napiVersion: aicr.nvidia.com/v1alpha1\n",
 			wantErr:     true,
-			errContain:  "kubernetes client",
+			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
 		{
 			name:        "empty kind passes kind check",
 			yamlContent: "apiVersion: aicr.nvidia.com/v1alpha1\n",
 			wantErr:     true,
-			errContain:  "kubernetes client",
+			errContain:  "--no-cluster requires --snapshot",
 			errAbsent:   "is required",
 		},
 	}
