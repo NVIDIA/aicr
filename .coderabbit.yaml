@@ -41,6 +41,9 @@ reviews:
       enabled: false
     shellcheck:
       enabled: true
+  pre_merge_checks:
+    docstrings:
+      mode: off
 
 knowledge_base:
   opt_out: false
