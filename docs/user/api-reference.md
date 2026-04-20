@@ -327,12 +327,14 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of bundler types to execute |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm` and `deployer=argocd-helm`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
-| `deployer` | string | helm | Deployment method: `helm` or `argocd` |
+| `deployer` | string | helm | Deployment method: `helm`, `argocd`, or `argocd-helm` |
+| `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=argocd-helm`) |
 
 **Request Body:**
 

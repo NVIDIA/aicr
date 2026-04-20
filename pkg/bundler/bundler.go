@@ -279,24 +279,14 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		return nil, err
 	}
 
+	slog.Debug("generating bundle",
+		"deployer", b.Config.Deployer(),
+		"component_count", len(recipeResult.ComponentRefs),
+		"dynamic_components", len(dynamicValues),
+	)
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
-		if b.Config.Attest() {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--attest is not yet supported with --deployer argocd-helm")
-		}
-		if provider := recipe.GetDataProvider(); provider != nil {
-			if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					"--data is not yet supported with --deployer argocd-helm")
-			}
-		}
-
-		slog.Debug("generating argocd helm chart app-of-apps",
-			"component_count", len(recipeResult.ComponentRefs),
-			"dynamic_components", len(dynamicValues),
-		)
-
 		return &argocdhelm.Generator{
 			RecipeResult:     recipeResult,
 			ComponentValues:  componentValues,
@@ -305,6 +295,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			TargetRevision:   b.Config.TargetRevision(),
 			IncludeChecksums: b.Config.IncludeChecksums(),
 			DynamicValues:    dynamicValues,
+			DataFiles:        dataFiles,
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -312,11 +303,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
 		}
-
-		slog.Debug("generating argocd applications",
-			"component_count", len(recipeResult.ComponentRefs),
-		)
-
 		return &argocd.Generator{
 			RecipeResult:     recipeResult,
 			ComponentValues:  componentValues,
@@ -324,6 +310,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			RepoURL:          b.Config.RepoURL(),
 			TargetRevision:   b.Config.TargetRevision(),
 			IncludeChecksums: b.Config.IncludeChecksums(),
+			DataFiles:        dataFiles,
 		}, nil
 
 	case config.DeployerHelm:
@@ -332,11 +319,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				"failed to collect component manifests", manifestErr)
 		}
-
-		slog.Debug("generating helm bundle",
-			"component_count", len(recipeResult.ComponentRefs),
-		)
-
 		return &helm.Generator{
 			RecipeResult:       recipeResult,
 			ComponentValues:    componentValues,

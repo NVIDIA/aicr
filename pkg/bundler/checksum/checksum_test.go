@@ -16,10 +16,14 @@ package checksum
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestGenerateChecksums(t *testing.T) {
@@ -280,5 +284,114 @@ func TestGetChecksumFilePath(t *testing.T) {
 
 	if path != expected {
 		t.Errorf("GetChecksumFilePath() = %s, want %s", path, expected)
+	}
+}
+
+func TestWriteChecksums(t *testing.T) {
+	t.Parallel()
+
+	// setup returns the Output that WriteChecksums will receive (or nil).
+	// May stage files on disk under tmpDir before returning.
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, tmpDir string) *deployer.Output
+		wantErr    bool
+		wantCode   errors.ErrorCode
+		wantMsg    string
+		assertPass func(t *testing.T, tmpDir string, output *deployer.Output)
+	}{
+		{
+			name: "appends checksum file and updates size",
+			setup: func(t *testing.T, tmpDir string) *deployer.Output {
+				t.Helper()
+				file1 := filepath.Join(tmpDir, "a.txt")
+				file2 := filepath.Join(tmpDir, "b.txt")
+				if err := os.WriteFile(file1, []byte("aaa"), 0600); err != nil {
+					t.Fatalf("write file1: %v", err)
+					return nil
+				}
+				if err := os.WriteFile(file2, []byte("bbbb"), 0600); err != nil {
+					t.Fatalf("write file2: %v", err)
+					return nil
+				}
+				return &deployer.Output{
+					Files:     []string{file1, file2},
+					TotalSize: 7,
+				}
+			},
+			assertPass: func(t *testing.T, _ string, output *deployer.Output) {
+				t.Helper()
+				if len(output.Files) != 3 {
+					t.Fatalf("expected 3 entries in output.Files, got %d", len(output.Files))
+					return
+				}
+				if !strings.HasSuffix(output.Files[2], ChecksumFileName) {
+					t.Errorf("last entry should be %s, got %s", ChecksumFileName, output.Files[2])
+				}
+				info, err := os.Stat(output.Files[2])
+				if err != nil {
+					t.Fatalf("stat checksum file: %v", err)
+					return
+				}
+				if output.TotalSize != 7+info.Size() {
+					t.Errorf("TotalSize = %d, want %d", output.TotalSize, 7+info.Size())
+				}
+			},
+		},
+		{
+			name: "propagates underlying error when source file missing",
+			setup: func(_ *testing.T, tmpDir string) *deployer.Output {
+				return &deployer.Output{
+					Files: []string{filepath.Join(tmpDir, "does-not-exist")},
+				}
+			},
+			wantErr:  true,
+			wantCode: errors.ErrCodeInternal,
+			wantMsg:  "failed to compute checksum",
+		},
+		{
+			name:     "rejects nil output",
+			setup:    func(_ *testing.T, _ string) *deployer.Output { return nil },
+			wantErr:  true,
+			wantCode: errors.ErrCodeInvalidRequest,
+			wantMsg:  "output is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tmpDir := t.TempDir()
+			output := tt.setup(t, tmpDir)
+
+			err := WriteChecksums(context.Background(), tmpDir, output)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+					return
+				}
+				var structErr *errors.StructuredError
+				if !stderrors.As(err, &structErr) {
+					t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+					return
+				}
+				if structErr.Code != tt.wantCode {
+					t.Errorf("error code = %s, want %s", structErr.Code, tt.wantCode)
+				}
+				if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
+					t.Errorf("error message should contain %q, got: %v", tt.wantMsg, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("WriteChecksums() unexpected error = %v", err)
+				return
+			}
+			if tt.assertPass != nil {
+				tt.assertPass(t, tmpDir, output)
+			}
+		})
 	}
 }

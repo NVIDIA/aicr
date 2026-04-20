@@ -819,8 +819,8 @@ aicr bundle [flags]
 |---------------------------------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path to recipe file (required) |
 | `--output` | `-o` | string | Output directory (default: current dir) |
-| `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
-| `--repo` | | string | Git repository URL for Argo CD applications (only used with `--deployer argocd`) |
+| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, or `argocd-helm` |
+| `--repo` | | string | Git repository URL for Argo CD applications (used with `--deployer argocd` and `--deployer argocd-helm`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -1010,6 +1010,8 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 |----------|------|---------|
 | Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
 | Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
+
+> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the shipped bundle (defaults and stubs), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -1243,6 +1245,14 @@ When `--attest` is passed, the bundle command performs five steps:
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
+
+Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
+
+##### Attestation Scope
+
+Attestation binds the **shipped bundle** — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
+
+If you need to enforce specific install-time values (e.g., pinning `driver.version`), that is a **policy concern**, not an attestation one. Use admission control (Kyverno, Gatekeeper) or Argo sync hooks to reject deployments that violate the policy. `aicr verify` checks bundle integrity and provenance; it does not evaluate install-time value constraints.
 
 #### Deploying a bundle
 

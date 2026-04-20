@@ -32,6 +32,7 @@ The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow
 **API Server Configuration:**
 - **Criteria allowlists** – Restrict allowed values for accelerator, service, intent, and OS via environment variables
 - **Value overrides** – Supported via `?set=bundler:path=value` query parameters on `/v1/bundle`
+- **Dynamic install-time values** – Supported via `?dynamic=component:path` query parameters on `/v1/bundle` (helm and argocd-helm deployers)
 - **Node scheduling** – Supported via `?system-node-selector` and `?accelerated-node-selector` query parameters
 
 **For complete workflow**, use the CLI which supports:

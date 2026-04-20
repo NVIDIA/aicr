@@ -91,6 +91,10 @@ type Generator struct {
 
 	// IncludeChecksums indicates whether to generate a checksums.txt file.
 	IncludeChecksums bool
+
+	// DataFiles lists additional file paths (relative to output dir) to include
+	// in checksum generation. Used for external data files copied into the bundle.
+	DataFiles []string
 }
 
 // resolveRepoSettings returns the effective repoURL and targetRevision,
@@ -232,18 +236,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
-	// Generate checksums if requested
+	// Include external data files in the file list (for checksums).
+	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
+		return nil, err
+	}
+
 	if g.IncludeChecksums {
-		if err := checksum.GenerateChecksums(ctx, outputDir, output.Files); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", err)
+		if err := checksum.WriteChecksums(ctx, outputDir, output); err != nil {
+			return nil, err
 		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		checksumInfo, statErr := os.Stat(checksumPath)
-		if statErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat checksums file", statErr)
-		}
-		output.Files = append(output.Files, checksumPath)
-		output.TotalSize += checksumInfo.Size()
 	}
 
 	output.Duration = time.Since(start)

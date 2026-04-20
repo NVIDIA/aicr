@@ -74,6 +74,10 @@ type Generator struct {
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
+
+	// DataFiles lists additional file paths (relative to output dir) to include
+	// in checksum generation. Used for external data files copied into the bundle.
+	DataFiles []string
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -185,6 +189,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
+	// Include external data files in the file list (for checksums).
+	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
+		return nil, err
+	}
+
 	// Generate checksums and finalize output
 	if err := g.finalizeOutput(ctx, output, outputDir, start); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to finalize output", err)
@@ -203,14 +212,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // finalizeOutput generates checksums (if requested) and sets deployment metadata.
 func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output, outputDir string, start time.Time) error {
 	if g.IncludeChecksums {
-		if checksumErr := checksum.GenerateChecksums(ctx, outputDir, output.Files); checksumErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", checksumErr)
-		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		info, statErr := os.Stat(checksumPath)
-		if statErr == nil {
-			output.Files = append(output.Files, checksumPath)
-			output.TotalSize += info.Size()
+		if err := checksum.WriteChecksums(ctx, outputDir, output); err != nil {
+			return err
 		}
 	}
 	output.Duration = time.Since(start)
