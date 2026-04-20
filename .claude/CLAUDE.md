@@ -556,6 +556,7 @@ net. When renaming or removing a heading:
 - Registry component → `docs/user/component-catalog.md`
 - Recipe / overlay / mixin structure → `docs/integrator/recipe-development.md` and `docs/contributor/data.md`
 - Internal package or architecture → `docs/contributor/<area>.md`
+- **Enum/constant value added** (e.g., new accelerator, service, OS, intent, platform, error code) → the value is usually enumerated in *many* files, not one, and grepping for the *new* value returns nothing. Start from the authoritative Go type (e.g., `pkg/recipe/criteria.go` for `CriteriaAccelerator*`), list every current value, and verify each appears wherever the enum is documented — typically the OpenAPI contract at `api/aicr/v1/server.yaml` (every `enum:` block) and the doc pages `docs/README.md` (glossary), `docs/user/cli-reference.md`, `docs/user/api-reference.md`, `docs/contributor/api-server.md`, `docs/contributor/cli.md`, `docs/contributor/data.md`, and `docs/contributor/validations.md`. Grepping `docs/` for an already-documented sibling value (e.g., `gb200`) catches forward additions but misses pre-existing drift — check against the Go type, not a known-good sibling.
 
 Follow the heading conventions in the `## Documentation Style` section above. Doc-only PRs (label `documentation`) are still subject to the full `make qualify` gate.
 
