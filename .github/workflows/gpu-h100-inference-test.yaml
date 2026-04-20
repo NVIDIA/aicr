@@ -43,7 +43,10 @@ jobs:
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
         id: filter
         with:
-          base: main
+          # No `base:` — on push events dorny/paths-filter defaults to diffing
+          # against github.event.before (the pre-push SHA). That avoids the
+          # race where `base: main` forced a fetch of `pull-request/<N>` and
+          # raced GitHub's post-merge ref cleanup on synthetic merge pushes.
           filters: |
             matched:
               - '.github/workflows/gpu-h100-inference-test.yaml'
