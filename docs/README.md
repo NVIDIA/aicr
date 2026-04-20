@@ -31,6 +31,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 Deploying high-performance AI infrastructure is historically complex. Administrators must navigate a "matrix" of dependencies, ensuring compatibility between the Operating System, Kubernetes version, GPU drivers, and container runtimes.
 
 ### The Challenge: The "Old Way"
+
 Previously, administrators relied on static documentation and manual installation guides. This approach presented several significant challenges:
 *   **Complexity:** Administrators had to manually track compatibility matrices across dozens of components (e.g., matching a specific GPU Operator version to a specific driver and K8s version).
 *   **Human Error:** Manual copy-pasting of commands and flags often led to configuration drift or broken deployments.
@@ -38,6 +39,7 @@ Previously, administrators relied on static documentation and manual installatio
 *   **Lack of Optimization:** Generic installation guides rarely account for specific hardware differences (e.g., H100 vs. GB200) or workload intents (Training vs. Inference).
 
 ### The Solution: Automated Approach
+
 AICR replaces manual interpretation of documentation with a **automated approach**. It treats infrastructure configuration as code, providing a deterministic engine that generates the exact artifacts needed for a specific environment.
 
 **Key Benefits:**
@@ -88,15 +90,18 @@ Finally, AICR converts the abstract Recipe into concrete deployment files.
 ## Key Capabilities
 
 ### Kubernetes-Native Integration
+
 AICR is designed to work natively within Kubernetes.
 *   **ConfigMap Support:** You don't need to manage local files. You can read and write Snapshots and Recipes directly to Kubernetes ConfigMaps using the URI format `cm://namespace/name`.
 *   **No Persistent Volumes:** The automated Agent writes data directly to the Kubernetes API, simplifying deployment in restricted environments.
 
 ### Integration & Automation
+
 *   **CI/CD Ready:** The `aicr` CLI and API server are built for pipelines. Teams can use AICR to detect "Configuration Drift" by periodically taking snapshots and comparing them to a baseline.
 *   **API Server:** For programmatic access, AICR provides a production-ready HTTP REST API to generate recipes dynamically.
 
 ### Security
+
 AICR prioritizes trust in the software supply chain.
 *   **Verifiable Builds:** Every release includes provenance data showing exactly how and where it was built (SLSA Level 3).
 *   **SBOMs:** Complete inventories of all dependencies are provided for both binaries and container images, enabling automated vulnerability scanning.

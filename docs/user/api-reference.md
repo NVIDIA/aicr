@@ -17,7 +17,8 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 └──────────────┘      └──────────────┘
 ```
 
-**API vs CLI:**
+### API vs CLI
+
 - Use the **API** for remote recipe generation and bundle creation
 - Use the **CLI** for local operations, snapshot capture, and ConfigMap integration
 
@@ -337,12 +338,12 @@ Generate deployment bundles from a recipe.
 
 The request body is the recipe (RecipeResult) directly. No wrapper object needed.
 
-**Supported Bundlers:**
+#### Components
 
 Bundler names correspond to component names in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). Any component registered there can be passed as a bundler. Current components:
 
-| Bundler | Description |
-|---------|-------------|
+| Component | Description |
+|-----------|-------------|
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
 | `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
@@ -425,7 +426,7 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-oper
 | `X-Bundle-Size` | Uncompressed size (bytes) | `45678` |
 | `X-Bundle-Duration` | Generation time | `1.234s` |
 
-**Bundle Structure:**
+#### Bundle Structure
 
 ```
 bundles.zip
@@ -542,7 +543,7 @@ ls -la
 
 ## Error Handling
 
-**Error Response Format:**
+### Error Response Format
 
 ```json
 {
@@ -555,7 +556,7 @@ ls -la
 }
 ```
 
-**Error Codes:**
+### Error Codes
 
 | Code | HTTP Status | Description | Retryable |
 |------|-------------|-------------|-----------|
@@ -565,7 +566,7 @@ ls -la
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests | Yes |
 | `INTERNAL_ERROR` | 500 | Server error | Yes |
 
-**Handling Rate Limits:**
+### Handling Rate Limits
 
 ```shell
 # Check rate limit headers
