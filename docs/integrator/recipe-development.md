@@ -166,7 +166,7 @@ componentRefs:
         version: "580.82.07"
 ```
 
-**Kustomize components:**
+#### Kustomize components
 ```yaml
 componentRefs:
   - name: my-app
@@ -259,7 +259,7 @@ constraints:
     value: "24.04"
 ```
 
-**Common measurement paths:**
+#### Common measurement paths
 | Path | Example |
 |------|---------|
 | `K8s.server.version` | `1.32.4` |
@@ -425,7 +425,7 @@ Integrators can extend or override embedded recipe data using the `--data` flag 
 - Extended registries with internal Helm charts
 - Rapid iteration without rebuilding binaries
 
-**Directory structure:**
+#### Directory structure
 ```
 ./my-data/
 ├── registry.yaml              # Extends/overrides component registry

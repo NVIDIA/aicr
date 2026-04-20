@@ -133,7 +133,7 @@ func main() {
 - Server configured with production defaults
 - Graceful shutdown on SIGINT/SIGTERM
 
-**Initialization Flow:**
+#### Initialization Flow
 ```go
 func Serve() error {
     // 1. Setup logging
@@ -1113,7 +1113,7 @@ ENTRYPOINT ["aicrd"]
 | `AICR_ALLOWED_INTENTS` | (none) | Comma-separated list of allowed intents (e.g., `training`). If not set, all intents allowed. |
 | `AICR_ALLOWED_OS` | (none) | Comma-separated list of allowed OS types (e.g., `ubuntu,rhel`). If not set, all OS types allowed. |
 
-**Criteria Allowlists:**
+#### Criteria Allowlists
 
 When allowlist environment variables are configured, the API server validates incoming requests against the allowed values. This enables operators to restrict the API to specific configurations.
 

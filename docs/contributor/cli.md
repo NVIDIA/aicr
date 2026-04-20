@@ -780,7 +780,7 @@ flowchart TD
 
 #### Bundler Architecture
 
-**BaseBundler Helper Pattern:**
+##### BaseBundler Helper Pattern
 ```go
 // Bundlers embed BaseBundler and override Make()
 type Bundler struct {
@@ -799,7 +799,7 @@ func init() {
 }
 ```
 
-**RecipeResult-Based Data Access:**
+##### RecipeResult-Based Data Access
 ```go
 // Get component reference from RecipeResult
 component := input.GetComponentRef(Name)
@@ -827,7 +827,7 @@ RecipeResult → GetComponentRef(Name) → ComponentRef
              → Template ({{ index .Values "key" }} or {{ .Script.Namespace }})
 ```
 
-**Registry Pattern:**
+##### Registry Pattern
 ```go
 // Dynamic bundler discovery
 bundlers := defaultRegistry.GetAll()  // Returns all registered bundlers

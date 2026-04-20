@@ -114,7 +114,7 @@ type Reading interface {
 
 ### Collection Process
 
-**Parallel Collection:**
+#### Parallel Collection
 ```
 ┌──────────────┐
 │ Snapshotter  │
@@ -178,7 +178,7 @@ When a snapshot is provided, the recipe builder extracts query parameters:
 Snapshot → Query Extractor → Recipe Query
 ```
 
-**Extraction mapping:**
+#### Extraction mapping
 ```
 K8s/server/version          → k8s (version)
 K8s/image/gpu-operator      → service (eks/gke/aks detection)
@@ -191,7 +191,7 @@ GPU/smi/model               → gpu (type)
 
 ### Recipe Generation
 
-**Inheritance Chain Resolution:**
+#### Inheritance Chain Resolution
 
 When a query matches a leaf recipe that has a `spec.base` reference, the system resolves the full inheritance chain before merging:
 
@@ -229,7 +229,7 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Base + Overlay Merging:**
+#### Base and Overlay Merging
 ```
 ┌────────────────────────────────────────────────────────┐
 │ Recipe Builder                                         │
@@ -264,7 +264,7 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 └────────────────────────────────────────────────────────┘
 ```
 
-**Overlay Matching Algorithm:**
+#### Overlay Matching Algorithm
 ```go
 // Overlay matches if all specified fields match query
 // Omitted fields act as wildcards
@@ -515,7 +515,7 @@ aicr validate \
 
 ### Configuration Extraction
 
-**RecipeResult Pattern:**
+#### RecipeResult Pattern
 Bundlers receive `RecipeResult` with component references and values maps:
 
 ```go
@@ -542,7 +542,7 @@ Driver Version: {{ index .Values "driver.version" }}
 Namespace: {{ .Script.Namespace }}
 ```
 
-**ScriptData for Metadata:**
+#### ScriptData for Metadata
 ```go
 // ScriptData struct for scripts and README metadata
 type ScriptData struct {

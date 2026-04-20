@@ -467,6 +467,50 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 - All checks report status as "skipped - no-cluster mode (test mode)"
 - Constraints are still evaluated inline (no cluster access needed)
 
+## Documentation Style
+
+**Auto-anchors, no TOCs.** Both GitHub and the Fern-rendered docs site
+auto-generate anchor IDs from heading text (lowercase, spaces → hyphens).
+Do not add `## Table of Contents` blocks or explicit `<a name="...">` /
+`{#slug}` markup — they drift out of sync and duplicate what the platforms
+already provide on hover.
+
+**Promote `**Bold Label:**` paragraphs to real headings sparingly.** A bold
+label becomes a heading only when it names a topic (feature, subsystem,
+algorithm, pattern, named behavior) with substantial content beneath it
+(≥ ~8 content lines is a useful rule of thumb). Leave as bold paragraphs:
+- **Scaffolding** that recurs per section: `Synopsis`, `Flags`, `Examples`,
+  `Example`, `Behavior`, `Usage`, `Parameters`, `Returns`.
+- **Generic structural labels** that just describe what's in the next
+  block: `Output`, `Input Sources`, `Benefits`, `Responsibilities`,
+  `Key Features`, `Key Points`, `Installation`.
+- **Thin sections (< 8 lines)** even if the label is a named topic — a
+  2-sentence intro that mostly delegates to children isn't itself a topic.
+- **FAQ-style entries** under a collection heading (e.g. `### Common Issues`
+  with entries like `**"Connection refused" error:**` + 2-line fix) —
+  promoting each fragments navigation without adding substance.
+- **Paired short subsections** — if two thin labels are conceptual siblings
+  (e.g. `**Updating versions:**` + `**Adding components:**`), promote
+  both or neither.
+
+**Slug gotchas when promoting.** GitHub preserves hyphens literally but
+strips most other punctuation:
+- Trailing `` (`--flag`) `` → triple-hyphen slug (`…values---dynamic`).
+  Drop the parenthetical if the flag name is already in the first paragraph.
+- `+`, `&`, `/` between words → double-hyphen slugs (`Base + Overlay
+  Merging` → `base--overlay-merging`). Rewrite with `and` / `or`.
+
+**Anchor link hygiene.** Broken anchor links are caught in CI by
+[lychee](https://github.com/lycheeverse/lychee) on any PR that touches
+`docs/**` (see `.github/workflows/fern-docs-ci.yaml`, config in
+`.lychee.toml`) — `make qualify` does NOT run it, so CI is the safety
+net. When renaming or removing a heading:
+- Grep for `<filename>.md#<old-slug>` across the repo first — other docs,
+  Helm templates, and `SECURITY.md` link into user-facing anchors, and
+  those inbound links won't be in the same file you're editing.
+- If intentionally removing a heading an external doc linked to, update
+  the inbound link in the same PR.
+
 ## Anti-Patterns (Do Not Do)
 
 | Anti-Pattern | Correct Approach |
@@ -505,6 +549,15 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 - Always rebase onto the target branch before pushing: `git fetch origin main && git rebase origin/main`
 - Squash commits into a single commit before push
 - Cryptographically sign commits (`git commit -S`)
+
+**Documentation updates:** When a PR adds or changes user-visible behavior (new CLI flag, API endpoint, component, recipe field, deployment pattern, environment variable, error code), update the relevant page in `docs/` in the same PR — don't defer to a follow-up. Common targets by kind of change:
+- CLI flag / subcommand → `docs/user/cli-reference.md`
+- API endpoint / query parameter → `docs/user/api-reference.md`
+- Registry component → `docs/user/component-catalog.md`
+- Recipe / overlay / mixin structure → `docs/integrator/recipe-development.md` and `docs/contributor/data.md`
+- Internal package or architecture → `docs/contributor/<area>.md`
+
+Follow the heading conventions in the `## Documentation Style` section above. Doc-only PRs (label `documentation`) are still subject to the full `make qualify` gate.
 
 **PR description:** Use the template from `.github/PULL_REQUEST_TEMPLATE.md` exactly as defined there. Do not inline a modified copy — read and fill in the canonical template. The template covers: Summary, Motivation/Context (with Fixes/Related), Type of Change, Components Affected, Implementation Notes, Testing, Risk Assessment, and Checklist.
 

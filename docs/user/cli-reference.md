@@ -162,7 +162,7 @@ aicr snapshot \
   --output cluster-report.yaml
 ```
 
-**Custom Templates:**
+#### Custom Templates
 
 The `--template` flag enables custom output formatting using Go templates with [Sprig functions](https://masterminds.github.io/sprig/). Templates receive the full Snapshot struct:
 
@@ -194,7 +194,7 @@ cluster:
 
 See `examples/templates/snapshot-template.md.tmpl` for a complete example template that generates a concise cluster report.
 
-**Agent Deployment Mode:**
+#### Agent Deployment Mode
 
 When running against a cluster, AICR deploys a Kubernetes Job to capture the snapshot:
 
@@ -218,7 +218,7 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 
 ```
 
-**ConfigMap Output:**
+#### ConfigMap Output
 
 When using ConfigMap URIs (`cm://namespace/name`), the snapshot is stored directly in Kubernetes:
 
@@ -239,7 +239,7 @@ data:
   timestamp: "2025-12-31T10:30:00Z"
 ```
 
-**Snapshot Structure:**
+#### Snapshot Structure
 ```yaml
 apiVersion: aicr.nvidia.com/v1alpha1
 kind: Snapshot
@@ -440,7 +440,7 @@ All `aicr recipe` flags are supported, plus:
 |------|------|-------------|
 | `--selector` | string | **Required.** Dot-path to the configuration value to extract |
 
-**Selector Syntax:**
+#### Selector Syntax
 
 Uses dot-delimited paths consistent with Helm `--set` and `yq`:
 
@@ -580,7 +580,7 @@ aicr validate [flags]
 - **URL**: HTTP/HTTPS URL (`https://example.com/recipe.yaml`)
 - **ConfigMap**: Kubernetes ConfigMap URI (`cm://namespace/configmap-name`)
 
-**Validation Phases:**
+#### Validation Phases
 
 Validation can be run in different phases to validate different aspects of the deployment:
 
@@ -598,7 +598,7 @@ Validation can be run in different phases to validate different aspects of the d
 - If a phase fails, subsequent phases are skipped
 - Use individual phases for targeted validation during specific deployment stages
 
-**Constraint Format:**
+#### Constraint Format
 
 Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 
@@ -610,7 +610,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
 | `GPU.info.type` | GPU hardware type |
 
-**Supported Operators:**
+#### Supported Operators
 | Operator | Example | Description |
 |----------|---------|-------------|
 | `>=` | `>= 1.30` | Greater than or equal (version comparison) |
@@ -682,7 +682,7 @@ aicr validate \
   --toleration gpu-type=h100:NoSchedule
 ```
 
-**Workload Scheduling:**
+#### Workload Scheduling
 
 The `--node-selector` and `--toleration` flags control scheduling for **validation
 workloads** — the inner pods that validators create to test cluster functionality
@@ -822,7 +822,7 @@ aicr bundle [flags]
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 
-**Node Scheduling:**
+#### Node Scheduling
 
 The `--accelerated-node-selector` and `--accelerated-node-toleration` flags control scheduling for GPU-specific components:
 
@@ -862,7 +862,7 @@ This results in:
 - Each component creates a subdirectory in the output directory
 - Components are deployed in the order specified by `deploymentOrder` in the recipe
 
-**Deployment Methods (`--deployer`):**
+#### Deployment Methods (`--deployer`)
 
 The `--deployer` flag controls how deployment artifacts are generated:
 
@@ -881,7 +881,7 @@ All deployers respect the `deploymentOrder` field from the recipe, ensuring comp
 - **Helm**: Components listed in README in deployment order
 - **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
 
-**Value Overrides (`--set`):**
+#### Value Overrides (`--set`)
 
 Override any value in the generated bundle files using dot notation:
 
@@ -984,7 +984,7 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-**Dynamic Install-Time Values (`--dynamic`):**
+#### Dynamic Install-Time Values
 
 The `--dynamic` flag declares value paths that are cluster-specific and should be provided at install time rather than baked into the bundle at build time. This enables building a single bundle that can be deployed to multiple clusters with different configurations.
 
@@ -1003,7 +1003,7 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 - `component` - Component name or override key (same keys as `--set`, e.g., `gpuoperator`, `alloy`)
 - `path` - Dot-separated path to the value that varies per cluster
 
-**Helm deployer behavior:**
+##### Helm deployer behavior
 
 Dynamic paths are removed from `values.yaml` and written to a separate `cluster-values.yaml` per component. The generated `deploy.sh` passes both files to Helm:
 
@@ -1015,7 +1015,7 @@ helm upgrade --install gpu-operator ... \
 
 Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
-**Argo CD deployer behavior:**
+##### Argo CD deployer behavior
 
 The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
 
@@ -1056,7 +1056,7 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-**Bundle structure with `--dynamic`** (Helm deployer):
+##### Bundle structure with `--dynamic` (Helm deployer)
 ```
 bundles/
 ├── alloy/
@@ -1068,7 +1068,7 @@ bundles/
 └── ...
 ```
 
-**Argo CD Helm chart structure with `--dynamic`:**
+##### Argo CD Helm chart structure with `--dynamic`
 ```
 bundles/
 ├── Chart.yaml                     # Helm chart metadata
@@ -1079,7 +1079,7 @@ bundles/
 └── README.md
 ```
 
-**Bundle structure** (with default Helm deployer):
+#### Bundle structure (default Helm deployer)
 ```
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
@@ -1099,7 +1099,7 @@ bundles/
     └── README.md
 ```
 
-**Argo CD bundle structure** (with `--deployer argocd`):
+#### Argo CD bundle structure (`--deployer argocd`)
 ```
 bundles/
 ├── app-of-apps.yaml               # Parent Application (bundle root)
@@ -1228,7 +1228,7 @@ When `--attest` is passed, the bundle command performs five steps:
 
 Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
 
-**Deploying a bundle:**
+#### Deploying a bundle
 ```shell
 # Navigate to bundle
 cd bundles/gpu-operator
@@ -1276,7 +1276,7 @@ After `helm install`, the same manifests are re-applied as post-install to ensur
 
 Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness.
 
-**DRA kubelet plugin registration:**
+##### DRA kubelet plugin registration
 
 After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin daemonset. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
 
@@ -1343,7 +1343,7 @@ aicr verify <bundle-dir> [flags]
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 
-**Trust Levels:**
+#### Trust Levels
 
 | Level | Name | Criteria |
 |-------|------|----------|
@@ -1352,7 +1352,7 @@ aicr verify <bundle-dir> [flags]
 | 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
 | 1 | `unknown` | Missing or invalid checksums |
 
-**Verification steps:**
+#### Verification steps
 
 1. **Checksums** — verifies all content files match `checksums.txt`
 2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
