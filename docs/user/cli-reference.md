@@ -587,12 +587,26 @@ Validation can be run in different phases to validate different aspects of the d
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `deployment` | Validates component deployment health and expected resources | After deploying components |
+| `deployment` | Validates component deployment completeness plus post-install GPU readiness signals (see below) | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
 | `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
+
+**Deployment phase checks:**
+
+The `deployment` phase verifies that the cluster is actually ready for GPU workloads — not just that install commands returned successfully. It covers:
+
+- Enabled component namespaces are `Active`.
+- Declared `expectedResources` (Deployments, DaemonSets, etc.) exist and are healthy.
+- When `skyhook-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored.
+- When `gpu-operator` is enabled: `ClusterPolicy` reports `status.state == ready`.
+- When `nvidia-dra-driver-gpu` is enabled: the kubelet-plugin DaemonSet is ready. Discovery is by the upstream chart's role-suffix convention — the validator finds the single DaemonSet in the component namespace whose name ends in `-kubelet-plugin`, so custom `fullnameOverride` values are handled automatically.
+
+**Graceful skip:** If a component is declared in the recipe but its CRD is not yet registered on the cluster (e.g., fresh cluster, operator chart not installed), the corresponding readiness check is skipped rather than failing. Once the CRD is present, the check runs and a missing CR is treated as a real failure — for example, if the `gpu-operator` CRD is registered but no `ClusterPolicy` CR exists, deployment validation fails with a "CR missing" diagnostic rather than silently passing. Other errors still fail closed: an RBAC denial on `skyhooks.skyhook.nvidia.com` returns HTTP 403 (not a `NoMatch`), so the validator surfaces it as a failure instead of silently skipping the Skyhook check.
+
+**Day-N re-verification:** Because this is a read-only check against live cluster state, re-running `aicr validate --phase deployment` after scale-up, upgrade, or other runtime changes is safe and answers the same "is this cluster ready for GPU workloads now?" question.
 
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
@@ -744,7 +758,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "status": "passed",
         "duration": 0,
         "suite": ["deployment"],
-        "stdout": ["All expected resources are healthy"]
+        "stdout": ["All deployment resources and required readiness signals are healthy"]
       },
       {
         "name": "nccl-all-reduce-bw",
