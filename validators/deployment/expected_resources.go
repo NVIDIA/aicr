@@ -53,16 +53,6 @@ const (
 	// installed the chart.
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
-	// aicrCreatedBy{Key,Value} document the label convention AICR manifests
-	// apply to resources they create ("app.kubernetes.io/created-by=aicr").
-	// The deployment-phase checks no longer use this label as a live-cluster
-	// filter — Skyhook readiness scopes by the exact CR names declared in
-	// the recipe's ManifestFiles, which is stronger than a label match —
-	// but tests still reference the constants when synthesizing fixture CRs
-	// that mirror production manifests.
-	aicrCreatedByLabelKey   = "app.kubernetes.io/created-by"
-	aicrCreatedByLabelValue = "aicr"
-
 	clusterPolicyReadyState = "ready"
 	skyhookCompleteState    = "complete"
 )
@@ -542,5 +532,6 @@ func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create dynamic client", err)
 	}
+	ctx.DynamicClient = dynClient
 	return dynClient, nil
 }

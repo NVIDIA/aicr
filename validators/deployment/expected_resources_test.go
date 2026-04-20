@@ -50,6 +50,13 @@ const testDefaultDRADSName = "nvidia-dra-driver-gpu-kubelet-plugin"
 // Declaring it once here keeps test setup aligned with the recipe defaults.
 const testSkyhookManifest = "components/skyhook-customizations/manifests/tuning.yaml"
 
+// testAICRCreatedBy{Key,Value} mirror the label convention AICR manifests
+// apply to synthesized fixtures that should look like real production objects.
+const (
+	testAICRCreatedByLabelKey   = "app.kubernetes.io/created-by"
+	testAICRCreatedByLabelValue = "aicr"
+)
+
 // TestMain forces the global recipe data provider to initialize before any
 // parallel t.Parallel() tests start. GetDataProvider() in pkg/recipe
 // performs lazy, unsynchronized initialization of the package-level
@@ -1120,7 +1127,7 @@ func skyhookWithStatus(name, status string) *unstructured.Unstructured {
 			"metadata": map[string]interface{}{
 				"name": name,
 				"labels": map[string]interface{}{
-					aicrCreatedByLabelKey: aicrCreatedByLabelValue,
+					testAICRCreatedByLabelKey: testAICRCreatedByLabelValue,
 				},
 			},
 			"status": map[string]interface{}{
