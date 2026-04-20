@@ -600,7 +600,7 @@ The `deployment` phase verifies that the cluster is actually ready for GPU workl
 
 - Enabled component namespaces are `Active`.
 - Declared `expectedResources` (Deployments, DaemonSets, etc.) exist and are healthy.
-- When `skyhook-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored.
+- When `skyhook-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored. If no Skyhook names can be extracted from those `ManifestFiles`, deployment validation fails closed as a recipe/configuration error instead of skipping.
 - When `gpu-operator` is enabled: `ClusterPolicy` reports `status.state == ready`.
 - When `nvidia-dra-driver-gpu` is enabled: the kubelet-plugin DaemonSet is ready. Discovery is by the upstream chart's role-suffix convention — the validator finds the single DaemonSet in the component namespace whose name ends in `-kubelet-plugin`, so custom `fullnameOverride` values are handled automatically.
 

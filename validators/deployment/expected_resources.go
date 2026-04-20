@@ -171,7 +171,9 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 		}
 		seen[ref.Namespace] = true
 
-		ns, err := ctx.Clientset.CoreV1().Namespaces().Get(ctx.Ctx, ref.Namespace, metav1.GetOptions{})
+		verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+		ns, err := ctx.Clientset.CoreV1().Namespaces().Get(verifyCtx, ref.Namespace, metav1.GetOptions{})
+		cancel()
 		if err != nil {
 			failures = append(failures, fmt.Sprintf("namespace %s: %v", ref.Namespace, err))
 			continue
@@ -270,7 +272,9 @@ func verifySkyhookReady(ctx *validators.Context, ref recipe.ComponentRef) error 
 
 	var failures []string
 	for _, name := range expectedNames {
-		sk, getErr := dynClient.Resource(skyhookGVR).Get(ctx.Ctx, name, metav1.GetOptions{})
+		verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+		sk, getErr := dynClient.Resource(skyhookGVR).Get(verifyCtx, name, metav1.GetOptions{})
+		cancel()
 		if getErr != nil {
 			if apierrors.IsNotFound(getErr) {
 				failures = append(failures, fmt.Sprintf("Skyhook %s: not found (recipe declared it but the cluster has no such CR)", name))
@@ -406,7 +410,9 @@ func verifyClusterPolicyReady(ctx *validators.Context) error {
 		return err
 	}
 
-	clusterPolicy, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, clusterPolicyName, metav1.GetOptions{})
+	verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	clusterPolicy, err := dynClient.Resource(clusterPolicyGVR).Get(verifyCtx, clusterPolicyName, metav1.GetOptions{})
+	cancel()
 	if err != nil {
 		// CRD is registered (we just checked). Any Get error here — including
 		// IsNotFound on the CR itself — signals that gpu-operator is installed

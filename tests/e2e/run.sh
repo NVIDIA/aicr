@@ -52,6 +52,9 @@ AICR_VALIDATOR_IMAGE="${AICR_VALIDATOR_IMAGE:-localhost:5001/aicr-validator:loca
 SNAPSHOT_NAMESPACE="${SNAPSHOT_NAMESPACE:-default}"
 SNAPSHOT_CM="${SNAPSHOT_CM:-aicr-e2e-snapshot}"
 FAKE_GPU_ENABLED="${FAKE_GPU_ENABLED:-false}"
+CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
+CREATED_FAKE_CLUSTER_POLICY=false
+CREATED_FAKE_CLUSTER_POLICY_CRD=false
 
 # Test counters
 TOTAL_TESTS=0
@@ -631,8 +634,25 @@ test_validate() {
 # =============================================================================
 
 setup_fake_gpu_operator_fixture() {
+  CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
+  CREATED_FAKE_CLUSTER_POLICY=false
+  CREATED_FAKE_CLUSTER_POLICY_CRD=false
+
   kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
   kubectl delete jobs,pods -n gpu-operator -l app=aicr-validator --ignore-not-found 2>&1 || true
+
+  if kubectl get deployment gpu-operator -n gpu-operator >/dev/null 2>&1; then
+    warn "Skipping fake GPU operator fixture: deployment/gpu-operator already exists in namespace gpu-operator"
+    return 1
+  fi
+  if kubectl get clusterpolicy cluster-policy >/dev/null 2>&1; then
+    warn "Skipping fake GPU operator fixture: ClusterPolicy cluster-policy already exists"
+    return 1
+  fi
+  if kubectl get crd clusterpolicies.nvidia.com >/dev/null 2>&1; then
+    warn "Skipping fake GPU operator fixture: CRD clusterpolicies.nvidia.com already exists"
+    return 1
+  fi
 
   # Deliberate: the CRD below does NOT declare `subresources: { status: {} }`.
   # We want kubectl apply on the ClusterPolicy CR that follows to persist the
@@ -667,8 +687,10 @@ spec:
 YAML
     return 1
   fi
+  CREATED_FAKE_CLUSTER_POLICY_CRD=true
 
   if ! kubectl wait --for=condition=Established crd/clusterpolicies.nvidia.com --timeout=60s 2>&1; then
+    cleanup_fake_gpu_operator_fixture
     return 1
   fi
 
@@ -680,8 +702,10 @@ metadata:
 status:
   state: ready
 YAML
+    cleanup_fake_gpu_operator_fixture
     return 1
   fi
+  CREATED_FAKE_CLUSTER_POLICY=true
 
   if ! cat <<YAML | kubectl apply -f - 2>&1; then
 apiVersion: apps/v1
@@ -707,16 +731,30 @@ spec:
         image: nvcr.io/nvidia/gpu-operator:v24.6.0
         imagePullPolicy: IfNotPresent
 YAML
+    cleanup_fake_gpu_operator_fixture
     return 1
   fi
+  CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=true
 
-  kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
+  if ! kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1; then
+    cleanup_fake_gpu_operator_fixture
+    return 1
+  fi
 }
 
 cleanup_fake_gpu_operator_fixture() {
-  kubectl delete deployment gpu-operator -n gpu-operator --ignore-not-found 2>&1 || true
-  kubectl delete clusterpolicy cluster-policy --ignore-not-found 2>&1 || true
-  kubectl delete crd clusterpolicies.nvidia.com --ignore-not-found 2>&1 || true
+  if [ "${CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT}" = "true" ]; then
+    kubectl delete deployment gpu-operator -n gpu-operator --ignore-not-found 2>&1 || true
+    CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
+  fi
+  if [ "${CREATED_FAKE_CLUSTER_POLICY}" = "true" ]; then
+    kubectl delete clusterpolicy cluster-policy --ignore-not-found 2>&1 || true
+    CREATED_FAKE_CLUSTER_POLICY=false
+  fi
+  if [ "${CREATED_FAKE_CLUSTER_POLICY_CRD}" = "true" ]; then
+    kubectl delete crd clusterpolicies.nvidia.com --ignore-not-found 2>&1 || true
+    CREATED_FAKE_CLUSTER_POLICY_CRD=false
+  fi
 }
 
 test_validate_deployment_checks() {
