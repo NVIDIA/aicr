@@ -39,6 +39,7 @@ This directory contains architecture documentation for the AI Cluster Runtime (A
 * The system provides validated configuration, not a new operational model.
 
 **Why:** If adoption requires retraining users on “the right way” then our design has failed.
+
 ## Components
 
 - **[CLI Architecture](cli.md)**: Command-line tool (`aicr`) implementing all four workflow stages
@@ -84,6 +85,7 @@ configuration         recommendations       compatibility         artifacts
 ```
 
 ### Step 1: Snapshot – Capture System Configuration
+
 Captures comprehensive system state including OS, kernel, GPU, Kubernetes, and SystemD configurations.
 - **CLI**: `aicr snapshot` command
 - **Agent**: Kubernetes Job for automated cluster snapshots (writes to ConfigMap)
@@ -91,6 +93,7 @@ Captures comprehensive system state including OS, kernel, GPU, Kubernetes, and S
 - **Storage**: File, stdout, or **Kubernetes ConfigMap** (`cm://namespace/name` URI)
 
 ### Step 2: Recipe – Generate Configuration Recommendations
+
 Produces optimized configuration recipes based on environment criteria or captured snapshots.
 - **CLI**: `aicr recipe` command (supports query mode and snapshot mode)
   - **Query Mode**: Direct recipe generation from criteria (service, accelerator, intent, OS, nodes)
@@ -105,6 +108,7 @@ Produces optimized configuration recipes based on environment criteria or captur
 - **Storage**: File, stdout, or **Kubernetes ConfigMap**
 
 ### Step 3: Validate – Check Cluster Compatibility
+
 Validates recipe constraints against actual system measurements from a snapshot.
 - **CLI**: `aicr validate` command
 - **Input Sources**: File paths, HTTP/HTTPS URLs, or ConfigMap URIs for both recipe and snapshot
@@ -114,6 +118,7 @@ Validates recipe constraints against actual system measurements from a snapshot.
 - **CI/CD Integration**: `--fail-on-error` flag for non-zero exit on failures
 
 ### Step 4: Bundle – Create Deployment Artifacts
+
 Generates deployment-ready bundles (Helm values, Kubernetes manifests, installation scripts) from recipes.
 - **CLI**: `aicr bundle` command
 - **API Server**: `POST /v1/bundle` endpoint (returns zip archive)
@@ -134,6 +139,7 @@ Generates deployment-ready bundles (Helm values, Kubernetes manifests, installat
 ## Key Design Principles
 
 ### 1. Separation of Concerns
+
 **Pattern**: Shared library with multiple entry points (CLI, API server)  
 **Rationale**: Maximizes code reuse while maintaining deployment flexibility  
 **Reference**: [Go Project Layout](https://go.dev/doc/modules/layout)
@@ -178,6 +184,7 @@ for _, step := range out.Deployment.Steps {
 ```
 
 ### 2. Concurrent Collection with Bounded Parallelism
+
 **Pattern**: `errgroup.WithContext` for fail-fast concurrent operations  
 **Rationale**: Parallel collection reduces latency; context propagation enables cancellation  
 **Trade-offs**: Memory overhead vs latency gain; appropriate for I/O-bound operations  
@@ -195,17 +202,20 @@ if err := g.Wait(); err != nil {
 ```
 
 ### 3. Pluggable Collectors via Abstract Factory
+
 **Pattern**: Factory interface with concrete implementations  
 **Rationale**: Testability (mock collectors), extensibility (add new sources)  
 **Trade-off**: Additional abstraction vs testing simplicity  
 **Reference**: [Go Interfaces](https://go.dev/doc/effective_go#interfaces)
 
 ### 4. Format Flexibility through Strategy Pattern
+
 **Pattern**: Serializer interface with format-specific implementations  
 **Rationale**: Open/closed principle - add formats without modifying callers  
 **Implementation**: JSON, YAML, Table writers behind common `Serialize` interface
 
 ### 5. Production-Ready HTTP Server
+
 **Patterns Implemented**:
 - **Rate Limiting**: Token bucket (`golang.org/x/time/rate`)  
 - **Graceful Shutdown**: Signal handling with deadline-based cleanup  
@@ -218,22 +228,26 @@ if err := g.Wait(); err != nil {
 - [Prometheus Best Practices](https://prometheus.io/docs/practices/naming/)
 
 ### 6. Semantic Versioning with Precision Control
+
 **Pattern**: Version struct with Major.Minor.Patch components  
 **Rationale**: Flexible matching (1.2 matches 1.2.x); reject negative components  
 **Trade-off**: Complexity vs matching flexibility  
 **Reference**: [Semantic Versioning 2.0.0](https://semver.org/)
 
 ### 7. Immutable Data Structures
+
 **Pattern**: Read-only recipe store with deep cloning for modifications  
 **Rationale**: Thread-safety without locks; functional programming style  
 **Implementation**: `sync.Once` for initialization, cloning for per-request mutations
 
 ### 8. Context-Aware Request Handling
+
 **Pattern**: Context propagation for cancellation and timeouts  
 **Rationale**: Prevents resource leaks; enables graceful degradation  
 **Reference**: [Go Context Package](https://pkg.go.dev/context)
 
 ### 9. Kubernetes Client Singleton
+
 **Pattern**: Cached Kubernetes client with `sync.Once` initialization  
 **Location**: `pkg/k8s/client` package  
 **Rationale**: Prevents connection exhaustion and reduces load on Kubernetes API server  
@@ -257,6 +271,7 @@ clientset, config, err := client.GetKubeClient()
 ## Deployment Topologies
 
 ### Topology 1: Standalone CLI
+
 **Use Case**: Local development, CI/CD pipelines, troubleshooting  
 **Architecture**: Single binary, no network dependencies  
 **Scaling**: Run on each node/machine independently
@@ -268,6 +283,7 @@ flowchart TD
 ```
 
 ### Topology 2: Centralized API with Load Balancer
+
 **Use Case**: Production environments, multi-tenant platforms  
 **Architecture**: Multiple stateless replicas behind L7 load balancer  
 **Scaling**: Horizontal auto-scaling based on request rate/latency
@@ -290,6 +306,7 @@ flowchart TD
 ```
 
 ### Topology 3: Kubernetes Job Agent
+
 **Use Case**: Automated cluster auditing, scheduled configuration checks  
 **Architecture**: Job running on GPU nodes with ConfigMap output (no volumes needed)  
 **Scaling**: One Job per node or node-group  
@@ -321,6 +338,7 @@ flowchart TD
 ```
 
 ### Topology 4: Service Mesh Integration
+
 **Use Case**: Zero-trust environments, mTLS everywhere  
 **Architecture**: API server with sidecar proxy (Istio, Linkerd)  
 **Scaling**: Service mesh handles load balancing, circuit breaking, retries
@@ -371,6 +389,7 @@ flowchart TD
 ## Data Flow
 
 ### Complete Four-Step Workflow (File-based)
+
 ```mermaid
 flowchart LR
     A[User] --> B[Step 1: Snapshot]
@@ -388,6 +407,7 @@ flowchart LR
 ```
 
 ### Complete Four-Step Workflow (ConfigMap-based)
+
 ```mermaid
 flowchart LR
     A[User/Agent] --> B[Step 1: Snapshot]
@@ -405,6 +425,7 @@ flowchart LR
 ```
 
 ### CLI Snapshot Flow (Step 1)
+
 ```mermaid
 flowchart LR
     A[User Command] --> B[CLI Parser]
@@ -416,6 +437,7 @@ flowchart LR
 ```
 
 ### CLI Recipe Flow (Step 2)
+
 ```mermaid
 flowchart LR
     A[User Flags] --> B[Query Builder]
@@ -427,6 +449,7 @@ flowchart LR
 ```
 
 ### API Recipe Flow (Step 2 - Programmatic)
+
 ```mermaid
 flowchart LR
     A[HTTP Request] --> B[Server Middleware]
@@ -437,6 +460,7 @@ flowchart LR
 ```
 
 ### CLI Bundle Flow (Step 3)
+
 ```mermaid
 flowchart LR
     A[Recipe File] --> B[Bundle Parser]
@@ -450,6 +474,7 @@ flowchart LR
 ## Failure Modes and Recovery Strategies
 
 ### Collector Failures
+
 **Failure**: Individual collector (K8s, GPU, SystemD) fails  
 **Detection**: `errgroup` propagates first error  
 **Recovery**: 
@@ -462,6 +487,7 @@ flowchart LR
 - **Decision**: Fail-fast for now; add best-effort mode behind feature flag
 
 ### Kubernetes API Server Unavailable
+
 **Failure**: K8s API server unreachable or rate-limiting  
 **Detection**: HTTP errors, context deadline exceeded  
 **Recovery**:  
@@ -483,6 +509,7 @@ retry.OnError(retry.DefaultBackoff, func(err error) bool {
 **Reference**: [client-go Retry](https://pkg.go.dev/k8s.io/client-go/util/retry)
 
 ### GPU Driver/SMI Unavailable
+
 **Failure**: nvidia-smi not found, driver not loaded  
 **Detection**: Exec error, exit code != 0  
 **Recovery**:  
@@ -491,6 +518,7 @@ retry.OnError(retry.DefaultBackoff, func(err error) bool {
 - Continue with other collectors
 
 ### ConfigMap Write Failure (Agent)
+
 **Failure**: Kubernetes API unavailable, RBAC permissions insufficient  
 **Detection**: HTTP 403 Forbidden, 500 Internal Server Error  
 **Recovery**:  
@@ -516,6 +544,7 @@ kubectl logs job/aicr -n gpu-operator
 ```
 
 ### Rate Limit Exceeded (API Server)
+
 **Failure**: HTTP 429 Too Many Requests  
 **Detection**: Response status code  
 **Recovery**:  
@@ -537,6 +566,7 @@ if resp.StatusCode == http.StatusTooManyRequests {
 ```
 
 ### Memory Exhaustion
+
 **Failure**: Large cluster with 1000s of pods causing OOM  
 **Detection**: Runtime memory stats, container limits  
 **Prevention**:  
@@ -550,6 +580,7 @@ process_resident_memory_bytes / container_spec_memory_limit_bytes > 0.9
 ```
 
 ### API Server Graceful Shutdown
+
 **Scenario**: SIGTERM received during active requests  
 **Behavior**:  
 1. Stop accepting new connections  
@@ -949,6 +980,7 @@ Components are configured in `recipes/registry.yaml`. The bundler automatically 
 
 **Per-Component Bundle Generation**:
 The bundler generates a per-component Helm bundle with individual values and manifests for each component, based on the recipe's `componentRefs`.
+
 ### Metrics and Observability
 
 **Bundler Metrics** (Prometheus):
@@ -1325,22 +1357,26 @@ For detailed usage, see [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/ma
 ## References and Further Reading
 
 ### Official Go Documentation
+
 - [Effective Go](https://go.dev/doc/effective_go)  
 - [Go Concurrency Patterns](https://go.dev/blog/pipelines)  
 - [Context Package](https://pkg.go.dev/context)  
 - [Error Handling](https://go.dev/blog/error-handling-and-go)
 
 ### Distributed Systems
+
 - [Designing Data-Intensive Applications](https://dataintensive.net/) by Martin Kleppmann  
 - [Site Reliability Engineering](https://sre.google/books/) by Google  
 - [Building Microservices](https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/) by Sam Newman
 
 ### Kubernetes
+
 - [Kubernetes Patterns](https://www.oreilly.com/library/view/kubernetes-patterns/9781492050278/)  
 - [Programming Kubernetes](https://www.oreilly.com/library/view/programming-kubernetes/9781492047094/)  
 - [client-go Documentation](https://github.com/kubernetes/client-go/tree/master/examples)
 
 ### Observability
+
 - [Prometheus Best Practices](https://prometheus.io/docs/practices/)  
 - [OpenTelemetry Go SDK](https://pkg.go.dev/go.opentelemetry.io/otel)  
 - [Structured Logging](https://pkg.go.dev/log/slog)
