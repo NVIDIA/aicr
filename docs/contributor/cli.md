@@ -41,6 +41,7 @@ Captures system configuration:
 Kubernetes Job runs on GPU nodes. Writes snapshot to ConfigMap via Kubernetes API. Requires ServiceAccount with ConfigMap create/update permissions (Role in target namespace). Does not require PersistentVolume.
 
 ### Step 2: Recipe Command  
+
 Generates optimized configuration recipes with two modes:
 - **Query Mode**: Direct recipe generation from system parameters (OS, GPU, K8s, etc.)
 - **Snapshot Mode**: Analyzes captured snapshots and generates tailored recipes based on workload intent (training/inference)
@@ -404,7 +405,6 @@ subjects:
 - ConfigMap automatically created if doesn't exist
 - Supports update pattern (overwrite existing snapshots)
 - RBAC and Job resources are created programmatically by `pkg/k8s/agent`
-```
 
 ### Recipe Command: `pkg/cli/recipe.go`
 
@@ -500,6 +500,7 @@ aicr recipe \
 The recipe command supports two modes of operation:
 
 #### Query Mode (Default)
+
 Direct recipe generation from environment parameters:
 
 ```mermaid
@@ -515,6 +516,7 @@ flowchart TD
 ```
 
 #### Snapshot Mode
+
 Analyze captured snapshots and generate tailored recipes:
 
 ```mermaid
@@ -780,7 +782,8 @@ flowchart TD
 
 #### Bundler Architecture
 
-**BaseBundler Helper Pattern:**
+##### BaseBundler Helper Pattern
+
 ```go
 // Bundlers embed BaseBundler and override Make()
 type Bundler struct {
@@ -799,7 +802,8 @@ func init() {
 }
 ```
 
-**RecipeResult-Based Data Access:**
+##### RecipeResult-Based Data Access
+
 ```go
 // Get component reference from RecipeResult
 component := input.GetComponentRef(Name)
@@ -827,7 +831,8 @@ RecipeResult → GetComponentRef(Name) → ComponentRef
              → Template ({{ index .Values "key" }} or {{ .Script.Namespace }})
 ```
 
-**Registry Pattern:**
+##### Registry Pattern
+
 ```go
 // Dynamic bundler discovery
 bundlers := defaultRegistry.GetAll()  // Returns all registered bundlers
@@ -1092,12 +1097,14 @@ go build -ldflags="$(LDFLAGS)" -o bin/aicr ./cmd/aicr
 ## Testing Strategy
 
 ### Unit Tests
+
 - Flag parsing and validation
 - Version parsing and error handling
 - Query building from command flags
 - Serializer format selection
 
 ### Integration Tests
+
 - Mock collectors for deterministic output
 - Full command execution with fake factory
 - Output format validation
@@ -1128,12 +1135,14 @@ func TestSnapshotCommand(t *testing.T) {
 ## Dependencies
 
 ### External Libraries
+
 - `github.com/urfave/cli/v3` - CLI framework
 - `golang.org/x/sync/errgroup` - Concurrent error handling
 - `gopkg.in/yaml.v3` - YAML parsing
 - `log/slog` - Structured logging
 
 ### Internal Packages
+
 - `pkg/collector` - System data collection
 - `pkg/measurement` - Data model
 - `pkg/recipe` - Recipe building
@@ -2995,6 +3004,7 @@ func TestDeployer_Generate_DeploymentOrder(t *testing.T) {
 ## References
 
 ### Official Documentation
+
 - [urfave/cli Framework](https://cli.urfave.org/) - CLI framework used by aicr  
 - [errgroup Patterns](https://pkg.go.dev/golang.org/x/sync/errgroup) - Concurrent error handling  
 - [YAML v3 Library](https://pkg.go.dev/gopkg.in/yaml.v3) - YAML parsing and serialization  
@@ -3002,24 +3012,28 @@ func TestDeployer_Generate_DeploymentOrder(t *testing.T) {
 - [Context Package](https://pkg.go.dev/context) - Cancellation and deadlines
 
 ### Kubernetes Integration
+
 - [client-go Documentation](https://github.com/kubernetes/client-go) - Official K8s client  
 - [Dynamic Client](https://pkg.go.dev/k8s.io/client-go/dynamic) - Unstructured resource access  
 - [CronJob Best Practices](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/) - Scheduled job patterns  
 - [RBAC Authorization](https://kubernetes.io/docs/reference/access-authn-authz/rbac/) - Permission model
 
 ### NVIDIA Tools
+
 - [NVIDIA SMI](https://developer.nvidia.com/nvidia-system-management-interface) - GPU management  
 - [NVML Library](https://developer.nvidia.com/nvml) - Programmatic GPU access  
 - [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) - GPU computing platform  
 - [GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/) - K8s GPU automation
 
 ### Best Practices
+
 - [Semantic Versioning](https://semver.org/) - Version comparison algorithm  
 - [The Twelve-Factor App](https://12factor.net/) - Cloud-native application patterns  
 - [Release Engineering Best Practices](https://sre.google/workbook/release-engineering/) - Google SRE  
 - [Go Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments) - Idiomatic Go
 
 ### Security
+
 - [OWASP Secure Coding Practices](https://owasp.org/www-project-secure-coding-practices-quick-reference-guide/)  
 - [Kubernetes Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/)  
 - [NIST 800-190: Container Security](https://csrc.nist.gov/publications/detail/sp/800-190/final)  

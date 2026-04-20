@@ -212,7 +212,7 @@ componentRefs:
       - cert-manager
 ```
 
-**Component Fields:**
+#### Component Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -710,7 +710,8 @@ for _, recipe := range chain {
 }
 ```
 
-**Merge Algorithm:**
+#### Merge Algorithm
+
 - **Constraints**: Same-named constraints are overridden; new constraints are added
 - **ComponentRefs**: Same-named components are merged field-by-field using `mergeComponentRef()`
 
