@@ -116,8 +116,8 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `any` |
-| `accelerator` | string | any | GPU type: `h100`, `gb200`, `a100`, `l40`, `any` |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `kind`, `lke`, `any` |
+| `accelerator` | string | any | GPU type: `h100`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `any` |
@@ -816,7 +816,7 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 
 **"Invalid accelerator type" error:**
 ```shell
-# Use valid values: h100, gb200, a100, l40, any
+# Use valid values: h100, gb200, b200, a100, l40, rtx-pro-6000, any
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 

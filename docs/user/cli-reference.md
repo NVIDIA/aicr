@@ -313,8 +313,8 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, a100, l40 |
+| `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux |
 | `--platform` | | string | Platform/framework type: kubeflow |

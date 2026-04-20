@@ -543,7 +543,7 @@ When using snapshot mode, the recipe builder extracts environment parameters fro
 - **server subtype** → K8s service provider (eks, gke, aks) inferred from images
 
 **From GPU Measurements:**
-- **Product Name** → GPU type detection (H100, GB200, A100, L40)
+- **Product Name** → GPU type detection (H100, GB200, B200, A100, L40, RTX PRO 6000)
 - Maps product names to normalized accelerator types for recipe matching
 
 **Intent Types:**
@@ -1049,7 +1049,7 @@ type Reading struct {
 ```bash
 # Invalid accelerator type
 $ aicr recipe --accelerator invalid-gpu
-Error: invalid accelerator type: must be one of h100, gb200, a100, l40, any
+[cli] command failed: error=[INTERNAL] error building recipe: [INVALID_REQUEST] error parsing criteria: [INVALID_REQUEST] failed to apply criteria option: [INVALID_REQUEST] failed to parse accelerator type: [INVALID_REQUEST] invalid accelerator type: invalid-gpu exitCode=8
 
 # Unknown output format
 $ aicr snapshot --format xml
@@ -1072,9 +1072,9 @@ $ aicr recipe
 ### Recipe Command
 
 - **Store Loading**: Once per process (cached via `sync.Once`)
-- **Typical Duration**: &lt;10ms after initial load
+- **Typical Duration**: <10ms after initial load
 - **Memory Usage**: ~5-10MB (embedded YAML + parsed structure)
-- **Scalability**: O(m) with number of overlays (typically &lt;100)
+- **Scalability**: O(m) with number of overlays (typically <100)
 
 ## Build Configuration
 
@@ -1694,10 +1694,10 @@ OUTPUT_DIR="recipes"
 mkdir -p "$OUTPUT_DIR"
 
 # GPU types from NVIDIA product line
-GPU_TYPES=("h100" "gb200" "a100" "l40" "l4")
+GPU_TYPES=("h100" "gb200" "b200" "a100" "l40" "rtx-pro-6000")
 
 # Kubernetes services
-K8S_SERVICES=("eks" "gke" "aks" "self-managed")
+K8S_SERVICES=("eks" "gke" "aks" "oke" "kind" "lke")
 
 # OS distributions
 OS_TYPES=("ubuntu" "rhel" "cos")

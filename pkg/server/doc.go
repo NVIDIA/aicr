@@ -63,9 +63,9 @@
 //	  - os: ubuntu, cos, any (default: any)
 //	  - osv: OS version (e.g., 24.04, 22.04)
 //	  - kernel: kernel version (e.g., 6.8, 5.15.0)
-//	  - service: eks, gke, aks, self-managed, any (default: any)
+//	  - service: eks, gke, aks, oke, kind, lke, any (default: any)
 //	  - k8s: Kubernetes version (e.g., 1.33, 1.32)
-//	  - gpu: h100, gb200, a100, l40, any (default: any)
+//	  - gpu: h100, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //	  - intent: training, inference, any (default: any)
 //	  - context: true/false - include context metadata (default: false)
 //

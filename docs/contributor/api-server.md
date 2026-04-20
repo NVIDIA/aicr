@@ -309,8 +309,8 @@ Supported content types:
 
 | Parameter | Type | Validation | Example |
 |-----------|------|------------|--------|
-| `service` | ServiceType | Enum: eks, gke, aks, oke, any | `service=eks` |
-| `accelerator` | AcceleratorType | Enum: h100, gb200, a100, l40, any | `accelerator=h100` |
+| `service` | ServiceType | Enum: eks, gke, aks, oke, kind, lke, any | `service=eks` |
+| `accelerator` | AcceleratorType | Enum: h100, gb200, b200, a100, l40, rtx-pro-6000, any | `accelerator=h100` |
 | `gpu` | AcceleratorType | Alias for accelerator | `gpu=h100` |
 | `intent` | IntentType | Enum: training, inference, any | `intent=training` |
 | `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, any | `os=ubuntu` |
@@ -331,8 +331,8 @@ Shared with CLI - same logic as described in CLI architecture.
 #### GET Method
 
 **Query Parameters**:
-- `service` - Kubernetes service type (eks, gke, aks, oke)
-- `accelerator` - GPU/accelerator type (h100, gb200, a100, l40)
+- `service` - Kubernetes service type (eks, gke, aks, oke, kind, lke)
+- `accelerator` - GPU/accelerator type (h100, gb200, b200, a100, l40, rtx-pro-6000)
 - `gpu` - Alias for accelerator (backwards compatibility)
 - `intent` - Workload intent (training, inference)
 - `os` - Operating system family (ubuntu, rhel, cos, amazonlinux)
@@ -414,7 +414,10 @@ spec:
 ```json
 {
   "code": "INVALID_REQUEST",
-  "message": "invalid gpu type: must be one of h100, gb200, a100, l40, ALL",
+  "message": "Invalid recipe criteria",
+  "details": {
+    "error": "[INVALID_REQUEST] invalid accelerator parameter: [INVALID_REQUEST] invalid accelerator type: invalid-gpu"
+  },
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
   "timestamp": "2025-12-25T12:00:00Z",
   "retryable": false
@@ -792,7 +795,7 @@ spec:
 
 - **Rate Limit**: 100 requests/second per instance (configurable)
 - **Burst**: 200 requests (configurable)
-- **Target Latency**: p50 &lt;10ms, p99 &lt;50ms
+- **Target Latency**: p50 <10ms, p99 <50ms
 - **Max Concurrent**: Limited by rate limiter
 
 ### Resource Usage
@@ -2163,8 +2166,8 @@ var validate = validator.New()
 type RecipeRequest struct {
     OS       string `validate:"required,oneof=ubuntu rhel cos"`
     OSVersion string `validate:"omitempty,semver"`
-    GPU      string `validate:"required,oneof=h100 gb200 a100 l40"`
-    Service  string `validate:"omitempty,oneof=eks gke aks self-managed"`
+    GPU      string `validate:"required,oneof=h100 gb200 b200 a100 l40 rtx-pro-6000"`
+    Service  string `validate:"omitempty,oneof=eks gke aks oke kind lke"`
 }
 
 func handleRecipe(w http.ResponseWriter, r *http.Request) {
