@@ -219,6 +219,29 @@ func TestCheckExpectedResources_SkipsSkyhookWhenCRDNotRegistered(t *testing.T) {
 	}
 }
 
+// When the Skyhook CRD is registered but the specific CR declared by the
+// recipe is absent, verifySkyhookReady should take the explicit IsNotFound
+// branch and surface the recipe-scoped "declared but missing" diagnostic.
+func TestCheckExpectedResources_FailsWhenSkyhookCRMissing(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContextWithDiscovery(t,
+		[]runtime.Object{activeNamespace("skyhook")},
+		nil,
+		[]schema.GroupVersion{skyhookGVR.GroupVersion()},
+		nil,
+		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+	)
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("expected error when Skyhook CR is missing but CRD is registered")
+	}
+	if !strings.Contains(err.Error(), "Skyhook tuning: not found (recipe declared it but the cluster has no such CR)") {
+		t.Fatalf("expected recipe-scoped Skyhook not-found failure, got: %v", err)
+	}
+}
+
 // Issue #607 acceptance (by symmetry): the gpu-operator readiness check must
 // skip gracefully when the ClusterPolicy CRD is not registered, so a recipe
 // can declare gpu-operator before the operator's CRDs are installed.
@@ -958,7 +981,10 @@ func (f *fakeResourceClient) Get(_ context.Context, name string, _ metav1.GetOpt
 		}
 		return object.DeepCopy(), nil
 	}
-	return nil, stderrors.New("object not found")
+	return nil, apierrors.NewNotFound(
+		schema.GroupResource{Group: f.resource.Group, Resource: f.resource.Resource},
+		name,
+	)
 }
 
 func (f *fakeResourceClient) List(_ context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
