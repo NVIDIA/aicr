@@ -711,6 +711,7 @@ for _, recipe := range chain {
 ```
 
 #### Merge Algorithm
+
 - **Constraints**: Same-named constraints are overridden; new constraints are added
 - **ComponentRefs**: Same-named components are merged field-by-field using `mergeComponentRef()`
 

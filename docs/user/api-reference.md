@@ -18,6 +18,7 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 ```
 
 ### API vs CLI
+
 - Use the **API** for remote recipe generation and bundle creation
 - Use the **CLI** for local operations, snapshot capture, and ConfigMap integration
 

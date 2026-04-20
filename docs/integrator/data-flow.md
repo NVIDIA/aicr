@@ -115,6 +115,7 @@ type Reading interface {
 ### Collection Process
 
 #### Parallel Collection
+
 ```
 ┌──────────────┐
 │ Snapshotter  │
@@ -179,6 +180,7 @@ Snapshot → Query Extractor → Recipe Query
 ```
 
 #### Extraction mapping
+
 ```
 K8s/server/version          → k8s (version)
 K8s/image/gpu-operator      → service (eks/gke/aks detection)
@@ -230,6 +232,7 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 ```
 
 #### Base and Overlay Merging
+
 ```
 ┌────────────────────────────────────────────────────────┐
 │ Recipe Builder                                         │
@@ -265,6 +268,7 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 ```
 
 #### Overlay Matching Algorithm
+
 ```go
 // Overlay matches if all specified fields match query
 // Omitted fields act as wildcards
@@ -516,6 +520,7 @@ aicr validate \
 ### Configuration Extraction
 
 #### RecipeResult Pattern
+
 Bundlers receive `RecipeResult` with component references and values maps:
 
 ```go
@@ -543,6 +548,7 @@ Namespace: {{ .Script.Namespace }}
 ```
 
 #### ScriptData for Metadata
+
 ```go
 // ScriptData struct for scripts and README metadata
 type ScriptData struct {

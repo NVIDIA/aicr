@@ -216,8 +216,6 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 - Cluster admin permissions (for RBAC creation)
 - GPU nodes with nvidia-smi (for GPU metrics)
 
-```
-
 #### ConfigMap Output
 
 When using ConfigMap URIs (`cm://namespace/name`), the snapshot is stored directly in Kubernetes:
@@ -239,7 +237,7 @@ data:
   timestamp: "2025-12-31T10:30:00Z"
 ```
 
-#### Snapshot Structure
+**Snapshot Structure:**
 ```yaml
 apiVersion: aicr.nvidia.com/v1alpha1
 kind: Snapshot
@@ -271,6 +269,7 @@ aicr recipe [flags]
 **Modes:**
 
 #### Criteria File Mode (Recommended)
+
 Generate recipes using a Kubernetes-style criteria file:
 
 **Flags:**
@@ -308,6 +307,7 @@ aicr recipe -c criteria.yaml -o recipe.yaml
 ```
 
 #### Query Mode
+
 Generate recipes using direct system parameters:
 
 **Flags:**
@@ -350,6 +350,7 @@ aicr recipe --os ubuntu --gpu h100 --output recipe.yaml
 ```
 
 #### Snapshot Mode
+
 Generate recipes from captured snapshots:
 
 **Flags:**
@@ -611,6 +612,7 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `GPU.info.type` | GPU hardware type |
 
 #### Supported Operators
+
 | Operator | Example | Description |
 |----------|---------|-------------|
 | `>=` | `>= 1.30` | Greater than or equal (version comparison) |
@@ -1003,7 +1005,7 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 - `component` - Component name or override key (same keys as `--set`, e.g., `gpuoperator`, `alloy`)
 - `path` - Dot-separated path to the value that varies per cluster
 
-##### Helm deployer behavior
+**Helm deployer behavior:**
 
 Dynamic paths are removed from `values.yaml` and written to a separate `cluster-values.yaml` per component. The generated `deploy.sh` passes both files to Helm:
 
@@ -1015,7 +1017,7 @@ helm upgrade --install gpu-operator ... \
 
 Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
-##### Argo CD deployer behavior
+**Argo CD deployer behavior:**
 
 The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
 
@@ -1056,7 +1058,7 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-##### Bundle structure with `--dynamic` (Helm deployer)
+**Bundle structure with `--dynamic`** (Helm deployer):
 ```
 bundles/
 ├── alloy/
@@ -1068,7 +1070,7 @@ bundles/
 └── ...
 ```
 
-##### Argo CD Helm chart structure with `--dynamic`
+**Argo CD Helm chart structure with `--dynamic`:**
 ```
 bundles/
 ├── Chart.yaml                     # Helm chart metadata
@@ -1079,7 +1081,7 @@ bundles/
 └── README.md
 ```
 
-#### Bundle structure (default Helm deployer)
+**Bundle structure** (with default Helm deployer):
 ```
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
@@ -1099,7 +1101,7 @@ bundles/
     └── README.md
 ```
 
-#### Argo CD bundle structure (`--deployer argocd`)
+**Argo CD bundle structure** (with `--deployer argocd`):
 ```
 bundles/
 ├── app-of-apps.yaml               # Parent Application (bundle root)
@@ -1229,6 +1231,7 @@ When `--attest` is passed, the bundle command performs five steps:
 Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
 
 #### Deploying a bundle
+
 ```shell
 # Navigate to bundle
 cd bundles/gpu-operator
@@ -1560,11 +1563,13 @@ AICR respects standard environment variables:
 ## Common Usage Patterns
 
 ### Quick Recipe Generation
+
 ```shell
 aicr recipe --os ubuntu --accelerator h100 | jq '.componentRefs[]'
 ```
 
 ### Save All Steps
+
 ```shell
 aicr snapshot -o snapshot.yaml
 aicr recipe -s snapshot.yaml --intent training -o recipe.yaml
@@ -1572,6 +1577,7 @@ aicr bundle -r recipe.yaml -o ./bundles
 ```
 
 ### JSON Processing
+
 ```shell
 # Extract GPU Operator version from recipe
 aicr recipe --os ubuntu --accelerator h100 --format json | \
@@ -1583,6 +1589,7 @@ aicr recipe --os ubuntu --accelerator h100 --format json | \
 ```
 
 ### Multiple Environments
+
 ```shell
 # Generate recipes for different cloud providers
 for service in eks gke aks; do
@@ -1594,6 +1601,7 @@ done
 ## Troubleshooting
 
 ### Snapshot Fails
+
 ```shell
 # Check GPU drivers
 nvidia-smi
@@ -1606,6 +1614,7 @@ aicr --debug snapshot
 ```
 
 ### Recipe Not Found
+
 ```shell
 # Query parameters may not match any overlay
 # Try broader query:
@@ -1613,6 +1622,7 @@ aicr recipe --os ubuntu --gpu h100
 ```
 
 ### Bundle Generation Fails
+
 ```shell
 # Verify recipe file
 cat recipe.yaml
