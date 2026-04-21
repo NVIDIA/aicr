@@ -2,9 +2,9 @@
 
 ## Status
 
-**Accepted** — 2026-04-21
+**Proposed** — 2026-04-21
 
-Core deployment-phase readiness support is implemented in `pkg/recipe/` and
+The primary implementation for this decision lands in `pkg/recipe/` and
 `validators/deployment/`. The steady-state CI guard for newly added components
 remains a follow-up.
 
@@ -76,8 +76,8 @@ Two additional constraints shaped the decision:
 
 | Option | Summary | Benefits | Costs |
 | --- | --- | --- | --- |
-| **Registry fields + pure Go runtime** | Add typed readiness metadata to the component registry and interpret it in the deployment validator through Kubernetes APIs | Typed contract, deployer-neutral, easy to unit test, aligns with current `aicr validate` architecture | Narrower than full Chainsaw expressiveness; some semantic overlap with repo-side health checks |
-| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw during deployment validation | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions | Second runtime inside `aicr validate`, binary packaging/version pinning, image maintenance, harder testing, upstream coupling |
+| **Registry fields + pure Go runtime** | Add three component-level fields (`readiness`, `customChecks`, `crds`) and have the deployment validator run the declared checks across all enabled components selected into the resolved recipe | Typed contract, deployer-neutral, easy to unit test, aligns with current `aicr validate` architecture, keeps the validator Kubernetes-native and extensible | Narrower than full Chainsaw expressiveness; some semantic overlap with repo-side health checks |
+| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw during deployment validation | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions | Second runtime inside `aicr validate`, binary packaging/version pinning, distroless-image packaging changes to ship the `chainsaw` binary, harder testing, upstream coupling |
 | **Keep bespoke per-component Go checks** | Continue adding code paths per component as gaps are found | No schema work | Does not scale; keeps coverage asymmetric and harder to enforce |
 
 ## Decision
@@ -87,6 +87,18 @@ Adopt **registry-driven deployment validation implemented in pure Go**.
 Deployment-phase deep checks are declared in `recipes/registry.yaml`, hydrated
 onto each resolved `ComponentRef`, and interpreted by the deployment validator
 using Kubernetes API state only.
+
+At schema level, this design adds three component-level readiness fields:
+
+- `readiness`
+- `customChecks`
+- `crds`
+
+Together, these let each component declare its own deployment check contract,
+and they let the validator run those checks consistently across all enabled
+components in the resolved recipe. This keeps deployment validation on a pure-Go,
+Kubernetes-native path that can run in any Kubernetes cluster and extend
+naturally toward broader CNCF AI Conformance validation.
 
 ### Contract
 
@@ -112,12 +124,22 @@ The supported coverage shapes are:
   - required `namespace`
   - optional deployer-neutral `selector`
   - optional exact `workloads` using `{kind, name}`
+  - `workloads.kind` accepts only the exact-case enum values `Deployment`,
+    `DaemonSet`, and `StatefulSet`
+  - `workloads` items do not carry their own namespace; `readiness.namespace`
+    is authoritative in v1
 - sibling `customChecks`
 - top-level `crds`
 
 These fields are hydrated onto each resolved `ComponentRef` in `RecipeResult`.
 The deployment validator reads only mounted `recipe.yaml`; it does not read
 `registry.yaml` directly at runtime.
+
+Overlay and external-data merge policy is replace-if-set for all three fields:
+
+- `readiness`: replace the whole object if set; otherwise inherit
+- `customChecks`: replace the whole list if set; otherwise inherit
+- `crds`: replace the whole list if set; otherwise inherit
 
 ### Runtime semantics
 
@@ -128,21 +150,28 @@ The deployment validator uses a narrow, stable v1 contract:
 - `StatefulSet`: `readyReplicas >= desiredReplicas`, with nil replicas treated
   as Kubernetes default `1`; explicit `0` is allowed
 - `DaemonSet`: `desiredNumberScheduled > 0` and `numberReady == desiredNumberScheduled`
+  - this tightened rule applies to both generic readiness and `expectedResources`
+    because both paths use the same workload health primitive
 - `CustomResourceDefinition`: `Established=True`
 
 When both `selector` and `workloads` are present:
 - selector matches and named workloads are unioned
 - the set is deduplicated by `{kind, namespace, name}`
-- every named workload is required
+- every named workload is required; if any named workload is absent, the
+  component fails even when selector-discovered workloads exist
 - zero effective matches fail closed
 
 `customChecks` are intentionally narrow:
 - fixed registration map in Go
-- fixed key set for the current special cases
+- fixed v1 key set:
+  - `clusterPolicyReady`
+  - `skyhookReady`
+  - `draKubeletPluginReady`
 - component-scoped execution only
 
 `expectedResources` continues to coexist during migration, but the registry
-contract becomes the standard component-coverage path.
+contract becomes the standard component-coverage path. Its long-term retention
+or deprecation remains out of scope for this ADR; see Scope above.
 
 ### Why this option
 
@@ -151,13 +180,18 @@ This is the recommended design because it:
 - creates a typed, enforceable deployment-readiness contract in `recipes/registry.yaml`
 - preserves deployer-neutrality and layered external-data behavior
 - keeps validator Jobs aligned with the resolved recipe as the single runtime input
+- adds three declarative fields that let each component define its own deep
+  deployment check contract without introducing per-component runtime code paths
+- runs the declared checks across all enabled components in the resolved recipe,
+  not just a small hard-coded special-case set
 - matches the current `aicr validate` architecture, where the conformance phase
   already uses Kubernetes-native pure-Go checks rather than Chainsaw
 - keeps `aicr validate` on one validator model instead of splitting it across
   Go checks for conformance and Chainsaw for deployment
 - keeps the validator Kubernetes-native end to end
 - makes the validator easier to extend toward broader **CNCF AI Conformance**
-  validation without introducing a second runtime model or external binary dependency
+  validation and toward using AICR validation on any Kubernetes cluster without
+  introducing a second runtime model or external binary dependency
 - is straightforward to test with fake Kubernetes clients and table-driven unit tests
 
 ## Why Not Runtime Chainsaw
@@ -172,6 +206,8 @@ operate and extend:
   - pure Go / Kubernetes-client checks for conformance
   - Chainsaw-driven execution for deployment
 - it requires ongoing **binary packaging, version pinning, and image maintenance**
+- the current deployment-validator image is distroless, so this option would
+  require a deliberate packaging change just to ship the `chainsaw` binary
 - it couples validator behavior more tightly to **upstream Chainsaw semantics and upgrade cadence**
 - it expands the maintenance and review surface because full Chainsaw `Test`
   execution brings scripts, waits, catches, and binary execution into runtime validation
@@ -238,11 +274,15 @@ The implementation associated with this ADR includes:
 
 The steady-state CI policy is intentionally sequenced after migration:
 
-- once the migration inventory is complete, `pkg/recipe` validation surfaced
-  through repo CI should reject newly added components that declare none of:
+- once the migration inventory is complete for the current **21-component**
+  registry inventory, `pkg/recipe` validation surfaced through repo CI should
+  reject newly added components that declare none of:
   - `readiness`
   - `customChecks`
   - `crds`
+- that guard belongs in `pkg/recipe` validation surfaced through existing repo
+  CI or lint, not as additional runtime deployment-validator behavior and not
+  as a separate standalone validator workflow
 
 ## Alternatives Considered
 
@@ -262,7 +302,7 @@ direction already used by `aicr validate --phase conformance`.
 Rejected because shared namespaces such as `kube-system` and `monitoring` need
 explicit scoping or exact identities to avoid false attribution and brittle behavior.
 
-## Related
+## References
 
 - [ADR-002: Replace Go Test Validation Engine with Container-Per-Validator Model](002-validatorv2-adr.md)
 - [Issue #607](https://github.com/NVIDIA/aicr/issues/607) — narrow GPU-scoped deployment readiness gap
