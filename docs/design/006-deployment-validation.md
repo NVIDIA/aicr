@@ -5,7 +5,7 @@
 **Proposed** — 2026-04-20
 **Revised** — 2026-04-21 (contract clarifications, rollout sequencing, and related design coordination)
 
-The primary implementation for this decision lands in `pkg/recipe/` and
+The primary implementation for this decision is planned for `pkg/recipe/` and
 `validators/deployment/`. The steady-state CI guard for newly added components
 remains a follow-up.
 
@@ -153,9 +153,9 @@ The supported coverage shapes are:
 - sibling `customChecks`
 - top-level `crds`
 
-These fields are hydrated onto each resolved `ComponentRef` in `RecipeResult`.
-The deployment validator reads only mounted `recipe.yaml`; it does not read
-`registry.yaml` directly at runtime.
+Under this design, these fields are hydrated onto each resolved `ComponentRef`
+in `RecipeResult`. The deployment validator reads only mounted `recipe.yaml`;
+it does not read `registry.yaml` directly at runtime.
 
 Overlay and external-data merge policy is replace-if-set for all three fields:
 
@@ -249,7 +249,7 @@ Chainsaw remains useful as:
   full Chainsaw expressiveness or pod-phase parity.
 - **Potential semantic overlap**: some repo-side Chainsaw health checks and the
   deployment contract may cover similar ground separately.
-- **Fixed special-case surface**: new bespoke behavior requires coordinated Go
+- **Fixed special-case surface**: new bespoke behavior requires coordinating Go
   and registry changes rather than arbitrary registry-defined assertions.
 - **Migration overlap**: `expectedResources` can temporarily duplicate reporting
   while the registry contract becomes the standard path.
@@ -266,7 +266,7 @@ This ADR intentionally does **not** attempt:
 
 ## Implementation Notes
 
-The implementation associated with this ADR includes:
+The target implementation associated with this ADR will include:
 
 - readiness metadata on `ComponentConfig` and `ComponentRef`
 - hydration of readiness metadata into the resolved recipe
@@ -279,6 +279,11 @@ The implementation associated with this ADR includes:
   - CRD `Established=True` readiness
   - fail-closed zero-match behavior
 - registry mappings for the current component inventory
+
+At the time of writing this ADR, these details describe design intent rather
+than current `main`. In particular, `ComponentConfig` / `ComponentRef`
+readiness metadata and the associated hydration path are planned follow-up code
+changes, not already-exposed fields in `pkg/recipe/metadata.go`.
 
 The rollout is intentionally sequenced in two phases:
 
