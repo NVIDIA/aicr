@@ -123,7 +123,7 @@ absorb hook-job details that belong to deploy-time orchestration.
 | Option | Summary | Benefits | Costs |
 | --- | --- | --- | --- |
 | **Registry fields + shared consumers** | Add three component-level fields (`readiness`, `customChecks`, `crds`) and make them the shared source of truth that deployment-related consumers can read, with a pure-Go validator consumer for post-install validation | Typed contract, one source of truth, reduced drift between consumers, deployer-neutral validator path, easy to unit test, aligns with current `aicr validate` architecture, keeps the validator extensible | Narrower than full Chainsaw expressiveness; requires coordination as more consumers adopt the contract |
-| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw semantics during deployment validation, either through the Go assertion library where possible or full test execution where needed | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions | Second runtime/model inside `aicr validate`, harder testing, upstream coupling, and for the current `kind: Test` inventory still either binary packaging or asset rewrites |
+| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw semantics during deployment validation, either through the Go assertion library where possible or full test execution where needed | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions; familiar third-party tool with existing docs and examples | Additional runtime/model complexity inside `aicr validate`; for the current `kind: Test` inventory still either binary packaging or asset rewrites |
 | **Keep bespoke per-component Go checks** | Continue adding code paths per component as gaps are found | No schema work | Does not scale; keeps coverage asymmetric and harder to enforce |
 
 ## Decision
@@ -181,6 +181,9 @@ The supported coverage shapes are:
   - for the initial post-install validator consumer, this means workload
     rollout checks for `Deployment`, `DaemonSet`, and `StatefulSet` resources
     selected within a component namespace
+  - may also carry follow-up wait-oriented metadata for other consumers, such
+    as deploy / cleanup flows that render `kubectl wait` commands from the same
+    schema
   - the field name remains `readiness` to stay aligned with the chosen
     registry contract and implementation vocabulary
 - `crds`
@@ -191,9 +194,11 @@ The supported coverage shapes are:
   - remains a first-class structured field because CRD establishment is a
     common declarative signal, not merely a bespoke per-component edge case
 - `customChecks`
-  - defines **fixed component-specific Go checks**
+  - defines **named component-specific checks**
   - used only when the desired readiness signal cannot be expressed cleanly by
     generic workload rollout or CRD establishment checks
+  - for the initial post-install validator consumer, supported names are
+    implemented through a fixed Go registration map
   - remains intentionally narrow and registry-declared rather than arbitrary
     script or assertion execution
 
@@ -208,6 +213,13 @@ The `readiness` object carries:
   `DaemonSet`, and `StatefulSet`
 - `workloads` items do not carry their own namespace; `readiness.namespace`
   is authoritative in v1
+- optional `wait` metadata for follow-up consumers that generate wait-oriented
+  commands from the shared schema
+- `wait.timeout` carries duration-style timeout metadata for those consumers;
+  the initial post-install validator consumer does not depend on it in v1
+- `wait` is supplemental metadata, not a standalone check target; a component
+  still needs an actual declared check primitive such as a selector, named
+  workloads, `customChecks`, or `crds`
 
 Under this design, validator consumers hydrate these fields onto each resolved
 `ComponentRef` in `RecipeResult`. Post-install validator Jobs read mounted
@@ -245,9 +257,11 @@ components:
       - skyhookReady
 ```
 
-These examples show the intended split:
+These examples show the intended split for the initial validator subset:
 
-- use `readiness` when the component signal is workload rollout health
+- use `readiness` when the component signal is primarily workload rollout
+  health, while allowing the same object to carry additional consumer-specific
+  readiness metadata over time
 - use `crds` when the component signal is declared CRD establishment
 - use `customChecks` only for the few cases where the signal is a
   component-specific status check that the generic model does not express well
@@ -297,13 +311,17 @@ Scope above.
 Because `expectedResources` and generic readiness share the same typed workload
 health primitive, the tightened `DaemonSet` rule above applies to both paths.
 
-## Why Not Runtime Chainsaw
+## Why Not Runtime Chainsaw As The Initial Default
 
 Reusing Chainsaw at deployment-validator runtime was considered seriously because
 it offers the best semantic reuse of the existing `recipes/checks/*` assets.
+This ADR does **not** remove Chainsaw from the repository, deprecate the
+existing repo-side Chainsaw health assets, or require rewriting current
+Chainsaw-based tests and checks.
 
-It was not chosen for the post-install validator consumer because it would make
-`aicr validate` harder to operate and extend:
+The ADR does not reject Chainsaw outright. It only stops short of making
+Chainsaw the primary runtime for the **initial** post-install validator
+consumer, because that would make `aicr validate` harder to operate and extend:
 
 - it introduces a **second validator runtime** inside `aicr validate`
   - pure Go / Kubernetes-client checks for conformance
@@ -324,13 +342,16 @@ It was not chosen for the post-install validator consumer because it would make
   mounted `recipe.yaml`, not `registry.yaml`
 
 Even if the internal evaluator changes later, the stable surface for consumers
-should remain the validator entrypoint and shared check contract rather than
-exposing phase-specific executor differences.
+should remain the shared check contract rather than exposing phase-specific
+executor differences.
 
 Chainsaw remains useful as:
 - a repo-side health-check asset format
 - a UAT / test workflow tool
 - a source of parity reference when deciding whether the Go-based contract is too narrow
+- a possible source of greater library-backed reuse in future follow-up work,
+  even though it is not the primary validator runtime in the initial shape of
+  this ADR
 
 ## Consequences
 
@@ -413,7 +434,8 @@ The rollout is intentionally sequenced in two phases:
   - once the current migration inventory is complete, `pkg/recipe` validation
     surfaced through existing repo CI or lint should reject newly added
     components that declare none of:
-    - `readiness`
+    - `readiness` with at least one actual check primitive, not just
+      supplemental wait metadata
     - `customChecks`
     - `crds`
     and should not be implemented as additional runtime deployment-validator
@@ -428,11 +450,12 @@ not produce an enforceable component contract.
 
 ### 2. Reuse Chainsaw health checks directly in deployment validation
 
-Rejected because it reintroduces Chainsaw as a second runtime inside
-`aicr validate`, even though the current deployment validator can stay on a
-typed Go model over registry-defined checks. Chainsaw remains valuable as a
-repo-side asset format and parity reference, but it is not the primary
-validator runtime in this ADR.
+Not chosen as the initial default because it reintroduces Chainsaw as a second
+runtime inside `aicr validate`, even though the current deployment validator
+can start with a typed Go model over registry-defined checks. Chainsaw remains
+valuable as a repo-side asset format and parity reference, and future
+implementations may choose greater library-backed or runtime reuse if that
+reduces duplication without increasing long-term maintenance cost too much.
 
 ### 3. Namespace-wide heuristics with no registry contract
 
