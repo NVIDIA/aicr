@@ -16,11 +16,13 @@ PR. The steady-state CI guard for newly added components remains a follow-up.
 This ADR covers the **shared component check-definition model** used by
 deployment-related phases of AICR.
 
-It builds on the `#622` validator contract (`readiness`, `customChecks`,
-`crds`) and records the broader shared schema needed by both the initial
-post-install validator consumer and deploy / cleanup consumers. In that shared
-shape, `readiness` carries both the check definition used by the validator and
-optional wait-oriented metadata used by deploy-flow consumers.
+It builds on the
+[`#622`](https://github.com/NVIDIA/aicr/issues/622) validator contract
+(`readiness`, `customChecks`, `crds`) and records the broader shared schema
+needed by both the initial post-install validator consumer and deploy /
+cleanup consumers. In that shared shape, `readiness` carries both the check
+definition used by the validator and optional wait-oriented metadata used by
+deploy-flow consumers.
 
 It defines:
 - how component check metadata is expressed in `recipes/registry.yaml`
@@ -187,6 +189,9 @@ components:
     crds: []
 ```
 
+The `wait.timeout` value shown here is illustrative; consumers choose the
+appropriate value per component.
+
 This is intentionally not a general-purpose DSL or arbitrary assertion
 language. The shared contract is a small typed schema over common Kubernetes
 resource-check primitives.
@@ -239,8 +244,10 @@ The `readiness` object carries:
   same shared definition; the initial post-install validator consumer does not
   depend on it in v1
 - `wait` is supplemental metadata, not a standalone check target; a component
-  still needs an actual declared check primitive such as a selector, named
-  workloads, `customChecks`, or `crds`
+  still needs an actual declared check target such as namespace-scoped
+  workload coverage in `readiness` via `readiness.namespace`, optionally
+  refined by a selector or named workloads, or a `customChecks` / `crds`
+  declaration
 
 Under this design, validator consumers hydrate these fields onto each resolved
 `ComponentRef` in `RecipeResult`. Post-install validator Jobs read mounted
@@ -357,8 +364,8 @@ consumer, because that would make `aicr validate` harder to operate and extend:
   inventory is still authored as full `kind: Test` assets, so direct reuse
   would still require either binary support for full test execution or
   rewriting those assets into a narrower form
-- Chainsaw is a strong testing and execution tool, but a weak canonical check
-  language for consumers such as `#610` readiness Jobs that need to derive
+- Chainsaw is a strong testing and execution tool, but a weaker canonical
+  check language for deploy-flow consumers that need to derive
   deployer-native behavior from structured intent rather than simply execute a
   test; those consumers would otherwise need to either run Chainsaw directly or
   parse executable `kind: Test` logic to recover semantics
