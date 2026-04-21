@@ -287,6 +287,12 @@ The initial post-install validator consumer uses a narrow, stable v1 contract:
 - `DaemonSet`: `desiredNumberScheduled > 0` and `numberReady == desiredNumberScheduled`
 - `CustomResourceDefinition`: `Established=True`
 
+A selector plus a generic Kubernetes `Ready` condition alone was considered too
+narrow for the current inventory. The initial validator subset also needs exact
+named workload identities, tightened `DaemonSet` semantics, declarative CRD
+establishment checks, and a small escape hatch for component-specific status
+logic.
+
 When both `selector` and `workloads` are present:
 - selector matches and named workloads are unioned
 - the set is deduplicated by `{kind, namespace, name}`
@@ -326,10 +332,13 @@ It was not chosen for the post-install validator consumer because it would make
 - it introduces a **second validator runtime** inside `aicr validate`
   - pure Go / Kubernetes-client checks for conformance
   - Chainsaw-driven execution for deployment
+- distroless packaging is not the blocker by itself: AICR could ship an
+  additional binary in a distroless image if it chose to. The cost is the
+  broader packaging, signing, SBOM / CVE scanning, upgrade, and operational
+  surface of making Chainsaw part of the validator runtime
 - even with greater library-backed reuse, the current repo-side health-check
   inventory is still authored as full `kind: Test` assets, so direct reuse
-  would still require either binary support for full test execution, including
-  a packaging change to the current distroless deployment-validator image, or
+  would still require either binary support for full test execution or
   rewriting those assets into a narrower form
 - it couples validator behavior more tightly to **upstream Chainsaw semantics and upgrade cadence**
 - it expands the maintenance and review surface because full Chainsaw `Test`
@@ -345,6 +354,8 @@ exposing phase-specific executor differences.
 Chainsaw remains useful as:
 - a repo-side health-check asset format
 - a UAT / test workflow tool
+- a possible override or escape-hatch executor when the structured schema is
+  not sufficient for a specific component
 - a source of parity reference when deciding whether the Go-based contract is too narrow
 
 ## Consequences
