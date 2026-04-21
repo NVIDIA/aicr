@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package argocd provides ArgoCD Application generation for recipes.
+// Package argocd provides Argo CD Application generation for recipes.
 package argocd
 
 import (
@@ -38,7 +38,7 @@ var appOfAppsTemplate string
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
 
-// ApplicationData contains data for rendering an ArgoCD Application.
+// ApplicationData contains data for rendering an Argo CD Application.
 type ApplicationData struct {
 	Name           string
 	Namespace      string
@@ -70,7 +70,7 @@ type ReadmeData struct {
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
-// Generator creates ArgoCD Applications from recipe results.
+// Generator creates Argo CD Applications from recipe results.
 // Configure it with the required fields, then call Generate.
 type Generator struct {
 	// RecipeResult contains the recipe metadata and component references.
@@ -91,6 +91,10 @@ type Generator struct {
 
 	// IncludeChecksums indicates whether to generate a checksums.txt file.
 	IncludeChecksums bool
+
+	// DataFiles lists additional file paths (relative to output dir) to include
+	// in checksum generation. Used for external data files copied into the bundle.
+	DataFiles []string
 }
 
 // resolveRepoSettings returns the effective repoURL and targetRevision,
@@ -107,7 +111,7 @@ func resolveRepoSettings(g *Generator) (repoURL, targetRevision string) {
 	return repoURL, targetRevision
 }
 
-// Generate creates ArgoCD Applications from the configured generator fields.
+// Generate creates Argo CD Applications from the configured generator fields.
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 
@@ -232,18 +236,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
-	// Generate checksums if requested
+	// Include external data files in the file list (for checksums).
+	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
+		return nil, err
+	}
+
 	if g.IncludeChecksums {
-		if err := checksum.GenerateChecksums(ctx, outputDir, output.Files); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", err)
+		if err := checksum.WriteChecksums(ctx, outputDir, output); err != nil {
+			return nil, err
 		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		checksumInfo, statErr := os.Stat(checksumPath)
-		if statErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat checksums file", statErr)
-		}
-		output.Files = append(output.Files, checksumPath)
-		output.TotalSize += checksumInfo.Size()
 	}
 
 	output.Duration = time.Since(start)

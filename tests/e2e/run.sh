@@ -52,6 +52,9 @@ AICR_VALIDATOR_IMAGE="${AICR_VALIDATOR_IMAGE:-localhost:5001/aicr-validator:loca
 SNAPSHOT_NAMESPACE="${SNAPSHOT_NAMESPACE:-default}"
 SNAPSHOT_CM="${SNAPSHOT_CM:-aicr-e2e-snapshot}"
 FAKE_GPU_ENABLED="${FAKE_GPU_ENABLED:-false}"
+CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
+CREATED_FAKE_CLUSTER_POLICY=false
+CREATED_FAKE_CLUSTER_POLICY_CRD=false
 
 # Test counters
 TOTAL_TESTS=0
@@ -630,33 +633,81 @@ test_validate() {
 # Deployment Phase Constraint Tests
 # =============================================================================
 
-test_validate_deployment_checks() {
-  msg "=========================================="
-  msg "Testing deployment checks (constraints, expected-resources, chainsaw)"
-  msg "=========================================="
+setup_fake_gpu_operator_fixture() {
+  CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
+  CREATED_FAKE_CLUSTER_POLICY=false
+  CREATED_FAKE_CLUSTER_POLICY_CRD=false
 
-  # Create validation namespace for tests
-  kubectl create namespace aicr-validation 2>&1 || true
-
-  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
-    skip "validate/deployment-constraints" "Fake GPU not enabled"
-    skip "validate/expected-resources" "Fake GPU not enabled"
-    skip "validate/chainsaw-healthcheck" "Fake GPU not enabled"
-    return 0
-  fi
-
-  local validate_dir="${OUTPUT_DIR}/validate-deployment-checks"
-  mkdir -p "$validate_dir"
-
-  # -----------------------------------------------------------------------
-  # Shared setup: Create fake GPU operator deployment ONCE
-  # -----------------------------------------------------------------------
-  msg "--- Setup: Create fake GPU operator deployment ---"
   kubectl create namespace gpu-operator --dry-run=client -o yaml | kubectl apply -f - 2>&1 || true
-  # Clean up leftover validator pods from previous tests that ran in gpu-operator namespace.
   kubectl delete jobs,pods -n gpu-operator -l app=aicr-validator --ignore-not-found 2>&1 || true
 
-  cat <<YAML | kubectl apply -f - 2>&1
+  if kubectl get deployment gpu-operator -n gpu-operator >/dev/null 2>&1; then
+    warn "Skipping fake GPU operator fixture: deployment/gpu-operator already exists in namespace gpu-operator"
+    return 1
+  fi
+  if kubectl get clusterpolicy cluster-policy >/dev/null 2>&1; then
+    warn "Skipping fake GPU operator fixture: ClusterPolicy cluster-policy already exists"
+    return 1
+  fi
+  if kubectl get crd clusterpolicies.nvidia.com >/dev/null 2>&1; then
+    warn "Skipping fake GPU operator fixture: CRD clusterpolicies.nvidia.com already exists"
+    return 1
+  fi
+
+  # Deliberate: the CRD below does NOT declare `subresources: { status: {} }`.
+  # We want kubectl apply on the ClusterPolicy CR that follows to persist the
+  # literal .status.state: ready field, so the validator's
+  # verifyClusterPolicyReady check sees the fixture as "ready". If a status
+  # subresource were declared, kubectl apply would silently drop .status
+  # updates (status is then only writable via PATCH on the /status
+  # subresource), and every deployment-phase test that depends on this
+  # fixture would start failing. If you need to add a status subresource
+  # later, also update the fixture to write .status via `kubectl patch
+  # --subresource=status`.
+  if ! cat <<YAML | kubectl apply -f - 2>&1; then
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: clusterpolicies.nvidia.com
+spec:
+  group: nvidia.com
+  scope: Cluster
+  names:
+    plural: clusterpolicies
+    singular: clusterpolicy
+    kind: ClusterPolicy
+  versions:
+  - name: v1
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        x-kubernetes-preserve-unknown-fields: true
+YAML
+    return 1
+  fi
+  CREATED_FAKE_CLUSTER_POLICY_CRD=true
+
+  if ! kubectl wait --for=condition=Established crd/clusterpolicies.nvidia.com --timeout=60s 2>&1; then
+    cleanup_fake_gpu_operator_fixture
+    return 1
+  fi
+
+  if ! cat <<YAML | kubectl apply -f - 2>&1; then
+apiVersion: nvidia.com/v1
+kind: ClusterPolicy
+metadata:
+  name: cluster-policy
+status:
+  state: ready
+YAML
+    cleanup_fake_gpu_operator_fixture
+    return 1
+  fi
+  CREATED_FAKE_CLUSTER_POLICY=true
+
+  if ! cat <<YAML | kubectl apply -f - 2>&1; then
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -680,10 +731,57 @@ spec:
         image: nvcr.io/nvidia/gpu-operator:v24.6.0
         imagePullPolicy: IfNotPresent
 YAML
-  apply_rc=$?
+    cleanup_fake_gpu_operator_fixture
+    return 1
+  fi
+  CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=true
 
-  if [ $apply_rc -eq 0 ]; then
-    detail "Created fake GPU operator deployment (v24.6.0)"
+  if ! kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1; then
+    cleanup_fake_gpu_operator_fixture
+    return 1
+  fi
+}
+
+cleanup_fake_gpu_operator_fixture() {
+  if [ "${CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT}" = "true" ]; then
+    kubectl delete deployment gpu-operator -n gpu-operator --ignore-not-found 2>&1 || true
+    CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
+  fi
+  if [ "${CREATED_FAKE_CLUSTER_POLICY}" = "true" ]; then
+    kubectl delete clusterpolicy cluster-policy --ignore-not-found 2>&1 || true
+    CREATED_FAKE_CLUSTER_POLICY=false
+  fi
+  if [ "${CREATED_FAKE_CLUSTER_POLICY_CRD}" = "true" ]; then
+    kubectl delete crd clusterpolicies.nvidia.com --ignore-not-found 2>&1 || true
+    CREATED_FAKE_CLUSTER_POLICY_CRD=false
+  fi
+}
+
+test_validate_deployment_checks() {
+  msg "=========================================="
+  msg "Testing deployment checks (constraints, expected-resources, chainsaw)"
+  msg "=========================================="
+
+  # Create validation namespace for tests
+  kubectl create namespace aicr-validation 2>&1 || true
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "validate/deployment-constraints" "Fake GPU not enabled"
+    skip "validate/expected-resources" "Fake GPU not enabled"
+    skip "validate/chainsaw-healthcheck" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local validate_dir="${OUTPUT_DIR}/validate-deployment-checks"
+  mkdir -p "$validate_dir"
+
+  # -----------------------------------------------------------------------
+  # Shared setup: Create fake GPU operator readiness fixture ONCE
+  # -----------------------------------------------------------------------
+  msg "--- Setup: Create fake GPU operator readiness fixture ---"
+
+  if setup_fake_gpu_operator_fixture; then
+    detail "Created fake GPU operator deployment and ready ClusterPolicy fixture"
   else
     skip "validate/deployment-constraint-pass" "Could not create GPU operator deployment"
     skip "validate/deployment-constraint-fail" "Could not create GPU operator deployment"
@@ -694,9 +792,6 @@ YAML
     skip "validate/chainsaw-healthcheck-fail" "Could not create GPU operator deployment"
     return 0
   fi
-
-  # Wait for deployment to be available (needed for chainsaw and expected-resources tests)
-  kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1 || true
 
   # -----------------------------------------------------------------------
   # Constraint tests
@@ -1005,7 +1100,7 @@ RECIPE
   if ! kubectl wait --for=condition=available deployment/gpu-operator -n gpu-operator --timeout=60s 2>&1; then
     skip "validate/chainsaw-healthcheck-pass" "GPU operator deployment not available"
     skip "validate/chainsaw-healthcheck-fail" "GPU operator deployment not available"
-    kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
+    cleanup_fake_gpu_operator_fixture
     return 0
   fi
 
@@ -1117,8 +1212,8 @@ RECIPE
   # -----------------------------------------------------------------------
   # Single cleanup for ALL deployment check tests
   # -----------------------------------------------------------------------
-  msg "--- Cleanup: Removing fake GPU operator deployment ---"
-  kubectl delete deployment gpu-operator -n gpu-operator 2>&1 || true
+  msg "--- Cleanup: Removing fake GPU operator readiness fixture ---"
+  cleanup_fake_gpu_operator_fixture
 }
 
 test_validate_job_deployment() {
@@ -1133,6 +1228,21 @@ test_validate_job_deployment() {
 
   local validate_dir="${OUTPUT_DIR}/validate-jobs"
   mkdir -p "$validate_dir"
+
+  msg "--- Setup: Create fake GPU operator readiness fixture ---"
+  if setup_fake_gpu_operator_fixture; then
+    detail "Created fake GPU operator deployment and ready ClusterPolicy fixture"
+  else
+    skip "validate/job-rbac-serviceaccount" "Could not create GPU operator readiness fixture"
+    skip "validate/job-rbac-role" "Could not create GPU operator readiness fixture"
+    skip "validate/job-creation" "Could not create GPU operator readiness fixture"
+    skip "validate/job-success" "Could not create GPU operator readiness fixture"
+    skip "validate/command-success" "Could not create GPU operator readiness fixture"
+    skip "validate/job-custom-namespace" "Could not create GPU operator readiness fixture"
+    skip "validate/job-cleanup" "Could not create GPU operator readiness fixture"
+    skip "validate/job-result-format" "Could not create GPU operator readiness fixture"
+    return 0
+  fi
 
   # Create a recipe with explicit deployment checks so Jobs are created.
   local recipe_file="${validate_dir}/recipe.yaml"
@@ -1306,6 +1416,7 @@ RECIPE
   # Cleanup test namespaces
   kubectl delete namespace aicr-validation 2>&1 || true
   kubectl delete namespace custom-validation 2>&1 || true
+  cleanup_fake_gpu_operator_fixture
 }
 
 

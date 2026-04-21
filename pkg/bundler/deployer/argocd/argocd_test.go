@@ -420,6 +420,104 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 }
 
+func TestGenerate_DataFiles(t *testing.T) {
+	recipeResult := func() *recipe.RecipeResult {
+		r := &recipe.RecipeResult{}
+		r.Metadata.Version = testVersion
+		r.ComponentRefs = []recipe.ComponentRef{
+			{Name: "gpu-operator", Namespace: "gpu-operator", Chart: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+		}
+		return r
+	}
+
+	tests := []struct {
+		name             string
+		stageDataFile    string // relative path to create under outputDir (empty = skip)
+		includeChecksums bool
+		dataFiles        []string
+		wantErr          bool
+		wantErrMsg       string
+	}{
+		{
+			name:             "valid data file included in checksums",
+			stageDataFile:    "data/overrides.yaml",
+			includeChecksums: true,
+			dataFiles:        []string{"data/overrides.yaml"},
+		},
+		{
+			name:       "path traversal rejected",
+			dataFiles:  []string{"../../../etc/passwd"},
+			wantErr:    true,
+			wantErrMsg: "escapes base directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			if tt.stageDataFile != "" {
+				full := filepath.Join(outputDir, tt.stageDataFile)
+				if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+					t.Fatalf("stage dir: %v", err)
+					return
+				}
+				if err := os.WriteFile(full, []byte("key: value"), 0600); err != nil {
+					t.Fatalf("stage file: %v", err)
+					return
+				}
+			}
+
+			g := &Generator{
+				RecipeResult:     recipeResult(),
+				Version:          "v0.9.0",
+				IncludeChecksums: tt.includeChecksums,
+				DataFiles:        tt.dataFiles,
+			}
+
+			output, err := g.Generate(ctx, outputDir)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Errorf("expected error containing %q, got: %v", tt.wantErrMsg, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Generate() unexpected error = %v", err)
+				return
+			}
+
+			found := false
+			for _, f := range output.Files {
+				if strings.HasSuffix(f, tt.stageDataFile) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("data file %q not included in output.Files", tt.stageDataFile)
+			}
+
+			if tt.includeChecksums {
+				content, readErr := os.ReadFile(filepath.Join(outputDir, "checksums.txt"))
+				if readErr != nil {
+					t.Fatalf("read checksums.txt: %v", readErr)
+					return
+				}
+				if !strings.Contains(string(content), tt.stageDataFile) {
+					t.Errorf("checksums.txt should contain %q entry", tt.stageDataFile)
+				}
+			}
+		})
+	}
+}
+
 func TestGenerate_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
@@ -793,7 +891,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	}
 }
 
-// TestGenerate_Reproducible verifies that ArgoCD bundle generation is deterministic.
+// TestGenerate_Reproducible verifies that Argo CD bundle generation is deterministic.
 // Running Generate() twice with the same input should produce identical output files.
 func TestGenerate_Reproducible(t *testing.T) {
 	ctx := context.Background()
@@ -890,7 +988,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 		}
 	}
 
-	t.Logf("ArgoCD reproducibility verified: both iterations produced %d identical files", len(fileContents[0]))
+	t.Logf("Argo CD reproducibility verified: both iterations produced %d identical files", len(fileContents[0]))
 }
 
 // assertValidYAML reads the file at path and fails the test if it is not valid YAML.
@@ -907,7 +1005,7 @@ func assertValidYAML(t *testing.T, path string) {
 }
 
 // TestGenerate_ApplicationYAMLStructure verifies that generated application.yaml files
-// are valid YAML with the expected ArgoCD Application structure (issue #410).
+// are valid YAML with the expected Argo CD Application structure (issue #410).
 func TestGenerate_ApplicationYAMLStructure(t *testing.T) {
 	tests := []struct {
 		name       string

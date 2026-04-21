@@ -256,15 +256,15 @@ for cluster_config in "${CLUSTERS[@]}"; do
 done
 ```
 
-### Pattern 5: GitOps Deployment with ArgoCD
+### Pattern 5: GitOps Deployment with Argo CD
 
-Use ArgoCD for declarative, GitOps-based deployments with automatic sync-wave ordering.
+Use Argo CD for declarative, GitOps-based deployments with automatic sync-wave ordering.
 
-**Use case:** Automated deployment pipeline with ArgoCD
+**Use case:** Automated deployment pipeline with Argo CD
 
 ```yaml
 # GitHub Actions
-name: GitOps Deploy with ArgoCD
+name: GitOps Deploy with Argo CD
 on:
   push:
     branches: [main]
@@ -291,7 +291,7 @@ jobs:
             --os ubuntu \
             --output recipe.yaml
       
-      - name: Generate ArgoCD bundles
+      - name: Generate Argo CD bundles
         run: |
           aicr bundle \
             --recipe recipe.yaml \
@@ -302,7 +302,7 @@ jobs:
       - name: Commit to GitOps repo
         run: |
           # Copy entire bundle to GitOps repository
-          # ArgoCD apps are in <component>/argocd/ directories
+          # Argo CD apps are in <component>/argocd/ directories
           # app-of-apps.yaml is at bundle root
           cp -r bundles/* gitops-repo/
           
@@ -312,7 +312,7 @@ jobs:
           git push
 ```
 
-**Generated ArgoCD Application with multi-source:**
+**Generated Argo CD Application with multi-source:**
 ```yaml
 # bundles/gpu-operator/argocd/application.yaml
 apiVersion: argoproj.io/v1alpha1
@@ -361,7 +361,7 @@ Deploy to multiple environments with environment-specific deployers.
 
 ENVIRONMENTS=(
   "staging:helm"       # Staging uses Helm per-component bundle
-  "production:argocd"  # Production uses ArgoCD
+  "production:argocd"  # Production uses Argo CD
 )
 
 for env_config in "${ENVIRONMENTS[@]}"; do

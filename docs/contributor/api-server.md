@@ -32,6 +32,7 @@ The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow
 **API Server Configuration:**
 - **Criteria allowlists** – Restrict allowed values for accelerator, service, intent, and OS via environment variables
 - **Value overrides** – Supported via `?set=bundler:path=value` query parameters on `/v1/bundle`
+- **Dynamic install-time values** – Supported via `?dynamic=component:path` query parameters on `/v1/bundle` (helm and argocd-helm deployers)
 - **Node scheduling** – Supported via `?system-node-selector` and `?accelerated-node-selector` query parameters
 
 **For complete workflow**, use the CLI which supports:
@@ -133,7 +134,8 @@ func main() {
 - Server configured with production defaults
 - Graceful shutdown on SIGINT/SIGTERM
 
-**Initialization Flow:**
+#### Initialization Flow
+
 ```go
 func Serve() error {
     // 1. Setup logging
@@ -302,14 +304,13 @@ spec:
 Supported content types:
 - `application/json` - JSON format
 - `application/x-yaml` - YAML format
-```
 
 #### Query Parameter Parsing
 
 | Parameter | Type | Validation | Example |
 |-----------|------|------------|--------|
-| `service` | ServiceType | Enum: eks, gke, aks, oke, any | `service=eks` |
-| `accelerator` | AcceleratorType | Enum: h100, gb200, a100, l40, any | `accelerator=h100` |
+| `service` | ServiceType | Enum: eks, gke, aks, oke, kind, lke, any | `service=eks` |
+| `accelerator` | AcceleratorType | Enum: h100, gb200, b200, a100, l40, rtx-pro-6000, any | `accelerator=h100` |
 | `gpu` | AcceleratorType | Alias for accelerator | `gpu=h100` |
 | `intent` | IntentType | Enum: training, inference, any | `intent=training` |
 | `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, any | `os=ubuntu` |
@@ -330,8 +331,8 @@ Shared with CLI - same logic as described in CLI architecture.
 #### GET Method
 
 **Query Parameters**:
-- `service` - Kubernetes service type (eks, gke, aks, oke)
-- `accelerator` - GPU/accelerator type (h100, gb200, a100, l40)
+- `service` - Kubernetes service type (eks, gke, aks, oke, kind, lke)
+- `accelerator` - GPU/accelerator type (h100, gb200, b200, a100, l40, rtx-pro-6000)
 - `gpu` - Alias for accelerator (backwards compatibility)
 - `intent` - Workload intent (training, inference)
 - `os` - Operating system family (ubuntu, rhel, cos, amazonlinux)
@@ -413,7 +414,10 @@ spec:
 ```json
 {
   "code": "INVALID_REQUEST",
-  "message": "invalid gpu type: must be one of h100, gb200, a100, l40, ALL",
+  "message": "Invalid recipe criteria",
+  "details": {
+    "error": "[INVALID_REQUEST] invalid accelerator parameter: [INVALID_REQUEST] invalid accelerator type: invalid-gpu"
+  },
   "requestId": "550e8400-e29b-41d4-a716-446655440000",
   "timestamp": "2025-12-25T12:00:00Z",
   "retryable": false
@@ -788,22 +792,26 @@ spec:
 ## Performance Characteristics
 
 ### Throughput
+
 - **Rate Limit**: 100 requests/second per instance (configurable)
 - **Burst**: 200 requests (configurable)
-- **Target Latency**: p50 &lt;10ms, p99 &lt;50ms
+- **Target Latency**: p50 <10ms, p99 <50ms
 - **Max Concurrent**: Limited by rate limiter
 
 ### Resource Usage
+
 - **CPU**: ~50m idle, ~200m at 100 req/s
 - **Memory**: ~100MB baseline, ~200MB at peak
 - **Disk**: None (stateless, embedded recipe data)
 
 ### Scalability
+
 - **Horizontal**: Fully stateless, linear scaling
 - **Vertical**: Recipe store cached in memory (sync.Once)
 - **Load Balancing**: Round-robin or least-connections
 
 ### Caching Strategy
+
 - **Recipe Store**: Loaded once per process, cached globally
 - **Client-Side**: 5-minute cache via Cache-Control header
 - **CDN**: Recommended for public-facing deployments
@@ -974,18 +982,21 @@ Future: OpenTelemetry integration for full tracing
 ## Testing Strategy
 
 ### Unit Tests
+
 - Handler validation logic
 - Middleware functionality
 - Error response formatting
 - Query parsing
 
 ### Integration Tests
+
 - Full HTTP request/response cycle
 - Rate limiting behavior
 - Graceful shutdown
 - Health/ready endpoints
 
 ### Load Tests
+
 - Sustained load at rate limit
 - Burst handling
 - Latency under load
@@ -1023,6 +1034,7 @@ func TestRecipeHandler(t *testing.T) {
 ## Dependencies
 
 ### External Libraries
+
 - `net/http` - Standard HTTP server
 - `golang.org/x/time/rate` - Rate limiting
 - `golang.org/x/sync/errgroup` - Concurrent error handling
@@ -1032,6 +1044,7 @@ func TestRecipeHandler(t *testing.T) {
 - `log/slog` - Structured logging
 
 ### Internal Packages
+
 - `pkg/recipe` - Recipe building logic
 - `pkg/measurement` - Data model
 - `pkg/version` - Semantic versioning
@@ -1113,7 +1126,7 @@ ENTRYPOINT ["aicrd"]
 | `AICR_ALLOWED_INTENTS` | (none) | Comma-separated list of allowed intents (e.g., `training`). If not set, all intents allowed. |
 | `AICR_ALLOWED_OS` | (none) | Comma-separated list of allowed OS types (e.g., `ubuntu,rhel`). If not set, all OS types allowed. |
 
-**Criteria Allowlists:**
+#### Criteria Allowlists
 
 When allowlist environment variables are configured, the API server validates incoming requests against the allowed values. This enables operators to restrict the API to specific configurations.
 
@@ -2153,8 +2166,8 @@ var validate = validator.New()
 type RecipeRequest struct {
     OS       string `validate:"required,oneof=ubuntu rhel cos"`
     OSVersion string `validate:"omitempty,semver"`
-    GPU      string `validate:"required,oneof=h100 gb200 a100 l40"`
-    Service  string `validate:"omitempty,oneof=eks gke aks self-managed"`
+    GPU      string `validate:"required,oneof=h100 gb200 b200 a100 l40 rtx-pro-6000"`
+    Service  string `validate:"omitempty,oneof=eks gke aks oke kind lke"`
 }
 
 func handleRecipe(w http.ResponseWriter, r *http.Request) {
@@ -2355,6 +2368,7 @@ func buildRecipeWithTrace(ctx context.Context, params Params) (*recipe.Recipe, e
 ## References
 
 ### Official Documentation
+
 - [net/http Package](https://pkg.go.dev/net/http) - Go standard HTTP library  
 - [golang.org/x/time/rate](https://pkg.go.dev/golang.org/x/time/rate) - Token bucket rate limiter  
 - [errgroup](https://pkg.go.dev/golang.org/x/sync/errgroup) - Concurrent error handling  
@@ -2362,36 +2376,42 @@ func buildRecipeWithTrace(ctx context.Context, params Params) (*recipe.Recipe, e
 - [slog Package](https://pkg.go.dev/log/slog) - Structured logging
 
 ### Production Patterns
+
 - [Kubernetes Patterns](https://k8s.io/docs/concepts/) - Deployment, scaling, networking  
 - [Twelve-Factor App](https://12factor.net/) - Cloud-native application principles  
 - [Google SRE Book](https://sre.google/sre-book/table-of-contents/) - Site reliability engineering  
 - [Release Engineering](https://sre.google/workbook/release-engineering/) - Deployment best practices
 
 ### HTTP & APIs
+
 - [HTTP/2 in Go](https://go.dev/blog/h2push) - HTTP/2 server push  
 - [RESTful API Design](https://cloud.google.com/apis/design) - Google Cloud API design guide  
 - [OpenAPI Specification](https://swagger.io/specification/) - API documentation standard  
 - [API Versioning](https://cloud.google.com/apis/design/versioning) - Version management strategies
 
 ### Observability
+
 - [Prometheus Go Client](https://prometheus.io/docs/guides/go-application/) - Metrics collection  
 - [OpenTelemetry Go](https://opentelemetry.io/docs/languages/go/) - Distributed tracing  
 - [Grafana Dashboards](https://grafana.com/docs/grafana/latest/) - Metrics visualization  
 - [Jaeger Tracing](https://www.jaegertracing.io/docs/) - Distributed tracing backend
 
 ### Security
+
 - [OWASP API Security](https://owasp.org/www-project-api-security/) - API security risks  
 - [HTTP Security Headers](https://owasp.org/www-project-secure-headers/) - Security header reference  
 - [Rate Limiting Strategies](https://cloud.google.com/architecture/rate-limiting-strategies) - Google Cloud guide  
 - [mTLS in Kubernetes](https://istio.io/latest/docs/concepts/security/) - Istio mutual TLS
 
 ### Performance
+
 - [Go Performance Tips](https://github.com/golang/go/wiki/Performance) - Optimization techniques  
 - [pprof Profiler](https://go.dev/blog/pprof) - CPU and memory profiling  
 - [High Performance Go](https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html) - Dave Cheney's workshop  
 - [Go Memory Model](https://go.dev/ref/mem) - Concurrency guarantees
 
 ### Reliability
+
 - [Circuit Breaker Pattern](https://github.com/sony/gobreaker) - Failure isolation  
 - [Retry with Backoff](https://github.com/cenkalti/backoff) - Resilient retries  
 - [Chaos Engineering](https://principlesofchaos.org/) - Resilience testing principles  

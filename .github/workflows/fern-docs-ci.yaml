@@ -37,12 +37,23 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '20'
 
       - name: Install Fern CLI
         run: npm install -g fern-api@$(jq -r .version fern/fern.config.json)
+
+      - name: Check MDX safety
+        # Intentionally inline — a composite action would add indirection without benefit for a single grep.
+        # Single-line grep is intentional — multiline <img> tags do not occur in practice in markdown docs.
+        run: |
+          BAD=$(grep -rn '<img\b[^>]*[^/]>' docs/ fern/ --include="*.md" --include="*.mdx" || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::Non-self-closing <img> tags found (MDX requires <img ... />):"
+            echo "$BAD"
+            exit 1
+          fi
 
       - name: Fern check
         run: fern check

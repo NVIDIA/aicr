@@ -1,11 +1,11 @@
-# ArgoCD Deployment Bundle
+# Argo CD Deployment Bundle
 
 Bundler Version: {{ .BundlerVersion }}
 Recipe Version: {{ .RecipeVersion }}
 
 ## Overview
 
-This bundle contains ArgoCD Application manifests for deploying NVIDIA Cloud Native Stack components using the App of Apps pattern.
+This bundle contains Argo CD Application manifests for deploying NVIDIA Cloud Native Stack components using the App of Apps pattern.
 
 ## Components
 
@@ -23,8 +23,8 @@ The following components are included in deployment order:
 
 ## Prerequisites
 
-- Kubernetes cluster with ArgoCD installed
-- ArgoCD CLI (`argocd`) configured
+- Kubernetes cluster with Argo CD installed
+- Argo CD CLI (`argocd`) configured
 - Git repository for storing these manifests
 - kubectl configured with cluster access
 
@@ -79,7 +79,7 @@ argocd app sync nvidia-stack --watch
 ├── README.md                  # This file
 {{- range .Components }}
 ├── {{ .Name }}/
-│   ├── application.yaml       # ArgoCD Application (sync-wave: {{ .SyncWave }})
+│   ├── application.yaml       # Argo CD Application (sync-wave: {{ .SyncWave }})
 {{- if not .IsKustomize }}
 │   └── values.yaml            # Helm values
 {{- end }}
@@ -88,7 +88,7 @@ argocd app sync nvidia-stack --watch
 
 ## Sync Waves
 
-Components are deployed in order using ArgoCD sync-waves:
+Components are deployed in order using Argo CD sync-waves:
 
 {{- range .Components }}
 - **Wave {{ .SyncWave }}**: {{ .Name }}
@@ -129,6 +129,6 @@ argocd app sync <app-name> --replace
 
 ## References
 
-- [ArgoCD Documentation](https://argo-cd.readthedocs.io/)
+- [Argo CD Documentation](https://argo-cd.readthedocs.io/)
 - [App of Apps Pattern](https://argo-cd.readthedocs.io/en/stable/operator-manual/cluster-bootstrapping/)
 - [Sync Waves](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-waves/)

@@ -390,7 +390,7 @@ flowchart LR
     end
 
     subgraph "Deployer Output"
-        O1[ArgoCD Applications]
+        O1[Argo CD Applications]
         O2[Helm Charts]
         O3[README.md]
     end
@@ -429,7 +429,7 @@ When the `--deployer` flag is set, bundlers generate standard artifacts that dep
 - Creates component-specific values with installation scripts
 - Includes manifests and deployment instructions per component
 
-**For ArgoCD** (`--deployer argocd`):
+**For Argo CD** (`--deployer argocd`):
 - Bundler generates `values.yaml` and `manifests/`
 - Deployer creates `<component>/argocd/application.yaml` with sync-wave annotations
 - Deployer creates `app-of-apps.yaml` at bundle root
@@ -443,7 +443,7 @@ The deployer is specified at bundle generation time:
 # Default: Helm per-component bundle
 aicr bundle -r recipe.yaml -o ./bundles
 
-# Generate bundles with ArgoCD deployer (use --repo to set Git repository URL)
+# Generate bundles with Argo CD deployer (use --repo to set Git repository URL)
 aicr bundle -r recipe.yaml -o ./bundles --deployer argocd \
   --repo https://github.com/my-org/my-gitops-repo.git
 ```

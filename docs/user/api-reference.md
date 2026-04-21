@@ -17,7 +17,8 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 └──────────────┘      └──────────────┘
 ```
 
-**API vs CLI:**
+### API vs CLI
+
 - Use the **API** for remote recipe generation and bundle creation
 - Use the **CLI** for local operations, snapshot capture, and ConfigMap integration
 
@@ -115,8 +116,8 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `any` |
-| `accelerator` | string | any | GPU type: `h100`, `gb200`, `a100`, `l40`, `any` |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `kind`, `lke`, `any` |
+| `accelerator` | string | any | GPU type: `h100`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `any` |
@@ -326,23 +327,25 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of bundler types to execute |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm` and `deployer=argocd-helm`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
-| `deployer` | string | helm | Deployment method: `helm` or `argocd` |
+| `deployer` | string | helm | Deployment method: `helm`, `argocd`, or `argocd-helm` |
+| `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=argocd-helm`) |
 
 **Request Body:**
 
 The request body is the recipe (RecipeResult) directly. No wrapper object needed.
 
-**Supported Bundlers:**
+#### Components
 
 Bundler names correspond to component names in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml). Any component registered there can be passed as a bundler. Current components:
 
-| Bundler | Description |
-|---------|-------------|
+| Component | Description |
+|-----------|-------------|
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
 | `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
@@ -371,7 +374,7 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
   curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
 
-# Advanced: with value overrides and ArgoCD deployer
+# Advanced: with value overrides and Argo CD deployer
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
   curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator&deployer=argocd&repo=https://github.com/my-org/my-gitops-repo.git&set=gpuoperator:gds.enabled=true" \
     -H "Content-Type: application/json" -d @- -o bundles.zip
@@ -425,7 +428,7 @@ curl -X POST "http://localhost:8080/v1/bundle?bundlers=gpu-operator,network-oper
 | `X-Bundle-Size` | Uncompressed size (bytes) | `45678` |
 | `X-Bundle-Duration` | Generation time | `1.234s` |
 
-**Bundle Structure:**
+#### Bundle Structure
 
 ```
 bundles.zip
@@ -542,7 +545,7 @@ ls -la
 
 ## Error Handling
 
-**Error Response Format:**
+### Error Response Format
 
 ```json
 {
@@ -555,7 +558,7 @@ ls -la
 }
 ```
 
-**Error Codes:**
+### Error Codes
 
 | Code | HTTP Status | Description | Retryable |
 |------|-------------|-------------|-----------|
@@ -565,7 +568,7 @@ ls -la
 | `RATE_LIMIT_EXCEEDED` | 429 | Too many requests | Yes |
 | `INTERNAL_ERROR` | 500 | Server error | Yes |
 
-**Handling Rate Limits:**
+### Handling Rate Limits
 
 ```shell
 # Check rate limit headers
@@ -813,7 +816,7 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 
 **"Invalid accelerator type" error:**
 ```shell
-# Use valid values: h100, gb200, a100, l40, any
+# Use valid values: h100, gb200, b200, a100, l40, rtx-pro-6000, any
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 

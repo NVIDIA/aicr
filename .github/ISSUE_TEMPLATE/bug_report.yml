@@ -113,20 +113,20 @@ body:
       placeholder: |
         - AICR version (CLI `aicr version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
-        - Platform (eks/gke/aks/self-managed):
+        - Platform (eks/gke/aks/oke/kind/lke/other):
         - Kubernetes version:
         - OS (ubuntu/cos/other) + version:
         - Kernel version:
-        - GPU type (h100/gb200/a100/l40/other):
+        - GPU type (h100/gb200/b200/a100/l40/rtx-pro-6000/other):
         - Workload intent (training/inference):
       value: |
         - AICR version (CLI `aicr version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
-        - Platform (eks/gke/aks/self-managed):
+        - Platform (eks/gke/aks/oke/kind/lke/other):
         - Kubernetes version:
         - OS (ubuntu/cos/other) + version:
         - Kernel version:
-        - GPU type (h100/gb200/a100/l40/other):
+        - GPU type (h100/gb200/b200/a100/l40/rtx-pro-6000/other):
         - Workload intent (training/inference):
     validations:
       required: true

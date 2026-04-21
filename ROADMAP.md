@@ -71,7 +71,7 @@ Expand recipe coverage for MVP platforms and accelerators.
 
 Validate bundler output deploys successfully on target platforms.
 
-| Platform | Script Deploy | ArgoCD Deploy |
+| Platform | Script Deploy | Argo CD Deploy |
 |----------|---------------|---------------|
 | EKS | Not validated | Not validated |
 | GKE | Not validated | Not validated |
@@ -184,7 +184,7 @@ Delivered capabilities (reference only).
 - **Snapshot-to-recipe transformation** — `ExtractCriteriaFromSnapshot` in `pkg/recipe/snapshot.go`
 - **Monitoring components** — kube-prometheus-stack, prometheus-adapter, nvsentinel, ephemeral-storage-metrics in registry; monitoring-hpa overlay
 - **Skyhook Ubuntu integration** — skyhook-operator + skyhook-customizations with H100 tuning manifest
-- **ArgoCD deployer** — `pkg/bundler/deployer/argocd/` alongside Helm deployer
+- **Argo CD deployer** — `pkg/bundler/deployer/argocd/` alongside Helm deployer
 - **Validation framework** — Four-phase validation (readiness, deployment, performance, conformance)
 
 ## Revision History

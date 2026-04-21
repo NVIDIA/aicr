@@ -55,7 +55,7 @@ No cluster needed. All tests receive `AICR_BIN` and `REPO_ROOT` from the environ
 | Test | Replaces | What it tests |
 |------|----------|---------------|
 | `cli/recipe-generation` | `generate_recipe()` in `tools/e2e` | Recipe generation via query-mode flags, structural assertion |
-| `cli/bundle-variants` | `run_bundle_tests()` in `tools/e2e` | All bundle flag combinations: node selectors, tolerations, value overrides, ArgoCD deployer |
+| `cli/bundle-variants` | `run_bundle_tests()` in `tools/e2e` | All bundle flag combinations: node selectors, tolerations, value overrides, Argo CD deployer |
 | `cli/bundle-scheduling` | `test_cli_bundle()` scheduling in `tests/e2e/run.sh` | Scheduling injection at correct Helm value paths |
 | `cli/cuj1-training` | `test_cuj1()` in `tools/e2e` | Full CUJ1 journey: recipe with kubeflow, validate, bundle, multi-phase |
 | `cli/criteria-file` | `test_criteria_file_flag()` in `tools/e2e` | Valid YAML/JSON criteria, CLI overrides, invalid files, partial criteria |

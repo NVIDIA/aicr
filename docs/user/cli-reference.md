@@ -162,7 +162,7 @@ aicr snapshot \
   --output cluster-report.yaml
 ```
 
-**Custom Templates:**
+#### Custom Templates
 
 The `--template` flag enables custom output formatting using Go templates with [Sprig functions](https://masterminds.github.io/sprig/). Templates receive the full Snapshot struct:
 
@@ -194,7 +194,7 @@ cluster:
 
 See `examples/templates/snapshot-template.md.tmpl` for a complete example template that generates a concise cluster report.
 
-**Agent Deployment Mode:**
+#### Agent Deployment Mode
 
 When running against a cluster, AICR deploys a Kubernetes Job to capture the snapshot:
 
@@ -216,9 +216,7 @@ When running against a cluster, AICR deploys a Kubernetes Job to capture the sna
 - Cluster admin permissions (for RBAC creation)
 - GPU nodes with nvidia-smi (for GPU metrics)
 
-```
-
-**ConfigMap Output:**
+#### ConfigMap Output
 
 When using ConfigMap URIs (`cm://namespace/name`), the snapshot is stored directly in Kubernetes:
 
@@ -271,6 +269,7 @@ aicr recipe [flags]
 **Modes:**
 
 #### Criteria File Mode (Recommended)
+
 Generate recipes using a Kubernetes-style criteria file:
 
 **Flags:**
@@ -308,13 +307,14 @@ aicr recipe -c criteria.yaml -o recipe.yaml
 ```
 
 #### Query Mode
+
 Generate recipes using direct system parameters:
 
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, a100, l40 |
+| `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux |
 | `--platform` | | string | Platform/framework type: kubeflow |
@@ -350,6 +350,7 @@ aicr recipe --os ubuntu --gpu h100 --output recipe.yaml
 ```
 
 #### Snapshot Mode
+
 Generate recipes from captured snapshots:
 
 **Flags:**
@@ -440,7 +441,7 @@ All `aicr recipe` flags are supported, plus:
 |------|------|-------------|
 | `--selector` | string | **Required.** Dot-path to the configuration value to extract |
 
-**Selector Syntax:**
+#### Selector Syntax
 
 Uses dot-delimited paths consistent with Helm `--set` and `yq`:
 
@@ -580,25 +581,39 @@ aicr validate [flags]
 - **URL**: HTTP/HTTPS URL (`https://example.com/recipe.yaml`)
 - **ConfigMap**: Kubernetes ConfigMap URI (`cm://namespace/configmap-name`)
 
-**Validation Phases:**
+#### Validation Phases
 
 Validation can be run in different phases to validate different aspects of the deployment:
 
 | Phase | Description | When to Run |
 |-------|-------------|-------------|
-| `deployment` | Validates component deployment health and expected resources | After deploying components |
+| `deployment` | Validates component deployment completeness plus post-install GPU readiness signals (see below) | After deploying components |
 | `performance` | Validates system performance and network fabric health | After components are running |
 | `conformance` | Validates workload-specific requirements and conformance | Before running production workloads |
 | `all` | Runs all phases sequentially with dependency logic | Complete end-to-end validation |
 
 > **Note:** Readiness constraints (K8s version, OS, kernel) are always evaluated implicitly before any phase runs. If readiness fails, validation stops before deploying any Jobs.
 
+**Deployment phase checks:**
+
+The `deployment` phase verifies that the cluster is actually ready for GPU workloads — not just that install commands returned successfully. It covers:
+
+- Enabled component namespaces are `Active`.
+- Declared `expectedResources` (Deployments, DaemonSets, etc.) exist and are healthy.
+- When `skyhook-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored. If no Skyhook names can be extracted from those `ManifestFiles`, deployment validation fails closed as a recipe/configuration error instead of skipping.
+- When `gpu-operator` is enabled: `ClusterPolicy` reports `status.state == ready`.
+- When `nvidia-dra-driver-gpu` is enabled: the kubelet-plugin DaemonSet is ready. Discovery is by the upstream chart's role-suffix convention — the validator finds the single DaemonSet in the component namespace whose name ends in `-kubelet-plugin`, so custom `fullnameOverride` values are handled automatically.
+
+**Graceful skip:** If a component is declared in the recipe but its CRD is not yet registered on the cluster (e.g., fresh cluster, operator chart not installed), the corresponding readiness check is skipped rather than failing. Once the CRD is present, the check runs and a missing CR is treated as a real failure — for example, if the `gpu-operator` CRD is registered but no `ClusterPolicy` CR exists, deployment validation fails with a "CR missing" diagnostic rather than silently passing. Other errors still fail closed: an RBAC denial on `skyhooks.skyhook.nvidia.com` returns HTTP 403 (not a `NoMatch`), so the validator surfaces it as a failure instead of silently skipping the Skyhook check.
+
+**Day-N re-verification:** Because this is a read-only check against live cluster state, re-running `aicr validate --phase deployment` after scale-up, upgrade, or other runtime changes is safe and answers the same "is this cluster ready for GPU workloads now?" question.
+
 **Phase Dependencies:**
 - Phases run sequentially when using `--phase all`
 - If a phase fails, subsequent phases are skipped
 - Use individual phases for targeted validation during specific deployment stages
 
-**Constraint Format:**
+#### Constraint Format
 
 Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 
@@ -610,7 +625,8 @@ Constraints use fully qualified measurement paths: `{Type}.{Subtype}.{Key}`
 | `OS.sysctl./proc/sys/kernel/osrelease` | Kernel version |
 | `GPU.info.type` | GPU hardware type |
 
-**Supported Operators:**
+#### Supported Operators
+
 | Operator | Example | Description |
 |----------|---------|-------------|
 | `>=` | `>= 1.30` | Greater than or equal (version comparison) |
@@ -682,7 +698,7 @@ aicr validate \
   --toleration gpu-type=h100:NoSchedule
 ```
 
-**Workload Scheduling:**
+#### Workload Scheduling
 
 The `--node-selector` and `--toleration` flags control scheduling for **validation
 workloads** — the inner pods that validators create to test cluster functionality
@@ -742,7 +758,7 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "status": "passed",
         "duration": 0,
         "suite": ["deployment"],
-        "stdout": ["All expected resources are healthy"]
+        "stdout": ["All deployment resources and required readiness signals are healthy"]
       },
       {
         "name": "nccl-all-reduce-bw",
@@ -803,8 +819,8 @@ aicr bundle [flags]
 |---------------------------------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path to recipe file (required) |
 | `--output` | `-o` | string | Output directory (default: current dir) |
-| `--deployer` | `-d` | string | Deployment method: helm (default), argocd |
-| `--repo` | | string | Git repository URL for ArgoCD applications (only used with `--deployer argocd`) |
+| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, or `argocd-helm` |
+| `--repo` | | string | Git repository URL for Argo CD applications (used with `--deployer argocd` and `--deployer argocd-helm`) |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -822,7 +838,7 @@ aicr bundle [flags]
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 
-**Node Scheduling:**
+#### Node Scheduling
 
 The `--accelerated-node-selector` and `--accelerated-node-toleration` flags control scheduling for GPU-specific components:
 
@@ -862,15 +878,15 @@ This results in:
 - Each component creates a subdirectory in the output directory
 - Components are deployed in the order specified by `deploymentOrder` in the recipe
 
-**Deployment Methods (`--deployer`):**
+#### Deployment Methods (`--deployer`)
 
 The `--deployer` flag controls how deployment artifacts are generated:
 
 | Method | Description |
 |--------|-------------|
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
-| `argocd` | Generates ArgoCD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
-| `argocd-helm` | Generates a Helm chart app-of-apps for ArgoCD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
+| `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
+| `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
@@ -879,9 +895,9 @@ The `--deployer` flag controls how deployment artifacts are generated:
 All deployers respect the `deploymentOrder` field from the recipe, ensuring components are installed in the correct sequence:
 
 - **Helm**: Components listed in README in deployment order
-- **ArgoCD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
+- **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
 
-**Value Overrides (`--set`):**
+#### Value Overrides (`--set`)
 
 Override any value in the generated bundle files using dot notation:
 
@@ -970,10 +986,10 @@ aicr bundle -r recipe.yaml --attest -o ./bundles
 # In GitHub Actions (OIDC token detected automatically)
 aicr bundle -r recipe.yaml --attest -o ./bundles
 
-# Generate ArgoCD Application manifests for GitOps
+# Generate Argo CD Application manifests for GitOps
 aicr bundle -r recipe.yaml --deployer argocd -o ./bundles
 
-# ArgoCD with Git repository URL (avoids placeholder in app-of-apps.yaml)
+# Argo CD with Git repository URL (avoids placeholder in app-of-apps.yaml)
 aicr bundle -r recipe.yaml --deployer argocd \
   --repo https://github.com/my-org/my-gitops-repo.git \
   -o ./bundles
@@ -984,7 +1000,7 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-**Dynamic Install-Time Values (`--dynamic`):**
+#### Dynamic Install-Time Values
 
 The `--dynamic` flag declares value paths that are cluster-specific and should be provided at install time rather than baked into the bundle at build time. This enables building a single bundle that can be deployed to multiple clusters with different configurations.
 
@@ -994,6 +1010,8 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 |----------|------|---------|
 | Cluster-specific value (varies per deployment) | `--dynamic` | `--dynamic alloy:clusterName` |
 | Static override (same for all deployments of this bundle) | `--set` | `--set gpuoperator:driver.version=580.105.08` |
+
+> **Attestation scope:** Dynamic values are supplied at install time and are **not covered by `--attest`**. Attestation binds the shipped bundle (defaults and stubs), not operator-provided overrides. If you need to constrain dynamic values at deploy time, use admission control or Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -1015,7 +1033,7 @@ helm upgrade --install gpu-operator ... \
 
 Before deploying, fill in `cluster-values.yaml` with cluster-specific values.
 
-**ArgoCD deployer behavior:**
+**Argo CD deployer behavior:**
 
 The `--deployer argocd-helm` generates a Helm chart app-of-apps where all values are overridable at install time. Static values are baked into the chart as files; dynamic overrides are merged on top at render time. Use `--dynamic` to pre-populate specific paths in the root `values.yaml`:
 
@@ -1044,13 +1062,13 @@ aicr bundle -r recipe.yaml \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# ArgoCD Helm chart: all values overridable, --dynamic pre-populates specific paths
+# Argo CD Helm chart: all values overridable, --dynamic pre-populates specific paths
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   --dynamic alloy:clusterName \
   -o ./bundles
 
-# ArgoCD Helm chart: without --dynamic, still fully overridable via helm --set
+# Argo CD Helm chart: without --dynamic, still fully overridable via helm --set
 aicr bundle -r recipe.yaml \
   --deployer argocd-helm \
   -o ./bundles
@@ -1068,13 +1086,13 @@ bundles/
 └── ...
 ```
 
-**ArgoCD Helm chart structure with `--dynamic`:**
+**Argo CD Helm chart structure with `--dynamic`:**
 ```
 bundles/
 ├── Chart.yaml                     # Helm chart metadata
 ├── values.yaml                    # Dynamic values only (defaults from recipe, override per cluster)
 ├── templates/
-│   ├── alloy.yaml                 # ArgoCD Application template with helm.values
+│   ├── alloy.yaml                 # Argo CD Application template with helm.values
 │   └── gpu-operator.yaml
 └── README.md
 ```
@@ -1099,7 +1117,7 @@ bundles/
     └── README.md
 ```
 
-**ArgoCD bundle structure** (with `--deployer argocd`):
+**Argo CD bundle structure** (with `--deployer argocd`):
 ```
 bundles/
 ├── app-of-apps.yaml               # Parent Application (bundle root)
@@ -1108,12 +1126,12 @@ bundles/
 │   ├── values.yaml                # Helm values for GPU Operator
 │   ├── manifests/                 # Additional manifests (ClusterPolicy, etc.)
 │   └── argocd/
-│       └── application.yaml       # ArgoCD Application (sync-wave: 0)
+│       └── application.yaml       # Argo CD Application (sync-wave: 0)
 ├── network-operator/
 │   ├── values.yaml                # Helm values for Network Operator
 │   └── argocd/
-│       └── application.yaml       # ArgoCD Application (sync-wave: 1)
-└── README.md                      # ArgoCD deployment guide
+│       └── application.yaml       # Argo CD Application (sync-wave: 1)
+└── README.md                      # Argo CD deployment guide
 ```
 
 **Day 2 Options:**
@@ -1209,7 +1227,7 @@ aicr bundle -r recipe.yaml \
   -o ./bundles
 ```
 
-ArgoCD Applications use multi-source to:
+Argo CD Applications use multi-source to:
 1. Pull Helm charts from upstream repositories
 2. Apply values.yaml from your GitOps repository
 3. Deploy additional manifests from component's manifests/ directory (if present)
@@ -1228,7 +1246,16 @@ When `--attest` is passed, the bundle command performs five steps:
 
 Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
 
-**Deploying a bundle:**
+Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
+
+##### Attestation Scope
+
+Attestation binds the **shipped bundle** — defaults, dynamic-value stubs, and any external `--data` files copied into the bundle. It does **not** bind install-time values supplied via `helm --set`, a user-provided `-f extra.yaml`, or Argo `Application.spec.source.helm.parameters`. That boundary is intentional: dynamic values are the operator's domain by design.
+
+If you need to enforce specific install-time values (e.g., pinning `driver.version`), that is a **policy concern**, not an attestation one. Use admission control (Kyverno, Gatekeeper) or Argo sync hooks to reject deployments that violate the policy. `aicr verify` checks bundle integrity and provenance; it does not evaluate install-time value constraints.
+
+#### Deploying a bundle
+
 ```shell
 # Navigate to bundle
 cd bundles/gpu-operator
@@ -1254,11 +1281,13 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 | Flag | Description |
 |------|-------------|
-| `--no-wait` | Skip `helm --wait` for each component (keeps `--timeout` for hooks) |
+| `--no-wait` | Skip Helm chart-level wait (`helm --wait`) where AICR uses it. Keeps `--timeout` for hooks. |
 | `--best-effort` | Continue past individual component failures instead of exiting |
 | `--retries N` | Retry failed helm/kubectl operations N times with exponential backoff (default: 5) |
 
-Unknown flags are rejected with an error to catch typos (e.g., `--best-effrot`).
+Unknown flags are rejected with an error to catch typos (e.g., `--best-effort`).
+
+> **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Skyhook node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
 
 **Retry behavior:**
 
@@ -1276,7 +1305,7 @@ After `helm install`, the same manifests are re-applied as post-install to ensur
 
 Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness.
 
-**DRA kubelet plugin registration:**
+##### DRA kubelet plugin registration
 
 After installing `nvidia-dra-driver-gpu`, the script automatically restarts the DRA kubelet plugin daemonset. This is a best-effort mitigation for a known issue: after uninstall/reinstall, the kubelet's plugin watcher (`fsnotify`) may not detect new registration sockets, causing `DRA driver gpu.nvidia.com is not registered` errors.
 
@@ -1302,6 +1331,7 @@ The undeploy script removes components in reverse deployment order.
 |------|-------------|
 | `--keep-namespaces` | Skip namespace deletion after component removal |
 | `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
+| `--skip-preflight` | Skip pre-flight CRD/finalizer checks (use with caution) |
 | `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
 
 **PVC preservation (default):**
@@ -1342,7 +1372,7 @@ aicr verify <bundle-dir> [flags]
 | `--certificate-identity-regexp` | string | | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--format` | string | `text` | Output format: `text` or `json`. |
 
-**Trust Levels:**
+#### Trust Levels
 
 | Level | Name | Criteria |
 |-------|------|----------|
@@ -1351,7 +1381,7 @@ aicr verify <bundle-dir> [flags]
 | 2 | `unverified` | Checksums valid, `--attest` was not used when creating the bundle |
 | 1 | `unknown` | Missing or invalid checksums |
 
-**Verification steps:**
+#### Verification steps
 
 1. **Checksums** — verifies all content files match `checksums.txt`
 2. **Bundle attestation** — cryptographic signature verified against Sigstore trusted root
@@ -1559,11 +1589,13 @@ AICR respects standard environment variables:
 ## Common Usage Patterns
 
 ### Quick Recipe Generation
+
 ```shell
 aicr recipe --os ubuntu --accelerator h100 | jq '.componentRefs[]'
 ```
 
 ### Save All Steps
+
 ```shell
 aicr snapshot -o snapshot.yaml
 aicr recipe -s snapshot.yaml --intent training -o recipe.yaml
@@ -1571,6 +1603,7 @@ aicr bundle -r recipe.yaml -o ./bundles
 ```
 
 ### JSON Processing
+
 ```shell
 # Extract GPU Operator version from recipe
 aicr recipe --os ubuntu --accelerator h100 --format json | \
@@ -1582,6 +1615,7 @@ aicr recipe --os ubuntu --accelerator h100 --format json | \
 ```
 
 ### Multiple Environments
+
 ```shell
 # Generate recipes for different cloud providers
 for service in eks gke aks; do
@@ -1593,6 +1627,7 @@ done
 ## Troubleshooting
 
 ### Snapshot Fails
+
 ```shell
 # Check GPU drivers
 nvidia-smi
@@ -1605,6 +1640,7 @@ aicr --debug snapshot
 ```
 
 ### Recipe Not Found
+
 ```shell
 # Query parameters may not match any overlay
 # Try broader query:
@@ -1612,6 +1648,7 @@ aicr recipe --os ubuntu --gpu h100
 ```
 
 ### Bundle Generation Fails
+
 ```shell
 # Verify recipe file
 cat recipe.yaml

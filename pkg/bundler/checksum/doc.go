@@ -15,7 +15,7 @@
 // Package checksum provides SHA256 checksum generation for bundle verification.
 //
 // Used by component bundlers (GPU Operator, Network Operator, etc.) and deployers
-// (Helm, ArgoCD) to generate checksums.txt files for integrity verification.
+// (Helm, Argo CD) to generate checksums.txt files for integrity verification.
 //
 // Usage:
 //

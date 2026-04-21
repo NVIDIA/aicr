@@ -16,6 +16,7 @@ package component
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -54,341 +55,6 @@ type TestStruct struct {
 	}
 }
 
-func TestApplyValueOverrides_SimpleFields(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		want      TestStruct
-		wantErr   bool
-	}{
-		{
-			name: "set string field",
-			overrides: map[string]string{
-				"name": "test-value",
-			},
-			want: TestStruct{
-				Name: "test-value",
-			},
-		},
-		{
-			name: "set enabled field",
-			overrides: map[string]string{
-				"enabled": "true",
-			},
-			want: TestStruct{
-				Enabled: "true",
-			},
-		},
-		{
-			name: "set multiple fields",
-			overrides: map[string]string{
-				"name":    "test",
-				"enabled": "false",
-			},
-			want: TestStruct{
-				Name:    "test",
-				Enabled: "false",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := TestStruct{}
-			err := ApplyValueOverrides(&got, tt.overrides)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyValueOverrides() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if got.Name != tt.want.Name {
-				t.Errorf("Name = %v, want %v", got.Name, tt.want.Name)
-			}
-			if got.Enabled != tt.want.Enabled {
-				t.Errorf("Enabled = %v, want %v", got.Enabled, tt.want.Enabled)
-			}
-		})
-	}
-}
-
-func TestApplyValueOverrides_NestedFields(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		want      TestStruct
-		wantErr   bool
-	}{
-		{
-			name: "set nested field",
-			overrides: map[string]string{
-				"driver.version": "550.127",
-			},
-			want: TestStruct{
-				Driver: struct {
-					Version string
-					Enabled string
-				}{
-					Version: "550.127",
-				},
-			},
-		},
-		{
-			name: "set multiple nested fields",
-			overrides: map[string]string{
-				"driver.version": "550.127",
-				"driver.enabled": "true",
-			},
-			want: TestStruct{
-				Driver: struct {
-					Version string
-					Enabled string
-				}{
-					Version: "550.127",
-					Enabled: "true",
-				},
-			},
-		},
-		{
-			name: "set deeply nested field",
-			overrides: map[string]string{
-				"dcgm.exporter.version": "3.3.11",
-				"dcgm.exporter.enabled": "true",
-			},
-			want: TestStruct{
-				DCGM: struct {
-					Exporter struct {
-						Version string
-						Enabled string
-					}
-				}{
-					Exporter: struct {
-						Version string
-						Enabled string
-					}{
-						Version: "3.3.11",
-						Enabled: "true",
-					},
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := TestStruct{}
-			err := ApplyValueOverrides(&got, tt.overrides)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyValueOverrides() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.want.Driver.Version != "" && got.Driver.Version != tt.want.Driver.Version {
-				t.Errorf("Driver.Version = %v, want %v", got.Driver.Version, tt.want.Driver.Version)
-			}
-			if tt.want.Driver.Enabled != "" && got.Driver.Enabled != tt.want.Driver.Enabled {
-				t.Errorf("Driver.Enabled = %v, want %v", got.Driver.Enabled, tt.want.Driver.Enabled)
-			}
-			if tt.want.DCGM.Exporter.Version != "" && got.DCGM.Exporter.Version != tt.want.DCGM.Exporter.Version {
-				t.Errorf("DCGM.Exporter.Version = %v, want %v", got.DCGM.Exporter.Version, tt.want.DCGM.Exporter.Version)
-			}
-		})
-	}
-}
-
-func TestApplyValueOverrides_AcronymFields(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		want      TestStruct
-		wantErr   bool
-	}{
-		{
-			name: "set MIG strategy",
-			overrides: map[string]string{
-				"mig.strategy": "mixed",
-			},
-			want: TestStruct{
-				MIG: struct {
-					Strategy string
-				}{
-					Strategy: "mixed",
-				},
-			},
-		},
-		{
-			name: "set GPU operator version",
-			overrides: map[string]string{
-				"gpu-operator.version": "25.3.3",
-			},
-			want: TestStruct{
-				GPUOperator: struct {
-					Version string
-				}{
-					Version: "25.3.3",
-				},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := TestStruct{}
-			err := ApplyValueOverrides(&got, tt.overrides)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyValueOverrides() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.want.MIG.Strategy != "" && got.MIG.Strategy != tt.want.MIG.Strategy {
-				t.Errorf("MIG.Strategy = %v, want %v", got.MIG.Strategy, tt.want.MIG.Strategy)
-			}
-			if tt.want.GPUOperator.Version != "" && got.GPUOperator.Version != tt.want.GPUOperator.Version {
-				t.Errorf("GPUOperator.Version = %v, want %v", got.GPUOperator.Version, tt.want.GPUOperator.Version)
-			}
-		})
-	}
-}
-
-func TestApplyValueOverrides_Errors(t *testing.T) {
-	tests := []struct {
-		name      string
-		target    any
-		overrides map[string]string
-		wantErr   bool
-		errMsg    string
-	}{
-		{
-			name:   "non-pointer target",
-			target: TestStruct{},
-			overrides: map[string]string{
-				"name": "test",
-			},
-			wantErr: true,
-			errMsg:  "must be a pointer",
-		},
-		{
-			name:      "nil overrides",
-			target:    &TestStruct{},
-			overrides: nil,
-			wantErr:   false,
-		},
-		{
-			name:      "empty overrides",
-			target:    &TestStruct{},
-			overrides: map[string]string{},
-			wantErr:   false,
-		},
-		{
-			name:   "non-existent field",
-			target: &TestStruct{},
-			overrides: map[string]string{
-				"nonexistent": "value",
-			},
-			wantErr: true,
-			errMsg:  "field not found",
-		},
-		{
-			name:   "non-existent nested field",
-			target: &TestStruct{},
-			overrides: map[string]string{
-				"driver.nonexistent": "value",
-			},
-			wantErr: true,
-			errMsg:  "field not found",
-		},
-		{
-			name:   "traverse through non-struct field",
-			target: &TestStruct{},
-			overrides: map[string]string{
-				"name.sub": "value",
-			},
-			wantErr: true,
-			errMsg:  "cannot traverse non-struct field",
-		},
-		{
-			name:   "pointer to non-struct",
-			target: new(string),
-			overrides: map[string]string{
-				"anything": "value",
-			},
-			wantErr: true,
-			errMsg:  "must be a pointer to a struct",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ApplyValueOverrides(tt.target, tt.overrides)
-
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyValueOverrides() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-
-			if tt.wantErr && tt.errMsg != "" {
-				if err == nil || !containsSubstring(err.Error(), tt.errMsg) {
-					t.Errorf("Expected error containing %q, got %v", tt.errMsg, err)
-				}
-			}
-		})
-	}
-}
-
-func TestApplyValueOverrides_CaseInsensitive(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		want      TestStruct
-	}{
-		{
-			name: "lowercase field name",
-			overrides: map[string]string{
-				"name": "test",
-			},
-			want: TestStruct{
-				Name: "test",
-			},
-		},
-		{
-			name: "uppercase field name",
-			overrides: map[string]string{
-				"NAME": "test",
-			},
-			want: TestStruct{
-				Name: "test",
-			},
-		},
-		{
-			name: "mixed case field name",
-			overrides: map[string]string{
-				"NaMe": "test",
-			},
-			want: TestStruct{
-				Name: "test",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := TestStruct{}
-			err := ApplyValueOverrides(&got, tt.overrides)
-
-			if err != nil {
-				t.Errorf("ApplyValueOverrides() unexpected error = %v", err)
-				return
-			}
-
-			if got.Name != tt.want.Name {
-				t.Errorf("Name = %v, want %v", got.Name, tt.want.Name)
-			}
-		})
-	}
-}
-
 // Test with actual GPU Operator-like struct
 type GPUOperatorValues struct {
 	EnableDriver string
@@ -409,107 +75,6 @@ type GPUOperatorValues struct {
 	DCGM struct {
 		Version string
 	}
-}
-
-func TestApplyValueOverrides_GPUOperatorScenarios(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		verify    func(t *testing.T, values *GPUOperatorValues)
-	}{
-		{
-			name: "gdrcopy enabled override",
-			overrides: map[string]string{
-				"gdrcopy.enabled": "false",
-			},
-			verify: func(t *testing.T, values *GPUOperatorValues) {
-				if values.GDRCopy.Enabled != "false" {
-					t.Errorf("GDRCopy.Enabled = %v, want false", values.GDRCopy.Enabled)
-				}
-			},
-		},
-		{
-			name: "gds enabled override",
-			overrides: map[string]string{
-				"gds.enabled": "true",
-			},
-			verify: func(t *testing.T, values *GPUOperatorValues) {
-				// Should match either EnableGDS or GDS.Enabled
-				if values.EnableGDS != "true" && values.GDS.Enabled != "true" {
-					t.Errorf("GDS not enabled: EnableGDS=%v, GDS.Enabled=%v", values.EnableGDS, values.GDS.Enabled)
-				}
-			},
-		},
-		{
-			name: "driver version override",
-			overrides: map[string]string{
-				"driver.version": "570.86.16",
-			},
-			verify: func(t *testing.T, values *GPUOperatorValues) {
-				if values.Driver.Version != "570.86.16" {
-					t.Errorf("Driver.Version = %v, want 570.86.16", values.Driver.Version)
-				}
-			},
-		},
-		{
-			name: "mig strategy override",
-			overrides: map[string]string{
-				"mig.strategy": "mixed",
-			},
-			verify: func(t *testing.T, values *GPUOperatorValues) {
-				if values.MIG.Strategy != "mixed" {
-					t.Errorf("MIG.Strategy = %v, want mixed", values.MIG.Strategy)
-				}
-			},
-		},
-		{
-			name: "multiple overrides",
-			overrides: map[string]string{
-				"gdrcopy.enabled": "false",
-				"gds.enabled":     "true",
-				"driver.version":  "570.86.16",
-				"mig.strategy":    "mixed",
-			},
-			verify: func(t *testing.T, values *GPUOperatorValues) {
-				if values.GDRCopy.Enabled != "false" {
-					t.Errorf("GDRCopy.Enabled = %v, want false", values.GDRCopy.Enabled)
-				}
-				if values.Driver.Version != "570.86.16" {
-					t.Errorf("Driver.Version = %v, want 570.86.16", values.Driver.Version)
-				}
-				if values.MIG.Strategy != "mixed" {
-					t.Errorf("MIG.Strategy = %v, want mixed", values.MIG.Strategy)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			values := &GPUOperatorValues{}
-			err := ApplyValueOverrides(values, tt.overrides)
-
-			if err != nil {
-				t.Fatalf("ApplyValueOverrides() unexpected error = %v", err)
-			}
-
-			tt.verify(t, values)
-		})
-	}
-}
-
-// containsSubstring checks if string contains substring (renamed to avoid collision)
-func containsSubstring(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsSubstringHelper(s, substr))
-}
-
-func containsSubstringHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 func TestApplyNodeSelectorOverrides(t *testing.T) {
@@ -748,125 +313,6 @@ func TestTolerationsToPodSpec(t *testing.T) {
 		})
 	}
 }
-
-func TestApplyMapOverrides(t *testing.T) {
-	tests := []struct {
-		name      string
-		target    map[string]any
-		overrides map[string]string
-		wantErr   bool
-		verify    func(t *testing.T, target map[string]any)
-	}{
-		{
-			name:   "sets simple value",
-			target: make(map[string]any),
-			overrides: map[string]string{
-				"key": "value",
-			},
-			wantErr: false,
-			verify: func(t *testing.T, target map[string]any) {
-				if target["key"] != "value" {
-					t.Errorf("key = %v, want value", target["key"])
-				}
-			},
-		},
-		{
-			name:   "sets nested value",
-			target: make(map[string]any),
-			overrides: map[string]string{
-				"driver.version": "550.0.0",
-			},
-			wantErr: false,
-			verify: func(t *testing.T, target map[string]any) {
-				driver, ok := target["driver"].(map[string]any)
-				if !ok {
-					t.Fatal("driver not found or wrong type")
-				}
-				if driver["version"] != "550.0.0" {
-					t.Errorf("driver.version = %v, want 550.0.0", driver["version"])
-				}
-			},
-		},
-		{
-			name:   "sets deeply nested value",
-			target: make(map[string]any),
-			overrides: map[string]string{
-				"dcgm.exporter.config.enabled": "true",
-			},
-			wantErr: false,
-			verify: func(t *testing.T, target map[string]any) {
-				dcgm := target["dcgm"].(map[string]any)
-				exporter := dcgm["exporter"].(map[string]any)
-				config := exporter["config"].(map[string]any)
-				if config["enabled"] != true {
-					t.Errorf("dcgm.exporter.config.enabled = %v, want true", config["enabled"])
-				}
-			},
-		},
-		{
-			name: "merges with existing map",
-			target: map[string]any{
-				"driver": map[string]any{
-					"enabled": true,
-				},
-			},
-			overrides: map[string]string{
-				"driver.version": "550.0.0",
-			},
-			wantErr: false,
-			verify: func(t *testing.T, target map[string]any) {
-				driver := target["driver"].(map[string]any)
-				if driver["enabled"] != true {
-					t.Error("existing enabled field was lost")
-				}
-				if driver["version"] != "550.0.0" {
-					t.Errorf("driver.version = %v, want 550.0.0", driver["version"])
-				}
-			},
-		},
-		{
-			name:      "nil target returns error",
-			target:    nil,
-			overrides: map[string]string{"key": "value"},
-			wantErr:   true,
-		},
-		{
-			name:      "empty overrides is no-op",
-			target:    make(map[string]any),
-			overrides: map[string]string{},
-			wantErr:   false,
-			verify: func(t *testing.T, target map[string]any) {
-				if len(target) != 0 {
-					t.Error("expected empty target")
-				}
-			},
-		},
-		{
-			name: "path segment exists but is not a map",
-			target: map[string]any{
-				"driver": "string-value",
-			},
-			overrides: map[string]string{
-				"driver.version": "550.0.0",
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ApplyMapOverrides(tt.target, tt.overrides)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ApplyMapOverrides() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.verify != nil && !tt.wantErr {
-				tt.verify(t, tt.target)
-			}
-		})
-	}
-}
-
 func TestConvertMapValue(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -920,370 +366,161 @@ func TestConvertMapValue(t *testing.T) {
 	}
 }
 
-func TestParseBool(t *testing.T) {
+func TestApplyMapOverrides(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		want    bool
-		wantErr bool
+		name       string
+		target     map[string]any
+		overrides  map[string]string
+		wantErr    bool
+		wantErrMsg string
+		verify     func(t *testing.T, got map[string]any)
 	}{
-		{name: "true", input: "true", want: true},
-		{name: "True", input: "True", want: true},
-		{name: "TRUE", input: "TRUE", want: true},
-		{name: "yes", input: "yes", want: true},
-		{name: "1", input: "1", want: true},
-		{name: "on", input: "on", want: true},
-		{name: "enabled", input: "enabled", want: true},
-		{name: "false", input: "false", want: false},
-		{name: "False", input: "False", want: false},
-		{name: "FALSE", input: "FALSE", want: false},
-		{name: "no", input: "no", want: false},
-		{name: "0", input: "0", want: false},
-		{name: "off", input: "off", want: false},
-		{name: "disabled", input: "disabled", want: false},
-		{name: "invalid", input: "maybe", wantErr: true},
-		{name: "empty", input: "", wantErr: true},
+		{
+			name:      "flat override with version string",
+			target:    map[string]any{"driver": map[string]any{"version": "570.86.16"}},
+			overrides: map[string]string{"driver.version": "580.86.16"},
+			verify: func(t *testing.T, got map[string]any) {
+				driver := got["driver"].(map[string]any)
+				if driver["version"] != "580.86.16" {
+					t.Errorf("driver.version = %v (%T), want \"580.86.16\"", driver["version"], driver["version"])
+				}
+			},
+		},
+		{
+			name:      "creates intermediate maps",
+			target:    map[string]any{},
+			overrides: map[string]string{"a.b.c": "value"},
+			verify: func(t *testing.T, got map[string]any) {
+				a, ok := got["a"].(map[string]any)
+				if !ok {
+					t.Fatalf("a is not a map: %T", got["a"])
+				}
+				b, ok := a["b"].(map[string]any)
+				if !ok {
+					t.Fatalf("a.b is not a map: %T", a["b"])
+				}
+				if b["c"] != "value" {
+					t.Errorf("a.b.c = %v, want \"value\"", b["c"])
+				}
+			},
+		},
+		{
+			name:      "type conversion",
+			target:    map[string]any{},
+			overrides: map[string]string{"b": "true", "i": "42", "f": "3.14", "s": "hello"},
+			verify: func(t *testing.T, got map[string]any) {
+				if got["b"] != true {
+					t.Errorf("b = %v (%T), want true", got["b"], got["b"])
+				}
+				if got["i"] != int64(42) {
+					t.Errorf("i = %v (%T), want int64(42)", got["i"], got["i"])
+				}
+				if got["f"] != 3.14 {
+					t.Errorf("f = %v (%T), want 3.14", got["f"], got["f"])
+				}
+				if got["s"] != "hello" {
+					t.Errorf("s = %v, want \"hello\"", got["s"])
+				}
+			},
+		},
+		{
+			name:      "multiple overrides on distinct paths",
+			target:    map[string]any{},
+			overrides: map[string]string{"driver.version": "v580", "mig.strategy": "mixed"},
+			verify: func(t *testing.T, got map[string]any) {
+				if got["driver"].(map[string]any)["version"] != "v580" {
+					t.Errorf("driver.version = %v", got["driver"])
+				}
+				if got["mig"].(map[string]any)["strategy"] != "mixed" {
+					t.Errorf("mig.strategy = %v", got["mig"])
+				}
+			},
+		},
+		{
+			name:      "empty overrides is a no-op",
+			target:    map[string]any{"keep": "me"},
+			overrides: map[string]string{},
+			verify: func(t *testing.T, got map[string]any) {
+				if got["keep"] != "me" {
+					t.Errorf("existing key mutated: %v", got)
+				}
+				if len(got) != 1 {
+					t.Errorf("map gained keys: %v", got)
+				}
+			},
+		},
+		{
+			name:      "nil overrides is a no-op",
+			target:    map[string]any{"keep": "me"},
+			overrides: nil,
+			verify: func(t *testing.T, got map[string]any) {
+				if len(got) != 1 || got["keep"] != "me" {
+					t.Errorf("unexpected mutation: %v", got)
+				}
+			},
+		},
+		{
+			name:       "nil target rejected",
+			target:     nil,
+			overrides:  map[string]string{"a": "b"},
+			wantErr:    true,
+			wantErrMsg: "target map cannot be nil",
+		},
+		{
+			name: "strict mode rejects non-map intermediate segment",
+			target: map[string]any{
+				"driver": "not-a-map",
+			},
+			overrides:  map[string]string{"driver.version": "580"},
+			wantErr:    true,
+			wantErrMsg: "exists but is not a map",
+		},
+		{
+			name: "error accumulates across overrides",
+			target: map[string]any{
+				"driver": "not-a-map",
+				"mig":    "also-not-a-map",
+			},
+			overrides:  map[string]string{"driver.version": "580", "mig.strategy": "mixed"},
+			wantErr:    true,
+			wantErrMsg: "failed to apply map overrides",
+		},
+		{
+			name:      "single-segment path sets top-level key",
+			target:    map[string]any{},
+			overrides: map[string]string{"enabled": "true"},
+			verify: func(t *testing.T, got map[string]any) {
+				if got["enabled"] != true {
+					t.Errorf("enabled = %v, want true", got["enabled"])
+				}
+			},
+		},
+		{
+			name:      "overwrites existing non-map leaf",
+			target:    map[string]any{"count": int64(1)},
+			overrides: map[string]string{"count": "42"},
+			verify: func(t *testing.T, got map[string]any) {
+				if got["count"] != int64(42) {
+					t.Errorf("count = %v (%T), want int64(42)", got["count"], got["count"])
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseBool(tt.input)
+			err := ApplyMapOverrides(tt.target, tt.overrides)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("parseBool(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Fatalf("ApplyMapOverrides() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.wantErrMsg)
+				}
 				return
 			}
-			if !tt.wantErr && got != tt.want {
-				t.Errorf("parseBool(%q) = %v, want %v", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestSetFieldValue tests the setFieldValue function with various types
-func TestSetFieldValue(t *testing.T) {
-	type testStruct struct {
-		StringField  string
-		BoolField    bool
-		IntField     int
-		Int64Field   int64
-		UintField    uint
-		FloatField   float64
-		Float32Field float32
-	}
-
-	tests := []struct {
-		name      string
-		fieldName string
-		value     string
-		verify    func(t *testing.T, s *testStruct)
-		wantErr   bool
-	}{
-		{
-			name:      "sets string field",
-			fieldName: "StringField",
-			value:     "test-value",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.StringField != "test-value" {
-					t.Errorf("StringField = %v, want test-value", s.StringField)
-				}
-			},
-		},
-		{
-			name:      "sets bool field true",
-			fieldName: "BoolField",
-			value:     "true",
-			verify: func(t *testing.T, s *testStruct) {
-				if !s.BoolField {
-					t.Error("BoolField should be true")
-				}
-			},
-		},
-		{
-			name:      "sets bool field false",
-			fieldName: "BoolField",
-			value:     "false",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.BoolField {
-					t.Error("BoolField should be false")
-				}
-			},
-		},
-		{
-			name:      "sets int field",
-			fieldName: "IntField",
-			value:     "42",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.IntField != 42 {
-					t.Errorf("IntField = %v, want 42", s.IntField)
-				}
-			},
-		},
-		{
-			name:      "sets int64 field",
-			fieldName: "Int64Field",
-			value:     "9223372036854775807",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.Int64Field != 9223372036854775807 {
-					t.Errorf("Int64Field = %v, want max int64", s.Int64Field)
-				}
-			},
-		},
-		{
-			name:      "sets uint field",
-			fieldName: "UintField",
-			value:     "100",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.UintField != 100 {
-					t.Errorf("UintField = %v, want 100", s.UintField)
-				}
-			},
-		},
-		{
-			name:      "sets float64 field",
-			fieldName: "FloatField",
-			value:     "3.14159",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.FloatField != 3.14159 {
-					t.Errorf("FloatField = %v, want 3.14159", s.FloatField)
-				}
-			},
-		},
-		{
-			name:      "sets float32 field",
-			fieldName: "Float32Field",
-			value:     "2.5",
-			verify: func(t *testing.T, s *testStruct) {
-				if s.Float32Field != 2.5 {
-					t.Errorf("Float32Field = %v, want 2.5", s.Float32Field)
-				}
-			},
-		},
-		{
-			name:      "invalid bool value",
-			fieldName: "BoolField",
-			value:     "not-a-bool",
-			wantErr:   true,
-		},
-		{
-			name:      "invalid int value",
-			fieldName: "IntField",
-			value:     "not-an-int",
-			wantErr:   true,
-		},
-		{
-			name:      "invalid uint value",
-			fieldName: "UintField",
-			value:     "-1",
-			wantErr:   true,
-		},
-		{
-			name:      "invalid float value",
-			fieldName: "FloatField",
-			value:     "not-a-float",
-			wantErr:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &testStruct{}
-			err := ApplyValueOverrides(s, map[string]string{tt.fieldName: tt.value})
-			if (err != nil) != tt.wantErr {
-				t.Errorf("setFieldValue() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.verify != nil && !tt.wantErr {
-				tt.verify(t, s)
-			}
-		})
-	}
-}
-
-func TestPathToFieldName(t *testing.T) {
-	tests := []struct {
-		segment string
-		want    string
-	}{
-		// Known acronyms
-		{"gds", "GDS"},
-		{"gpu", "GPU"},
-		{"mig", "MIG"},
-		{"dcgm", "DCGM"},
-		{"cpu", "CPU"},
-		{"api", "API"},
-		{"cdi", "CDI"},
-		{"gdr", "GDR"},
-		{"rdma", "RDMA"},
-		{"sriov", "SRIOV"},
-		{"vfio", "VFIO"},
-		{"vgpu", "VGPU"},
-		{"ofed", "OFED"},
-		{"crds", "CRDs"},
-		{"rbac", "RBAC"},
-		{"tls", "TLS"},
-		{"nfd", "NFD"},
-		{"gfd", "GFD"},
-		// Case-insensitive acronym lookup
-		{"GPU", "GPU"},
-		{"Gds", "GDS"},
-		// Underscore-separated with acronym
-		{"mig_strategy", "MIGStrategy"},
-		{"gpu_version", "GPUVersion"},
-		// Underscore-separated without acronym
-		{"node_selector", "NodeSelector"},
-		// Dash-separated with acronym
-		{"gpu-operator", "GPUOperator"},
-		{"rdma-driver", "RDMADriver"},
-		// Dash-separated without acronym
-		{"network-operator", "NetworkOperator"},
-		// Simple title case
-		{"enabled", "Enabled"},
-		{"version", "Version"},
-		{"driver", "Driver"},
-		{"strategy", "Strategy"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.segment, func(t *testing.T) {
-			got := pathToFieldName(tt.segment)
-			if got != tt.want {
-				t.Errorf("pathToFieldName(%q) = %q, want %q", tt.segment, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestMatchesPattern(t *testing.T) {
-	tests := []struct {
-		name      string
-		fieldName string
-		segment   string
-		want      bool
-	}{
-		// Containment
-		{"field contains segment", "DriverVersion", "driver", true},
-		{"field contains segment mixed case", "GPUOperatorVersion", "operator", true},
-		// Enable prefix
-		{"enable prefix match", "EnableGDS", "gds", true},
-		{"enable prefix no match", "EnableGDS", "mig", false},
-		// Starts with
-		{"field starts with segment", "DriverVersion", "driverversion", true},
-		// Dash-separated
-		{"dash-separated match", "GPUOperator", "gpu-operator", true},
-		{"dash-separated no match", "GPUOperator", "network-operator", false},
-		// Negative cases
-		{"no match at all", "EnableGDS", "version", false},
-		{"empty segment", "DriverVersion", "", true}, // empty string is contained in anything
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := matchesPattern(tt.fieldName, tt.segment)
-			if got != tt.want {
-				t.Errorf("matchesPattern(%q, %q) = %v, want %v", tt.fieldName, tt.segment, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDeriveFlatFieldName(t *testing.T) {
-	tests := []struct {
-		prefix string
-		suffix string
-		want   string
-	}{
-		// Special mappings
-		{"operator", "version", "GPUOperatorVersion"},
-		{"toolkit", "version", "NvidiaContainerToolkitVersion"},
-		{"driver", "repository", "DriverRegistry"},
-		{"driver", "registry", "DriverRegistry"},
-		{"ofed", "version", "OFEDVersion"},
-		{"ofed", "deploy", "DeployOFED"},
-		{"nic", "type", "NicType"},
-		{"containerRuntime", "socket", "ContainerRuntimeSocket"},
-		{"hostDevice", "enabled", "EnableHostDevice"},
-		{"operator", "registry", "OperatorRegistry"},
-		{"kubeRbacProxy", "version", "KubeRbacProxyVersion"},
-		{"agent", "image", "SkyhookAgentImage"},
-		// Tolerations
-		{"tolerations", "key", "TolerationKey"},
-		{"tolerations", "value", "TolerationValue"},
-		// Sandbox / secure boot
-		{"sandboxWorkloads", "enabled", "EnableSecureBoot"},
-		// Open kernel module
-		{"driver", "useOpenKernelModules", "UseOpenKernelModule"},
-		{"driver", "useOpenKernelModule", "UseOpenKernelModule"},
-		// Generic enabled suffix
-		{"gds", "enabled", "EnableGDS"},
-		{"mig", "enabled", "EnableMIG"},
-		// Default concatenation
-		{"driver", "version", "DriverVersion"},
-		{"mig", "strategy", "MIGStrategy"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.prefix+"."+tt.suffix, func(t *testing.T) {
-			got := deriveFlatFieldName(tt.prefix, tt.suffix)
-			if got != tt.want {
-				t.Errorf("deriveFlatFieldName(%q, %q) = %q, want %q", tt.prefix, tt.suffix, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestDeriveMultiSegmentFieldName(t *testing.T) {
-	tests := []struct {
-		name  string
-		parts []string
-		want  string
-	}{
-		{
-			"cpu limit",
-			[]string{"manager", "resources", "cpu", "limit"},
-			"ManagerCPULimit",
-		},
-		{
-			"memory limit",
-			[]string{"manager", "resources", "memory", "limit"},
-			"ManagerMemoryLimit",
-		},
-		{
-			"cpu request",
-			[]string{"manager", "resources", "cpu", "request"},
-			"ManagerCPURequest",
-		},
-		{
-			"memory request",
-			[]string{"manager", "resources", "memory", "request"},
-			"ManagerMemoryRequest",
-		},
-		{
-			"wrong prefix",
-			[]string{"worker", "resources", "cpu", "limit"},
-			"",
-		},
-		{
-			"wrong second segment",
-			[]string{"manager", "config", "cpu", "limit"},
-			"",
-		},
-		{
-			"wrong length - 3 parts",
-			[]string{"manager", "resources", "cpu"},
-			"",
-		},
-		{
-			"wrong length - 5 parts",
-			[]string{"manager", "resources", "cpu", "limit", "extra"},
-			"",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := deriveMultiSegmentFieldName(tt.parts)
-			if got != tt.want {
-				t.Errorf("deriveMultiSegmentFieldName(%v) = %q, want %q", tt.parts, got, tt.want)
+			if tt.verify != nil {
+				tt.verify(t, tt.target)
 			}
 		})
 	}
@@ -1598,135 +835,6 @@ type MultiSegmentTestStruct struct {
 	ManagerMemoryLimit   string
 	ManagerCPURequest    string
 	ManagerMemoryRequest string
-}
-
-func TestApplyValueOverrides_PointerToStruct(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		verify    func(t *testing.T, s *PointerTestStruct)
-	}{
-		{
-			name: "sets field through nil pointer to struct",
-			overrides: map[string]string{
-				"config.value": "initialized",
-			},
-			verify: func(t *testing.T, s *PointerTestStruct) {
-				if s.Config == nil {
-					t.Fatal("Config pointer should be initialized")
-				}
-				if s.Config.Value != "initialized" {
-					t.Errorf("Config.Value = %v, want initialized", s.Config.Value)
-				}
-			},
-		},
-		{
-			name: "sets field through non-nil pointer to struct",
-			overrides: map[string]string{
-				"config.count": "42",
-			},
-			verify: func(t *testing.T, s *PointerTestStruct) {
-				if s.Config == nil {
-					t.Fatal("Config pointer should be initialized")
-				}
-				if s.Config.Count != 42 {
-					t.Errorf("Config.Count = %v, want 42", s.Config.Count)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &PointerTestStruct{}
-			err := ApplyValueOverrides(s, tt.overrides)
-			if err != nil {
-				t.Fatalf("ApplyValueOverrides() unexpected error = %v", err)
-			}
-			tt.verify(t, s)
-		})
-	}
-}
-
-func TestApplyValueOverrides_NonStructTraversal(t *testing.T) {
-	type FlatStruct struct {
-		Name string
-	}
-
-	s := &FlatStruct{Name: "test"}
-	err := ApplyValueOverrides(s, map[string]string{
-		"name.sub": "value",
-	})
-	if err == nil {
-		t.Fatal("expected error for non-struct traversal")
-	}
-	if !containsSubstring(err.Error(), "cannot traverse non-struct field") {
-		t.Errorf("expected 'cannot traverse non-struct field' error, got: %v", err)
-	}
-}
-
-func TestApplyValueOverrides_MultiSegmentPaths(t *testing.T) {
-	tests := []struct {
-		name      string
-		overrides map[string]string
-		verify    func(t *testing.T, s *MultiSegmentTestStruct)
-	}{
-		{
-			name: "manager.resources.cpu.limit",
-			overrides: map[string]string{
-				"manager.resources.cpu.limit": "4",
-			},
-			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
-				if s.ManagerCPULimit != "4" {
-					t.Errorf("ManagerCPULimit = %v, want 4", s.ManagerCPULimit)
-				}
-			},
-		},
-		{
-			name: "manager.resources.memory.limit",
-			overrides: map[string]string{
-				"manager.resources.memory.limit": "8Gi",
-			},
-			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
-				if s.ManagerMemoryLimit != "8Gi" {
-					t.Errorf("ManagerMemoryLimit = %v, want 8Gi", s.ManagerMemoryLimit)
-				}
-			},
-		},
-		{
-			name: "manager.resources.cpu.request",
-			overrides: map[string]string{
-				"manager.resources.cpu.request": "2",
-			},
-			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
-				if s.ManagerCPURequest != "2" {
-					t.Errorf("ManagerCPURequest = %v, want 2", s.ManagerCPURequest)
-				}
-			},
-		},
-		{
-			name: "manager.resources.memory.request",
-			overrides: map[string]string{
-				"manager.resources.memory.request": "4Gi",
-			},
-			verify: func(t *testing.T, s *MultiSegmentTestStruct) {
-				if s.ManagerMemoryRequest != "4Gi" {
-					t.Errorf("ManagerMemoryRequest = %v, want 4Gi", s.ManagerMemoryRequest)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			s := &MultiSegmentTestStruct{}
-			err := ApplyValueOverrides(s, tt.overrides)
-			if err != nil {
-				t.Fatalf("ApplyValueOverrides() unexpected error = %v", err)
-			}
-			tt.verify(t, s)
-		})
-	}
 }
 
 func TestGetValueByPath(t *testing.T) {

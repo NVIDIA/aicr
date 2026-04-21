@@ -114,7 +114,8 @@ type Reading interface {
 
 ### Collection Process
 
-**Parallel Collection:**
+#### Parallel Collection
+
 ```
 ┌──────────────┐
 │ Snapshotter  │
@@ -178,7 +179,8 @@ When a snapshot is provided, the recipe builder extracts query parameters:
 Snapshot → Query Extractor → Recipe Query
 ```
 
-**Extraction mapping:**
+#### Extraction mapping
+
 ```
 K8s/server/version          → k8s (version)
 K8s/image/gpu-operator      → service (eks/gke/aks detection)
@@ -191,7 +193,7 @@ GPU/smi/model               → gpu (type)
 
 ### Recipe Generation
 
-**Inheritance Chain Resolution:**
+#### Inheritance Chain Resolution
 
 When a query matches a leaf recipe that has a `spec.base` reference, the system resolves the full inheritance chain before merging:
 
@@ -229,7 +231,8 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Base + Overlay Merging:**
+#### Base and Overlay Merging
+
 ```
 ┌────────────────────────────────────────────────────────┐
 │ Recipe Builder                                         │
@@ -264,7 +267,8 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 └────────────────────────────────────────────────────────┘
 ```
 
-**Overlay Matching Algorithm:**
+#### Overlay Matching Algorithm
+
 ```go
 // Overlay matches if all specified fields match query
 // Omitted fields act as wildcards
@@ -515,7 +519,8 @@ aicr validate \
 
 ### Configuration Extraction
 
-**RecipeResult Pattern:**
+#### RecipeResult Pattern
+
 Bundlers receive `RecipeResult` with component references and values maps:
 
 ```go
@@ -542,7 +547,8 @@ Driver Version: {{ index .Values "driver.version" }}
 Namespace: {{ .Script.Namespace }}
 ```
 
-**ScriptData for Metadata:**
+#### ScriptData for Metadata
+
 ```go
 // ScriptData struct for scripts and README metadata
 type ScriptData struct {
@@ -587,7 +593,7 @@ After bundlers generate artifacts, the deployer framework transforms them into d
 │  │ │   └─ Helm charts + README             │           │
 │  │ │                                       │           │
 │  │ └─ argocd                               │           │
-│  │     └─ ArgoCD Application + sync-wave   │           │
+│  │     └─ Argo CD Application + sync-wave   │           │
 │  └─────────────────────────────────────────┘           │
 │                                                        │
 └────────────────────────────────────────────────────────┘
@@ -618,7 +624,7 @@ The `deploymentOrder` field in recipes specifies component deployment sequence. 
 │         ┌────────────────┴────────────────┐             │
 │         ▼                                 ▼             │
 │  ┌────────────┐                    ┌────────────┐       │
-│  │    Helm    │                    │  ArgoCD    │       │
+│  │    Helm    │                    │  Argo CD    │       │
 │  │  Deployer  │                    │  Deployer  │       │
 │  │ (default)  │                    │            │       │
 │  └──────┬─────┘                    └──────┬─────┘       │
@@ -654,7 +660,7 @@ bundle-output/
     └── README.md
 ```
 
-**ArgoCD Deployer**:
+**Argo CD Deployer**:
 ```
 bundle-output/
 ├── app-of-apps.yaml       # Parent Application (bundle root)
@@ -670,7 +676,7 @@ bundle-output/
 └── README.md
 ```
 
-ArgoCD Application with multi-source:
+Argo CD Application with multi-source:
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -846,22 +852,22 @@ X-RateLimit-Reset: 1735650000
 
 - **Cached**: Recipe data cached in memory (5min TTL)
 - **Overlay Matching**: O(n) where n = number of overlays
-- **Memory**: &lt;1MB per request
-- **Duration**: &lt;100ms typical (in-memory only)
+- **Memory**: <1MB per request
+- **Duration**: <100ms typical (in-memory only)
 
 ### Bundle Generation
 
 - **Parallel**: All bundlers run concurrently
-- **Template Rendering**: Minimal overhead (&lt;10ms per template)
+- **Template Rendering**: Minimal overhead (<10ms per template)
 - **File I/O**: ~10-20 files per bundler
-- **Duration**: &lt;1 second typical
+- **Duration**: <1 second typical
 
 ### API Server
 
 - **Concurrency**: 100 req/s sustained, 200 burst
 - **Latency**: p50: 50ms, p95: 150ms, p99: 300ms
 - **Memory**: ~100MB baseline + 1MB per concurrent request
-- **CPU**: Minimal (&lt;5% single core at 100 req/s)
+- **CPU**: Minimal (<5% single core at 100 req/s)
 
 ## Data Validation
 

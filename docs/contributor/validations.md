@@ -93,8 +93,8 @@ conditions:
 
 **Supported Condition Keys:**
 - `intent`: Workload intent (training, inference)
-- `service`: Kubernetes service (eks, gke, aks, oke)
-- `accelerator`: GPU type (h100, gb200, a100, l40)
+- `service`: Kubernetes service (eks, gke, aks, oke, kind, lke)
+- `accelerator`: GPU type (h100, gb200, b200, a100, l40, rtx-pro-6000)
 - `os`: Operating system (ubuntu, rhel, cos, amazonlinux)
 - `platform`: Platform/framework (kubeflow)
 

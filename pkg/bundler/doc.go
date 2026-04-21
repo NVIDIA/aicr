@@ -16,14 +16,14 @@
 Package bundler provides orchestration for generating deployment bundles from recipes.
 
 The bundler package generates deployment-ready artifacts (Helm per-component bundles or
-ArgoCD applications) from recipe configurations. Component configuration is loaded
+Argo CD applications) from recipe configurations. Component configuration is loaded
 from the declarative component registry (recipes/registry.yaml).
 
 # Architecture
 
-  - DefaultBundler: Generates Helm per-component bundles or ArgoCD applications
+  - DefaultBundler: Generates Helm per-component bundles or Argo CD applications
   - Component Registry: Declarative configuration in recipes/registry.yaml
-  - Deployers: Helm (default) and ArgoCD output formats
+  - Deployers: Helm (default) and Argo CD output formats
   - result.Output: Aggregated generation results
 
 # Quick Start
@@ -61,9 +61,9 @@ Helm (default):
   - <component>/README.md: Component install/upgrade/uninstall
   - <component>/manifests/: Optional manifest files
 
-ArgoCD:
-  - app-of-apps.yaml: Parent ArgoCD Application
-  - <component>/application.yaml: ArgoCD Application per component
+Argo CD:
+  - app-of-apps.yaml: Parent Argo CD Application
+  - <component>/application.yaml: Argo CD Application per component
   - <component>/values.yaml: Values for each component
 
 # Configuration

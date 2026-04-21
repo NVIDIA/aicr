@@ -68,7 +68,7 @@ func TestGenerate(t *testing.T) {
 				if _, err := os.Stat(filepath.Join(outputDir, "templates", "gpu-operator.yaml")); os.IsNotExist(err) {
 					t.Error("templates/gpu-operator.yaml should exist")
 				}
-				// Should NOT have flat ArgoCD artifacts
+				// Should NOT have flat Argo CD artifacts
 				if _, err := os.Stat(filepath.Join(outputDir, "app-of-apps.yaml")); !os.IsNotExist(err) {
 					t.Error("app-of-apps.yaml should NOT exist in Helm chart output")
 				}
@@ -114,7 +114,7 @@ func TestGenerate(t *testing.T) {
 					t.Fatal("expected driver map in dynamic stubs")
 				}
 				// Dynamic path should have the resolved default value (not empty —
-				// the ArgoCD Helm chart preserves defaults so users see what to override)
+				// the Argo CD Helm chart preserves defaults so users see what to override)
 				if driver["version"] == nil {
 					t.Error("dynamic path driver.version should be present in root values.yaml")
 				}
@@ -170,7 +170,7 @@ func TestGenerate(t *testing.T) {
 					t.Error("template should use single 'source:', not multi-source 'sources:'")
 				}
 				if strings.Contains(tmplStr, "$values") {
-					t.Error("template should not reference $values (flat ArgoCD pattern)")
+					t.Error("template should not reference $values (flat Argo CD pattern)")
 				}
 			},
 		},
@@ -252,6 +252,103 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+func TestGenerate_DataFiles(t *testing.T) {
+	makeGenerator := func(dataFiles []string, includeChecksums bool) *Generator {
+		return &Generator{
+			RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
+				{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
+			}),
+			ComponentValues:  map[string]map[string]any{"gpu-operator": {}},
+			Version:          "test",
+			RepoURL:          "https://github.com/example/repo.git",
+			IncludeChecksums: includeChecksums,
+			DataFiles:        dataFiles,
+		}
+	}
+
+	tests := []struct {
+		name             string
+		stageDataFile    string
+		includeChecksums bool
+		dataFiles        []string
+		wantErr          bool
+		wantErrMsg       string
+	}{
+		{
+			name:             "valid data file included in checksums",
+			stageDataFile:    "data/overrides.yaml",
+			includeChecksums: true,
+			dataFiles:        []string{"data/overrides.yaml"},
+		},
+		{
+			name:       "path traversal rejected",
+			dataFiles:  []string{"../../../etc/passwd"},
+			wantErr:    true,
+			wantErrMsg: "escapes base directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			if tt.stageDataFile != "" {
+				full := filepath.Join(outputDir, tt.stageDataFile)
+				if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+					t.Fatalf("stage dir: %v", err)
+					return
+				}
+				if err := os.WriteFile(full, []byte("key: value"), 0600); err != nil {
+					t.Fatalf("stage file: %v", err)
+					return
+				}
+			}
+
+			g := makeGenerator(tt.dataFiles, tt.includeChecksums)
+			output, err := g.Generate(ctx, outputDir)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.wantErrMsg) {
+					t.Errorf("expected error containing %q, got: %v", tt.wantErrMsg, err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Generate() unexpected error = %v", err)
+				return
+			}
+
+			found := false
+			for _, f := range output.Files {
+				if strings.HasSuffix(f, tt.stageDataFile) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("data file %q not included in output.Files", tt.stageDataFile)
+			}
+
+			if tt.includeChecksums {
+				content, readErr := os.ReadFile(filepath.Join(outputDir, "checksums.txt"))
+				if readErr != nil {
+					t.Fatalf("read checksums.txt: %v", readErr)
+					return
+				}
+				if !strings.Contains(string(content), tt.stageDataFile) {
+					t.Errorf("checksums.txt should contain %q entry", tt.stageDataFile)
+				}
+			}
+		})
+	}
+}
+
 // TestConvertToSingleSourceWithValues verifies the structured YAML
 // transformation from multi-source to single-source with helm.values.
 func TestConvertToSingleSourceWithValues(t *testing.T) {
@@ -307,15 +404,20 @@ func TestConvertToSingleSourceWithValues(t *testing.T) {
 		t.Errorf("targetRevision = %v, want v24.9.0", source["targetRevision"])
 	}
 
-	// Verify helm.values contains template expressions
+	// Verify helm.values contains template expressions. It's a *yaml.Node with
+	// LiteralStyle so yaml.Marshal emits it as a block scalar (not a quoted string).
 	helm, ok := source["helm"].(map[string]any)
 	if !ok {
 		t.Fatal("source should have 'helm' map")
 	}
-	valuesStr, ok := helm["values"].(string)
+	valuesNode, ok := helm["values"].(*yaml.Node)
 	if !ok {
-		t.Fatal("helm should have 'values' string")
+		t.Fatalf("helm.values should be *yaml.Node, got %T", helm["values"])
 	}
+	if valuesNode.Style != yaml.LiteralStyle {
+		t.Errorf("helm.values should use LiteralStyle to render as block scalar, got %v", valuesNode.Style)
+	}
+	valuesStr := valuesNode.Value
 	if !strings.Contains(valuesStr, "static/gpu-operator.yaml") {
 		t.Error("values should reference static file")
 	}
@@ -403,44 +505,47 @@ func TestSetValueByPath_StubBehavior(t *testing.T) {
 	}
 }
 
-// TestFixValuesTemplate verifies that the raw Helm template expression in
-// helm.values survives yaml.Marshal → fixValuesTemplate without being
-// quoted or escaped. This is critical: ArgoCD needs the raw template text, not
-// a YAML string literal.
-func TestFixValuesTemplate(t *testing.T) {
-	tmpl := `{{- $static := (.Files.Get "static/gpu-operator.yaml") | fromYaml -}}
-{{- $dynamic := index .Values "gpuOperator" | default dict -}}
-{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}`
-
+// TestValuesBlockScalarMarshal verifies that the raw Helm template expression
+// in helm.values survives yaml.Marshal as a block scalar (not a quoted string).
+// Argo CD needs the raw template text so Helm evaluates it at render time.
+func TestValuesBlockScalarMarshal(t *testing.T) {
 	app := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
 		"spec": map[string]any{
-			"source": map[string]any{
-				"helm": map[string]any{
-					"values": tmpl,
+			"sources": []any{
+				map[string]any{
+					"repoURL":        "https://helm.ngc.nvidia.com/nvidia",
+					"chart":          "gpu-operator",
+					"targetRevision": "v24.9.0",
 				},
 			},
 		},
 	}
 
-	// yaml.Marshal will quote the template (it contains {{ }})
+	if err := convertToSingleSourceWithValues(app, "gpu-operator", "gpuOperator"); err != nil {
+		t.Fatalf("convertToSingleSourceWithValues error: %v", err)
+	}
+
 	marshaled, err := yaml.Marshal(app)
 	if err != nil {
 		t.Fatalf("yaml.Marshal error: %v", err)
 	}
 
-	// Apply the fix
-	fixed := fixValuesTemplate(marshaled, app)
-
-	// The fixed output should contain the raw template as a block scalar
-	fixedStr := string(fixed)
-	if !strings.Contains(fixedStr, "values: |-") {
-		t.Error("fixed output should use block scalar (|-) for values")
+	out := string(marshaled)
+	// Block scalar indicator must be present so Helm sees raw template text.
+	if !strings.Contains(out, "values: |") {
+		t.Errorf("marshaled output should use block scalar (|) for values, got:\n%s", out)
 	}
-	if !strings.Contains(fixedStr, "{{- $static") {
-		t.Error("fixed output should contain raw template expression")
+	// Helm template expressions must NOT be quoted.
+	if strings.Contains(out, `values: "{{-`) || strings.Contains(out, `values: '{{-`) {
+		t.Errorf("marshaled output must not quote the template, got:\n%s", out)
 	}
-	if !strings.Contains(fixedStr, "mustMergeOverwrite") {
-		t.Error("fixed output should contain mustMergeOverwrite")
+	if !strings.Contains(out, "{{- $static") {
+		t.Error("marshaled output should contain raw template expression")
+	}
+	if !strings.Contains(out, "mustMergeOverwrite") {
+		t.Error("marshaled output should contain mustMergeOverwrite")
 	}
 }
 

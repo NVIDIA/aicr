@@ -238,7 +238,7 @@ spec:
               (contains($stdout, 'update')): true
 
     - name: argocd-bundle-no-attest
-      description: ArgoCD bundle with works.
+      description: Argo CD bundle works.
       try:
         - script:
             content: |

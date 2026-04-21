@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package argocdhelm generates a Helm chart app-of-apps for ArgoCD with
+// Package argocdhelm generates a Helm chart app-of-apps for Argo CD with
 // dynamic install-time values.
 //
 // # How it works
 //
-// Rather than reimplementing ArgoCD Application generation, this deployer
-// delegates to the existing flat ArgoCD deployer (pkg/bundler/deployer/argocd)
+// Rather than reimplementing Argo CD Application generation, this deployer
+// delegates to the existing flat Argo CD deployer (pkg/bundler/deployer/argocd)
 // to produce proven Application manifests, then transforms the output into a
 // Helm chart:
 //
-//  1. Generate flat ArgoCD output to a temp directory (app-of-apps.yaml,
+//  1. Generate flat Argo CD output to a temp directory (app-of-apps.yaml,
 //     per-component application.yaml + values.yaml)
 //  2. For each Helm component, transform the multi-source Application manifest
 //     into a single-source template with helm.values containing {{ .Values.<key> }}
@@ -30,7 +30,7 @@
 //     available, empty strings otherwise). Static values stay in chart files.
 //  4. Write Chart.yaml + static/ + templates/ + values.yaml as a valid Helm chart
 //
-// This approach means changes to the ArgoCD deployer (new component types,
+// This approach means changes to the Argo CD deployer (new component types,
 // sync policies, etc.) automatically flow through without duplication.
 //
 // # When this deployer is used
@@ -62,7 +62,7 @@ import (
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
-// Generator creates Helm chart app-of-apps bundles by transforming flat ArgoCD output.
+// Generator creates Helm chart app-of-apps bundles by transforming flat Argo CD output.
 // Configure it with the required fields, then call Generate.
 type Generator struct {
 	RecipeResult     *recipe.RecipeResult
@@ -74,10 +74,14 @@ type Generator struct {
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
+
+	// DataFiles lists additional file paths (relative to output dir) to include
+	// in checksum generation. Used for external data files copied into the bundle.
+	DataFiles []string
 }
 
 // Generate creates a Helm chart app-of-apps by:
-//  1. Delegating to the flat ArgoCD deployer for proven Application generation
+//  1. Delegating to the flat Argo CD deployer for proven Application generation
 //  2. Transforming the output into a Helm chart with {{ .Values }} references
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
@@ -86,7 +90,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "RecipeResult is required")
 	}
 
-	// Step 1: Generate flat ArgoCD output to a temp directory
+	// Step 1: Generate flat Argo CD output to a temp directory
 	tmpDir, err := os.MkdirTemp("", "argocdhelm-*")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create temp directory", err)
@@ -103,7 +107,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base ArgoCD output", genErr)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate base Argo CD output", genErr)
 	}
 
 	// Step 2: Create Helm chart output structure
@@ -185,6 +189,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
+	// Include external data files in the file list (for checksums).
+	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
+		return nil, err
+	}
+
 	// Generate checksums and finalize output
 	if err := g.finalizeOutput(ctx, output, outputDir, start); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to finalize output", err)
@@ -203,14 +212,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // finalizeOutput generates checksums (if requested) and sets deployment metadata.
 func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output, outputDir string, start time.Time) error {
 	if g.IncludeChecksums {
-		if checksumErr := checksum.GenerateChecksums(ctx, outputDir, output.Files); checksumErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", checksumErr)
-		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		info, statErr := os.Stat(checksumPath)
-		if statErr == nil {
-			output.Files = append(output.Files, checksumPath)
-			output.TotalSize += info.Size()
+		if err := checksum.WriteChecksums(ctx, outputDir, output); err != nil {
+			return err
 		}
 	}
 	output.Duration = time.Since(start)
@@ -241,6 +244,13 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		isHelmChart := ref.Type != recipe.ComponentTypeKustomize && ref.Source != ""
 		if !isHelmChart {
 			continue
+		}
+
+		// Defense-in-depth: argocd.Generator runs first and validates names,
+		// but validate here too so this function is safe on its own terms.
+		if !deployer.IsSafePathComponent(ref.Name) {
+			return nil, 0, nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
 
 		values := g.ComponentValues[ref.Name]
@@ -285,7 +295,7 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 	return files, totalSize, dynamicOnlyValues, nil
 }
 
-// transformApplication reads a flat ArgoCD Application manifest, parses it as
+// transformApplication reads a flat Argo CD Application manifest, parses it as
 // structured YAML, replaces the multi-source block with a single-source +
 // helm.values Helm template, and writes the result as a chart template file.
 func transformApplication(srcDir, templatesDir, componentName, overrideKey string) (string, int64, error) {
@@ -319,16 +329,14 @@ func transformApplication(srcDir, templatesDir, componentName, overrideKey strin
 			fmt.Sprintf("failed to transform application.yaml for %s", componentName), transformErr)
 	}
 
-	// Marshal to YAML, then replace the quoted values string with the
-	// raw Helm template expression. yaml.Marshal wraps the template in quotes
-	// (since it contains {{ }}), but ArgoCD needs the raw template text so
-	// Helm can evaluate it at render time.
+	// helm.values is a *yaml.Node with LiteralStyle, so yaml.Marshal emits
+	// the raw Helm template as a block scalar that Helm evaluates at render
+	// time (rather than a quoted YAML string).
 	out, marshalErr := yaml.Marshal(app)
 	if marshalErr != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to marshal transformed application for %s", componentName), marshalErr)
 	}
-	out = fixValuesTemplate(out, app)
 
 	destPath, pathErr := deployer.SafeJoin(templatesDir, componentName+".yaml")
 	if pathErr != nil {
@@ -342,7 +350,7 @@ func transformApplication(srcDir, templatesDir, componentName, overrideKey strin
 	return destPath, int64(len(out)), nil
 }
 
-// convertToSingleSourceWithValues mutates an ArgoCD Application map,
+// convertToSingleSourceWithValues mutates an Argo CD Application map,
 // replacing the multi-source "sources" block with a single "source" that
 // loads static values from a chart file and merges dynamic overrides.
 //
@@ -385,7 +393,7 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 	}
 
 	// Build the Helm template expression for values.
-	// ArgoCD's spec.source.helm.values is a string field containing YAML text.
+	// Argo CD's spec.source.helm.values is a string field containing YAML text.
 	// This template merges static values (from chart files) with dynamic overrides
 	// (from .Values) at Helm render time.
 	valuesTmpl := fmt.Sprintf(
@@ -394,58 +402,26 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 			`{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}`,
 		componentName, overrideKey)
 
-	// Replace multi-source with single source + values
+	// Replace multi-source with single source + values. The values template is
+	// wrapped in a yaml.Node with LiteralStyle so yaml.Marshal emits it as a
+	// block scalar rather than a quoted string — Helm evaluates the raw
+	// template text at render time.
 	spec["source"] = map[string]any{
 		"repoURL":        repoURL,
 		"chart":          chart,
 		"targetRevision": targetRevision,
 		"helm": map[string]any{
-			"values": valuesTmpl,
+			"values": &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!str",
+				Style: yaml.LiteralStyle,
+				Value: valuesTmpl,
+			},
 		},
 	}
 	delete(spec, "sources")
 
 	return nil
-}
-
-// fixValuesTemplate replaces the yaml.Marshal-quoted values string with a raw
-// block scalar. yaml.Marshal wraps strings containing {{ }} in quotes, but the
-// output needs to be a raw Helm template that Helm evaluates at render time.
-// ArgoCD's spec.source.helm.values is a string field, so |- block scalar is correct.
-func fixValuesTemplate(marshaled []byte, app map[string]any) []byte {
-	spec, _ := app["spec"].(map[string]any)
-	source, _ := spec["source"].(map[string]any)
-	helm, _ := source["helm"].(map[string]any)
-	tmpl, _ := helm["values"].(string)
-	if tmpl == "" {
-		return marshaled
-	}
-
-	// Build the raw block scalar version
-	var raw strings.Builder
-	raw.WriteString("      values: |-\n")
-	for _, line := range strings.Split(tmpl, "\n") {
-		raw.WriteString("        " + line + "\n")
-	}
-
-	// Replace whatever yaml.Marshal produced for values with the raw version.
-	result := string(marshaled)
-	start := strings.Index(result, "      values:")
-	if start == -1 {
-		return marshaled
-	}
-	// Find the end of the values value (next line at indent <= 6 spaces)
-	rest := result[start:]
-	lines := strings.Split(rest, "\n")
-	end := len(lines[0]) + 1
-	for _, line := range lines[1:] {
-		if line == "" || (len(line) > 0 && len(line)-len(strings.TrimLeft(line, " ")) <= 6 && strings.TrimSpace(line) != "") {
-			break
-		}
-		end += len(line) + 1
-	}
-
-	return []byte(result[:start] + raw.String() + result[start+end:])
 }
 
 func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, error) {
@@ -506,8 +482,8 @@ func (g *Generator) writeReadme(outputDir string) (string, int64, error) {
 	}
 
 	var buf strings.Builder
-	buf.WriteString("# ArgoCD Helm Chart Deployment Bundle\n\n")
-	buf.WriteString("This bundle is a Helm chart that generates ArgoCD Application manifests.\n")
+	buf.WriteString("# Argo CD Helm Chart Deployment Bundle\n\n")
+	buf.WriteString("This bundle is a Helm chart that generates Argo CD Application manifests.\n")
 	buf.WriteString("Dynamic values are supplied at install time using `helm install --set`.\n\n")
 	buf.WriteString("## Install\n\n```bash\nhelm install aicr-bundle .")
 

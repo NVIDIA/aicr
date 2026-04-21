@@ -90,6 +90,26 @@ func GetChecksumFilePath(bundleDir string) string {
 	return filepath.Join(bundleDir, ChecksumFileName)
 }
 
+// WriteChecksums generates checksums.txt over output.Files, then appends the
+// checksum file to output.Files and updates output.TotalSize. Used by deployer
+// generators to finalize bundles when IncludeChecksums is true.
+func WriteChecksums(ctx context.Context, bundleDir string, output *deployer.Output) error {
+	if output == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "output is required")
+	}
+	if err := GenerateChecksums(ctx, bundleDir, output.Files); err != nil {
+		return err
+	}
+	checksumPath := GetChecksumFilePath(bundleDir)
+	info, statErr := os.Stat(checksumPath)
+	if statErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to stat checksums file", statErr)
+	}
+	output.Files = append(output.Files, checksumPath)
+	output.TotalSize += info.Size()
+	return nil
+}
+
 // VerifyChecksums reads a checksums.txt file and verifies each file's SHA256 digest.
 // Returns a list of error descriptions for any mismatches or read failures.
 // An empty return means all checksums are valid.

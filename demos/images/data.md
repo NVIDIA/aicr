@@ -52,7 +52,7 @@ bundles/
 ```
 
 Folder icons with component names
-Deployer badges: "Script", "ArgoCD", "Flux"
+Deployer badges: "Script", "Argo CD", "Flux"
 Caption: "Per-component folders with deployer-specific artifacts"
 
 ---

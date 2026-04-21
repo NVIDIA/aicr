@@ -157,25 +157,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.TotalSize += undeploySize
 
 	// Include external data files in the file list (for checksums)
-	for _, dataFile := range g.DataFiles {
-		absPath, joinErr := deployer.SafeJoin(outputDir, dataFile)
-		if joinErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe data file path", joinErr)
-		}
-		output.Files = append(output.Files, absPath)
+	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
+		return nil, err
 	}
 
 	// Generate checksums.txt if requested
 	if g.IncludeChecksums {
-		if err := checksum.GenerateChecksums(ctx, outputDir, output.Files); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to generate checksums", err)
-		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		info, statErr := os.Stat(checksumPath)
-		if statErr == nil {
-			output.Files = append(output.Files, checksumPath)
-			output.TotalSize += info.Size()
+		if err := checksum.WriteChecksums(ctx, outputDir, output); err != nil {
+			return nil, err
 		}
 	}
 

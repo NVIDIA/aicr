@@ -1,10 +1,11 @@
 # What is it
 
-Skyhook and Skyhook-customizations are two halves of a component. [Skyhook](https://github.com/NVIDIA/skyhook) is a Kubernetes Operator to apply [skyhook packages](https://github.com/NVIDIA/skyhook-packages) in a consistent, repeatable and tested lifecycles within a cluster. Skyhook-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/skyhook/blob/main/chart/templates/skyhook-crd.yaml) that define one or more skyhook-packages to deploy. These packages were selected to provide two main functions:
+Skyhook and Skyhook-customizations are two halves of the integration. [Skyhook](https://github.com/NVIDIA/skyhook) is a Kubernetes Operator that applies [skyhook packages](https://github.com/NVIDIA/skyhook-packages) with consistent, repeatable, and tested lifecycles within a cluster. Skyhook-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/skyhook/blob/main/chart/templates/skyhook-crd.yaml) that define one or more skyhook-packages to deploy. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
 2. Be able to install all of the necessary software to bring a vanilla kubernetes node to the AICR spec.
 
 ## References
+
 1. [Skyhook documentation](https://github.com/NVIDIA/skyhook/blob/main/docs)
 
 # Optimizer
@@ -64,13 +65,13 @@ The [version overview](https://github.com/NVIDIA/skyhook-packages/blob/main/nvid
 
 ## Tuning
 
-Includes the setup and optimizations for a specific service, accelerator and intent. Note that while it does have if statements around the service and intent due to the inclusion of the nvidia-setup which does require service these are all not optional and would need to be split it to properly support this. Currently tested with:
+Includes the setup and optimizations for a specific service, accelerator and intent. Note that while it does have if statements around the service and intent, the inclusion of nvidia-setup (which requires service) means these are not optional today and would need to be split out to properly support that. Currently tested with:
  * eks, gb200, multiNodeTraining
  * eks, gb200, inference
  * eks, h100, multiNodeTraining
  * eks, h100, inference
 
- To support non service specific tuning for example: h100, inference. The nvidia-tuned package would need to be separated out or nvidia-setup updated to support additional services or have less assumptions about what it is installing as it is currently opinionated towards EKS.
+ To support non-service-specific tuning (for example, h100 + inference), the nvidia-tuned package would need to be separated out, or nvidia-setup updated to support additional services or make fewer assumptions about what it is installing — it is currently opinionated towards EKS.
 
  See [recipes/components/skyhook-customizations/manifests/tuning.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/tuning.yaml)
 

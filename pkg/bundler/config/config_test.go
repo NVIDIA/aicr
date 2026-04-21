@@ -432,13 +432,23 @@ func TestDeployerOptions(t *testing.T) {
 }
 
 func TestParseValueOverrides(t *testing.T) {
+	// lookup returns the value of the first entry matching component+path, or "" if absent.
+	lookup := func(cps []ComponentPath, component, path string) string {
+		for _, cp := range cps {
+			if cp.Component == component && cp.Path == path && cp.Value != nil {
+				return *cp.Value
+			}
+		}
+		return ""
+	}
+
 	t.Run("valid single override", func(t *testing.T) {
 		result, err := ParseValueOverrides([]string{"gpuoperator:gds.enabled=true"})
 		if err != nil {
 			t.Fatalf("ParseValueOverrides() error = %v", err)
 		}
-		if result["gpuoperator"]["gds.enabled"] != testValueTrue {
-			t.Errorf("result[gpuoperator][gds.enabled] = %s, want true", result["gpuoperator"]["gds.enabled"])
+		if got := lookup(result, "gpuoperator", "gds.enabled"); got != testValueTrue {
+			t.Errorf("gpuoperator:gds.enabled = %q, want true", got)
 		}
 	})
 
@@ -450,11 +460,11 @@ func TestParseValueOverrides(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseValueOverrides() error = %v", err)
 		}
-		if result["gpuoperator"]["gds.enabled"] != testValueTrue {
-			t.Errorf("result[gpuoperator][gds.enabled] = %s, want true", result["gpuoperator"]["gds.enabled"])
+		if got := lookup(result, "gpuoperator", "gds.enabled"); got != testValueTrue {
+			t.Errorf("gpuoperator:gds.enabled = %q, want true", got)
 		}
-		if result["gpuoperator"]["driver.version"] != "570.86.16" {
-			t.Errorf("result[gpuoperator][driver.version] = %s, want 570.86.16", result["gpuoperator"]["driver.version"])
+		if got := lookup(result, "gpuoperator", "driver.version"); got != "570.86.16" {
+			t.Errorf("gpuoperator:driver.version = %q, want 570.86.16", got)
 		}
 	})
 
@@ -466,11 +476,11 @@ func TestParseValueOverrides(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseValueOverrides() error = %v", err)
 		}
-		if result["gpuoperator"]["gds.enabled"] != testValueTrue {
-			t.Errorf("result[gpuoperator][gds.enabled] = %s, want true", result["gpuoperator"]["gds.enabled"])
+		if got := lookup(result, "gpuoperator", "gds.enabled"); got != testValueTrue {
+			t.Errorf("gpuoperator:gds.enabled = %q, want true", got)
 		}
-		if result["networkoperator"]["rdma.enabled"] != "false" {
-			t.Errorf("result[networkoperator][rdma.enabled] = %s, want false", result["networkoperator"]["rdma.enabled"])
+		if got := lookup(result, "networkoperator", "rdma.enabled"); got != "false" {
+			t.Errorf("networkoperator:rdma.enabled = %q, want false", got)
 		}
 	})
 
@@ -517,8 +527,27 @@ func TestParseValueOverrides(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ParseValueOverrides() error = %v", err)
 		}
-		if result["bundler"]["path"] != "value=with=equals" {
-			t.Errorf("result[bundler][path] = %s, want value=with=equals", result["bundler"]["path"])
+		if got := lookup(result, "bundler", "path"); got != "value=with=equals" {
+			t.Errorf("bundler:path = %q, want value=with=equals", got)
+		}
+	})
+
+	t.Run("value with spaces", func(t *testing.T) {
+		// safePathPattern applies only to path segments, not values.
+		// Values may contain spaces and other arbitrary characters.
+		result, err := ParseValueOverrides([]string{"gpuoperator:custom.label=hello world"})
+		if err != nil {
+			t.Fatalf("ParseValueOverrides() error = %v", err)
+		}
+		if got := lookup(result, "gpuoperator", "custom.label"); got != "hello world" {
+			t.Errorf("gpuoperator:custom.label = %q, want %q", got, "hello world")
+		}
+	})
+
+	t.Run("unsafe path segment rejected", func(t *testing.T) {
+		_, err := ParseValueOverrides([]string{"bundler:path.{{inject}}=x"})
+		if err == nil {
+			t.Error("ParseValueOverrides() expected error for unsafe path segment, got nil")
 		}
 	})
 }
@@ -633,11 +662,30 @@ func TestParseDynamicValues(t *testing.T) {
 			inputs:  []string{"gpuoperator:driver version"},
 			wantErr: true,
 		},
+		{
+			name:    "rejects =value",
+			inputs:  []string{"gpuoperator:driver.version=oops"},
+			wantErr: true,
+		},
+	}
+
+	// groupByComponent collapses the returned slice into a map[component][]paths
+	// for easy comparison against the map-shaped expectations.
+	groupByComponent := func(cps []ComponentPath) map[string][]string {
+		out := make(map[string][]string)
+		for _, cp := range cps {
+			if cp.Value != nil {
+				// ParseDynamicValues must not return entries with Value set.
+				panic("ParseDynamicValues returned an entry with Value != nil")
+			}
+			out[cp.Component] = append(out[cp.Component], cp.Path)
+		}
+		return out
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseDynamicValues(tt.inputs)
+			rawGot, err := ParseDynamicValues(tt.inputs)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseDynamicValues() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -645,6 +693,7 @@ func TestParseDynamicValues(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
+			got := groupByComponent(rawGot)
 			if len(got) != len(tt.want) {
 				t.Errorf("ParseDynamicValues() returned %d components, want %d", len(got), len(tt.want))
 				return

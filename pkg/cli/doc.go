@@ -30,7 +30,7 @@
 //
 // Captures a comprehensive snapshot of the current system including CPU/GPU settings,
 // kernel parameters, systemd services, Kubernetes configuration, Helm releases, and
-// ArgoCD applications. Supports file, stdout, and Kubernetes ConfigMap output.
+// Argo CD applications. Supports file, stdout, and Kubernetes ConfigMap output.
 //
 // recipe - Generate configuration recipes (Step 2):
 //
@@ -86,7 +86,7 @@
 //
 // Generates deployment artifacts from recipes. By default creates a Helm
 // per-component bundle with individual values.yaml per component. Use
-// --deployer argocd for ArgoCD Application manifests.
+// --deployer argocd for Argo CD Application manifests.
 //
 // # Global Flags
 //

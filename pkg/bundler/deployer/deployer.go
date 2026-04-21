@@ -25,7 +25,11 @@ package deployer
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // Output contains the result of deployer generation.
@@ -44,6 +48,30 @@ type Output struct {
 
 	// DeploymentNotes contains optional deployment notes or warnings.
 	DeploymentNotes []string
+}
+
+// AddDataFiles resolves each relative data file path against outputDir (via
+// SafeJoin, rejecting traversal), stats the file, and appends the absolute
+// path to Files while adding the file size to TotalSize. Used by generators
+// to include external --data files in their output so they are covered by
+// checksum generation.
+func (o *Output) AddDataFiles(outputDir string, dataFiles []string) error {
+	if o == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "output is required")
+	}
+	for _, dataFile := range dataFiles {
+		absPath, joinErr := SafeJoin(outputDir, dataFile)
+		if joinErr != nil {
+			return joinErr
+		}
+		info, statErr := os.Stat(absPath)
+		if statErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to stat data file %s", dataFile), statErr)
+		}
+		o.Files = append(o.Files, absPath)
+		o.TotalSize += info.Size()
+	}
+	return nil
 }
 
 // Deployer generates deployment bundles from configured inputs.

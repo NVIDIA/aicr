@@ -44,10 +44,13 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 // It accepts a POST request with a JSON body containing the recipe (RecipeResult).
 // Supports query parameters:
 //   - set: Value overrides in format "bundler:path.to.field=value" (can be repeated)
+//   - dynamic: Declare value paths as install-time parameters in format "component:path.to.field" (can be repeated)
 //   - system-node-selector: Node selectors for system components in format "key=value" (can be repeated)
 //   - system-node-toleration: Tolerations for system components in format "key=value:effect" (can be repeated)
 //   - accelerated-node-selector: Node selectors for GPU nodes in format "key=value" (can be repeated)
 //   - accelerated-node-toleration: Tolerations for GPU nodes in format "key=value:effect" (can be repeated)
+//   - deployer: Deployment method (helm, argocd, or argocd-helm; default helm)
+//   - repo: Git repository URL for GitOps deployments (used with deployer=argocd)
 //   - workload-gate: Taint for skyhook-operator runtime required in format "key=value:effect" or "key:effect"
 //   - workload-selector: Label selector for skyhook-customizations in format "key=value" (can be repeated)
 //   - nodes: Estimated number of GPU nodes (sets estimatedNodeCount in skyhook-operator; 0 = unset)
@@ -115,6 +118,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	slog.Debug("bundle request received",
 		"components", len(recipeResult.ComponentRefs),
 		"value_overrides", len(params.valueOverrides),
+		"dynamic_declarations", len(params.dynamicValues),
 		"system_node_selectors", len(params.systemNodeSelector),
 		"accelerated_node_selectors", len(params.acceleratedNodeSelector),
 	)
@@ -131,7 +135,8 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// Create a new bundler with configuration
 	bundler, err := New(
 		WithConfig(config.NewConfig(
-			config.WithValueOverrides(params.valueOverrides),
+			config.WithValueOverridePaths(params.valueOverrides),
+			config.WithDynamicValuePaths(params.dynamicValues),
 			config.WithSystemNodeSelector(params.systemNodeSelector),
 			config.WithSystemNodeTolerations(params.systemNodeTolerations),
 			config.WithAcceleratedNodeSelector(params.acceleratedNodeSelector),
@@ -256,7 +261,8 @@ func streamZipResponse(w http.ResponseWriter, dir string, output *result.Output)
 
 // bundleParams holds parsed query parameters for bundle generation
 type bundleParams struct {
-	valueOverrides             map[string]map[string]string
+	valueOverrides             []config.ComponentPath
+	dynamicValues              []config.ComponentPath
 	systemNodeSelector         map[string]string
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
@@ -279,6 +285,12 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	params.valueOverrides, err = config.ParseValueOverrides(query["set"])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid set parameter", err)
+	}
+
+	// Parse dynamic value declarations
+	params.dynamicValues, err = config.ParseDynamicValues(query["dynamic"])
+	if err != nil {
+		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid dynamic parameter", err)
 	}
 
 	// Parse system node selectors
@@ -316,7 +328,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 		}
 	}
 
-	// Parse repo URL (for ArgoCD deployer)
+	// Parse repo URL (for Argo CD deployer)
 	params.repoURL = query.Get("repo")
 
 	// Parse workload-gate taint

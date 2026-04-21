@@ -39,7 +39,7 @@ bundles/
 Caption: "Create GitOps-ready artifacts with Cosign attestations"
 
 **Step 3 - DEPLOY**
-Icon: ArgoCD and Helm 
+Icon: Argo CD and Helm 
 Visual: GitOps tooling syncing artifacts from Step 3 into the cluster
 Caption: "Use existing OSS tooling to deploy to your cluster"
 

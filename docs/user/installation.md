@@ -142,12 +142,14 @@ source <(aicr completion zsh)
 AICR is also available as container images for integration into automated pipelines:
 
 ### CLI Image
+
 ```shell
 docker pull ghcr.io/nvidia/aicr:latest
 docker run ghcr.io/nvidia/aicr:latest --version
 ```
 
 ### API Server Image (Self-hosting)
+
 ```shell
 docker pull ghcr.io/nvidia/aicrd:latest
 docker run -p 8080:8080 ghcr.io/nvidia/aicrd:latest

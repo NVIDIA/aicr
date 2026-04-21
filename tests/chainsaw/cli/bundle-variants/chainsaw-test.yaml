@@ -21,7 +21,7 @@ spec:
   description: |
     Tests bundle generation with all flag combinations: basic, system/accelerated
     node selectors and tolerations, value overrides (--set), combined flags,
-    and ArgoCD deployer.
+    and Argo CD deployer.
     Replaces run_bundle_tests() in tools/e2e.
     No cluster needed.
   timeouts:

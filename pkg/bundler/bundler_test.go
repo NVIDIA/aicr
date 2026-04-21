@@ -721,7 +721,7 @@ func TestMake_ArgoCD(t *testing.T) {
 		t.Fatal("Make() returned nil output")
 	}
 
-	// ArgoCD output should have results
+	// Argo CD output should have results
 	if len(output.Results) == 0 {
 		t.Error("expected at least 1 result")
 	}
@@ -740,8 +740,8 @@ func TestMake_ArgoCD(t *testing.T) {
 	if output.Deployment == nil {
 		t.Fatal("expected deployment info")
 	}
-	if output.Deployment.Type != "ArgoCD applications" {
-		t.Errorf("deployment type = %q, want %q", output.Deployment.Type, "ArgoCD applications")
+	if output.Deployment.Type != "Argo CD applications" {
+		t.Errorf("deployment type = %q, want %q", output.Deployment.Type, "Argo CD applications")
 	}
 
 	// Verify output directory has files
@@ -1241,88 +1241,6 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "argocd-helm") {
 		t.Errorf("error should suggest argocd-helm, got: %v", err)
-	}
-}
-
-// TestMake_ArgoCDHelmRejectsAttest verifies that --attest is rejected with
-// --deployer argocd-helm since attestation is not yet supported.
-func TestMake_ArgoCDHelmRejectsAttest(t *testing.T) {
-	cfg := config.NewConfig(
-		config.WithDeployer(config.DeployerArgoCDHelm),
-		config.WithAttest(true),
-	)
-	bundler, err := New(WithConfig(cfg))
-	if err != nil {
-		// New() may fail for attest pre-flight (no binary attestation file)
-		// which is fine — the important thing is it doesn't silently succeed
-		return
-	}
-
-	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
-		Kind:       "RecipeResult",
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
-		},
-	}
-
-	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
-	if err == nil {
-		t.Fatal("expected error for --attest with --deployer argocd-helm")
-	}
-	if !strings.Contains(err.Error(), "not yet supported") {
-		t.Errorf("error should mention not yet supported, got: %v", err)
-	}
-}
-
-// TestMake_ArgoCDHelmRejectsData verifies that --data is rejected with
-// --deployer argocd-helm since external data is not yet supported.
-func TestMake_ArgoCDHelmRejectsData(t *testing.T) {
-	// Create a temp external data dir with a minimal registry.yaml (required by LayeredDataProvider)
-	dataDir := t.TempDir()
-	registryContent := "components:\n  - name: custom\n    displayName: Custom\n"
-	if err := os.WriteFile(filepath.Join(dataDir, "registry.yaml"), []byte(registryContent), 0600); err != nil {
-		t.Fatalf("failed to write registry.yaml: %v", err)
-	}
-
-	// Set up layered data provider (simulates --data flag)
-	originalProvider := recipe.GetDataProvider()
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), ".")
-	layered, providerErr := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
-		ExternalDir: dataDir,
-	})
-	if providerErr != nil {
-		t.Fatalf("NewLayeredDataProvider error: %v", providerErr)
-	}
-	recipe.SetDataProvider(layered)
-	recipe.ResetComponentRegistryForTesting()
-	defer func() {
-		recipe.SetDataProvider(originalProvider)
-		recipe.ResetComponentRegistryForTesting()
-	}()
-
-	cfg := config.NewConfig(
-		config.WithDeployer(config.DeployerArgoCDHelm),
-	)
-	bundler, err := New(WithConfig(cfg))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
-
-	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.nvidia.com/v1alpha1",
-		Kind:       "RecipeResult",
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "gpu-operator", Namespace: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator"},
-		},
-	}
-
-	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
-	if err == nil {
-		t.Fatal("expected error for --data with --deployer argocd-helm")
-	}
-	if !strings.Contains(err.Error(), "not yet supported") {
-		t.Errorf("error should mention not yet supported, got: %v", err)
 	}
 }
 

@@ -150,7 +150,7 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 
 // Make generates a deployment bundle from the given recipe.
 // By default, generates a Helm per-component bundle. If deployer is set to "argocd",
-// generates ArgoCD Application manifests.
+// generates Argo CD Application manifests.
 //
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
@@ -161,9 +161,9 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 //   - <component>/manifests/: Optional manifest files
 //   - checksums.txt: SHA256 checksums of generated files
 //
-// For ArgoCD output:
-//   - app-of-apps.yaml: Parent ArgoCD Application
-//   - <component>/application.yaml: ArgoCD Application per component
+// For Argo CD output:
+//   - app-of-apps.yaml: Parent Argo CD Application
+//   - <component>/application.yaml: Argo CD Application per component
 //   - <component>/values.yaml: Values for each component
 //   - README.md: Deployment instructions
 //
@@ -279,24 +279,14 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		return nil, err
 	}
 
+	slog.Debug("generating bundle",
+		"deployer", b.Config.Deployer(),
+		"component_count", len(recipeResult.ComponentRefs),
+		"dynamic_components", len(dynamicValues),
+	)
+
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
-		if b.Config.Attest() {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--attest is not yet supported with --deployer argocd-helm")
-		}
-		if provider := recipe.GetDataProvider(); provider != nil {
-			if layered, ok := provider.(*recipe.LayeredDataProvider); ok && len(layered.ExternalFiles()) > 0 {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					"--data is not yet supported with --deployer argocd-helm")
-			}
-		}
-
-		slog.Debug("generating argocd helm chart app-of-apps",
-			"component_count", len(recipeResult.ComponentRefs),
-			"dynamic_components", len(dynamicValues),
-		)
-
 		return &argocdhelm.Generator{
 			RecipeResult:     recipeResult,
 			ComponentValues:  componentValues,
@@ -305,6 +295,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			TargetRevision:   b.Config.TargetRevision(),
 			IncludeChecksums: b.Config.IncludeChecksums(),
 			DynamicValues:    dynamicValues,
+			DataFiles:        dataFiles,
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -312,11 +303,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
 		}
-
-		slog.Debug("generating argocd applications",
-			"component_count", len(recipeResult.ComponentRefs),
-		)
-
 		return &argocd.Generator{
 			RecipeResult:     recipeResult,
 			ComponentValues:  componentValues,
@@ -324,6 +310,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			RepoURL:          b.Config.RepoURL(),
 			TargetRevision:   b.Config.TargetRevision(),
 			IncludeChecksums: b.Config.IncludeChecksums(),
+			DataFiles:        dataFiles,
 		}, nil
 
 	case config.DeployerHelm:
@@ -332,11 +319,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				"failed to collect component manifests", manifestErr)
 		}
-
-		slog.Debug("generating helm bundle",
-			"component_count", len(recipeResult.ComponentRefs),
-		)
-
 		return &helm.Generator{
 			RecipeResult:       recipeResult,
 			ComponentValues:    componentValues,
@@ -434,9 +416,9 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 	case config.DeployerHelm:
 		return "helm-bundle", "Helm per-component bundle"
 	case config.DeployerArgoCD:
-		return "argocd-applications", "ArgoCD applications"
+		return "argocd-applications", "Argo CD applications"
 	case config.DeployerArgoCDHelm:
-		return "argocd-helm-chart", "ArgoCD Helm chart app-of-apps"
+		return "argocd-helm-chart", "Argo CD Helm chart app-of-apps"
 	default:
 		return types.BundleType(dt), string(dt)
 	}
@@ -946,7 +928,7 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 	if joinErr != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}
-	if err := os.WriteFile(recipePath, recipeData, 0600); err != nil {
+	if err := os.WriteFile(recipePath, recipeData, 0600); err != nil { //nolint:gosec // path validated by SafeJoin
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", err)
 	}
 
