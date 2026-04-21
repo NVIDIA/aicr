@@ -24,6 +24,8 @@ It does **not** change:
 - readiness constraint evaluation before deployment validation
 - performance or conformance phase runtime design
 - repo-side Chainsaw health-check workflows used in tests and component health assets
+- deploy-time or undeploy-time lifecycle orchestration proposed in
+  [`#610`](https://github.com/NVIDIA/aicr/issues/610)
 - the long-term deprecation or retention plan for `expectedResources`
 
 ## Problem
@@ -61,6 +63,16 @@ AICR already has two relevant validation models:
    both raw resource assertions and full `kind: Test` execution, including
    shelling out to a `chainsaw` binary when required.
 
+The Chainsaw discussion also has an important nuance: now that Chainsaw can
+build cleanly with the current Go toolchain, AICR could choose to consume more
+of the Chainsaw assertion engine as a Go library. That makes a library-backed
+option more realistic than when Chainsaw first entered the project. It does not
+eliminate the main design question here, though, because the current
+repo-side health-check inventory is still authored as full `kind: Test` assets,
+not just raw assertions. Direct reuse of those assets at validator runtime
+would still require either binary support for full test execution or a
+non-trivial rewrite into the narrower library-consumable form.
+
 This ADR had to decide whether deployment validation should:
 - adopt the same Kubernetes-native pure-Go model already used by conformance, or
 - reintroduce Chainsaw as a runtime dependency inside `aicr validate --phase deployment`
@@ -73,12 +85,27 @@ Two additional constraints shaped the decision:
   not `registry.yaml`, so any deployment-readiness contract has to travel
   through the resolved recipe.
 
+There is intentional overlap with the deployment half of
+[`#610`](https://github.com/NVIDIA/aicr/issues/610): both discussions touch the
+per-component readiness intent. The scopes remain different:
+
+- `#610` is about **deploy-time flow control and undeploy-time cleanup**
+  through deployer-specific hooks, sync-wave ordering, bridge Jobs, images,
+  RBAC, and cleanup behavior
+- this ADR is about **post-install validation** in
+  `aicr validate --phase deployment`, using a deployer-neutral, pure-Go,
+  Kubernetes-API-based contract
+
+The goal is to coordinate semantics and component mappings where that stays
+simple, without forcing the validator contract to absorb hook-job details that
+belong to deploy-time orchestration.
+
 ## Options Summary
 
 | Option | Summary | Benefits | Costs |
 | --- | --- | --- | --- |
 | **Registry fields + pure Go runtime** | Add three component-level fields (`readiness`, `customChecks`, `crds`) and have the deployment validator run the declared checks across all enabled components selected into the resolved recipe | Typed contract, deployer-neutral, easy to unit test, aligns with current `aicr validate` architecture, keeps the validator Kubernetes-native and extensible | Narrower than full Chainsaw expressiveness; some semantic overlap with repo-side health checks |
-| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw during deployment validation | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions | Second runtime inside `aicr validate`, binary packaging/version pinning, distroless-image packaging changes to ship the `chainsaw` binary, harder testing, upstream coupling |
+| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw semantics during deployment validation, either through the Go assertion library where possible or full test execution where needed | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions | Second runtime/model inside `aicr validate`, harder testing, upstream coupling, and for the current `kind: Test` inventory still either binary packaging or asset rewrites |
 | **Keep bespoke per-component Go checks** | Continue adding code paths per component as gaps are found | No schema work | Does not scale; keeps coverage asymmetric and harder to enforce |
 
 ## Decision
@@ -208,9 +235,16 @@ operate and extend:
 - it introduces a **second validator runtime** inside `aicr validate`
   - pure Go / Kubernetes-client checks for conformance
   - Chainsaw-driven execution for deployment
-- it requires ongoing **binary packaging, version pinning, and image maintenance**
-- the current deployment-validator image is distroless, so this option would
-  require a deliberate packaging change just to ship the `chainsaw` binary
+- even if AICR reuses more of the Chainsaw Go assertion engine directly, it
+  still introduces a second assertion model and tighter coupling to Chainsaw's
+  APIs and semantics
+- the current repo-side health-check inventory is authored as full
+  `kind: Test` assets, not just raw assertions, so direct reuse would still
+  require one of:
+  - ongoing **binary packaging, version pinning, and image maintenance**
+  - a deliberate packaging change to the distroless deployment-validator image
+    just to ship the `chainsaw` binary
+  - or a rewrite of existing assets into a narrower library-consumable shape
 - it couples validator behavior more tightly to **upstream Chainsaw semantics and upgrade cadence**
 - it expands the maintenance and review surface because full Chainsaw `Test`
   execution brings scripts, waits, catches, and binary execution into runtime validation
@@ -244,6 +278,9 @@ Chainsaw remains useful as:
   full Chainsaw expressiveness or pod-phase parity.
 - **Potential semantic overlap**: some repo-side Chainsaw health checks and the
   deployment contract may cover similar ground separately.
+- **Potential overlap with deploy-time readiness design**: the per-component
+  readiness intent may also appear in the deployment half of `#610`, so the
+  two efforts should coordinate to avoid unnecessary drift.
 - **Fixed special-case surface**: new bespoke behavior requires coordinated Go
   and registry changes rather than arbitrary registry-defined assertions.
 - **Migration overlap**: `expectedResources` can temporarily duplicate reporting
@@ -274,6 +311,15 @@ The implementation associated with this ADR includes:
   - CRD `Established=True` readiness
   - fail-closed zero-match behavior
 - registry mappings for the current component inventory
+
+Coordination note with [`#610`](https://github.com/NVIDIA/aicr/issues/610):
+
+- if the deployment-half design in `#610` lands, prefer sharing or deriving the
+  same component readiness intent where that does not add much complexity
+- do not force a single shared config model if doing so would couple the
+  validator contract to deploy-time details such as hook annotations, bridge Job
+  images, RBAC, or cleanup behavior
+- optimize for shared readiness semantics rather than identical runtime config
 
 The rollout is intentionally sequenced in two phases:
 
@@ -312,6 +358,7 @@ explicit scoping or exact identities to avoid false attribution and brittle beha
 ## References
 
 - [ADR-002: Replace Go Test Validation Engine with Container-Per-Validator Model](002-validatorv2-adr.md)
+- [Issue #610](https://github.com/NVIDIA/aicr/issues/610) — bridge jobs for deploy/undeploy lifecycle flow control
 - [Issue #607](https://github.com/NVIDIA/aicr/issues/607) — narrow GPU-scoped deployment readiness gap
 - [PR #611](https://github.com/NVIDIA/aicr/pull/611) — targeted GPU readiness groundwork
 - [Issue #622](https://github.com/NVIDIA/aicr/issues/622) — broader registry-driven deployment readiness follow-up
