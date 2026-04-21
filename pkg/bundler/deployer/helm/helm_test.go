@@ -395,6 +395,67 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 }
 
+func TestGenerate_DeployScriptFinalReadinessNote(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	g := &Generator{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	script := string(content)
+
+	// The success-path status line must still be present — existing CI log
+	// matchers rely on it for full-success runs.
+	if !strings.Contains(script, `echo "Deployment complete."`) {
+		t.Error(`deploy.sh missing "Deployment complete." line`)
+	}
+	if !strings.Contains(script, `echo "Deployment completed with non-fatal errors (--best-effort)."`) {
+		t.Error(`deploy.sh missing partial-failure status line`)
+	}
+	// The final message must distinguish install completion from workload
+	// readiness so users don't read success as "ready for GPU workloads".
+	wantPhrases := []string{
+		"The above status reflects Helm install and manifest apply results",
+		"not whether the cluster is ready for GPU workloads",
+		"cluster convergence may continue asynchronously",
+		"Skyhook",
+		"GPU operator operand rollout",
+		"DRA kubelet plugin",
+	}
+	for _, p := range wantPhrases {
+		if !strings.Contains(script, p) {
+			t.Errorf("deploy.sh final note missing phrase: %q", p)
+		}
+	}
+	// Both final status lines must precede the shared readiness note.
+	doneIdx := strings.Index(script, `echo "Deployment complete."`)
+	bestEffortIdx := strings.Index(script, `echo "Deployment completed with non-fatal errors (--best-effort)."`)
+	noteIdx := strings.Index(script, "not whether the cluster is ready for GPU workloads")
+	if doneIdx < 0 || bestEffortIdx < 0 || noteIdx < 0 {
+		t.Fatal("unexpected: status line or readiness note missing indices")
+	}
+	if doneIdx >= noteIdx {
+		t.Error(`"Deployment complete." must come before the readiness note`)
+	}
+	if bestEffortIdx >= noteIdx {
+		t.Error(`partial-failure status line must come before the readiness note`)
+	}
+}
+
 func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
