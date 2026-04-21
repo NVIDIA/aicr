@@ -5,7 +5,8 @@
 **Proposed** — 2026-04-20
 **Revised** — 2026-04-21 (contract clarifications, rollout sequencing, and related design coordination)
 
-The primary implementation for this decision is planned for `pkg/recipe/` and
+This PR records the design only; it does not include the implementation.
+If accepted, the primary implementation is planned for `pkg/recipe/` and
 `validators/deployment/`. The steady-state CI guard for newly added components
 remains a follow-up.
 
@@ -120,6 +121,13 @@ validator then runs those declared checks across all enabled components in the
 resolved recipe, on a pure-Go path that can run in any Kubernetes cluster and
 extend naturally toward broader CNCF AI Conformance validation.
 
+This option was chosen because it creates a typed, enforceable
+deployment-readiness contract in `recipes/registry.yaml`, keeps validator jobs
+aligned with the resolved recipe as the single runtime input, applies declared
+checks across all enabled components, and preserves one pure-Go validator model
+that is easy to unit test and extend toward broader **CNCF AI Conformance**
+validation.
+
 ### Contract
 
 The component readiness contract is:
@@ -192,14 +200,9 @@ When both `selector` and `workloads` are present:
 `expectedResources` continues to coexist during migration, but the registry
 contract becomes the standard component-coverage path. Its long-term retention
 or deprecation remains out of scope for this ADR; see Scope above.
-Because `expectedResources` and generic readiness share the same typed workload
-health primitive, the tightened `DaemonSet` rule applies to both paths.
 
-This option was chosen because it creates a typed, enforceable deployment-readiness
-contract in `recipes/registry.yaml`, keeps validator jobs aligned with the
-resolved recipe as the single runtime input, applies declared checks across all
-enabled components, and preserves one pure-Go validator model that is easy to
-unit test and extend toward broader **CNCF AI Conformance** validation.
+Because `expectedResources` and generic readiness share the same typed workload
+health primitive, the tightened `DaemonSet` rule above applies to both paths.
 
 ## Why Not Runtime Chainsaw
 
@@ -214,8 +217,9 @@ operate and extend:
   - Chainsaw-driven execution for deployment
 - even with greater library-backed reuse, the current repo-side health-check
   inventory is still authored as full `kind: Test` assets, so direct reuse
-  would still require either binary support for full test execution or rewriting
-  those assets into a narrower form
+  would still require either binary support for full test execution, including
+  a packaging change to the current distroless deployment-validator image, or
+  rewriting those assets into a narrower form
 - it couples validator behavior more tightly to **upstream Chainsaw semantics and upgrade cadence**
 - it expands the maintenance and review surface because full Chainsaw `Test`
   execution brings scripts, waits, catches, and binary execution into runtime validation
