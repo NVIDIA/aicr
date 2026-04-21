@@ -1,4 +1,4 @@
-# ADR-006: Shared Component Checks for Deployment Flows
+# ADR-006: Shared Component Check Definitions
 
 ## Status
 
@@ -16,11 +16,17 @@ PR. The steady-state CI guard for newly added components remains a follow-up.
 This ADR covers the **shared component check-definition model** used by
 deployment-related phases of AICR.
 
+It builds on the `#622` validator contract (`readiness`, `customChecks`,
+`crds`) and records the broader shared schema needed by both the initial
+post-install validator consumer and deploy / cleanup consumers. In that shared
+shape, `readiness` carries both the check definition used by the validator and
+optional wait-oriented metadata used by deploy-flow consumers.
+
 It defines:
 - how component check metadata is expressed in `recipes/registry.yaml`
 - how that metadata is transported in the resolved recipe for validator consumers
 - how the initial post-install validator consumer interprets the shared check definitions
-- how deployment-flow consumers such as `#610` are expected to consume the same
+- how follow-up deploy / cleanup consumers are expected to consume the same
   schema without becoming a second source of truth
 - why AICR wants one source of truth for component checks, while still using a
   Kubernetes-native, pure-Go validator path for post-install validation
@@ -46,9 +52,9 @@ This created three problems:
 
 1. **Coverage drift**: deep component checks depended partly on Go code,
    partly on ad hoc `expectedResources`, and only partially on registry metadata.
-2. **Consumer drift**: other deployment-flow consumers such as `#610` could
-   end up maintaining overlapping readiness intent in different places unless
-   they consume the same schema.
+2. **Consumer drift**: other deployment-flow consumers could end up
+   maintaining overlapping readiness intent in different places unless they
+   consume the same schema.
 3. **Weak extensibility**: the project needed a typed contract that could scale
    across the current component inventory, future additions, and multiple
    deployment-flow consumers.
@@ -77,6 +83,15 @@ repo-side health-check inventory is still authored as full `kind: Test` assets,
 not just raw assertions. Direct reuse of those assets at validator runtime
 would still require either binary support for full test execution or a
 non-trivial rewrite into the narrower library-consumable form.
+
+That distinction matters even more for non-validator consumers such as
+[`#610`](https://github.com/NVIDIA/aicr/issues/610). A deploy-time readiness
+Job that wants to render deployer-native behavior such as `kubectl wait`
+commands does not just need to execute a check; it needs a canonical,
+structured description of what to check. Full Chainsaw `kind: Test` YAML is
+strong as an execution and testing format, but weak as canonical semantics for
+those consumers because they would otherwise need to either execute Chainsaw or
+parse executable test logic to recover structured intent.
 
 This ADR had to decide whether AICR should:
 - establish one registry-resident source of truth for component checks that
@@ -123,20 +138,20 @@ absorb hook-job details that belong to deploy-time orchestration.
 | Option | Summary | Benefits | Costs |
 | --- | --- | --- | --- |
 | **Registry fields + shared consumers** | Add three component-level fields (`readiness`, `customChecks`, `crds`) and make them the shared source of truth that deployment-related consumers can read, with a pure-Go validator consumer for post-install validation | Typed contract, one source of truth, reduced drift between consumers, deployer-neutral validator path, easy to unit test, aligns with current `aicr validate` architecture, keeps the validator extensible | Narrower than full Chainsaw expressiveness; requires coordination as more consumers adopt the contract |
-| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw semantics during deployment validation, either through the Go assertion library where possible or full test execution where needed | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions; familiar third-party tool with existing docs and examples | Additional runtime/model complexity inside `aicr validate`; for the current `kind: Test` inventory still either binary packaging or asset rewrites |
+| **Reuse Chainsaw at runtime** | Hydrate `healthCheck.assertFile` into validator jobs and run Chainsaw semantics during deployment validation, either through the Go assertion library where possible or full test execution where needed | Best parity with existing `recipes/checks/*`; strongest reuse of current assertions; familiar third-party tool with existing docs and examples | Additional runtime/model complexity inside `aicr validate`; for the current `kind: Test` inventory still either binary packaging or asset rewrites; weak interchange format for consumers that need structured check semantics rather than direct execution |
 | **Keep bespoke per-component Go checks** | Continue adding code paths per component as gaps are found | No schema work | Does not scale; keeps coverage asymmetric and harder to enforce |
 
 ## Decision
 
-Adopt **registry-driven component check definitions, with initial validator
-consumers implemented in pure Go**.
+Adopt **shared component check definitions, with initial validator consumers
+implemented in pure Go**.
 
 Component checks are declared in `recipes/registry.yaml` and become the shared
 source of truth for deployment-related consumers. The initial post-install
 validator consumer hydrates those definitions onto each resolved `ComponentRef`
-and interprets them using Kubernetes API state only. Follow-up consumers, such
-as the deploy / cleanup proposal in `#610`, should consume the same schema
-rather than maintaining a second per-component check inventory.
+and interprets them using Kubernetes API state only. Follow-up deploy /
+cleanup consumers should consume the same schema rather than maintaining a
+second per-component check inventory.
 
 The schema adds three component-level fields — `readiness`, `customChecks`, and
 `crds` — so each component can declare its own component check contract. The
@@ -166,6 +181,8 @@ components:
       workloads:
         - kind: Deployment
           name: kube-prometheus-operator
+      wait:
+        timeout: 30m
     customChecks: []
     crds: []
 ```
@@ -184,6 +201,8 @@ The supported coverage shapes are:
   - may also carry follow-up wait-oriented metadata for other consumers, such
     as deploy / cleanup flows that render `kubectl wait` commands from the same
     schema
+  - intentionally carries both the check definition (`namespace`, `selector`,
+    `workloads`) and consumer hints (`wait`) in one object
   - the field name remains `readiness` to stay aligned with the chosen
     registry contract and implementation vocabulary
 - `crds`
@@ -215,8 +234,10 @@ The `readiness` object carries:
   is authoritative in v1
 - optional `wait` metadata for follow-up consumers that generate wait-oriented
   commands from the shared schema
-- `wait.timeout` carries duration-style timeout metadata for those consumers;
-  the initial post-install validator consumer does not depend on it in v1
+- `wait.timeout` carries duration-style timeout metadata for those consumers so
+  they can render the correct wait command or equivalent wait behavior from the
+  same shared definition; the initial post-install validator consumer does not
+  depend on it in v1
 - `wait` is supplemental metadata, not a standalone check target; a component
   still needs an actual declared check primitive such as a selector, named
   workloads, `customChecks`, or `crds`
@@ -283,10 +304,10 @@ The initial post-install validator consumer uses a narrow, stable v1 contract:
 - `DaemonSet`: `desiredNumberScheduled > 0` and `numberReady == desiredNumberScheduled`
 - `CustomResourceDefinition`: `Established=True`
 
-A selector plus a generic Kubernetes `Ready` condition alone was considered too
-narrow for the current inventory. The initial validator subset also needs exact
-named workload identities, tightened `DaemonSet` semantics, declarative CRD
-establishment checks, and a small set of component-specific status checks.
+The initial validator subset needs more than a selector plus a generic
+Kubernetes `Ready` condition. It also needs exact named workload identities,
+tightened `DaemonSet` semantics, declarative CRD establishment checks, and a
+small set of component-specific status checks.
 
 When both `selector` and `workloads` are present:
 - selector matches and named workloads are unioned
@@ -334,6 +355,11 @@ consumer, because that would make `aicr validate` harder to operate and extend:
   inventory is still authored as full `kind: Test` assets, so direct reuse
   would still require either binary support for full test execution or
   rewriting those assets into a narrower form
+- Chainsaw is a strong testing and execution tool, but a weak canonical check
+  language for consumers such as `#610` readiness Jobs that need to derive
+  deployer-native behavior from structured intent rather than simply execute a
+  test; those consumers would otherwise need to either run Chainsaw directly or
+  parse executable `kind: Test` logic to recover semantics
 - it couples validator behavior more tightly to **upstream Chainsaw semantics and upgrade cadence**
 - it expands the maintenance and review surface because full Chainsaw `Test`
   execution brings scripts, waits, catches, and binary execution into runtime validation
@@ -408,9 +434,8 @@ The target implementation associated with this ADR will include:
   - CRD `Established=True` readiness
   - fail-closed zero-match behavior
 - registry mappings for the current component inventory
-- follow-up consumers, including the deploy / cleanup proposal in `#610`, that
-  read the same definitions rather than introducing a second per-component
-  check inventory
+- follow-up deploy / cleanup consumers that read the same definitions rather
+  than introducing a second per-component check inventory
 
 At the time of writing this ADR, these details describe design intent rather
 than current `main`. In particular, `ComponentConfig` / `ComponentRef`
@@ -418,10 +443,10 @@ component check metadata and the associated hydration path are planned follow-up
 changes, not already-exposed fields in `pkg/recipe/metadata.go`.
 
 The broader direction is a generic, phase-aware deployment-check schema that
-can be consumed by post-install validation and by deploy / cleanup flows such
-as `#610`. Resource types or metadata beyond the initial validator subset, such
-as richer readiness details needed by other consumers, can be layered onto the
-same schema over time without introducing separate per-component inventories.
+can be consumed by post-install validation and by deploy / cleanup flows.
+Resource types or metadata beyond the initial validator subset can be layered
+onto the same schema over time without introducing separate per-component
+inventories.
 
 The rollout is intentionally sequenced in two phases:
 
@@ -434,8 +459,9 @@ The rollout is intentionally sequenced in two phases:
   - once the current migration inventory is complete, `pkg/recipe` validation
     surfaced through existing repo CI or lint should reject newly added
     components that declare none of:
-    - `readiness` with at least one actual check primitive, not just
-      supplemental wait metadata
+    - `readiness` that declares namespace-scoped workload coverage, optionally
+      refined by a selector or named workloads; `wait.timeout` metadata alone
+      does not satisfy this rule
     - `customChecks`
     - `crds`
     and should not be implemented as additional runtime deployment-validator
