@@ -3,7 +3,7 @@
 ## Status
 
 **Proposed** — 2026-04-20
-**Revised** — 2026-04-21 (contract clarifications, rollout sequencing, related design coordination, and shared-schema framing)
+**Revised** — 2026-04-21 (contract clarifications and shared-schema framing)
 
 This PR records the design only; it does not include the implementation.
 If accepted, the shared schema is planned for `pkg/recipe/`, with an initial
@@ -266,6 +266,8 @@ components:
       workloads:
         - kind: Deployment
           name: kube-prometheus-operator
+      wait:
+        timeout: 30m
 
   - name: dynamo-crds
     crds:
