@@ -74,6 +74,10 @@ type Generator struct {
 
 	// DynamicValues maps component names to their dynamic value paths.
 	DynamicValues map[string][]string
+
+	// DataFiles lists additional file paths (relative to output dir) to include
+	// in checksum generation. Used for external data files copied into the bundle.
+	DataFiles []string
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -185,6 +189,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	output.Files = append(output.Files, readmePath)
 	output.TotalSize += readmeSize
 
+	// Include external data files in the file list (for checksums).
+	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
+		return nil, err
+	}
+
 	// Generate checksums and finalize output
 	if err := g.finalizeOutput(ctx, output, outputDir, start); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to finalize output", err)
@@ -203,14 +212,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // finalizeOutput generates checksums (if requested) and sets deployment metadata.
 func (g *Generator) finalizeOutput(ctx context.Context, output *deployer.Output, outputDir string, start time.Time) error {
 	if g.IncludeChecksums {
-		if checksumErr := checksum.GenerateChecksums(ctx, outputDir, output.Files); checksumErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to generate checksums", checksumErr)
-		}
-		checksumPath := checksum.GetChecksumFilePath(outputDir)
-		info, statErr := os.Stat(checksumPath)
-		if statErr == nil {
-			output.Files = append(output.Files, checksumPath)
-			output.TotalSize += info.Size()
+		if err := checksum.WriteChecksums(ctx, outputDir, output); err != nil {
+			return err
 		}
 	}
 	output.Duration = time.Since(start)
@@ -241,6 +244,13 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 		isHelmChart := ref.Type != recipe.ComponentTypeKustomize && ref.Source != ""
 		if !isHelmChart {
 			continue
+		}
+
+		// Defense-in-depth: argocd.Generator runs first and validates names,
+		// but validate here too so this function is safe on its own terms.
+		if !deployer.IsSafePathComponent(ref.Name) {
+			return nil, 0, nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
 
 		values := g.ComponentValues[ref.Name]
@@ -319,16 +329,14 @@ func transformApplication(srcDir, templatesDir, componentName, overrideKey strin
 			fmt.Sprintf("failed to transform application.yaml for %s", componentName), transformErr)
 	}
 
-	// Marshal to YAML, then replace the quoted values string with the
-	// raw Helm template expression. yaml.Marshal wraps the template in quotes
-	// (since it contains {{ }}), but Argo CD needs the raw template text so
-	// Helm can evaluate it at render time.
+	// helm.values is a *yaml.Node with LiteralStyle, so yaml.Marshal emits
+	// the raw Helm template as a block scalar that Helm evaluates at render
+	// time (rather than a quoted YAML string).
 	out, marshalErr := yaml.Marshal(app)
 	if marshalErr != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to marshal transformed application for %s", componentName), marshalErr)
 	}
-	out = fixValuesTemplate(out, app)
 
 	destPath, pathErr := deployer.SafeJoin(templatesDir, componentName+".yaml")
 	if pathErr != nil {
@@ -394,58 +402,26 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 			`{{- mustMergeOverwrite $static $dynamic | toYaml | nindent 8 }}`,
 		componentName, overrideKey)
 
-	// Replace multi-source with single source + values
+	// Replace multi-source with single source + values. The values template is
+	// wrapped in a yaml.Node with LiteralStyle so yaml.Marshal emits it as a
+	// block scalar rather than a quoted string — Helm evaluates the raw
+	// template text at render time.
 	spec["source"] = map[string]any{
 		"repoURL":        repoURL,
 		"chart":          chart,
 		"targetRevision": targetRevision,
 		"helm": map[string]any{
-			"values": valuesTmpl,
+			"values": &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Tag:   "!!str",
+				Style: yaml.LiteralStyle,
+				Value: valuesTmpl,
+			},
 		},
 	}
 	delete(spec, "sources")
 
 	return nil
-}
-
-// fixValuesTemplate replaces the yaml.Marshal-quoted values string with a raw
-// block scalar. yaml.Marshal wraps strings containing {{ }} in quotes, but the
-// output needs to be a raw Helm template that Helm evaluates at render time.
-// Argo CD's spec.source.helm.values is a string field, so |- block scalar is correct.
-func fixValuesTemplate(marshaled []byte, app map[string]any) []byte {
-	spec, _ := app["spec"].(map[string]any)
-	source, _ := spec["source"].(map[string]any)
-	helm, _ := source["helm"].(map[string]any)
-	tmpl, _ := helm["values"].(string)
-	if tmpl == "" {
-		return marshaled
-	}
-
-	// Build the raw block scalar version
-	var raw strings.Builder
-	raw.WriteString("      values: |-\n")
-	for _, line := range strings.Split(tmpl, "\n") {
-		raw.WriteString("        " + line + "\n")
-	}
-
-	// Replace whatever yaml.Marshal produced for values with the raw version.
-	result := string(marshaled)
-	start := strings.Index(result, "      values:")
-	if start == -1 {
-		return marshaled
-	}
-	// Find the end of the values value (next line at indent <= 6 spaces)
-	rest := result[start:]
-	lines := strings.Split(rest, "\n")
-	end := len(lines[0]) + 1
-	for _, line := range lines[1:] {
-		if line == "" || (len(line) > 0 && len(line)-len(strings.TrimLeft(line, " ")) <= 6 && strings.TrimSpace(line) != "") {
-			break
-		}
-		end += len(line) + 1
-	}
-
-	return []byte(result[:start] + raw.String() + result[start+end:])
 }
 
 func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, error) {

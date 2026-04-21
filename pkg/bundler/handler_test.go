@@ -375,6 +375,18 @@ func TestBundleRequestQueryParamParsing(t *testing.T) {
 			body:       `{"apiVersion": "v1", "kind": "Recipe", "componentRefs": [{"name": "gpu-operator", "version": "v1"}]}`,
 			wantStatus: http.StatusOK,
 		},
+		{
+			name:       "dynamic param",
+			queryParam: "dynamic=gpuoperator:driver.version",
+			body:       `{"apiVersion": "v1", "kind": "Recipe", "componentRefs": [{"name": "gpu-operator", "version": "v1"}]}`,
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "set and dynamic on same path",
+			queryParam: "set=gpuoperator:driver.version=570.86.16&dynamic=gpuoperator:driver.version",
+			body:       `{"apiVersion": "v1", "kind": "Recipe", "componentRefs": [{"name": "gpu-operator", "version": "v1"}]}`,
+			wantStatus: http.StatusOK,
+		},
 	}
 
 	for _, tt := range tests {
@@ -475,6 +487,7 @@ func TestParseQueryParams(t *testing.T) {
 		wantDeployer string
 		wantRepoURL  string
 		wantNodes    *int
+		wantDynamic  map[string]int // component -> expected path count
 	}{
 		{
 			name:         "empty query defaults to helm",
@@ -542,6 +555,34 @@ func TestParseQueryParams(t *testing.T) {
 			wantDeployer: "helm",
 			wantNodes:    wantNodes(0),
 		},
+		{
+			name:         "dynamic single declaration",
+			url:          "/v1/bundle?dynamic=gpuoperator:driver.version",
+			wantDeployer: "helm",
+			wantDynamic:  map[string]int{"gpuoperator": 1},
+		},
+		{
+			name:         "dynamic multiple declarations same component",
+			url:          "/v1/bundle?dynamic=gpuoperator:driver.version&dynamic=gpuoperator:mig.strategy",
+			wantDeployer: "helm",
+			wantDynamic:  map[string]int{"gpuoperator": 2},
+		},
+		{
+			name:         "dynamic multiple components",
+			url:          "/v1/bundle?dynamic=gpuoperator:driver.version&dynamic=networkoperator:ofed.version",
+			wantDeployer: "helm",
+			wantDynamic:  map[string]int{"gpuoperator": 1, "networkoperator": 1},
+		},
+		{
+			name:    "dynamic malformed missing colon",
+			url:     "/v1/bundle?dynamic=gpuoperatorDriverVersion",
+			wantErr: true,
+		},
+		{
+			name:    "dynamic rejects =value",
+			url:     "/v1/bundle?dynamic=gpuoperator:driver.version=oops",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -562,6 +603,22 @@ func TestParseQueryParams(t *testing.T) {
 			}
 			if tt.wantNodes != nil && params.estimatedNodeCount != *tt.wantNodes {
 				t.Errorf("estimatedNodeCount = %d, want %d", params.estimatedNodeCount, *tt.wantNodes)
+			}
+			if tt.wantDynamic != nil {
+				gotCounts := make(map[string]int)
+				for _, cp := range params.dynamicValues {
+					gotCounts[cp.Component]++
+				}
+				if len(gotCounts) != len(tt.wantDynamic) {
+					t.Errorf("dynamicValues has %d components, want %d",
+						len(gotCounts), len(tt.wantDynamic))
+				}
+				for component, wantCount := range tt.wantDynamic {
+					if got := gotCounts[component]; got != wantCount {
+						t.Errorf("dynamicValues[%q] has %d paths, want %d",
+							component, got, wantCount)
+					}
+				}
 			}
 		})
 	}

@@ -27,7 +27,7 @@ The agent is a Kubernetes Job that captures system configuration and writes outp
 - Drift detection (compare snapshots over time)
 - CI/CD integration (automated configuration validation)
 
-**ConfigMap storage:**
+### ConfigMap storage
 
 Agent uses ConfigMap URI scheme (`cm://namespace/name`) to write snapshots:
 ```bash

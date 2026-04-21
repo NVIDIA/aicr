@@ -67,9 +67,9 @@
 //   - os: Operating system (ubuntu, cos, rhel, any)
 //   - osv: OS version (e.g., 24.04)
 //   - kernel: Kernel version (supports vendor suffixes)
-//   - service: Kubernetes service (eks, gke, aks, self-managed, any)
+//   - service: Kubernetes service (eks, gke, aks, oke, kind, lke, any)
 //   - k8s: Kubernetes version (supports vendor suffixes)
-//   - gpu: GPU type (h100, gb200, a100, l40, any)
+//   - gpu: GPU type (h100, gb200, b200, a100, l40, rtx-pro-6000, any)
 //   - intent: Workload intent (training, inference, any)
 //   - context: Include context metadata (true/false)
 //

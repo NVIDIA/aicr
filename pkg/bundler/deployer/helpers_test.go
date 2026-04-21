@@ -15,13 +15,34 @@
 package deployer
 
 import (
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// assertErrorCode verifies err is a *errors.StructuredError with the given code.
+// The substring check is secondary — the code is the authoritative contract.
+func assertErrorCode(t *testing.T, err error, want errors.ErrorCode, wantMsg string) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error with code %s, got nil", want)
+	}
+	var structErr *errors.StructuredError
+	if !stderrors.As(err, &structErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+	if structErr.Code != want {
+		t.Errorf("error code = %s, want %s (full error: %v)", structErr.Code, want, err)
+	}
+	if wantMsg != "" && !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("error message should contain %q, got: %v", wantMsg, err)
+	}
+}
 
 func TestIsSafePathComponent(t *testing.T) {
 	tests := []struct {
@@ -80,6 +101,94 @@ func TestSafeJoin(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOutput_AddDataFiles(t *testing.T) {
+	t.Run("empty input leaves Output unchanged", func(t *testing.T) {
+		o := &Output{Files: []string{"existing"}, TotalSize: 10}
+		if err := o.AddDataFiles(t.TempDir(), nil); err != nil {
+			t.Fatalf("AddDataFiles(nil) error = %v", err)
+		}
+		if len(o.Files) != 1 || o.TotalSize != 10 {
+			t.Errorf("empty input mutated output: files=%v size=%d", o.Files, o.TotalSize)
+		}
+	})
+
+	t.Run("appends absolute paths and sums sizes", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		absTmp, err := filepath.Abs(tmpDir)
+		if err != nil {
+			t.Fatalf("failed to resolve tmpDir: %v", err)
+		}
+		dataFiles := []string{"data/a.yaml", "data/nested/b.yaml"}
+		contents := map[string]string{
+			"data/a.yaml":        "aaa",
+			"data/nested/b.yaml": "bbbbbb",
+		}
+		var expectedBytes int64
+		for rel, c := range contents {
+			full := filepath.Join(tmpDir, rel)
+			if mkErr := os.MkdirAll(filepath.Dir(full), 0755); mkErr != nil {
+				t.Fatalf("mkdir: %v", mkErr)
+			}
+			if wErr := os.WriteFile(full, []byte(c), 0600); wErr != nil {
+				t.Fatalf("write: %v", wErr)
+			}
+			expectedBytes += int64(len(c))
+		}
+
+		o := &Output{TotalSize: 5}
+		if err := o.AddDataFiles(tmpDir, dataFiles); err != nil {
+			t.Fatalf("AddDataFiles() error = %v", err)
+		}
+		if len(o.Files) != len(dataFiles) {
+			t.Fatalf("got %d Files, want %d", len(o.Files), len(dataFiles))
+		}
+		if o.TotalSize != 5+expectedBytes {
+			t.Errorf("TotalSize = %d, want %d", o.TotalSize, 5+expectedBytes)
+		}
+		for i, p := range o.Files {
+			if !strings.HasPrefix(p, absTmp+string(filepath.Separator)) {
+				t.Errorf("path %q should be under %q", p, absTmp)
+			}
+			if !strings.HasSuffix(p, dataFiles[i]) {
+				t.Errorf("path %q should end with %q", p, dataFiles[i])
+			}
+		}
+	})
+
+	t.Run("rejects path traversal without mutating output", func(t *testing.T) {
+		o := &Output{Files: []string{"existing"}, TotalSize: 10}
+		err := o.AddDataFiles(t.TempDir(), []string{"../../../etc/passwd"})
+		assertErrorCode(t, err, errors.ErrCodeInvalidRequest, "escapes base directory")
+		if len(o.Files) != 1 || o.Files[0] != "existing" || o.TotalSize != 10 {
+			t.Errorf("output mutated on traversal error: files=%v size=%d", o.Files, o.TotalSize)
+		}
+	})
+
+	t.Run("rejects absolute path", func(t *testing.T) {
+		o := &Output{Files: []string{"existing"}, TotalSize: 10}
+		err := o.AddDataFiles(t.TempDir(), []string{"/etc/passwd"})
+		assertErrorCode(t, err, errors.ErrCodeInvalidRequest, "escapes base directory")
+		if len(o.Files) != 1 || o.Files[0] != "existing" || o.TotalSize != 10 {
+			t.Errorf("output mutated on absolute-path error: files=%v size=%d", o.Files, o.TotalSize)
+		}
+	})
+
+	t.Run("errors when file missing", func(t *testing.T) {
+		o := &Output{Files: []string{"existing"}, TotalSize: 10}
+		err := o.AddDataFiles(t.TempDir(), []string{"data/does-not-exist.yaml"})
+		assertErrorCode(t, err, errors.ErrCodeInternal, "failed to stat data file")
+		if len(o.Files) != 1 || o.Files[0] != "existing" || o.TotalSize != 10 {
+			t.Errorf("output mutated on stat error: files=%v size=%d", o.Files, o.TotalSize)
+		}
+	})
+
+	t.Run("rejects nil receiver", func(t *testing.T) {
+		var o *Output
+		err := o.AddDataFiles(t.TempDir(), []string{"data/a.yaml"})
+		assertErrorCode(t, err, errors.ErrCodeInvalidRequest, "output is required")
+	})
 }
 
 func TestWriteValuesFile(t *testing.T) {
