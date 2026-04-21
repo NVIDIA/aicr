@@ -2,7 +2,8 @@
 
 ## Status
 
-**Proposed** — 2026-04-21
+**Proposed** — 2026-04-20
+**Revised** — 2026-04-21 (contract clarifications and rollout sequencing)
 
 The primary implementation for this decision lands in `pkg/recipe/` and
 `validators/deployment/`. The steady-state CI guard for newly added components
@@ -122,7 +123,9 @@ The supported coverage shapes are:
 
 - `readiness`
   - required `namespace`
-  - optional deployer-neutral `selector`
+  - optional deployer-neutral `selector` using stable labels only;
+    release-identity labels such as `app.kubernetes.io/instance` remain out of
+    bounds
   - optional exact `workloads` using `{kind, name}`
   - `workloads.kind` accepts only the exact-case enum values `Deployment`,
     `DaemonSet`, and `StatefulSet`
@@ -272,17 +275,23 @@ The implementation associated with this ADR includes:
   - fail-closed zero-match behavior
 - registry mappings for the current component inventory
 
-The steady-state CI policy is intentionally sequenced after migration:
+The rollout is intentionally sequenced in two phases:
 
-- once the migration inventory is complete for the current **21-component**
-  registry inventory, `pkg/recipe` validation surfaced through repo CI should
-  reject newly added components that declare none of:
-  - `readiness`
-  - `customChecks`
-  - `crds`
-- that guard belongs in `pkg/recipe` validation surfaced through existing repo
-  CI or lint, not as additional runtime deployment-validator behavior and not
-  as a separate standalone validator workflow
+- **Phase 1: migrate the current inventory**
+  - add the component contract fields
+  - hydrate them into the resolved recipe
+  - populate the current **21-component** registry inventory
+  - allow temporary overlap with `expectedResources` during migration
+- **Phase 2: enforce the steady-state rule for newly added components**
+  - once the current migration inventory is complete, `pkg/recipe` validation
+    surfaced through repo CI should reject newly added components that declare
+    none of:
+    - `readiness`
+    - `customChecks`
+    - `crds`
+  - that guard belongs in `pkg/recipe` validation surfaced through existing
+    repo CI or lint, not as additional runtime deployment-validator behavior
+    and not as a separate standalone validator workflow
 
 ## Alternatives Considered
 
@@ -293,9 +302,7 @@ not produce an enforceable component contract.
 
 ### 2. Reuse Chainsaw health checks directly in deployment validation
 
-Rejected for this ADR because runtime reuse would add a second validator model,
-increase image/runtime maintenance cost, and work against the Kubernetes-native
-direction already used by `aicr validate --phase conformance`.
+Rejected for the reasons captured in [Why Not Runtime Chainsaw](#why-not-runtime-chainsaw).
 
 ### 3. Namespace-wide heuristics with no registry contract
 
