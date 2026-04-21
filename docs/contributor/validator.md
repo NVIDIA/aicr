@@ -438,4 +438,5 @@ When adding a new upstream check:
 - [Validator Extension Guide](../integrator/validator-extension.md) — External validators via `--data`
 - [Validator Catalog Reference](https://github.com/NVIDIA/aicr/tree/main/recipes/validators) — Catalog schema and entries
 - [Validator V2 ADR](https://github.com/NVIDIA/aicr/blob/main/docs/design/002-validatorv2-adr.md) — Architecture decision record
+- [Deployment Validation ADR](https://github.com/NVIDIA/aicr/blob/main/docs/design/006-deployment-validation.md) — Registry-driven deployment readiness design
 - [CLI Reference](../user/cli-reference.md#aicr-validate) — Validate command flags
