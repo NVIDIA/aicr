@@ -928,7 +928,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
       "name": "nodewright-operator",
       "type": "Helm",
       "source": "oci://ghcr.io/nvidia/skyhook",
-      "version": "v0.4.0",
+      "version": "v0.15.0",
       "valuesFile": "components/nodewright-operator/values.yaml",
       "overrides": {
         "customization": "ubuntu"

@@ -56,7 +56,7 @@ componentRefs:
       - cert-manager
   - name: nodewright-operator
     namespace: skyhook
-    chart: nodewright-operator
+    chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: 0.14.0

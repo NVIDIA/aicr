@@ -54,7 +54,7 @@ Visual: Left-to-right horizontal pipeline, boxes connected by labeled arrows
 │   RESOLVED   │◀──────────────│  + UBUNTU    │◀────────────────│  + H100      │
 │   RECIPE     │   KUBEFLOW    │              │   H100           │              │
 │              │                │ OS kernel    │                   │ +nodewright- │
-│ 12 unique    │  +kubeflow-   │ constraint   │                   │ customizatns │
+│ 12 unique    │  +kubeflow-   │ constraint   │                   │ customizationns │
 │ components   │  trainer      │ >= 6.8       │                   │ behavior     │
 │              │  +36 values   │              │                   │ mutations    │
 └──────────────┘                └──────────────┘                   └──────────────┘

@@ -59,7 +59,7 @@ measurements:
           prometheus-adapter.namespace: monitoring
           nodewright-customizations.chart: nodewright-customizations
           nodewright-customizations.namespace: skyhook
-          nodewright-operator.chart: nodewright-operator
+          nodewright-operator.chart: skyhook-operator
           nodewright-operator.version: v0.14.0
           nodewright-operator.namespace: skyhook
   - type: OS
