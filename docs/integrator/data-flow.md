@@ -523,7 +523,7 @@ aicr validate \
 │    │                                                   │
 │    └─ Nodewright                                       │
 │       ├─ values map → values.yaml                      │
-│       └─ values map → skyhook-cr.yaml                  │
+│       └─ values map → nodewright-cr.yaml               │
 │                                                        │
 │  ┌────────▼────────┐                                   │
 │  │ Template Engine │ (go:embed templates)              │

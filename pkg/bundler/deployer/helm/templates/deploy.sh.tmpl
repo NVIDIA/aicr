@@ -332,11 +332,11 @@ if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
     NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
     fi
   fi
-  stale_skyhook=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
-  if [[ -n "${stale_skyhook}" ]]; then
-    echo "WARNING: nodes with stale ${NODEWRIGHT_TAINT_KEY} taints (no running nodewright-operator): ${stale_skyhook}"
+  stale_nodewright=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
+  if [[ -n "${stale_nodewright}" ]]; then
+    echo "WARNING: nodes with stale ${NODEWRIGHT_TAINT_KEY} taints (no running nodewright-operator): ${stale_nodewright}"
     echo "  Removing stale taints to unblock scheduling..."
-    for node in ${stale_skyhook}; do
+    for node in ${stale_nodewright}; do
       kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
     done
   fi

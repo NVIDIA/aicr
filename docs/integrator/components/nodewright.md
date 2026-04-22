@@ -42,7 +42,7 @@ A second, more stripped down, optimizer is available for operating systems that 
             env:
               # GKE COS has a read-only rootfs, so we need to use a different directory
               # /etc is stateless so better represents the flag and history on reboot
-              copyDirRoot: /etc/skyhook
+              copyDirRoot: /etc/nodewright
               # Because what nodewright does is generally on /etc we need to reapply on reboot
               reapplyOnReboot: "true"
 ```
