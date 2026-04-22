@@ -39,10 +39,10 @@ import (
 )
 
 const (
-	gpuOperatorComponent = "gpu-operator"
-	skyhookComponent     = "nodewright-customizations"
-	draDriverComponent   = "nvidia-dra-driver-gpu"
-	clusterPolicyName    = "cluster-policy"
+	gpuOperatorComponent              = "gpu-operator"
+	nodewrightCustomizationsComponent = "nodewright-customizations"
+	draDriverComponent                = "nvidia-dra-driver-gpu"
+	clusterPolicyName                 = "cluster-policy"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -54,7 +54,7 @@ const (
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
 	clusterPolicyReadyState = "ready"
-	skyhookCompleteState    = "complete"
+	nodewrightCompleteState = "complete"
 )
 
 var (
@@ -182,7 +182,7 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentRef) []string {
 	var failures []string
 
-	if ref, ok := findEnabledComponent(refs, skyhookComponent); ok {
+	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
 		if err := verifySkyhookReady(ctx, ref); err != nil {
 			failures = append(failures, err.Error())
 		}

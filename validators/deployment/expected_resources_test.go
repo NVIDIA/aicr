@@ -87,7 +87,7 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 		},
 		[]recipe.ComponentRef{
 			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
-			{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
 			{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 			{
 				Name:      "app-component",
@@ -120,7 +120,7 @@ func TestCheckExpectedResources_FailsWhenSkyhookIncomplete(t *testing.T) {
 		},
 		[]recipe.ComponentRef{
 			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
-			{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
 			{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 		},
 	)
@@ -167,7 +167,7 @@ func TestCheckExpectedResources_SkipsDisabledComponents(t *testing.T) {
 		nil,
 		[]recipe.ComponentRef{
 			{
-				Name:      skyhookComponent,
+				Name:      nodewrightCustomizationsComponent,
 				Namespace: "skyhook",
 				Overrides: map[string]any{"enabled": false},
 			},
@@ -200,7 +200,7 @@ func TestVerifySkyhookReady_ListsClusterScoped(t *testing.T) {
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{activeNamespace("skyhook")},
 		[]runtime.Object{skyhookWithStatus("tuning", skyhookCompleteState)},
-		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
 	)
 
 	if err := checkExpectedResources(ctx); err != nil {
@@ -218,7 +218,7 @@ func TestCheckExpectedResources_SkipsSkyhookWhenCRDNotRegistered(t *testing.T) {
 		[]runtime.Object{activeNamespace("skyhook")},
 		nil,
 		[]schema.GroupVersionResource{skyhookGVR},
-		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
 	)
 
 	if err := checkExpectedResources(ctx); err != nil {
@@ -237,7 +237,7 @@ func TestCheckExpectedResources_FailsWhenSkyhookCRMissing(t *testing.T) {
 		nil,
 		[]schema.GroupVersion{skyhookGVR.GroupVersion()},
 		nil,
-		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
 	)
 
 	err := checkExpectedResources(ctx)
@@ -361,7 +361,7 @@ func TestCheckExpectedResources_IgnoresStaleUnrelatedSkyhook(t *testing.T) {
 			skyhookWithStatus("no-op", "waiting"),
 		},
 		[]recipe.ComponentRef{
-			{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
 		},
 	)
 
@@ -384,7 +384,7 @@ func TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames(t *testing.T) {
 		nil,
 		[]recipe.ComponentRef{
 			// Intentionally no ManifestFiles — simulates a misconfigured recipe.
-			{Name: skyhookComponent, Namespace: "skyhook"},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook"},
 		},
 	)
 
@@ -596,7 +596,7 @@ func TestCheckExpectedResources_SurfacesMultipleSkyhookFailures(t *testing.T) {
 		},
 		[]recipe.ComponentRef{
 			{
-				Name:      skyhookComponent,
+				Name:      nodewrightCustomizationsComponent,
 				Namespace: "skyhook",
 				ManifestFiles: []string{
 					"components/nodewright-customizations/manifests/tuning.yaml",
