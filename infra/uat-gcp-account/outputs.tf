@@ -13,7 +13,7 @@
 # limitations under the License.
 
 output "PROJECT_ID" {
-  value       = data.google_project.project.name
+  value       = data.google_project.project.project_id
   description = "GCP Project ID to use in GitHub Actions."
 }
 
