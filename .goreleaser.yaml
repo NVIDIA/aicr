@@ -110,8 +110,8 @@ kos:
       - linux/amd64
       - linux/arm64
     tags:
-      - latest
       - "{{.Tag}}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
     preserve_import_paths: false
     bare: true
 
@@ -124,8 +124,8 @@ kos:
       - linux/amd64
       - linux/arm64
     tags:
-      - latest
       - "{{.Tag}}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
     preserve_import_paths: false
     bare: true
 
@@ -170,7 +170,7 @@ brews:
       git:
         url: "ssh://git@github.com/NVIDIA/homebrew-aicr.git"
         private_key: "{{ .Env.HOMEBREW_DEPLOY_KEY }}"
-    skip_upload: "{{ if .Env.HOMEBREW_DEPLOY_KEY }}false{{ else }}true{{ end }}"
+    skip_upload: "{{ if or .Prerelease (not .Env.HOMEBREW_DEPLOY_KEY) }}true{{ else }}false{{ end }}"
     commit_author:
       name: github-actions
       email: github-actions@github.com
