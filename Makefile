@@ -340,6 +340,18 @@ release: ## Runs the full release process with goreleaser
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
+.PHONY: bump-prepare
+bump-prepare: ## Prepares a release for review (generates changelog, does not tag/push). Use TYPE=patch|minor|major|rc|beta
+	tools/bump prepare $(or $(TYPE),patch)
+
+.PHONY: bump-finalize
+bump-finalize: ## Commits, tags, and pushes a prepared release
+	tools/bump finalize
+
+.PHONY: bump-abort
+bump-abort: ## Cancels a prepared release
+	tools/bump abort
+
 .PHONY: bump-major
 bump-major: ## Bumps major version (1.2.3 → 2.0.0)
 	tools/bump major
@@ -351,6 +363,14 @@ bump-minor: ## Bumps minor version (1.2.3 → 1.3.0)
 .PHONY: bump-patch
 bump-patch: ## Bumps patch version (1.2.3 → 1.2.4)
 	tools/bump patch
+
+.PHONY: bump-rc
+bump-rc: ## One-shot RC pre-release bump (v1.2.3 → v1.2.4-rc1 → v1.2.4-rc2)
+	tools/bump rc
+
+.PHONY: bump-beta
+bump-beta: ## One-shot beta pre-release bump (v1.2.3 → v1.2.4-beta1 → v1.2.4-beta2)
+	tools/bump beta
 
 .PHONY: changelog
 changelog: ## Previews changelog for next release (does not commit)
