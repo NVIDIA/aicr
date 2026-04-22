@@ -239,7 +239,7 @@ regular regressions.
 
 ## References
 
-- [KWOK recipes workflow](../../.github/workflows/kwok-recipes.yaml)
-- [KWOK test action](../../.github/actions/kwok-test/)
-- [Recipe overlays](../../recipes/overlays/)
+- [KWOK recipes workflow](https://github.com/NVIDIA/aicr/blob/main/.github/workflows/kwok-recipes.yaml)
+- [KWOK test action](https://github.com/NVIDIA/aicr/tree/main/.github/actions/kwok-test)
+- [Recipe overlays](https://github.com/NVIDIA/aicr/tree/main/recipes/overlays)
 - [KWOK project](https://kwok.sigs.k8s.io/)

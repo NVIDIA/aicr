@@ -259,4 +259,4 @@ managed via Server-Side Apply and cleaned up after each run.
 - [CTRF Specification](https://ctrf.io/)
 - [CTRF JSON Schema](https://github.com/ctrf-io/ctrf/blob/main/schema/ctrf.schema.json)
 - [Kubernetes Termination Messages](https://kubernetes.io/docs/tasks/debug/debug-application/determine-reason-pod-failure/)
-- [Current validator implementation](../../pkg/validator/)
+- [Current validator implementation](https://github.com/NVIDIA/aicr/tree/main/pkg/validator)
