@@ -210,7 +210,6 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Phase | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Capacity | ${{ steps.capacity.outcome }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependencies | ${{ steps.deps.outcome }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Config | ${{ steps.config.outcome }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Cluster | ${{ steps.infra.outcome }} |" >> $GITHUB_STEP_SUMMARY
