@@ -16,4 +16,4 @@ self-hosted-runner:
   labels:
     - linux-amd64-gpu-h100-latest-1
     - linux-amd64-gpu-h100-latest-2
-    - linux-amd64-gpu-t4-latest-1
+    - linux-amd64-gpu-l40g-latest-1
