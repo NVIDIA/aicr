@@ -1,0 +1,242 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT - GCP
+
+on:
+  workflow_dispatch: {}  # allow manual runs for testing
+  schedule:
+    - cron: '0 4 * * *' # daily at midnight PST, runs on default branch only
+
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+  packages: write
+
+jobs:
+  uat-gcp:
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GCP_PROJECT_ID: "eidosx"
+      GCP_REGION: "us-central1"
+      GCP_WIF_PROVIDER: "projects/116689922666/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider"
+      GCP_WIF_SERVICE_ACCOUNT: "github-actions@eidosx.iam.gserviceaccount.com"
+      DEPLOYMENT_ID: "aicr-uat-${{ github.run_id }}"
+      CLUSTER_CONFIG: tests/uat/gcp/config.yaml
+      GKE_IMAGE: "ghcr.io/mchmarny/cluster/gke@sha256:placeholder"
+      VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
+      VALIDATOR_TAG: "uat-${{ github.run_id }}"
+
+      # Debug
+      SKIP_DELETE: "false"  # skip cluster deletion
+
+    steps:
+      # Checkout
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      # Versions
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      # Build from source
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+
+      - name: Build aicr binary
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          go build -o ./aicr ./cmd/aicr
+          ./aicr --version
+
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build and push validator images
+        run: |
+          for phase in deployment performance conformance; do
+            IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
+            docker build -f "validators/${phase}/Dockerfile" \
+              -t "${IMAGE}" .
+            docker push "${IMAGE}"
+          done
+
+      # Auth
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193  # v2.1.10
+        with:
+          workload_identity_provider: ${{ env.GCP_WIF_PROVIDER }}
+          service_account: ${{ env.GCP_WIF_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a  # v2.1.4
+
+      # Capacity check (reads reservation path and zone from cluster config)
+      - name: Check GPU node pool capacity
+        id: capacity
+        run: |
+          set -euo pipefail
+          GPU_WORKER='.compute.gke.nodePools.workers[] | select(.name == "gpu-worker")'
+          # Reservation path: projects/<project>/reservations/<name>
+          RESERVATION_PATH=$(yq eval "${GPU_WORKER}.nodeConfig.capacityReservations[0]" "$CLUSTER_CONFIG")
+          RESERVATION=$(echo "${RESERVATION_PATH}" | awk -F/ '{print $NF}')
+          ZONE=$(yq eval "${GPU_WORKER}.zones[0]" "$CLUSTER_CONFIG")
+          echo "Reservation: ${RESERVATION}, zone: ${ZONE}"
+
+          AVAILABLE=$(gcloud compute reservations describe "${RESERVATION}" \
+            --project="${GCP_PROJECT_ID}" \
+            --zone="${ZONE}" \
+            --format="value(specificReservation.count - specificReservation.inUseCount)")
+          echo "available=${AVAILABLE}" >> "$GITHUB_OUTPUT"
+          echo "Available instances in reservation ${RESERVATION}: ${AVAILABLE}"
+          if [[ "${AVAILABLE}" -lt 1 ]]; then
+            echo "::error::No available instances in reservation ${RESERVATION} (zone: ${ZONE})"
+            exit 1
+          fi
+
+      # Deps
+      - name: Install tools
+        id: deps
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+          install_chainsaw: 'true'
+          chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
+
+      # Config
+      - name: Update Config
+        id: config
+        run: |
+          set -euox pipefail
+          yq -i '.deployment.id = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
+          yq -i '.cluster.name = strenv(DEPLOYMENT_ID)' "$CLUSTER_CONFIG"
+          cat "$CLUSTER_CONFIG"
+
+      # Bringup
+      - name: Bringup Infra
+        id: infra
+        run: |
+          set -euox pipefail
+          docker run \
+            -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
+            -e AUTO_APPROVE=true \
+            -e GOOGLE_APPLICATION_CREDENTIALS_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
+            ${{ env.GKE_IMAGE }} apply
+
+      # Connect
+      - name: Connect to Cluster
+        id: client
+        if: steps.infra.outcome == 'success'
+        shell: bash
+        run: |
+          set -euox pipefail
+          echo "Updating kubeconfig..."
+          gcloud container clusters get-credentials "${{ env.DEPLOYMENT_ID }}" \
+            --region "${{ env.GCP_REGION }}" \
+            --project "${{ env.GCP_PROJECT_ID }}"
+          echo "Verifying cluster connection..."
+          kubectl get nodes
+
+      # Test (capped to guarantee teardown headroom within the 90m job timeout)
+      - name: Run UAT Tests
+        id: tests
+        if: steps.client.outcome == 'success'
+        timeout-minutes: 30
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+        run: |
+          set -euxo pipefail
+          chainsaw test \
+            --config tests/uat/chainsaw-config.yaml \
+            --test-dir tests/uat/gcp/tests/
+
+      # Teardown (retry up to 3 times)
+      - name: Destroy Cluster
+        if: always() && steps.infra.outcome != 'skipped' && env.SKIP_DELETE != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for attempt in 1 2 3; do
+            echo "Destroy attempt ${attempt}..."
+            if docker run \
+              -e CONFIG_CONTENT="$(base64 < $CLUSTER_CONFIG)" \
+              -e AUTO_APPROVE=true \
+              -e GOOGLE_APPLICATION_CREDENTIALS_CONTENT="$(base64 < ${{ steps.auth.outputs.credentials_file_path }})" \
+              ${{ env.GKE_IMAGE }} destroy; then
+              echo "Cluster destroyed successfully"
+              break
+            fi
+            echo "Destroy attempt ${attempt} failed, retrying..."
+            sleep 30
+          done
+
+      # Cleanup
+      - name: Cleanup validator image
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Delete UAT-tagged validator images to avoid GHCR clutter
+          for phase in deployment performance conformance; do
+            VERSION_ID=$(gh api \
+              "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions" \
+              --jq ".[] | select(.metadata.container.tags[] == \"${VALIDATOR_TAG}\") | .id" 2>/dev/null) || true
+            if [[ -n "${VERSION_ID}" ]]; then
+              gh api --method DELETE \
+                "repos/${{ github.repository }}/packages/container/aicr-validators%2F${phase}/versions/${VERSION_ID}" || true
+            fi
+          done
+
+      # Artifacts
+      - name: Upload Test Artifacts
+        if: always() && steps.tests.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-gcp-results
+          path: |
+            tests/uat/gcp/tests/**/chainsaw-report*.xml
+          retention-days: 30
+
+      # Summary
+      - name: Test Summary
+        if: always()
+        run: |
+          echo "## UAT Results (GCP)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Phase | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Capacity | ${{ steps.capacity.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependencies | ${{ steps.deps.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Config | ${{ steps.config.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cluster | ${{ steps.infra.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Connection | ${{ steps.client.outcome }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ steps.tests.outcome }} |" >> $GITHUB_STEP_SUMMARY

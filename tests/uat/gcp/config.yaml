@@ -1,0 +1,115 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: github.com/mchmarny/cluster/v1alpha1
+kind: Cluster
+
+deployment:
+  id: aicr-uat
+  provider: gke
+  tenancy: eidosx
+  location: us-central1
+  state: tenancy
+  destroy: false
+  tags:
+    env: dev
+
+cluster:
+  gke:
+    version: "1.35"
+    controlPlane:
+      authorizedNetworks:
+        - cidr: 216.228.127.128/30
+          name: hq
+        - cidr: 52.41.222.58/32
+          name: nw1
+        - cidr: 54.68.11.139/32
+          name: nw2
+        - cidr: 128.77.49.34/32
+          name: nw3
+
+network:
+  gke:
+    gpuNets:
+      count: 8
+      mtu: 8244
+      cidrBase: "192.168.0.0/16"
+      gvnicCidr: "192.168.128.0/20"
+    firewallRules:
+      - name: nccl-internal
+        direction: INGRESS
+        priority: 900
+        sourceRanges:
+          - "10.0.0.0/8"
+        allowed:
+          - protocol: tcp
+          - protocol: udp
+          - protocol: icmp
+
+compute:
+  gke:
+    nodePools:
+      system:
+        machineType: e2-standard-4
+        autoscaling:
+          enabled: true
+          minNodes: 1
+          maxNodes: 3
+        nodeConfig:
+          labels:
+            nodeGroup: system-worker
+            dedicated: system-workload
+
+      workers:
+        - name: cpu-worker
+          machineType: n2-standard-8
+          diskType: pd-ssd
+          diskSizeGb: 200
+          zones:
+            - us-central1-c
+          autoscaling:
+            enabled: true
+            minNodes: 1
+            maxNodes: 1
+          nodeConfig:
+            labels:
+              nodeGroup: cpu-worker
+              dedicated: user-workload
+
+        - name: gpu-worker
+          machineType: a3-megagpu-8g
+          diskType: pd-ssd
+          diskSizeGb: 200
+          zones:
+            - us-central1-c
+          autoscaling:
+            enabled: true
+            minNodes: 2
+            maxNodes: 2
+          guestAccelerator:
+            type: nvidia-h100-mega-80gb
+            count: 8
+            gpuDriverInstallation:
+              gpuDriverVersion: DEFAULT
+          nodeConfig:
+            gvnic: true
+            capacityReservations:
+              - projects/eidosx/reservations/aicr-uat-h100
+            taints:
+              - key: dedicated
+                value: gpu-workload
+                effect: NO_SCHEDULE
+            labels:
+              nodeGroup: gpu-worker
+              dedicated: user-workload
