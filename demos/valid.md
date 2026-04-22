@@ -65,7 +65,7 @@ aicr bundle \
 Expected:
 - Completes in <10s
 - `bundle` created
-- Skyhook Warning about workload selector
+- Nodewright Warning about workload selector
 
 ## Validate (dry run, no-cluster)
 

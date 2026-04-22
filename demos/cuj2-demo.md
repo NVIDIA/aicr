@@ -61,7 +61,7 @@
   │                                                                        │
   │  cert-manager ──▶ kube-prometheus-stack ──▶ gpu-operator ──▶           │
   │  kai-scheduler ──▶ kgateway ──▶ nvidia-dra-driver ──▶                  │
-  │  dynamo-platform ──▶ skyhook ──▶ nvsentinel ──▶ ...                    │
+  │  dynamo-platform ──▶ nodewright ──▶ nvsentinel ──▶ ...                 │
   │                                                                        │
   │  Result: Fully configured GPU cluster                                  │
   │    • 8x H100 GPUs advertised via DRA                                   │
@@ -147,7 +147,7 @@
 | System | m4.16xlarge | `nodeGroup=system-worker` | `dedicated=system-workload:NoSchedule` + `:NoExecute` |
 | CPU worker | m4.16xlarge | `nodeGroup=cpu-worker` | `dedicated=worker-workload:NoSchedule` + `:NoExecute` |
 
-- **GPU nodes**: Run GPU operator DaemonSets, DRA driver, skyhook tuning, and GPU workloads
+- **GPU nodes**: Run GPU operator DaemonSets, DRA driver, nodewright tuning, and GPU workloads
 - **System nodes**: Run control-plane components (cert-manager, monitoring, schedulers, operators)
 - **CPU nodes**: Run CPU-only workloads (e.g., Dynamo frontend, inference gateway)
 - EKS-managed add-ons (CoreDNS, metrics-server) tolerate `dedicated=system-workload` by default

@@ -1,20 +1,20 @@
 # What is it
 
-Skyhook and Skyhook-customizations are two halves of the integration. [Skyhook](https://github.com/NVIDIA/skyhook) is a Kubernetes Operator that applies [skyhook packages](https://github.com/NVIDIA/skyhook-packages) with consistent, repeatable, and tested lifecycles within a cluster. Skyhook-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/skyhook/blob/main/chart/templates/skyhook-crd.yaml) that define one or more skyhook-packages to deploy. These packages were selected to provide two main functions:
+Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/skyhook-crd.yaml) that define one or more nodewright packages to deploy. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
 2. Be able to install all of the necessary software to bring a vanilla kubernetes node to the AICR spec.
 
 ## References
 
-1. [Skyhook documentation](https://github.com/NVIDIA/skyhook/blob/main/docs)
+1. [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs)
 
 # Optimizer
 
 Uses tuned to apply a sequence of profiles to optimize primarily grub and sysctl settings. Your mileage may vary depending on the particulars of the virtualization if not running baremetal.
 
-Package: [nvidia-tuned](https://github.com/NVIDIA/skyhook-packages/tree/main/nvidia-tuned)
+Package: [nvidia-tuned](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned)
 
-Configuration [documentation](https://github.com/NVIDIA/skyhook-packages/tree/main/nvidia-tuned#usage):
+Configuration [documentation](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned#usage):
 
 A full configuration supplies: `intent`, `accelerator`, `service`. A minimal configuration is just `accelerator`
 ```
@@ -27,12 +27,12 @@ configMap:
 Supported accelerators: `h100`, `gb200`
 
 Integration notes:
-  * If you provide a service it MUST exist in the [profiles service directory](https://github.com/NVIDIA/skyhook-packages/tree/main/nvidia-tuned/profiles/service)
+  * If you provide a service it MUST exist in the [profiles service directory](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned/profiles/service)
   * If you are integrating a new service beware that even tested paths may not fully work due to limitations in that service. For example you will notice that `eks` has overrides to remove setting `kernel.sched_latency_ns` and `kernel.sched_min_granularity_ns` as these are not available on AWS kernels. They cannot fail silently as the package will test to make sure the changes asked for actually happens and error if it does not.
 
 ## Secondary optimizer
 
-A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/skyhook-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Skyhook configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/overlays/gke-cos.yaml#L69)
+A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Nodewright configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/overlays/gke-cos.yaml#L69)
 ```
     - name: skyhook-operator
       type: Helm
@@ -49,17 +49,17 @@ A second, more stripped down, optimizer is available for operating systems that 
 
 ## Versioning and extension notes
 
-Both of these packages (nvidia-tuned and nvidia-tuning-gke) extend other skyhook packages (tuned and tuning) and as such could directly use those and provide the configuration via configmaps. The choice was made to go with specific versioned packages in order to provide a more clear path for upgrades and understanding differences. However, the base packages are still useful to quickly iterate on configurations without requiring new versions of the extended packages used in AICR.
+Both of these packages (nvidia-tuned and nvidia-tuning-gke) extend other nodewright packages (tuned and tuning) and as such could directly use those and provide the configuration via configmaps. The choice was made to go with specific versioned packages in order to provide a more clear path for upgrades and understanding differences. However, the base packages are still useful to quickly iterate on configurations without requiring new versions of the extended packages used in AICR.
 
 # Setup
 
 Uses a set of bash scripts to do the necessary actions to bring an ubuntu worker to the desired AICR spec.
 
-Package: [nvidia-setup](https://github.com/NVIDIA/skyhook-packages/blob/main/nvidia-setup)
+Package: [nvidia-setup](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup)
 
 Currently supports: eks and gb200/h100. Each service must be added explicitly and the documentation for the addition is in the readme for how to make this update.
 
-The [version overview](https://github.com/NVIDIA/skyhook-packages/blob/main/nvidia-setup/VERSION_OVERVIEW.md) has all of the information about what each version for a service + accelerator pair will install or configure.
+The [version overview](https://github.com/NVIDIA/nodewright-packages/blob/main/nvidia-setup/VERSION_OVERVIEW.md) has all of the information about what each version for a service + accelerator pair will install or configure.
 
 # Manifests
 

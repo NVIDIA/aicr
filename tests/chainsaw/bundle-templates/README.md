@@ -23,7 +23,7 @@ Each component gets its own subdirectory with:
    (`apiVersion`/`kind`), chainsaw can parse them directly.
 
 This follows the same pattern used in the
-[skyhook project](https://github.com/NVIDIA/skyhook/blob/main/k8s-tests/chainsaw/helm/helm-template-test/chainsaw-test.yaml),
+[nodewright project](https://github.com/NVIDIA/nodewright/blob/main/k8s-tests/chainsaw/helm/helm-template-test/chainsaw-test.yaml),
 adapted for AICR's `aicr bundle` rendering pipeline instead of `helm template`.
 
 ## Running

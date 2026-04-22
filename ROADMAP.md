@@ -157,7 +157,7 @@ Detect when clusters diverge from recipe-defined state.
 - Scheduled drift detection via CronJob
 - Alerting integration for drift events
 
-#### Enhanced Skyhook Integration
+#### Enhanced Nodewright Integration
 
 Deeper OS-level node optimization. Ubuntu done; RHEL and Amazon Linux remain.
 

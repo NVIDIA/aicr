@@ -524,7 +524,7 @@ DRIVER_VERSION=$(aicr query --service eks --accelerator h100 --intent training \
   --selector components.gpu-operator.values.driver.version)
 echo "gpu_driver_version = \"${DRIVER_VERSION}\""
 
-# Compare skyhook tuning parameters across accelerators
+# Compare nodewright tuning parameters across accelerators
 # H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.skyhook-customizations.values
@@ -955,7 +955,7 @@ aicr bundle -r recipe.yaml \
   --set certmanager:webhook.resources.cpu.limit=200m \
   -o ./bundles
 
-# Override Skyhook manager resources
+# Override Nodewright manager resources
 aicr bundle -r recipe.yaml \
   --set skyhook-operator:manager.resources.cpu.limit=500m \
   --set skyhook-operator:manager.resources.memory.limit=256Mi \
@@ -989,7 +989,7 @@ aicr bundle -r recipe.yaml \
 # Set estimated GPU node count (writes to nodeCountPaths in registry)
 aicr bundle -r recipe.yaml --nodes 8 -o ./bundles
 
-# Day 2 options: workload-gate and workload-selector for skyhook
+# Day 2 options: workload-gate and workload-selector for nodewright
 aicr bundle -r recipe.yaml \
   --workload-gate skyhook.io/runtime-required=true:NoSchedule \
   --workload-selector workload-type=training \
@@ -1153,9 +1153,9 @@ bundles/
 
 The `--workload-gate` and `--workload-selector` flags are day 2 operational options for cluster scaling operations:
 
-- **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [skyhook documentation](https://github.com/NVIDIA/skyhook/blob/main/docs/runtime_required.md).
+- **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/runtime_required.md).
 
-- **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent skyhook from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
+- **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent nodewright from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
 
 **Estimated node count (`--nodes`):**
 
@@ -1184,7 +1184,7 @@ When generating bundles with skyhook-customizations enabled, validation warnings
 
 ```
 Warning: skyhook-customizations is enabled but --workload-selector is not set. 
-This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
+This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction.
 ```
 
 2. **Accelerated Selector Warning**: When skyhook-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
@@ -1200,7 +1200,7 @@ Validation warnings are displayed in the bundle output after successful generati
 
 ```shell
 Note:
-  ⚠ Warning: skyhook-customizations is enabled but --workload-selector is not set. This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction.
+  ⚠ Warning: skyhook-customizations is enabled but --workload-selector is not set. This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction.
   ⚠ Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
@@ -1302,7 +1302,7 @@ The deploy script installs components in the order specified by `deploymentOrder
 
 Unknown flags are rejected with an error to catch typos (e.g., `--best-effort`).
 
-> **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Skyhook node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
+> **Note on install completion vs. workload readiness.** By default, `deploy.sh` waits on Helm chart readiness where AICR uses `helm --wait`. Some components are intentionally installed without Helm chart-level waiting, and the script does not wait for bundle-level workload readiness such as Nodewright node tuning, GPU operator operand rollout (driver, toolkit, device-plugin DaemonSets), or NVIDIA DRA kubelet plugin registration. Those continue asynchronously after the script exits. When `--best-effort` is used, the script may also finish with non-fatal component failures; check warning lines and logs before treating the install/apply pass as fully successful. `--no-wait` only skips the Helm chart-level wait where AICR uses it; it does not affect bundle-level convergence.
 
 **Retry behavior:**
 

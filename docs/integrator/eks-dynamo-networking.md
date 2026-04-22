@@ -35,12 +35,3 @@ aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
   --protocol tcp --port 4222 --source-group <gpu-sg-id>
 ```
-
-## GB200 Skyhook Note
-
-GB200 EKS overlays use the Skyhook `no-op` customization manifest instead of the H100 `tuning.yaml`. The H100 tuning packages (`nvidia-setup`, `nvidia-tuned`) are not compatible with GB200 for two reasons:
-
-1. **ARM64 host CPU**: GB200 nodes use Graviton (ARM64) host processors. The H100 tuning packages include x86-specific operations (e.g., EFA driver installation, apt package upgrades) that fail on ARM64.
-2. **Blackwell GPU architecture**: GPU-specific tuning parameters (kernel module settings, sysctl values) differ between Hopper (H100) and Blackwell (GB200).
-
-When GB200-specific tuning packages are available, switch `skyhook-customizations` in the GB200 overlays from `no-op.yaml` to `tuning.yaml`.

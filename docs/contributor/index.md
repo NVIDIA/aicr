@@ -63,7 +63,7 @@ This directory contains architecture documentation for the AI Cluster Runtime (A
 - **Bundler Framework**: Extensible system for generating deployment artifacts
   - Execution model: Multiple bundlers run concurrently by default
   - Registration: Bundlers self-register via `init()` function
-  - Current bundlers: GPU Operator, Network Operator, Skyhook, Cert-Manager, NVSentinel, DRA Driver
+  - Current bundlers: GPU Operator, Network Operator, Nodewright, Cert-Manager, NVSentinel, DRA Driver
   - Value overrides: CLI `--set` flag allows runtime customization of bundle values
   - Node scheduling: `--system-node-selector`, `--accelerated-node-selector`, `--*-toleration` flags for workload placement
 - **Deployer Framework**: GitOps integration for deployment artifacts
@@ -124,7 +124,7 @@ Generates deployment-ready bundles (Helm values, Kubernetes manifests, installat
 - **API Server**: `POST /v1/bundle` endpoint (returns zip archive)
 - **ConfigMap Input**: Can read recipes from ConfigMap URIs (CLI only)
 - **Parallel execution** of multiple bundlers by default
-- **Available bundlers**: GPU Operator, Network Operator, Skyhook, Cert-Manager, NVSentinel, DRA Driver
+- **Available bundlers**: GPU Operator, Network Operator, Nodewright, Cert-Manager, NVSentinel, DRA Driver
 - **Deployment methods** (`--deployer` flag):
   - `helm` (default): Helm per-component bundle with individual values.yaml and deploy script
   - `argocd`: Argo CD Application manifests with sync-wave ordering (use `--repo` to set Git repository URL)

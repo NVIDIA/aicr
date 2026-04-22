@@ -51,8 +51,8 @@ navigation:
         path: integrator/validator-extension.md
       - section: Components
         contents:
-          - page: Skyhook
-            path: integrator/components/skyhook.md
+          - page: Nodewright
+            path: integrator/components/nodewright.md
 
   - section: Contributor Guide
     contents:
