@@ -351,8 +351,8 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
-| `skyhook-operator` | OS-level node tuning and kernel configuration |
-| `skyhook-customizations` | Environment-specific node tuning profiles |
+| `nodewright-operator` | OS-level node tuning and kernel configuration |
+| `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nvsentinel` | GPU health monitoring and automated remediation |
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
 | `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |

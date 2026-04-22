@@ -12,26 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook Helm values
-# Base configuration for all deployments
-
-# Override release name prefix to avoid aicr-stack- prefix in resource names
-fullnameOverride: skyhook-operator
-
-limitRange:
-  default:
-    cpu: "1"
-    memory: "1Gi"
-  defaultRequest:
-    cpu: "500m"
-    memory: "512Mi"
-
-controllerManager:
-  manager:
-    resources:
-      limits:
-        cpu: 1000m
-        memory: 4000Mi
-      requests:
-        cpu: 1000m
-        memory: 2000Mi
+# Assert tuning manifest with autoTaintNewNodes disabled.
+# --set nodewrightcustomizations:autoTaintNewNodes=false
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  name: tuning
+spec:
+  runtimeRequired: true
+  autoTaintNewNodes: false

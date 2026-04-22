@@ -859,7 +859,7 @@ paths:
           in: query
           required: false
           description: >
-            Taint for skyhook-operator workload gating (format: key=value:effect or key:effect).
+            Taint for nodewright-operator workload gating (format: key=value:effect or key:effect).
             Configures a day-2 scaling gate that prevents workloads from scheduling on new
             nodes until the runtime stack is ready.
           schema:
@@ -869,7 +869,7 @@ paths:
           in: query
           required: false
           description: >
-            Label selector for skyhook-customizations (format: key=value).
+            Label selector for nodewright-customizations (format: key=value).
             Can be repeated for multiple selectors.
           schema:
             type: array
@@ -883,7 +883,7 @@ paths:
           required: false
           description: >
             Estimated number of GPU nodes in the cluster (0 = unset).
-            Used to configure node-count-aware components such as skyhook-operator.
+            Used to configure node-count-aware components such as nodewright-operator.
           schema:
             type: integer
             minimum: 0
@@ -995,7 +995,7 @@ paths:
                     details:
                       bundler: "invalid-bundler"
                       error: "unsupported bundle type: invalid-bundler"
-                      valid: ["gpu-operator", "network-operator", "skyhook-operator", "nvsentinel", "cert-manager", "nvidia-dra-driver-gpu"]
+                      valid: ["gpu-operator", "network-operator", "nodewright-operator", "nvsentinel", "cert-manager", "nvidia-dra-driver-gpu"]
                     requestId: "550e8400-e29b-41d4-a716-446655440000"
                     timestamp: "2025-01-15T10:30:00Z"
                     retryable: false
@@ -1424,7 +1424,7 @@ components:
           type: array
           items:
             type: string
-            enum: [gpu-operator, network-operator, skyhook-operator, nvsentinel, cert-manager, nvidia-dra-driver-gpu]
+            enum: [gpu-operator, network-operator, nodewright-operator, nvsentinel, cert-manager, nvidia-dra-driver-gpu]
           description: >
             Optional list of bundler types to execute.
             If not specified, all registered bundlers are executed.

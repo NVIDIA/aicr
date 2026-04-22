@@ -48,7 +48,7 @@ const testDefaultDRADSName = "nvidia-dra-driver-gpu-kubelet-plugin"
 // testSkyhookManifest is the path of the Skyhook manifest the AICR embedded
 // data provider ships for the eks/h100/inference recipe used in most tests.
 // Declaring it once here keeps test setup aligned with the recipe defaults.
-const testSkyhookManifest = "components/skyhook-customizations/manifests/tuning.yaml"
+const testSkyhookManifest = "components/nodewright-customizations/manifests/tuning.yaml"
 
 // testAICRCreatedBy{Key,Value} mirror the label convention AICR manifests
 // apply to synthesized fixtures that should look like real production objects.
@@ -209,7 +209,7 @@ func TestVerifySkyhookReady_ListsClusterScoped(t *testing.T) {
 }
 
 // Issue #607 acceptance: Skyhook check must skip gracefully when the CRD is
-// not registered on the cluster, even when skyhook-customizations is declared
+// not registered on the cluster, even when nodewright-customizations is declared
 // in the recipe's componentRefs.
 func TestCheckExpectedResources_SkipsSkyhookWhenCRDNotRegistered(t *testing.T) {
 	t.Parallel()
@@ -371,7 +371,7 @@ func TestCheckExpectedResources_IgnoresStaleUnrelatedSkyhook(t *testing.T) {
 }
 
 // TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames pins the
-// fail-closed behavior when an enabled skyhook-customizations ref declares
+// fail-closed behavior when an enabled nodewright-customizations ref declares
 // no manifest files (or the manifests contain no Skyhook CRs). Rather than
 // silently pass, the check must surface this as a recipe misconfiguration.
 func TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames(t *testing.T) {
@@ -390,7 +390,7 @@ func TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames(t *testing.T) {
 
 	err := checkExpectedResources(ctx)
 	if err == nil {
-		t.Fatal("expected error when enabled skyhook-customizations ref has no expected Skyhook names")
+		t.Fatal("expected error when enabled nodewright-customizations ref has no expected Skyhook names")
 	}
 	if !strings.Contains(err.Error(), "no Skyhook CR names could be extracted") {
 		t.Fatalf("expected 'no Skyhook CR names could be extracted' failure, got: %v", err)
@@ -599,8 +599,8 @@ func TestCheckExpectedResources_SurfacesMultipleSkyhookFailures(t *testing.T) {
 				Name:      skyhookComponent,
 				Namespace: "skyhook",
 				ManifestFiles: []string{
-					"components/skyhook-customizations/manifests/tuning.yaml",
-					"components/skyhook-customizations/manifests/no-op.yaml",
+					"components/nodewright-customizations/manifests/tuning.yaml",
+					"components/nodewright-customizations/manifests/no-op.yaml",
 				},
 			},
 		},
@@ -675,7 +675,7 @@ metadata:
 		},
 		{
 			name: "Helm template preamble — not-valid-YAML lines do not break extraction",
-			content: []byte(`{{- $cust := index .Values "skyhook-customizations" }}
+			content: []byte(`{{- $cust := index .Values "nodewright-customizations" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
 ---
 apiVersion: skyhook.nvidia.com/v1alpha1
@@ -684,7 +684,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
   labels:
-    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/part-of: nodewright-operator
   name: tuning
   namespace: {{ .Release.Namespace }}
 spec:
@@ -731,7 +731,7 @@ metadata:
 func TestExtractSkyhookNamesFromManifest_TuningGke(t *testing.T) {
 	t.Parallel()
 
-	content, err := recipe.GetManifestContent("components/skyhook-customizations/manifests/tuning-gke.yaml")
+	content, err := recipe.GetManifestContent("components/nodewright-customizations/manifests/tuning-gke.yaml")
 	if err != nil {
 		t.Fatalf("failed to load tuning-gke manifest: %v", err)
 	}

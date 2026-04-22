@@ -163,8 +163,8 @@ spec:
               cpu: 200m
               memory: 512Mi
 
-    # skyhook-operator: reduce resources for local development
-    - name: skyhook-operator
+    # nodewright-operator: reduce resources for local development
+    - name: nodewright-operator
       type: Helm
       overrides:
         controllerManager:

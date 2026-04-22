@@ -758,7 +758,7 @@ func TestRemoveHyphens(t *testing.T) {
 		{"gpu-operator", "gpuoperator"},
 		{"network-operator", "networkoperator"},
 		{"cert-manager", "certmanager"},
-		{"skyhook-operator", "skyhookoperator"},
+		{"nodewright-operator", "nodewrightoperator"},
 		{"", ""},
 		{"a-b-c-d", "abcd"},
 	}
@@ -855,9 +855,9 @@ func TestApplyNodeSchedulingOverrides_EstimatedNodeCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetComponentRegistry() error = %v", err)
 	}
-	comp := registry.Get("skyhook-operator")
+	comp := registry.Get("nodewright-operator")
 	if comp == nil || len(comp.GetNodeCountPaths()) == 0 {
-		t.Skip("skyhook-operator with nodeCountPaths not in registry; skipping estimated node count path test")
+		t.Skip("nodewright-operator with nodeCountPaths not in registry; skipping estimated node count path test")
 	}
 
 	cfg := config.NewConfig(config.WithEstimatedNodeCount(8))
@@ -867,9 +867,9 @@ func TestApplyNodeSchedulingOverrides_EstimatedNodeCount(t *testing.T) {
 	}
 
 	values := make(map[string]any)
-	b.applyNodeSchedulingOverrides("skyhook-operator", values)
+	b.applyNodeSchedulingOverrides("nodewright-operator", values)
 
-	// Path "estimatedNodeCount" is in skyhook-operator's nodeCountPaths; convertMapValue produces int64.
+	// Path "estimatedNodeCount" is in nodewright-operator's nodeCountPaths; convertMapValue produces int64.
 	got, ok := values["estimatedNodeCount"]
 	if !ok {
 		t.Fatal("estimatedNodeCount not set in values map")

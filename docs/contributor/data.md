@@ -52,7 +52,7 @@ recipes/
     │   └── values.yaml
     ├── nvsentinel/
     │   └── values.yaml
-    └── skyhook-operator/
+    └── nodewright-operator/
         └── values.yaml
 ```
 
@@ -925,11 +925,11 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
       "dependencyRefs": ["cert-manager"]
     },
     {
-      "name": "skyhook-operator",
+      "name": "nodewright-operator",
       "type": "Helm",
       "source": "oci://ghcr.io/nvidia/skyhook",
       "version": "v0.4.0",
-      "valuesFile": "components/skyhook-operator/values.yaml",
+      "valuesFile": "components/nodewright-operator/values.yaml",
       "overrides": {
         "customization": "ubuntu"
       }
@@ -939,7 +939,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
     "cert-manager",
     "gpu-operator",
     "nvsentinel",
-    "skyhook-operator"
+    "nodewright-operator"
   ]
 }
 ```

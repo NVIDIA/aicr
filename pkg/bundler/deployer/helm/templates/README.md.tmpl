@@ -56,7 +56,7 @@ Use `--no-wait` to skip Helm chart-level waiting where AICR uses `--wait` (keeps
 ./deploy.sh --no-wait
 ```
 
-> **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** mean the cluster is ready for GPU workloads. On fresh GPU nodes, cluster convergence (Skyhook node tuning, GPU operator operand rollout, DRA kubelet plugin registration) continues asynchronously after the script exits. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
+> **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** mean the cluster is ready for GPU workloads. On fresh GPU nodes, cluster convergence (Nodewright node tuning, GPU operator operand rollout, DRA kubelet plugin registration) continues asynchronously after the script exits. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
 
 ## Manual Installation
 

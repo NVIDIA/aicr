@@ -666,7 +666,7 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 	}
 
 	// Verify base components exist
-	baseComponents := []string{"cert-manager", "gpu-operator", "nvsentinel", "skyhook-operator"}
+	baseComponents := []string{"cert-manager", "gpu-operator", "nvsentinel", "nodewright-operator"}
 	for _, name := range baseComponents {
 		if comp := result.GetComponentRef(name); comp == nil {
 			t.Errorf("Base component %q not found in result", name)
@@ -743,7 +743,7 @@ func TestOverlayMergeDoesNotLoseBaseComponents(t *testing.T) {
 	}
 
 	// Verify all 4 base components exist
-	expectedBaseComponents := []string{"cert-manager", "gpu-operator", "nvsentinel", "skyhook-operator"}
+	expectedBaseComponents := []string{"cert-manager", "gpu-operator", "nvsentinel", "nodewright-operator"}
 	for _, name := range expectedBaseComponents {
 		if comp := result.GetComponentRef(name); comp == nil {
 			t.Errorf("Base component %q missing from overlay result", name)
@@ -797,7 +797,7 @@ func TestInheritanceChain(t *testing.T) {
 	}
 
 	// Verify base components are present
-	expectedComponents := []string{"cert-manager", "gpu-operator", "nvsentinel", "skyhook-operator"}
+	expectedComponents := []string{"cert-manager", "gpu-operator", "nvsentinel", "nodewright-operator"}
 	for _, name := range expectedComponents {
 		if comp := result.GetComponentRef(name); comp == nil {
 			t.Errorf("Expected component %q not found in result", name)

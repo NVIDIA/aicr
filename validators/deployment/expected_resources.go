@@ -40,7 +40,7 @@ import (
 
 const (
 	gpuOperatorComponent = "gpu-operator"
-	skyhookComponent     = "skyhook-customizations"
+	skyhookComponent     = "nodewright-customizations"
 	draDriverComponent   = "nvidia-dra-driver-gpu"
 	clusterPolicyName    = "cluster-policy"
 
@@ -229,7 +229,7 @@ func verifySkyhookReady(ctx *validators.Context, ref recipe.ComponentRef) error 
 		return err
 	}
 	if len(expectedNames) == 0 {
-		// The recipe enabled skyhook-customizations but declared no Skyhook
+		// The recipe enabled nodewright-customizations but declared no Skyhook
 		// manifests, so we cannot prove readiness. Fail closed rather than
 		// silently pass — treating this as a recipe misconfiguration that the
 		// user should see.
@@ -329,7 +329,7 @@ func expectedSkyhookNames(ref recipe.ComponentRef) ([]string, error) {
 //
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in
-// recipes/components/skyhook-customizations/manifests/):
+// recipes/components/nodewright-customizations/manifests/):
 //   - "kind: Skyhook" sits at column 0.
 //   - The metadata.name of each Skyhook is a literal string (not templated)
 //     at exactly 2-space indent under a top-level "metadata:" block.

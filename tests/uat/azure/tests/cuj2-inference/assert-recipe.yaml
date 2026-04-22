@@ -49,7 +49,7 @@ componentRefs: ## alphabetically sorted
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: skyhook-operator
+  - name: nodewright-operator
 deploymentOrder:
   - cert-manager
   - dynamo-crds
@@ -64,4 +64,4 @@ deploymentOrder:
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
-  - skyhook-operator
+  - nodewright-operator

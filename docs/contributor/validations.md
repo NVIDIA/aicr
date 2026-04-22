@@ -102,7 +102,7 @@ conditions:
 
 ```yaml
 components:
-  - name: skyhook-customizations
+  - name: nodewright-customizations
     # ... other config ...
     validations:
       # Check for missing workload-selector when training intent

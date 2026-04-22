@@ -36,7 +36,7 @@ unset GITLAB_TOKEN && make build
 AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/
 
 # Run a specific component's tests
-AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/skyhook-customizations
+AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/nodewright-customizations
 ```
 
 ## Adding Tests for a New Component

@@ -925,10 +925,10 @@ aicr bundle -r recipe.yaml \
 │   ├── values.yaml
 │   ├── README.md
 │   └── checksums.txt
-└── skyhook/
+└── nodewright-operator/
     ├── values.yaml
     ├── manifests/
-    │   └── skyhook.yaml
+    │   └── nodewright.yaml
     ├── README.md
     └── checksums.txt
 ```

@@ -61,7 +61,7 @@ aicr bundle \
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
-> Note: If skyhook-operator is already installed on the cluster, comment out or skip the skyhook-operator and skyhook-customizations sections in deploy.sh to avoid upgrade conflicts.
+> Note: If nodewright-operator is already installed on the cluster, comment out or skip the nodewright-operator and nodewright-customizations sections in deploy.sh to avoid upgrade conflicts.
 
 ## Validate Cluster
 

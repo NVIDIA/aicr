@@ -26,10 +26,10 @@ spec:
     accelerator: h100
     intent: inference
 
-  # No additional components — skyhook-customizations (tuning CR) is excluded
+  # No additional components — nodewright-customizations (tuning CR) is excluded
   # because the tuning operation drains the single worker node, which kills the
   # kai-scheduler admission webhook, creating an unresolvable deadlock in a
-  # 2-node kind cluster. The skyhook-operator deployment itself is inherited
+  # 2-node kind cluster. The nodewright-operator deployment itself is inherited
   # from the base kind recipe.
   componentRefs: []
 

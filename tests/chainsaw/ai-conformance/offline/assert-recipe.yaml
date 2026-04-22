@@ -51,8 +51,8 @@ componentRefs: ## alphabetically sorted
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: skyhook-customizations
-  - name: skyhook-operator
+  - name: nodewright-customizations
+  - name: nodewright-operator
 deploymentOrder:
   - aws-ebs-csi-driver
   - aws-efa
@@ -64,8 +64,8 @@ deploymentOrder:
   - k8s-ephemeral-storage-metrics
   - nfd
   - prometheus-adapter
-  - skyhook-operator
-  - skyhook-customizations
+  - nodewright-operator
+  - nodewright-customizations
   - gpu-operator
   - kai-scheduler
   - dynamo-platform

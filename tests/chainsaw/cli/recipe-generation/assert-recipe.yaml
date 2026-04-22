@@ -24,4 +24,4 @@ criteria:
 # Verify key components are present via JMESPath (arrays require exact match in chainsaw)
 (length(componentRefs) > `0`): true
 (componentRefs[?name == 'gpu-operator'] | length(@) > `0`): true
-(componentRefs[?name == 'skyhook-operator'] | length(@) > `0`): true
+(componentRefs[?name == 'nodewright-operator'] | length(@) > `0`): true

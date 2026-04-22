@@ -34,7 +34,7 @@ Integration notes:
 
 A second, more stripped down, optimizer is available for operating systems that are mostly read only such as GKE's ContainerOptimizedOS. In this case the [nvidia-tuning-gke](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuning-gke) is available to directly perform sysctl writes. Also note the change in Nodewright configuration to write to a different directory tree in order to have a writable FS and to re-apply changes every boot: [recipes/overlays/gke-cos.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/overlays/gke-cos.yaml#L69)
 ```
-    - name: skyhook-operator
+    - name: nodewright-operator
       type: Helm
       overrides:
         controllerManager:
@@ -43,7 +43,7 @@ A second, more stripped down, optimizer is available for operating systems that 
               # GKE COS has a read-only rootfs, so we need to use a different directory
               # /etc is stateless so better represents the flag and history on reboot
               copyDirRoot: /etc/skyhook
-              # Because what skyhook does is generally on /etc we need to reapply on reboot
+              # Because what nodewright does is generally on /etc we need to reapply on reboot
               reapplyOnReboot: "true"
 ```
 
@@ -73,14 +73,14 @@ Includes the setup and optimizations for a specific service, accelerator and int
 
  To support non-service-specific tuning (for example, h100 + inference), the nvidia-tuned package would need to be separated out, or nvidia-setup updated to support additional services or make fewer assumptions about what it is installing — it is currently opinionated towards EKS.
 
- See [recipes/components/skyhook-customizations/manifests/tuning.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/tuning.yaml)
+ See [recipes/components/nodewright-customizations/manifests/tuning.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests/tuning.yaml)
 
 ## Tuning-gke
 
 A GKE + Container Optimized OS (COS) specific tuning that only sets some of the sysctl settings and does NOT require any interrupts due to being able to configure seamlessly while workloads are running.
 
-See [recipes/components/skyhook-customizations/manifests/tuning-gke.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/tuning-gke.yaml)
+See [recipes/components/nodewright-customizations/manifests/tuning-gke.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests/tuning-gke.yaml)
 
 ## No-op
 
-A no-op package may be used as a place holder until a full package suite can be tested. See [recipes/components/skyhook-customizations/manifests/no-op.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/skyhook-customizations/manifests/no-op.yaml)
+A no-op package may be used as a place holder until a full package suite can be tested. See [recipes/components/nodewright-customizations/manifests/no-op.yaml](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests/no-op.yaml)

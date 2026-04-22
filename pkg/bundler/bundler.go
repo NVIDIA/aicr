@@ -598,7 +598,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply workload-gate taint (as string format for skyhook-operator)
+	// Apply workload-gate taint (as string format for nodewright-operator)
 	if taint := b.Config.WorkloadGateTaint(); taint != nil {
 		if paths := comp.GetAcceleratedTaintStrPaths(); len(paths) > 0 {
 			taintStr := taint.ToString()

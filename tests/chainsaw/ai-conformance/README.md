@@ -50,7 +50,7 @@ The Kind GPU workflows use these leaf recipes instead:
 | cert-manager | cert-manager | Helm | 3 Deployments (controller, webhook, cainjector) |
 | gpu-operator | gpu-operator | Helm | Operator Deployment, ClusterPolicy ready, 6 DaemonSets (driver, device-plugin, dcgm-exporter, toolkit, gfd, validator) |
 | nvsentinel | nvsentinel | Helm | Controller Deployment, platform-connector DaemonSet |
-| skyhook-operator | skyhook | Helm | Controller-manager Deployment |
+| nodewright-operator | skyhook | Helm | Controller-manager Deployment |
 | kube-prometheus-stack | monitoring | Helm | 3 Deployments (operator, grafana, kube-state-metrics), 2 StatefulSets (prometheus, alertmanager), node-exporter DaemonSet |
 | k8s-ephemeral-storage-metrics | monitoring | Helm | Deployment |
 | prometheus-adapter | monitoring | Helm | Deployment |
@@ -58,7 +58,7 @@ The Kind GPU workflows use these leaf recipes instead:
 | aws-efa | kube-system | Helm | Device plugin DaemonSet |
 | kgateway-crds | kgateway-system | Helm | CRDs only (Gateway API + Inference Extension) |
 | kgateway | kgateway-system | Helm | Controller Deployment |
-| skyhook-customizations | skyhook | Manifest | No workloads (NodeConfiguration CRs) |
+| nodewright-customizations | skyhook | Manifest | No workloads (NodeConfiguration CRs) |
 | nvidia-dra-driver-gpu | nvidia-dra-driver | Helm | Controller Deployment, kubelet-plugin DaemonSet |
 | kai-scheduler | kai-scheduler | Helm | Scheduler Deployment |
 | dynamo-crds | dynamo-system | Helm | CRDs only |

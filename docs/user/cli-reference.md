@@ -514,7 +514,7 @@ aicr query --service gke --intent training \
   --selector components.kube-prometheus-stack.values.prometheus.prometheusSpec.storageSpec
 
 # Compare deployment order across clouds
-# EKS deploys 12 components (includes aws-ebs-csi-driver, aws-efa, skyhook-customizations)
+# EKS deploys 12 components (includes aws-ebs-csi-driver, aws-efa, nodewright-customizations)
 aicr query --service eks --accelerator h100 --intent training --selector deploymentOrder
 # GKE deploys 9 components (storage and networking are platform-managed)
 aicr query --service gke --accelerator h100 --intent training --selector deploymentOrder
@@ -527,10 +527,10 @@ echo "gpu_driver_version = \"${DRIVER_VERSION}\""
 # Compare nodewright tuning parameters across accelerators
 # H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
 aicr query --service eks --accelerator h100 --intent training \
-  --selector components.skyhook-customizations.values
+  --selector components.nodewright-customizations.values
 # GB200: same value structure, but manifest renders a no-op (ARM64 packages pending)
 aicr query --service eks --accelerator gb200 --intent training \
-  --selector components.skyhook-customizations.values
+  --selector components.nodewright-customizations.values
 
 # Watch constraints tighten as you add specificity
 # Just "EKS" → 1 constraint (K8s >= 1.28)
@@ -603,7 +603,7 @@ The `deployment` phase verifies that the cluster is actually ready for GPU workl
 
 - Enabled component namespaces are `Active`.
 - Declared `expectedResources` (Deployments, DaemonSets, etc.) exist and are healthy.
-- When `skyhook-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored. If no Skyhook names can be extracted from those `ManifestFiles`, deployment validation fails closed as a recipe/configuration error instead of skipping.
+- When `nodewright-customizations` is enabled: every Skyhook CR the recipe declares reports `status.status == complete`. The set of expected CR names is extracted from the recipe's own `ComponentRef.ManifestFiles` for this component, so unrelated Skyhook CRs on the cluster (stale from prior deploys, or owned by another tenant) are ignored. If no Skyhook names can be extracted from those `ManifestFiles`, deployment validation fails closed as a recipe/configuration error instead of skipping.
 - When `gpu-operator` is enabled: `ClusterPolicy` reports `status.state == ready`.
 - When `nvidia-dra-driver-gpu` is enabled: the kubelet-plugin DaemonSet is ready. Discovery is by the upstream chart's role-suffix convention — the validator finds the single DaemonSet in the component namespace whose name ends in `-kubelet-plugin`, so custom `fullnameOverride` values are handled automatically.
 
@@ -843,8 +843,8 @@ aicr bundle [flags]
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable) |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
-| `--workload-gate` | | string | Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
-| `--workload-selector` | | string[] | Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when skyhook-customizations is enabled with training intent. |
+| `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
+| `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
@@ -921,7 +921,7 @@ Override any value in the generated bundle files using dot notation:
 ```
 
 **Format:** `bundler:path=value` where:
-- `bundler` - Bundler name (e.g., `gpuoperator`, `networkoperator`, `certmanager`, `skyhook-operator`, `nvsentinel`)
+- `bundler` - Bundler name (e.g., `gpuoperator`, `networkoperator`, `certmanager`, `nodewright-operator`, `nvsentinel`)
 - `path` - Dot-separated path to the field
 - `value` - New value to set
 
@@ -957,8 +957,8 @@ aicr bundle -r recipe.yaml \
 
 # Override Nodewright manager resources
 aicr bundle -r recipe.yaml \
-  --set skyhook-operator:manager.resources.cpu.limit=500m \
-  --set skyhook-operator:manager.resources.memory.limit=256Mi \
+  --set nodewright-operator:manager.resources.cpu.limit=500m \
+  --set nodewright-operator:manager.resources.memory.limit=256Mi \
   -o ./bundles
 
 # Disable a component at bundle time (e.g., EBS CSI already installed as EKS addon)
@@ -1153,9 +1153,9 @@ bundles/
 
 The `--workload-gate` and `--workload-selector` flags are day 2 operational options for cluster scaling operations:
 
-- **`--workload-gate`**: Specifies a taint for skyhook-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the skyhook-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/runtime_required.md).
+- **`--workload-gate`**: Specifies a taint for nodewright-operator's runtime required feature. This ensures nodes are properly configured before workloads can schedule on them during cluster scaling. The taint is configured in the nodewright-operator Helm values file at `controllerManager.manager.env.runtimeRequiredTaint`. For more information about runtime required, see the [Nodewright documentation](https://github.com/NVIDIA/nodewright/blob/main/docs/runtime_required.md).
 
-- **`--workload-selector`**: Specifies a label selector for skyhook-customizations to prevent nodewright from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
+- **`--workload-selector`**: Specifies a label selector for nodewright-customizations to prevent nodewright from evicting running training jobs. This is critical for training workloads where job eviction would cause significant disruption. The selector is set in the Skyhook CR manifest (tuning.yaml) in the `spec.workloadSelector.matchLabels` field.
 
 **Estimated node count (`--nodes`):**
 
@@ -1178,19 +1178,19 @@ AICR includes a component-driven validation system that automatically checks bun
 
 **Validation Warnings:**
 
-When generating bundles with skyhook-customizations enabled, validation warnings are displayed for missing configuration:
+When generating bundles with nodewright-customizations enabled, validation warnings are displayed for missing configuration:
 
-1. **Workload Selector Warning**: When skyhook-customizations is enabled with training intent, if `--workload-selector` is not set, a warning will be displayed:
+1. **Workload Selector Warning**: When nodewright-customizations is enabled with training intent, if `--workload-selector` is not set, a warning will be displayed:
 
 ```
-Warning: skyhook-customizations is enabled but --workload-selector is not set. 
+Warning: nodewright-customizations is enabled but --workload-selector is not set. 
 This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction.
 ```
 
-2. **Accelerated Selector Warning**: When skyhook-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
+2. **Accelerated Selector Warning**: When nodewright-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
 
 ```
-Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. 
+Warning: nodewright-customizations is enabled but --accelerated-node-selector is not set. 
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
@@ -1200,8 +1200,8 @@ Validation warnings are displayed in the bundle output after successful generati
 
 ```shell
 Note:
-  ⚠ Warning: skyhook-customizations is enabled but --workload-selector is not set. This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction.
-  ⚠ Warning: skyhook-customizations is enabled but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
+  ⚠ Warning: nodewright-customizations is enabled but --workload-selector is not set. This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction.
+  ⚠ Warning: nodewright-customizations is enabled but --accelerated-node-selector is not set. Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
 **Resolving Validation Warnings:**

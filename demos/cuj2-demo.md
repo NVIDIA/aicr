@@ -45,8 +45,8 @@
   │    ├── kgateway-crds/            (Gateway API + inference CRDs)        │
   │    ├── kgateway/                 (inference gateway controller)        │
   │    ├── nvsentinel/               (security/compliance)                 │
-  │    ├── skyhook-operator/         (node configuration)                  │
-  │    ├── skyhook-customizations/   (H100 tuning)                         │
+  │    ├── nodewright-operator/         (node configuration)                  │
+  │    ├── nodewright-customizations/   (H100 tuning)                         │
   │    ├── aws-ebs-csi-driver/       (EBS storage)                         │
   │    ├── aws-efa/                  (Elastic Fabric Adapter)              │
   │    ├── dynamo-crds/              (Dynamo CRDs)                         │
@@ -107,7 +107,7 @@
 │  ├── nvidia-dra-driver-gpu          │  ├── nvidia-dra-driver-gpu          │
 │  ├── kai-scheduler                  │  ├── kai-scheduler                  │
 │  ├── nvsentinel                     │  ├── nvsentinel                     │
-│  └── skyhook-operator               │  └── skyhook-operator               │
+│  └── nodewright-operator               │  └── nodewright-operator               │
 │      │                              │      │                              │
 │  eks.yaml                           │  eks.yaml                           │
 │  ├── aws-ebs-csi-driver             │  ├── aws-ebs-csi-driver             │
@@ -118,8 +118,8 @@
 │      │                              │  └── kgateway               ◀── NEW │
 │      │                              │      │                              │
 │  h100-eks-training.yaml             │  h100-eks-inference.yaml            │
-│  ├── gpu-operator (CDI, gdrcopy)    │  └── skyhook-customizations         │
-│  └── skyhook-customizations         │      │                              │
+│  ├── gpu-operator (CDI, gdrcopy)    │  └── nodewright-customizations         │
+│  └── nodewright-customizations         │      │                              │
 │      │                              │  h100-eks-ubuntu-inference.yaml     │
 │  h100-eks-ubuntu-training.yaml      │  (Ubuntu constraints)               │
 │  (Ubuntu constraints)               │      │                              │
@@ -134,7 +134,7 @@
 │                                     │    dynamo-crds, dynamo-platform     │
 ├─────────────────────────────────────┴─────────────────────────────────────┤
 │  Shared (base + eks): cert-manager, kube-prometheus-stack, gpu-operator,  │
-│    kai-scheduler, nvidia-dra-driver-gpu, nvsentinel, skyhook-operator,    │
+│    kai-scheduler, nvidia-dra-driver-gpu, nvsentinel, nodewright-operator,    │
 │    k8s-ephemeral-storage-metrics, aws-ebs-csi-driver, aws-efa             │
 └───────────────────────────────────────────────────────────────────────────┘
 ```

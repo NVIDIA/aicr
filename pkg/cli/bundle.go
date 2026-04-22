@@ -313,12 +313,12 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     "workload-gate",
-				Usage:    "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
 				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
 				Name:     "workload-selector",
-				Usage:    "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+				Usage:    "Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when nodewright-customizations is enabled with training intent.",
 				Category: "Scheduling",
 			},
 			&cli.IntFlag{
