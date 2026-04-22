@@ -363,10 +363,6 @@ generate_bundle() {
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
         --set "skyhook-customizations:enabled=false" \
-        --set "networkoperator:operator.tolerations[2].key=aicr.nvidia.com/kwok-test" \
-        --set "networkoperator:operator.tolerations[2].operator=Equal" \
-        --set "networkoperator:operator.tolerations[2].value=true" \
-        --set "networkoperator:operator.tolerations[2].effect=NoSchedule" \
         --set "dynamoplatform:etcd.persistence.enabled=false" \
         --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false" 2>&1); then
         log_error "Bundle generation failed"

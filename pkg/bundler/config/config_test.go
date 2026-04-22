@@ -550,6 +550,36 @@ func TestParseValueOverrides(t *testing.T) {
 			t.Error("ParseValueOverrides() expected error for unsafe path segment, got nil")
 		}
 	})
+
+	t.Run("helm-style array index rejected", func(t *testing.T) {
+		// Helm's `foo.bar[N].baz` list-indexing syntax is intentionally
+		// rejected at parse time. The downstream path walker in
+		// pkg/component/overrides.go (`getOrCreateNestedMap` / `setMapValueByPath`)
+		// splits on `.` only and treats `tolerations[2]` as a literal map key
+		// — so permitting the syntax here would silently produce bundles with
+		// a stringly-keyed `"tolerations[2]"` field instead of the indexed
+		// list element the user intended. Rejecting up front fails loudly.
+		tests := []struct {
+			name  string
+			input string
+		}{
+			{
+				name:  "tolerations index",
+				input: "networkoperator:operator.tolerations[2].key=aicr.nvidia.com/kwok-test",
+			},
+			{
+				name:  "env index",
+				input: "gpuoperator:driver.env[3].name=CUDA_VISIBLE_DEVICES",
+			},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				if _, err := ParseValueOverrides([]string{tt.input}); err == nil {
+					t.Errorf("ParseValueOverrides(%q) should have rejected Helm array index syntax — downstream walker can't interpret it", tt.input)
+				}
+			})
+		}
+	})
 }
 
 // TestWithDynamicValues verifies the functional option sets dynamic value paths
