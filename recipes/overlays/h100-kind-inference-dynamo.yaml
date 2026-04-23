@@ -51,6 +51,15 @@ spec:
         - kube-prometheus-stack
         - kai-scheduler
       overrides:
+        # Kind inference CI uses a plain DynamoGraphDeployment vLLM workload,
+        # not the MPI launch path. Disable the chart's ssh-keygen pre-install
+        # hook here so fresh Kind runners do not spend hook budget creating an
+        # unused MPI SSH secret.
+        dynamo-operator:
+          dynamo:
+            mpiRun:
+              sshKeygen:
+                enabled: false
         # Use kind's local-path-provisioner instead of EBS gp2
         etcd:
           persistence:
