@@ -43,11 +43,11 @@ componentRefs: ## alphabetically sorted
   - name: kai-scheduler
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
+  - name: nodewright-customizations
+  - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: nodewright-customizations
-  - name: nodewright-operator
 deploymentOrder:
   - aws-ebs-csi-driver
   - aws-efa

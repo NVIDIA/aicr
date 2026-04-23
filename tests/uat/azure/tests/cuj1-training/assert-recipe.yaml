@@ -42,10 +42,10 @@ componentRefs: ## alphabetically sorted
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
   - name: network-operator
+  - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: nodewright-operator
 deploymentOrder:
   - cert-manager
   - kube-prometheus-stack

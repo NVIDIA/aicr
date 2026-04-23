@@ -47,11 +47,11 @@ componentRefs: ## alphabetically sorted
   - name: kgateway
   - name: kgateway-crds
   - name: kube-prometheus-stack
+  - name: nodewright-customizations
+  - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: nodewright-customizations
-  - name: nodewright-operator
 deploymentOrder:
   - aws-ebs-csi-driver
   - aws-efa

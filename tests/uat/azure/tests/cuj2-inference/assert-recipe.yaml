@@ -46,10 +46,10 @@ componentRefs: ## alphabetically sorted
   - name: kgateway-crds
   - name: kube-prometheus-stack
   - name: network-operator
+  - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: nodewright-operator
 deploymentOrder:
   - cert-manager
   - dynamo-crds
