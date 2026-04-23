@@ -36,6 +36,7 @@ componentRefs: ## alphabetically sorted
   - name: kai-scheduler
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
+  - name: nfd
   - name: nodewright-customizations
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu

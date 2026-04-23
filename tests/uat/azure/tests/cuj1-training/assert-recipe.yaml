@@ -42,6 +42,7 @@ componentRefs: ## alphabetically sorted
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
   - name: network-operator
+  - name: nfd
   - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
