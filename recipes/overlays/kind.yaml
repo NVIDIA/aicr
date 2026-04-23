@@ -72,8 +72,6 @@ spec:
                   - matchExpressions:
                       - key: node-role.kubernetes.io/control-plane
                         operator: DoesNotExist
-        nfd:
-          enabled: true
         # Use chart-default device plugin env in kind (no CDI overrides)
         devicePlugin:
           env: []
@@ -193,6 +191,7 @@ spec:
       version: "25.1.0"
       valuesFile: components/network-operator/values.yaml
       dependencyRefs:
+        - nfd
         - cert-manager
 
   validation:

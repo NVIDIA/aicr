@@ -1,0 +1,148 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Node Feature Discovery Health Check
+#
+# Validates the standalone NFD deployment by checking:
+# 1. NFD Master Deployment has at least one ready replica
+# 2. NFD Worker DaemonSet has fully rolled out (desiredNumberScheduled > 0
+#    and numberUnavailable == 0, so partial failures don't pass)
+# 3. NFD GC Deployment has at least one ready replica (gc.enable: true)
+# 4. No pods in unhealthy phases (Pending, Failed, Unknown) or stuck in
+#    Running with a known-unhealthy container waiting reason
+#    (CrashLoopBackOff, ImagePullBackOff, ErrImagePull,
+#    CreateContainerConfigError)
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nfd-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-master-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-feature-discovery-master
+                namespace: node-feature-discovery
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-worker-daemonset
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: node-feature-discovery-worker
+                namespace: node-feature-discovery
+              status:
+                # Guard against vacuous pass when 0 nodes match the
+                # DaemonSet: require at least one scheduled pod.
+                (desiredNumberScheduled > `0`): true
+                # Full rollout: 0 unavailable pods. Combined with the
+                # guard above, this is equivalent to "all scheduled pods
+                # are ready". Replaces the earlier `numberReady > 0`
+                # which passed on partial failures.
+                (numberUnavailable == `0`): true
+    - name: validate-gc-deployment
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: node-feature-discovery-gc
+                namespace: node-feature-discovery
+              status:
+                (availableReplicas > `0`): true
+    - name: validate-all-pods-healthy
+      try:
+        # Phase-based errors: Pending/Failed/Unknown.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                phase: Unknown
+        # Container-state errors: pods stuck in Running phase with a
+        # container in a known-bad waiting reason. Phase filtering alone
+        # misses CrashLoopBackOff/ImagePullBackOff because those pods
+        # typically remain in Running phase with unhealthy containers.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                containerStatuses:
+                  - state:
+                      waiting:
+                        reason: CrashLoopBackOff
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                containerStatuses:
+                  - state:
+                      waiting:
+                        reason: ImagePullBackOff
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                containerStatuses:
+                  - state:
+                      waiting:
+                        reason: ErrImagePull
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: node-feature-discovery
+              status:
+                containerStatuses:
+                  - state:
+                      waiting:
+                        reason: CreateContainerConfigError

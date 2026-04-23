@@ -82,6 +82,6 @@ validator:
       - name: WITH_WORKLOAD
         value: "false"
 
-# Node Feature Discovery sub-chart
-node-feature-discovery:
-  fullnameOverride: node-feature-discovery
+# NFD deployed as standalone shared component — disable sub-chart
+nfd:
+  enabled: false
