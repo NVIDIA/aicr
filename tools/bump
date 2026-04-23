@@ -127,8 +127,8 @@ cmd_promote() {
     err "Usage: $0 promote <rc-tag>  (e.g., v1.2.3-rc1)"
   fi
 
-  # Verify the tag exists
-  if ! git rev-parse "$rc_tag" &>/dev/null; then
+  # Verify the tag exists (not a branch or other ref)
+  if ! git rev-parse -q --verify "refs/tags/$rc_tag" >/dev/null; then
     err "Tag '$rc_tag' does not exist."
   fi
 
@@ -142,7 +142,12 @@ cmd_promote() {
   check_tag_available "$release_version"
 
   local sha
-  sha=$(git rev-list -n1 "$rc_tag")
+  sha=$(git rev-list -n1 "refs/tags/$rc_tag")
+
+  # Verify the SHA is reachable from origin/main
+  if ! git merge-base --is-ancestor "$sha" origin/main; then
+    err "RC tag $rc_tag points at $sha, which is not on origin/main. Refusing to promote."
+  fi
 
   msg "Promoting $rc_tag → $release_version (SHA: ${sha:0:12})"
   git tag -a "$release_version" "$sha" -m "Release $release_version"

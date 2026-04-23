@@ -9,7 +9,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 has_tools git git-cliff
 
 # Get the latest release tag
-LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || "")
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || true)
 
 if [ -z "$LAST_TAG" ]; then
   err "No release tags found."
@@ -37,10 +37,23 @@ while IFS= read -r line; do
   fi
 done <<< "$RAW"
 
+# Emit known sections in preferred order, then any remaining groups
+# so new cliff.toml groups are never silently dropped.
+declare -A emitted
 for section in "New Features" "Bug Fixes" "Other Tasks"; do
   if [[ -s "$TMPDIR_CL/$section" ]]; then
     echo "### $section"
     echo ""
     cat "$TMPDIR_CL/$section"
+    emitted["$section"]=1
   fi
+done
+
+for f in "$TMPDIR_CL"/*; do
+  [[ -s "$f" ]] || continue
+  section=$(basename "$f")
+  [[ -n "${emitted[$section]:-}" ]] && continue
+  echo "### $section"
+  echo ""
+  cat "$f"
 done

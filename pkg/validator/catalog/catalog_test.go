@@ -450,37 +450,35 @@ validators:
 	}
 }
 
-// TestResolveImageCIContract verifies that ResolveImage produces tags matching
-// what on-push.yaml actually pushes. CI tags images with the full 40-char
-// github.sha (e.g., sha-abcdef1234...40chars). The CLI commit injected via
-// goreleaser must also be 40 chars (FullCommit, not ShortCommit) so the
-// resolved tag matches a real registry tag.
+// TestResolveImageCIContract verifies that:
+//  1. .goreleaser.yaml injects FullCommit (not ShortCommit) so the CLI has a
+//     40-char SHA matching on-push.yaml's image tags.
+//  2. ResolveImage produces the correct :sha-<commit> tag with a full SHA.
 func TestResolveImageCIContract(t *testing.T) {
-	const img = "ghcr.io/nvidia/aicr-validators/deployment:latest"
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 
-	// Simulate the full 40-char SHA that FullCommit provides and on-push.yaml tags with.
+	// Guard: .goreleaser.yaml must use FullCommit for both aicr and aicrd.
+	data, err := os.ReadFile("../../../.goreleaser.yaml")
+	if err != nil {
+		t.Fatalf("failed to read .goreleaser.yaml: %v", err)
+	}
+	for _, want := range []string{
+		"pkg/cli.commit={{.FullCommit}}",
+		"pkg/api.commit={{.FullCommit}}",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("goreleaser must inject FullCommit so :sha-<commit> matches on-push.yaml; missing %q", want)
+		}
+	}
+
+	// Verify ResolveImage produces the expected tag with a full 40-char SHA.
+	const img = "ghcr.io/nvidia/aicr-validators/deployment:latest"
 	fullCommit := "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
 
 	got := ResolveImage(img, "dev", fullCommit)
 	want := "ghcr.io/nvidia/aicr-validators/deployment:sha-" + fullCommit
 	if got != want {
 		t.Fatalf("ResolveImage with full SHA:\n  got  %q\n  want %q", got, want)
-	}
-
-	// A 7-char short commit would produce a tag that doesn't exist in the
-	// registry. This test documents that the code *accepts* short SHAs but
-	// the goreleaser config must use FullCommit to avoid mismatch.
-	shortCommit := fullCommit[:7]
-	gotShort := ResolveImage(img, "dev", shortCommit)
-	wantShort := "ghcr.io/nvidia/aicr-validators/deployment:sha-" + shortCommit
-	if gotShort != wantShort {
-		t.Fatalf("ResolveImage with short SHA:\n  got  %q\n  want %q", gotShort, wantShort)
-	}
-
-	// The short tag does NOT match the full tag — this is the bug that
-	// prompted the FullCommit fix in .goreleaser.yaml.
-	if got == gotShort {
-		t.Fatal("full and short SHA produced identical tags — test is wrong")
 	}
 }
 
