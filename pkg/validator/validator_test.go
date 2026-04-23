@@ -479,3 +479,65 @@ func catalogNames(cat *catalog.ValidatorCatalog, phase string) []string {
 	}
 	return names
 }
+
+func TestExtractResultSummaries(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdout []string
+		want   []string
+	}{
+		{
+			name:   "no RESULT lines — nothing extracted",
+			stdout: []string{"time=... level=INFO msg=starting", "All pods running"},
+			want:   []string{},
+		},
+		{
+			name: "extracts prefixed lines in order",
+			stdout: []string{
+				"time=... level=INFO msg=check running",
+				"RESULT: Inference throughput: 39399.24 tokens/sec",
+				"RESULT: Inference TTFT p99: 138.27 ms",
+				"Throughput constraint: >= 5000 → PASS",
+			},
+			want: []string{
+				"Inference throughput: 39399.24 tokens/sec",
+				"Inference TTFT p99: 138.27 ms",
+			},
+		},
+		{
+			name: "RESULT without trailing content is skipped (no empty emission)",
+			stdout: []string{
+				"RESULT: ",
+				"RESULT: real summary",
+			},
+			want: []string{"real summary"},
+		},
+		{
+			name:   "empty stdout — empty result",
+			stdout: nil,
+			want:   []string{},
+		},
+		{
+			name: "prefix must match exactly — lowercase 'result:' does not qualify",
+			stdout: []string{
+				"result: not-a-summary",
+				"RESULT:no-space-after-colon",
+				"RESULT: valid",
+			},
+			want: []string{"valid"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractResultSummaries(tt.stdout)
+			if len(got) != len(tt.want) {
+				t.Fatalf("extractResultSummaries() len = %d (%v), want %d (%v)", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("extractResultSummaries()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

@@ -449,3 +449,75 @@ validators:
 		t.Error("expected operator-health from embedded catalog")
 	}
 }
+
+func TestResolveImage(t *testing.T) {
+	const imgLatest = "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest"
+	const imgPinned = "ghcr.io/nvidia/aicr-validators/aiperf-bench:v1.2.3"
+
+	tests := []struct {
+		name     string
+		image    string
+		version  string
+		registry string // if non-empty, sets AICR_VALIDATOR_IMAGE_REGISTRY for the test
+		want     string
+	}{
+		{
+			name:    "dev version — no tag rewrite, no registry override",
+			image:   imgLatest,
+			version: "dev",
+			want:    imgLatest,
+		},
+		{
+			name:    "-next version — no tag rewrite",
+			image:   imgLatest,
+			version: "v0.11.1-next",
+			want:    imgLatest,
+		},
+		{
+			name:    "release version rewrites :latest to :vX.Y.Z",
+			image:   imgLatest,
+			version: "v0.11.1",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:v0.11.1",
+		},
+		{
+			name:    "release version with no leading v still produces :vX.Y.Z",
+			image:   imgLatest,
+			version: "0.11.1",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:v0.11.1",
+		},
+		{
+			name:    "explicit version tag is never overwritten",
+			image:   imgPinned,
+			version: "v0.11.1",
+			want:    imgPinned,
+		},
+		{
+			name:     "registry override replaces ghcr.io/nvidia prefix",
+			image:    imgLatest,
+			version:  "dev",
+			registry: "localhost:5001",
+			want:     "localhost:5001/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:     "version rewrite and registry override compose",
+			image:    imgLatest,
+			version:  "v0.11.1",
+			registry: "localhost:5001",
+			want:     "localhost:5001/aicr-validators/aiperf-bench:v0.11.1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.registry != "" {
+				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", tt.registry)
+			} else {
+				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+			}
+			got := ResolveImage(tt.image, tt.version)
+			if got != tt.want {
+				t.Errorf("ResolveImage(%q, %q) = %q, want %q", tt.image, tt.version, got, tt.want)
+			}
+		})
+	}
+}

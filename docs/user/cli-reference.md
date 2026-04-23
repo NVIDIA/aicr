@@ -546,6 +546,9 @@ aicr query --service eks --accelerator h100 --intent training --os ubuntu \
 
 Validate a system snapshot against the constraints defined in a recipe to verify cluster compatibility. Supports multi-phase validation with different validation stages.
 
+For a task-oriented walkthrough (capture snapshot → generate recipe → run each
+phase, with worked training and inference examples), see [Validation](validation.md).
+
 **Synopsis:**
 ```shell
 aicr validate [flags]
@@ -766,6 +769,18 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
         "duration": 234000,
         "suite": ["performance"],
         "stdout": ["NCCL All Reduce bandwidth: 488.37 GB/s", "Constraint: >= 100 → true"]
+      },
+      {
+        "name": "inference-perf",
+        "status": "passed",
+        "duration": 612000,
+        "suite": ["performance"],
+        "stdout": [
+          "RESULT: Inference throughput: 37961.24 tokens/sec",
+          "RESULT: Inference TTFT p99: 146.30 ms",
+          "Throughput constraint: >= 5000 → PASS",
+          "TTFT p99 constraint: <= 200 → PASS"
+        ]
       },
       {
         "name": "dra-support",

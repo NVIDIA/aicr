@@ -114,21 +114,30 @@ func Load(version string) (*ValidatorCatalog, error) {
 		return nil, err
 	}
 
-	// Replace :latest with CLI version for reproducibility.
-	if isReleaseVersion(version) {
-		for i := range cat.Validators {
-			cat.Validators[i].Image = replaceLatestTag(cat.Validators[i].Image, version)
-		}
-	}
-
-	// Apply image registry override if set.
-	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
-		for i := range cat.Validators {
-			cat.Validators[i].Image = replaceRegistry(cat.Validators[i].Image, override)
-		}
+	for i := range cat.Validators {
+		cat.Validators[i].Image = ResolveImage(cat.Validators[i].Image, version)
 	}
 
 	return cat, nil
+}
+
+// ResolveImage applies the same image rewriting that Load uses for catalog
+// entries, exposed for external callers that hold image references outside the
+// catalog (for example the inner AIPerf benchmark image referenced by the
+// inference-perf validator). Applies, in order:
+//
+//  1. :latest tag replacement with version if version is a release (vX.Y.Z).
+//  2. Registry prefix override if AICR_VALIDATOR_IMAGE_REGISTRY is set.
+//
+// Images with explicit version tags are not modified by step 1.
+func ResolveImage(image, version string) string {
+	if isReleaseVersion(version) {
+		image = replaceLatestTag(image, version)
+	}
+	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
+		image = replaceRegistry(image, override)
+	}
+	return image
 }
 
 // isReleaseVersion returns true for semantic version strings (vX.Y.Z),

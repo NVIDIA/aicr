@@ -63,6 +63,21 @@ validators:
     timeout: 30m
     args: ["nccl-all-reduce-bw"]
     env: []
+  - name: inference-perf
+    phase: performance
+    description: "Verify inference throughput and TTFT p99 meet thresholds using AIPerf"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    # Must exceed CheckExecutionTimeout (45m). The parent ctx accommodates:
+    # namespace-termination (5m) + workload-ready (10m) + health (5m) +
+    # AIPerf pod scheduling (5m) + AIPerf benchmark (15m) = 40m worst case
+    # phase sum, with 5m headroom inside the ctx for inter-phase overhead.
+    # The Job's activeDeadlineSeconds is set from this value and kills the
+    # pod only after the ctx has surfaced a clean timeout; 50m leaves 5m
+    # for deferred cleanup + termination-log / CTRF-tail work after the
+    # ctx itself has expired.
+    timeout: 50m
+    args: ["inference-perf"]
+    env: []
   # Conformance phase
   - name: dra-support
     phase: conformance

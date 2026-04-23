@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -46,6 +47,7 @@ type Deployer struct {
 	factory          informers.SharedInformerFactory
 	namespace        string
 	runID            string
+	cliVersion       string // CLI version — forwarded to validator containers via AICR_CLI_VERSION for inner-image resolution
 	entry            catalog.ValidatorEntry
 	jobName          string // Unique name generated client-side (set by DeployJob)
 	imagePullSecrets []string
@@ -55,10 +57,15 @@ type Deployer struct {
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
 // The factory must be a namespace-scoped SharedInformerFactory started by the caller.
+// cliVersion is the CLI's own version string; empty is acceptable for dev builds
+// and is forwarded to the validator container via the AICR_CLI_VERSION env var so
+// the validator can resolve images it references outside the catalog (e.g. the
+// AIPerf benchmark image used by inference-perf) using the same rewriting
+// rules as catalog.Load.
 func NewDeployer(
 	clientset kubernetes.Interface,
 	factory informers.SharedInformerFactory,
-	namespace, runID string,
+	namespace, runID, cliVersion string,
 	entry catalog.ValidatorEntry,
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
@@ -70,6 +77,7 @@ func NewDeployer(
 		factory:          factory,
 		namespace:        namespace,
 		runID:            runID,
+		cliVersion:       cliVersion,
 		entry:            entry,
 		imagePullSecrets: imagePullSecrets,
 		tolerations:      tolerations,
@@ -209,6 +217,16 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	}
 	if len(d.tolerations) > 0 {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_TOLERATIONS").WithValue(serializeTolerations(d.tolerations)))
+	}
+	// Forward CLI version and image-registry override so the validator can
+	// resolve images it references outside the catalog (e.g. inference-perf's
+	// aiperf-bench benchmark image) with the same :latest→version pinning and
+	// registry override that catalog.Load applies to catalog entries.
+	if d.cliVersion != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_CLI_VERSION").WithValue(d.cliVersion))
+	}
+	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_VALIDATOR_IMAGE_REGISTRY").WithValue(override))
 	}
 	for _, e := range d.entry.Env {
 		env = append(env, applycorev1.EnvVar().WithName(e.Name).WithValue(e.Value))

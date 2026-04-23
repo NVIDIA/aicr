@@ -19,6 +19,7 @@ This section is for users who:
 | [CLI Reference](cli-reference.md) | Complete command reference with examples for all CLI operations |
 | [API Reference](api-reference.md) | REST API quick start and endpoint documentation |
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
+| [Validation](validation.md) | Task-oriented walkthrough: validate a cluster against a recipe, both training and inference performance phases |
 | [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
 
 ## Quick Start
@@ -40,6 +41,10 @@ aicr bundle --recipe recipe.yaml -o ./bundles
 # Deploy to your cluster
 cd bundles && chmod +x deploy.sh && ./deploy.sh
 ```
+
+**Validating a cluster instead of deploying?** See [Validation](validation.md)
+for a task-oriented walkthrough covering deployment, performance (training and
+inference), and conformance phases.
 
 ## Related Documentation
 

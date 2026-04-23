@@ -61,9 +61,22 @@ func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 	}
 
-	tolerations, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+	// Preserve the "no --toleration flag" signal for downstream validators:
+	// snapshotter.ParseTolerations returns DefaultTolerations() (a single
+	// bare Exists entry that matches every taint) when its input is empty,
+	// which collapses the implicit default and an explicit `--toleration '*'`
+	// into the same in-memory value. Validators like inference-perf that
+	// want to mirror the target node's taints by default must be able to
+	// tell "operator opted into tolerate-all" from "operator said nothing".
+	// Passing nil here when no flag was provided keeps the env var unset,
+	// so the inner validator context sees nil unambiguously.
+	tolerationArgs := cmd.StringSlice("toleration")
+	var tolerations []corev1.Toleration
+	if len(tolerationArgs) > 0 {
+		tolerations, err = snapshotter.ParseTolerations(tolerationArgs)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+		}
 	}
 
 	return &validateAgentConfig{
@@ -547,9 +560,17 @@ Run validation without failing on check errors (informational mode):
 				}
 			}
 
-			tolerations, tolErr := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
-			if tolErr != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
+			// See validateAgentConfig builder for why we gate on flag presence:
+			// preserve the "no flag" signal so inner validators can distinguish
+			// operator-opted tolerate-all (--toleration '*') from silence.
+			tolerationArgs := cmd.StringSlice("toleration")
+			var tolerations []corev1.Toleration
+			if len(tolerationArgs) > 0 {
+				var tolErr error
+				tolerations, tolErr = snapshotter.ParseTolerations(tolerationArgs)
+				if tolErr != nil {
+					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
+				}
 			}
 
 			nodeSelector, nsErr := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))

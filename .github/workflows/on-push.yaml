@@ -38,8 +38,10 @@ permissions:
 
 env:
   VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
-  # Keep in sync with build-docker matrix.phase
-  VALIDATOR_PHASES: "deployment performance conformance"
+  # Keep in sync with build-docker matrix.phase. `aiperf-bench` is an ancillary
+  # image (Python-based, not a Go validator) required by the inference-perf
+  # check; it uses an alternate Dockerfile via matrix overrides.
+  VALIDATOR_PHASES: "deployment performance conformance aiperf-bench"
   EXPECTED_PLATFORMS: "linux/amd64 linux/arm64"
 
 concurrency:
@@ -79,7 +81,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        phase: [deployment, performance, conformance]  # keep in sync with VALIDATOR_PHASES
+        phase: [deployment, performance, conformance, aiperf-bench]  # keep in sync with VALIDATOR_PHASES
         arch: [amd64, arm64]
         include:
           - arch: amd64
@@ -88,6 +90,11 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
+          # Ancillary (non-Go-validator) images override the default
+          # validators/<phase>/Dockerfile path and image title.
+          - phase: aiperf-bench
+            dockerfile: validators/performance/aiperf-bench.Dockerfile
+            image_title: aicr-aiperf-bench
     steps:
       - name: Checkout Code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
@@ -104,7 +111,7 @@ jobs:
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
           context: .
-          file: validators/${{ matrix.phase }}/Dockerfile
+          file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
@@ -115,7 +122,7 @@ jobs:
           cache-to: type=gha,mode=max
           labels: |
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.title=aicr-validator-${{ matrix.phase }}
+            org.opencontainers.image.title=${{ matrix.image_title || format('aicr-validator-{0}', matrix.phase) }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=main-${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
