@@ -45,6 +45,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -448,7 +449,7 @@ func copyAsTemplate(srcDir, templatesDir, componentName string) (string, int64, 
 		return "", 0, pathErr
 	}
 
-	if writeErr := os.WriteFile(destPath, content, 0600); writeErr != nil {
+	if writeErr := os.WriteFile(filepath.Clean(destPath), content, 0600); writeErr != nil { //nolint:gosec // G703 -- path from SafeJoin, not user-controlled
 		return "", 0, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to write template for %s", componentName), writeErr)
 	}
