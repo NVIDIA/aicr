@@ -39,15 +39,15 @@ componentRefs: ## alphabetically sorted
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: skyhook-customizations
-  - name: skyhook-operator
+  - name: nodewright-customizations
+  - name: nodewright-operator
 deploymentOrder:
   - cert-manager
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
   - prometheus-adapter
-  - skyhook-operator
-  - skyhook-customizations
+  - nodewright-operator
+  - nodewright-customizations
   - gpu-operator
   - gke-nccl-tcpxo
   - kai-scheduler
