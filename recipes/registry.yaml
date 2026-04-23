@@ -162,6 +162,7 @@ components:
     displayName: nodewright
     valueOverrideKeys:
       - nodewright
+      - skyhook
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
     helm:
@@ -184,6 +185,7 @@ components:
     displayName: nodewright-customizations
     valueOverrideKeys:
       - nodewrightcustomizations
+      - skyhookcustomizations
     healthCheck:
       assertFile: checks/nodewright-customizations/health-check.yaml
     helm:
