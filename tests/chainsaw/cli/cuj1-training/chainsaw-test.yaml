@@ -126,6 +126,19 @@ spec:
                 --file ./assert-bundle-scheduling.yaml \
                 --no-color --timeout 5s
 
+    - name: assert-bundle-scheduling-nfd
+      description: Verify standalone nfd values.yaml has scheduling for master/gc/worker.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-cuj1-training"
+              printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/nfd-values.yaml"
+              sed '/^---$/d' "${WORK}/bundle/nfd/values.yaml" >> "${WORK}/nfd-values.yaml"
+              chainsaw assert \
+                --resource "${WORK}/nfd-values.yaml" \
+                --file ./assert-bundle-scheduling-nfd.yaml \
+                --no-color --timeout 5s
+
     # ── Step 4: Deploy script validation ─────────────────────────────
     - name: assert-deploy-script
       description: Verify deploy.sh exists, is executable, and has correct shebang.
