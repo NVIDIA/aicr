@@ -40,5 +40,6 @@ spec:
     - name: gpu-operator
       type: Helm
       dependencyRefs:
+        - nfd
         - cert-manager
         - kube-prometheus-stack

@@ -31,17 +31,6 @@ status:
   (conditions[?type == 'Available']):
     - status: "True"
 ---
-# Node Feature Discovery master
-# fullnameOverride: node-feature-discovery (from gpu-operator values.yaml)
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: node-feature-discovery-master
-  namespace: gpu-operator
-status:
-  (conditions[?type == 'Available']):
-    - status: "True"
----
 # ClusterPolicy — umbrella health check for all GPU operator sub-components.
 # When status.state is "ready", the driver, device-plugin, toolkit, DCGM
 # exporter, GFD, MIG manager, and validator are all functional.
@@ -113,26 +102,6 @@ metadata:
 status:
   (numberReady > `0`): true
   (desiredNumberScheduled > `0`): true
----
-# Node Feature Discovery worker DaemonSet — detects hardware features on each node
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  name: node-feature-discovery-worker
-  namespace: gpu-operator
-status:
-  (numberReady > `0`): true
-  (desiredNumberScheduled > `0`): true
----
-# Node Feature Discovery garbage collector — cleans up stale node feature labels
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: node-feature-discovery-gc
-  namespace: gpu-operator
-status:
-  (conditions[?type == 'Available']):
-    - status: "True"
 ---
 # NVIDIA DCGM DaemonSet — Data Center GPU Manager for health and diagnostics
 apiVersion: apps/v1

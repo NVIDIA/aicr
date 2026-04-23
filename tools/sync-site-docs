@@ -5,7 +5,7 @@
 # Sync docs/ (source of truth) into site/docs/ for VitePress.
 # This eliminates manual duplication — docs/ is the single source.
 #
-# Synced sections: user, integrator, contributor, conformance
+# Synced sections: user, integrator, contributor, conformance, design
 # Site-only content (getting-started, project, index.md) is NOT touched.
 #
 # Run before: site dev, site build
@@ -22,9 +22,15 @@ sync_section() {
   local src="$1"
   local dst="$2"
 
+  if [[ ! -d "${src}" ]]; then
+    echo "sync_section: source directory not found: ${src}" >&2
+    return 1
+  fi
+
   rm -rf "${dst}"
   mkdir -p "${dst}"
-  cp -R "${src}/"* "${dst}/"
+  # Copy all contents, including dotfiles; an empty source stays empty.
+  cp -R "${src}/." "${dst}/"
 }
 
 echo "Syncing docs/ → site/docs/..."
@@ -33,6 +39,7 @@ echo "Syncing docs/ → site/docs/..."
 sync_section "${DOCS}/user" "${SITE_DOCS}/user"
 sync_section "${DOCS}/integrator" "${SITE_DOCS}/integrator"
 sync_section "${DOCS}/contributor" "${SITE_DOCS}/contributor"
+sync_section "${DOCS}/design" "${SITE_DOCS}/design"
 
 # Conformance: flatten cncf/ prefix (docs/conformance/cncf/ → site/docs/conformance/).
 # Copies the entire cncf/ subtree so new subdirectories (e.g., v1.35/) are picked up

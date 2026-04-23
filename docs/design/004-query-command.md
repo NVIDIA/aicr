@@ -309,7 +309,7 @@ command keeps the contract clean and lets `query` optimize for human-readable ou
 
 ## References
 
-- [Recipe command](../../pkg/cli/recipe.go)
-- [Recipe resolution](../../pkg/recipe/metadata_store.go)
-- [Value hydration](../../pkg/recipe/adapter.go)
-- [Component registry](../../recipes/registry.yaml)
+- [Recipe command](https://github.com/NVIDIA/aicr/blob/main/pkg/cli/recipe.go)
+- [Recipe resolution](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/metadata_store.go)
+- [Value hydration](https://github.com/NVIDIA/aicr/blob/main/pkg/recipe/adapter.go)
+- [Component registry](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml)

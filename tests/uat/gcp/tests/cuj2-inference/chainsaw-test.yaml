@@ -1,0 +1,185 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: uat-cuj2-inference
+spec:
+  description: |
+    UAT CUJ2: Inference workload on live GKE cluster with GPU nodes.
+    Tests the aicr workflow against a real cluster:
+      Step 1: Snapshot the live cluster
+      Step 2: Generate recipe (GKE/H100/inference/dynamo)
+      Step 3: Validate deployment against live snapshot
+      Step 4: Generate bundle with node scheduling
+      Step 5: Validate bundle structure
+      Step 6: Multi-phase validation
+  timeouts:
+    exec: 300s
+  steps:
+
+    # ── Step 1: Snapshot the live cluster ──────────────────────────────
+    - name: snapshot-cluster
+      description: Capture live cluster state for validation.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference-gke"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} snapshot --output "${WORK}/snapshot.yaml"
+              test -f "${WORK}/snapshot.yaml"
+
+    # ── Step 2: Generate recipe ────────────────────────────────────────
+    - name: generate-recipe
+      description: Generate a GKE H100 inference recipe with dynamo platform.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference-gke"
+              ${AICR_BIN} recipe \
+                --service gke \
+                --accelerator h100 \
+                --intent inference \
+                --os cos \
+                --platform dynamo \
+                --output "${WORK}/recipe.yaml"
+              test -f "${WORK}/recipe.yaml"
+
+    - name: assert-recipe
+      description: Verify recipe has correct criteria and components.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference-gke"
+              chainsaw assert \
+                --resource "${WORK}/recipe.yaml" \
+                --file ./assert-recipe.yaml \
+                --no-color --timeout 10s
+
+    # ── Step 3: Validate deployment against live snapshot ───────────────
+    - name: validate-deployment
+      description: Run deployment validation with live cluster snapshot.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference-gke"
+              ${AICR_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot "${WORK}/snapshot.yaml" \
+                --phase deployment \
+                --no-cluster \
+                --output "${WORK}/validate-deployment.json"
+              test -f "${WORK}/validate-deployment.json"
+
+    - name: assert-validate-deployment
+      description: Verify deployment validation CTRF report is well-formed.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference-gke"
+              # chainsaw assert requires apiVersion/kind; inject into CTRF JSON
+              python3 -c "
+              import json, sys
+              d = json.load(open(sys.argv[1]))
+              d['apiVersion'] = 'ctrf/v1'
+              d['kind'] = 'CTRFReport'
+              json.dump(d, open(sys.argv[2], 'w'), indent=2)
+              " "${WORK}/validate-deployment.json" "${WORK}/validate-deployment-resource.json"
+              chainsaw assert \
+                --resource "${WORK}/validate-deployment-resource.json" \
+                --file ./assert-validate-deployment.yaml \
+                --no-color --timeout 10s
+
+    # ── Step 4: Generate bundle with node scheduling ───────────────────
+    - name: generate-bundle
+      description: Generate bundle with system and GPU node scheduling.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference-gke"
+              ${AICR_BIN} bundle \
+                --recipe "${WORK}/recipe.yaml" \
+                --output "${WORK}/bundle" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
+                --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
+
+    - name: assert-bundle-structure
+      description: Verify bundle contains expected files.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference-gke"
+              test -f "${WORK}/bundle/README.md"
+              test -f "${WORK}/bundle/deploy.sh"
+              test -x "${WORK}/bundle/deploy.sh"
+              test -f "${WORK}/bundle/recipe.yaml"
+              ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
+            check:
+              ($error == null): true
+
+    # ── Step 5: Multi-phase validation ─────────────────────────────────
+    - name: validate-multiphase
+      description: Run all three validation phases.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/uat-cuj2-inference-gke"
+              ${AICR_BIN} validate \
+                --recipe "${WORK}/recipe.yaml" \
+                --snapshot "${WORK}/snapshot.yaml" \
+                --phase deployment \
+                --phase performance \
+                --phase conformance \
+                --no-cluster \
+                --output "${WORK}/validate-multiphase.json"
+
+    - name: assert-validate-multiphase
+      description: Verify multiphase validation CTRF report is well-formed.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/uat-cuj2-inference-gke"
+              # chainsaw assert requires apiVersion/kind; inject into CTRF JSON
+              python3 -c "
+              import json, sys
+              d = json.load(open(sys.argv[1]))
+              d['apiVersion'] = 'ctrf/v1'
+              d['kind'] = 'CTRFReport'
+              json.dump(d, open(sys.argv[2], 'w'), indent=2)
+              " "${WORK}/validate-multiphase.json" "${WORK}/validate-multiphase-resource.json"
+              chainsaw assert \
+                --resource "${WORK}/validate-multiphase-resource.json" \
+                --file ./assert-validate-multiphase.yaml \
+                --no-color --timeout 10s
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/uat-cuj2-inference-gke

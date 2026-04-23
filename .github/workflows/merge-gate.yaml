@@ -1,0 +1,338 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Aggregate merge gate — the ONLY required status check in the main branch
+# ruleset. Every PR-gating CI check is either run or explicitly skipped here,
+# and the final "gate" job aggregates all results into a single pass/fail.
+#
+# To add a new gating check:
+#   1. Add a real job + companion -skip job with inverse if: conditions
+#   2. Add both job names to the gate job's needs: list
+#   3. No ruleset change needed — "gate" is the only required check.
+#
+# GPU tests are intentionally excluded (advisory only) until flake rate is
+# assessed. They can be added later with the same real/skip pattern.
+
+name: Merge Gate
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Path classification — determines which checks run vs skip
+  # ---------------------------------------------------------------------------
+
+  check-paths:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      code: ${{ steps.code.outputs.code }}
+      actions: ${{ steps.changes.outputs.actions }}
+      deps: ${{ steps.changes.outputs.deps }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Detect targeted path categories (default: any match = true)
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+        id: changes
+        with:
+          filters: |
+            actions:
+              - '.github/workflows/**'
+              - '.github/actions/**'
+            deps:
+              - 'go.mod'
+              - 'go.sum'
+              - 'vendor/**'
+              - '.github/workflows/verify-licenses.yaml'
+
+      # Detect docs-only PRs: true only when EVERY changed file is docs/md
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
+        id: docs
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            only:
+              - '**.md'
+              - 'docs/**'
+              - 'site/**'
+              - 'LICENSE'
+
+      # code = NOT docs-only (inverted because paths-filter can't negate)
+      - name: Compute code flag
+        id: code
+        run: |
+          if [ "${{ steps.docs.outputs.only }}" = "true" ]; then
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Qualification (Test, Lint, CLI E2E, E2E, Security Scan)
+  # ---------------------------------------------------------------------------
+
+  tests:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code == 'true'
+    uses: ./.github/workflows/qualification.yaml
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      security-events: write
+    with:
+      coverage_report: true
+
+  tests-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Docs/non-code change — qualification tests not required"
+
+  # ---------------------------------------------------------------------------
+  # CodeQL (analyze)
+  # ---------------------------------------------------------------------------
+
+  analyze:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+      - uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225  # v4.35.2
+        with:
+          languages: go
+      - run: go build ./...
+        env:
+          GOFLAGS: -mod=vendor
+      - uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225  # v4.35.2
+
+  analyze-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Docs/non-code change — CodeQL analysis not required"
+
+  # ---------------------------------------------------------------------------
+  # Vulnerability scan (grype)
+  # ---------------------------------------------------------------------------
+
+  vuln-scan:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/security-scan
+        with:
+          severity-cutoff: 'medium'
+          category: 'anchore-fs'
+
+  vuln-scan-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Docs/non-code change — vulnerability scan not required"
+
+  # ---------------------------------------------------------------------------
+  # Malware scan (ClamAV)
+  # ---------------------------------------------------------------------------
+
+  malware-scan:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/malware-scan
+        with:
+          scan_path: '.'
+          category: 'clamav'
+
+  malware-scan-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.code != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "Docs/non-code change — malware scan not required"
+
+  # ---------------------------------------------------------------------------
+  # Actionlint (GitHub Actions workflow linting)
+  # ---------------------------------------------------------------------------
+
+  actionlint:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.actions == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        run: |
+          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          echo "${PWD}" >> "$GITHUB_PATH"
+      - name: Run actionlint
+        run: actionlint -color -shellcheck=
+
+  actionlint-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.actions != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No workflow/action changes — actionlint not required"
+
+  # ---------------------------------------------------------------------------
+  # License verification
+  # ---------------------------------------------------------------------------
+
+  verify-licenses:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/load-versions
+        id: versions
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            vendor/modules.txt
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@${{ steps.versions.outputs.go_licenses }}
+      - name: Report licenses
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          echo "=== Dependency Licenses ==="
+          go-licenses report ./... 2>/dev/null | sort -t',' -k3 | column -t -s','
+          echo ""
+          echo "=== License Summary ==="
+          go-licenses report ./... 2>/dev/null | cut -d',' -f3 | sort | uniq -c | sort -rn
+      - name: Check licenses
+        env:
+          GOFLAGS: -mod=vendor
+        run: |
+          go-licenses check ./... \
+            --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0
+
+  verify-licenses-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.deps != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No dependency changes — license check not required"
+
+  # ---------------------------------------------------------------------------
+  # Aggregate gate — the single required status check
+  # ---------------------------------------------------------------------------
+
+  gate:
+    if: always()
+    needs:
+      - check-paths
+      - tests
+      - tests-skip
+      - analyze
+      - analyze-skip
+      - vuln-scan
+      - vuln-scan-skip
+      - malware-scan
+      - malware-scan-skip
+      - actionlint
+      - actionlint-skip
+      - verify-licenses
+      - verify-licenses-skip
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Check gate
+        run: |
+          echo "Gate results:"
+          echo '${{ toJSON(needs) }}' | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+
+          # check-paths must succeed — if it fails, all downstream jobs are
+          # skipped (not failed), which would silently pass the gate.
+          if [ "${{ needs.check-paths.result }}" != "success" ]; then
+            echo "::error::check-paths did not succeed (result: ${{ needs.check-paths.result }})"
+            exit 1
+          fi
+
+          # Fail if ANY other dependency failed or was cancelled.
+          # Skipped is OK — it means the inverse job ran instead.
+          if echo '${{ toJSON(needs.*.result) }}' | jq -e 'map(select(. == "failure" or . == "cancelled")) | length > 0' > /dev/null; then
+            echo "::error::One or more gating checks failed or were cancelled"
+            exit 1
+          fi

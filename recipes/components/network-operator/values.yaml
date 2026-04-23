@@ -25,6 +25,7 @@ deployCR: true
 
 nfd:
   enabled: false
+  deployNodeFeatureRules: true
 
 sriovNetworkOperator:
   enabled: false
