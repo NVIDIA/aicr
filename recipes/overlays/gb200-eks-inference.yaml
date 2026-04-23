@@ -44,7 +44,7 @@ spec:
     # GB200 uses nodewright no-op: the H100 tuning packages (nvidia-setup,
     # nvidia-tuned) are not compatible with GB200's ARM64 host CPU and
     # Blackwell GPU architecture. Replace with tuning.yaml once GB200-specific
-    # packages are available. See docs/integrator/eks-dynamo-networking.md.
+    # packages are available.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
