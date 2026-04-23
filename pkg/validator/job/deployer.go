@@ -48,6 +48,7 @@ type Deployer struct {
 	namespace        string
 	runID            string
 	cliVersion       string // CLI version — forwarded to validator containers via AICR_CLI_VERSION for inner-image resolution
+	cliCommit        string // CLI commit SHA — forwarded via AICR_CLI_COMMIT for dev-build image resolution
 	entry            catalog.ValidatorEntry
 	jobName          string // Unique name generated client-side (set by DeployJob)
 	imagePullSecrets []string
@@ -61,11 +62,12 @@ type Deployer struct {
 // and is forwarded to the validator container via the AICR_CLI_VERSION env var so
 // the validator can resolve images it references outside the catalog (e.g. the
 // AIPerf benchmark image used by inference-perf) using the same rewriting
-// rules as catalog.Load.
+// rules as catalog.Load. cliCommit is the git commit SHA, forwarded via
+// AICR_CLI_COMMIT for SHA-based image tag resolution in dev builds.
 func NewDeployer(
 	clientset kubernetes.Interface,
 	factory informers.SharedInformerFactory,
-	namespace, runID, cliVersion string,
+	namespace, runID, cliVersion, cliCommit string,
 	entry catalog.ValidatorEntry,
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
@@ -78,6 +80,7 @@ func NewDeployer(
 		namespace:        namespace,
 		runID:            runID,
 		cliVersion:       cliVersion,
+		cliCommit:        cliCommit,
 		entry:            entry,
 		imagePullSecrets: imagePullSecrets,
 		tolerations:      tolerations,
@@ -224,6 +227,9 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	// registry override that catalog.Load applies to catalog entries.
 	if d.cliVersion != "" {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_CLI_VERSION").WithValue(d.cliVersion))
+	}
+	if d.cliCommit != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_CLI_COMMIT").WithValue(d.cliCommit))
 	}
 	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_VALIDATOR_IMAGE_REGISTRY").WithValue(override))

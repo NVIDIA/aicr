@@ -26,6 +26,14 @@ func WithVersion(version string) Option {
 	}
 }
 
+// WithCommit sets the git commit SHA (typically the CLI build commit).
+// Used for resolving dev-build validator images to SHA-tagged images.
+func WithCommit(commit string) Option {
+	return func(v *Validator) {
+		v.Commit = commit
+	}
+}
+
 // WithNamespace sets the Kubernetes namespace for validation Jobs.
 // Default: "aicr-validation".
 func WithNamespace(namespace string) Option {

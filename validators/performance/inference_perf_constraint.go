@@ -1125,7 +1125,7 @@ func runAIPerfJob(ctx *validators.Context, endpoint string, concurrency int, job
 // mirrored/private-registry deployments and release-version pinning reach
 // this inner workload too.
 func resolveAiperfImage() string {
-	return catalog.ResolveImage(aiperfBaseImage, os.Getenv("AICR_CLI_VERSION"))
+	return catalog.ResolveImage(aiperfBaseImage, os.Getenv("AICR_CLI_VERSION"), os.Getenv("AICR_CLI_COMMIT"))
 }
 
 // getOwnPullSecrets returns the imagePullSecrets attached to the pod this

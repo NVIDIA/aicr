@@ -165,7 +165,7 @@ func (v *Validator) ValidatePhases(
 		return nil, err
 	}
 
-	cat, err := catalog.Load(v.Version)
+	cat, err := catalog.Load(v.Version, v.Commit)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
 	}
@@ -223,7 +223,7 @@ func (v *Validator) ValidatePhase(
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
-	cat, err := catalog.Load(v.Version)
+	cat, err := catalog.Load(v.Version, v.Commit)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog", err)
 	}
@@ -322,7 +322,7 @@ func (v *Validator) runPhase(
 		slog.Info("running validator", "name", entry.Name, "phase", phase)
 
 		deployer := job.NewDeployer(
-			clientset, factory, v.Namespace, v.RunID, v.Version, entry,
+			clientset, factory, v.Namespace, v.RunID, v.Version, v.Commit, entry,
 			v.ImagePullSecrets, v.Tolerations, v.NodeSelector,
 		)
 

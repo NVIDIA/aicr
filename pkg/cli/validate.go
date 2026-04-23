@@ -245,6 +245,7 @@ func runValidation(
 
 	v := validator.New(
 		validator.WithVersion(version),
+		validator.WithCommit(commit),
 		validator.WithNamespace(cfg.validationNamespace),
 		validator.WithCleanup(cfg.cleanup),
 		validator.WithImagePullSecrets(cfg.imagePullSecrets),
