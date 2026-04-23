@@ -56,7 +56,6 @@ deploymentOrder:
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
   - nfd
-  - prometheus-adapter
   - nodewright-operator
   - nodewright-customizations
   - gpu-operator
@@ -64,3 +63,4 @@ deploymentOrder:
   - kubeflow-trainer
   - nvidia-dra-driver-gpu
   - nvsentinel
+  - prometheus-adapter
