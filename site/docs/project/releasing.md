@@ -18,7 +18,7 @@ This document outlines the release process for NVIDIA AI Cluster Runtime (AICR).
 
 ## Release Methods
 
-### Method 1: Version Bump (Recommended)
+### Method 1: Direct Release (Recommended)
 
 Use Makefile targets for standard releases:
 
@@ -32,40 +32,30 @@ make bump-major   # v1.2.3 → v2.0.0
 
 1. Validates working directory is clean with no unpushed commits
 2. Calculates the new version based on bump type
-3. Generates/updates `CHANGELOG.md` using [git-cliff](https://git-cliff.org/)
-4. Commits the changelog update
-5. Creates an annotated tag
-6. Pushes both commit and tag to origin
-7. Triggers release workflows (see [Workflow Pipeline](#workflow-pipeline))
+3. Creates an annotated tag on the current HEAD
+4. Pushes the tag to origin
+5. Triggers release workflows (see [Workflow Pipeline](#workflow-pipeline))
 
-**Note**: Manual edits to `CHANGELOG.md` (e.g., corrections to previous releases) are preserved. The bump process prepends new entries without overwriting existing content.
+No commits are created — the tag points directly at the code. Use `make changelog` to preview changes since the last tag. The changelog is generated for GitHub Release notes and is not committed to the repository.
 
-### Method 2: Manual Tag (Advanced)
+### Method 2: Pre-release with Promotion (Recommended for important releases)
 
-For cases where you need more control over the release process:
+Use this workflow to validate an RC before promoting it to stable. The promotion re-tags the exact same SHA — no new commits, no re-builds needed.
 
-1. **Ensure main is ready**:
-   ```bash
-   git checkout main
-   git pull origin main
-   make qualify  # All checks must pass
-   ```
+```bash
+# 1. Tag an RC
+make bump-rc                         # v1.2.3 → v1.2.4-rc1
 
-2. **Generate changelog manually** (optional):
-   ```bash
-   git-cliff --tag v1.2.3 -o CHANGELOG.md
-   git add CHANGELOG.md
-   git commit -m "chore: update CHANGELOG for v1.2.3"
-   git push origin main
-   ```
+# 2. Validate the RC (CI runs, manual testing, etc.)
 
-3. **Create and push a version tag**:
-   ```bash
-   git tag -a v1.2.3 -m "Release v1.2.3"
-   git push origin v1.2.3
-   ```
+# 3a. If issues found, fix on main and cut another RC
+make bump-rc                         # v1.2.4-rc1 → v1.2.4-rc2
 
-4. **Automatic workflows trigger** (via `on-tag.yaml`)
+# 3b. When satisfied, promote the RC to stable (same SHA)
+make bump-promote TAG=v1.2.4-rc2    # → v1.2.4 on same commit
+```
+
+Beta pre-releases follow the same pattern: `make bump-beta`, then `make bump-promote TAG=v1.2.4-beta2`.
 
 ### Method 3: Manual Workflow Trigger
 
@@ -221,7 +211,7 @@ For urgent fixes:
    ```bash
    git checkout main
    git pull origin main
-   make bump-patch  # Generates changelog, tags, and pushes
+   make bump-patch  # Tags and pushes
    ```
 
 3. **For patching older releases** (rare):
@@ -229,9 +219,6 @@ For urgent fixes:
    git checkout v1.2.3
    git checkout -b hotfix/v1.2.4
    git cherry-pick <commit-hash-from-main>
-   git-cliff --tag v1.2.4 --unreleased --prepend CHANGELOG.md
-   git add CHANGELOG.md
-   git commit -m "chore: update CHANGELOG for v1.2.4"
    git tag -a v1.2.4 -m "Release v1.2.4"
    git push origin hotfix/v1.2.4 v1.2.4
    ```

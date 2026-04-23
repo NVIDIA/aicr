@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+
+# Dir setup
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${DIR}/common"
+
+# Check if required tools are installed
+has_tools git git-cliff
+
+# Get the latest release tag
+LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || "")
+
+if [ -z "$LAST_TAG" ]; then
+  err "No release tags found."
+fi
+
+msg "Changes since $LAST_TAG" >&2
+
+# Generate raw changelog, strip noise lines
+RAW=$(git-cliff --unreleased --strip header \
+  | grep -v '<!-- .* -->' \
+  | grep -vi 'Signed-off-by:' \
+  | grep -vi 'Co-authored-by:')
+
+# Split into sections and emit in fixed order:
+#   New Features → Bug Fixes → Other Tasks
+TMPDIR_CL=$(mktemp -d "${TMPDIR:-/tmp}/changelog.XXXXXX")
+trap 'rm -rf "$TMPDIR_CL"' EXIT
+
+current=""
+while IFS= read -r line; do
+  if [[ "$line" =~ ^###\  ]]; then
+    current="${line#\#\#\# }"
+  elif [[ -n "$current" ]]; then
+    echo "$line" >> "$TMPDIR_CL/$current"
+  fi
+done <<< "$RAW"
+
+for section in "New Features" "Bug Fixes" "Other Tasks"; do
+  if [[ -s "$TMPDIR_CL/$section" ]]; then
+    echo "### $section"
+    echo ""
+    cat "$TMPDIR_CL/$section"
+  fi
+done

@@ -44,30 +44,37 @@ git checkout main
 git pull origin main
 make qualify          # Verify locally before releasing
 
-make bump-patch       # v1.2.3 -> v1.2.4
+make bump-patch       # v1.2.3 → v1.2.4
 # or
-make bump-minor       # v1.2.3 -> v1.3.0
+make bump-minor       # v1.2.3 → v1.3.0
 ```
 
-This automatically: validates clean state, generates changelog, commits, tags, pushes, and triggers the release pipeline.
+This validates clean state, tags the current HEAD, pushes the tag, and triggers the release pipeline. No commits are created — the tag points directly at the code.
 
-### Two-Phase Release (with review)
+Use `make changelog` to preview changes since the last tag. The changelog is generated for GitHub Release notes and is not committed to the repository.
 
-For releases where you want to review/edit the changelog before tagging:
+### Pre-release with Promotion (recommended for important releases)
+
+Use this workflow to validate an RC before promoting it to stable. The promotion re-tags the exact same SHA — no new commits, no re-builds.
 
 ```bash
 git checkout main
 git pull origin main
 make qualify
 
-make bump-prepare TYPE=patch    # Generates CHANGELOG.md, does not tag/push
-# Review and edit CHANGELOG.md
-make bump-finalize              # Commits, tags, pushes
+# 1. Tag an RC
+make bump-rc                         # v1.2.3 → v1.2.4-rc1
+
+# 2. Validate the RC (CI runs, manual testing, etc.)
+
+# 3a. If issues found, fix on main and cut another RC
+make bump-rc                         # v1.2.4-rc1 → v1.2.4-rc2
+
+# 3b. When satisfied, promote the RC to stable (same SHA)
+make bump-promote TAG=v1.2.4-rc2    # → v1.2.4 on same commit
 ```
 
-To cancel a prepared release: `make bump-abort`
-
-### Pre-release
+Beta pre-releases follow the same pattern: `make bump-beta`, then `make bump-promote TAG=v1.2.4-beta2`.
 
 Pre-releases exercise the full build/test/attest pipeline but do not update:
 
@@ -77,32 +84,6 @@ Pre-releases exercise the full build/test/attest pipeline but do not update:
 - Site documentation (GitHub Pages stays on latest stable)
 
 Slack notifications fire for both pre-releases and stable releases.
-
-```bash
-make bump-rc                     # v1.2.3 → v1.2.4-rc1
-make bump-rc                     # v1.2.4-rc1 → v1.2.4-rc2
-make bump-patch                  # v1.2.4-rc2 → v1.2.5 (promote to stable)
-
-# Or with review:
-make bump-prepare TYPE=rc        # Prepare v1.2.4-rc1 for review
-make bump-finalize               # Tag and push after review
-
-# Beta pre-releases also supported:
-make bump-beta                   # v1.2.3 → v1.2.4-beta1
-```
-
-### Manual Tag
-
-For more control:
-
-```bash
-git checkout main && git pull origin main
-make qualify
-git-cliff --tag v1.2.3 -o CHANGELOG.md       # Optional: generate changelog
-git add CHANGELOG.md && git commit -m "chore: update CHANGELOG for v1.2.3"
-git tag -a v1.2.3 -m "Release v1.2.3"
-git push origin main v1.2.3
-```
 
 ### Re-run Existing Release
 
@@ -204,4 +185,4 @@ The `aicrd` API server demo deploys to Google Cloud Run on successful release (r
 
 - Repository admin access with write permissions
 - Access to GitHub Actions workflows
-- [git-cliff](https://git-cliff.org/) installed (`make tools-setup`)
+- [git-cliff](https://git-cliff.org/) installed for `make changelog` (`make tools-setup`)
