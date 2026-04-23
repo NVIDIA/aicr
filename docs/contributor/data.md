@@ -443,6 +443,79 @@ spec:
 - Conflict detection: a mixin constraint or component that conflicts with the inheritance chain or a previously applied mixin produces an error
 - When a snapshot is provided, mixin constraints are evaluated against it after merging; if any fail, the entire composed candidate is invalid and falls back to base-only output. In plain query mode (no snapshot), mixin constraints are merged but not evaluated
 
+### Criteria-Wildcard Overlays
+
+Some overlays apply across a criteria dimension without being referenced via `spec.base` or included via `spec.mixins`. The resolver picks them up automatically because `FindMatchingOverlays` can return multiple independent maximal-leaf overlays for a single query, not just one. Ancestors of a matched leaf are filtered out of the candidate set, but sibling leaves whose criteria independently match are kept and their inheritance chains are resolved and merged in parallel. See [Criteria Matching Algorithm](#criteria-matching-algorithm) and [Recipe Generation Process](#recipe-generation-process) for details.
+
+This is useful for content that cross-cuts one criteria dimension but must stay tied to others — for example, a GB200 NCCL bandwidth target that applies to every service (EKS, OKE, etc.) but only for GB200 + training.
+
+```yaml
+# recipes/overlays/gb200-any-training.yaml
+spec:
+  base: base
+  criteria:
+    service: any         # Wildcard — matches eks, oke, gke, etc.
+    accelerator: gb200
+    intent: training
+  validation:
+    performance:
+      checks:
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 720"
+```
+
+When a query specifies `{service: eks, accelerator: gb200, intent: training}`, the resolver returns three maximal leaves — `gb200-eks-training` (matched by explicit criteria), `gb200-any-training` (matched by wildcard `service: any`), and `monitoring-hpa` (matched by wildcard `intent: any`). Their inheritance chains are resolved and merged with the base spec:
+
+```yaml
+appliedOverlays:
+  - base
+  - monitoring-hpa
+  - gb200-any-training      # matched by wildcard criteria, not via base:
+  - eks
+  - eks-training
+  - gb200-eks-training
+```
+
+The `nccl-all-reduce-bw` constraint from `gb200-any-training` lands in the hydrated recipe without being duplicated in each service-specific overlay. (Adding `os: ubuntu` to the query would extend the chain with `gb200-eks-ubuntu-training` as the maximal leaf in place of `gb200-eks-training`; `gb200-any-training` would still match independently.)
+
+**Naming convention.** The `-any-` segment signals this pattern: the static segments indicate the fixed criteria dimensions (accelerator, intent), and `any` marks the wildcard dimension. Examples: `gb200-any-training.yaml`, `b200-any-training.yaml`.
+
+**When to use a criteria-wildcard overlay vs a mixin:**
+
+| Use a criteria-wildcard overlay when... | Use a mixin when... |
+|---|---|
+| Content applies based on query criteria | Content applies based on explicit opt-in |
+| The set of consumers is determined by criteria matching | The set of consumers is an enumerated list of overlays |
+| Adopt-by-default is desired for new matching overlays | Each consumer should reference it explicitly |
+| You want to add `validation` blocks (mixins don't carry validation) | You only need `constraints` / `componentRefs` |
+
+**Precedence when a wildcard overlay and a service-specific leaf collide.** `FindMatchingOverlays` sorts its returned leaves by `Criteria.Specificity()` ascending, so less-specific overlays merge first and more-specific overlays merge last. Two different merge rules apply — they are not the same:
+
+- **Top-level `spec.constraints`** merge by name. A same-named constraint from the more-specific leaf overrides the wildcard's value (the "overridden, new added" rule from the merge algorithm).
+- **`spec.validation.<phase>`** blocks (deployment, performance, conformance) are **replaced wholesale** when a later overlay defines the same phase — no field-level merge. The leaf's `checks` and `constraints` replace the wildcard's entire block.
+
+This distinction matters. To override only the threshold in the wildcard example above, a service-specific leaf must restate **both** `checks` and `constraints`:
+
+```yaml
+# recipes/overlays/gb200-eks-training.yaml
+spec:
+  validation:
+    performance:
+      checks:                        # Must restate — else the phase is dropped
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 650"            # EKS-specific threshold
+```
+
+Setting only `constraints` drops the wildcard's `checks`, which causes `filterEntriesByRecipe` to return zero entries and the performance phase to be skipped entirely — the opposite of the "lower the threshold" intent.
+
+Criteria-wildcard overlays are only appropriate when the content is genuinely uniform across the wildcard dimension. If the value diverges (e.g., H100 NCCL targets differ by cloud: AKS ≥ 100, EKS ≥ 300, GKE ≥ 250), keep it inline in each service-specific overlay — collapsing divergent values to a lowest-common-denominator wildcard silently weakens validation.
+
+**See also:** [ADR-005: Overlay Refactoring](../design/005-overlay-refactoring.md) — rationale for the maximal-leaf resolver semantics (Phase 2) and why wildcard overlays are preferred over multi-parent inheritance or intermediate-reparenting approaches that were prototyped and rejected.
+
 ### Cycle Detection
 
 The system detects circular inheritance to prevent infinite loops:
@@ -652,19 +725,37 @@ Result:          ❌ NO MATCH - Recipe requires gb200, query has "any" (wildcard
 
 This asymmetric behavior ensures that a generic query like `--service eks --intent training` only matches generic recipes, not hardware-specific ones like `gb200-eks-training.yaml`.
 
-**Example 4: Multiple Matches (Fully Specific Query)**
+**Example 4: Multiple Maximal Matches (Fully Specific Query)**
+
 ```yaml
 User Query: { service: "eks", os: "ubuntu", accelerator: "gb200", intent: "training" }
 
-Matching Recipes (sorted by specificity):
-  1. overlays/base.yaml              { }  (all "any")                                    Specificity: 0
-  2. overlays/eks.yaml               { service: eks }                                    Specificity: 1
-  3. overlays/eks-training.yaml      { service: eks, intent: training }                  Specificity: 2
-  4. overlays/gb200-eks-training.yaml { service: eks, accelerator: gb200, intent: training }  Specificity: 3
-  5. overlays/gb200-eks-ubuntu-training.yaml { service: eks, accelerator: gb200, os: ubuntu, intent: training }  Specificity: 4
+Overlay criteria matches (pre-filter):
+  1. overlays/monitoring-hpa.yaml             { intent: any }                                           Specificity: 0
+  2. overlays/eks.yaml                        { service: eks }                                          Specificity: 1
+  3. overlays/eks-training.yaml               { service: eks, intent: training }                        Specificity: 2
+  4. overlays/gb200-any-training.yaml         { service: any, accelerator: gb200, intent: training }    Specificity: 2
+  5. overlays/gb200-eks-training.yaml         { service: eks, accelerator: gb200, intent: training }    Specificity: 3
+  6. overlays/gb200-eks-ubuntu-training.yaml  { service: eks, accelerator: gb200, os: ubuntu, intent: training }  Specificity: 4
 
-Result: All matching recipes are applied in order of specificity
+(base.yaml is the root spec, not an overlay candidate: FindMatchingOverlays
+iterates s.Overlays only. The base spec is always applied as the seed for
+the merged output — it is not selected by criteria matching.)
+
+Maximal leaves (after filterToMaximalLeaves):
+  - monitoring-hpa             (no matching descendant)
+  - gb200-any-training         (no matching descendant)
+  - gb200-eks-ubuntu-training  (most-specific overlay; eks, eks-training,
+                                gb200-eks-training are ancestors and are filtered out)
+
+Result: Each maximal leaf's inheritance chain is resolved and merged onto
+the base spec. Ancestors removed by the filter re-enter the output via
+chain resolution (step 3), so the final appliedOverlays is
+[base, monitoring-hpa, gb200-any-training, eks, eks-training,
+gb200-eks-training, gb200-eks-ubuntu-training].
 ```
+
+Note that multiple maximal leaves can coexist when their inheritance chains are independent — `gb200-any-training` (via wildcard `service: any`) and `gb200-eks-ubuntu-training` (via explicit criteria) are both kept because neither is an ancestor of the other. This is what enables the [criteria-wildcard overlay pattern](#criteria-wildcard-overlays).
 
 ## Recipe Generation Process
 
@@ -686,29 +777,40 @@ store, err := loadMetadataStore(ctx)
 overlays := store.FindMatchingOverlays(criteria)
 ```
 
-- Iterate all overlay recipes
+- Iterate all overlays in `s.Overlays` (the base recipe is held separately in `s.Base` and is not a candidate here — it is injected as the merge seed by `initBaseMergedSpec()` in Step 4)
 - Check if each overlay's criteria matches the user query
-- Sort matches by specificity (least specific first)
+- **Filter to maximal leaves** via `filterToMaximalLeaves()`: drop any match that is an ancestor (via `spec.base`) of another match. Ancestors are re-added later via chain resolution; this filter ensures that a matched descendant isn't double-counted with its own chain
+- Sort maximal-leaf matches by specificity (least specific first)
+
+Multiple maximal leaves can be returned for one query when they sit on independent inheritance chains — for example, a `service: any` wildcard overlay and the most-specific service-specific leaf are both kept (see [Criteria-Wildcard Overlays](#criteria-wildcard-overlays)).
 
 ### Step 3: Resolve Inheritance Chains
 
-For each matching overlay:
+For each maximal-leaf match from step 2:
 
 ```go
 chain, err := store.resolveInheritanceChain(overlay.Metadata.Name)
 ```
 
-- Build the chain from root (base) to the target overlay
+- Build the chain from root (base) to the target overlay by walking `spec.base`
 - Detect cycles to prevent infinite loops
 - Example: `["base", "eks", "eks-training", "gb200-eks-ubuntu-training"]`
 
+Ancestors filtered out in step 2 re-enter the output here as part of their descendant's chain.
+
 ### Step 4: Merge Specifications
 
+The merge starts from a seed containing the base spec, then applies each resolved chain on top:
+
 ```go
+mergedSpec, appliedOverlays := s.initBaseMergedSpec()  // seed with s.Base
+// ... then for each chain from Step 3:
 for _, recipe := range chain {
     mergedSpec.Merge(&recipe.Spec)
 }
 ```
+
+This is why `base` always appears first in `appliedOverlays` even though it is not returned by `FindMatchingOverlays`.
 
 #### Merge Algorithm
 
@@ -784,38 +886,36 @@ return &RecipeResult{
 ```mermaid
 flowchart TD
     Start["User Query<br/>{service: 'eks', accelerator: 'gb200', intent: 'training'}"]
-    
+
     Start --> Load[Load Metadata Store]
-    
-    Load --> Find["Find Matching Overlays<br/>Sorted by specificity"]
-    
-    Find --> Match1["eks.yaml<br/>criteria: { service: eks }<br/>✅ MATCH (specificity: 1)"]
-    
-    Match1 --> Match2["eks-training.yaml<br/>criteria: { service: eks, intent: training }<br/>✅ MATCH (specificity: 2)"]
-    
-    Match2 --> Match3["gb200-eks-training.yaml<br/>criteria: { service: eks, accelerator: gb200, intent: training }<br/>✅ MATCH (specificity: 3)"]
-    
-    Match3 --> Match4["gb200-eks-ubuntu-training.yaml<br/>criteria: { service: eks, accelerator: gb200, os: ubuntu, intent: training }<br/>✅ MATCH (specificity: 4)"]
-    
-    Match4 --> Resolve["Resolve Inheritance Chains"]
-    
-    Resolve --> Chain1["Chain: base → eks"]
-    Resolve --> Chain2["Chain: base → eks → eks-training"]
-    Resolve --> Chain3["Chain: base → eks → eks-training → gb200-eks-training"]
-    Resolve --> Chain4["Chain: base → eks → eks-training → gb200-eks-training → gb200-eks-ubuntu-training"]
-    
-    Chain1 --> Merge["Merge All (deduplicated)"]
+
+    Load --> Find["FindMatchingOverlays(criteria)<br/>iterates s.Overlays (base is separate)"]
+
+    Find --> RawMatches["Overlay criteria matches (pre-filter):<br/>• monitoring-hpa (intent: any)<br/>• eks<br/>• eks-training<br/>• gb200-any-training (service: any wildcard)<br/>• gb200-eks-training"]
+
+    RawMatches --> Filter["filterToMaximalLeaves():<br/>drop ancestors of other matches"]
+
+    Filter --> Leaves["Maximal leaves:<br/>• monitoring-hpa<br/>• gb200-any-training<br/>• gb200-eks-training"]
+
+    Leaves --> Resolve["Resolve Inheritance Chains<br/>(for each leaf, build chain root→leaf via spec.base)"]
+
+    Resolve --> Chain1["base → monitoring-hpa"]
+    Resolve --> Chain2["base → gb200-any-training"]
+    Resolve --> Chain3["base → eks → eks-training → gb200-eks-training"]
+
+    Chain1 --> Merge["Merge onto base spec (deduplicated)<br/>base spec is injected by initBaseMergedSpec()"]
     Chain2 --> Merge
     Chain3 --> Merge
-    Chain4 --> Merge
-    
-    Merge --> Merged["Merged Spec<br/>base + eks + eks-training + gb200-eks-training + gb200-eks-ubuntu-training"]
-    
+
+    Merge --> Mixins["Apply Mixins (spec.mixins on merged leaves)"]
+
+    Mixins --> Merged["Merged Spec<br/>base + monitoring-hpa + gb200-any-training + eks + eks-training + gb200-eks-training"]
+
     Merged --> Validate["Validate Dependencies"]
-    
+
     Validate --> Sort["Topological Sort"]
-    
-    Sort --> Result["RecipeResult<br/>• componentRefs: [cert-manager, gpu-operator, ...]<br/>• deploymentOrder: [cert-manager, gpu-operator, ...]<br/>• constraints: [K8s.server.version >= 1.32, ...]<br/>• appliedOverlays: [base, eks, eks-training, gb200-eks-training, gb200-eks-ubuntu-training]"]
+
+    Sort --> Result["RecipeResult<br/>• componentRefs: [cert-manager, gpu-operator, ...]<br/>• deploymentOrder: [cert-manager, gpu-operator, ...]<br/>• constraints: [K8s.server.version >= 1.32.4]<br/>• validation.performance.constraints: [nccl-all-reduce-bw >= 720]<br/>• appliedOverlays: [base, monitoring-hpa, gb200-any-training, eks, eks-training, gb200-eks-training]"]
 ```
 
 ## Usage Examples

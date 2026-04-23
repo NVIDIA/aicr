@@ -12,6 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Cross-cutting overlay applied via criteria-wildcard matching.
+#
+# This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
+# The resolver picks it up for every B200+training query because its
+# `service: any` criterion wildcard-matches any service (EKS, OKE, etc.),
+# contributing the B200-wide NCCL bandwidth target without duplicating it
+# in each service-specific overlay.
+#
+# See docs/contributor/data.md#criteria-wildcard-overlays for details.
+
 kind: RecipeMetadata
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
