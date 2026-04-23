@@ -62,13 +62,7 @@ migManager:
 toolkit:
   enabled: true
 
-# ── Node Feature Discovery scheduling ───────────────────────────────
-# NFD master/gc run on system nodes, worker runs on all worker nodes
-# (no accelerated nodeSelector — NFD must discover features everywhere)
-node-feature-discovery:
-  master:
-    nodeSelector:
-      nodeGroup: system-pool
-  gc:
-    nodeSelector:
-      nodeGroup: system-pool
+# ── Node Feature Discovery ──────────────────────────────────────────
+# NFD deployed as standalone shared component — sub-chart disabled
+nfd:
+  enabled: false

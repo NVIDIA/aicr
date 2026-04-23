@@ -54,6 +54,7 @@ spec:
       version: "25.1.0"
       valuesFile: components/network-operator/values.yaml
       dependencyRefs:
+        - nfd
         - cert-manager
 
     # Prometheus persistent storage — Azure Disk Standard SSD

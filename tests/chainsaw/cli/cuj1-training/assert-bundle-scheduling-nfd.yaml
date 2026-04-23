@@ -1,0 +1,54 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Assert standalone nfd values.yaml for CUJ1 training workload.
+#
+# Validates scheduling injection for the standalone NFD component:
+#   - master + gc get the system node selector
+#   - worker gets the accelerated toleration (worker runs on all nodes,
+#     so it must tolerate GPU-node taints)
+#
+# NOTE: chainsaw assert --resource requires apiVersion/kind to parse the YAML.
+# Helm values files don't have these natively, so we prepend them in the test
+# script before asserting. These two lines are not part of the actual values.
+apiVersion: helm/v1
+kind: Values
+
+# ── NodeFeature API enabled ──────────────────────────────────────────
+enableNodeFeatureApi: true
+
+# ── Scheduling: master on system nodes ───────────────────────────────
+master:
+  nodeSelector:
+    nodeGroup: system-pool
+
+# ── Scheduling: GC enabled and on system nodes ───────────────────────
+gc:
+  enable: true
+  nodeSelector:
+    nodeGroup: system-pool
+
+# ── Scheduling: worker gets accelerated toleration ───────────────────
+# Worker DaemonSet must run on all nodes (system + accelerated) to
+# publish hardware features; the accelerated toleration is required so
+# it can land on tainted GPU nodes.
+worker:
+  tolerations:
+    - key: nvidia.com/gpu
+      value: present
+      effect: NoSchedule
+  # Explicit regression guard: nodeSelector MUST NOT be injected, even
+  # by accident. If a future overlay/registry change adds one, this
+  # assertion fails and catches it.
+  (nodeSelector == null): true
