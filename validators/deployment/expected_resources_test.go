@@ -101,6 +101,7 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+		return
 	}
 }
 
@@ -128,9 +129,11 @@ func TestCheckExpectedResources_FailsWhenNodewrightIncomplete(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when Nodewright is not complete")
+		return
 	}
 	if !strings.Contains(err.Error(), "Nodewright tuning: status=waiting") {
 		t.Fatalf("expected Nodewright readiness failure, got: %v", err)
+		return
 	}
 }
 
@@ -150,9 +153,11 @@ func TestCheckExpectedResources_FailsWhenNamespaceNotActive(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when namespace is not Active")
+		return
 	}
 	if !strings.Contains(err.Error(), "namespace app-ns: phase=Terminating") {
 		t.Fatalf("expected namespace readiness failure, got: %v", err)
+		return
 	}
 }
 
@@ -188,6 +193,7 @@ func TestCheckExpectedResources_SkipsDisabledComponents(t *testing.T) {
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil for disabled optional components", err)
+		return
 	}
 }
 
@@ -204,7 +210,8 @@ func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	)
 
 	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil for cluster-scoped Nodeweight", err)
+		t.Fatalf("checkExpectedResources() error = %v, want nil for cluster-scoped Nodewright", err)
+		return
 	}
 }
 
@@ -223,6 +230,7 @@ func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil when Nodewright CRD is not registered", err)
+		return
 	}
 }
 
@@ -243,9 +251,11 @@ func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when Nodewright CR is missing but CRD is registered")
+		return
 	}
 	if !strings.Contains(err.Error(), "Nodewright tuning: not found (recipe declared it but the cluster has no such CR)") {
 		t.Fatalf("expected recipe-scoped Nodewright not-found failure, got: %v", err)
+		return
 	}
 }
 
@@ -264,6 +274,7 @@ func TestCheckExpectedResources_SkipsClusterPolicyWhenCRDNotRegistered(t *testin
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil when ClusterPolicy CRD is not registered", err)
+		return
 	}
 }
 
@@ -286,6 +297,7 @@ func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *tes
 	clientset, ok := ctx.Clientset.(*k8sfake.Clientset)
 	if !ok {
 		t.Fatalf("expected *k8sfake.Clientset, got %T", ctx.Clientset)
+		return
 	}
 	// Resource name is the literal string "resource" (not "apiresources") —
 	// that is the string FakeDiscovery hard-codes when synthesizing the
@@ -305,12 +317,15 @@ func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *tes
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when discovery returns a non-NotFound error (fail-closed)")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to discover") {
 		t.Fatalf("expected discovery failure to surface, got: %v", err)
+		return
 	}
 	if strings.Contains(err.Error(), "not registered, skipping") {
 		t.Fatalf("discovery failure must not be treated as CRD-not-registered skip, got: %v", err)
+		return
 	}
 }
 
@@ -333,9 +348,11 @@ func TestCheckExpectedResources_FailsWhenClusterPolicyCRMissing(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when ClusterPolicy CR is missing but CRD is registered")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to get ClusterPolicy cluster-policy") {
 		t.Fatalf("expected ClusterPolicy-missing failure, got: %v", err)
+		return
 	}
 }
 
@@ -367,6 +384,7 @@ func TestCheckExpectedResources_IgnoresStaleUnrelatedNodewright(t *testing.T) {
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil — stale unrelated Nodewright must not affect the result", err)
+		return
 	}
 }
 
@@ -391,9 +409,11 @@ func TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames(t *testing.T)
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when enabled nodewright-customizations ref has no expected Nodewright names")
+		return
 	}
 	if !strings.Contains(err.Error(), "no Nodewright CR names could be extracted") {
 		t.Fatalf("expected 'no Nodewright CR names could be extracted' failure, got: %v", err)
+		return
 	}
 }
 
@@ -415,9 +435,11 @@ func TestCheckExpectedResources_FailsWhenClusterPolicyMissingState(t *testing.T)
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when ClusterPolicy status.state is missing")
+		return
 	}
 	if !strings.Contains(err.Error(), "ClusterPolicy status.state not found") {
 		t.Fatalf("expected ClusterPolicy readiness failure, got: %v", err)
+		return
 	}
 }
 
@@ -437,9 +459,11 @@ func TestCheckExpectedResources_FailsWhenDRAKubeletPluginMissing(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when DRA kubelet plugin DaemonSet is missing")
+		return
 	}
 	if !strings.Contains(err.Error(), "no kubelet-plugin DaemonSet") {
 		t.Fatalf("expected DRA missing DaemonSet failure, got: %v", err)
+		return
 	}
 }
 
@@ -460,12 +484,15 @@ func TestCheckExpectedResources_FailsWhenDRAKubeletPluginIsUnhealthy(t *testing.
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when DRA kubelet plugin DaemonSet is unhealthy")
+		return
 	}
 	if !strings.Contains(err.Error(), "DaemonSet nvidia-dra-driver/"+testDefaultDRADSName) {
 		t.Fatalf("expected DRA DaemonSet context in failure, got: %v", err)
+		return
 	}
 	if !strings.Contains(err.Error(), "not healthy: 1/2 pods ready") {
 		t.Fatalf("expected unhealthy DaemonSet detail, got: %v", err)
+		return
 	}
 }
 
@@ -486,9 +513,11 @@ func TestCheckExpectedResources_FailsWhenDRAKubeletPluginHasNoScheduledPods(t *t
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when DRA kubelet plugin DaemonSet has no scheduled pods")
+		return
 	}
 	if !strings.Contains(err.Error(), "no ready kubelet-plugin pods scheduled (0/0 pods ready)") {
 		t.Fatalf("expected zero-pod DaemonSet detail, got: %v", err)
+		return
 	}
 }
 
@@ -516,6 +545,7 @@ func TestCheckExpectedResources_DRAKubeletPluginCustomName(t *testing.T) {
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil for custom-named kubelet-plugin DaemonSet", err)
+		return
 	}
 }
 
@@ -541,13 +571,16 @@ func TestCheckExpectedResources_FailsWhenMultipleKubeletPluginDaemonSets(t *test
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when multiple kubelet-plugin DaemonSets match")
+		return
 	}
 	if !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("expected ambiguity failure, got: %v", err)
+		return
 	}
 	for _, name := range []string{"alpha-kubelet-plugin", "beta-kubelet-plugin"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("expected matched DaemonSet name %q in failure, got: %v", name, err)
+			return
 		}
 	}
 }
@@ -575,6 +608,7 @@ func TestCheckExpectedResources_IgnoresUnrelatedDaemonSetInNamespace(t *testing.
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil — unrelated DaemonSet must be ignored", err)
+		return
 	}
 }
 
@@ -609,6 +643,7 @@ func TestCheckExpectedResources_SurfacesMultipleNodewrightFailures(t *testing.T)
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when multiple expected Nodewrights are non-complete")
+		return
 	}
 	for _, needle := range []string{
 		"Nodewright tuning: status=waiting",
@@ -616,6 +651,7 @@ func TestCheckExpectedResources_SurfacesMultipleNodewrightFailures(t *testing.T)
 	} {
 		if !strings.Contains(err.Error(), needle) {
 			t.Fatalf("expected %q in failure, got: %v", needle, err)
+			return
 		}
 	}
 }
@@ -720,6 +756,7 @@ metadata:
 			got := extractNodewrightNamesFromManifest(tc.content)
 			if !stringSlicesEqual(got, tc.want) {
 				t.Fatalf("extractNodewrightNamesFromManifest(...) = %v, want %v", got, tc.want)
+				return
 			}
 		})
 	}
@@ -734,12 +771,14 @@ func TestExtractNodewrightNamesFromManifest_TuningGke(t *testing.T) {
 	content, err := recipe.GetManifestContent("components/nodewright-customizations/manifests/tuning-gke.yaml")
 	if err != nil {
 		t.Fatalf("failed to load tuning-gke manifest: %v", err)
+		return
 	}
 
 	got := extractNodewrightNamesFromManifest(content)
 	want := []string{"tuning"}
 	if !stringSlicesEqual(got, want) {
 		t.Fatalf("extractNodewrightNamesFromManifest(tuning-gke.yaml) = %v, want %v (metadata.name is 'tuning', not the filename basename)", got, want)
+		return
 	}
 }
 
@@ -852,6 +891,7 @@ func configureFakeDiscovery(
 	fakeDisc, ok := clientset.Discovery().(*fakediscovery.FakeDiscovery)
 	if !ok {
 		t.Fatalf("expected *fakediscovery.FakeDiscovery, got %T", clientset.Discovery())
+		return
 	}
 	for gv := range gvSet {
 		fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
