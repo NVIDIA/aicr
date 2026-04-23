@@ -554,10 +554,17 @@ func TestResolveImage(t *testing.T) {
 			want:    imgLatest,
 		},
 		{
-			name:    "dev version with too-long commit keeps latest",
+			name:    "dev version with 40-char full SHA resolves",
 			image:   imgLatest,
 			version: "dev",
-			commit:  "abc1234abc1234abc1234abc1234abc1234abc1234x",
+			commit:  "abcdef1234abcdef1234abcdef1234abcdef1234", // exactly 40 hex chars
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:sha-abcdef1234abcdef1234abcdef1234abcdef1234",
+		},
+		{
+			name:    "dev version with 41-char commit keeps latest",
+			image:   imgLatest,
+			version: "dev",
+			commit:  "abcdef1234abcdef1234abcdef1234abcdef12345", // 41 hex chars
 			want:    imgLatest,
 		},
 		{
