@@ -17,6 +17,7 @@ package helm
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -3405,4 +3406,426 @@ func TestUndeployScript_DynamoPlatformOwnsExplicitGroveCRDs(t *testing.T) {
 				crd, stdout.String(), stderr.String())
 		}
 	}
+}
+
+// TestUndeployScript_DeleteOrphanCRDsFlag asserts that the opt-in
+// --delete-orphan-crds flag wires force_clear_and_delete_crd into the rendered
+// script. Cases exercise both CRD scopes (cluster and namespaced), the
+// foreign-release guard (shared-cluster safety from PR #602), the unannotated
+// case (the extra_crds_for_release() primary use case), and the
+// malformed-metadata fallback. The read-EOF regression — jsonpath returning
+// empty + `|| return 0` swallowing the delete — is covered implicitly by the
+// "cluster scope, same release" case: it only passes if the helper reaches
+// the terminal `kubectl delete crd` despite the helper's early exits.
+func TestUndeployScript_DeleteOrphanCRDsFlag(t *testing.T) {
+	for _, bin := range []string{"bash", "awk", "sed", "jq"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available; skipping shell-behavior test", bin)
+		}
+	}
+
+	ctx := context.Background()
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	undeployPath := filepath.Join(outputDir, "undeploy.sh")
+
+	// Sanity-check wiring: the flag, the helper signature, and the
+	// shared-case nvidia-dra-driver-gpu CRDs must all appear in every
+	// rendered script regardless of the test recipe's component set.
+	scriptBytes, err := os.ReadFile(undeployPath)
+	if err != nil {
+		t.Fatalf("read rendered undeploy.sh: %v", err)
+	}
+	script := string(scriptBytes)
+	for _, marker := range []string{
+		"--delete-orphan-crds)",
+		"DELETE_ORPHAN_CRDS=false",
+		"force_clear_and_delete_crd()",
+		"computedomains.resource.nvidia.com",
+		"computedomaincliques.resource.nvidia.com",
+		// Foreign-release guard is tied to the helper's 3-arg signature;
+		// its absence would silently reintroduce the shared-cluster
+		// safety gap that PR #602 intentionally closed.
+		`expected_release="$2"`,
+		`expected_namespace="$3"`,
+		"owned by foreign Helm release",
+		// Post-flight's exact-name CRD warning must apply the same
+		// ownership rule. Without this, a CRD annotated to a foreign
+		// Helm release but sharing a name with the bundle's explicit
+		// list would be skipped during deletion (correctly) but then
+		// re-surfaced in a "from this bundle" warning with a suggested
+		// `kubectl delete crd <name>`, steering operators into removing
+		// another tenant's CRD.
+		`(.metadata.annotations["meta.helm.sh/release-name"] // "")==""`,
+		`(.metadata.annotations["meta.helm.sh/release-namespace"] // "")==$ns`,
+	} {
+		if !strings.Contains(script, marker) {
+			t.Errorf("rendered undeploy.sh missing expected marker %q", marker)
+		}
+	}
+
+	cases := []struct {
+		name             string
+		crdName          string
+		plural           string
+		group            string
+		scope            string // "Cluster" or "Namespaced"
+		crdAnnotations   string // jq-shaped JSON object for .metadata.annotations
+		crdJSONOverride  string // if set, replace the whole `get crd X -o json` stdout
+		crdGetExitCode   int    // non-zero → stub exits with this on `get crd X -o json` (for NotFound / transient-error cases)
+		crdGetStderr     string // written to stderr by the stub on the crd lookup
+		crs              string // JSON items[] for `get <resource> [-A] -o json`; "" → empty items
+		expectedRelease  string // $2 to force_clear_and_delete_crd
+		expectedNs       string // $3 to force_clear_and_delete_crd
+		wantDelete       bool
+		wantPatchContain string // optional: substring the patch call must include (e.g., "-n monitoring")
+		wantStderr       string // optional: substring the helper must log to stderr
+		wantStdout       string // optional: substring the helper must log to stdout
+	}{
+		{
+			name:             "cluster scope, same release — clears finalizer and deletes",
+			crdName:          "clusterpolicies.nvidia.com",
+			plural:           "clusterpolicies",
+			group:            "nvidia.com",
+			scope:            "Cluster",
+			crdAnnotations:   `{"meta.helm.sh/release-name":"gpu-operator","meta.helm.sh/release-namespace":"gpu-operator"}`,
+			crs:              `[{"metadata":{"name":"cluster-policy","finalizers":["nvidia.com/clusterpolicy"]}}]`,
+			expectedRelease:  "gpu-operator",
+			expectedNs:       "gpu-operator",
+			wantDelete:       true,
+			wantPatchContain: "patch clusterpolicies.nvidia.com cluster-policy --type=merge",
+			// "force-deleting" is logged by the helper ONLY after ownership
+			// is confirmed and spec fields parsed, so it proves the new
+			// fail-closed gate was passed on this happy path.
+			wantStdout: "force-deleting clusterpolicies.nvidia.com (from extra list for gpu-operator)",
+		},
+		{
+			name:             "namespaced scope, same release — patch includes -n and delete fires",
+			crdName:          "prometheusrules.monitoring.coreos.com",
+			plural:           "prometheusrules",
+			group:            "monitoring.coreos.com",
+			scope:            "Namespaced",
+			crdAnnotations:   `{"meta.helm.sh/release-name":"kube-prometheus-stack","meta.helm.sh/release-namespace":"monitoring"}`,
+			crs:              `[{"metadata":{"namespace":"monitoring","name":"leftover-rule","finalizers":["prometheus-operator/cleanup"]}}]`,
+			expectedRelease:  "kube-prometheus-stack",
+			expectedNs:       "monitoring",
+			wantDelete:       true,
+			wantPatchContain: "patch prometheusrules.monitoring.coreos.com leftover-rule -n monitoring --type=merge",
+			wantStdout:       "force-deleting prometheusrules.monitoring.coreos.com (from extra list for kube-prometheus-stack)",
+		},
+		{
+			name:            "cluster scope, foreign release — skipped, no delete",
+			crdName:         "clusterpolicies.nvidia.com",
+			plural:          "clusterpolicies",
+			group:           "nvidia.com",
+			scope:           "Cluster",
+			crdAnnotations:  `{"meta.helm.sh/release-name":"other-gpu-operator","meta.helm.sh/release-namespace":"other-ns"}`,
+			crs:             `[]`,
+			expectedRelease: "gpu-operator",
+			expectedNs:      "gpu-operator",
+			wantDelete:      false,
+			wantStdout:      "owned by foreign Helm release other-gpu-operator/other-ns",
+		},
+		{
+			name:            "cluster scope, unannotated — fair game, deletes",
+			crdName:         "configs.kai.scheduler",
+			plural:          "configs",
+			group:           "kai.scheduler",
+			scope:           "Cluster",
+			crdAnnotations:  `{}`,
+			crs:             `[]`,
+			expectedRelease: "kai-scheduler",
+			expectedNs:      "kai-scheduler",
+			wantDelete:      true,
+		},
+		{
+			// Fail-closed: unparseable metadata means we can't confirm scope
+			// or reliably re-check ownership downstream. Skip rather than
+			// delete blind; post-flight will re-surface.
+			name:            "malformed metadata — warns and skips (fail-closed)",
+			crdName:         "oddcrd.example.com",
+			crdJSONOverride: "not-json",
+			expectedRelease: "gpu-operator",
+			expectedNs:      "gpu-operator",
+			wantDelete:      false,
+			wantStderr:      "could not parse plural/group/scope from CRD oddcrd.example.com",
+		},
+		{
+			// Fail-closed: unknown .spec.scope value. Without this guard the
+			// code would fall through to the cluster-scoped get (no -A) and
+			// silently skip namespaced CR finalizers on what might actually
+			// be a namespaced CRD, leaving the CRD delete stuck later.
+			name:            "unknown scope — warns and skips (fail-closed)",
+			crdName:         "weirdscope.example.com",
+			plural:          "weirdscopes",
+			group:           "example.com",
+			scope:           "Mystery",
+			crdAnnotations:  `{}`,
+			crs:             `[]`,
+			expectedRelease: "gpu-operator",
+			expectedNs:      "gpu-operator",
+			wantDelete:      false,
+			wantStderr:      "could not parse plural/group/scope from CRD weirdscope.example.com",
+		},
+		{
+			// `kubectl get crd X -o json` returns a NotFound error. The CRD
+			// is genuinely gone (e.g., already cleaned by the Helm-annotation
+			// deletion loop earlier in the script). Helper must quiet-exit
+			// without attempting another delete.
+			name:            "CRD not found — quiet exit, no delete",
+			crdName:         "alreadygone.example.com",
+			crdGetExitCode:  1,
+			crdGetStderr:    `Error from server (NotFound): customresourcedefinitions.apiextensions.k8s.io "alreadygone.example.com" not found`,
+			expectedRelease: "gpu-operator",
+			expectedNs:      "gpu-operator",
+			wantDelete:      false,
+		},
+		{
+			// Fail-closed: a non-NotFound `get crd` failure (RBAC granting
+			// delete-but-not-get, API blip) must NOT fall through to a bare
+			// `kubectl delete crd`. Without the ownership probe we can't
+			// tell if the CRD belongs to a foreign Helm release, and blind
+			// deletion would reopen the shared-cluster safety hole.
+			name:            "CRD lookup transient error — warns and skips (fail-closed)",
+			crdName:         "flaky.example.com",
+			crdGetExitCode:  1,
+			crdGetStderr:    `Error from server (Forbidden): customresourcedefinitions.apiextensions.k8s.io "flaky.example.com" is forbidden: User "u" cannot get resource "customresourcedefinitions"`,
+			expectedRelease: "gpu-operator",
+			expectedNs:      "gpu-operator",
+			wantDelete:      false,
+			wantStderr:      "could not verify ownership of flaky.example.com",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubDir := t.TempDir()
+			callLog := filepath.Join(stubDir, "kubectl.log")
+
+			crdJSON := tc.crdJSONOverride
+			if crdJSON == "" && tc.crdGetExitCode == 0 {
+				crdJSON = fmt.Sprintf(
+					`{"metadata":{"name":%q,"annotations":%s},"spec":{"names":{"plural":%q},"group":%q,"scope":%q}}`,
+					tc.crdName, tc.crdAnnotations, tc.plural, tc.group, tc.scope,
+				)
+			}
+			crs := tc.crs
+			if crs == "" {
+				crs = "[]"
+			}
+			crsJSON := fmt.Sprintf(`{"items":%s}`, crs)
+			resource := ""
+			if tc.plural != "" && tc.group != "" {
+				resource = tc.plural + "." + tc.group
+			}
+
+			// Build the crd-get branch: success prints JSON; failure writes to
+			// stderr and exits with the configured code (NotFound / transient).
+			var crdGetBranch string
+			if tc.crdGetExitCode != 0 {
+				crdGetBranch = fmt.Sprintf(
+					"    printf '%%s\\n' %s >&2\n    exit %d ;;\n",
+					shellQuote(tc.crdGetStderr), tc.crdGetExitCode,
+				)
+			} else {
+				crdGetBranch = "    printf '%s' " + shellQuote(crdJSON) + " ;;\n"
+			}
+
+			kubectlStub := `#!/bin/sh
+printf '%s\n' "$*" >> ` + shellQuote(callLog) + `
+case "$*" in
+  "get crd ` + tc.crdName + ` -o json")
+` + crdGetBranch + `  "get ` + resource + ` -o json"|"get ` + resource + ` -A -o json")
+    printf '%s' ` + shellQuote(crsJSON) + ` ;;
+  "patch ` + resource + `"*)
+    exit 0 ;;
+  "delete crd ` + tc.crdName + `"*)
+    exit 0 ;;
+  *)
+    exit 0 ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(kubectlStub), 0o755); err != nil {
+				t.Fatalf("write kubectl stub: %v", err)
+			}
+
+			bashSnippet := fmt.Sprintf(`
+        for fn in capture_kubectl_json force_clear_and_delete_crd; do
+          snippet=$(sed -n "/^${fn}()/,/^}/p" "$UNDEPLOY")
+          eval "$snippet"
+        done
+        HELM_TIMEOUT=120
+        force_clear_and_delete_crd %q %q %q
+    `, tc.crdName, tc.expectedRelease, tc.expectedNs)
+
+			subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(subCtx, "bash", "-c", "set -euo pipefail\n"+bashSnippet)
+			cmd.Env = append(os.Environ(),
+				"PATH="+stubDir+":"+os.Getenv("PATH"),
+				"UNDEPLOY="+undeployPath,
+			)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if runErr := cmd.Run(); runErr != nil {
+				t.Fatalf("helper exited non-zero.\nerr: %v\nstdout: %s\nstderr: %s",
+					runErr, stdout.String(), stderr.String())
+			}
+
+			logged, readErr := os.ReadFile(callLog)
+			if readErr != nil {
+				t.Fatalf("read kubectl call log: %v", readErr)
+			}
+			calls := string(logged)
+
+			deleteMarker := "delete crd " + tc.crdName + " --ignore-not-found --wait=false"
+			gotDelete := strings.Contains(calls, deleteMarker)
+			if gotDelete != tc.wantDelete {
+				t.Errorf("wantDelete=%v got=%v. kubectl calls:\n%s", tc.wantDelete, gotDelete, calls)
+			}
+			if tc.wantPatchContain != "" && !strings.Contains(calls, tc.wantPatchContain) {
+				t.Errorf("expected patch call containing %q; kubectl calls:\n%s", tc.wantPatchContain, calls)
+			}
+			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Errorf("expected stderr to contain %q; got stderr: %q", tc.wantStderr, stderr.String())
+			}
+			if tc.wantStdout != "" && !strings.Contains(stdout.String(), tc.wantStdout) {
+				t.Errorf("expected stdout to contain %q; got stdout: %q", tc.wantStdout, stdout.String())
+			}
+		})
+	}
+}
+
+// TestUndeployScript_DeleteOrphanCRDsSkipsPreflightForExtraCRDs covers the
+// script-level ordering that the force_clear_and_delete_crd-only test cannot
+// see: pre-flight runs BEFORE --delete-orphan-crds. Without the filter, a CR
+// with a non-k8s finalizer on an extra_crds_for_release() CRD would cause
+// pre-flight to exit the script before the opt-in force-clear path ever ran,
+// silently requiring callers to also pass --skip-preflight to use the flag
+// for its advertised finalizer-cleanup case.
+func TestUndeployScript_DeleteOrphanCRDsSkipsPreflightForExtraCRDs(t *testing.T) {
+	for _, bin := range []string{"bash", "awk", "sed", "jq", "grep"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available; skipping shell-behavior test", bin)
+		}
+	}
+
+	ctx := context.Background()
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult:    createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	undeployPath := filepath.Join(outputDir, "undeploy.sh")
+
+	// clusterpolicies.nvidia.com is in extra_crds_for_release("gpu-operator").
+	// Left unannotated so it flows through the explicit_crds source only
+	// (not annotated_crds), isolating the fix's filter to one code path.
+	// A non-k8s finalizer guarantees check_crd_for_stuck_resources records
+	// the CR when invoked.
+	const crdName = "clusterpolicies.nvidia.com"
+	allCRDsJSON := `{"items":[{"metadata":{"name":"` + crdName + `","annotations":{}},"spec":{"names":{"plural":"clusterpolicies"},"group":"nvidia.com","scope":"Cluster"}}]}`
+	crdJSON := `{"metadata":{"name":"` + crdName + `","annotations":{}},"spec":{"names":{"plural":"clusterpolicies"},"group":"nvidia.com","scope":"Cluster"}}`
+	crsJSON := `{"items":[{"metadata":{"name":"cluster-policy","finalizers":["nvidia.com/clusterpolicy"]}}]}`
+
+	for _, tc := range []struct {
+		name             string
+		deleteOrphanCRDs string
+		wantPreflightHit bool
+	}{
+		{
+			name:             "flag off — pre-flight records stuck CR on explicit CRD",
+			deleteOrphanCRDs: "false",
+			wantPreflightHit: true,
+		},
+		{
+			name:             "flag on — pre-flight skips explicit CRD (opt-in force-clears later)",
+			deleteOrphanCRDs: "true",
+			wantPreflightHit: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubDir := t.TempDir()
+			callLog := filepath.Join(stubDir, "kubectl.log")
+
+			kubectlStub := `#!/bin/sh
+printf '%s\n' "$*" >> ` + shellQuote(callLog) + `
+case "$*" in
+  "get crd -o json")
+    printf '%s' ` + shellQuote(allCRDsJSON) + ` ;;
+  "get crd ` + crdName + ` -o json")
+    printf '%s' ` + shellQuote(crdJSON) + ` ;;
+  "get clusterpolicies.nvidia.com -o json")
+    printf '%s' ` + shellQuote(crsJSON) + ` ;;
+  *)
+    exit 0 ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(kubectlStub), 0o755); err != nil {
+				t.Fatalf("write kubectl stub: %v", err)
+			}
+			// helm get manifest returns empty so manifest_crds stays empty —
+			// explicit_crds is the only source contributing the stuck CRD.
+			if err := os.WriteFile(filepath.Join(stubDir, "helm"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+				t.Fatalf("write helm stub: %v", err)
+			}
+
+			bashSnippet := fmt.Sprintf(`
+        for fn in capture_kubectl_json extra_crds_for_release check_crd_for_stuck_resources check_release_for_stuck_crds; do
+          snippet=$(sed -n "/^${fn}()/,/^}/p" "$UNDEPLOY")
+          eval "$snippet"
+        done
+        DELETE_ORPHAN_CRDS=%q
+        PREFLIGHT_DETAILS=$(mktemp)
+        PREFLIGHT_ALL_CRDS_JSON=''
+        check_release_for_stuck_crds "gpu-operator" "gpu-operator"
+        if [[ -s "${PREFLIGHT_DETAILS}" ]]; then
+          echo "PREFLIGHT_HIT"
+          cat "${PREFLIGHT_DETAILS}"
+        else
+          echo "PREFLIGHT_CLEAN"
+        fi
+        rm -f "${PREFLIGHT_DETAILS}"
+    `, tc.deleteOrphanCRDs)
+
+			subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(subCtx, "bash", "-c", "set -euo pipefail\n"+bashSnippet)
+			cmd.Env = append(os.Environ(),
+				"PATH="+stubDir+":"+os.Getenv("PATH"),
+				"UNDEPLOY="+undeployPath,
+			)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			if runErr := cmd.Run(); runErr != nil {
+				t.Fatalf("snippet exited non-zero.\nerr: %v\nstdout: %s\nstderr: %s",
+					runErr, stdout.String(), stderr.String())
+			}
+			gotHit := strings.Contains(stdout.String(), "PREFLIGHT_HIT")
+			if gotHit != tc.wantPreflightHit {
+				t.Errorf("wantPreflightHit=%v got=%v; stdout:\n%s\nstderr:\n%s",
+					tc.wantPreflightHit, gotHit, stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+// shellQuote wraps a string in single quotes for safe embedding into a shell
+// script body (test helper). Any single-quote in the input is escaped via the
+// usual bash-close / escaped-quote / bash-reopen dance.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

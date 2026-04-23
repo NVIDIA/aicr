@@ -1347,6 +1347,7 @@ The undeploy script removes components in reverse deployment order.
 | `--keep-namespaces` | Skip namespace deletion after component removal |
 | `--delete-pvcs` | Delete all PVCs in component namespaces (default: **off**) |
 | `--skip-preflight` | Skip pre-flight CRD/finalizer checks (use with caution) |
+| `--delete-orphan-crds` | Force-delete release-scoped CRDs not covered by Helm annotation discovery (default: **off**) |
 | `--timeout SECONDS` | Helm uninstall timeout per component (default: 120) |
 
 **PVC preservation (default):**
@@ -1366,6 +1367,12 @@ If a Helm release is in a `pending-install` or `pending-upgrade` state (from an 
 **Orphaned webhook cleanup:**
 
 After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
+
+**Orphan-CRD cleanup (opt-in):**
+
+By default, the script deletes only CRDs whose `meta.helm.sh/release-name` **and** `meta.helm.sh/release-namespace` annotations both match an in-bundle release. CRDs installed outside Helm manifest/annotation discovery — shipped via a chart's `crds/` directory, installed by an operator at runtime, or added out-of-band — are surfaced as a post-flight warning but **not deleted**. This is the shared-cluster safety default: avoid removing foreign-tenant CRDs that happen to share an API group.
+
+Pass `--delete-orphan-crds` on a single-tenant teardown to also force-delete the release-scoped CRDs enumerated in the script's explicit list (`extra_crds_for_release`). When set, the script first clears any active finalizers on remaining CRs of those CRDs so the CRD delete does not hang on resource-in-use markers from controllers that are already gone. Pre-flight's stuck-CR check also skips the explicit list under this flag, so the opt-in covers the full finalizer-cleanup case on its own — no separate `--skip-preflight` needed. Manifest- and annotation-discovered CRDs still go through pre-flight. The same foreign-ownership guard applies: CRDs annotated to a different Helm release and/or release namespace are skipped with a log line, not deleted. Use this only when you know the cluster is not shared — default stays off to avoid data-loss on multi-tenant clusters.
 
 ---
 
