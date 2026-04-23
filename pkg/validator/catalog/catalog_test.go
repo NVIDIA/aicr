@@ -475,6 +475,25 @@ func TestResolveImage(t *testing.T) {
 			want:    imgLatest,
 		},
 		{
+			name:    "git-describe snapshot is not a release",
+			image:   imgLatest,
+			version: "v0.0.0-12-gabc1234",
+			want:    imgLatest,
+		},
+		{
+			name:    "pre-release rc suffix is not a release",
+			image:   imgLatest,
+			version: "v1.0.0-rc1",
+			want:    imgLatest,
+		},
+		{
+			name:    "snapshot with valid commit resolves to sha tag",
+			image:   imgLatest,
+			version: "v0.0.0-12-gabc1234",
+			commit:  "abc1234",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:sha-abc1234",
+		},
+		{
 			name:    "release version rewrites :latest to :vX.Y.Z",
 			image:   imgLatest,
 			version: "v0.11.1",

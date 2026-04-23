@@ -20,6 +20,7 @@ package catalog
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -146,13 +147,16 @@ func ResolveImage(image, version, commit string) string {
 	return image
 }
 
-// isReleaseVersion returns true for semantic version strings (vX.Y.Z),
-// false for dev builds ("dev", "v0.0.0-next", empty).
+// releaseVersionPattern matches strict semantic versions: vX.Y.Z or X.Y.Z
+// with no pre-release suffix. This ensures snapshot strings like
+// v0.0.0-12-gabc1234 or pre-release tags like v1.0.0-rc1 are not treated
+// as releases.
+var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
+
+// isReleaseVersion returns true for strict semantic version strings (vX.Y.Z),
+// false for dev builds, pre-release suffixes, snapshots, and empty strings.
 func isReleaseVersion(version string) bool {
-	if version == "" || version == "dev" || strings.Contains(version, "-next") {
-		return false
-	}
-	return true
+	return releaseVersionPattern.MatchString(version)
 }
 
 // replaceLatestTag replaces :latest with the given version tag.
