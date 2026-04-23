@@ -528,6 +528,27 @@ func TestResolveImage(t *testing.T) {
 			want:    imgLatest,
 		},
 		{
+			name:    "dev version with too-short commit keeps latest",
+			image:   imgLatest,
+			version: "dev",
+			commit:  "abc12",
+			want:    imgLatest,
+		},
+		{
+			name:    "dev version with too-long commit keeps latest",
+			image:   imgLatest,
+			version: "dev",
+			commit:  "abc1234abc1234abc1234abc1234abc1234abc1234x",
+			want:    imgLatest,
+		},
+		{
+			name:    "dev version with non-hex commit keeps latest",
+			image:   imgLatest,
+			version: "dev",
+			commit:  "xyz1234",
+			want:    imgLatest,
+		},
+		{
 			name:    "-next version with valid commit resolves to sha tag",
 			image:   imgLatest,
 			version: "v0.11.1-next",
