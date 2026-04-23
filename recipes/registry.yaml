@@ -41,6 +41,34 @@ apiVersion: aicr.nvidia.com/v1alpha1
 kind: ComponentRegistry
 
 components:
+  - name: nfd
+    displayName: Node Feature Discovery
+    valueOverrideKeys:
+      - nfd
+    healthCheck:
+      assertFile: checks/nfd/health-check.yaml
+    helm:
+      defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+      defaultChart: node-feature-discovery
+      defaultNamespace: node-feature-discovery
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - master.nodeSelector
+          - gc.nodeSelector
+        tolerationPaths:
+          - master.tolerations
+          - gc.tolerations
+          # Worker also inherits system tolerations — the DaemonSet must
+          # run on tainted system nodes (not just GPU nodes) to publish
+          # hardware features cluster-wide.
+          - worker.tolerations
+      accelerated:
+        # Worker intentionally excluded from accelerated nodeSelector —
+        # NFD workers must run on ALL nodes to detect hardware features.
+        tolerationPaths:
+          - worker.tolerations
+
   - name: gpu-operator
     displayName: gpu-operator
     valueOverrideKeys:
@@ -55,24 +83,13 @@ components:
       system:
         nodeSelectorPaths:
           - operator.nodeSelector
-          - node-feature-discovery.gc.nodeSelector
-          - node-feature-discovery.master.nodeSelector
         tolerationPaths:
           - operator.tolerations
-          - node-feature-discovery.gc.tolerations
-          - node-feature-discovery.master.tolerations
       accelerated:
         nodeSelectorPaths:
           - daemonsets.nodeSelector
-          # Note: NFD worker nodeSelector is intentionally excluded from
-          # accelerated scheduling. NFD must run on all nodes (GPU, CPU,
-          # and system) to detect hardware features — this matches the
-          # gpu-operator default behavior where NFD workers also run on
-          # control-plane nodes. NFD worker tolerations remain here so
-          # it inherits the same tolerations as GPU daemonsets.
         tolerationPaths:
           - daemonsets.tolerations
-          - node-feature-discovery.worker.tolerations
 
   - name: network-operator
     displayName: network-operator

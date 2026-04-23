@@ -16,7 +16,7 @@ NVIDIA AI Cluster Runtime (AICR) is a suite of tooling designed to automate the 
 |------|-------------|
 | **Snapshot** | A captured state of a system including OS, kernel, Kubernetes, GPU, and SystemD configuration. Created by `aicr snapshot` or the Kubernetes agent. |
 | **Recipe** | A generated configuration recommendation containing component references, constraints, and deployment order. Created by `aicr recipe` based on criteria or snapshot analysis. |
-| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke), `accelerator` (h100/gb200/a100/l40), `intent` (training/inference), `os` (ubuntu/rhel/cos), `platform` (kubeflow), and `nodes`. |
+| **Criteria** | Query parameters that define the target environment: `service` (eks/gke/aks/oke/kind/lke), `accelerator` (h100/gb200/b200/a100/l40/rtx-pro-6000), `intent` (training/inference), `os` (ubuntu/rhel/cos), `platform` (kubeflow), and `nodes`. |
 | **Overlay** | A recipe metadata file that extends the base recipe for specific environments. Overlays are matched against criteria using asymmetric matching. |
 | **Mixin** | A composable recipe fragment (`kind: RecipeMixin`) that carries shared constraints or components (e.g., OS requirements, platform components). Leaf overlays reference mixins via `spec.mixins` to avoid duplicating cross-cutting content. |
 | **Bundle** | Deployment artifacts generated from a recipe: Helm values files, Kubernetes manifests, installation scripts, and checksums. |

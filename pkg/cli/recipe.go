@@ -88,8 +88,8 @@ func recipeCmd() *cli.Command {
 		Category: functionalCategoryName,
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
 		Description: `Generate configuration recipe based on specified environment parameters including:
-  - Kubernetes service type (e.g. eks, gke, aks, oke, self-managed)
-  - Accelerator type (e.g. h100, gb200, a100, l40)
+  - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke)
+  - Accelerator type (e.g. h100, gb200, b200, a100, l40, rtx-pro-6000)
   - Workload intent (e.g. training, inference)
   - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux)
   - Number of GPU nodes in the cluster

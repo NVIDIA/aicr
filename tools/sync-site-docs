@@ -22,9 +22,15 @@ sync_section() {
   local src="$1"
   local dst="$2"
 
+  if [[ ! -d "${src}" ]]; then
+    echo "sync_section: source directory not found: ${src}" >&2
+    return 1
+  fi
+
   rm -rf "${dst}"
   mkdir -p "${dst}"
-  cp -R "${src}/"* "${dst}/"
+  # Copy all contents, including dotfiles; an empty source stays empty.
+  cp -R "${src}/." "${dst}/"
 }
 
 echo "Syncing docs/ → site/docs/..."

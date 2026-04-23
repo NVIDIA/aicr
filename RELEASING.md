@@ -10,6 +10,7 @@ Releases follow a **bi-weekly cadence**, aligned with sprint boundaries. A new r
 |-------------|------|-------------|----------|
 | Sprint release | End of each 2-week sprint | `patch` or `minor` | Maintainer determines bump type based on changes landed |
 | Hotfix | Between sprints, as needed | `patch` | Any maintainer can initiate for critical fixes |
+| Pre-release | Before sprint release, as needed | `rc` or `beta` | Any maintainer can create for testing |
 | Major | Planned | `major` | Requires team agreement and advance communication |
 
 ## What Goes Into a Release
@@ -49,6 +50,46 @@ make bump-minor       # v1.2.3 -> v1.3.0
 ```
 
 This automatically: validates clean state, generates changelog, commits, tags, pushes, and triggers the release pipeline.
+
+### Two-Phase Release (with review)
+
+For releases where you want to review/edit the changelog before tagging:
+
+```bash
+git checkout main
+git pull origin main
+make qualify
+
+make bump-prepare TYPE=patch    # Generates CHANGELOG.md, does not tag/push
+# Review and edit CHANGELOG.md
+make bump-finalize              # Commits, tags, pushes
+```
+
+To cancel a prepared release: `make bump-abort`
+
+### Pre-release
+
+Pre-releases exercise the full build/test/attest pipeline but do not update:
+
+- Homebrew formula (users on `brew upgrade` are unaffected)
+- Container `:latest` tags (only version-tagged images are pushed)
+- Demo deployment (Cloud Run stays on latest stable)
+- Site documentation (GitHub Pages stays on latest stable)
+
+Slack notifications fire for both pre-releases and stable releases.
+
+```bash
+make bump-rc                     # v1.2.3 → v1.2.4-rc1
+make bump-rc                     # v1.2.4-rc1 → v1.2.4-rc2
+make bump-patch                  # v1.2.4-rc2 → v1.2.5 (promote to stable)
+
+# Or with review:
+make bump-prepare TYPE=rc        # Prepare v1.2.4-rc1 for review
+make bump-finalize               # Tag and push after review
+
+# Beta pre-releases also supported:
+make bump-beta                   # v1.2.3 → v1.2.4-beta1
+```
 
 ### Manual Tag
 

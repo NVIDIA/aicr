@@ -25,10 +25,11 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, any
-//	    Accelerator CriteriaAcceleratorType // h100, gb200, b200, a100, l40, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, any
+//	    Accelerator CriteriaAcceleratorType // h100, gb200, b200, a100, l40, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
-//	    OS          CriteriaOSType          // ubuntu, cos, rhel, any
+//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, any
+//	    Platform    CriteriaPlatformType    // kubeflow, dynamo, nim, any
 //	    Nodes       int                     // node count (0 = any)
 //	}
 //
@@ -63,6 +64,9 @@
 //   - CriteriaServiceEKS: Amazon EKS
 //   - CriteriaServiceGKE: Google GKE
 //   - CriteriaServiceAKS: Azure AKS
+//   - CriteriaServiceOKE: Oracle OKE
+//   - CriteriaServiceKind: kind (local clusters)
+//   - CriteriaServiceLKE: Linode LKE
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -71,12 +75,26 @@
 //   - CriteriaAcceleratorB200: NVIDIA B200
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
+//   - CriteriaAcceleratorRTXPro6000: NVIDIA RTX PRO 6000
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
 //
 // Intent types for workload optimization:
 //   - CriteriaIntentTraining: ML training workloads
 //   - CriteriaIntentInference: Inference workloads
 //   - CriteriaIntentAny: Generic workloads
+//
+// OS types for host operating system:
+//   - CriteriaOSUbuntu: Ubuntu
+//   - CriteriaOSRHEL: Red Hat Enterprise Linux
+//   - CriteriaOSCOS: Container-Optimized OS (GKE)
+//   - CriteriaOSAmazonLinux: Amazon Linux
+//   - CriteriaOSAny: Any OS (wildcard)
+//
+// Platform types for workload frameworks:
+//   - CriteriaPlatformKubeflow: Kubeflow
+//   - CriteriaPlatformDynamo: NVIDIA Dynamo
+//   - CriteriaPlatformNIM: NVIDIA NIM
+//   - CriteriaPlatformAny: Any platform (wildcard)
 //
 // # Usage
 //
@@ -115,8 +133,8 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, any (default: any)
-//   - accelerator: h100, gb200, b200, a100, l40, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, any (default: any)
+//   - accelerator: h100, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, cos, rhel, any (default: any)

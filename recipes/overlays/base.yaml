@@ -25,6 +25,12 @@ spec:
       value: ">= 1.25"
 
   componentRefs:
+    - name: nfd
+      type: Helm
+      source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+      version: v0.18.3
+      valuesFile: components/nfd/values.yaml
+
     - name: cert-manager
       type: Helm
       source: https://charts.jetstack.io
@@ -39,6 +45,7 @@ spec:
       manifestFiles:
         - components/gpu-operator/manifests/dcgm-exporter.yaml
       dependencyRefs:
+        - nfd
         - cert-manager
         - kube-prometheus-stack
 

@@ -6,90 +6,161 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${DIR}/common"
 ROOT=$(dirname "${DIR}")
 
+PENDING_FILE="${ROOT}/.release-pending"
+
 # Check if required tools are installed
 has_tools git git-cliff
 
-# Bump git tag version
-bump_version() {
-  local bump_type=${1:-patch}
-  
-  # Check if git working directory is clean
-  if ! git diff-index --quiet HEAD --; then
-    err "Working directory is not clean. Please commit and push all changes before bumping version so the tag represents a clean state."
+# ==============================================================================
+# Version calculation helpers
+# ==============================================================================
+
+# Get current version from latest git tag
+current_version() {
+  git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0"
+}
+
+# Parse semver into components. Sets: MAJOR, MINOR, PATCH, PRERELEASE
+parse_version() {
+  local ver="${1#v}"
+  # Split off pre-release suffix (everything after first hyphen)
+  if [[ "$ver" == *-* ]]; then
+    PRERELEASE="${ver#*-}"
+    ver="${ver%%-*}"
+  else
+    PRERELEASE=""
   fi
-  
-  # Check if there are unpushed commits
-  if [ "$(git rev-list @{u}..HEAD --count 2>/dev/null || echo 0)" -gt 0 ]; then
-    err "There are unpushed commits. Please push all changes before bumping version so the tag represents the remote state."
-  fi
-  
-  # Get current version
-  local current_version=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-  
-  msg "Current version: $current_version"
-  
-  # Parse version components (remove 'v' prefix if present)
-  local version_without_v=${current_version#v}
   local IFS='.'
-  read -ra version_parts <<< "$version_without_v"
-  local major=${version_parts[0]:-0}
-  local minor=${version_parts[1]:-0}
-  local patch=${version_parts[2]:-0}
-  
-  # Validate current version format
-  if [[ ! "$current_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    err "Current version '$current_version' is not in semantic versioning format (x.y.z)"
-  fi
-  
-  # Bump version based on type
+  read -ra parts <<< "$ver"
+  MAJOR=${parts[0]:-0}
+  MINOR=${parts[1]:-0}
+  PATCH=${parts[2]:-0}
+}
+
+# Compute next version for a given bump type
+compute_next_version() {
+  local bump_type=$1
+  local cur
+  cur=$(current_version)
+  parse_version "$cur"
+
   case "$bump_type" in
     major)
-      major=$((major + 1))
-      minor=0
-      patch=0
-      ;;
+      MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0; PRERELEASE="" ;;
     minor)
-      minor=$((minor + 1))
-      patch=0
-      ;;
+      MINOR=$((MINOR + 1)); PATCH=0; PRERELEASE="" ;;
     patch)
-      patch=$((patch + 1))
+      PATCH=$((PATCH + 1)); PRERELEASE="" ;;
+    rc|beta)
+      # If current tag is already a pre-release of the same type, increment suffix.
+      # Otherwise start at 1 on the next patch version.
+      if [[ "$PRERELEASE" == "${bump_type}"* ]]; then
+        local num="${PRERELEASE#${bump_type}}"
+        num=$((num + 1))
+        PRERELEASE="${bump_type}${num}"
+      else
+        # Bump patch first, then add suffix
+        PATCH=$((PATCH + 1))
+        PRERELEASE="${bump_type}1"
+      fi
       ;;
     *)
-      err "Invalid bump type '$bump_type'. Use: major, minor, or patch"
-      ;;
+      err "Invalid bump type '$bump_type'. Use: major, minor, patch, rc, beta" ;;
   esac
-  
-  local new_version="v${major}.${minor}.${patch}"
-    
-  # Check if new version tag already exists locally
-  if git tag --list | grep -q "^${new_version}$"; then
-    err "Version tag '${new_version}' already exists locally. Use a different bump type or manually set version."
-  fi
-  
-  # Check if new version tag already exists on remote
-  if git ls-remote --tags origin | grep -q "refs/tags/${new_version}$"; then
-    err "Version tag '${new_version}' already exists on remote. Use a different bump type or manually set version."
-  fi
-  
-  msg "Bumping $bump_type version: $current_version → $new_version"
 
-  # Generate changelog for the new version
+  local new_version="v${MAJOR}.${MINOR}.${PATCH}"
+  if [[ -n "$PRERELEASE" ]]; then
+    new_version="${new_version}-${PRERELEASE}"
+  fi
+  echo "$new_version"
+}
+
+# ==============================================================================
+# Validation helpers
+# ==============================================================================
+
+check_clean_state() {
+  if ! git diff-index --quiet HEAD --; then
+    err "Working directory is not clean. Commit and push all changes first."
+  fi
+}
+
+check_pushed() {
+  if [ "$(git rev-list @{u}..HEAD --count 2>/dev/null || echo 0)" -gt 0 ]; then
+    err "There are unpushed commits. Push all changes first."
+  fi
+}
+
+check_tag_available() {
+  local tag=$1
+  if git tag --list | grep -q "^${tag}$"; then
+    err "Tag '${tag}' already exists locally."
+  fi
+  if git ls-remote --tags origin | grep -q "refs/tags/${tag}$"; then
+    err "Tag '${tag}' already exists on remote."
+  fi
+}
+
+# ==============================================================================
+# Core operations
+# ==============================================================================
+
+generate_changelog() {
+  local new_version=$1
   msg "Generating CHANGELOG.md for $new_version..."
   if [ -f "${ROOT}/CHANGELOG.md" ]; then
-    # Prepend new entries to preserve manual edits
     git-cliff --tag "$new_version" --unreleased --prepend "${ROOT}/CHANGELOG.md"
   else
-    # Create new changelog with full history
     git-cliff --tag "$new_version" -o "${ROOT}/CHANGELOG.md"
   fi
+}
 
-  # Commit the changelog update
+# ==============================================================================
+# Subcommands
+# ==============================================================================
+
+# Prepare: generate changelog, write pending file, do NOT tag or push.
+# The user reviews/edits CHANGELOG.md, then runs finalize.
+cmd_prepare() {
+  local bump_type=${1:-patch}
+
+  check_clean_state
+  check_pushed
+
+  local cur new_version
+  cur=$(current_version)
+  new_version=$(compute_next_version "$bump_type")
+
+  check_tag_available "$new_version"
+
+  msg "Preparing release: $cur → $new_version"
+
+  generate_changelog "$new_version"
+
+  # Write pending state so finalize knows what version to tag
+  echo "$new_version" > "$PENDING_FILE"
+
+  msg "CHANGELOG.md updated. Review and edit, then run: make bump-finalize"
+  msg "To abort: make bump-abort"
+}
+
+# Finalize: commit changelog, tag, push.
+cmd_finalize() {
+  if [[ ! -f "$PENDING_FILE" ]]; then
+    err "No pending release. Run 'make bump-prepare TYPE=<type>' first."
+  fi
+
+  local new_version
+  new_version=$(cat "$PENDING_FILE")
+
+  check_tag_available "$new_version"
+
+  # Commit changelog if changed
   git add "${ROOT}/CHANGELOG.md"
   if git diff --cached --quiet; then
     msg "No changelog changes to commit"
   else
-    git commit -m "build: release $new_version"
+    git commit -S -m "build: release $new_version"
     msg "Committed CHANGELOG.md update"
   fi
 
@@ -97,19 +168,91 @@ bump_version() {
   git tag -a "$new_version" -m "Release $new_version"
   git push origin HEAD
   git push origin "$new_version"
+
+  rm -f "$PENDING_FILE"
+  msg "Released $new_version"
 }
 
-# Show usage if no arguments
-if [ $# -eq 0 ]; then
-  echo "Usage: $0 <bump_type>"
-  echo "Bump types: major, minor, patch"
-  echo ""
-  echo "Examples:"
-  echo "  $0 patch   # v1.2.3 → v1.2.4"
-  echo "  $0 minor   # v1.2.3 → v1.3.0" 
-  echo "  $0 major   # v1.2.3 → v2.0.0"
+# Abort: remove pending state, restore changelog.
+cmd_abort() {
+  if [[ ! -f "$PENDING_FILE" ]]; then
+    err "No pending release to abort."
+  fi
+  local ver
+  ver=$(cat "$PENDING_FILE")
+  rm -f "$PENDING_FILE"
+  git checkout -- "${ROOT}/CHANGELOG.md" 2>/dev/null || true
+  msg "Aborted pending release $ver"
+}
+
+# One-shot: legacy behavior — prepare + finalize in one step (no review).
+cmd_oneshot() {
+  local bump_type=${1:-patch}
+
+  check_clean_state
+  check_pushed
+
+  local cur new_version
+  cur=$(current_version)
+  new_version=$(compute_next_version "$bump_type")
+
+  check_tag_available "$new_version"
+
+  msg "Bumping $bump_type version: $cur → $new_version"
+
+  generate_changelog "$new_version"
+
+  git add "${ROOT}/CHANGELOG.md"
+  if git diff --cached --quiet; then
+    msg "No changelog changes to commit"
+  else
+    git commit -S -m "build: release $new_version"
+    msg "Committed CHANGELOG.md update"
+  fi
+
+  git tag -a "$new_version" -m "Release $new_version"
+  git push origin HEAD
+  git push origin "$new_version"
+}
+
+# ==============================================================================
+# Usage and dispatch
+# ==============================================================================
+
+usage() {
+  cat <<EOF
+Usage: $0 <command> [args]
+
+Commands:
+  prepare <type>   Generate changelog for review (does not tag/push)
+  finalize         Commit, tag, and push a prepared release
+  abort            Cancel a prepared release
+  major            One-shot major bump   (v1.2.3 → v2.0.0)
+  minor            One-shot minor bump   (v1.2.3 → v1.3.0)
+  patch            One-shot patch bump   (v1.2.3 → v1.2.4)
+  rc               One-shot RC bump      (v1.2.3 → v1.2.4-rc1, then -rc2, …)
+  beta             One-shot beta bump    (v1.2.3 → v1.2.4-beta1, then -beta2, …)
+
+Bump types for prepare: major, minor, patch, rc, beta
+
+Examples:
+  $0 prepare patch   # Prepare v1.2.4 for review
+  $0 finalize        # Tag and push after review
+  $0 abort           # Cancel prepared release
+  $0 patch           # One-shot v1.2.3 → v1.2.4 (no review)
+  $0 rc              # One-shot v1.2.3 → v1.2.4-rc1
+EOF
   exit 1
+}
+
+if [ $# -eq 0 ]; then
+  usage
 fi
 
-# Run version bump
-bump_version "$1"
+case "$1" in
+  prepare)   shift; cmd_prepare "$@" ;;
+  finalize)  cmd_finalize ;;
+  abort)     cmd_abort ;;
+  major|minor|patch|rc|beta) cmd_oneshot "$1" ;;
+  *)         usage ;;
+esac

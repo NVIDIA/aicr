@@ -2408,8 +2408,8 @@ func TestGenerate_DataFiles(t *testing.T) {
 		if err == nil {
 			t.Fatal("Generate() should reject path traversal in DataFiles")
 		}
-		if !strings.Contains(err.Error(), "unsafe data file path") {
-			t.Errorf("expected 'unsafe data file path' error, got: %v", err)
+		if !strings.Contains(err.Error(), "escapes base directory") {
+			t.Errorf("expected path-escape error from SafeJoin, got: %v", err)
 		}
 	})
 }
