@@ -556,6 +556,13 @@ func TestResolveImage(t *testing.T) {
 			registry: "localhost:5001",
 			want:     "localhost:5001/aicr-validators/aiperf-bench:sha-abc1234",
 		},
+		{
+			name:    "uppercase commit is normalized to lowercase",
+			image:   imgLatest,
+			version: "dev",
+			commit:  "ABC1234",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:sha-abc1234",
+		},
 	}
 
 	for _, tt := range tests {

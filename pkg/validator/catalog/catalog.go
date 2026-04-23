@@ -134,6 +134,7 @@ func Load(version, commit string) (*ValidatorCatalog, error) {
 //
 // Images with explicit version tags are not modified by steps 1-2.
 func ResolveImage(image, version, commit string) string {
+	commit = strings.ToLower(commit)
 	if isReleaseVersion(version) {
 		image = replaceLatestTag(image, version)
 	} else if isValidCommit(commit) {
