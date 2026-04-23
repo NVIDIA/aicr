@@ -302,6 +302,7 @@ jobs:
   gate:
     if: always()
     needs:
+      - check-paths
       - tests
       - tests-skip
       - analyze
@@ -322,7 +323,14 @@ jobs:
           echo "Gate results:"
           echo '${{ toJSON(needs) }}' | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
 
-          # Fail if ANY dependency failed or was cancelled.
+          # check-paths must succeed — if it fails, all downstream jobs are
+          # skipped (not failed), which would silently pass the gate.
+          if [ "${{ needs.check-paths.result }}" != "success" ]; then
+            echo "::error::check-paths did not succeed (result: ${{ needs.check-paths.result }})"
+            exit 1
+          fi
+
+          # Fail if ANY other dependency failed or was cancelled.
           # Skipped is OK — it means the inverse job ran instead.
           if echo '${{ toJSON(needs.*.result) }}' | jq -e 'map(select(. == "failure" or . == "cancelled")) | length > 0' > /dev/null; then
             echo "::error::One or more gating checks failed or were cancelled"
