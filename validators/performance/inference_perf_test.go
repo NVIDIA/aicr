@@ -449,11 +449,16 @@ func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
 func TestBuildAIPerfJob_PrebuiltImageAndSentinel(t *testing.T) {
 	// Isolate from the caller's environment: buildAIPerfJob resolves the
 	// container image through resolveAiperfImage() which honors
-	// AICR_CLI_VERSION (version pin) and AICR_VALIDATOR_IMAGE_REGISTRY
-	// (registry override). A developer running `go test` with either set
-	// would otherwise see spurious failures on the image-equality assertion.
+	// AICR_CLI_VERSION (version pin), AICR_CLI_COMMIT (dev-build pin),
+	// AICR_VALIDATOR_IMAGE_REGISTRY (registry override), and
+	// AICR_VALIDATOR_IMAGE_TAG (tag override). A developer running
+	// `go test` with any of these set would otherwise see spurious
+	// failures on the image-equality assertion — the exact feature-branch
+	// dogfooding workflow this override was added for.
 	t.Setenv("AICR_CLI_VERSION", "")
+	t.Setenv("AICR_CLI_COMMIT", "")
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
 
 	pullSecrets := []v1.LocalObjectReference{
 		{Name: "ghcr-mirror-pull"},
@@ -517,6 +522,50 @@ func TestBuildAIPerfJob_NoPullSecrets(t *testing.T) {
 	}
 }
 
+// TestBuildAIPerfJob_ImagePullPolicy asserts the inner aiperf container
+// stays in lockstep with the outer validator Job's pull policy. Without
+// this, setting AICR_VALIDATOR_IMAGE_TAG=edge on the CLI would re-pull
+// the outer validator (Always) while the aiperf pod — lacking an explicit
+// ImagePullPolicy — would default to IfNotPresent and serve a stale
+// cached `:edge` image, defeating the motivating feature-branch workflow.
+func TestBuildAIPerfJob_ImagePullPolicy(t *testing.T) {
+	// Isolate from caller's environment so resolveAiperfImage is deterministic
+	// across cases.
+	t.Setenv("AICR_CLI_VERSION", "")
+	t.Setenv("AICR_CLI_COMMIT", "")
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+
+	tests := []struct {
+		name   string
+		envTag string
+		want   v1.PullPolicy
+	}{
+		{
+			// Default path: aiperfBaseImage ends with :latest, so policy is Always
+			// whether or not the override is set.
+			name:   "no override — :latest → Always",
+			envTag: "",
+			want:   v1.PullAlways,
+		},
+		{
+			name:   "override with mutable :edge tag → Always (no stale cache)",
+			envTag: "edge",
+			want:   v1.PullAlways,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
+			job := buildAIPerfJob("ns", "aicr-aiperf-run-0", "http://ep:8000", 16, nil)
+			got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy
+			if got != tt.want {
+				t.Errorf("aiperf ImagePullPolicy = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestBuildAIPerfJob_RequestCountFloor(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -563,7 +612,9 @@ func TestResolveAiperfImage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("AICR_CLI_VERSION", tt.version)
+			t.Setenv("AICR_CLI_COMMIT", "")
 			t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
 			if got := resolveAiperfImage(); got != tt.want {
 				t.Errorf("resolveAiperfImage() = %q, want %q", got, tt.want)
 			}
@@ -572,7 +623,9 @@ func TestResolveAiperfImage(t *testing.T) {
 
 	t.Run("registry override applies", func(t *testing.T) {
 		t.Setenv("AICR_CLI_VERSION", "dev")
+		t.Setenv("AICR_CLI_COMMIT", "")
 		t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "localhost:5001")
+		t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
 		want := "localhost:5001/aicr-validators/aiperf-bench:latest"
 		if got := resolveAiperfImage(); got != want {
 			t.Errorf("resolveAiperfImage() = %q, want %q", got, want)

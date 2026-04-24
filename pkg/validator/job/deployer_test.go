@@ -294,6 +294,60 @@ func TestDeployJobCLIVersionInjected(t *testing.T) {
 	}
 }
 
+// TestDeployJobImageTagOverrideForwarding asserts that AICR_VALIDATOR_IMAGE_TAG
+// is forwarded from the CLI invocation into the validator container's env
+// ONLY when set, and that it is strictly omitted when unset. Forwarding is
+// load-bearing for feature-branch dogfooding: validators that resolve inner
+// workload images at runtime (e.g. inference-perf's aiperf-bench Job) call
+// catalog.ResolveImage with the pod's env. Without this forwarding the outer
+// validator would get :latest while the inner benchmark pod would still
+// resolve to the unpublished :sha-<commit> and ImagePullBackOff. Omission
+// on the default paths is equally load-bearing — the release / main-branch
+// flows must not inadvertently pin inner pods to the wrong tag.
+func TestDeployJobImageTagOverrideForwarding(t *testing.T) {
+	tests := []struct {
+		name      string
+		envTag    string
+		wantSet   bool
+		wantValue string
+	}{
+		{name: "set — forwarded into validator container", envTag: "latest", wantSet: true, wantValue: "latest"},
+		{name: "empty — omitted (default release / main-branch paths untouched)", envTag: "", wantSet: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
+
+			ns := createUniqueNamespace(t)
+			job := deployAndGet(t, NewDeployer(testClientset, testFactory(t, ns), ns, "run1", "", "", testEntry(), nil, nil, nil))
+
+			env := job.Spec.Template.Spec.Containers[0].Env
+			var got *corev1.EnvVar
+			for i := range env {
+				if env[i].Name == "AICR_VALIDATOR_IMAGE_TAG" {
+					got = &env[i]
+					break
+				}
+			}
+
+			if tt.wantSet {
+				if got == nil {
+					t.Fatalf("AICR_VALIDATOR_IMAGE_TAG not found in env; have %d vars", len(env))
+				}
+				if got.Value != tt.wantValue {
+					t.Errorf("AICR_VALIDATOR_IMAGE_TAG = %q, want %q", got.Value, tt.wantValue)
+				}
+				return
+			}
+
+			if got != nil {
+				t.Errorf("AICR_VALIDATOR_IMAGE_TAG should be omitted when env var is empty; got %q", got.Value)
+			}
+		})
+	}
+}
+
 // TestDeployJobCLICommitInjected exercises the production code path where
 // validator.go passes v.Commit (non-empty) so the inner validator container
 // can resolve SHA-based image tags in dev builds via AICR_CLI_COMMIT.
@@ -648,17 +702,32 @@ func TestImagePullPolicy(t *testing.T) {
 	tests := []struct {
 		name   string
 		image  string
+		envTag string // AICR_VALIDATOR_IMAGE_TAG — empty means unset
 		expect corev1.PullPolicy
 	}{
-		{"latest tag uses Always", "ghcr.io/nvidia/aicr-validators/conformance:latest", corev1.PullAlways},
-		{"versioned tag uses IfNotPresent", "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0", corev1.PullIfNotPresent},
-		{"ko.local uses Never", "ko.local/aicr-validators/conformance:latest", corev1.PullNever},
-		{"kind.local uses Never", "kind.local/aicr-validators/conformance:latest", corev1.PullNever},
-		{"localhost registry with latest uses Always", "localhost:5001/aicr-validators/conformance:latest", corev1.PullAlways},
-		{"localhost registry versioned uses IfNotPresent", "localhost:5001/aicr-validators/conformance:v1.0.0", corev1.PullIfNotPresent},
+		{name: "latest tag uses Always", image: "ghcr.io/nvidia/aicr-validators/conformance:latest", expect: corev1.PullAlways},
+		{name: "versioned tag uses IfNotPresent", image: "ghcr.io/nvidia/aicr-validators/conformance:v1.0.0", expect: corev1.PullIfNotPresent},
+		{name: "ko.local uses Never", image: "ko.local/aicr-validators/conformance:latest", expect: corev1.PullNever},
+		{name: "kind.local uses Never", image: "kind.local/aicr-validators/conformance:latest", expect: corev1.PullNever},
+		{name: "localhost registry with latest uses Always", image: "localhost:5001/aicr-validators/conformance:latest", expect: corev1.PullAlways},
+		{name: "localhost registry versioned uses IfNotPresent", image: "localhost:5001/aicr-validators/conformance:v1.0.0", expect: corev1.PullIfNotPresent},
+		// --- AICR_VALIDATOR_IMAGE_TAG forces PullAlways ------------------
+		// Mutable published tags (edge, main, nightly, or any rolling tag
+		// on-push.yaml recreates on every merge) would otherwise get
+		// PullIfNotPresent and serve a stale cached image. When the user
+		// opts into the override, treat the resolved tag as mutable.
+		{name: "override with mutable tag :edge — Always", image: "ghcr.io/nvidia/aicr-validators/conformance:edge", envTag: "edge", expect: corev1.PullAlways},
+		{name: "override with :latest still Always (no regression)", image: "ghcr.io/nvidia/aicr-validators/conformance:latest", envTag: "latest", expect: corev1.PullAlways},
+		{name: "override with release :v0.11.0 — Always (safe over-pull)", image: "ghcr.io/nvidia/aicr-validators/conformance:v0.11.0", envTag: "v0.11.0", expect: corev1.PullAlways},
+		{name: "override with ko.local still Never (side-load wins)", image: "ko.local/aicr-validators/conformance:edge", envTag: "edge", expect: corev1.PullNever},
+		// Digest-pinned refs stay IfNotPresent even when the override env
+		// var is set — required so disconnected/air-gapped clusters that
+		// preload pinned images don't re-contact the registry every run.
+		{name: "digest-pinned ref + override → IfNotPresent (digest wins over override)", image: "ghcr.io/nvidia/aicr-validators/conformance@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", envTag: "latest", expect: corev1.PullIfNotPresent},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
 			entry := testEntry()
 			entry.Image = tt.image
 			d := &Deployer{entry: entry}

@@ -1173,6 +1173,9 @@ func buildAIPerfJob(namespace, jobName, endpoint string, concurrency int, pullSe
 	if concurrency*2 > requestCount {
 		requestCount = concurrency * 2
 	}
+	// Resolve once so Image and ImagePullPolicy can't drift if env vars
+	// were mutated between two calls (matters in tests; cheap in prod).
+	aiperfImage := resolveAiperfImage()
 
 	script := fmt.Sprintf(`set -e
 aiperf profile "%s" \
@@ -1219,10 +1222,22 @@ echo '%s'`,
 					ImagePullSecrets: pullSecrets,
 					Containers: []v1.Container{
 						{
-							Name:    "aiperf",
-							Image:   resolveAiperfImage(),
-							Command: []string{"/bin/sh", "-c"},
-							Args:    []string{script},
+							Name:  "aiperf",
+							Image: aiperfImage,
+							// Apply the same pull policy the outer validator
+							// Job uses (catalog.ImagePullPolicy handles the
+							// AICR_VALIDATOR_IMAGE_TAG override and digest
+							// pins) so a mutable override tag on the CLI
+							// doesn't let the aiperf pod serve a stale
+							// cached image while the outer validator pulls
+							// the current one. Leaving this unset would
+							// fall back to Kubernetes' default (Always
+							// only for :latest), which is insufficient for
+							// `:edge`, `:main`, and similar rolling tags
+							// on-push.yaml recreates on every merge.
+							ImagePullPolicy: catalog.ImagePullPolicy(aiperfImage),
+							Command:         []string{"/bin/sh", "-c"},
+							Args:            []string{script},
 						},
 					},
 				},
