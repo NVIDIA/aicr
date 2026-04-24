@@ -577,6 +577,7 @@ This rule does not apply to non-Go changes (YAML, docs, CI workflows). Note: CI 
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
 - Add appropriate type labels: `enhancement`, `bug`, `documentation`
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
+- Do NOT add issue priority labels `P0`, `P1`, or `P2` to PRs; they are reserved for issues and automation removes them from pull requests
 - Do NOT add `size/*` labels (auto-assigned by bot)
 - Keep the PR title under 70 characters; use the description for details
 
