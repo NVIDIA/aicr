@@ -251,6 +251,42 @@ func TestSnapshots_NilReadingValues(t *testing.T) {
 	}
 }
 
+func TestSnapshots_NilVsNonNilReading(t *testing.T) {
+	// When one side has nil and the other has a concrete Reading,
+	// the diff must surface a change (not silently skip it).
+	baseline := makeSnapshot(
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{
+				"version": measurement.Str("1.32.4"),
+				"missing": nil,
+			}),
+		),
+	)
+	target := makeSnapshot(
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{
+				"version": measurement.Str("1.32.4"),
+				"missing": measurement.Str("now-present"),
+			}),
+		),
+	)
+
+	result := Snapshots(baseline, target)
+	if result.Summary.Modified != 1 {
+		t.Errorf("expected 1 modified change (nil→value), got %d", result.Summary.Modified)
+	}
+	for _, c := range result.Changes {
+		if c.Path == "K8s.server.missing" {
+			if c.Baseline != "<nil>" {
+				t.Errorf("baseline for nil reading = %q, want %q", c.Baseline, "<nil>")
+			}
+			if c.Target != "now-present" {
+				t.Errorf("target = %q, want %q", c.Target, "now-present")
+			}
+		}
+	}
+}
+
 func TestSnapshots_DeterministicOrder(t *testing.T) {
 	baseline := makeSnapshot(
 		makeMeasurement(measurement.TypeOS,

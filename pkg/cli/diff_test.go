@@ -106,7 +106,7 @@ func TestDiffCmd_Validation(t *testing.T) {
 	}
 }
 
-func TestWriteDiffResult_TableToFile(t *testing.T) {
+func TestWritTable_ToFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	outFile := filepath.Join(tmpDir, "out.txt")
 
@@ -133,7 +133,7 @@ func TestWriteDiffResult_TableToFile(t *testing.T) {
 	}
 }
 
-func TestWriteDiffResult_TableToStdout(t *testing.T) {
+func TestWriteTable_ToStdout(t *testing.T) {
 	result := &diff.Result{Changes: make([]diff.Change, 0)}
 
 	// WriteTable to stdout should not error.
@@ -143,7 +143,7 @@ func TestWriteDiffResult_TableToStdout(t *testing.T) {
 	}
 }
 
-func TestDiffCmd_TableConfigMapRejected(t *testing.T) {
+func TestDiffCmd_TableDefaultStdout(t *testing.T) {
 	cmd := diffCmd()
 	app := &cli.Command{
 		Name:     "aicr",
@@ -159,9 +159,9 @@ func TestDiffCmd_TableConfigMapRejected(t *testing.T) {
 		"--target", snap,
 		"--format", "table",
 	})
-	// This test verifies the basic table path works without --output
-	// (ConfigMap rejection is tested at the unit level below since
-	// urfave/cli shared flag state prevents multi-arg integration tests).
+	// Verifies the table path defaults to stdout without --output.
+	// ConfigMap rejection is tested at the unit level below since
+	// urfave/cli shared flag state prevents multi-arg integration tests.
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

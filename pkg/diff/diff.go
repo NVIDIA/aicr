@@ -150,10 +150,11 @@ func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 // --- helpers ---
 
 // safeReadingString returns the string representation of a Reading,
-// or an empty string if the Reading is nil.
+// or "<nil>" if the Reading is nil so that nil values are
+// distinguishable from legitimate empty strings.
 func safeReadingString(r measurement.Reading) string {
 	if r == nil {
-		return ""
+		return "<nil>"
 	}
 	return r.String()
 }
