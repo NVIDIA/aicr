@@ -35,32 +35,15 @@ jobs:
       pull-requests: write
     timeout-minutes: 5
     steps:
-      - name: Remove issue-only priority labels from PR
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+      # Required so `uses: ./.github/actions/...` can resolve the local
+      # composite action. On pull_request_target the default ref is the
+      # base branch (target of the merge), so no PR code is checked out.
+      - name: Checkout base repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
-          script: |
-            const priorityLabelPattern = /^P\d+$/;
-            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
+          persist-credentials: false
 
-            const present = labels
-              .map(label => label.name)
-              .filter(name => priorityLabelPattern.test(name));
-
-            if (present.length === 0) {
-              core.info('No issue-only priority labels found on this PR');
-              return;
-            }
-
-            for (const name of present) {
-              core.info(`Removing issue-only priority label from PR: ${name}`);
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                name,
-              });
-            }
+      - name: Remove issue-only priority labels from PR
+        uses: ./.github/actions/remove-issue-only-priority-labels
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
