@@ -136,6 +136,7 @@ The validator engine mounts snapshot and recipe data as ConfigMaps:
 | `AICR_SNAPSHOT_PATH` | Override snapshot mount path |
 | `AICR_RECIPE_PATH` | Override recipe mount path |
 | `AICR_VALIDATOR_IMAGE_REGISTRY` | Override image registry prefix (set by user) |
+| `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved image tag (e.g. `latest`). Bypasses the default `:v<version>` / `:sha-<commit>` resolution for feature-branch dev builds whose commit has no published image. |
 | `AICR_NODE_SELECTOR` | User-provided node selector override for inner workloads (comma-separated `key=value` pairs). Set by the `--node-selector` CLI flag. Use `ctx.NodeSelector` to access the parsed value. |
 | `AICR_TOLERATIONS` | User-provided toleration override for inner workloads (comma-separated `key=value:effect` entries). Set by the `--toleration` CLI flag. Use `ctx.Tolerations` to access the parsed value. |
 
@@ -227,8 +228,24 @@ Each entry in `recipes/validators/catalog.yaml`:
 **Image tag resolution** (applied by `catalog.Load`):
 
 1. `:latest` tags are replaced with the CLI version (e.g., `:v0.9.5`) for release builds
-2. Explicit version tags (e.g., `:v1.2.3`) are never modified
-3. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix
+2. On non-release dev builds with a valid commit, `:latest` becomes `:sha-<commit>` (matches the tags `on-push.yaml` pushes for merges to `main`)
+3. Explicit version tags (e.g., `:v1.2.3`) are not modified by steps 1-2
+4. `AICR_VALIDATOR_IMAGE_TAG` overrides the resolved tag on every validator image, including explicit catalog tags. Use this when running `aicr validate` from a feature-branch dev build whose commit has not been merged to `main` (no `:sha-<commit>` image has been published). Typical value: `latest`. Example: `AICR_VALIDATOR_IMAGE_TAG=latest aicr validate --phase performance ...`
+5. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix
+
+**Digest-pinned references** (`name@sha256:…`) are not rewritten by step 4. A tag override is meaningless against a content-addressable pin, and naive rewriting would corrupt the digest. Step 5's registry override still applies — only the registry prefix changes, the digest is preserved verbatim.
+
+**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.Load`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
+
+**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `catalog.ImagePullPolicy(image)` helper (`pkg/validator/catalog/catalog.go`). The rule, in precedence order, is:
+
+1. **Side-loaded refs** (`ko.local/*`, `kind.local/*`) → `Never` (no registry to pull from).
+2. **Digest-pinned refs** (`name@sha256:…`) → `IfNotPresent`. Cryptographic immutability means a cached copy is always correct; forcing `Always` here would make kubelet re-contact the registry every run, which breaks disconnected / air-gapped clusters even though the image itself was never overridden.
+3. **`AICR_VALIDATOR_IMAGE_TAG` is set** → `Always`. Override values are typically mutable (`latest`, `edge`, `main`, or any tag `on-push.yaml` recreates on every merge), so `IfNotPresent` would let a node's previously cached image win over the tag's current target.
+4. **`:latest` suffix** → `Always`. Mutable tag by convention.
+5. **Otherwise** → `IfNotPresent`. Versioned tag assumed immutable enough that caching is a win.
+
+Callers in this repo: the outer validator Job's `Deployer.imagePullPolicy()` (`pkg/validator/job/deployer.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: catalog.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
 
 **Performance phase example — inference perf:**
 

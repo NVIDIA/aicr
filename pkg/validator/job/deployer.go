@@ -221,10 +221,15 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	if len(d.tolerations) > 0 {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_TOLERATIONS").WithValue(serializeTolerations(d.tolerations)))
 	}
-	// Forward CLI version and image-registry override so the validator can
-	// resolve images it references outside the catalog (e.g. inference-perf's
-	// aiperf-bench benchmark image) with the same :latest→version pinning and
-	// registry override that catalog.Load applies to catalog entries.
+	// Forward CLI version, image-registry override, and image-tag override so
+	// the validator can resolve images it references outside the catalog
+	// (e.g. inference-perf's aiperf-bench benchmark image) with the same
+	// resolution semantics that catalog.Load applies to catalog entries.
+	// All three must travel together: if a feature-branch dev build set
+	// AICR_VALIDATOR_IMAGE_TAG=latest on the CLI side to get a published
+	// outer validator image, the inner benchmark pod needs the same
+	// override or it will resolve to the same unpublished :sha-<commit>
+	// the outer pod would have hit without the override.
 	if d.cliVersion != "" {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_CLI_VERSION").WithValue(d.cliVersion))
 	}
@@ -233,6 +238,9 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	}
 	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_VALIDATOR_IMAGE_REGISTRY").WithValue(override))
+	}
+	if tag := os.Getenv("AICR_VALIDATOR_IMAGE_TAG"); tag != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_VALIDATOR_IMAGE_TAG").WithValue(tag))
 	}
 	for _, e := range d.entry.Env {
 		env = append(env, applycorev1.EnvVar().WithName(e.Name).WithValue(e.Value))
@@ -276,23 +284,13 @@ func serializeTolerations(tols []corev1.Toleration) string {
 	return strings.Join(parts, ",")
 }
 
-// imagePullPolicy returns the appropriate pull policy based on the image reference.
-// Side-loaded images (ko.local, kind.local) use Never since they are loaded
-// via `kind load docker-image` and no registry exists to pull from.
-// All other images (including localhost registry) follow the standard policy:
-// :latest tag uses Always to ensure fresh images, versioned tags use IfNotPresent.
+// imagePullPolicy returns the appropriate pull policy for the outer validator
+// Job. Delegates to catalog.ImagePullPolicy so the outer Job and any inner
+// workload Jobs (e.g. inference-perf's aiperf-bench Job) apply the same
+// rules — side-load / digest-pin / AICR_VALIDATOR_IMAGE_TAG override /
+// :latest / versioned — without drifting.
 func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
-	img := d.entry.Image
-	// Side-loaded images via kind load — no registry exists, never pull.
-	if strings.HasPrefix(img, "ko.local") ||
-		strings.HasPrefix(img, "kind.local") {
-
-		return corev1.PullNever
-	}
-	if strings.HasSuffix(img, ":latest") {
-		return corev1.PullAlways
-	}
-	return corev1.PullIfNotPresent
+	return catalog.ImagePullPolicy(d.entry.Image)
 }
 
 func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectReferenceApplyConfiguration {

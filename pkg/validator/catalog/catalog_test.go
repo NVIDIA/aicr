@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestLoadEmbeddedCatalog(t *testing.T) {
@@ -365,6 +366,11 @@ func TestLoadWithoutRegistryOverride(t *testing.T) {
 }
 
 func TestLoadWithExternalCatalog(t *testing.T) {
+	// Isolate from caller's shell so the image-equality assertions below
+	// compare against the default-resolution path, not an override.
+	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
+
 	// Create external data directory with registry.yaml (required) and catalog
 	tmpDir := t.TempDir()
 
@@ -456,6 +462,10 @@ validators:
 //  2. ResolveImage produces the correct :sha-<commit> tag with a full SHA.
 func TestResolveImageCIContract(t *testing.T) {
 	t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
+	// Isolate from caller's shell — AICR_VALIDATOR_IMAGE_TAG rewrites the
+	// resolved tag and would otherwise turn this contract test's default
+	// resolution into an override-driven path during dogfooding.
+	t.Setenv("AICR_VALIDATOR_IMAGE_TAG", "")
 
 	// Guard: .goreleaser.yaml must use FullCommit for both aicr and aicrd.
 	data, err := os.ReadFile("../../../.goreleaser.yaml")
@@ -492,6 +502,7 @@ func TestResolveImage(t *testing.T) {
 		version  string
 		commit   string
 		registry string // if non-empty, sets AICR_VALIDATOR_IMAGE_REGISTRY for the test
+		tag      string // if non-empty, sets AICR_VALIDATOR_IMAGE_TAG for the test
 		want     string
 	}{
 		{
@@ -642,6 +653,107 @@ func TestResolveImage(t *testing.T) {
 			commit:  "ABC1234",
 			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:sha-abc1234",
 		},
+		// --- AICR_VALIDATOR_IMAGE_TAG escape hatch -----------------------
+		// Motivating scenario: a contributor building aicr from an
+		// un-merged feature-branch checkout. The commit isn't on main,
+		// so on-push.yaml never pushed :sha-<commit> to ghcr, and
+		// `aicr validate` pod ImagePullBackOffs. Setting
+		// AICR_VALIDATOR_IMAGE_TAG=latest (or any published tag) forces
+		// every validator image to a reachable tag without losing the
+		// registry / version-based resolution as the default.
+		{
+			name:    "tag override rewrites :latest on dev build (feature-branch dogfooding)",
+			image:   imgLatest,
+			version: "dev",
+			commit:  "abc1234",
+			tag:     "latest",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:    "tag override replaces :sha-<commit> when both resolve",
+			image:   imgLatest,
+			version: "v0.11.1-next",
+			commit:  "abc1234",
+			tag:     "latest",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:    "tag override replaces the release :vX.Y.Z tag",
+			image:   imgLatest,
+			version: "v0.11.1",
+			tag:     "latest",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:    "tag override replaces an explicit catalog tag",
+			image:   imgPinned, // :v1.2.3 is normally untouched
+			version: "v0.11.1",
+			tag:     "latest",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:    "tag override with no tag on image appends the tag",
+			image:   "ghcr.io/nvidia/aicr-validators/aiperf-bench",
+			version: "dev",
+			tag:     "latest",
+			want:    "ghcr.io/nvidia/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:    "empty tag env var leaves image untouched (no-op)",
+			image:   imgPinned,
+			version: "v0.11.1",
+			tag:     "", // explicitly empty — should behave like unset
+			want:    imgPinned,
+		},
+		{
+			name:    "tag override preserves registry port (localhost:5001 edge case)",
+			image:   "localhost:5001/aicr-validators/aiperf-bench:sha-abc1234",
+			version: "dev",
+			commit:  "abc1234",
+			tag:     "latest",
+			want:    "localhost:5001/aicr-validators/aiperf-bench:latest",
+		},
+		{
+			name:     "tag override and registry override compose",
+			image:    imgLatest,
+			version:  "dev",
+			commit:   "abc1234",
+			tag:      "v0.11.0",
+			registry: "localhost:5001",
+			want:     "localhost:5001/aicr-validators/aiperf-bench:v0.11.0",
+		},
+		// --- digest-pinned refs must never be tag-rewritten --------------
+		// A tag override is incompatible with a content-addressable digest
+		// pin. Naive last-colon splitting would corrupt `@sha256:<hash>`
+		// into `@sha256:<newTag>`, emitting an invalid reference.
+		{
+			name:    "digest-pinned image is not rewritten by tag override",
+			image:   "ghcr.io/foo/bar@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			version: "dev",
+			commit:  "abc1234",
+			tag:     "latest",
+			want:    "ghcr.io/foo/bar@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		},
+		{
+			name:    "mixed ref (name:tag@digest) is not rewritten by tag override",
+			image:   "ghcr.io/foo/bar:v1.0.0@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			version: "dev",
+			commit:  "abc1234",
+			tag:     "latest",
+			want:    "ghcr.io/foo/bar:v1.0.0@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		},
+		{
+			// Registry override still applies to digest refs (existing
+			// replaceRegistry behavior), so compose test verifies the two
+			// env vars don't step on each other on a digest-pinned image.
+			name:     "digest ref + registry override: digest preserved, prefix replaced",
+			image:    "ghcr.io/nvidia/aicr-validators/aiperf-bench@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			version:  "dev",
+			commit:   "abc1234",
+			tag:      "latest",
+			registry: "localhost:5001",
+			want:     "localhost:5001/aicr-validators/aiperf-bench@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		},
 	}
 
 	for _, tt := range tests {
@@ -651,9 +763,86 @@ func TestResolveImage(t *testing.T) {
 			} else {
 				t.Setenv("AICR_VALIDATOR_IMAGE_REGISTRY", "")
 			}
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.tag)
 			got := ResolveImage(tt.image, tt.version, tt.commit)
 			if got != tt.want {
 				t.Errorf("ResolveImage(%q, %q, %q) = %q, want %q", tt.image, tt.version, tt.commit, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestImagePullPolicy covers the shared helper that both the outer
+// validator Deployer and the inner aiperf-bench Job call, so they stay in
+// lockstep. The digest-pin case is the specific Codex P3 concern: forcing
+// PullAlways on a digest-pinned ref (e.g. an external catalog entry that
+// stayed `name@sha256:…`) would break disconnected/private clusters by
+// making kubelet re-contact the registry every run, for no correctness
+// benefit (the digest is cryptographically immutable).
+func TestImagePullPolicy(t *testing.T) {
+	tests := []struct {
+		name   string
+		image  string
+		envTag string // AICR_VALIDATOR_IMAGE_TAG — empty means unset
+		want   corev1.PullPolicy
+	}{
+		// ----- side-loaded refs win unconditionally -----
+		{name: "ko.local → Never", image: "ko.local/aicr-validators/x:latest", want: corev1.PullNever},
+		{name: "kind.local → Never", image: "kind.local/aicr-validators/x:latest", want: corev1.PullNever},
+		{name: "ko.local + override still Never", image: "ko.local/aicr-validators/x:edge", envTag: "edge", want: corev1.PullNever},
+		// The side-load check must anchor on the full registry segment
+		// (trailing slash) so a real registry like `ko.localhost:5000/...`
+		// is not misread as `ko.local/...` and forced to PullNever —
+		// kubelet would then be unable to pull from the real registry.
+		{name: "ko.localhost:5000 registry → not treated as side-load", image: "ko.localhost:5000/aicr-validators/x:v1", want: corev1.PullIfNotPresent},
+		{name: "kind.localhost:5000 registry → not treated as side-load", image: "kind.localhost:5000/aicr-validators/x:v1", want: corev1.PullIfNotPresent},
+
+		// ----- digest pins are immutable → IfNotPresent -----
+		{
+			name:  "digest-only ref → IfNotPresent (immutable by construction)",
+			image: "ghcr.io/foo/bar@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			want:  corev1.PullIfNotPresent,
+		},
+		{
+			// Codex P3: the tag override must NOT upgrade a digest ref to
+			// PullAlways. Doing so would make disconnected/air-gapped
+			// clusters re-contact the registry every run for no gain.
+			name:   "digest-only ref + override → IfNotPresent (override does not apply)",
+			image:  "ghcr.io/foo/bar@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			envTag: "latest",
+			want:   corev1.PullIfNotPresent,
+		},
+		{
+			name:  "mixed ref name:tag@digest → IfNotPresent (digest wins)",
+			image: "ghcr.io/foo/bar:v1.0.0@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+			want:  corev1.PullIfNotPresent,
+		},
+
+		// ----- override forces Always on non-digest refs -----
+		{
+			name:   "override with :edge → Always (avoid stale cache on mutable tag)",
+			image:  "ghcr.io/nvidia/aicr-validators/performance:edge",
+			envTag: "edge",
+			want:   corev1.PullAlways,
+		},
+		{
+			name:   "override with release :v0.11.0 → Always (safe over-pull, not a regression)",
+			image:  "ghcr.io/nvidia/aicr-validators/performance:v0.11.0",
+			envTag: "v0.11.0",
+			want:   corev1.PullAlways,
+		},
+
+		// ----- default policy (no override) -----
+		{name: ":latest → Always", image: "ghcr.io/nvidia/aicr-validators/performance:latest", want: corev1.PullAlways},
+		{name: ":vX.Y.Z → IfNotPresent", image: "ghcr.io/nvidia/aicr-validators/performance:v1.0.0", want: corev1.PullIfNotPresent},
+		{name: ":sha-<commit> → IfNotPresent (main-branch dev default)", image: "ghcr.io/nvidia/aicr-validators/performance:sha-abc1234", want: corev1.PullIfNotPresent},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_VALIDATOR_IMAGE_TAG", tt.envTag)
+			if got := ImagePullPolicy(tt.image); got != tt.want {
+				t.Errorf("ImagePullPolicy(%q) = %q, want %q", tt.image, got, tt.want)
 			}
 		})
 	}
