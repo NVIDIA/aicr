@@ -1369,16 +1369,18 @@ After uninstalling each component, the script checks for orphaned validating/mut
 
 **Orphan-CRD behavior (by design):**
 
-By default, the script deletes only CRDs whose `meta.helm.sh/release-name` **and** `meta.helm.sh/release-namespace` annotations both match an in-bundle release. CRDs installed outside Helm annotation discovery — shipped via a chart's `crds/` directory, installed by an operator at runtime, or added out-of-band — are surfaced as a post-flight warning but **not deleted**. This is the shared-cluster safety default: removing a CRD that another tenant shares the API group with would delete their resources too.
+By default, the script deletes only CRDs whose `meta.helm.sh/release-name` **and** `meta.helm.sh/release-namespace` annotations both match an in-bundle release. CRDs installed outside Helm annotation discovery — shipped via a chart's `crds/` directory or installed by an operator at runtime — survive undeploy and are surfaced as a post-flight warning only when their exact name appears in the script's internal `extra_crds_for_release` list (one entry per component this bundle ships). CRDs added fully out-of-band are not surfaced by post-flight. This is the shared-cluster safety default: removing a CRD whose API group another tenant also uses would delete their resources too.
 
 **Consequence for redeploy on single-tenant clusters:** these orphan CRDs survive `undeploy.sh`. They can block a subsequent `deploy.sh` in two ways: (1) `helm upgrade --install` refuses to adopt a pre-existing CRD that carries no release annotation, and (2) a CR with an unreconciled finalizer (controller already uninstalled) prevents `kubectl delete crd` from ever completing. On a single-tenant cluster where clean teardown-then-redeploy is required, clear the orphans manually after `undeploy.sh` — the post-flight warning lists which CRDs survived:
 
 ```shell
 # For each orphan CRD, clear finalizers on any remaining CRs first,
 # otherwise the CRD delete will hang on the resource-in-use marker.
+# Name is emitted first so cluster-scoped CRs (where namespace is empty)
+# still bind correctly under `read -r name ns`.
 kubectl get <plural>.<group> -A -o json \
-  | jq -r '.items[] | "\(.metadata.namespace // "") \(.metadata.name)"' \
-  | while read -r ns name; do
+  | jq -r '.items[] | "\(.metadata.name) \(.metadata.namespace // "")"' \
+  | while read -r name ns; do
       [[ -z "${name}" ]] && continue
       kubectl patch "<plural>.<group>" "${name}" ${ns:+-n "${ns}"} \
         --type=merge -p '{"metadata":{"finalizers":[]}}'
