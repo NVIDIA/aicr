@@ -24,7 +24,13 @@ via its own `install.sh`:
 | Component | Version | Namespace | Source |
 |-----------|---------|-----------|--------|
 {{ range .Components -}}
-| {{ .Name }} | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
+{{ if .IsKustomize -}}
+| {{ .Name }} | Kustomize | {{ .Tag }} | {{ .Namespace }} | {{ .Repository }} ({{ .Path }}) |
+{{ else if .HasChart -}}
+| {{ .Name }} | Helm | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
+{{ else -}}
+| {{ .Name }} | Manifests | | {{ .Namespace }} | |
+{{ end -}}
 {{ end }}
 
 {{ if .Constraints }}
@@ -65,6 +71,30 @@ with the right arguments baked in. To install a single component manually:
 cd NNN-<component-name>
 bash install.sh
 ```
+{{ else if .HasChart -}}
+```bash
+{{ if .IsOCI -}}
+helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} --create-namespace \
+  -f {{ .Name }}/values.yaml \
+  --wait --timeout 10m
+{{ else -}}
+helm upgrade --install {{ .Name }} {{ .ChartName }} \
+  --repo {{ .Repository }} \
+  --version {{ .Version }} \
+  -n {{ .Namespace }} --create-namespace \
+  -f {{ .Name }}/values.yaml \
+  --wait --timeout 10m
+{{ end -}}
+```
+{{ end -}}
+{{ if .HasManifests }}
+```bash
+kubectl apply -f {{ .Name }}/manifests/
+```
+{{ end }}
+{{ end }}
 
 ## Customization
 
