@@ -1367,6 +1367,29 @@ If a Helm release is in a `pending-install` or `pending-upgrade` state (from an 
 
 After uninstalling each component, the script checks for orphaned validating/mutating webhooks whose backing service no longer exists. Fail-closed webhooks with missing services block all pod creation, so these are deleted proactively.
 
+**Orphan-CRD behavior (by design):**
+
+By default, the script deletes only CRDs whose `meta.helm.sh/release-name` **and** `meta.helm.sh/release-namespace` annotations both match an in-bundle release. CRDs installed outside Helm annotation discovery — shipped via a chart's `crds/` directory, installed by an operator at runtime, or added out-of-band — are surfaced as a post-flight warning but **not deleted**. This is the shared-cluster safety default: removing a CRD that another tenant shares the API group with would delete their resources too.
+
+**Consequence for redeploy on single-tenant clusters:** these orphan CRDs survive `undeploy.sh`. They can block a subsequent `deploy.sh` in two ways: (1) `helm upgrade --install` refuses to adopt a pre-existing CRD that carries no release annotation, and (2) a CR with an unreconciled finalizer (controller already uninstalled) prevents `kubectl delete crd` from ever completing. On a single-tenant cluster where clean teardown-then-redeploy is required, clear the orphans manually after `undeploy.sh` — the post-flight warning lists which CRDs survived:
+
+```shell
+# For each orphan CRD, clear finalizers on any remaining CRs first,
+# otherwise the CRD delete will hang on the resource-in-use marker.
+kubectl get <plural>.<group> -A -o json \
+  | jq -r '.items[] | "\(.metadata.namespace // "") \(.metadata.name)"' \
+  | while read -r ns name; do
+      [[ -z "${name}" ]] && continue
+      kubectl patch "<plural>.<group>" "${name}" ${ns:+-n "${ns}"} \
+        --type=merge -p '{"metadata":{"finalizers":[]}}'
+    done
+
+# Then delete the CRD.
+kubectl delete crd <crd-name> --ignore-not-found
+```
+
+Do not run these commands on a shared/multi-tenant cluster — they do not re-check ownership and may remove another tenant's resources if the API group is shared.
+
 ---
 
 ### aicr verify
