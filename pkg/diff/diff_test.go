@@ -225,6 +225,32 @@ func TestSnapshots_NilMeasurementEntries(t *testing.T) {
 	}
 }
 
+func TestSnapshots_NilReadingValues(t *testing.T) {
+	// A malformed snapshot can have nil Reading values in the Data map.
+	// safeReadingString must handle them without panicking.
+	baseline := makeSnapshot(
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{
+				"version": measurement.Str("1.32.4"),
+				"nilkey":  nil,
+			}),
+		),
+	)
+	target := makeSnapshot(
+		makeMeasurement(measurement.TypeK8s,
+			makeSubtype("server", map[string]measurement.Reading{
+				"version": measurement.Str("1.33.0"),
+				"nilkey":  nil,
+			}),
+		),
+	)
+
+	result := Snapshots(baseline, target)
+	if result.Summary.Modified != 1 {
+		t.Errorf("expected 1 modified change, got %d", result.Summary.Modified)
+	}
+}
+
 func TestSnapshots_DeterministicOrder(t *testing.T) {
 	baseline := makeSnapshot(
 		makeMeasurement(measurement.TypeOS,

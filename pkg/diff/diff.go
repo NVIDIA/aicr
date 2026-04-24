@@ -149,6 +149,15 @@ func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 
 // --- helpers ---
 
+// safeReadingString returns the string representation of a Reading,
+// or an empty string if the Reading is nil.
+func safeReadingString(r measurement.Reading) string {
+	if r == nil {
+		return ""
+	}
+	return r.String()
+}
+
 func indexMeasurements(measurements []*measurement.Measurement) map[string]*measurement.Measurement {
 	idx := make(map[string]*measurement.Measurement, len(measurements))
 	for _, m := range measurements {
@@ -202,16 +211,16 @@ func compareReadings(prefix string, base, target map[string]measurement.Reading)
 		targetReading, targetExists := target[key]
 
 		if !baseExists {
-			changes = append(changes, Change{Kind: Added, Severity: SeverityInfo, Path: path, Target: targetReading.String()})
+			changes = append(changes, Change{Kind: Added, Severity: SeverityInfo, Path: path, Target: safeReadingString(targetReading)})
 			continue
 		}
 		if !targetExists {
-			changes = append(changes, Change{Kind: Removed, Severity: SeverityInfo, Path: path, Baseline: baseReading.String()})
+			changes = append(changes, Change{Kind: Removed, Severity: SeverityInfo, Path: path, Baseline: safeReadingString(baseReading)})
 			continue
 		}
 
-		baseVal := baseReading.String()
-		targetVal := targetReading.String()
+		baseVal := safeReadingString(baseReading)
+		targetVal := safeReadingString(targetReading)
 		if baseVal != targetVal {
 			changes = append(changes, Change{Kind: Modified, Severity: SeverityInfo, Path: path, Baseline: baseVal, Target: targetVal})
 		}
@@ -239,7 +248,7 @@ func removedMeasurement(m *measurement.Measurement) []Change {
 func addedSubtype(prefix string, st *measurement.Subtype) []Change {
 	changes := make([]Change, 0, len(st.Data))
 	for key, reading := range st.Data {
-		changes = append(changes, Change{Kind: Added, Severity: SeverityInfo, Path: prefix + "." + key, Target: reading.String()})
+		changes = append(changes, Change{Kind: Added, Severity: SeverityInfo, Path: prefix + "." + key, Target: safeReadingString(reading)})
 	}
 	return changes
 }
@@ -247,7 +256,7 @@ func addedSubtype(prefix string, st *measurement.Subtype) []Change {
 func removedSubtype(prefix string, st *measurement.Subtype) []Change {
 	changes := make([]Change, 0, len(st.Data))
 	for key, reading := range st.Data {
-		changes = append(changes, Change{Kind: Removed, Severity: SeverityInfo, Path: prefix + "." + key, Baseline: reading.String()})
+		changes = append(changes, Change{Kind: Removed, Severity: SeverityInfo, Path: prefix + "." + key, Baseline: safeReadingString(reading)})
 	}
 	return changes
 }

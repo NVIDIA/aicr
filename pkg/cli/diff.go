@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 
@@ -112,12 +113,12 @@ func runDiffCmd(ctx context.Context, cmd *cli.Command) error {
 
 	baseline, err := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](baselinePath, kubeconfig)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load baseline snapshot from %q", baselinePath), err)
+		return err
 	}
 
 	target, err := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](targetPath, kubeconfig)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load target snapshot from %q", targetPath), err)
+		return err
 	}
 
 	result := diff.Snapshots(baseline, target)
@@ -150,8 +151,12 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 
 	// Use custom table writer for human-readable output
 	if outFormat == serializer.FormatTable {
+		output = strings.TrimSpace(output)
+		if strings.HasPrefix(output, serializer.ConfigMapURIScheme) {
+			return errors.New(errors.ErrCodeInvalidRequest, "table output does not support ConfigMap destinations")
+		}
 		w := os.Stdout
-		if output != "" {
+		if output != "" && output != "-" && output != serializer.StdoutURI {
 			var f *os.File
 			f, err = os.Create(output)
 			if err != nil {
@@ -170,7 +175,7 @@ func writeDiffResult(ctx context.Context, cmd *cli.Command, outFormat serializer
 	// JSON/YAML use standard serializer
 	ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
+		return err
 	}
 	defer func() {
 		if closer, ok := ser.(interface{ Close() error }); ok {
