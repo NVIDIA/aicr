@@ -141,9 +141,9 @@ func TestParseTaint(t *testing.T) {
 	}{
 		{
 			name:     "taint with key, value, and effect",
-			taintStr: "skyhook.io/runtime-required=true:NoSchedule",
+			taintStr: "skyhook.nvidia.com/runtime-required=true:NoSchedule",
 			want: &corev1.Taint{
-				Key:    "skyhook.io/runtime-required",
+				Key:    "skyhook.nvidia.com/runtime-required",
 				Value:  "true",
 				Effect: corev1.TaintEffectNoSchedule,
 			},

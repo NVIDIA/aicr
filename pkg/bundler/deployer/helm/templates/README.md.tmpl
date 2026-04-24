@@ -80,6 +80,7 @@ helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
+  -f {{ .Name }}/cluster-values.yaml \
   --wait --timeout 10m
 {{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
@@ -87,6 +88,7 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
+  -f {{ .Name }}/cluster-values.yaml \
   --wait --timeout 10m
 {{ end -}}
 ```
@@ -100,19 +102,27 @@ kubectl apply -f {{ .Name }}/manifests/
 
 ## Customization
 
-Each Helm component has its own `values.yaml` in its directory.
-Edit the file before deploying to customize component configuration:
+Each Helm component has two values files in its directory:
 
-```bash
-vim gpu-operator/values.yaml
-```
+- `values.yaml` — resolved configuration from the recipe. Edit to override defaults:
+
+  ```bash
+  vim gpu-operator/values.yaml
+  ```
+
+- `cluster-values.yaml` — install-time parameters. Any paths declared with
+  `aicr bundle --dynamic <component>:<path>` are pulled out of `values.yaml`
+  and placed here for you to fill in. The file is always created (empty if
+  no dynamic paths were declared) and passed to `helm upgrade --install`
+  alongside `values.yaml` by both `deploy.sh` and the per-component commands
+  in the "Manual Installation" section above.
 
 ## Upgrade
 
 To upgrade a specific Helm component:
 
 ```bash
-helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml --wait --timeout 10m
+helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml -f <component>/cluster-values.yaml --wait --timeout 10m
 ```
 
 ## Uninstall

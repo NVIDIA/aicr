@@ -831,7 +831,7 @@ func TestDeployerTypeString(t *testing.T) {
 func TestWorkloadGateTaintOptions(t *testing.T) {
 	t.Run("WithWorkloadGateTaint with valid taint", func(t *testing.T) {
 		taint := &corev1.Taint{
-			Key:    "skyhook.io/runtime-required",
+			Key:    "skyhook.nvidia.com/runtime-required",
 			Value:  "true",
 			Effect: corev1.TaintEffectNoSchedule,
 		}
@@ -841,8 +841,8 @@ func TestWorkloadGateTaintOptions(t *testing.T) {
 		if got == nil {
 			t.Fatal("WorkloadGateTaint() returned nil")
 		}
-		if got.Key != "skyhook.io/runtime-required" {
-			t.Errorf("WorkloadGateTaint().Key = %s, want skyhook.io/runtime-required", got.Key)
+		if got.Key != "skyhook.nvidia.com/runtime-required" {
+			t.Errorf("WorkloadGateTaint().Key = %s, want skyhook.nvidia.com/runtime-required", got.Key)
 		}
 		if got.Value != "true" {
 			t.Errorf("WorkloadGateTaint().Value = %s, want true", got.Value)
