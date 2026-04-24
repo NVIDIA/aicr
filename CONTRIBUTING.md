@@ -191,6 +191,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - **Type of Change**: Bug fix, feature, breaking change, etc.
    - **Testing**: What testing was performed
    - **Checklist**: Verify all items
+3. Do not use the issue priority labels `P0`, `P1`, or `P2` on PRs. They are reserved for issues and are automatically removed from pull requests by automation.
 
 ### Review Process
 
