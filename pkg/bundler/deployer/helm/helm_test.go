@@ -372,17 +372,47 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	if !strings.Contains(string(content), "MAX_RETRIES=5") {
 		t.Error("deploy.sh missing default MAX_RETRIES")
 	}
+	if !strings.Contains(string(content), `PREFLIGHT_KUBECTL_TIMEOUT="20s"`) {
+		t.Error("deploy.sh missing bounded pre-flight kubectl timeout")
+	}
+	if !strings.Contains(string(content), "SLOW_HELM_DIAGNOSTICS_SECONDS=120") {
+		t.Error("deploy.sh missing slow Helm diagnostics threshold")
+	}
 	if !strings.Contains(string(content), "backoff_seconds()") {
 		t.Error("deploy.sh missing backoff_seconds function")
 	}
 	if !strings.Contains(string(content), "retry()") {
 		t.Error("deploy.sh missing retry function")
 	}
+	if !strings.Contains(string(content), "kubectl_preflight()") {
+		t.Error("deploy.sh missing bounded pre-flight kubectl helper")
+	}
 	if !strings.Contains(string(content), "helm_retry()") {
 		t.Error("deploy.sh missing helm_retry function")
 	}
 	if !strings.Contains(string(content), "cleanup_helm_hooks()") {
 		t.Error("deploy.sh missing cleanup_helm_hooks function")
+	}
+	if !strings.Contains(string(content), "dump_component_helm_events()") {
+		t.Error("deploy.sh missing component events function")
+	}
+	if !strings.Contains(string(content), "dump_component_helm_diagnostics()") {
+		t.Error("deploy.sh missing component diagnostics function")
+	}
+	if !strings.Contains(string(content), `dump_component_helm_events "${namespace}" "${desc}"`) {
+		t.Error("deploy.sh missing success-path component events call")
+	}
+	if !strings.Contains(string(content), `dump_component_helm_diagnostics "${namespace}" "${desc}"`) {
+		t.Error("deploy.sh missing failure-path component diagnostics call")
+	}
+	if !strings.Contains(string(content), `echo "  ${desc} completed in ${elapsed}s"`) {
+		t.Error("deploy.sh missing Helm success elapsed timing")
+	}
+	if !strings.Contains(string(content), `echo "  ${desc} failed in ${elapsed}s (rc=${rc})"`) {
+		t.Error("deploy.sh missing Helm failure elapsed timing")
+	}
+	if !strings.Contains(string(content), `[[ ${elapsed} -ge ${SLOW_HELM_DIAGNOSTICS_SECONDS} ]]`) {
+		t.Error("deploy.sh missing slow-success diagnostics gate")
 	}
 	if !strings.Contains(string(content), "HELM_TIMEOUT=") {
 		t.Error("deploy.sh missing HELM_TIMEOUT variable")
@@ -392,6 +422,117 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 	if !strings.Contains(string(content), "--retries") {
 		t.Error("deploy.sh missing --retries flag handling")
+	}
+	if !strings.Contains(string(content), `kubectl_preflight get ns "${ns}"`) {
+		t.Error("deploy.sh pre-flight namespace check should use bounded kubectl helper")
+	}
+	if !strings.Contains(string(content), `kubectl_preflight get "${kind}" -o json`) {
+		t.Error("deploy.sh pre-flight webhook check should use bounded kubectl helper")
+	}
+}
+
+func TestGenerate_DeployScriptBashSyntaxValid(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available; skipping shell-syntax test")
+	}
+
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	g := &Generator{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	deployPath := filepath.Join(outputDir, "deploy.sh")
+	subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(subCtx, "bash", "-n", deployPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generated deploy.sh is not bash-syntax valid.\nerr: %v\noutput: %s",
+			err, string(output))
+	}
+}
+
+func TestDeployScriptHelmRetryPreservesFailureExitCode(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available; skipping shell-behavior test")
+	}
+
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	g := &Generator{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	script := string(content)
+	start := strings.Index(script, "function backoff_seconds()")
+	end := strings.Index(script, "# kubectl apply that tolerates")
+	if start < 0 || end < 0 || start >= end {
+		t.Fatal("failed to extract helm_retry helper block from deploy.sh")
+	}
+
+	helperPath := filepath.Join(t.TempDir(), "deploy-helpers.sh")
+	if writeErr := os.WriteFile(helperPath, []byte(script[start:end]), 0o644); writeErr != nil {
+		t.Fatalf("write helper script: %v", writeErr)
+	}
+
+	stubDir := t.TempDir()
+	kubectlStub := "#!/bin/sh\nexit 0\n"
+	if writeErr := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(kubectlStub), 0o755); writeErr != nil {
+		t.Fatalf("write kubectl stub: %v", writeErr)
+	}
+
+	bashSnippet := `
+        source "$HELPER"
+        fail_with_42() { return 42; }
+        set +e
+        helm_retry "stub component" "stub-ns" "0" fail_with_42
+        retry_rc=$?
+        set -e
+        echo "helm_retry_exit=${retry_rc}"
+        if [[ "${retry_rc}" -ne 1 ]]; then
+          exit 1
+        fi
+    `
+	subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(subCtx, "bash", "-c", "set -euo pipefail\n"+bashSnippet)
+	cmd.Env = append(os.Environ(),
+		"PATH="+stubDir+":"+os.Getenv("PATH"),
+		"HELPER="+helperPath,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm_retry execution failed.\nerr: %v\noutput: %s", err, string(output))
+	}
+	out := string(output)
+	if !strings.Contains(out, "stub component failed in") || !strings.Contains(out, "(rc=42)") {
+		t.Fatalf("helm_retry did not preserve failing command rc=42 in output:\n%s", out)
+	}
+	if !strings.Contains(out, "helm_retry_exit=1") {
+		t.Fatalf("helm_retry did not return final failure rc=1 after retry budget exhausted:\n%s", out)
 	}
 }
 
@@ -505,14 +646,71 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	if !strings.Contains(script, `COMPONENT_MAX_RETRIES="1"`) {
 		t.Error("deploy.sh missing kai-scheduler retry override")
 	}
-	if !strings.Contains(script, `dump_kai_scheduler_helm_diagnostics "${namespace}"`) {
-		t.Error("deploy.sh missing kai-scheduler diagnostics hook")
+	if !strings.Contains(script, `dump_component_helm_events "${namespace}" "${desc}"`) {
+		t.Error("deploy.sh missing component events hook")
 	}
-	if !strings.Contains(script, `kubectl get jobs -n "${namespace}"`) {
+	if !strings.Contains(script, `dump_component_helm_diagnostics "${namespace}" "${desc}"`) {
+		t.Error("deploy.sh missing component diagnostics hook")
+	}
+	if !strings.Contains(script, `SLOW_HELM_DIAGNOSTICS_SECONDS=120`) {
+		t.Error("deploy.sh missing slow Helm diagnostics threshold")
+	}
+	if !strings.Contains(script, `exceeded ${SLOW_HELM_DIAGNOSTICS_SECONDS}s; dumping full diagnostics`) {
+		t.Error("deploy.sh missing slow-success full diagnostics message")
+	}
+	if !strings.Contains(script, `kubectl get jobs -n "${namespace}" -o wide`) {
 		t.Error("deploy.sh missing job diagnostics")
 	}
-	if !strings.Contains(script, `kubectl describe pods -n "${namespace}"`) {
+	if !strings.Contains(script, `kubectl get pods -n "${namespace}" -o wide`) {
 		t.Error("deploy.sh missing pod diagnostics")
+	}
+	if !strings.Contains(script, `kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' -o wide`) {
+		t.Error("deploy.sh missing event diagnostics")
+	}
+}
+
+func TestGenerate_DeployScriptDynamoPlatformTimeout(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	g := &Generator{
+		RecipeResult: &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.nvidia.com/v1alpha1",
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:      "dynamo-platform",
+					Namespace: "dynamo-system",
+					Chart:     "dynamo-platform",
+					Version:   "0.9.0",
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "https://helm.ngc.nvidia.com/nvidia/ai-dynamo",
+				},
+			},
+			DeploymentOrder: []string{"dynamo-platform"},
+		},
+		ComponentValues: map[string]map[string]any{
+			"dynamo-platform": {},
+		},
+		Version: "v1.0.0",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+	if err != nil {
+		t.Fatalf("failed to read deploy.sh: %v", err)
+	}
+	script := string(content)
+
+	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="20m"`) {
+		t.Error("deploy.sh missing dynamo-platform 20m timeout override")
+	}
+	if strings.Contains(script, `COMPONENT_MAX_RETRIES="1"`) {
+		t.Error("dynamo-platform should keep the default retry budget")
 	}
 }
 

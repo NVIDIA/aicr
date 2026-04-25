@@ -49,7 +49,7 @@ jobs:
               - '.github/workflows/gpu-h100-inference-test.yaml'
               - '.settings.yaml'
               - '.github/actions/gpu-cluster-setup/**'
-              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/runtime-install/**'
               - '.github/actions/aicr-build/**'
               - '.github/actions/setup-build-tools/**'
               - '.github/actions/install-karpenter-kwok/**'
@@ -96,7 +96,8 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 120
+    # Cold self-hosted H100 runners have exceeded 120m before diagnostics finish.
+    timeout-minutes: 180
 
     env:
       KIND_CLUSTER_NAME: gpu-inference-test
@@ -118,7 +119,7 @@ jobs:
 
       - name: Install runtime bundle
         id: bundle-install
-        uses: ./.github/actions/gpu-operator-install
+        uses: ./.github/actions/runtime-install
         with:
           method: bundle
           accelerator: h100
@@ -127,6 +128,7 @@ jobs:
       # --- Snapshot and GPU validation ---
 
       - name: Snapshot and validate GPU
+        id: snapshot-validate
         uses: ./.github/actions/gpu-snapshot-validate
         with:
           gpu_model: H100
@@ -200,6 +202,7 @@ jobs:
           always()
           && !cancelled()
           && steps.bundle-install.outcome == 'success'
+          && steps.snapshot-validate.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |

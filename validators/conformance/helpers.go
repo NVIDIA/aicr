@@ -35,6 +35,8 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const noneValue = "none"
+
 // getDynamicClient returns the dynamic client from context, or creates one from RESTConfig.
 func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
 	if ctx.DynamicClient != nil {
@@ -275,7 +277,7 @@ func podWaitingStatus(pod *corev1.Pod) string {
 			return fmt.Sprintf("%s: %s", w.Reason, w.Message)
 		}
 	}
-	return "none"
+	return noneValue
 }
 
 // waitForDeletion polls until a resource is gone (NotFound) or the context expires.

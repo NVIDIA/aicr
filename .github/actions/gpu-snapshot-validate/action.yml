@@ -38,6 +38,8 @@ runs:
           --namespace=default \
           --image=ko.local:smoke-test \
           --require-gpu \
+          --timeout=10m \
+          --no-cleanup \
           --output=snapshot.yaml
         echo "--- Snapshot output ---"
         cat snapshot.yaml
@@ -83,3 +85,63 @@ runs:
         echo "=== Snapshot ConfigMap ==="
         kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
           get configmap aicr-snapshot -o yaml || true
+        echo "=== Recent events (default) ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          get events --sort-by='.lastTimestamp' -o wide 2>/dev/null | tail -80 || true
+        echo "=== Recent events (all namespaces) ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" \
+          get events -A --sort-by='.lastTimestamp' -o wide 2>/dev/null | tail -120 || true
+        echo "=== Cluster nodes ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get nodes -o wide || true
+        echo "=== Node describe ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" describe nodes || true
+        echo "=== Pods (all namespaces) ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get pods -A -o wide || true
+        echo "=== Jobs (all namespaces) ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get jobs -A -o wide || true
+        echo "=== Resource quotas and limit ranges ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get resourcequota,limitrange -A -o wide || true
+        echo "=== Admission webhooks ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" \
+          get validatingwebhookconfigurations,mutatingwebhookconfigurations -o wide || true
+        echo "=== API services ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get apiservices || true
+        echo "=== API server livez ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get --raw='/livez?verbose' || true
+        echo
+        echo "=== API server readyz ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" get --raw='/readyz?verbose' || true
+        echo
+        echo "=== Control-plane leases ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n kube-system get leases -o wide || true
+        echo "=== kube-system pods ==="
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n kube-system get pods -o wide || true
+        for component in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+          echo "=== ${component} describe ==="
+          kubectl --context="kind-${{ inputs.cluster_name }}" -n kube-system \
+            describe pods -l component="${component}" || true
+          echo "=== ${component} logs ==="
+          kubectl --context="kind-${{ inputs.cluster_name }}" -n kube-system \
+            logs -l component="${component}" --all-containers --tail=300 || true
+        done
+        echo "=== Kind node containers ==="
+        docker ps --filter "name=${{ inputs.cluster_name }}" || true
+        echo "=== Kind control-plane container logs ==="
+        docker logs "${{ inputs.cluster_name }}-control-plane" --tail=300 || true
+
+    - name: Cleanup snapshot Job
+      if: always()
+      shell: bash
+      run: |
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          delete job aicr --ignore-not-found=true --wait=false || true
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          delete serviceaccount aicr --ignore-not-found=true || true
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          delete role aicr --ignore-not-found=true || true
+        kubectl --context="kind-${{ inputs.cluster_name }}" -n default \
+          delete rolebinding aicr --ignore-not-found=true || true
+        kubectl --context="kind-${{ inputs.cluster_name }}" \
+          delete clusterrole aicr-node-reader --ignore-not-found=true || true
+        kubectl --context="kind-${{ inputs.cluster_name }}" \
+          delete clusterrolebinding aicr-node-reader --ignore-not-found=true || true

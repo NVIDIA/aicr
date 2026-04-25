@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: 'GPU Operator Install'
-description: 'Installs the GPU operator via standalone Helm chart or aicr bundle.'
+name: 'Runtime Install'
+description: 'Installs the GPU runtime stack via standalone Helm chart or aicr bundle.'
 
 inputs:
   method:

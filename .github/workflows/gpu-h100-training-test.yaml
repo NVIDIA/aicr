@@ -49,7 +49,7 @@ jobs:
               - '.github/workflows/gpu-h100-training-test.yaml'
               - '.settings.yaml'
               - '.github/actions/gpu-cluster-setup/**'
-              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/runtime-install/**'
               - '.github/actions/aicr-build/**'
               - '.github/actions/setup-build-tools/**'
               - '.github/actions/install-karpenter-kwok/**'
@@ -92,7 +92,8 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 120
+    # Cold self-hosted H100 runners have exceeded 120m before diagnostics finish.
+    timeout-minutes: 180
 
     env:
       KIND_CLUSTER_NAME: gpu-training-test
@@ -114,7 +115,7 @@ jobs:
 
       - name: Install runtime bundle
         id: bundle-install
-        uses: ./.github/actions/gpu-operator-install
+        uses: ./.github/actions/runtime-install
         with:
           method: bundle
           accelerator: h100
@@ -124,6 +125,7 @@ jobs:
       # --- Snapshot and GPU validation ---
 
       - name: Snapshot and validate GPU
+        id: snapshot-validate
         uses: ./.github/actions/gpu-snapshot-validate
         with:
           gpu_model: H100
@@ -193,6 +195,7 @@ jobs:
           always()
           && !cancelled()
           && steps.bundle-install.outcome == 'success'
+          && steps.snapshot-validate.outcome == 'success'
         continue-on-error: true
         shell: bash
         run: |
@@ -235,6 +238,8 @@ jobs:
           echo "=== KAI scheduler logs ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kai-scheduler \
             logs deployment/kai-scheduler-default --tail=100 2>/dev/null || true
+          echo "=== Recent events (kai-scheduler) ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kai-scheduler get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== KAI scheduler queues ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get queues -A 2>/dev/null || true
           echo "=== KAI scheduler podgroups ==="
@@ -243,6 +248,8 @@ jobs:
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kubeflow get deployment kubeflow-trainer-controller-manager -o wide 2>/dev/null || true
           echo "=== Kubeflow pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kubeflow get pods -o wide 2>/dev/null || true
+          echo "=== Recent events (kubeflow) ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kubeflow get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== Kubeflow validating webhooks ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" get validatingwebhookconfigurations validator.trainer.kubeflow.org -o yaml 2>/dev/null || true
           echo "=== Kubeflow Trainer CRD ==="
@@ -252,6 +259,8 @@ jobs:
             --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
           echo "=== GPU Operator pods ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
+          echo "=== Recent events (gpu-operator) ==="
+          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== Node resources ==="
           kubectl --context="kind-${KIND_CLUSTER_NAME}" describe nodes 2>/dev/null | \
             grep -A 20 "Allocated resources" || true

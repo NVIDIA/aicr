@@ -48,7 +48,7 @@ jobs:
             matched:
               - '.github/workflows/gpu-smoke-test.yaml'
               - '.github/actions/gpu-cluster-setup/**'
-              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/runtime-install/**'
               - '.github/actions/aicr-build/**'
               - '.github/actions/gpu-test-cleanup/**'
               - '.github/actions/load-versions/**'
@@ -95,7 +95,7 @@ jobs:
           validator_phases: 'none'
 
       - name: Install GPU operator (helm)
-        uses: ./.github/actions/gpu-operator-install
+        uses: ./.github/actions/runtime-install
         with:
           method: helm
 

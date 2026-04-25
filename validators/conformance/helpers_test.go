@@ -17,8 +17,10 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestFirstContainerImage(t *testing.T) {
@@ -341,7 +343,7 @@ func TestPodWaitingStatus(t *testing.T) {
 		{
 			name:     "no waiting containers",
 			pod:      &corev1.Pod{},
-			expected: "none",
+			expected: noneValue,
 		},
 		{
 			name: "waiting container",
@@ -412,5 +414,121 @@ func TestNewGangTestRun(t *testing.T) {
 	}
 	if run.suffix == run2.suffix {
 		t.Error("newGangTestRun() two calls produced identical suffixes")
+	}
+}
+
+func TestGangPodClaimNames(t *testing.T) {
+	claimName := "claim-0"
+	templateName := "claim-template"
+	pod := corev1.Pod{
+		Spec: corev1.PodSpec{
+			ResourceClaims: []corev1.PodResourceClaim{
+				{Name: "gpu", ResourceClaimName: &claimName},
+				{Name: "shared", ResourceClaimTemplateName: &templateName},
+			},
+		},
+	}
+
+	got := gangPodClaimNames(pod)
+	if got != "gpu=claim-0,shared=template:claim-template" {
+		t.Errorf("gangPodClaimNames() = %q", got)
+	}
+
+	if got := gangPodClaimNames(corev1.Pod{}); got != noneValue {
+		t.Errorf("gangPodClaimNames(empty) = %q, want %s", got, noneValue)
+	}
+}
+
+func TestSummarizeGangPodsIncludesDiagnostics(t *testing.T) {
+	claimName := "claim-0"
+	pods := []corev1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "pod-b"},
+			Spec: corev1.PodSpec{
+				NodeName:      "node-1",
+				SchedulerName: "kai-scheduler",
+				ResourceClaims: []corev1.PodResourceClaim{
+					{Name: "gpu", ResourceClaimName: &claimName},
+				},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodPending,
+				Conditions: []corev1.PodCondition{
+					{
+						Type:    corev1.PodScheduled,
+						Status:  corev1.ConditionFalse,
+						Reason:  string(corev1.PodReasonUnschedulable),
+						Message: "waiting for gang",
+					},
+				},
+				ContainerStatuses: []corev1.ContainerStatus{
+					{
+						Name:  "worker",
+						Image: "nvidia/cuda:test",
+						State: corev1.ContainerState{
+							Waiting: &corev1.ContainerStateWaiting{
+								Reason:  "ContainerCreating",
+								Message: "pulling image",
+							},
+						},
+					},
+				},
+			},
+		},
+		{ObjectMeta: metav1.ObjectMeta{Name: "pod-a"}},
+	}
+
+	got := summarizeGangPods(pods)
+	for _, want := range []string{
+		"pod-a",
+		"pod-b phase=Pending node=node-1 scheduler=kai-scheduler ready=0/1 waiting=ContainerCreating: pulling image claims=gpu=claim-0",
+		"condition PodScheduled=False reason=Unschedulable message=waiting for gang",
+		"container worker ready=false restartCount=0 state=Waiting(ContainerCreating: pulling image) image=nvidia/cuda:test",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("summarizeGangPods() missing %q in:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "pod-a") > strings.Index(got, "pod-b") {
+		t.Errorf("summarizeGangPods() should sort by pod name, got:\n%s", got)
+	}
+}
+
+func TestSummarizeGangEventsSortsAndCopies(t *testing.T) {
+	oldTime := metav1.NewTime(time.Date(2026, 4, 24, 1, 0, 0, 0, time.UTC))
+	newTime := metav1.NewTime(time.Date(2026, 4, 24, 1, 1, 0, 0, time.UTC))
+	events := []corev1.Event{
+		{
+			ObjectMeta:     metav1.ObjectMeta{Name: "new"},
+			LastTimestamp:  newTime,
+			Type:           corev1.EventTypeWarning,
+			Reason:         "FailedScheduling",
+			Message:        "new event",
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "pod-new"},
+			Count:          2,
+		},
+		{
+			ObjectMeta:     metav1.ObjectMeta{Name: "old"},
+			LastTimestamp:  oldTime,
+			Type:           corev1.EventTypeNormal,
+			Reason:         "Scheduled",
+			Message:        "old event",
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "pod-old"},
+			Count:          1,
+		},
+	}
+
+	got := summarizeGangEvents(events)
+	if !strings.Contains(got, "Pod/pod-old reason=Scheduled count=1 message=old event") {
+		t.Errorf("summarizeGangEvents() missing old event:\n%s", got)
+	}
+	if !strings.Contains(got, "Pod/pod-new reason=FailedScheduling count=2 message=new event") {
+		t.Errorf("summarizeGangEvents() missing new event:\n%s", got)
+	}
+	if strings.Index(got, "pod-old") > strings.Index(got, "pod-new") {
+		t.Errorf("summarizeGangEvents() should sort by event time, got:\n%s", got)
+	}
+	if events[0].Name != "new" {
+		t.Errorf("summarizeGangEvents() mutated input slice order")
 	}
 }

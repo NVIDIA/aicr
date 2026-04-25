@@ -24,10 +24,14 @@ trap 'rm -rf "${HELM_WORKDIR}"' EXIT
 cd "${HELM_WORKDIR}"
 
 HELM_TIMEOUT="10m"
+PREFLIGHT_KUBECTL_TIMEOUT="20s"
 NO_WAIT=false
 BEST_EFFORT=false
 FAILED_COMPONENTS=""
 MAX_RETRIES=5
+# Dump full diagnostics for successful Helm waits that are slow enough to hide
+# image-pull or readiness bottlenecks on cold CI runners.
+SLOW_HELM_DIAGNOSTICS_SECONDS=120
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -78,6 +82,10 @@ function retry() {
   done
 }
 
+function kubectl_preflight() {
+  kubectl --request-timeout="${PREFLIGHT_KUBECTL_TIMEOUT}" "$@"
+}
+
 # Clean up stale Helm hook Jobs before retrying. When a hook Job (e.g.,
 # crd-upgrader) times out or fails, it stays in the namespace and blocks
 # subsequent install attempts with "Job not ready" errors.
@@ -124,24 +132,27 @@ function cleanup_helm_hooks() {
   done <<< "${job_names}"
 }
 
-function dump_kai_scheduler_helm_diagnostics() {
+function dump_component_helm_events() {
   local namespace="$1"
-  if [[ "${namespace}" != "kai-scheduler" ]]; then
-    return
-  fi
+  local desc="$2"
 
-  echo "  --- ${namespace} diagnostics ---"
-  echo "  Jobs:"
-  kubectl get jobs -n "${namespace}" 2>/dev/null || true
-  echo "  Job descriptions:"
-  kubectl describe jobs -n "${namespace}" 2>/dev/null || true
+  echo "  --- ${desc} recent events (${namespace}) ---"
+  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' -o wide 2>/dev/null | tail -50 || true
+  echo "  --- End ${desc} recent events (${namespace}) ---"
+}
+
+function dump_component_helm_diagnostics() {
+  local namespace="$1"
+  local desc="$2"
+
+  echo "  --- ${desc} diagnostics (${namespace}) ---"
   echo "  Pods:"
   kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
-  echo "  Pod descriptions:"
-  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  echo "  Jobs:"
+  kubectl get jobs -n "${namespace}" -o wide 2>/dev/null || true
   echo "  Recent events:"
-  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-  echo "  --- End ${namespace} diagnostics ---"
+  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' -o wide 2>/dev/null | tail -50 || true
+  echo "  --- End ${desc} diagnostics (${namespace}) ---"
 }
 
 # helm_retry contract:
@@ -155,21 +166,40 @@ function helm_retry() {
   local max_retries="$3"
   shift 3
   local attempt=0
+  local rc=0
   while true; do
+    local start
+    start=$(date +%s)
     if "$@"; then
+      local end elapsed
+      end=$(date +%s)
+      elapsed=$((end - start))
+      echo "  ${desc} completed in ${elapsed}s"
+      if [[ ${elapsed} -ge ${SLOW_HELM_DIAGNOSTICS_SECONDS} ]]; then
+        echo "  ${desc} exceeded ${SLOW_HELM_DIAGNOSTICS_SECONDS}s; dumping full diagnostics"
+        dump_component_helm_diagnostics "${namespace}" "${desc}"
+      else
+        dump_component_helm_events "${namespace}" "${desc}"
+      fi
       return 0
+    else
+      rc=$?
+      local end elapsed
+      end=$(date +%s)
+      elapsed=$((end - start))
+      attempt=$((attempt + 1))
+      echo "  ${desc} failed in ${elapsed}s (rc=${rc})"
+      dump_component_helm_diagnostics "${namespace}" "${desc}"
+      if [[ ${attempt} -gt ${max_retries} ]]; then
+        echo "ERROR: ${desc} failed after ${attempt} attempts"
+        return 1
+      fi
+      cleanup_helm_hooks "${namespace}"
+      local wait_secs
+      wait_secs=$(backoff_seconds "${attempt}")
+      echo "RETRY: ${desc} failed (attempt ${attempt}/${max_retries}), retrying in ${wait_secs}s..."
+      sleep "${wait_secs}"
     fi
-    attempt=$((attempt + 1))
-    dump_kai_scheduler_helm_diagnostics "${namespace}"
-    if [[ ${attempt} -gt ${max_retries} ]]; then
-      echo "ERROR: ${desc} failed after ${attempt} attempts"
-      return 1
-    fi
-    cleanup_helm_hooks "${namespace}"
-    local wait_secs
-    wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${desc} failed (attempt ${attempt}/${max_retries}), retrying in ${wait_secs}s..."
-    sleep "${wait_secs}"
   done
 }
 
@@ -243,7 +273,7 @@ BUNDLE_NAMESPACES=$(echo "{{ range .Components }}{{ .Namespace }} {{ end }}" | t
 
 # Check for terminating namespaces that overlap with our components
 for ns in ${BUNDLE_NAMESPACES}; do
-  phase=$(kubectl get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+  phase=$(kubectl_preflight get ns "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null || true)
   if [[ "${phase}" == "Terminating" ]]; then
     echo "ERROR: namespace '${ns}' is still terminating from a previous install."
     echo "  Wait for it to finish, or force-finalize with:"
@@ -266,13 +296,13 @@ if command -v jq &>/dev/null; then
       [[ "${is_bundle_ns}" == "false" ]] && continue
 
       # Use explicit NotFound check to avoid false positives from transient errors
-      svc_check=$(kubectl get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
+      svc_check=$(kubectl_preflight get svc "${svc_name}" -n "${svc_ns}" 2>&1) || true
       if echo "${svc_check}" | grep -q "NotFound\|not found"; then
         echo "ERROR: ${kind} '${wh_name}' references non-existent service ${svc_ns}/${svc_name}."
         echo "  This will block pod/resource creation. Delete with: kubectl delete ${kind} ${wh_name}"
         preflight_failed=true
       fi
-    done < <(kubectl get "${kind}" -o json 2>/dev/null | \
+    done < <(kubectl_preflight get "${kind}" -o json 2>/dev/null | \
       jq -r '.items[] | .metadata.name as $wh | .webhooks[]? | select(.clientConfig.service != null) | [$wh, .clientConfig.service.namespace, .clientConfig.service.name] | @tsv' 2>/dev/null || true)
   done
 else
@@ -281,7 +311,7 @@ fi
 
 # Check for stale API services (e.g., custom.metrics.k8s.io from prometheus-adapter)
 if command -v jq &>/dev/null; then
-  for api_svc in $(kubectl get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
+  for api_svc in $(kubectl_preflight get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true); do
     echo "WARNING: API service '${api_svc}' is unavailable. This can block namespace deletion."
     echo "  Delete with: kubectl delete apiservice ${api_svc}"
     # API service issues are warnings, not hard failures — they don't block deployment directly
@@ -303,7 +333,7 @@ ORPHANED_CRD_GROUPS=""
 {{- if eq .Name "kubeflow-trainer" }} ORPHANED_CRD_GROUPS="${ORPHANED_CRD_GROUPS} trainer.kubeflow.org jobset.x-k8s.io"{{ end }}
 {{- end }}
 for group in ${ORPHANED_CRD_GROUPS}; do
-  orphaned=$(kubectl get crd -o name 2>/dev/null | grep "\.${group}$" || true)
+  orphaned=$(kubectl_preflight get crd -o name 2>/dev/null | grep "\.${group}$" || true)
   if [[ -n "${orphaned}" ]]; then
     echo "WARNING: orphaned CRDs from previous deployment: ${orphaned}"
     echo "  These may cause conflicts. Delete with: kubectl delete ${orphaned}"
@@ -317,7 +347,7 @@ done
 {{- if eq .Name "nodewright-operator" }}
 # Only remove taints if nodewright-operator is not running with available replicas.
 # A crashlooping or scaled-to-zero operator still leaves stale taints.
-nodewright_available=$(kubectl get deploy -n {{ .Namespace }} -l app.kubernetes.io/name=skyhook-operator -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null || echo "0")
+nodewright_available=$(kubectl_preflight get deploy -n {{ .Namespace }} -l app.kubernetes.io/name=skyhook-operator -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null || echo "0")
 if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
   # Extract the taint key from bundle values. The YAML value is a taint string
   # like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
@@ -332,12 +362,12 @@ if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
     NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
     fi
   fi
-  stale_nodewright=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
+  stale_nodewright=$(kubectl_preflight get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
   if [[ -n "${stale_nodewright}" ]]; then
     echo "WARNING: nodes with stale ${NODEWRIGHT_TAINT_KEY} taints (no running nodewright-operator): ${stale_nodewright}"
     echo "  Removing stale taints to unblock scheduling..."
     for node in ${stale_nodewright}; do
-      kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
+      kubectl_preflight taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
     done
   fi
 fi
@@ -371,13 +401,16 @@ retry "{{ .Name }} pre-install manifests" apply_ignoring_crd_race "${SCRIPT_DIR}
   || helm_failed "{{ .Name }}"
 {{ end -}}
 # Per-component timeout override. Most components use HELM_TIMEOUT (10m).
-# Components with slow hooks (e.g., kai-scheduler crd-upgrader image pull
-# on cold runners) get a longer timeout to avoid unnecessary retry cycles.
+# Components with slow hooks (e.g., kai-scheduler crd-upgrader and Dynamo
+# platform chart hooks on cold runners) get a longer timeout to avoid
+# unnecessary retry cycles.
 COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
 COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
 {{ if eq .Name "kai-scheduler" -}}
 COMPONENT_HELM_TIMEOUT="20m"
 COMPONENT_MAX_RETRIES="1"
+{{ else if eq .Name "dynamo-platform" -}}
+COMPONENT_HELM_TIMEOUT="20m"
 {{ end -}}
 # Derive wait args: global --wait/--no-wait behavior + component timeout.
 if [[ "${NO_WAIT}" == "true" ]]; then
