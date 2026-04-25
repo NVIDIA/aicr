@@ -19,6 +19,18 @@ inputs:
   cluster_name:
     description: 'Kind cluster name (used for kubectl context)'
     required: true
+  kwok_helm_timeout:
+    description: 'Timeout for KWOK controller Helm install'
+    required: false
+    default: '300s'
+  ko_build_timeout:
+    description: 'Timeout in seconds for Karpenter KWOK provider ko build'
+    required: false
+    default: '900'
+  karpenter_helm_timeout:
+    description: 'Timeout for Karpenter Helm install'
+    required: false
+    default: '300s'
 
 runs:
   using: 'composite'
@@ -46,6 +58,9 @@ runs:
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
         KARPENTER_VERSION: ${{ steps.versions.outputs.karpenter }}
+        KWOK_HELM_TIMEOUT: ${{ inputs.kwok_helm_timeout }}
+        KO_BUILD_TIMEOUT: ${{ inputs.ko_build_timeout }}
+        KARPENTER_HELM_TIMEOUT: ${{ inputs.karpenter_helm_timeout }}
       run: |
         set -euo pipefail
         bash kwok/scripts/install-karpenter-kwok.sh

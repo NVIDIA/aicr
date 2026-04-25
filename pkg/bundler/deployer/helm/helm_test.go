@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -493,9 +494,9 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	}
 	script := string(content)
 
-	// kai-scheduler should get a custom 20m timeout override
-	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="20m"`) {
-		t.Error("deploy.sh missing kai-scheduler 20m timeout override")
+	// kai-scheduler should get a custom 30m timeout override
+	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="30m"`) {
+		t.Error("deploy.sh missing kai-scheduler 30m timeout override")
 	}
 	// Other components should use the default HELM_TIMEOUT
 	if !strings.Contains(script, `COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"`) {
@@ -505,6 +506,9 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	if !strings.Contains(script, `COMPONENT_MAX_RETRIES="1"`) {
 		t.Error("deploy.sh missing kai-scheduler retry override")
 	}
+	if !strings.Contains(script, `if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]`) {
+		t.Error("deploy.sh missing kai-scheduler retry cap")
+	}
 	if !strings.Contains(script, `dump_kai_scheduler_helm_diagnostics "${namespace}"`) {
 		t.Error("deploy.sh missing kai-scheduler diagnostics hook")
 	}
@@ -513,6 +517,105 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	}
 	if !strings.Contains(script, `kubectl describe pods -n "${namespace}"`) {
 		t.Error("deploy.sh missing pod diagnostics")
+	}
+}
+
+func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
+	retryCapPattern := regexp.MustCompile(`(?m)(if \[\[ "\$\{COMPONENT_MAX_RETRIES\}" -gt \d+ \]\]|COMPONENT_MAX_RETRIES="\d+")`)
+	tests := []struct {
+		name                string
+		component           recipe.ComponentRef
+		wantTimeout         string
+		wantRetryAssignment string
+		wantRetryCap        string
+		wantComment         string
+		rejectRetryCap      bool
+	}{
+		{
+			name: "dynamo-platform",
+			component: recipe.ComponentRef{
+				Name:      "dynamo-platform",
+				Namespace: "dynamo-system",
+				Chart:     "dynamo-platform",
+				Version:   "0.9.0",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "oci://nvcr.io/nvidia/ai-dynamo",
+			},
+			wantTimeout:         `COMPONENT_HELM_TIMEOUT="30m"`,
+			wantRetryAssignment: `COMPONENT_MAX_RETRIES="1"`,
+			wantRetryCap:        `if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]`,
+		},
+		{
+			name: "kube-prometheus-stack",
+			component: recipe.ComponentRef{
+				Name:      "kube-prometheus-stack",
+				Namespace: "monitoring",
+				Chart:     "kube-prometheus-stack",
+				Version:   "82.8.0",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://prometheus-community.github.io/helm-charts",
+			},
+			wantTimeout:    `COMPONENT_HELM_TIMEOUT="20m"`,
+			wantComment:    `Keep the default retry budget for kube-prometheus-stack`,
+			rejectRetryCap: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			g := &Generator{
+				RecipeResult: &recipe.RecipeResult{
+					Kind:            "RecipeResult",
+					APIVersion:      "aicr.nvidia.com/v1alpha1",
+					ComponentRefs:   []recipe.ComponentRef{tt.component},
+					DeploymentOrder: []string{tt.component.Name},
+				},
+				ComponentValues: map[string]map[string]any{
+					tt.component.Name: {},
+				},
+				Version: "v1.0.0",
+			}
+
+			_, err := g.Generate(ctx, outputDir)
+			if err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+			if err != nil {
+				t.Fatalf("failed to read deploy.sh: %v", err)
+			}
+			script := string(content)
+
+			blockStart := strings.Index(script, `Installing `+tt.component.Name)
+			if blockStart == -1 {
+				t.Fatalf("deploy.sh missing %s install block", tt.component.Name)
+			}
+			blockEnd := strings.Index(script[blockStart:], `helm upgrade --install `+tt.component.Name)
+			if blockEnd == -1 {
+				t.Fatalf("deploy.sh missing %s helm install command", tt.component.Name)
+			}
+			componentBlock := script[blockStart : blockStart+blockEnd]
+
+			if !strings.Contains(componentBlock, tt.wantTimeout) {
+				t.Errorf("deploy.sh missing %s timeout override %q", tt.component.Name, tt.wantTimeout)
+			}
+			if tt.wantRetryAssignment != "" && !strings.Contains(componentBlock, tt.wantRetryAssignment) {
+				t.Errorf("deploy.sh missing %s retry override %q", tt.component.Name, tt.wantRetryAssignment)
+			}
+			if tt.wantRetryCap != "" && !strings.Contains(componentBlock, tt.wantRetryCap) {
+				t.Errorf("deploy.sh missing %s retry cap %q", tt.component.Name, tt.wantRetryCap)
+			}
+			if tt.wantComment != "" && !strings.Contains(componentBlock, tt.wantComment) {
+				t.Errorf("deploy.sh missing %s retry rationale", tt.component.Name)
+			}
+			if tt.rejectRetryCap && retryCapPattern.MatchString(componentBlock) {
+				t.Errorf("deploy.sh should not cap %s retries in its component block", tt.component.Name)
+			}
+		})
 	}
 }
 

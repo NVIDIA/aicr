@@ -1,0 +1,116 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Check Control Plane Health'
+description: 'Fails if Kind control-plane static pods are missing, unready, or restarted.'
+
+inputs:
+  cluster_name:
+    description: 'Kind cluster name'
+    required: true
+  namespace:
+    description: 'Namespace that contains the control-plane pods'
+    required: false
+    default: kube-system
+  components:
+    description: 'Space-separated component label values to check'
+    required: false
+    default: kube-apiserver kube-controller-manager kube-scheduler etcd
+  wait_timeout:
+    description: 'Timeout for each component readiness wait'
+    required: false
+    default: 60s
+  max_restarts:
+    description: 'Maximum tolerated restart count for each control-plane container'
+    required: false
+    default: '1'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check control-plane pods
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        COMPONENTS: ${{ inputs.components }}
+        WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
+        MAX_RESTARTS: ${{ inputs.max_restarts }}
+      run: |
+        set -euo pipefail
+
+        MAX_RESTARTS="${MAX_RESTARTS#"${MAX_RESTARTS%%[![:space:]]*}"}"
+        MAX_RESTARTS="${MAX_RESTARTS%"${MAX_RESTARTS##*[![:space:]]}"}"
+        if ! [[ "${MAX_RESTARTS}" =~ ^[0-9]+$ ]]; then
+          echo "::error::max_restarts must be a non-negative integer, got '${MAX_RESTARTS}'"
+          exit 1
+        fi
+
+        kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw='/readyz' || true
+
+        check_component() {
+          local component="$1"
+          local selector="component=${component}"
+          local pods
+
+          pods=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+            get pod -l "${selector}" -o name)
+          if [[ -z "${pods}" ]]; then
+            echo "::error::no ${component} pods found in ${NAMESPACE} with selector ${selector}"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+              get pods -o wide || true
+            exit 1
+          fi
+
+          if ! kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+            wait --for=condition=Ready pod -l "${selector}" --timeout="${WAIT_TIMEOUT}"; then
+            echo "::error::${component} pods did not become Ready within ${WAIT_TIMEOUT}"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+              get pod -l "${selector}" -o wide || true
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+              describe pod -l "${selector}" || true
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+              get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw='/readyz' || true
+            exit 1
+          fi
+
+          local restart_counts
+          restart_counts=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+            get pod -l "${selector}" \
+            -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}')
+          if [[ -z "${restart_counts}" ]]; then
+            echo "::error::no container statuses found for ${component} pods"
+            kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+              describe pod -l "${selector}" || true
+            exit 1
+          fi
+
+          while IFS= read -r restart_count; do
+            [[ -z "${restart_count}" ]] && continue
+            if (( restart_count > MAX_RESTARTS )); then
+              echo "::error::${component} restartCount=${restart_count}"
+              kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+                get pod -l "${selector}" -o wide || true
+              kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+                describe pod -l "${selector}" || true
+              exit 1
+            fi
+          done <<< "${restart_counts}"
+        }
+
+        for component in ${COMPONENTS}; do
+          check_component "${component}"
+        done
+        kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw='/readyz'

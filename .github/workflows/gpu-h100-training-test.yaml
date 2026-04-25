@@ -50,6 +50,7 @@ jobs:
               - '.settings.yaml'
               - '.github/actions/gpu-cluster-setup/**'
               - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/check-control-plane-health/**'
               - '.github/actions/aicr-build/**'
               - '.github/actions/setup-build-tools/**'
               - '.github/actions/install-karpenter-kwok/**'
@@ -92,7 +93,9 @@ jobs:
       group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 120
+    # Cold self-hosted H100 runners can spend most of the old budget pulling
+    # images and loading Kind nodes before validation starts.
+    timeout-minutes: 180
 
     env:
       KIND_CLUSTER_NAME: gpu-training-test
@@ -112,6 +115,12 @@ jobs:
         with:
           validator_phases: 'conformance'
 
+      - name: Check control plane health
+        uses: ./.github/actions/check-control-plane-health
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait_timeout: 120s
+
       - name: Install runtime bundle
         id: bundle-install
         uses: ./.github/actions/gpu-operator-install
@@ -120,6 +129,14 @@ jobs:
           accelerator: h100
           intent: training
           platform: kubeflow
+          wait: 'true'
+          best_effort: 'false'
+
+      - name: Check control plane health after runtime install
+        uses: ./.github/actions/check-control-plane-health
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait_timeout: 120s
 
       # --- Snapshot and GPU validation ---
 
@@ -129,15 +146,31 @@ jobs:
           gpu_model: H100
           min_gpu_count: '2'
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          snapshot_timeout: 10m
 
       # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
+
+      - name: Check control plane health before Karpenter
+        uses: ./.github/actions/check-control-plane-health
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait_timeout: 120s
 
       - name: Install Karpenter + KWOK
         uses: ./.github/actions/install-karpenter-kwok
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          kwok_helm_timeout: 600s
+          ko_build_timeout: '1200'
+          karpenter_helm_timeout: 600s
 
       # --- Health checks ---
+
+      - name: Check control plane health after Karpenter
+        uses: ./.github/actions/check-control-plane-health
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait_timeout: 120s
 
       - name: Prepare chainsaw
         id: versions
@@ -168,6 +201,12 @@ jobs:
             --kubeconfig="${HOME}/.kube/config" \
             --debug
 
+      - name: Check control plane health before conformance validation
+        uses: ./.github/actions/check-control-plane-health
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          wait_timeout: 120s
+
       - name: Validate CNCF AI Conformance
         id: validate-conformance
         run: |
@@ -186,8 +225,9 @@ jobs:
 
       # --- Validation artifacts ---
 
-      # Collect a post-run resource snapshot regardless of whether conformance
-      # validation ran, so triage always has a cluster-state artifact.
+      # Collect a post-run resource snapshot whenever the runtime bundle
+      # installed. This preserves triage data for snapshot/chainsaw/conformance
+      # failures; continue-on-error keeps the original failure intact.
       - name: Collect validation artifacts
         if: >-
           always()

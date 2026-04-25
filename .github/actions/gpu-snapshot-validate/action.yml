@@ -26,6 +26,10 @@ inputs:
   cluster_name:
     description: 'Kind cluster name (for kubectl context)'
     required: true
+  snapshot_timeout:
+    description: 'Timeout for aicr snapshot'
+    required: false
+    default: '5m'
 
 runs:
   using: composite
@@ -38,6 +42,7 @@ runs:
           --namespace=default \
           --image=ko.local:smoke-test \
           --require-gpu \
+          --timeout="${{ inputs.snapshot_timeout }}" \
           --output=snapshot.yaml
         echo "--- Snapshot output ---"
         cat snapshot.yaml

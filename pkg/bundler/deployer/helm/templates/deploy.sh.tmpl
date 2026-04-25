@@ -371,13 +371,25 @@ retry "{{ .Name }} pre-install manifests" apply_ignoring_crd_race "${SCRIPT_DIR}
   || helm_failed "{{ .Name }}"
 {{ end -}}
 # Per-component timeout override. Most components use HELM_TIMEOUT (10m).
-# Components with slow hooks (e.g., kai-scheduler crd-upgrader image pull
-# on cold runners) get a longer timeout to avoid unnecessary retry cycles.
+# Components with slow hooks on cold runners get a longer timeout to avoid
+# unnecessary retry cycles.
 COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
 COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
 {{ if eq .Name "kai-scheduler" -}}
+COMPONENT_HELM_TIMEOUT="30m"
+if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
+  COMPONENT_MAX_RETRIES="1"
+fi
+{{ else if eq .Name "dynamo-platform" -}}
+COMPONENT_HELM_TIMEOUT="30m"
+if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
+  COMPONENT_MAX_RETRIES="1"
+fi
+{{ else if eq .Name "kube-prometheus-stack" -}}
 COMPONENT_HELM_TIMEOUT="20m"
-COMPONENT_MAX_RETRIES="1"
+# Keep the default retry budget for kube-prometheus-stack. On cold H100
+# runners, Grafana can hit ProgressDeadlineExceeded multiple times before
+# images and rollout state are warm enough for a later retry to succeed.
 {{ end -}}
 # Derive wait args: global --wait/--no-wait behavior + component timeout.
 if [[ "${NO_WAIT}" == "true" ]]; then

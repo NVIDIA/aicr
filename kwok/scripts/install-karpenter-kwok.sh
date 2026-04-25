@@ -41,7 +41,9 @@ KARPENTER_VERSION="${KARPENTER_VERSION:-v1.8.0}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:?KIND_CLUSTER_NAME must be set}"
 KARPENTER_NAMESPACE="${KARPENTER_NAMESPACE:-karpenter}"
 KARPENTER_CLONE_DIR="${KARPENTER_CLONE_DIR:-/tmp/karpenter}"
+KWOK_HELM_TIMEOUT="${KWOK_HELM_TIMEOUT:-300s}"
 KO_BUILD_TIMEOUT="${KO_BUILD_TIMEOUT:-900}"  # 15 minutes
+KARPENTER_HELM_TIMEOUT="${KARPENTER_HELM_TIMEOUT:-300s}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -68,7 +70,7 @@ install_kwok() {
     helm upgrade --install kwok-controller kwok/kwok \
         --namespace kube-system \
         --set hostNetwork=true \
-        --wait --timeout 300s
+        --wait --timeout "${KWOK_HELM_TIMEOUT}"
 
     helm upgrade --install kwok-stage-fast kwok/stage-fast \
         --namespace kube-system
@@ -98,11 +100,16 @@ build_karpenter() {
     # Redirect stderr to avoid Go compilation warnings corrupting the image reference.
     # Output format: kind.local/<name>:<content-hash>
     # Hard timeout prevents a slow/stuck compilation from consuming the entire job.
+    local ko_stderr="${KARPENTER_CLONE_DIR}/ko-build.stderr"
     CONTROLLER_IMG=$(timeout "${KO_BUILD_TIMEOUT}" \
         env KO_DOCKER_REPO=kind.local \
         KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME}" \
-        ko build sigs.k8s.io/karpenter/kwok 2>/dev/null) || {
+        ko build sigs.k8s.io/karpenter/kwok 2>"${ko_stderr}") || {
         log_error "ko build failed or timed out after ${KO_BUILD_TIMEOUT}s"
+        if [[ -s "${ko_stderr}" ]]; then
+            log_error "ko build stderr:"
+            sed 's/^/  /' "${ko_stderr}" || true
+        fi
         exit 1
     }
 
@@ -187,7 +194,7 @@ deploy_karpenter() {
         --set 'controller.extraVolumeMounts[0].readOnly=true' \
         --set 'controller.env[0].name=INSTANCE_TYPES_FILE_PATH' \
         --set 'controller.env[0].value=/etc/karpenter/instance-types/instance-types.json' \
-        --wait --timeout 300s \
+        --wait --timeout "${KARPENTER_HELM_TIMEOUT}" \
         || {
             log_error "Helm install failed. Diagnostics:"
             kubectl -n "${KARPENTER_NAMESPACE}" get pods -o wide 2>/dev/null || true
@@ -213,6 +220,7 @@ main() {
     log_info "Karpenter version: ${KARPENTER_VERSION}"
     log_info "Kind cluster: ${KIND_CLUSTER_NAME}"
     log_info "Namespace: ${KARPENTER_NAMESPACE}"
+    log_info "Timeouts: kwok=${KWOK_HELM_TIMEOUT} ko-build=${KO_BUILD_TIMEOUT}s karpenter=${KARPENTER_HELM_TIMEOUT}"
 
     install_kwok
     build_karpenter

@@ -31,6 +31,14 @@ inputs:
     description: 'Platform for recipe generation (bundle mode only, e.g. dynamo)'
     required: false
     default: ''
+  wait:
+    description: 'Wait for bundle Helm resources during deploy'
+    required: false
+    default: 'false'
+  best_effort:
+    description: 'Continue deploying remaining bundle components after a component failure'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -82,8 +90,7 @@ runs:
           --intent ${{ inputs.intent }} \
           ${PLATFORM_FLAG} \
           --output recipe.yaml
-        echo "--- Recipe ---"
-        cat recipe.yaml
+        echo "Recipe written to recipe.yaml"
 
     - name: Generate deployment bundle
       if: inputs.method == 'bundle'
@@ -101,19 +108,23 @@ runs:
       shell: bash
       run: |
         cd bundle
-        # Use --no-wait: several components (gpu-operator ClusterPolicy,
-        # kai-scheduler SchedulingShard, nvidia-dra-driver-gpu kubelet plugin)
-        # stay InProgress in kind because their CRs/DaemonSets require
-        # features not available in kind (DRA feature gates, driver modules).
-        # The explicit "Wait for GPU operands" step below gates on what
-        # actually matters (device plugin readiness).
-        # --best-effort: some components (e.g. network-operator) have Helm
-        # hooks that may time out in Kind; continue deploying remaining
-        # components so the overall stack is functional.
+        # The default keeps legacy bundle-mode behavior: do not wait on every
+        # Helm resource and keep deploying after component failures. H100
+        # qualification jobs override these inputs to hard-fail and wait.
         chmod +x deploy.sh
-        echo "--- deploy.sh ---"
-        cat deploy.sh
-        ./deploy.sh --no-wait --best-effort
+        DEPLOY_ARGS=()
+        if [[ "${{ inputs.wait }}" != "true" ]]; then
+          DEPLOY_ARGS+=(--no-wait)
+        fi
+        if [[ "${{ inputs.best_effort }}" == "true" ]]; then
+          DEPLOY_ARGS+=(--best-effort)
+        fi
+        if [[ "${#DEPLOY_ARGS[@]}" -gt 0 ]]; then
+          echo "Deploying bundle with args: ${DEPLOY_ARGS[*]}"
+        else
+          echo "Deploying bundle with default args"
+        fi
+        ./deploy.sh "${DEPLOY_ARGS[@]}"
 
     - name: Wait for GPU operands (bundle)
       if: inputs.method == 'bundle'

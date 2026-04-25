@@ -40,6 +40,15 @@ runs:
         kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
         kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
         kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded > /tmp/debug-artifacts/non-running-pods.txt || true
+        tar_inputs=()
+        [[ -f recipe.yaml ]] && tar_inputs+=(recipe.yaml)
+        [[ -d bundle ]] && tar_inputs+=(bundle)
+        if [[ "${#tar_inputs[@]}" -gt 0 ]]; then
+          echo "Archiving runtime bundle inputs: ${tar_inputs[*]}"
+          tar -czf /tmp/debug-artifacts/aicr-runtime-bundle.tar.gz "${tar_inputs[@]}" || true
+        else
+          echo "No recipe.yaml or bundle directory found; skipping runtime bundle archive"
+        fi
 
     - name: Export kind logs
       if: failure()

@@ -73,6 +73,8 @@ spec:
 
     - name: assert-kubeflow-trainer
       description: Verify Kubeflow Trainer controller, validating webhook, and TrainJob CRD are available.
+      timeouts:
+        assert: 600s
       try:
         - assert:
             file: assert-kubeflow-trainer.yaml
