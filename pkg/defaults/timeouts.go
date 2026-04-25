@@ -151,6 +151,9 @@ const (
 	// ComponentRenderTimeout is the maximum time to render a single component
 	// via helm template or manifest file rendering during resource discovery.
 	ComponentRenderTimeout = 60 * time.Second
+
+	// EvidenceRenderTimeout is the timeout for rendering conformance evidence.
+	EvidenceRenderTimeout = 30 * time.Second
 )
 
 // Chainsaw assertion configuration for component health checks.

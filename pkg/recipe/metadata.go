@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"maps"
 	"sort"
 	"strings"
 
@@ -374,7 +373,7 @@ func (e *ExcludedOverlay) UnmarshalYAML(node *yaml.Node) error {
 	type rawExcludedOverlay ExcludedOverlay
 	var raw rawExcludedOverlay
 	if err := node.Decode(&raw); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode excluded overlay", err)
 	}
 	*e = ExcludedOverlay(raw)
 	return nil
@@ -392,7 +391,7 @@ func (e *ExcludedOverlay) UnmarshalJSON(data []byte) error {
 	type rawExcludedOverlay ExcludedOverlay
 	var raw rawExcludedOverlay
 	if err := json.Unmarshal(data, &raw); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to decode excluded overlay JSON", err)
 	}
 	*e = ExcludedOverlay(raw)
 	return nil
@@ -568,12 +567,12 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 		result.ValuesFile = overlay.ValuesFile
 	}
 
-	// Overrides: merge maps, overlay takes precedence
+	// Overrides: deep-merge maps, overlay takes precedence
 	if len(overlay.Overrides) > 0 {
 		if result.Overrides == nil {
 			result.Overrides = make(map[string]any)
 		}
-		maps.Copy(result.Overrides, overlay.Overrides)
+		deepMergeMap(result.Overrides, overlay.Overrides)
 	}
 
 	// Patches: overlay replaces if set
@@ -754,4 +753,37 @@ func (s *RecipeMetadataSpec) TopologicalSort() ([]string, error) {
 	}
 
 	return result, nil
+}
+
+// deepMergeMap copies all key-value pairs from src into dst. For keys whose
+// values are nested maps in both src and dst, the merge recurses so that
+// inner maps are not shared by reference between the two trees.
+func deepMergeMap(dst, src map[string]any) {
+	for k, sv := range src {
+		svMap, svIsMap := sv.(map[string]any)
+		if !svIsMap {
+			dst[k] = sv
+			continue
+		}
+		dvMap, dvIsMap := dst[k].(map[string]any)
+		if !dvIsMap {
+			// dst has no nested map at this key — deep-copy src subtree
+			dst[k] = deepCopyAnyMap(svMap)
+			continue
+		}
+		deepMergeMap(dvMap, svMap)
+	}
+}
+
+// deepCopyAnyMap returns a deep copy of a map[string]any tree.
+func deepCopyAnyMap(m map[string]any) map[string]any {
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		if nested, ok := v.(map[string]any); ok {
+			cp[k] = deepCopyAnyMap(nested)
+		} else {
+			cp[k] = v
+		}
+	}
+	return cp
 }

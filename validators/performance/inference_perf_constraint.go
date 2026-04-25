@@ -963,7 +963,7 @@ func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkload
 		Namespace(config.namespace).
 		Delete(cleanupCtx, inferenceDeploymentName, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		slog.Error("Failed to delete DynamoGraphDeployment", "error", err)
+		slog.Warn("failed to delete DynamoGraphDeployment", "error", err)
 	} else {
 		slog.Info("Deleted DynamoGraphDeployment")
 	}
@@ -987,7 +987,7 @@ func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkload
 	// Delete namespace (cascades all remaining resources).
 	err = ctx.Clientset.CoreV1().Namespaces().Delete(cleanupCtx, config.namespace, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		slog.Error("Failed to delete namespace", "error", err)
+		slog.Warn("failed to delete namespace", "error", err)
 	} else {
 		slog.Info("Deleted namespace", "namespace", config.namespace)
 	}

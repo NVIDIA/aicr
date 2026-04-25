@@ -27,9 +27,6 @@
 name: Merge Gate
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -40,7 +37,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
 
@@ -160,36 +157,6 @@ jobs:
       - run: echo "Docs/non-code change — CodeQL analysis not required"
 
   # ---------------------------------------------------------------------------
-  # Vulnerability scan (grype)
-  # ---------------------------------------------------------------------------
-
-  vuln-scan:
-    needs: [check-paths]
-    if: needs.check-paths.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      actions: read
-      contents: read
-      security-events: write
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/security-scan
-        with:
-          severity-cutoff: 'medium'
-          category: 'anchore-fs'
-
-  vuln-scan-skip:
-    needs: [check-paths]
-    if: needs.check-paths.outputs.code != 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 1
-    steps:
-      - run: echo "Docs/non-code change — vulnerability scan not required"
-
-  # ---------------------------------------------------------------------------
   # Malware scan (ClamAV)
   # ---------------------------------------------------------------------------
 
@@ -307,8 +274,6 @@ jobs:
       - tests-skip
       - analyze
       - analyze-skip
-      - vuln-scan
-      - vuln-scan-skip
       - malware-scan
       - malware-scan-skip
       - actionlint

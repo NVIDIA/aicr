@@ -307,7 +307,7 @@ func runValidation(
 
 	// Generate conformance evidence if requested.
 	if cfg.evidenceDir != "" {
-		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, 30*time.Second) //nolint:mnd // Evidence rendering is fast, 30s is generous
+		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
 		defer evidenceCancel()
 
 		renderer := evidence.New(evidence.WithOutputDir(cfg.evidenceDir))
@@ -483,7 +483,7 @@ Run validation without failing on check errors (informational mode):
 			}
 
 			if err := initDataProvider(cmd); err != nil {
-				return err
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 			}
 
 			evidenceDir := cmd.String("evidence-dir")

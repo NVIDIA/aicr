@@ -53,7 +53,7 @@ type MetadataStore struct {
 }
 
 // loadMetadataStore loads and caches the metadata store from the data provider.
-func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
+func loadMetadataStore(ctx context.Context) (*MetadataStore, error) {
 	metadataStoreOnce.Do(func() {
 		// Record cache miss on first load
 		recipeCacheMisses.Inc()
@@ -70,6 +70,9 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 		err := provider.WalkDir("", func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk data directory", err)
+			}
+			if ctx.Err() != nil {
+				return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "context canceled during metadata load", ctx.Err())
 			}
 			if d.IsDir() {
 				return nil
@@ -187,6 +190,14 @@ func loadMetadataStore(_ context.Context) (*MetadataStore, error) {
 	return cachedMetadataStore, nil
 }
 
+// ResetMetadataStoreForTesting clears the cached metadata store so that
+// tests can reload with different data. Must only be called from tests.
+func ResetMetadataStoreForTesting() {
+	metadataStoreOnce = sync.Once{}
+	cachedMetadataStore = nil
+	cachedMetadataErr = nil
+}
+
 // GetValuesFile returns the content of a values file by filename.
 func (s *MetadataStore) GetValuesFile(filename string) ([]byte, error) {
 	content, exists := s.ValuesFiles[filename]
@@ -276,9 +287,14 @@ func (s *MetadataStore) FindMatchingOverlays(criteria *Criteria) []*RecipeMetada
 	// Filter to maximal leaf candidates
 	matches = s.filterToMaximalLeaves(matches)
 
-	// Sort by specificity (least specific first, so more specific overlays are applied later)
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].Spec.Criteria.Specificity() < matches[j].Spec.Criteria.Specificity()
+	// Sort by specificity (least specific first, so more specific overlays are applied later).
+	// SliceStable guarantees deterministic output when overlays share the same specificity.
+	sort.SliceStable(matches, func(i, j int) bool {
+		si, sj := matches[i].Spec.Criteria.Specificity(), matches[j].Spec.Criteria.Specificity()
+		if si != sj {
+			return si < sj
+		}
+		return matches[i].Metadata.Name < matches[j].Metadata.Name
 	})
 
 	return matches

@@ -139,8 +139,10 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	snapshotCollectorDuration.WithLabelValues("metadata").Observe(time.Since(metadataStart).Seconds())
 	slog.Debug("obtained node metadata", slog.String("name", nodeName), slog.String("version", n.Version))
 
-	// Launch all collectors in parallel — each degrades gracefully on error
-	g, _ := errgroup.WithContext(ctx)
+	// Launch all collectors in parallel — each degrades gracefully on error.
+	// Derived context is unused because collectSafe swallows all errors (never
+	// triggers early cancellation), so a plain Group suffices.
+	var g errgroup.Group
 	g.Go(collectSafe("k8s", n.Factory.CreateKubernetesCollector()))
 	g.Go(collectSafe("systemd", n.Factory.CreateSystemDCollector()))
 	g.Go(collectSafe("os", n.Factory.CreateOSCollector()))

@@ -23,14 +23,6 @@ on:
       - 'docs/**'
       - 'site/**'
       - 'LICENSE'
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'site/**'
-      - 'LICENSE'
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -45,10 +37,10 @@ env:
   EXPECTED_PLATFORMS: "linux/amd64 linux/arm64"
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # Cancel in-progress PR runs but not main pushes — every main merge must
-  # complete to produce its immutable sha-<commit> image tag.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Never cancel main pushes — every merge must complete to produce its
+  # immutable sha-<commit> image tag.
+  cancel-in-progress: false
 
 jobs:
 

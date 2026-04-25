@@ -145,7 +145,7 @@ func (s *Server) loggingMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(rw, r)
 
 		duration := time.Since(start)
-		slog.Debug("request completed",
+		slog.Info("request completed",
 			"requestID", requestID,
 			"method", r.Method,
 			"path", r.URL.Path,
