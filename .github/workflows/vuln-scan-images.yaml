@@ -1,0 +1,358 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Daily Image Vulnerability Scan
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Daily at 6:00 AM UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+env:
+  VALIDATOR_IMAGE_PREFIX: ghcr.io/nvidia/aicr-validators
+  VALIDATOR_PHASES: "deployment performance conformance aiperf-bench"
+  SCAN_TAG: scan-${{ github.sha }}
+
+jobs:
+
+  # =============================================================================
+  # Build Ko Images (aicr, aicrd)
+  # =============================================================================
+
+  build-ko:
+    name: Build Ko Images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c  # v6.4.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: true
+
+      - name: Setup build tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_ko: 'true'
+          ko_version: ${{ steps.versions.outputs.ko }}
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build and push aicr
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicr
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicr \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${SCAN_TAG}"
+
+      - name: Build and push aicrd
+        env:
+          GOFLAGS: -mod=vendor
+          KO_DOCKER_REPO: ghcr.io/nvidia/aicrd
+          KO_DEFAULTBASEIMAGE: gcr.io/distroless/static:nonroot
+        run: |
+          set -euo pipefail
+          ko build ./cmd/aicrd \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --image-label="org.opencontainers.image.revision=${{ github.sha }}" \
+            --tags="${SCAN_TAG}"
+
+  # =============================================================================
+  # Build Docker Validator Images
+  # =============================================================================
+
+  build-docker:
+    name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [deployment, performance, conformance, aiperf-bench]
+        arch: [amd64, arm64]
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+          - phase: aiperf-bench
+            dockerfile: validators/performance/aiperf-bench.Dockerfile
+            image_title: aicr-aiperf-bench
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Build and push
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ env.SCAN_TAG }}-${{ matrix.arch }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image_title || format('aicr-validator-{0}', matrix.phase) }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  # =============================================================================
+  # Docker Manifest: Combine per-arch images into multi-arch manifests
+  # =============================================================================
+
+  docker-manifest:
+    name: Docker Manifest
+    runs-on: ubuntu-latest
+    needs: [build-docker]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4.0.0
+
+      - name: Create multi-arch manifests
+        run: |
+          set -euo pipefail
+          for phase in ${VALIDATOR_PHASES}; do
+            IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}"
+            docker buildx imagetools create \
+              -t "${IMAGE}:${SCAN_TAG}" \
+              "${IMAGE}:${SCAN_TAG}-amd64" \
+              "${IMAGE}:${SCAN_TAG}-arm64"
+          done
+
+  # =============================================================================
+  # Scan: Vulnerability scan all images
+  # =============================================================================
+
+  scan:
+    name: Scan (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    needs: [build-ko, docker-manifest]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ghcr.io/nvidia/aicr
+          - ghcr.io/nvidia/aicrd
+          - ghcr.io/nvidia/aicr-validators/deployment
+          - ghcr.io/nvidia/aicr-validators/performance
+          - ghcr.io/nvidia/aicr-validators/conformance
+          - ghcr.io/nvidia/aicr-validators/aiperf-bench
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to registry
+        uses: ./.github/actions/ghcr-login
+
+      - name: Scan container image
+        id: scan
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2  # v7.4.0
+        with:
+          image: '${{ matrix.image }}:${{ env.SCAN_TAG }}'
+          severity-cutoff: 'high'
+          output-format: json
+          only-fixed: true
+          fail-build: false
+          config: .grype.yaml
+
+      - name: Extract severity counts
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          JSON_FILE="${{ steps.scan.outputs.json }}"
+          if [[ -f "${JSON_FILE}" ]]; then
+            CRITICAL=$(jq '[.matches[] | select(.vulnerability.severity == "Critical")] | length' "${JSON_FILE}")
+            HIGH=$(jq '[.matches[] | select(.vulnerability.severity == "High")] | length' "${JSON_FILE}")
+            MEDIUM=$(jq '[.matches[] | select(.vulnerability.severity == "Medium")] | length' "${JSON_FILE}")
+            LOW=$(jq '[.matches[] | select(.vulnerability.severity == "Low")] | length' "${JSON_FILE}")
+            NEGLIGIBLE=$(jq '[.matches[] | select(.vulnerability.severity == "Negligible")] | length' "${JSON_FILE}")
+          else
+            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0; NEGLIGIBLE=0
+          fi
+
+          SHORT_NAME="${IMAGE##*/}"
+          mkdir -p scan-results
+          echo "${SHORT_NAME}: ${CRITICAL} critical, ${HIGH} high, ${MEDIUM} medium, ${LOW} low, ${NEGLIGIBLE} negligible" \
+            > "scan-results/${SHORT_NAME}.txt"
+
+      - name: Upload scan result
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: scan-${{ strategy.job-index }}
+          path: scan-results/
+          retention-days: 1
+
+  # =============================================================================
+  # Notify: Post scan results to Slack (always runs)
+  # =============================================================================
+
+  notify:
+    name: Slack Notification
+    runs-on: ubuntu-latest
+    needs: [scan]
+    if: always() && needs.scan.result != 'cancelled'
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Download all scan results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          pattern: scan-*
+          merge-multiple: true
+          path: scan-results
+
+      - name: Post to Slack
+        env:
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          SHA: ${{ github.sha }}
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${SHA:0:7}"
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M')
+          RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
+
+          RESULTS=""
+          for f in scan-results/*.txt; do
+            [[ -f "$f" ]] || continue
+            LINE=$(cat "$f")
+            RESULTS="${RESULTS}\\n• ${LINE}"
+          done
+
+          MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}\\n<${RUN_URL}|View run>"
+
+          if [[ -n "${SLACK_SERVICE}" ]]; then
+            curl -sSf -X POST \
+              -H 'Content-type: application/json' \
+              --data "{\"text\":\"${MESSAGE}\"}" \
+              "https://hooks.slack.com/services/${SLACK_SERVICE}"
+          else
+            echo "SLACK_SERVICE not set, skipping notification"
+            echo -e "${MESSAGE}"
+          fi
+
+  # =============================================================================
+  # Cleanup: Delete all scan-* images from GHCR (always runs)
+  # =============================================================================
+
+  cleanup:
+    name: Cleanup Scan Images
+    runs-on: ubuntu-latest
+    needs: [notify]
+    if: always()
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Delete scan images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # All image paths to clean up (org-level packages)
+          IMAGES=(
+            "nvidia/aicr"
+            "nvidia/aicrd"
+            "nvidia/aicr-validators/deployment"
+            "nvidia/aicr-validators/performance"
+            "nvidia/aicr-validators/conformance"
+            "nvidia/aicr-validators/aiperf-bench"
+          )
+
+          for IMAGE in "${IMAGES[@]}"; do
+            # URL-encode the package name (slashes become %2F)
+            PKG_NAME=$(echo "${IMAGE}" | sed 's|/|%2F|g')
+
+            echo "Cleaning ${IMAGE}..."
+
+            # List versions matching the scan tag
+            VERSIONS=$(gh api \
+              "orgs/NVIDIA/packages/container/${PKG_NAME}/versions?per_page=100" \
+              --jq ".[] | select(.metadata.container.tags | any(startswith(\"${SCAN_TAG}\"))) | .id" \
+              2>/dev/null || true)
+
+            for VID in ${VERSIONS}; do
+              echo "  Deleting version ${VID}"
+              gh api \
+                --method DELETE \
+                "orgs/NVIDIA/packages/container/${PKG_NAME}/versions/${VID}" \
+                2>/dev/null || true
+            done
+          done

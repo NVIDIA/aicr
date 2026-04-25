@@ -72,20 +72,3 @@ spec:
         intent: inference
       dependencyRefs:
         - nodewright-operator
-
-  # NCCL fabric health checks. NET exercises EFA (inter-node), NVLS exercises
-  # MNNVL (intra-NVL72). Both matter for multi-node inference that spans the
-  # fabric (tensor-parallel serving, MoE expert parallelism); single-node
-  # deployments hit the WorkerCount < 2 skip path gracefully. Thresholds sized
-  # for a 2-node GB200 pair — will be raised once production NVL72 data is
-  # available.
-  validation:
-    performance:
-      checks:
-        - nccl-all-reduce-bw-net
-        - nccl-all-reduce-bw-nvls
-      constraints:
-        - name: nccl-all-reduce-bw-net
-          value: ">= 40"
-        - name: nccl-all-reduce-bw-nvls
-          value: ">= 500"

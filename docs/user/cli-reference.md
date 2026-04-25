@@ -991,7 +991,7 @@ aicr bundle -r recipe.yaml --nodes 8 -o ./bundles
 
 # Day 2 options: workload-gate and workload-selector for nodewright
 aicr bundle -r recipe.yaml \
-  --workload-gate skyhook.io/runtime-required=true:NoSchedule \
+  --workload-gate skyhook.nvidia.com/runtime-required=true:NoSchedule \
   --workload-selector workload-type=training \
   -o ./bundles
 
@@ -1230,7 +1230,7 @@ aicr bundle -r recipe.yaml \
 ```shell
 # Generate bundle with day 2 options for training workloads
 aicr bundle -r recipe.yaml \
-  --workload-gate skyhook.io/runtime-required=true:NoSchedule \
+  --workload-gate skyhook.nvidia.com/runtime-required=true:NoSchedule \
   --workload-selector workload-type=training \
   --workload-selector intent=training \
   --accelerated-node-selector accelerator=nvidia-h100 \
