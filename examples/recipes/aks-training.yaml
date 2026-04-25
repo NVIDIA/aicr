@@ -135,13 +135,13 @@ componentRefs:
     valuesFile: components/prometheus-adapter/values.yaml
     dependencyRefs:
       - kube-prometheus-stack
-  - name: skyhook-operator
+  - name: nodewright-operator
     namespace: skyhook
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: v0.13.1
-    valuesFile: components/skyhook-operator/values.yaml
+    valuesFile: components/nodewright-operator/values.yaml
 deploymentOrder:
   - cert-manager
   - kube-prometheus-stack
@@ -151,7 +151,7 @@ deploymentOrder:
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
-  - skyhook-operator
+  - nodewright-operator
 validation:
   deployment:
     constraints:

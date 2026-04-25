@@ -53,34 +53,6 @@ jobs:
             const body = context.payload.issue.body || '';
             const existingLabels = new Set((context.payload.issue.labels || []).map(label => label.name));
 
-            async function loadAreaAssignees() {
-              const { data: file } = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: '.settings.yaml',
-              });
-              const content = Buffer.from(file.content, 'base64').toString('utf8');
-
-              const assignees = {};
-              let inBlock = false;
-              for (const line of content.split('\n')) {
-                if (line.startsWith('area_assignees:')) {
-                  inBlock = true;
-                  continue;
-                }
-                if (inBlock) {
-                  const m = line.match(/^\s+(area\/\S+):\s*(.+)/);
-                  if (m) {
-                    assignees[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
-                  } else if (/^\S/.test(line)) {
-                    break;
-                  }
-                }
-              }
-
-              return assignees;
-            }
-
             const componentPatterns = [
               { pattern: /\bcli\b/, label: 'area/cli' },
               { pattern: /\bapi server\b|\baicrd\b/, label: 'area/api' },
@@ -247,21 +219,6 @@ jobs:
               core.info(`Issue already has ${areaLabel}`);
             }
 
-            const assignees = await loadAreaAssignees();
-            const value = assignees[areaLabel];
-            if (value) {
-              const users = [...new Set(value.split(',').map(u => u.trim()).filter(Boolean))];
-              core.info(`Assigning issue to [${users.join(', ')}] for ${areaLabel}`);
-              await github.rest.issues.addAssignees({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                assignees: users,
-              });
-            } else {
-              core.info(`No assignee configured for ${areaLabel}`);
-            }
-
             try {
               await github.rest.issues.removeLabel({
                 owner: context.repo.owner,
@@ -297,64 +254,4 @@ jobs:
                 issue_number: context.issue.number,
                 name: 'needs-triage',
               });
-            }
-
-      - name: Assign by area label
-        if: >-
-          github.event.action == 'labeled' &&
-          startsWith(github.event.label.name, 'area/')
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
-        with:
-          script: |
-            try {
-              const label = context.payload.label.name;
-              const issue = context.issue.number;
-              core.info(`[assign] label=${label} issue=#${issue}`);
-
-              const { data: file } = await github.rest.repos.getContent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                path: '.settings.yaml',
-              });
-              core.info(`[assign] fetched .settings.yaml (${file.size} bytes, encoding=${file.encoding})`);
-
-              const content = Buffer.from(file.content, 'base64').toString('utf8');
-
-              // Parse area_assignees from .settings.yaml
-              const assignees = {};
-              let inBlock = false;
-              for (const line of content.split('\n')) {
-                if (line.startsWith('area_assignees:')) {
-                  inBlock = true;
-                  continue;
-                }
-                if (inBlock) {
-                  const m = line.match(/^\s+(area\/\S+):\s*(.+)/);
-                  if (m) {
-                    assignees[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
-                  } else if (/^\S/.test(line)) {
-                    break;
-                  }
-                }
-              }
-              core.info(`[assign] parsed map: ${JSON.stringify(assignees)}`);
-
-              const value = assignees[label];
-              if (!value) {
-                core.warning(`[assign] no assignee configured for label "${label}"`);
-                return;
-              }
-
-              const users = [...new Set(value.split(',').map(u => u.trim()).filter(Boolean))];
-              core.info(`[assign] assigning [${users.join(', ')}] to issue #${issue}`);
-
-              const result = await github.rest.issues.addAssignees({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issue,
-                assignees: users,
-              });
-              core.info(`[assign] API status=${result.status}, assignees=${result.data.assignees.map(a => a.login).join(',')}`);
-            } catch (err) {
-              core.setFailed(`[assign] failed: ${err.message} (status=${err.status || 'n/a'})`);
             }

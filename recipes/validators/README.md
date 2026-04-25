@@ -47,6 +47,8 @@ Applied by `catalog.Load` in order:
 | Name | Description | Timeout |
 |------|-------------|---------|
 | `nccl-all-reduce-bw` | Verify NCCL All Reduce Bus Bandwidth meets threshold | 30m |
+| `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS) | 30m |
+| `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 
 ### Conformance Phase
 

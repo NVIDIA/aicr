@@ -103,10 +103,10 @@ tests/chainsaw/
 - **K8s-native** -- apply resources, assert state, cleanup with `cleanup` blocks
 - **Parallel execution** -- independent tests run concurrently
 - **JUnit reporting** -- CI-friendly test output
-- **Consistent with skyhook** -- same patterns used in [skyhook/k8s-tests/chainsaw](https://github.com/NVIDIA/skyhook/tree/main/k8s-tests/chainsaw)
+- **Consistent with nodewright** -- same patterns used in [nodewright/k8s-tests/chainsaw](https://github.com/NVIDIA/nodewright/tree/main/k8s-tests/chainsaw)
 
 ## References
 
 - [Kyverno Chainsaw](https://github.com/kyverno/chainsaw)
 - [Chainsaw Documentation](https://kyverno.github.io/chainsaw/)
-- [Skyhook Chainsaw Tests](https://github.com/NVIDIA/skyhook/tree/main/k8s-tests/chainsaw)
+- [Nodewright Chainsaw Tests](https://github.com/NVIDIA/nodewright/tree/main/k8s-tests/chainsaw)

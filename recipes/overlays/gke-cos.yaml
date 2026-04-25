@@ -66,7 +66,7 @@ spec:
           affinity:
             nodeAffinity: null
 
-    - name: skyhook-operator
+    - name: nodewright-operator
       type: Helm
       overrides:
         controllerManager:
@@ -74,8 +74,8 @@ spec:
             env:
               # GKE COS has a read-only rootfs, so we need to use a different directory
               # /etc is stateless so better represents the flag and history on reboot
-              copyDirRoot: /etc/skyhook
-              # Because what skyhook does is generally on /etc we need to reapply on reboot
+              copyDirRoot: /etc/nodewright
+              # Because what nodewright does is generally on /etc we need to reapply on reboot
               reapplyOnReboot: "true"
 
   validation:

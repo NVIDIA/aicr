@@ -88,7 +88,7 @@ spec:
                 k8s-ephemeral-storage-metrics kai-scheduler \
                 kgateway kgateway-crds kube-prometheus-stack \
                 nvidia-dra-driver-gpu nvsentinel prometheus-adapter \
-                skyhook-customizations skyhook-operator; do
+                nodewright-customizations nodewright-operator; do
                 test -d "${WORK}/bundle/${component}" || { echo "missing: ${component}"; exit 1; }
               done
             check:

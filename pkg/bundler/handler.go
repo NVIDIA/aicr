@@ -51,9 +51,9 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 //   - accelerated-node-toleration: Tolerations for GPU nodes in format "key=value:effect" (can be repeated)
 //   - deployer: Deployment method (helm, argocd, or argocd-helm; default helm)
 //   - repo: Git repository URL for GitOps deployments (used with deployer=argocd)
-//   - workload-gate: Taint for skyhook-operator runtime required in format "key=value:effect" or "key:effect"
-//   - workload-selector: Label selector for skyhook-customizations in format "key=value" (can be repeated)
-//   - nodes: Estimated number of GPU nodes (sets estimatedNodeCount in skyhook-operator; 0 = unset)
+//   - workload-gate: Taint for nodewright-operator runtime required in format "key=value:effect" or "key:effect"
+//   - workload-selector: Label selector for nodewright-customizations in format "key=value" (can be repeated)
+//   - nodes: Estimated number of GPU nodes (sets estimatedNodeCount in nodewright-operator; 0 = unset)
 //
 // The response is a zip archive containing the Helm per-component bundle:
 //   - README.md: Root deployment guide

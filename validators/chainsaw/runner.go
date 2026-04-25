@@ -26,8 +26,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/kyverno/chainsaw/pkg/apis"
 	"github.com/kyverno/chainsaw/pkg/apis/v1alpha1"
@@ -99,31 +100,17 @@ func Run(ctx context.Context, asserts []ComponentAssert, timeout time.Duration, 
 
 	results := make([]Result, len(asserts))
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, defaults.ChainsawMaxParallel)
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(defaults.ChainsawMaxParallel)
 
 	for i, ca := range asserts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			// Acquire semaphore with context cancellation check.
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				results[i] = Result{
-					Component: ca.Name,
-					Error:     errors.Wrap(errors.ErrCodeInternal, "context canceled before execution", ctx.Err()),
-				}
-				return
-			}
-
-			results[i] = assertComponent(ctx, ca, timeout, fetcher, &cfg)
-		}()
+		g.Go(func() error {
+			results[i] = assertComponent(gctx, ca, timeout, fetcher, &cfg)
+			return nil
+		})
 	}
 
-	wg.Wait()
+	_ = g.Wait() // Individual errors are captured in results; group always returns nil.
 	return results
 }
 

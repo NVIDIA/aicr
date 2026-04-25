@@ -57,8 +57,9 @@ func TestTimeoutConstants(t *testing.T) {
 		// Validation phase timeouts
 		{"ResourceVerificationTimeout", ResourceVerificationTimeout, 5 * time.Second, 30 * time.Second},
 
-		// Conformance check execution timeout
-		{"CheckExecutionTimeout", CheckExecutionTimeout, 5 * time.Minute, 15 * time.Minute},
+		// Conformance check execution timeout — parent ctx for all in-Job checks,
+		// sized for the slowest (cold-start inference benchmark).
+		{"CheckExecutionTimeout", CheckExecutionTimeout, 30 * time.Minute, 60 * time.Minute},
 
 		// Gang scheduling co-scheduling window
 		{"CoScheduleWindow", CoScheduleWindow, 10 * time.Second, 60 * time.Second},
@@ -123,9 +124,54 @@ func TestHTTPClientTimeoutRelationships(t *testing.T) {
 
 func TestCheckExecutionTimeoutRelationships(t *testing.T) {
 	// Individual check timeouts must fit within the execution context.
-	if DRATestPodTimeout >= CheckExecutionTimeout {
-		t.Errorf("DRATestPodTimeout (%v) should be less than CheckExecutionTimeout (%v)",
-			DRATestPodTimeout, CheckExecutionTimeout)
+	childTimeouts := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{"DRATestPodTimeout", DRATestPodTimeout},
+		{"GangTestPodTimeout", GangTestPodTimeout},
+		{"InferenceHealthTimeout", InferenceHealthTimeout},
+		{"InferencePerfJobTimeout", InferencePerfJobTimeout},
+		{"InferencePerfPodTimeout", InferencePerfPodTimeout},
+		{"InferenceWorkloadReadyTimeout", InferenceWorkloadReadyTimeout},
+	}
+	for _, c := range childTimeouts {
+		if c.timeout >= CheckExecutionTimeout {
+			t.Errorf("%s (%v) should be less than CheckExecutionTimeout (%v)",
+				c.name, c.timeout, CheckExecutionTimeout)
+		}
+	}
+
+	// All serial phases of the inference pipeline that consume the parent
+	// CheckExecutionTimeout must together fit under it. This mirrors the
+	// worst-case happy path inside validateInferencePerf:
+	//
+	//   InferenceNamespaceTerminationWait (5m)  — prior run's ns drain
+	//   + InferenceWorkloadReadyTimeout   (10m) — DynamoGraphDeployment ready
+	//   + InferenceHealthTimeout          (5m)  — frontend /health probe
+	//   + InferencePerfPodTimeout         (5m)  — AIPerf pod scheduling
+	//   + InferencePerfJobTimeout         (15m) — AIPerf benchmark runtime
+	//
+	// Cleanup (K8sCleanupTimeout) uses a fresh context.Background and does
+	// not consume this budget — documented via the separate assertion below.
+	inferenceSequential := InferenceNamespaceTerminationWait +
+		InferenceWorkloadReadyTimeout +
+		InferenceHealthTimeout +
+		InferencePerfPodTimeout +
+		InferencePerfJobTimeout
+	if inferenceSequential >= CheckExecutionTimeout {
+		t.Errorf("Inference sequential phases %v (NamespaceTermination + WorkloadReady + Health + PerfPod + PerfJob) must be less than CheckExecutionTimeout (%v)",
+			inferenceSequential, CheckExecutionTimeout)
+	}
+
+	// Cleanup runs post-ctx under its own background context, but we still
+	// want the parent ceiling plus cleanup to comfortably fit within the
+	// catalog's Job-level activeDeadlineSeconds ceiling (verified at the
+	// catalog-loading layer, not here) so a Job kill doesn't interrupt the
+	// cleanup path mid-delete.
+	if CheckExecutionTimeout+K8sCleanupTimeout >= 60*time.Minute {
+		t.Errorf("CheckExecutionTimeout (%v) + K8sCleanupTimeout (%v) should stay well under a 1h Job ceiling to leave room for scheduling delays",
+			CheckExecutionTimeout, K8sCleanupTimeout)
 	}
 }
 

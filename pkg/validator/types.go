@@ -31,6 +31,10 @@ type Validator struct {
 	// Version is the validator version (typically the CLI version).
 	Version string
 
+	// Commit is the git commit SHA from the CLI build. Used to resolve
+	// dev-build validator images to SHA-tagged images pushed by on-push CI.
+	Commit string
+
 	// Namespace is the Kubernetes namespace for validation Jobs.
 	Namespace string
 

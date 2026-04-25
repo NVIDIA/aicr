@@ -33,25 +33,42 @@ spec:
       value: ">= 1.32.4"
 
   componentRefs:
+    # GB200+EKS GPU Operator prerequisites. Keep in sync with the same block
+    # in gb200-eks-training.yaml. The NVreg flag and cdi+gdrcopy are needed
+    # for multi-node inference that crosses EFA — tensor-parallel serving
+    # over the network has the same dma-buf attach requirement as training
+    # all-reduce. The mixin system can't extend componentRefs already
+    # declared in the inheritance chain, so this lives per-leaf for now.
     - name: gpu-operator
       type: Helm
+      manifestFiles:
+        - components/gpu-operator/manifests/kernel-module-params.yaml
       dependencyRefs:
         - nfd
         - cert-manager
         - kube-prometheus-stack
-        - skyhook-customizations
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+        driver:
+          version: 580.126.20
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
 
-    # GB200 uses skyhook no-op: the H100 tuning packages (nvidia-setup,
+    # GB200 uses nodewright no-op: the H100 tuning packages (nvidia-setup,
     # nvidia-tuned) are not compatible with GB200's ARM64 host CPU and
     # Blackwell GPU architecture. Replace with tuning.yaml once GB200-specific
-    # packages are available. See docs/integrator/eks-dynamo-networking.md#gb200-skyhook-note.
-    - name: skyhook-customizations
+    # packages are available.
+    - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/no-op.yaml
       overrides:
         service: eks
         accelerator: gb200
         intent: inference
       dependencyRefs:
-        - skyhook-operator
+        - nodewright-operator

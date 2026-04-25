@@ -277,6 +277,8 @@ func (g *Generator) writeStaticValuesAndBuildStubs(outputDir string) ([]string, 
 					component.RemoveValueByPath(staticValues, path)
 					component.SetValueByPath(stubs, path, val)
 				} else {
+					slog.Warn("dynamic path not found in component values; introducing empty placeholder",
+						"component", ref.Name, "path", path)
 					component.SetValueByPath(stubs, path, "")
 				}
 			}

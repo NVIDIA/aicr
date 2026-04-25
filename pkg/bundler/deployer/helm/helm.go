@@ -520,6 +520,8 @@ func writeClusterValuesFile(values map[string]any, dynamicPaths []string, compon
 			component.RemoveValueByPath(values, path)
 		} else {
 			val = ""
+			slog.Warn("dynamic path not found in component values; introducing empty placeholder",
+				"component", componentName, "path", path)
 		}
 		component.SetValueByPath(clusterValues, path, val)
 	}

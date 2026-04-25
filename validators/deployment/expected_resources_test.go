@@ -45,10 +45,10 @@ import (
 // an intentionally-different name to prove the role-suffix discovery works.
 const testDefaultDRADSName = "nvidia-dra-driver-gpu-kubelet-plugin"
 
-// testSkyhookManifest is the path of the Skyhook manifest the AICR embedded
+// testNodewrightManifest is the path of the Nodewright manifest the AICR embedded
 // data provider ships for the eks/h100/inference recipe used in most tests.
 // Declaring it once here keeps test setup aligned with the recipe defaults.
-const testSkyhookManifest = "components/skyhook-customizations/manifests/tuning.yaml"
+const testNodewrightManifest = "components/nodewright-customizations/manifests/tuning.yaml"
 
 // testAICRCreatedBy{Key,Value} mirror the label convention AICR manifests
 // apply to synthesized fixtures that should look like real production objects.
@@ -83,11 +83,11 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 		},
 		[]runtime.Object{
 			clusterPolicyWithState(clusterPolicyReadyState),
-			skyhookWithStatus("tuning", skyhookCompleteState),
+			nodewrightWithStatus("tuning", nodewrightCompleteState),
 		},
 		[]recipe.ComponentRef{
 			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
-			{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 			{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 			{
 				Name:      "app-component",
@@ -101,10 +101,11 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+		return
 	}
 }
 
-func TestCheckExpectedResources_FailsWhenSkyhookIncomplete(t *testing.T) {
+func TestCheckExpectedResources_FailsWhenNodewrightIncomplete(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContext(t,
@@ -116,21 +117,23 @@ func TestCheckExpectedResources_FailsWhenSkyhookIncomplete(t *testing.T) {
 		},
 		[]runtime.Object{
 			clusterPolicyWithState(clusterPolicyReadyState),
-			skyhookWithStatus("tuning", "waiting"),
+			nodewrightWithStatus("tuning", "waiting"),
 		},
 		[]recipe.ComponentRef{
 			{Name: gpuOperatorComponent, Namespace: "gpu-operator"},
-			{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 			{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
 		},
 	)
 
 	err := checkExpectedResources(ctx)
 	if err == nil {
-		t.Fatal("expected error when Skyhook is not complete")
+		t.Fatal("expected error when Nodewright is not complete")
+		return
 	}
-	if !strings.Contains(err.Error(), "Skyhook tuning: status=waiting") {
-		t.Fatalf("expected Skyhook readiness failure, got: %v", err)
+	if !strings.Contains(err.Error(), "Nodewright tuning: status=waiting") {
+		t.Fatalf("expected Nodewright readiness failure, got: %v", err)
+		return
 	}
 }
 
@@ -150,9 +153,11 @@ func TestCheckExpectedResources_FailsWhenNamespaceNotActive(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when namespace is not Active")
+		return
 	}
 	if !strings.Contains(err.Error(), "namespace app-ns: phase=Terminating") {
 		t.Fatalf("expected namespace readiness failure, got: %v", err)
+		return
 	}
 }
 
@@ -167,7 +172,7 @@ func TestCheckExpectedResources_SkipsDisabledComponents(t *testing.T) {
 		nil,
 		[]recipe.ComponentRef{
 			{
-				Name:      skyhookComponent,
+				Name:      nodewrightCustomizationsComponent,
 				Namespace: "skyhook",
 				Overrides: map[string]any{"enabled": false},
 			},
@@ -188,64 +193,69 @@ func TestCheckExpectedResources_SkipsDisabledComponents(t *testing.T) {
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil for disabled optional components", err)
+		return
 	}
 }
 
-// Regression test: Skyhook is a cluster-scoped CR. The validator must list it
+// Regression test: Nodewright is a cluster-scoped CR. The validator must list it
 // without a namespace; otherwise the API server returns 404 even when the
 // resource exists on a real cluster.
-func TestVerifySkyhookReady_ListsClusterScoped(t *testing.T) {
+func TestVerifyNodewrightReady_ListsClusterScoped(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{activeNamespace("skyhook")},
-		[]runtime.Object{skyhookWithStatus("tuning", skyhookCompleteState)},
-		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+		[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
 	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil for cluster-scoped Skyhook", err)
+		t.Fatalf("checkExpectedResources() error = %v, want nil for cluster-scoped Nodewright", err)
+		return
 	}
 }
 
-// Issue #607 acceptance: Skyhook check must skip gracefully when the CRD is
-// not registered on the cluster, even when skyhook-customizations is declared
+// Issue #607 acceptance: Nodewright check must skip gracefully when the CRD is
+// not registered on the cluster, even when nodewright-customizations is declared
 // in the recipe's componentRefs.
-func TestCheckExpectedResources_SkipsSkyhookWhenCRDNotRegistered(t *testing.T) {
+func TestCheckExpectedResources_SkipsNodewrightWhenCRDNotRegistered(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithUnregistered(t,
 		[]runtime.Object{activeNamespace("skyhook")},
 		nil,
-		[]schema.GroupVersionResource{skyhookGVR},
-		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+		[]schema.GroupVersionResource{nodewrightGVR},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
 	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil when Skyhook CRD is not registered", err)
+		t.Fatalf("checkExpectedResources() error = %v, want nil when Nodewright CRD is not registered", err)
+		return
 	}
 }
 
-// When the Skyhook CRD is registered but the specific CR declared by the
-// recipe is absent, verifySkyhookReady should take the explicit IsNotFound
+// When the Nodewright CRD is registered but the specific CR declared by the
+// recipe is absent, verifyNodewrightReady should take the explicit IsNotFound
 // branch and surface the recipe-scoped "declared but missing" diagnostic.
-func TestCheckExpectedResources_FailsWhenSkyhookCRMissing(t *testing.T) {
+func TestCheckExpectedResources_FailsWhenNodewrightCRMissing(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContextWithDiscovery(t,
 		[]runtime.Object{activeNamespace("skyhook")},
 		nil,
-		[]schema.GroupVersion{skyhookGVR.GroupVersion()},
+		[]schema.GroupVersion{nodewrightGVR.GroupVersion()},
 		nil,
-		[]recipe.ComponentRef{{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}}},
+		[]recipe.ComponentRef{{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}},
 	)
 
 	err := checkExpectedResources(ctx)
 	if err == nil {
-		t.Fatal("expected error when Skyhook CR is missing but CRD is registered")
+		t.Fatal("expected error when Nodewright CR is missing but CRD is registered")
+		return
 	}
-	if !strings.Contains(err.Error(), "Skyhook tuning: not found (recipe declared it but the cluster has no such CR)") {
-		t.Fatalf("expected recipe-scoped Skyhook not-found failure, got: %v", err)
+	if !strings.Contains(err.Error(), "Nodewright tuning: not found (recipe declared it but the cluster has no such CR)") {
+		t.Fatalf("expected recipe-scoped Nodewright not-found failure, got: %v", err)
+		return
 	}
 }
 
@@ -264,6 +274,7 @@ func TestCheckExpectedResources_SkipsClusterPolicyWhenCRDNotRegistered(t *testin
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil when ClusterPolicy CRD is not registered", err)
+		return
 	}
 }
 
@@ -286,6 +297,7 @@ func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *tes
 	clientset, ok := ctx.Clientset.(*k8sfake.Clientset)
 	if !ok {
 		t.Fatalf("expected *k8sfake.Clientset, got %T", ctx.Clientset)
+		return
 	}
 	// Resource name is the literal string "resource" (not "apiresources") —
 	// that is the string FakeDiscovery hard-codes when synthesizing the
@@ -305,12 +317,15 @@ func TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError(t *tes
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when discovery returns a non-NotFound error (fail-closed)")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to discover") {
 		t.Fatalf("expected discovery failure to surface, got: %v", err)
+		return
 	}
 	if strings.Contains(err.Error(), "not registered, skipping") {
 		t.Fatalf("discovery failure must not be treated as CRD-not-registered skip, got: %v", err)
+		return
 	}
 }
 
@@ -333,18 +348,20 @@ func TestCheckExpectedResources_FailsWhenClusterPolicyCRMissing(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when ClusterPolicy CR is missing but CRD is registered")
+		return
 	}
 	if !strings.Contains(err.Error(), "failed to get ClusterPolicy cluster-policy") {
 		t.Fatalf("expected ClusterPolicy-missing failure, got: %v", err)
+		return
 	}
 }
 
-// TestCheckExpectedResources_IgnoresStaleUnrelatedSkyhook pins the fix for
-// Codex review comment #2: an unrelated Skyhook CR left on the cluster from
+// TestCheckExpectedResources_IgnoresStaleUnrelatedNodewright pins the fix for
+// Codex review comment #2: an unrelated Nodewright CR left on the cluster from
 // a prior deploy (or from a different tenant) must NOT influence this
-// recipe's readiness result. The check is scoped to the Skyhook name(s) the
+// recipe's readiness result. The check is scoped to the Nodewright name(s) the
 // recipe itself declares via ComponentRef.ManifestFiles.
-func TestCheckExpectedResources_IgnoresStaleUnrelatedSkyhook(t *testing.T) {
+func TestCheckExpectedResources_IgnoresStaleUnrelatedNodewright(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContext(t,
@@ -353,28 +370,29 @@ func TestCheckExpectedResources_IgnoresStaleUnrelatedSkyhook(t *testing.T) {
 		},
 		[]runtime.Object{
 			// The recipe's manifestFiles point at tuning.yaml → expected name "tuning".
-			skyhookWithStatus("tuning", skyhookCompleteState),
-			// A stale "no-op" Skyhook lingering on the cluster in waiting state
+			nodewrightWithStatus("tuning", nodewrightCompleteState),
+			// A stale "no-op" Nodewright lingering on the cluster in waiting state
 			// (simulating a partially-cleaned previous deploy). It happens to
 			// carry the AICR label — under the pre-fix implementation this would
 			// have failed the check.
-			skyhookWithStatus("no-op", "waiting"),
+			nodewrightWithStatus("no-op", "waiting"),
 		},
 		[]recipe.ComponentRef{
-			{Name: skyhookComponent, Namespace: "skyhook", ManifestFiles: []string{testSkyhookManifest}},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
 		},
 	)
 
 	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil — stale unrelated Skyhook must not affect the result", err)
+		t.Fatalf("checkExpectedResources() error = %v, want nil — stale unrelated Nodewright must not affect the result", err)
+		return
 	}
 }
 
-// TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames pins the
-// fail-closed behavior when an enabled skyhook-customizations ref declares
-// no manifest files (or the manifests contain no Skyhook CRs). Rather than
+// TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames pins the
+// fail-closed behavior when an enabled nodewright-customizations ref declares
+// no manifest files (or the manifests contain no Nodewright CRs). Rather than
 // silently pass, the check must surface this as a recipe misconfiguration.
-func TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames(t *testing.T) {
+func TestCheckExpectedResources_FailsWhenNoExpectedNodewrightNames(t *testing.T) {
 	t.Parallel()
 
 	ctx := newDeploymentTestContext(t,
@@ -384,16 +402,18 @@ func TestCheckExpectedResources_FailsWhenNoExpectedSkyhookNames(t *testing.T) {
 		nil,
 		[]recipe.ComponentRef{
 			// Intentionally no ManifestFiles — simulates a misconfigured recipe.
-			{Name: skyhookComponent, Namespace: "skyhook"},
+			{Name: nodewrightCustomizationsComponent, Namespace: "skyhook"},
 		},
 	)
 
 	err := checkExpectedResources(ctx)
 	if err == nil {
-		t.Fatal("expected error when enabled skyhook-customizations ref has no expected Skyhook names")
+		t.Fatal("expected error when enabled nodewright-customizations ref has no expected Nodewright names")
+		return
 	}
-	if !strings.Contains(err.Error(), "no Skyhook CR names could be extracted") {
-		t.Fatalf("expected 'no Skyhook CR names could be extracted' failure, got: %v", err)
+	if !strings.Contains(err.Error(), "no Nodewright CR names could be extracted") {
+		t.Fatalf("expected 'no Nodewright CR names could be extracted' failure, got: %v", err)
+		return
 	}
 }
 
@@ -415,9 +435,11 @@ func TestCheckExpectedResources_FailsWhenClusterPolicyMissingState(t *testing.T)
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when ClusterPolicy status.state is missing")
+		return
 	}
 	if !strings.Contains(err.Error(), "ClusterPolicy status.state not found") {
 		t.Fatalf("expected ClusterPolicy readiness failure, got: %v", err)
+		return
 	}
 }
 
@@ -437,9 +459,11 @@ func TestCheckExpectedResources_FailsWhenDRAKubeletPluginMissing(t *testing.T) {
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when DRA kubelet plugin DaemonSet is missing")
+		return
 	}
 	if !strings.Contains(err.Error(), "no kubelet-plugin DaemonSet") {
 		t.Fatalf("expected DRA missing DaemonSet failure, got: %v", err)
+		return
 	}
 }
 
@@ -460,12 +484,15 @@ func TestCheckExpectedResources_FailsWhenDRAKubeletPluginIsUnhealthy(t *testing.
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when DRA kubelet plugin DaemonSet is unhealthy")
+		return
 	}
 	if !strings.Contains(err.Error(), "DaemonSet nvidia-dra-driver/"+testDefaultDRADSName) {
 		t.Fatalf("expected DRA DaemonSet context in failure, got: %v", err)
+		return
 	}
 	if !strings.Contains(err.Error(), "not healthy: 1/2 pods ready") {
 		t.Fatalf("expected unhealthy DaemonSet detail, got: %v", err)
+		return
 	}
 }
 
@@ -486,9 +513,11 @@ func TestCheckExpectedResources_FailsWhenDRAKubeletPluginHasNoScheduledPods(t *t
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when DRA kubelet plugin DaemonSet has no scheduled pods")
+		return
 	}
 	if !strings.Contains(err.Error(), "no ready kubelet-plugin pods scheduled (0/0 pods ready)") {
 		t.Fatalf("expected zero-pod DaemonSet detail, got: %v", err)
+		return
 	}
 }
 
@@ -516,6 +545,7 @@ func TestCheckExpectedResources_DRAKubeletPluginCustomName(t *testing.T) {
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil for custom-named kubelet-plugin DaemonSet", err)
+		return
 	}
 }
 
@@ -541,13 +571,16 @@ func TestCheckExpectedResources_FailsWhenMultipleKubeletPluginDaemonSets(t *test
 	err := checkExpectedResources(ctx)
 	if err == nil {
 		t.Fatal("expected error when multiple kubelet-plugin DaemonSets match")
+		return
 	}
 	if !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("expected ambiguity failure, got: %v", err)
+		return
 	}
 	for _, name := range []string{"alpha-kubelet-plugin", "beta-kubelet-plugin"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Fatalf("expected matched DaemonSet name %q in failure, got: %v", name, err)
+			return
 		}
 	}
 }
@@ -575,14 +608,15 @@ func TestCheckExpectedResources_IgnoresUnrelatedDaemonSetInNamespace(t *testing.
 
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil — unrelated DaemonSet must be ignored", err)
+		return
 	}
 }
 
-// TestCheckExpectedResources_SurfacesMultipleSkyhookFailures pins Codex's
-// non-blocking observation #1: when a recipe declares multiple Skyhook CRs
+// TestCheckExpectedResources_SurfacesMultipleNodewrightFailures pins Codex's
+// non-blocking observation #1: when a recipe declares multiple Nodewright CRs
 // and several are non-complete, all failures must surface in the error so
 // the user can diagnose the whole state, not just the first issue.
-func TestCheckExpectedResources_SurfacesMultipleSkyhookFailures(t *testing.T) {
+func TestCheckExpectedResources_SurfacesMultipleNodewrightFailures(t *testing.T) {
 	t.Parallel()
 
 	// Use a synthetic recipe ref whose ManifestFiles point at the two real
@@ -591,16 +625,16 @@ func TestCheckExpectedResources_SurfacesMultipleSkyhookFailures(t *testing.T) {
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{activeNamespace("skyhook")},
 		[]runtime.Object{
-			skyhookWithStatus("tuning", "waiting"),
-			skyhookWithStatus("no-op", "erroring"),
+			nodewrightWithStatus("tuning", "waiting"),
+			nodewrightWithStatus("no-op", "erroring"),
 		},
 		[]recipe.ComponentRef{
 			{
-				Name:      skyhookComponent,
+				Name:      nodewrightCustomizationsComponent,
 				Namespace: "skyhook",
 				ManifestFiles: []string{
-					"components/skyhook-customizations/manifests/tuning.yaml",
-					"components/skyhook-customizations/manifests/no-op.yaml",
+					"components/nodewright-customizations/manifests/tuning.yaml",
+					"components/nodewright-customizations/manifests/no-op.yaml",
 				},
 			},
 		},
@@ -608,22 +642,24 @@ func TestCheckExpectedResources_SurfacesMultipleSkyhookFailures(t *testing.T) {
 
 	err := checkExpectedResources(ctx)
 	if err == nil {
-		t.Fatal("expected error when multiple expected Skyhooks are non-complete")
+		t.Fatal("expected error when multiple expected Nodewrights are non-complete")
+		return
 	}
 	for _, needle := range []string{
-		"Skyhook tuning: status=waiting",
-		"Skyhook no-op: status=erroring",
+		"Nodewright tuning: status=waiting",
+		"Nodewright no-op: status=erroring",
 	} {
 		if !strings.Contains(err.Error(), needle) {
 			t.Fatalf("expected %q in failure, got: %v", needle, err)
+			return
 		}
 	}
 }
 
-// TestExtractSkyhookNamesFromManifest exercises the narrow manifest parser
+// TestExtractNodewrightNamesFromManifest exercises the narrow manifest parser
 // directly. The most important case is Codex's: tuning-gke.yaml's filename
 // suggests "tuning-gke" but the actual metadata.name is "tuning".
-func TestExtractSkyhookNamesFromManifest(t *testing.T) {
+func TestExtractNodewrightNamesFromManifest(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -675,7 +711,7 @@ metadata:
 		},
 		{
 			name: "Helm template preamble — not-valid-YAML lines do not break extraction",
-			content: []byte(`{{- $cust := index .Values "skyhook-customizations" }}
+			content: []byte(`{{- $cust := index .Values "nodewright-customizations" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
 ---
 apiVersion: skyhook.nvidia.com/v1alpha1
@@ -684,7 +720,7 @@ metadata:
   annotations:
     "helm.sh/hook": post-install,post-upgrade
   labels:
-    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/part-of: nodewright-operator
   name: tuning
   namespace: {{ .Release.Namespace }}
 spec:
@@ -717,29 +753,32 @@ metadata:
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := extractSkyhookNamesFromManifest(tc.content)
+			got := extractNodewrightNamesFromManifest(tc.content)
 			if !stringSlicesEqual(got, tc.want) {
-				t.Fatalf("extractSkyhookNamesFromManifest(...) = %v, want %v", got, tc.want)
+				t.Fatalf("extractNodewrightNamesFromManifest(...) = %v, want %v", got, tc.want)
+				return
 			}
 		})
 	}
 }
 
-// TestExtractSkyhookNamesFromManifest_TuningGke is the regression test for
+// TestExtractNodewrightNamesFromManifest_TuningGke is the regression test for
 // Codex's explicit ask: tuning-gke.yaml's metadata.name is "tuning", not
 // "tuning-gke". A basename-derived heuristic would get this wrong.
-func TestExtractSkyhookNamesFromManifest_TuningGke(t *testing.T) {
+func TestExtractNodewrightNamesFromManifest_TuningGke(t *testing.T) {
 	t.Parallel()
 
-	content, err := recipe.GetManifestContent("components/skyhook-customizations/manifests/tuning-gke.yaml")
+	content, err := recipe.GetManifestContent("components/nodewright-customizations/manifests/tuning-gke.yaml")
 	if err != nil {
 		t.Fatalf("failed to load tuning-gke manifest: %v", err)
+		return
 	}
 
-	got := extractSkyhookNamesFromManifest(content)
+	got := extractNodewrightNamesFromManifest(content)
 	want := []string{"tuning"}
 	if !stringSlicesEqual(got, want) {
-		t.Fatalf("extractSkyhookNamesFromManifest(tuning-gke.yaml) = %v, want %v (metadata.name is 'tuning', not the filename basename)", got, want)
+		t.Fatalf("extractNodewrightNamesFromManifest(tuning-gke.yaml) = %v, want %v (metadata.name is 'tuning', not the filename basename)", got, want)
+		return
 	}
 }
 
@@ -852,6 +891,7 @@ func configureFakeDiscovery(
 	fakeDisc, ok := clientset.Discovery().(*fakediscovery.FakeDiscovery)
 	if !ok {
 		t.Fatalf("expected *fakediscovery.FakeDiscovery, got %T", clientset.Discovery())
+		return
 	}
 	for gv := range gvSet {
 		fakeDisc.Resources = append(fakeDisc.Resources, &metav1.APIResourceList{
@@ -884,8 +924,8 @@ func gvrForTestObject(gvk schema.GroupVersionKind) schema.GroupVersionResource {
 	switch {
 	case gvk.Group == clusterPolicyGVR.Group && gvk.Version == clusterPolicyGVR.Version && gvk.Kind == "ClusterPolicy":
 		return clusterPolicyGVR
-	case gvk.Group == skyhookGVR.Group && gvk.Version == skyhookGVR.Version && gvk.Kind == "Skyhook":
-		return skyhookGVR
+	case gvk.Group == nodewrightGVR.Group && gvk.Version == nodewrightGVR.Version && gvk.Kind == "Skyhook":
+		return nodewrightGVR
 	default:
 		return schema.GroupVersionResource{
 			Group:    gvk.Group,
@@ -914,7 +954,7 @@ func (f *fakeDynamicClient) Resource(resource schema.GroupVersionResource) dynam
 // resource", not a silently empty list).
 var clusterScopedGVRs = map[schema.GroupVersionResource]bool{
 	clusterPolicyGVR: true,
-	skyhookGVR:       true,
+	nodewrightGVR:    true,
 }
 
 type fakeResourceClient struct {
@@ -1117,9 +1157,9 @@ func clusterPolicyWithState(state string) *unstructured.Unstructured {
 	}
 }
 
-// skyhookWithStatus builds a Skyhook fixture. Skyhook is a cluster-scoped CR,
+// nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
 // so metadata.namespace is intentionally not set.
-func skyhookWithStatus(name, status string) *unstructured.Unstructured {
+func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "skyhook.nvidia.com/v1alpha1",

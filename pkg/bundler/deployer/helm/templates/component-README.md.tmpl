@@ -46,6 +46,7 @@ helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f values.yaml \
+  -f cluster-values.yaml \
   --wait --timeout 10m
 {{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
@@ -53,6 +54,7 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f values.yaml \
+  -f cluster-values.yaml \
   --wait --timeout 10m
 {{ end -}}
 ```
@@ -71,6 +73,7 @@ helm upgrade {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} \
   -f values.yaml \
+  -f cluster-values.yaml \
   --wait --timeout 10m
 {{ else -}}
 helm upgrade {{ .Name }} {{ .ChartName }} \
@@ -78,6 +81,7 @@ helm upgrade {{ .Name }} {{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} \
   -f values.yaml \
+  -f cluster-values.yaml \
   --wait --timeout 10m
 {{ end -}}
 ```

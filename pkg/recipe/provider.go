@@ -544,6 +544,7 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 
 // Global data provider (defaults to embedded, can be set for layered)
 var (
+	dataProviderMu         sync.RWMutex
 	globalDataProvider     DataProvider
 	dataProviderGeneration int // Incremented when provider changes
 )
@@ -553,6 +554,8 @@ var (
 // Note: This invalidates cached data, so callers should ensure this is called
 // early in the application lifecycle.
 func SetDataProvider(provider DataProvider) {
+	dataProviderMu.Lock()
+	defer dataProviderMu.Unlock()
 	globalDataProvider = provider
 	dataProviderGeneration++
 	slog.Info("data provider set", "generation", dataProviderGeneration)
@@ -561,6 +564,8 @@ func SetDataProvider(provider DataProvider) {
 // GetDataProvider returns the global data provider.
 // Returns the embedded provider if none was set.
 func GetDataProvider() DataProvider {
+	dataProviderMu.Lock()
+	defer dataProviderMu.Unlock()
 	if globalDataProvider == nil {
 		slog.Debug("initializing default embedded data provider")
 		globalDataProvider = NewEmbeddedDataProvider(GetEmbeddedFS(), "")
@@ -569,5 +574,7 @@ func GetDataProvider() DataProvider {
 }
 
 func getDataProviderGeneration() int {
+	dataProviderMu.RLock()
+	defer dataProviderMu.RUnlock()
 	return dataProviderGeneration
 }

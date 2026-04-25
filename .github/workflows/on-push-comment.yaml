@@ -20,7 +20,7 @@ name: Post PR Comment
 
 on:
   workflow_run:
-    workflows: ["On Push Qualification"]
+    workflows: ["Merge Gate"]
     types:
       - completed
 
@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 jobs:
-  # COUPLING: This workflow depends on "On Push Qualification" producing these artifacts:
+  # COUPLING: This workflow depends on "Merge Gate" producing these artifacts (via qualification.yaml):
   #   - coverage-pr (coverage.out from PR build)
   #   - coverage-comment-data (JSON: coverage, threshold, pass, color, pr_number)
   #   - coverage-baseline (coverage.out from last successful main build)
@@ -107,16 +107,16 @@ jobs:
               --repo ${{ github.repository }} \
               --name coverage-baseline \
               --dir /tmp/baseline-coverage 2>/dev/null; then
-              echo "baseline_found=true" >> $GITHUB_OUTPUT
+              echo "baseline_found=true" >> "$GITHUB_OUTPUT"
               echo "✅ Baseline coverage downloaded"
             else
-              echo "baseline_found=false" >> $GITHUB_OUTPUT
+              echo "baseline_found=false" >> "$GITHUB_OUTPUT"
               echo "⚠️ Failed to download baseline (first run?)"
               # Create empty baseline
               echo "mode: set" > /tmp/baseline-coverage/coverage.out
             fi
           else
-            echo "baseline_found=false" >> $GITHUB_OUTPUT
+            echo "baseline_found=false" >> "$GITHUB_OUTPUT"
             echo "⚠️ No successful baseline run found"
             echo "mode: set" > /tmp/baseline-coverage/coverage.out
           fi
@@ -169,18 +169,18 @@ jobs:
             /tmp/baseline-coverage/coverage.out \
             /tmp/pr-coverage/coverage.out \
             .github/outputs/all_modified_files.json > delta-report.md 2> delta-error.log; then
-            echo "delta_generated=true" >> $GITHUB_OUTPUT
+            echo "delta_generated=true" >> "$GITHUB_OUTPUT"
           else
-            echo "delta_generated=false" >> $GITHUB_OUTPUT
+            echo "delta_generated=false" >> "$GITHUB_OUTPUT"
             echo "⚠️ Delta generation failed:"
             cat delta-error.log || true
           fi
 
           # Check if report shows no change (to reduce noise)
           if grep -q "will \*\*not change\*\* overall coverage" delta-report.md 2>/dev/null; then
-            echo "no_change=true" >> $GITHUB_OUTPUT
+            echo "no_change=true" >> "$GITHUB_OUTPUT"
           else
-            echo "no_change=false" >> $GITHUB_OUTPUT
+            echo "no_change=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Post PR Comment

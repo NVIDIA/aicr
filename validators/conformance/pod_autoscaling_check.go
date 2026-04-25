@@ -314,7 +314,7 @@ func buildHPATestDeployment(name, namespace string) *appsv1.Deployment {
 					Containers: []corev1.Container{
 						{
 							Name:    "sleep",
-							Image:   "busybox:1.37",
+							Image:   defaults.ProbeImage,
 							Command: []string{"sleep", "3600"},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{

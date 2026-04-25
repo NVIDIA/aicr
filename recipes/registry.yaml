@@ -158,14 +158,15 @@ components:
           - cainjector.tolerations
           - startupapicheck.tolerations
 
-  - name: skyhook-operator
-    displayName: skyhook
+  - name: nodewright-operator
+    displayName: nodewright
     valueOverrideKeys:
+      - nodewright
       - skyhook
     healthCheck:
-      assertFile: checks/skyhook-operator/health-check.yaml
+      assertFile: checks/nodewright-operator/health-check.yaml
     helm:
-      defaultRepository: https://nvidia.github.io/skyhook
+      defaultRepository: https://helm.ngc.nvidia.com/nvidia/skyhook
       defaultChart: skyhook-operator
       defaultNamespace: skyhook
     nodeScheduling:
@@ -180,12 +181,13 @@ components:
         taintStrPaths:
           - controllerManager.manager.env.runtimeRequiredTaint
 
-  - name: skyhook-customizations
-    displayName: skyhook-customizations
+  - name: nodewright-customizations
+    displayName: nodewright-customizations
     valueOverrideKeys:
+      - nodewrightcustomizations
       - skyhookcustomizations
     healthCheck:
-      assertFile: checks/skyhook-customizations/health-check.yaml
+      assertFile: checks/nodewright-customizations/health-check.yaml
     helm:
       # Manifest-only component - no external Helm chart, uses manifestFiles
       defaultRepository: ""
@@ -206,7 +208,7 @@ components:
         conditions:
           intent:
             - training
-        message: "This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction."
+        message: "This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction."
       - function: CheckAcceleratedSelectorMissing
         severity: warning
         conditions:

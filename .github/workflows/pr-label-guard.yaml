@@ -12,22 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Lint GitHub Actions
+name: PR Label Guard
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/**'
-      - '.github/actions/**'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/workflows/**'
-      - '.github/actions/**'
-  workflow_dispatch: {}
+  pull_request_target:
+    types: [opened, reopened, labeled]
 
 permissions:
   contents: read
@@ -38,20 +27,23 @@ concurrency:
 
 jobs:
 
-  actionlint:
-    name: Lint Workflows
+  remove-issue-only-priority-labels:
+    name: Remove Issue-Only Priority Labels
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     timeout-minutes: 5
     steps:
-      - name: Checkout Code
+      # Required so `uses: ./.github/actions/...` can resolve the local
+      # composite action. On pull_request_target the default ref is the
+      # base branch (target of the merge), so no PR code is checked out.
+      - name: Checkout base repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Install actionlint
-        run: |
-          bash <(curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
-          echo "${PWD}" >> "$GITHUB_PATH"
-
-      - name: Run actionlint
-        run: actionlint -color -shellcheck=
+      - name: Remove issue-only priority labels from PR
+        uses: ./.github/actions/remove-issue-only-priority-labels
+        with:
+          issue-number: ${{ github.event.pull_request.number }}

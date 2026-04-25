@@ -44,11 +44,11 @@ componentRefs: ## alphabetically sorted
   - name: kube-prometheus-stack
   - name: kubeflow-trainer
   - name: nfd
+  - name: nodewright-customizations
+  - name: nodewright-operator
   - name: nvidia-dra-driver-gpu
   - name: nvsentinel
   - name: prometheus-adapter
-  - name: skyhook-customizations
-  - name: skyhook-operator
 deploymentOrder:
   - aws-ebs-csi-driver
   - aws-efa
@@ -56,11 +56,11 @@ deploymentOrder:
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
   - nfd
-  - prometheus-adapter
-  - skyhook-operator
-  - skyhook-customizations
+  - nodewright-operator
+  - nodewright-customizations
   - gpu-operator
   - kai-scheduler
   - kubeflow-trainer
   - nvidia-dra-driver-gpu
   - nvsentinel
+  - prometheus-adapter

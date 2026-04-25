@@ -36,7 +36,7 @@ func TestCheckWorkloadSelectorMissing(t *testing.T) {
 	}{
 		{
 			name:          "component not in recipe",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
 					{Name: "gpu-operator"},
@@ -49,10 +49,10 @@ func TestCheckWorkloadSelectorMissing(t *testing.T) {
 		},
 		{
 			name:          "condition not met",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentInference,
@@ -65,10 +65,10 @@ func TestCheckWorkloadSelectorMissing(t *testing.T) {
 		},
 		{
 			name:          "workload selector missing with training intent",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -78,14 +78,14 @@ func TestCheckWorkloadSelectorMissing(t *testing.T) {
 			conditions:     map[string][]string{"intent": {"training"}},
 			wantWarnings:   1,
 			wantErrors:     0,
-			wantWarningMsg: "skyhook-customizations is enabled but --workload-selector is not set",
+			wantWarningMsg: "nodewright-customizations is enabled but --workload-selector is not set",
 		},
 		{
 			name:          "workload selector set",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -100,10 +100,10 @@ func TestCheckWorkloadSelectorMissing(t *testing.T) {
 		},
 		{
 			name:          "nil config",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -150,7 +150,7 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 	}{
 		{
 			name:          "component not in recipe",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
 					{Name: "gpu-operator"},
@@ -163,10 +163,10 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 		},
 		{
 			name:          "condition not met",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: "other",
@@ -179,10 +179,10 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 		},
 		{
 			name:          "accelerated selector missing with training intent",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -192,14 +192,14 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 			conditions:     map[string][]string{"intent": {"training", "inference"}},
 			wantWarnings:   1,
 			wantErrors:     0,
-			wantWarningMsg: "skyhook-customizations is enabled but --accelerated-node-selector is not set",
+			wantWarningMsg: "nodewright-customizations is enabled but --accelerated-node-selector is not set",
 		},
 		{
 			name:          "accelerated selector missing with inference intent",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentInference,
@@ -209,14 +209,14 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 			conditions:     map[string][]string{"intent": {"training", "inference"}},
 			wantWarnings:   1,
 			wantErrors:     0,
-			wantWarningMsg: "skyhook-customizations is enabled but --accelerated-node-selector is not set",
+			wantWarningMsg: "nodewright-customizations is enabled but --accelerated-node-selector is not set",
 		},
 		{
 			name:          "accelerated selector set",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -231,10 +231,10 @@ func TestCheckAcceleratedSelectorMissing(t *testing.T) {
 		},
 		{
 			name:          "nil config",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,

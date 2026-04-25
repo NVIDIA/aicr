@@ -37,10 +37,10 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"gpu-operator": {"cert-manager", "kube-prometheus-stack", "skyhook-customizations"},
+				"gpu-operator": {"cert-manager", "kube-prometheus-stack", "nodewright-customizations"},
 			},
 			requiredOrdering: [][2]string{
-				{"skyhook-customizations", "gpu-operator"},
+				{"nodewright-customizations", "gpu-operator"},
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
@@ -54,10 +54,10 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"gpu-operator": {"cert-manager", "kube-prometheus-stack", "skyhook-customizations"},
+				"gpu-operator": {"cert-manager", "kube-prometheus-stack", "nodewright-customizations"},
 			},
 			requiredOrdering: [][2]string{
-				{"skyhook-customizations", "gpu-operator"},
+				{"nodewright-customizations", "gpu-operator"},
 				{"gpu-operator", "nvsentinel"},
 			},
 		},

@@ -31,7 +31,7 @@ builds:
       -s
       -extldflags "-static"
       -X github.com/NVIDIA/aicr/pkg/cli.version={{.Version}}
-      -X github.com/NVIDIA/aicr/pkg/cli.commit={{.ShortCommit}}
+      -X github.com/NVIDIA/aicr/pkg/cli.commit={{.FullCommit}}
       -X github.com/NVIDIA/aicr/pkg/cli.date={{.Date}}
     hooks:
       post:
@@ -66,7 +66,7 @@ builds:
       -s
       -extldflags "-static"
       -X github.com/NVIDIA/aicr/pkg/api.version={{.Version}}
-      -X github.com/NVIDIA/aicr/pkg/api.commit={{.ShortCommit}}
+      -X github.com/NVIDIA/aicr/pkg/api.commit={{.FullCommit}}
       -X github.com/NVIDIA/aicr/pkg/api.date={{.Date}}
     goos:
       - linux
@@ -105,7 +105,7 @@ kos:
     build: aicr
     repositories:
       - ghcr.io/nvidia/aicr
-    base_image: nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
+    base_image: nvcr.io/nvidia/cuda:13.2.1-runtime-ubuntu24.04
     platforms:
       - linux/amd64
       - linux/arm64

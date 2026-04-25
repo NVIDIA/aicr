@@ -123,7 +123,7 @@ func TestRunValidations(t *testing.T) {
 		},
 		{
 			name:          "workload selector missing with message",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			validations: []recipe.ComponentValidationConfig{
 				{
 					Function:   "CheckWorkloadSelectorMissing",
@@ -134,7 +134,7 @@ func TestRunValidations(t *testing.T) {
 			},
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -148,7 +148,7 @@ func TestRunValidations(t *testing.T) {
 		},
 		{
 			name:          "workload selector missing without message",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			validations: []recipe.ComponentValidationConfig{
 				{
 					Function:   "CheckWorkloadSelectorMissing",
@@ -158,7 +158,7 @@ func TestRunValidations(t *testing.T) {
 			},
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,
@@ -171,7 +171,7 @@ func TestRunValidations(t *testing.T) {
 		},
 		{
 			name:          "error severity converts warnings to errors",
-			componentName: "skyhook-customizations",
+			componentName: "nodewright-customizations",
 			validations: []recipe.ComponentValidationConfig{
 				{
 					Function:   "CheckWorkloadSelectorMissing",
@@ -182,7 +182,7 @@ func TestRunValidations(t *testing.T) {
 			},
 			recipeResult: &recipe.RecipeResult{
 				ComponentRefs: []recipe.ComponentRef{
-					{Name: "skyhook-customizations"},
+					{Name: "nodewright-customizations"},
 				},
 				Criteria: &recipe.Criteria{
 					Intent: recipe.CriteriaIntentTraining,

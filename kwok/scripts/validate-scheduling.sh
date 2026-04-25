@@ -347,7 +347,7 @@ generate_bundle() {
     # Generate bundle with node scheduling flags for KWOK
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
-    # - Skyhook customization (creates CRs that depend on operator CRDs)
+    # - Nodewright customization (creates CRs that depend on operator CRDs)
     log_info "Generating bundle..."
 
     local bundle_output
@@ -362,7 +362,7 @@ generate_bundle() {
         --set "certmanager:startupapicheck.enabled=false" \
         --set "kubeprometheusstack:defaultRules.create=false" \
         --set "kubeprometheusstack:alertmanager.enabled=false" \
-        --set "skyhook-customizations:enabled=false" \
+        --set "nodewright-customizations:enabled=false" \
         --set "dynamoplatform:etcd.persistence.enabled=false" \
         --set "dynamoplatform:nats.config.jetstream.fileStore.enabled=false" 2>&1); then
         log_error "Bundle generation failed"

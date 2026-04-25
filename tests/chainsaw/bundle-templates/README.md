@@ -23,7 +23,7 @@ Each component gets its own subdirectory with:
    (`apiVersion`/`kind`), chainsaw can parse them directly.
 
 This follows the same pattern used in the
-[skyhook project](https://github.com/NVIDIA/skyhook/blob/main/k8s-tests/chainsaw/helm/helm-template-test/chainsaw-test.yaml),
+[nodewright project](https://github.com/NVIDIA/nodewright/blob/main/k8s-tests/chainsaw/helm/helm-template-test/chainsaw-test.yaml),
 adapted for AICR's `aicr bundle` rendering pipeline instead of `helm template`.
 
 ## Running
@@ -36,7 +36,7 @@ unset GITLAB_TOKEN && make build
 AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/
 
 # Run a specific component's tests
-AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/skyhook-customizations
+AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/nodewright-customizations
 ```
 
 ## Adding Tests for a New Component

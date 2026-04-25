@@ -57,11 +57,11 @@ measurements:
           prometheus-adapter.chart: prometheus-adapter
           prometheus-adapter.version: 5.3.0
           prometheus-adapter.namespace: monitoring
-          skyhook-customizations.chart: skyhook-customizations
-          skyhook-customizations.namespace: skyhook
-          skyhook-operator.chart: skyhook-operator
-          skyhook-operator.version: v0.14.0
-          skyhook-operator.namespace: skyhook
+          nodewright-customizations.chart: nodewright-customizations
+          nodewright-customizations.namespace: skyhook
+          nodewright-operator.chart: skyhook-operator
+          nodewright-operator.version: v0.14.0
+          nodewright-operator.namespace: skyhook
   - type: OS
     subtypes:
       - subtype: release

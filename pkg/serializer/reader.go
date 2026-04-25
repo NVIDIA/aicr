@@ -358,7 +358,7 @@ func FromFileWithKubeconfig[T any](path, kubeconfig string) (*T, error) {
 	}
 
 	if ser == nil {
-		slog.Error("reader is unexpectedly nil despite no error")
+		slog.Error("reader is unexpectedly nil despite no error", "path", path, "format", fileFormat)
 		return nil, errors.New(errors.ErrCodeInternal, fmt.Sprintf("reader is nil for %q", path))
 	}
 

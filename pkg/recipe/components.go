@@ -108,7 +108,7 @@ type NodeSchedulingConfig struct {
 	// Accelerated defines paths for GPU/accelerated node scheduling.
 	Accelerated SchedulingPaths `yaml:"accelerated,omitempty"`
 
-	// NodeCountPaths are Helm value paths where the bundle-time node count is injected (e.g. estimatedNodeCount for skyhook-operator).
+	// NodeCountPaths are Helm value paths where the bundle-time node count is injected (e.g. estimatedNodeCount for nodewright-operator).
 	NodeCountPaths []string `yaml:"nodeCountPaths,omitempty"`
 }
 

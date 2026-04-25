@@ -17,11 +17,13 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -213,6 +215,185 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 	}
 }
 
+func TestResolveTargetGPUNodes(t *testing.T) {
+	mkNode := func(name string, labels map[string]string) corev1.Node {
+		return corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels},
+		}
+	}
+	// GFD-labeled (gpu.product present)
+	gb200a := mkNode("gb200-a", map[string]string{"node.kubernetes.io/instance-type": "p6e-gb200.36xlarge", "nvidia.com/gpu.product": "NVIDIA-GB200", "gpu-pool": "gb200"})
+	gb200b := mkNode("gb200-b", map[string]string{"node.kubernetes.io/instance-type": "p6e-gb200.36xlarge", "nvidia.com/gpu.product": "NVIDIA-GB200", "gpu-pool": "gb200"})
+	h100a := mkNode("h100-a", map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge", "nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3", "gpu-pool": "h100"})
+	h100b := mkNode("h100-b", map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge", "nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3", "gpu-pool": "h100"})
+	h100pcie := mkNode("h100-pcie", map[string]string{"node.kubernetes.io/instance-type": "p5e.48xlarge", "nvidia.com/gpu.product": "NVIDIA-H100-PCIe", "gpu-pool": "h100"})
+	// Non-GFD: instance-type only, no gpu.product
+	gb200noGFD := mkNode("gb200-nogfd", map[string]string{"node.kubernetes.io/instance-type": "p6e-gb200.36xlarge"})
+	h100noGFD := mkNode("h100-nogfd", map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"})
+	unlabeled := mkNode("bare", nil)
+
+	tests := []struct {
+		name        string
+		nodes       []corev1.Node
+		override    map[string]string
+		service     recipe.CriteriaServiceType
+		accelerator recipe.CriteriaAcceleratorType
+		wantNames   []string
+		wantErr     bool
+		wantErrSub  string // substring that must appear in err.Error() when wantErr
+	}{
+		{
+			name:        "mixed accelerators — gpu.product filter deterministically picks GB200 regardless of list order",
+			nodes:       []corev1.Node{h100a, gb200a, h100b, gb200b}, // H100 listed first
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantNames:   []string{"gb200-a", "gb200-b"},
+		},
+		{
+			name:        "H100 recipe on H100 cluster — GFD matches H100 family (prefix)",
+			nodes:       []corev1.Node{h100a, h100b},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorH100,
+			wantNames:   []string{"h100-a", "h100-b"},
+		},
+		{
+			name:        "H100 SXM + H100 PCIe — gpu.product narrows to both, EKS instance-type narrow picks one",
+			nodes:       []corev1.Node{h100a, h100pcie, h100b},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorH100,
+			wantNames:   []string{"h100-a", "h100-b"},
+		},
+		{
+			name:        "accelerator mismatch — zero match returns diagnostic error with products seen",
+			nodes:       []corev1.Node{h100a, h100b},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantErr:     true,
+			wantErrSub:  `recipe accelerator "gb200"`,
+		},
+		{
+			name:        "non-GFD cluster — gpu.product absent, fall back to EKS instance-type heuristic",
+			nodes:       []corev1.Node{gb200noGFD, h100noGFD},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantNames:   []string{"gb200-nogfd"},
+		},
+		{
+			name:        "user override wins over accelerator filter",
+			nodes:       []corev1.Node{gb200a, gb200b, h100a},
+			override:    map[string]string{"gpu-pool": "h100"},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200, // ignored due to override
+			wantNames:   []string{"h100-a"},
+		},
+		{
+			name:        "override matches zero — hard error naming the override",
+			nodes:       []corev1.Node{gb200a, gb200b},
+			override:    map[string]string{"gpu-pool": "h100"},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantErr:     true,
+			wantErrSub:  "--node-selector",
+		},
+		{
+			name:        "accelerator=any — matcher skipped, EKS instance-type heuristic applies",
+			nodes:       []corev1.Node{gb200a, gb200b, h100a},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorAny,
+			wantNames:   []string{"gb200-a", "gb200-b"},
+		},
+		{
+			name:        "non-EKS + GFD — accelerator filter applies, no further narrow",
+			nodes:       []corev1.Node{gb200a, h100a, gb200b},
+			service:     recipe.CriteriaServiceOKE,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantNames:   []string{"gb200-a", "gb200-b"},
+		},
+		{
+			name:        "non-EKS + no GFD + no override — returns all",
+			nodes:       []corev1.Node{gb200noGFD, h100noGFD},
+			service:     recipe.CriteriaServiceOKE,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantNames:   []string{"gb200-nogfd", "h100-nogfd"},
+		},
+		{
+			name:        "EKS first node missing instance-type label on non-GFD cluster — returns all",
+			nodes:       []corev1.Node{unlabeled, gb200noGFD},
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantNames:   []string{"bare", "gb200-nogfd"},
+		},
+		{
+			name:        "empty input",
+			nodes:       nil,
+			service:     recipe.CriteriaServiceEKS,
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			wantNames:   nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveTargetGPUNodes(tt.nodes, tt.override, tt.service, tt.accelerator)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("resolveTargetGPUNodes() err = %v, wantErr = %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				if tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Errorf("err = %q, want substring %q", err.Error(), tt.wantErrSub)
+				}
+				return
+			}
+			var gotNames []string
+			for _, n := range got {
+				gotNames = append(gotNames, n.Name)
+			}
+			if !reflect.DeepEqual(gotNames, tt.wantNames) {
+				t.Errorf("nodes = %v, want %v", gotNames, tt.wantNames)
+			}
+		})
+	}
+}
+
+func TestAcceleratorProductMatchers(t *testing.T) {
+	cases := []struct {
+		accelerator recipe.CriteriaAcceleratorType
+		product     string
+		want        bool
+	}{
+		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200", true},
+		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200-96GB", false}, // exact-match guard
+		{recipe.CriteriaAcceleratorGB200, "NVIDIA-H100-80GB-HBM3", false},
+		{recipe.CriteriaAcceleratorB200, "NVIDIA-B200", true},
+		{recipe.CriteriaAcceleratorB200, "NVIDIA-GB200", false},
+		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-80GB-HBM3", true},
+		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-PCIe", true},
+		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-NVL", true},
+		{recipe.CriteriaAcceleratorH100, "NVIDIA-H200-141GB-HBM3e", false},
+		{recipe.CriteriaAcceleratorA100, "NVIDIA-A100-SXM4-80GB", true},
+		{recipe.CriteriaAcceleratorA100, "NVIDIA-A100-PCIe", true},
+		{recipe.CriteriaAcceleratorA100, "NVIDIA-A10G", false},
+		{recipe.CriteriaAcceleratorL40, "NVIDIA-L40", true},
+		{recipe.CriteriaAcceleratorL40, "NVIDIA-L40S", true},
+		{recipe.CriteriaAcceleratorL40, "NVIDIA-L4", false},
+		{recipe.CriteriaAcceleratorRTXPro6000, "NVIDIA-RTX-PRO-6000", true},
+		{recipe.CriteriaAcceleratorRTXPro6000, "NVIDIA-RTX-6000-Ada", false},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.accelerator)+"/"+tc.product, func(t *testing.T) {
+			matcher, ok := acceleratorProductMatchers[tc.accelerator]
+			if !ok {
+				t.Fatalf("no matcher for accelerator %q", tc.accelerator)
+			}
+			if got := matcher(tc.product); got != tc.want {
+				t.Errorf("%q matches %q = %v, want %v", tc.accelerator, tc.product, got, tc.want)
+			}
+		})
+	}
+	if _, ok := acceleratorProductMatchers[recipe.CriteriaAcceleratorAny]; ok {
+		t.Errorf("accelerator=any must have no matcher (filter should be skipped)")
+	}
+}
+
 func TestPlatformWorkerScheduling(t *testing.T) {
 	t.Run("EKS returns instance-type selector", func(t *testing.T) {
 		ns, tols := platformWorkerScheduling(recipe.CriteriaServiceEKS, "p5.48xlarge")
@@ -251,52 +432,242 @@ func TestTemplatePath(t *testing.T) {
 		name        string
 		accelerator recipe.CriteriaAcceleratorType
 		service     recipe.CriteriaServiceType
+		variant     ncclVariant
 		filename    string
 		expected    string
 	}{
 		{
-			name:        "eks h100 runtime",
+			name:        "eks h100 runtime default",
 			accelerator: recipe.CriteriaAcceleratorH100,
 			service:     recipe.CriteriaServiceEKS,
+			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "h100", "eks", "runtime.yaml"),
 		},
 		{
-			name:        "eks h100 trainjob",
+			name:        "eks h100 trainjob default",
 			accelerator: recipe.CriteriaAcceleratorH100,
 			service:     recipe.CriteriaServiceEKS,
+			variant:     variantDefault,
 			filename:    "trainjob.yaml",
 			expected:    filepath.Join("testdata", "h100", "eks", "trainjob.yaml"),
 		},
 		{
-			name:        "gke gb200",
+			name:        "gke gb200 default",
 			accelerator: recipe.CriteriaAcceleratorGB200,
 			service:     recipe.CriteriaServiceGKE,
+			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "gke", "runtime.yaml"),
 		},
 		{
-			name:        "b200 any runtime",
+			name:        "b200 any runtime default",
 			accelerator: recipe.CriteriaAcceleratorB200,
 			service:     recipe.CriteriaServiceAny,
+			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "b200", "any", "runtime.yaml"),
 		},
 		{
-			name:        "gb200 any runtime",
+			name:        "gb200 any runtime default",
 			accelerator: recipe.CriteriaAcceleratorGB200,
 			service:     recipe.CriteriaServiceAny,
+			variant:     variantDefault,
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "any", "runtime.yaml"),
+		},
+		{
+			name:        "gb200 eks NET variant",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceEKS,
+			variant:     variantNET,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "eks", "runtime-net.yaml"),
+		},
+		{
+			name:        "gb200 eks NVLS variant",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceEKS,
+			variant:     variantNVLS,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"),
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := templatePath(tt.accelerator, tt.service, tt.filename)
+			got := templatePath(tt.accelerator, tt.service, tt.variant, tt.filename)
 			if got != tt.expected {
 				t.Errorf("templatePath() = %q, want %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestVerifyTransportFromLogs(t *testing.T) {
+	// Representative NCCL 2.27 outputs captured from real GB200/EKS and
+	// EKS H100 runs. Format note: NCCL 2.27 no longer emits per-channel
+	// "[send] via NVLS" lines; the authoritative transport signals are
+	// "NCCL INFO Using network <plugin>" for NET, and "NVLS comm 0x<addr>"
+	// + "NVLS multicast support is available" for NVLS.
+	const netLog = `NCCL INFO NET/OFI Selected Provider is efa
+NCCL INFO NET/Plugin: Loaded net plugin Libfabric (v10)
+NCCL INFO Using network AWS Libfabric`
+
+	const nvlsLog = `NCCL INFO MNNVL 1 cliqueId 2 cliqueSize 8 cliqueRank 0
+NCCL INFO NVLS multicast support is available on dev 0 (NVLS_NCHANNELS 24)
+NCCL INFO comm 0xabc123 rank 0 nRanks 8 nNodes 1 localRanks 8 localRank 0 MNNVL 1
+NCCL INFO NVLS comm 0xabc123 headRank 0 nHeads 8 nvlsRanks 8 buffSize 1048576`
+
+	const socketOnlyLog = `NCCL INFO Using network Socket`
+
+	const silentLog = `no transport banners here`
+
+	const nvlsAvailableOnlyLog = `NCCL INFO NVLS multicast support is available on dev 0 (NVLS_NCHANNELS 24)
+NCCL INFO Using network Socket`
+
+	tests := []struct {
+		name    string
+		logs    string
+		variant ncclVariant
+		wantErr bool
+	}{
+		{
+			name:    "default variant never asserts",
+			logs:    silentLog,
+			variant: variantDefault,
+			wantErr: false,
+		},
+		{
+			name:    "NET variant with AWS Libfabric passes",
+			logs:    netLog,
+			variant: variantNET,
+			wantErr: false,
+		},
+		{
+			name:    "NET variant with Socket-only fails (provider plugin didn't load)",
+			logs:    socketOnlyLog,
+			variant: variantNET,
+			wantErr: true,
+		},
+		{
+			name:    "NET variant with no Using-network banner fails",
+			logs:    nvlsLog,
+			variant: variantNET,
+			wantErr: true,
+		},
+		{
+			name:    "NVLS variant with comm-init + availability passes",
+			logs:    nvlsLog,
+			variant: variantNVLS,
+			wantErr: false,
+		},
+		{
+			name:    "NVLS variant when NCCL only sees NET fails (no availability banner)",
+			logs:    netLog,
+			variant: variantNVLS,
+			wantErr: true,
+		},
+		{
+			name:    "NVLS variant with availability but no comm init fails (detected, not used)",
+			logs:    nvlsAvailableOnlyLog,
+			variant: variantNVLS,
+			wantErr: true,
+		},
+		{
+			name:    "NVLS variant with silent logs fails",
+			logs:    silentLog,
+			variant: variantNVLS,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := verifyTransportFromLogs(tt.logs, tt.variant)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("verifyTransportFromLogs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildComputeDomain(t *testing.T) {
+	const ns = "aicr-validation-test"
+	cd := buildComputeDomain(ns)
+
+	if got := cd.GetAPIVersion(); got != "resource.nvidia.com/v1beta1" {
+		t.Errorf("apiVersion = %q, want resource.nvidia.com/v1beta1", got)
+	}
+	if got := cd.GetKind(); got != "ComputeDomain" {
+		t.Errorf("kind = %q, want ComputeDomain", got)
+	}
+	if got := cd.GetName(); got != ncclComputeDomainName {
+		t.Errorf("name = %q, want %q", got, ncclComputeDomainName)
+	}
+	if got := cd.GetNamespace(); got != ns {
+		t.Errorf("namespace = %q, want %q", got, ns)
+	}
+
+	numNodes, found, err := unstructured.NestedInt64(cd.Object, "spec", "numNodes")
+	if err != nil || !found {
+		t.Fatalf("spec.numNodes lookup failed: err=%v found=%v", err, found)
+	}
+	if numNodes != 0 {
+		t.Errorf("numNodes = %d, want 0 (IMEXDaemonsWithDNSNames=true default)", numNodes)
+	}
+
+	mode, found, err := unstructured.NestedString(cd.Object, "spec", "channel", "allocationMode")
+	if err != nil || !found {
+		t.Fatalf("spec.channel.allocationMode lookup failed: err=%v found=%v", err, found)
+	}
+	if mode != "Single" {
+		t.Errorf("allocationMode = %q, want Single", mode)
+	}
+
+	rctName, found, err := unstructured.NestedString(cd.Object, "spec", "channel", "resourceClaimTemplate", "name")
+	if err != nil || !found {
+		t.Fatalf("spec.channel.resourceClaimTemplate.name lookup failed: err=%v found=%v", err, found)
+	}
+	if rctName != ncclIMEXClaimTemplateName {
+		t.Errorf("resourceClaimTemplate.name = %q, want %q", rctName, ncclIMEXClaimTemplateName)
+	}
+}
+
+func TestNVLSRuntimeYAMLReferencesIMEXClaim(t *testing.T) {
+	// The runtime-nvls template hardcodes the same RCT name the Go code
+	// creates via buildComputeDomain. If these drift, the DRA driver
+	// generates one name and the worker pods reference another, and
+	// pod admission fails with an opaque "claim not found" error.
+	data, err := os.ReadFile(filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"))
+	if err != nil {
+		t.Fatalf("failed to read runtime-nvls.yaml: %v", err)
+	}
+	s := string(data)
+	if !strings.Contains(s, "resourceClaimTemplateName: "+ncclIMEXClaimTemplateName) {
+		t.Errorf("runtime-nvls.yaml missing resourceClaimTemplateName: %s", ncclIMEXClaimTemplateName)
+	}
+	if !strings.Contains(s, "- name: imex-channel") {
+		t.Error("runtime-nvls.yaml missing 'name: imex-channel' in resourceClaims / claims blocks")
+	}
+}
+
+func TestSupportedNCCLCombinations_Variants(t *testing.T) {
+	if accels, ok := supportedNCCLCombinations[variantNET][recipe.CriteriaServiceEKS]; !ok {
+		t.Error("variantNET should support EKS")
+	} else if len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorGB200 {
+		t.Errorf("variantNET EKS accelerators = %v, want [GB200]", accels)
+	}
+	if accels, ok := supportedNCCLCombinations[variantNVLS][recipe.CriteriaServiceEKS]; !ok {
+		t.Error("variantNVLS should support EKS")
+	} else if len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorGB200 {
+		t.Errorf("variantNVLS EKS accelerators = %v, want [GB200]", accels)
+	}
+	// Legacy default variant must still list the original combinations
+	// so existing recipes that reference "nccl-all-reduce-bw" keep working.
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceEKS]; len(accels) != 1 || accels[0] != recipe.CriteriaAcceleratorH100 {
+		t.Errorf("variantDefault EKS = %v, want [H100]", accels)
+	}
+	if accels := supportedNCCLCombinations[variantDefault][recipe.CriteriaServiceAny]; len(accels) != 2 {
+		t.Errorf("variantDefault Any count = %d, want 2 (B200, GB200)", len(accels))
 	}
 }
 

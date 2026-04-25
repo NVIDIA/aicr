@@ -313,12 +313,12 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     "workload-gate",
-				Usage:    "Taint for skyhook-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
+				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
 				Category: "Scheduling",
 			},
 			&cli.StringSliceFlag{
 				Name:     "workload-selector",
-				Usage:    "Label selector for skyhook-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when skyhook-customizations is enabled with training intent.",
+				Usage:    "Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when nodewright-customizations is enabled with training intent.",
 				Category: "Scheduling",
 			},
 			&cli.IntFlag{
@@ -441,27 +441,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 	)
 
-	// Pre-flight: verify binary attestation file exists before OIDC auth.
-	// selectAttester may open a browser; fail fast if attestation is impossible.
-	if opts.attest {
-		binaryPath, execErr := os.Executable()
-		if execErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
-				"could not resolve executable path; remove --attest to skip", execErr)
-		}
-		if _, findErr := attestation.FindBinaryAttestation(binaryPath); findErr != nil {
-			return errors.New(errors.ErrCodeNotFound,
-				fmt.Sprintf("binary attestation not found at %s\n\n"+
-					"The --attest flag requires a binary installed using the install script, which\n"+
-					"includes a cryptographic attestation from NVIDIA CI. Binaries installed via\n"+
-					"\"go install\" or manual download do not include this file.\n\n"+
-					"To fix:\n"+
-					"  - Reinstall using the install script\n"+
-					"  - Or remove --attest to generate bundles without attestation",
-					binaryPath+attestation.AttestationFileSuffix))
-		}
-	}
-
+	// Note: binary attestation pre-flight check is handled by bundler.New().
 	attester, err := selectAttester(ctx, opts.attest)
 	if err != nil {
 		return err

@@ -168,22 +168,15 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 //   - README.md: Deployment instructions
 //
 // Returns a result.Output summarizing the generation results.
-func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir string) (*result.Output, error) {
+func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeResult, dir string) (*result.Output, error) {
 	start := time.Now()
 
 	// Reset warnings so they dont accumulate between multiple bundle generations
 	b.warnings = nil
 
 	// Validate input
-	if input == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe input cannot be nil")
-	}
-
-	// Only support RecipeResult format (not legacy Recipe)
-	recipeResult, ok := input.(*recipe.RecipeResult)
-	if !ok {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"bundle generation requires RecipeResult format")
+	if recipeResult == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe result cannot be nil")
 	}
 
 	if len(recipeResult.ComponentRefs) == 0 {
@@ -191,7 +184,7 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 			"recipe must contain at least one component reference")
 	}
 
-	// Filter out disabled components.
+	// Filter out disabled components on a local copy to avoid mutating the caller's input.
 	// Check order: --set overrides take precedence over recipe overrides.
 	// This allows users to enable/disable components at bundle time:
 	//   --set awsebscsidriver:enabled=false  (disable)
@@ -212,7 +205,6 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 		enabledRefs = append(enabledRefs, ref)
 		enabledSet[ref.Name] = struct{}{}
 	}
-	recipeResult.ComponentRefs = enabledRefs
 
 	// Filter DeploymentOrder to match enabled components
 	filteredOrder := make([]string, 0, len(recipeResult.DeploymentOrder))
@@ -221,7 +213,12 @@ func (b *DefaultBundler) Make(ctx context.Context, input recipe.RecipeInput, dir
 			filteredOrder = append(filteredOrder, name)
 		}
 	}
-	recipeResult.DeploymentOrder = filteredOrder
+
+	// Work on a shallow copy so the caller's RecipeResult is not mutated
+	filtered := *recipeResult
+	filtered.ComponentRefs = enabledRefs
+	filtered.DeploymentOrder = filteredOrder
+	recipeResult = &filtered
 
 	if len(enabledRefs) == 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -598,7 +595,7 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 		}
 	}
 
-	// Apply workload-gate taint (as string format for skyhook-operator)
+	// Apply workload-gate taint (as string format for nodewright-operator)
 	if taint := b.Config.WorkloadGateTaint(); taint != nil {
 		if paths := comp.GetAcceleratedTaintStrPaths(); len(paths) > 0 {
 			taintStr := taint.ToString()

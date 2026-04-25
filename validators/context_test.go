@@ -15,8 +15,13 @@
 package validators
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -205,6 +210,83 @@ func TestEnvOrDefault(t *testing.T) {
 			got := envOrDefault(tt.key, tt.fallback)
 			if got != tt.expected {
 				t.Errorf("envOrDefault(%q, %q) = %q, want %q", tt.key, tt.fallback, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCheckTimeoutFromEnv(t *testing.T) {
+	tests := []struct {
+		name     string
+		envVal   string
+		setEnv   bool
+		expected time.Duration
+		wantWarn bool
+	}{
+		{
+			name:     "unset returns default",
+			setEnv:   false,
+			expected: defaults.CheckExecutionTimeout,
+		},
+		{
+			name:     "empty returns default",
+			envVal:   "",
+			setEnv:   true,
+			expected: defaults.CheckExecutionTimeout,
+		},
+		{
+			name:     "valid duration returns parsed value",
+			envVal:   "30m",
+			setEnv:   true,
+			expected: 30 * time.Minute,
+		},
+		{
+			name:     "malformed returns default with warn",
+			envVal:   "zzz",
+			setEnv:   true,
+			expected: defaults.CheckExecutionTimeout,
+			wantWarn: true,
+		},
+		{
+			name:     "negative returns default with warn",
+			envVal:   "-5m",
+			setEnv:   true,
+			expected: defaults.CheckExecutionTimeout,
+			wantWarn: true,
+		},
+		{
+			name:     "zero returns default with warn",
+			envVal:   "0s",
+			setEnv:   true,
+			expected: defaults.CheckExecutionTimeout,
+			wantWarn: true,
+		},
+	}
+
+	prevLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prevLogger) })
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setEnv {
+				t.Setenv("AICR_CHECK_TIMEOUT", tt.envVal)
+			} else {
+				// t.Setenv automatically unsets on cleanup; explicitly clear
+				// for the "unset" case so a parent-process value doesn't leak in.
+				t.Setenv("AICR_CHECK_TIMEOUT", "")
+			}
+
+			var buf bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
+			got := checkTimeoutFromEnv()
+			if got != tt.expected {
+				t.Errorf("checkTimeoutFromEnv() = %v, want %v", got, tt.expected)
+			}
+
+			gotWarn := strings.Contains(buf.String(), "ignoring malformed AICR_CHECK_TIMEOUT")
+			if gotWarn != tt.wantWarn {
+				t.Errorf("warn emitted = %v, want %v (log output: %q)", gotWarn, tt.wantWarn, buf.String())
 			}
 		})
 	}

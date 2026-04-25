@@ -12,21 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook EKS Ubuntu GPU Customization
+# Nodewright EKS Ubuntu GPU Customization
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support
 #
 # This customization configures GPU nodes on Ubuntu with:
 # - GRUB parameters for hugepages and nokaslr
 # - Containerd service limits
 # - Sysctl kernel tuning parameters
-{{- $cust := index .Values "skyhook-customizations" }}
+{{- $cust := index .Values "nodewright-customizations" }}
 {{- if ne (toString (index $cust "enabled")) "false" }}
 ---
 apiVersion: skyhook.nvidia.com/v1alpha1
 kind: Skyhook
 metadata:
   annotations:
-    # Helm hooks ensure this CR is applied after skyhook-operator CRD is installed
+    # Helm hooks ensure this CR is applied after the Skyhook CRD is installed
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-weight": "10"
     "helm.sh/hook-delete-policy": before-hook-creation
@@ -39,7 +39,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
-  # Default: true. Disable with --set skyhookcustomizations:autoTaintNewNodes=false
+  # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
   autoTaintNewNodes: {{ ne (toString ($cust.autoTaintNewNodes | default true)) "false" }}
   # Dynamic: Supports --accelerated-node-toleration CLI flag
   additionalTolerations:

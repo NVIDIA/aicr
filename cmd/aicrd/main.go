@@ -15,13 +15,15 @@
 package main
 
 import (
-	"log"
+	"log/slog"
+	"os"
 
 	"github.com/NVIDIA/aicr/pkg/api"
 )
 
 func main() {
 	if err := api.Serve(); err != nil {
-		log.Fatal(err)
+		slog.Error("server failed", "error", err)
+		os.Exit(1)
 	}
 }

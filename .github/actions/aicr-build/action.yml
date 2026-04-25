@@ -108,8 +108,6 @@ runs:
           }
         done
 
-    - name: Build aicr binary
+    - name: Stage aicr binary at repo root
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
-      run: go build -o ./aicr ./cmd/aicr
+      run: cp dist/aicr ./aicr

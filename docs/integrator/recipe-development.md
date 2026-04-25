@@ -74,12 +74,13 @@ make qualify  # Includes end to end tests before submitting
 
 ## Overview
 
-Recipe metadata files define component configurations for GPU-accelerated Kubernetes deployments using a **base-plus-overlay architecture** with **multi-level inheritance** and **mixin composition**:
+Recipe metadata files define component configurations for GPU-accelerated Kubernetes deployments using a **base-plus-overlay architecture** with three composition mechanisms — single-parent inheritance, explicit mixin composition, and criteria-wildcard matching:
 
 - **Base values** (`overlays/base.yaml`) - universal defaults
 - **Intermediate recipes** (`eks.yaml`, `eks-training.yaml`) - shared configurations for categories
 - **Leaf recipes** (`gb200-eks-ubuntu-training.yaml`) - hardware/workload-specific overrides
 - **Mixins** (`mixins/*.yaml`) - composable fragments (OS constraints, platform components) that leaf overlays reference via `spec.mixins` instead of duplicating content
+- **Criteria-wildcard overlays** (`gb200-any-training.yaml`) - cross-cutting overlays picked up automatically by the resolver when their wildcard criteria match the query, without being referenced via `spec.base` or `spec.mixins`
 - **Inline overrides** - per-recipe customization without new files
 
 Recipe files in `recipes/` are embedded at compile time. Integrators can extend or override using the `--data` flag (see [Advanced Topics](#advanced-topics)).
@@ -143,6 +144,27 @@ spec:
 ```
 
 Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/data.md#mixin-composition) for details.
+
+**Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
+
+```yaml
+# gb200-any-training.yaml — applies to every GB200+training query
+spec:
+  base: base
+  criteria:
+    service: any         # Wildcard — matches eks, oke, gke, etc.
+    accelerator: gb200
+    intent: training
+  validation:
+    performance:
+      checks:
+        - nccl-all-reduce-bw   # Required: selects which validators run
+      constraints:
+        - name: nccl-all-reduce-bw
+          value: ">= 720"
+```
+
+Only use this pattern when the content is truly uniform across the wildcard dimension — if values diverge per service, keep them inline in each service-specific overlay. See [Data Architecture](../contributor/data.md#criteria-wildcard-overlays) for when to use wildcard overlays vs mixins.
 
 **Merge order:** `base.yaml` (lowest) → intermediate → leaf → mixins (highest)
 

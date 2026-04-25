@@ -24,8 +24,10 @@ The following components are included (deployed in order):
 {{ range .Components -}}
 {{ if .IsKustomize -}}
 | {{ .Name }} | Kustomize | {{ .Tag }} | {{ .Namespace }} | {{ .Repository }} ({{ .Path }}) |
-{{ else -}}
+{{ else if .HasChart -}}
 | {{ .Name }} | Helm | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
+{{ else -}}
+| {{ .Name }} | Manifests | | {{ .Namespace }} | |
 {{ end -}}
 {{ end }}
 
@@ -56,7 +58,7 @@ Use `--no-wait` to skip Helm chart-level waiting where AICR uses `--wait` (keeps
 ./deploy.sh --no-wait
 ```
 
-> **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** mean the cluster is ready for GPU workloads. On fresh GPU nodes, cluster convergence (Skyhook node tuning, GPU operator operand rollout, DRA kubelet plugin registration) continues asynchronously after the script exits. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
+> **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** mean the cluster is ready for GPU workloads. On fresh GPU nodes, cluster convergence (Nodewright node tuning, GPU operator operand rollout, DRA kubelet plugin registration) continues asynchronously after the script exits. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
 
 ## Manual Installation
 
@@ -71,13 +73,14 @@ kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl app
 kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
   | kubectl apply -n {{ .Namespace }} -f -
 ```
-{{ else -}}
+{{ else if .HasChart -}}
 ```bash
 {{ if .IsOCI -}}
 helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
+  -f {{ .Name }}/cluster-values.yaml \
   --wait --timeout 10m
 {{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
@@ -85,6 +88,7 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
+  -f {{ .Name }}/cluster-values.yaml \
   --wait --timeout 10m
 {{ end -}}
 ```
@@ -98,19 +102,27 @@ kubectl apply -f {{ .Name }}/manifests/
 
 ## Customization
 
-Each Helm component has its own `values.yaml` in its directory.
-Edit the file before deploying to customize component configuration:
+Each Helm component has two values files in its directory:
 
-```bash
-vim gpu-operator/values.yaml
-```
+- `values.yaml` — resolved configuration from the recipe. Edit to override defaults:
+
+  ```bash
+  vim gpu-operator/values.yaml
+  ```
+
+- `cluster-values.yaml` — install-time parameters. Any paths declared with
+  `aicr bundle --dynamic <component>:<path>` are pulled out of `values.yaml`
+  and placed here for you to fill in. The file is always created (empty if
+  no dynamic paths were declared) and passed to `helm upgrade --install`
+  alongside `values.yaml` by both `deploy.sh` and the per-component commands
+  in the "Manual Installation" section above.
 
 ## Upgrade
 
 To upgrade a specific Helm component:
 
 ```bash
-helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml --wait --timeout 10m
+helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml -f <component>/cluster-values.yaml --wait --timeout 10m
 ```
 
 ## Uninstall

@@ -155,6 +155,3 @@ site/node_modules/
 # Demos
 *.mp4
 *.mov
-
-# Release workflow state
-.release-pending

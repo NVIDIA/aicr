@@ -82,6 +82,19 @@ spec:
       constraints:
         - name: Deployment.gpu-operator.version
           value: ">= v24.6.0"
+    performance:
+      checks:
+        - inference-perf
+      # Placeholder thresholds — pending empirical tuning on H100 with
+      # Qwen/Qwen3-0.6B at concurrency=16/GPU. Current values are loose
+      # smoke-test floors; tighten once reference runs are published. Each
+      # constraint name corresponds to one metric the inference-perf check
+      # produces (throughput in tok/s; time-to-first-token p99 in ms).
+      constraints:
+        - name: inference-throughput
+          value: ">= 5000"
+        - name: inference-ttft-p99
+          value: "<= 200"
     conformance:
       checks:
         - platform-health

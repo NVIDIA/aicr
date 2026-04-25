@@ -33,38 +33,69 @@ spec:
       value: ">= 1.32.4"
 
   componentRefs:
-    # GB200-specific GPU Operator overrides (inherits valuesFile from eks-training)
+    # GB200+EKS GPU Operator prerequisites. Keep in sync with the same block
+    # in gb200-eks-inference.yaml — the mixin system can't extend componentRefs
+    # already declared in the inheritance chain (gpu-operator comes from
+    # eks-training / eks-inference), so this lives per-leaf for now.
     - name: gpu-operator
       type: Helm
+      manifestFiles:
+        # Ships a ConfigMap with options nvidia NVreg_GrdmaPciTopoCheckOverride=1.
+        # driver.kernelModuleConfig.name (below) points the ClusterPolicy at it,
+        # so the driver DaemonSet mounts nvidia.conf and the kernel loads with
+        # the flag set — required on GB200+EFA for EFA dma-buf attach to the
+        # Grace PCI topology. Without it, NCCL silently falls back to Socket.
+        - components/gpu-operator/manifests/kernel-module-params.yaml
       dependencyRefs:
         - nfd
         - cert-manager
         - kube-prometheus-stack
-        - skyhook-customizations
+        - nodewright-customizations
       overrides:
         cdi:
           enabled: true
         gdrcopy:
           enabled: true
+        driver:
+          # 580.126.20 is NVIDIA's recommended floor for GB200+EFA; the global
+          # default (580.105.08 in components/gpu-operator/values.yaml) stays
+          # unchanged for H100/B200 and non-EKS GB200 recipes.
+          version: 580.126.20
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
 
-    # GB200 uses skyhook no-op: the H100 tuning packages (nvidia-setup,
+    # GB200 uses nodewright no-op: the H100 tuning packages (nvidia-setup,
     # nvidia-tuned) are not compatible with GB200's ARM64 host CPU and
     # Blackwell GPU architecture. Replace with tuning.yaml once GB200-specific
-    # packages are available. See docs/integrator/eks-dynamo-networking.md#gb200-skyhook-note.
-    - name: skyhook-customizations
+    # packages are available.
+    - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/no-op.yaml
       overrides:
         service: eks
         accelerator: gb200
         intent: multiNodeTraining
       dependencyRefs:
-        - skyhook-operator
+        - nodewright-operator
 
   # Validation checks for GB200 on EKS training workloads.
   # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
   validation:
+    performance:
+      # NET exercises EFA (the external interconnect) and NVLS exercises MNNVL
+      # across the NVL72 IMEX domain — each variant asserts its transport
+      # actually carried traffic, so a silent fallback to Socket or NET does
+      # not masquerade as a pass. Thresholds are sized for a 2-node GB200 pair
+      # and will be raised once production NVL72 data is available.
+      checks:
+        - nccl-all-reduce-bw-net
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-net
+          value: ">= 40"
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 500"
     conformance:
       checks:
         - platform-health

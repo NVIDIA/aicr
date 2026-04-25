@@ -20,12 +20,14 @@ package catalog
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -100,10 +102,17 @@ type EnvVar struct {
 // Image tag resolution (applied in order):
 //  1. If a catalog entry uses :latest and version is a release (vX.Y.Z),
 //     the tag is replaced with the CLI version for reproducibility.
-//  2. If AICR_VALIDATOR_IMAGE_REGISTRY is set, the registry prefix is replaced.
+//  2. If version is a non-release dev build and commit is a valid short SHA,
+//     the tag is replaced with :sha-<commit> to match on-push.yaml image tags.
+//  3. If AICR_VALIDATOR_IMAGE_TAG is set, the resolved tag is overridden.
+//     Useful for feature-branch dev builds whose commit SHA has no published
+//     image (on-push.yaml only pushes SHA tags for commits merged to main).
+//     Common value: `latest`.
+//  4. If AICR_VALIDATOR_IMAGE_REGISTRY is set, the registry prefix is replaced.
 //
-// Entries with explicit version tags (e.g., :v1.2.3) are never modified.
-func Load(version string) (*ValidatorCatalog, error) {
+// Entries with explicit version tags (e.g., :v1.2.3) are never modified by
+// steps 1-2 but are replaced by step 3 if that env var is set.
+func Load(version, commit string) (*ValidatorCatalog, error) {
 	data, err := recipe.GetDataProvider().ReadFile("validators/catalog.yaml")
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read catalog", err)
@@ -114,30 +123,96 @@ func Load(version string) (*ValidatorCatalog, error) {
 		return nil, err
 	}
 
-	// Replace :latest with CLI version for reproducibility.
-	if isReleaseVersion(version) {
-		for i := range cat.Validators {
-			cat.Validators[i].Image = replaceLatestTag(cat.Validators[i].Image, version)
-		}
-	}
-
-	// Apply image registry override if set.
-	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
-		for i := range cat.Validators {
-			cat.Validators[i].Image = replaceRegistry(cat.Validators[i].Image, override)
-		}
+	for i := range cat.Validators {
+		cat.Validators[i].Image = ResolveImage(cat.Validators[i].Image, version, commit)
 	}
 
 	return cat, nil
 }
 
-// isReleaseVersion returns true for semantic version strings (vX.Y.Z),
-// false for dev builds ("dev", "v0.0.0-next", empty).
-func isReleaseVersion(version string) bool {
-	if version == "" || version == "dev" || strings.Contains(version, "-next") {
-		return false
+// ResolveImage applies the same image rewriting that Load uses for catalog
+// entries, exposed for external callers that hold image references outside the
+// catalog (for example the inner AIPerf benchmark image referenced by the
+// inference-perf validator). Applies, in order:
+//
+//  1. :latest tag replacement with version if version is a release (vX.Y.Z).
+//  2. If non-release and commit is a valid SHA, :latest → :sha-<commit>.
+//  3. Tag override if AICR_VALIDATOR_IMAGE_TAG is set (overrides steps 1-2
+//     AND explicit catalog tags). Intended for feature-branch dev builds
+//     where no :sha-<commit> image has been published; typical value:
+//     `latest`.
+//  4. Registry prefix override if AICR_VALIDATOR_IMAGE_REGISTRY is set.
+//
+// Images with explicit version tags are not modified by steps 1-2.
+func ResolveImage(image, version, commit string) string {
+	commit = strings.ToLower(commit)
+	if isReleaseVersion(version) {
+		image = replaceLatestTag(image, version)
+	} else if isValidCommit(commit) {
+		image = replaceLatestWithSHA(image, commit)
 	}
-	return true
+	if tag := os.Getenv("AICR_VALIDATOR_IMAGE_TAG"); tag != "" {
+		image = replaceTag(image, tag)
+	}
+	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
+		image = replaceRegistry(image, override)
+	}
+	return image
+}
+
+// ImagePullPolicy returns the appropriate Kubernetes pull policy for a
+// resolved validator image. The caller should pass the image that
+// ResolveImage would return (i.e. after any env-var rewriting); callers that
+// just installed an image from the catalog can reuse this helper so the
+// outer validator Job and any inner workload Jobs (e.g. inference-perf's
+// aiperf-bench Job) stay in lockstep.
+//
+// Precedence (first match wins):
+//
+//  1. Side-loaded refs (ko.local/*, kind.local/*) → Never. No registry to
+//     pull from — the image is preloaded via `kind load docker-image`.
+//  2. Digest-pinned refs (name@sha256:...) → IfNotPresent. The digest is
+//     cryptographically immutable, so a cached copy is always correct;
+//     forcing Always here would break disconnected/private clusters that
+//     preload images and make kubelet re-contact the registry every run.
+//  3. AICR_VALIDATOR_IMAGE_TAG is set → Always. The override is intended
+//     for mutable published tags (e.g. `latest`, `edge`, `main` — tags
+//     on-push.yaml recreates on every merge); re-pulling prevents
+//     node-local caches from serving stale images.
+//  4. `:latest` suffix → Always. Mutable tag by convention.
+//  5. Otherwise → IfNotPresent. Versioned tag assumed immutable enough
+//     that caching is a win.
+func ImagePullPolicy(image string) corev1.PullPolicy {
+	// Trailing slash anchors the match to the full registry segment so a
+	// real registry like `ko.localhost:5000/...` is not mistaken for a
+	// side-loaded `ko.local/...` ref and wrongly forced to PullNever.
+	if strings.HasPrefix(image, "ko.local/") || strings.HasPrefix(image, "kind.local/") {
+		return corev1.PullNever
+	}
+	if strings.Contains(image, "@") {
+		// Digest pin — immutable by construction. Caching is safe and
+		// also required for disconnected/air-gapped deployments.
+		return corev1.PullIfNotPresent
+	}
+	if os.Getenv("AICR_VALIDATOR_IMAGE_TAG") != "" {
+		return corev1.PullAlways
+	}
+	if strings.HasSuffix(image, ":latest") {
+		return corev1.PullAlways
+	}
+	return corev1.PullIfNotPresent
+}
+
+// releaseVersionPattern matches strict semantic versions: vX.Y.Z or X.Y.Z
+// with no pre-release suffix. This ensures snapshot strings like
+// v0.0.0-12-gabc1234 or pre-release tags like v1.0.0-rc1 are not treated
+// as releases.
+var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
+
+// isReleaseVersion returns true for strict semantic version strings (vX.Y.Z),
+// false for dev builds, pre-release suffixes, snapshots, and empty strings.
+func isReleaseVersion(version string) bool {
+	return releaseVersionPattern.MatchString(version)
 }
 
 // replaceLatestTag replaces :latest with the given version tag.
@@ -151,6 +226,63 @@ func replaceLatestTag(image, version string) string {
 			tag = "v" + tag
 		}
 		return strings.TrimSuffix(image, ":latest") + ":" + tag
+	}
+	return image
+}
+
+// isValidCommit returns true for non-empty strings that look like a git short
+// or full SHA (7-40 hex characters). The sentinel value "unknown" (set by
+// ldflags default) is explicitly rejected.
+func isValidCommit(commit string) bool {
+	if commit == "" || commit == "unknown" {
+		return false
+	}
+	if len(commit) < 7 || len(commit) > 40 {
+		return false
+	}
+	for _, c := range commit {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// replaceTag forces the image's tag to newTag, regardless of what tag (if
+// any) the image currently carries. Unlike replaceLatestTag / replaceLatestWithSHA,
+// which only rewrite :latest, this helper supports the AICR_VALIDATOR_IMAGE_TAG
+// env-var escape hatch: a user running a feature-branch dev build (where no
+// :sha-<commit> image was published by on-push.yaml) can set the env var
+// to `latest` and force every validator image to a published tag.
+//
+// Digest-pinned references (`name@sha256:…`) are cryptographic pins and are
+// intentionally left untouched — a tag override is meaningless against a
+// content-addressable ref, and naively rewriting would corrupt the digest.
+// For non-digest refs, the tag separator is found as the last ':' that sits
+// after the last '/' to avoid colliding with the registry port (`:5001` in
+// `localhost:5001/...`).
+func replaceTag(image, newTag string) string {
+	if strings.Contains(image, "@") {
+		// Digest-pinned ref (e.g. ghcr.io/foo/bar@sha256:deadbeef, or the
+		// mixed form name:tag@sha256:…). The digest is the authoritative
+		// pin; preserve it verbatim.
+		return image
+	}
+	slash := strings.LastIndex(image, "/")
+	colon := strings.LastIndex(image, ":")
+	if colon <= slash {
+		// No tag on the image (just an image reference) — append one.
+		return image + ":" + newTag
+	}
+	return image[:colon] + ":" + newTag
+}
+
+// replaceLatestWithSHA replaces :latest with :sha-<commit> to match the
+// image tags pushed by the on-push CI workflow.
+// Images with explicit version tags are not modified.
+func replaceLatestWithSHA(image, commit string) string {
+	if strings.HasSuffix(image, ":latest") {
+		return strings.TrimSuffix(image, ":latest") + ":sha-" + commit
 	}
 	return image
 }

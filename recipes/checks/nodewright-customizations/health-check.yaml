@@ -12,18 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook Customizations Health Check
+# Nodewright Customizations Health Check
 #
-# Validates that the Skyhook custom resource(s) deployed by the skyhook-customizations
+# Validates that the Skyhook custom resource(s) deployed by the nodewright-customizations
 # component have completed successfully. The Skyhook CR status.status (see
-# github.com/NVIDIA/skyhook/chart/templates/skyhook-crd.yaml) is one of: unknown,
+# github.com/NVIDIA/nodewright/chart/templates/skyhook-crd.yaml) is one of: unknown,
 # complete, blocked, waiting, disabled, paused, in_progress, erroring. This check
 # asserts status.status is "complete" so that node-level customizations (e.g. tuning)
 # have been applied to all matching nodes.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: skyhook-customizations-health-check
+  name: nodewright-customizations-health-check
 spec:
   timeouts:
     assert: 5m

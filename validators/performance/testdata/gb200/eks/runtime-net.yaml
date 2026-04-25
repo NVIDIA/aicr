@@ -1,0 +1,203 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL all-reduce TrainingRuntime for GB200 on EKS, NET-transport variant.
+#
+# Forces NCCL to route traffic over the network transport (AWS EFA via the
+# aws-ofi-nccl plugin) instead of any NVLink path. Both NVLS (NVLink SHARP)
+# and MNNVL (multi-node NVLink via IMEX) are explicitly disabled so operators
+# validating a p6e-gb200.36xlarge cluster can measure the EFA fabric
+# independently of the NVL72 NVLink domain.
+#
+# NCCL_DEBUG=INFO emits the transport banner lines that
+# validators/performance/nccl_all_reduce_bw_constraint.go:verifyTransportFromLogs
+# parses to confirm the selected transport actually carried traffic.
+#
+# Cluster prerequisite: the NVIDIA kernel driver must have
+# NVreg_GrdmaPciTopoCheckOverride=1 set. Without it, the driver rejects
+# dma-buf attach on the GB200 PCIe topology and NCCL silently falls back
+# to Socket. The NET check's preflight reads /proc/driver/nvidia/params
+# and fails loudly if the override is missing.
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: launcher
+        replicas: 1
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  env:
+                  # /opt/amazon/ofi-nccl/lib/aarch64-linux-gnu is where libnccl-net.so
+                  # (the aws-ofi-nccl EFA plugin) is installed in the hpc-cloud/nccl-tests
+                  # image on arm64. GB200 nodes are aarch64; use the arch-triplet subdir
+                  # that matches the EFA 1.43.2 packaging bundled in this image.
+                  - name: LD_LIBRARY_PATH
+                    value: "/opt/amazon/ofi-nccl/lib/aarch64-linux-gnu:/opt/amazon/efa/lib:/opt/amazon/openmpi/lib:/opt/nccl/build/lib:/usr/local/nvidia/lib"
+                  - name: PATH
+                    value: "$PATH:/opt/amazon/efa/bin:/usr/bin"
+                  command:
+                  - /opt/amazon/openmpi/bin/mpirun
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - -bind-to
+                  - none
+                  - --mca
+                  - plm_rsh_agent
+                  - ssh
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  - -x
+                  - LD_LIBRARY_PATH
+                  - -x
+                  - PATH
+                  # INFO (not WARN) so the "NCCL INFO Using network <plugin>"
+                  # bootstrap banner appears in launcher logs — that's the
+                  # line verifyTransportFromLogs greps to confirm EFA carried
+                  # traffic on this variant (per-channel "[send] via NET/..."
+                  # lines were dropped in NCCL 2.27).
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  # Force NCCL onto the NET transport (EFA). Disable every NVLink
+                  # path NCCL would otherwise try: NVLS (NVLink SHARP) and MNNVL
+                  # (multi-node NVLink via IMEX). On GB200 the MNNVL probe succeeds
+                  # on cliqueSize=8 but the NET pods have no IMEX channel device
+                  # attached, so MNNVL init aborts with "Cuda failure 800 operation
+                  # not permitted" and the NCCL test exits before any NET traffic.
+                  - -x
+                  - NCCL_NVLS_ENABLE=0
+                  - -x
+                  - NCCL_MNNVL_ENABLE=0
+                  - -x
+                  - FI_PROVIDER=efa
+                  - -x
+                  - FI_EFA_USE_DEVICE_RDMA=1
+                  - -x
+                  - FI_EFA_FORK_SAFE=1
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  - /opt/nccl-tests/build/${TEST_TYPE}
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                initContainers:
+                - name: fix-ssh-perms
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: public.ecr.aws/hpc-cloud/nccl-tests:cuda12.8.1-efa1.43.2-ofiv1.16.3-ncclv2.27.7-1-testsv2.16.9
+                  command: ["/usr/sbin/sshd", "-De"]
+                  resources:
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+${EFA_RESOURCE_LIMITS}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+${EFA_RESOURCE_REQUESTS}
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher

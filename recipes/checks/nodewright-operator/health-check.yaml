@@ -12,16 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Skyhook Operator Health Check
+# Nodewright Operator Health Check
 #
-# Validates that the Skyhook Operator is running and healthy in the skyhook
+# Validates that the Nodewright Operator is running and healthy in the skyhook
 # namespace. Checks that the skyhook-operator-controller-manager deployment has at least one
 # available replica and that no pods in the namespace are stuck in Pending,
 # Failed, or Unknown phases.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: skyhook-operator-health-check
+  name: nodewright-operator-health-check
 spec:
   timeouts:
     assert: 5m

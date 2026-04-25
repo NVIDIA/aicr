@@ -98,11 +98,11 @@ conditions:
 - `os`: Operating system (ubuntu, rhel, cos, amazonlinux)
 - `platform`: Platform/framework (kubeflow)
 
-### Example: Skyhook Customizations Validations
+### Example: Nodewright Customizations Validations
 
 ```yaml
 components:
-  - name: skyhook-customizations
+  - name: nodewright-customizations
     # ... other config ...
     validations:
       # Check for missing workload-selector when training intent
@@ -111,7 +111,7 @@ components:
         conditions:
           intent:
             - training
-        message: "This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction."
+        message: "This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction."
       
       # Check for missing accelerated-node-selector for training/inference
       - function: CheckAcceleratedSelectorMissing
@@ -129,7 +129,7 @@ components:
 
 Checks if `--workload-selector` is missing when conditions are met.
 
-**Use Case**: Prevent skyhook from evicting running training jobs by ensuring workload selector is configured.
+**Use Case**: Prevent nodewright from evicting running training jobs by ensuring workload selector is configured.
 
 **Example:**
 ```yaml
@@ -139,7 +139,7 @@ validations:
     conditions:
       intent:
         - training
-    message: "This may cause skyhook to evict running training jobs. Consider setting --workload-selector to prevent eviction."
+    message: "This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction."
 ```
 
 ### CheckAcceleratedSelectorMissing

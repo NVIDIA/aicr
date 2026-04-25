@@ -24,7 +24,11 @@ import (
 
 // warnIfHeterogeneousNodes logs a warning if GPU nodes have different instance
 // types. NCCL all-reduce requires homogeneous nodes for optimal performance.
-// TODO: Add GPU product compatibility layer (nvidia.com/gpu.product family grouping).
+// Under normal NCCL flow this is redundant on EKS after resolveTargetGPUNodes,
+// which narrows both by accelerator (nvidia.com/gpu.product) and by
+// instance-type. Kept as insurance for code paths that bypass the resolver and
+// for discoverEKSNodeConfig call sites that might use the snapshot's GPU node
+// list directly.
 func warnIfHeterogeneousNodes(nodes []v1.Node) {
 	if len(nodes) < 2 {
 		return

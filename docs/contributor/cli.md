@@ -119,7 +119,7 @@ Generates deployment artifacts from recipes:
 - Network Operator: Generates Network Operator Helm values and NICClusterPolicy manifest
 - Cert-Manager: Generates cert-manager Helm values for certificate management
 - NVSentinel: Generates NVSentinel Helm values
-- Skyhook: Generates Skyhook Operator Helm values and Skyhook CR manifest for node optimization
+- Nodewright: Generates Nodewright Operator Helm values and Nodewright CR manifest for node optimization
 
 **Value overrides**:
 
@@ -925,10 +925,10 @@ aicr bundle -r recipe.yaml \
 │   ├── values.yaml
 │   ├── README.md
 │   └── checksums.txt
-└── skyhook/
+└── nodewright-operator/
     ├── values.yaml
     ├── manifests/
-    │   └── skyhook.yaml
+    │   └── nodewright.yaml
     ├── README.md
     └── checksums.txt
 ```

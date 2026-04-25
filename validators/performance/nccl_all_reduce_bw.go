@@ -23,16 +23,52 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 )
 
-// checkNCCLAllReduceBW wraps the NCCL constraint validator as a CheckFunc.
-// Finds the nccl-all-reduce-bw constraint from the recipe and delegates to
-// validateNcclAllReduceBw (copied from v1).
+// checkNCCLAllReduceBW is the legacy CheckFunc that runs the provider-default
+// NCCL all-reduce template with no transport assertion. Preserved so existing
+// recipes keep working after the per-variant catalog entries were added.
 func checkNCCLAllReduceBW(ctx *validators.Context) error {
-	constraint, found := findPerformanceConstraint(ctx, "nccl-all-reduce-bw")
+	return checkNCCLAllReduceBWVariant(ctx, variantDefault)
+}
+
+// checkNCCLAllReduceBWNET runs the NET-transport variant (EFA on EKS, etc.)
+// and asserts the NET fabric carried traffic.
+func checkNCCLAllReduceBWNET(ctx *validators.Context) error {
+	return checkNCCLAllReduceBWVariant(ctx, variantNET)
+}
+
+// checkNCCLAllReduceBWNVLS runs the NVLS/MNNVL-transport variant and asserts
+// that NVLS initialized and carried traffic (fails loudly if the cluster's
+// IMEX domain is broken and NCCL falls back to NET).
+func checkNCCLAllReduceBWNVLS(ctx *validators.Context) error {
+	return checkNCCLAllReduceBWVariant(ctx, variantNVLS)
+}
+
+// constraintNameForVariant returns the recipe constraint name that selects a
+// given NCCL transport variant. Must match the entries in
+// recipes/validators/catalog.yaml.
+func constraintNameForVariant(variant ncclVariant) string {
+	switch variant {
+	case variantNET:
+		return "nccl-all-reduce-bw-net"
+	case variantNVLS:
+		return "nccl-all-reduce-bw-nvls"
+	case variantDefault:
+		return "nccl-all-reduce-bw"
+	default:
+		// Unknown values fall back to the legacy constraint name so existing
+		// recipes keep validating after variant rollout.
+		return "nccl-all-reduce-bw"
+	}
+}
+
+func checkNCCLAllReduceBWVariant(ctx *validators.Context, variant ncclVariant) error {
+	name := constraintNameForVariant(variant)
+	constraint, found := findPerformanceConstraint(ctx, name)
 	if !found {
-		return validators.Skip("no nccl-all-reduce-bw constraint in recipe")
+		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", name))
 	}
 
-	actual, passed, err := validateNcclAllReduceBw(ctx, constraint)
+	actual, passed, err := validateNcclAllReduceBw(ctx, constraint, variant)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "NCCL All Reduce bandwidth check failed", err)
 	}
@@ -42,7 +78,7 @@ func checkNCCLAllReduceBW(ctx *validators.Context) error {
 		return validators.Skip(actual)
 	}
 
-	fmt.Printf("NCCL All Reduce bandwidth: %s\n", actual)
+	fmt.Printf("NCCL All Reduce bandwidth (%s): %s\n", name, actual)
 	fmt.Printf("Constraint: %s → %v\n", constraint.Value, passed)
 
 	if !passed {

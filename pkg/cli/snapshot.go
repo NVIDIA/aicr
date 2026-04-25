@@ -16,6 +16,7 @@ package cli
 
 import (
 	"context"
+	"log/slog"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -264,6 +265,13 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			ser, err := createSnapshotSerializer(tmplOpts)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output serializer", err)
+			}
+			if c, ok := ser.(serializer.Closer); ok {
+				defer func() {
+					if closeErr := c.Close(); closeErr != nil {
+						slog.Warn("failed to close snapshot serializer", "error", closeErr)
+					}
+				}()
 			}
 
 			// Build snapshotter configuration

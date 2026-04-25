@@ -54,6 +54,7 @@ func TestNewDefaults(t *testing.T) {
 func TestNewWithOptions(t *testing.T) {
 	v := New(
 		WithVersion("1.0.0"),
+		WithCommit("abc1234"),
 		WithNamespace("custom-ns"),
 		WithRunID("test-run"),
 		WithCleanup(false),
@@ -64,6 +65,9 @@ func TestNewWithOptions(t *testing.T) {
 
 	if v.Version != "1.0.0" {
 		t.Errorf("Version = %q, want %q", v.Version, "1.0.0")
+	}
+	if v.Commit != "abc1234" {
+		t.Errorf("Commit = %q, want %q", v.Commit, "abc1234")
 	}
 	if v.Namespace != "custom-ns" {
 		t.Errorf("Namespace = %q, want %q", v.Namespace, "custom-ns")
@@ -99,7 +103,7 @@ func TestGenerateRunID(t *testing.T) {
 
 func loadEmbeddedCatalog(t *testing.T) *catalog.ValidatorCatalog {
 	t.Helper()
-	cat, err := catalog.Load("")
+	cat, err := catalog.Load("", "")
 	if err != nil {
 		t.Fatalf("failed to load catalog: %v", err)
 	}
@@ -406,7 +410,7 @@ func TestPhaseOrder(t *testing.T) {
 // in recipe overlays exists in the validator catalog for the correct phase.
 // Catches typos and drift between recipes and catalog at PR time.
 func TestRecipeCheckNamesMatchCatalog(t *testing.T) {
-	cat, err := catalog.Load("")
+	cat, err := catalog.Load("", "")
 	if err != nil {
 		t.Fatalf("failed to load catalog: %v", err)
 	}
@@ -478,4 +482,66 @@ func catalogNames(cat *catalog.ValidatorCatalog, phase string) []string {
 		names = append(names, e.Name)
 	}
 	return names
+}
+
+func TestExtractResultSummaries(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdout []string
+		want   []string
+	}{
+		{
+			name:   "no RESULT lines — nothing extracted",
+			stdout: []string{"time=... level=INFO msg=starting", "All pods running"},
+			want:   []string{},
+		},
+		{
+			name: "extracts prefixed lines in order",
+			stdout: []string{
+				"time=... level=INFO msg=check running",
+				"RESULT: Inference throughput: 39399.24 tokens/sec",
+				"RESULT: Inference TTFT p99: 138.27 ms",
+				"Throughput constraint: >= 5000 → PASS",
+			},
+			want: []string{
+				"Inference throughput: 39399.24 tokens/sec",
+				"Inference TTFT p99: 138.27 ms",
+			},
+		},
+		{
+			name: "RESULT without trailing content is skipped (no empty emission)",
+			stdout: []string{
+				"RESULT: ",
+				"RESULT: real summary",
+			},
+			want: []string{"real summary"},
+		},
+		{
+			name:   "empty stdout — empty result",
+			stdout: nil,
+			want:   []string{},
+		},
+		{
+			name: "prefix must match exactly — lowercase 'result:' does not qualify",
+			stdout: []string{
+				"result: not-a-summary",
+				"RESULT:no-space-after-colon",
+				"RESULT: valid",
+			},
+			want: []string{"valid"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractResultSummaries(tt.stdout)
+			if len(got) != len(tt.want) {
+				t.Fatalf("extractResultSummaries() len = %d (%v), want %d (%v)", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("extractResultSummaries()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
 }

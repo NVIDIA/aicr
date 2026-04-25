@@ -268,7 +268,14 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 			docker push $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG); \
 		fi; \
-	done
+	done; \
+	echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
+	docker build -f validators/performance/aiperf-bench.Dockerfile \
+		-t $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG) .; \
+	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
+		echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
+		docker push $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG); \
+	fi
 
 .PHONY: check-health
 check-health: ## Runs chainsaw health check directly against Kind cluster (COMPONENT=<name>)
@@ -311,7 +318,7 @@ check-health-all: ## Runs all chainsaw health checks against Kind cluster
 	echo "All health checks passed"
 
 .PHONY: validate-local
-validate-local: image-validator ## Builds validator image and runs validation in Kind (RECIPE=<path>)
+validate-local: image-validators ## Builds validator images and runs validation in Kind (RECIPE=<path>)
 	@set -e; \
 	if [ -z "$(RECIPE)" ]; then \
 		echo "Usage: make validate-local RECIPE=<path-to-recipe.yaml>"; \
@@ -322,7 +329,7 @@ validate-local: image-validator ## Builds validator image and runs validation in
 		exit 1; \
 	fi; \
 	echo "Loading validator images into Kind cluster..."; \
-	for phase in deployment performance conformance; do \
+	for phase in deployment performance conformance aiperf-bench; do \
 		kind load docker-image $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) --name kind-aicr; \
 	done; \
 	echo "Running validation with local images..."; \
@@ -340,41 +347,33 @@ release: ## Runs the full release process with goreleaser
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
-.PHONY: bump-prepare
-bump-prepare: ## Prepares a release for review (generates changelog, does not tag/push). Use TYPE=patch|minor|major|rc|beta
-	tools/bump prepare $(or $(TYPE),patch)
-
-.PHONY: bump-finalize
-bump-finalize: ## Commits, tags, and pushes a prepared release
-	tools/bump finalize
-
-.PHONY: bump-abort
-bump-abort: ## Cancels a prepared release
-	tools/bump abort
-
 .PHONY: bump-major
-bump-major: ## Bumps major version (1.2.3 → 2.0.0)
+bump-major: ## Tags major version bump (1.2.3 → 2.0.0)
 	tools/bump major
 
 .PHONY: bump-minor
-bump-minor: ## Bumps minor version (1.2.3 → 1.3.0)
+bump-minor: ## Tags minor version bump (1.2.3 → 1.3.0)
 	tools/bump minor
 
 .PHONY: bump-patch
-bump-patch: ## Bumps patch version (1.2.3 → 1.2.4)
+bump-patch: ## Tags patch version bump (1.2.3 → 1.2.4)
 	tools/bump patch
 
 .PHONY: bump-rc
-bump-rc: ## One-shot RC pre-release bump (v1.2.3 → v1.2.4-rc1 → v1.2.4-rc2)
+bump-rc: ## Tags RC pre-release (v1.2.3 → v1.3.0-rc1 → v1.3.0-rc2)
 	tools/bump rc
 
-.PHONY: bump-beta
-bump-beta: ## One-shot beta pre-release bump (v1.2.3 → v1.2.4-beta1 → v1.2.4-beta2)
-	tools/bump beta
+.PHONY: bump-promote
+bump-promote: ## Promotes a pre-release to stable on the same SHA. Use TAG=v1.2.3-rc1
+	tools/bump promote $(TAG)
 
 .PHONY: changelog
-changelog: ## Previews changelog for next release (does not commit)
-	@git-cliff --unreleased --strip header
+changelog: ## Shows changes since the last release
+	@tools/changelog
+
+.PHONY: changelog-file
+changelog-file: ## Updates CHANGELOG.md with changes since the last release
+	@tools/changelog --file
 
 .PHONY: clean
 clean: ## Cleans build artifacts (dist, coverage files)
@@ -713,9 +712,13 @@ help-full: ## Displays commands grouped by category
 	@echo "  make build          Build binaries for current OS/arch"
 	@echo "  make image          Build and push container image"
 	@echo "  make release        Full release with goreleaser"
-	@echo "  make bump-major     Bump major version (1.2.3 -> 2.0.0)"
-	@echo "  make bump-minor     Bump minor version (1.2.3 -> 1.3.0)"
-	@echo "  make bump-patch     Bump patch version (1.2.3 -> 1.2.4)"
+	@echo "  make bump-rc        Tag RC pre-release (v1.2.3 -> v1.3.0-rc1)"
+	@echo "  make bump-promote   Promote RC to stable (TAG=v1.2.4-rc1)"
+	@echo "  make bump-patch     Tag patch version (1.2.3 -> 1.2.4)"
+	@echo "  make bump-minor     Tag minor version (1.2.3 -> 1.3.0)"
+	@echo "  make bump-major     Tag major version (1.2.3 -> 2.0.0)"
+	@echo "  make changelog      Show changes since last release"
+	@echo "  make changelog-file Update CHANGELOG.md with unreleased changes"
 	@echo ""
 	@echo "\033[1m=== Local Development ===\033[0m"
 	@echo "  make dev-env        Create cluster and start Tilt (full setup)"

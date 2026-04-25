@@ -9,7 +9,7 @@ AICR uses a container-per-validator model. Each validation check runs as an isol
 | Phase | Purpose | Example |
 |-------|---------|---------|
 | `deployment` | Verify components are installed and healthy | GPU operator pods running, expected resources present |
-| `performance` | Verify system meets performance thresholds | NCCL bandwidth, GPU utilization |
+| `performance` | Verify system meets performance thresholds | NCCL all-reduce bandwidth (training), AIPerf inference throughput & TTFT p99 (inference+Dynamo) |
 | `conformance` | Verify workload-specific requirements | DRA support, gang scheduling, autoscaling |
 
 **Architecture:**
@@ -136,6 +136,8 @@ The validator engine mounts snapshot and recipe data as ConfigMaps:
 | `AICR_SNAPSHOT_PATH` | Override snapshot mount path |
 | `AICR_RECIPE_PATH` | Override recipe mount path |
 | `AICR_VALIDATOR_IMAGE_REGISTRY` | Override image registry prefix (set by user) |
+| `AICR_CHECK_TIMEOUT` | Parent-context timeout for the check, injected by the Job deployer from the catalog entry's `timeout` field (Go duration string, e.g. `30m`). Falls back to `defaults.CheckExecutionTimeout` when unset or malformed; a malformed value is logged at WARN. Use `ctx.Ctx` (set by `LoadContext`) to honor it. |
+| `AICR_VALIDATOR_IMAGE_TAG` | Override the resolved image tag (e.g. `latest`). Bypasses the default `:v<version>` / `:sha-<commit>` resolution for feature-branch dev builds whose commit has no published image. |
 | `AICR_NODE_SELECTOR` | User-provided node selector override for inner workloads (comma-separated `key=value` pairs). Set by the `--node-selector` CLI flag. Use `ctx.NodeSelector` to access the parsed value. |
 | `AICR_TOLERATIONS` | User-provided toleration override for inner workloads (comma-separated `key=value:effect` entries). Set by the `--toleration` CLI flag. Use `ctx.Tolerations` to access the parsed value. |
 
@@ -158,7 +160,7 @@ type Context struct {
 }
 ```
 
-`LoadContext()` builds this from the container environment: reads mounted ConfigMaps, creates in-cluster K8s clients, and sets a timeout from `defaults.CheckExecutionTimeout`.
+`LoadContext()` builds this from the container environment: reads mounted ConfigMaps, creates in-cluster K8s clients, and sets the parent-context timeout via `validators/context.go:checkTimeoutFromEnv` — which honors `AICR_CHECK_TIMEOUT` (injected by the Job deployer from the catalog entry's `timeout` field) and falls back to `defaults.CheckExecutionTimeout` when unset or malformed.
 
 ### Scheduling Overrides
 
@@ -227,8 +229,69 @@ Each entry in `recipes/validators/catalog.yaml`:
 **Image tag resolution** (applied by `catalog.Load`):
 
 1. `:latest` tags are replaced with the CLI version (e.g., `:v0.9.5`) for release builds
-2. Explicit version tags (e.g., `:v1.2.3`) are never modified
-3. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix
+2. On non-release dev builds with a valid commit, `:latest` becomes `:sha-<commit>` (matches the tags `on-push.yaml` pushes for merges to `main`)
+3. Explicit version tags (e.g., `:v1.2.3`) are not modified by steps 1-2
+4. `AICR_VALIDATOR_IMAGE_TAG` overrides the resolved tag on every validator image, including explicit catalog tags. Use this when running `aicr validate` from a feature-branch dev build whose commit has not been merged to `main` (no `:sha-<commit>` image has been published). Typical value: `latest`. Example: `AICR_VALIDATOR_IMAGE_TAG=latest aicr validate --phase performance ...`
+5. `AICR_VALIDATOR_IMAGE_REGISTRY` overrides the registry prefix
+
+**Digest-pinned references** (`name@sha256:…`) are not rewritten by step 4. A tag override is meaningless against a content-addressable pin, and naive rewriting would corrupt the digest. Step 5's registry override still applies — only the registry prefix changes, the digest is preserved verbatim.
+
+**Env-var forwarding to the validator pod:** `AICR_CLI_VERSION`, `AICR_CLI_COMMIT`, `AICR_VALIDATOR_IMAGE_REGISTRY`, and `AICR_VALIDATOR_IMAGE_TAG` are forwarded from the CLI invocation into the validator container so that validators resolving inner workload images at runtime (e.g. `inference-perf`'s AIPerf benchmark Job) apply the same semantics as `catalog.Load`. If you set `AICR_VALIDATOR_IMAGE_TAG=latest` on the CLI, the override reaches both the outer validator Job and the inner benchmark Job — they always travel together.
+
+**Pull-policy behavior when the override is set:** both the outer validator Job and every inner workload Job it dispatches route through the shared `catalog.ImagePullPolicy(image)` helper (`pkg/validator/catalog/catalog.go`). The rule, in precedence order, is:
+
+1. **Side-loaded refs** (`ko.local/*`, `kind.local/*`) → `Never` (no registry to pull from).
+2. **Digest-pinned refs** (`name@sha256:…`) → `IfNotPresent`. Cryptographic immutability means a cached copy is always correct; forcing `Always` here would make kubelet re-contact the registry every run, which breaks disconnected / air-gapped clusters even though the image itself was never overridden.
+3. **`AICR_VALIDATOR_IMAGE_TAG` is set** → `Always`. Override values are typically mutable (`latest`, `edge`, `main`, or any tag `on-push.yaml` recreates on every merge), so `IfNotPresent` would let a node's previously cached image win over the tag's current target.
+4. **`:latest` suffix** → `Always`. Mutable tag by convention.
+5. **Otherwise** → `IfNotPresent`. Versioned tag assumed immutable enough that caching is a win.
+
+Callers in this repo: the outer validator Job's `Deployer.imagePullPolicy()` (`pkg/validator/job/deployer.go`) and the inner AIPerf benchmark pod spec in `buildAIPerfJob` (`validators/performance/inference_perf_constraint.go`). They both delegate to the same helper so their policy can't drift. When adding a new inner workload Job in `validators/<phase>/*`, set `ImagePullPolicy: catalog.ImagePullPolicy(<resolved image>)` on the container to keep the invariant.
+
+**Performance phase example — inference perf:**
+
+```yaml
+- name: inference-perf
+  phase: performance
+  description: "Verify inference throughput and TTFT p99 meet thresholds using AIPerf"
+  image: ghcr.io/nvidia/aicr-validators/performance:latest
+  timeout: 50m
+  args: ["inference-perf"]
+```
+
+Paired constraints in an overlay (one per metric the check produces):
+
+```yaml
+validation:
+  performance:
+    checks: [inference-perf]
+    constraints:
+      - name: inference-throughput   # output tokens/sec, >= threshold
+        value: ">= 5000"
+      - name: inference-ttft-p99     # time-to-first-token p99 in ms, <= threshold
+        value: "<= 200"
+```
+
+## Performance Validators
+
+Two performance checks ship today, both registered in `validators/performance/main.go`:
+
+| Check | Intent | Workload | Constraints |
+|-------|--------|----------|-------------|
+| `nccl-all-reduce-bw` | training | NCCL `all_reduce_perf` under a Kubeflow `TrainJob` | `nccl-all-reduce-bw >= N GB/s` |
+| `inference-perf` | inference+Dynamo | `DynamoGraphDeployment` (vLLM, Qwen/Qwen3-0.6B) + AIPerf Job | `inference-throughput >= N tok/s`, `inference-ttft-p99 <= N ms` |
+
+Both follow a consistent lifecycle:
+
+1. **Deploy** a fresh benchmark workload. `inference-perf` always provisions its own `DynamoGraphDeployment` into a per-run namespace (`aicr-inference-perf-<hash>`) derived from `AICR_RUN_ID`, so two concurrent runs cannot collide and a prior run's leftovers cannot be silently adopted. An earlier design sketch had a "discover existing frontend" path — it was intentionally dropped because it admitted ambiguity about which service was being benchmarked on shared clusters.
+2. **Wait for readiness** via the watch API (not polling) on the workload CR's status.
+3. **Run the benchmark** in a K8s Job, capturing stdout with sentinels that survive noisy logs.
+4. **Parse and evaluate** against recipe constraints with a 10% tolerance.
+5. **Defer cleanup** — the per-run namespace is torn down on both success and failure so leaked workloads from interrupted prior runs are reaped on the next invocation.
+
+The inference check injects pod-scheduling (nodeSelector, tolerations, DRA `resourceClaims`) into the unstructured `DynamoGraphDeployment` programmatically rather than via text substitution, to avoid YAML-escape issues with taint values.
+
+**AIPerf runner image.** The benchmark Job spawned by `inference-perf` pulls a pre-built image (`ghcr.io/nvidia/aicr-validators/aiperf-bench:<tag>`) with `aiperf` already `pip install`-ed. The image is published by the same `on-tag.yaml` workflow that publishes the three Go validator images; its Dockerfile at `validators/performance/aiperf-bench.Dockerfile` pins the `AIPERF_VERSION` build arg. Baking the install at release time (rather than `pip install` on every benchmark pod) removes the PyPI runtime dependency, eliminates a ~30 s warmup, and keeps the check air-gap-friendly on clusters with only ghcr.io access.
 
 ## Code Walkthrough
 
@@ -286,9 +349,14 @@ validators/
 │   ├── expected_resources.go
 │   └── ...
 ├── performance/            # Performance phase validators
-│   ├── main.go
+│   ├── main.go                       # Registers nccl-all-reduce-bw, inference-perf
 │   ├── Dockerfile
-│   └── ...
+│   ├── nccl_all_reduce_bw.go             # Training: NCCL CheckFunc wrapper
+│   ├── nccl_all_reduce_bw_constraint.go  # Training: NCCL pipeline (deploy → bench → parse)
+│   ├── inference_perf.go                 # Inference: AIPerf CheckFunc wrapper (constraint eval)
+│   ├── inference_perf_constraint.go      # Inference: Dynamo deploy → AIPerf → parse pipeline
+│   ├── aiperf-bench.Dockerfile           # Pre-built AIPerf benchmark runner image
+│   └── testdata/                         # Workload YAML templates (NCCL TrainJob, Dynamo CR, DRA claim)
 ├── conformance/            # Conformance phase validators
 │   ├── main.go
 │   ├── Dockerfile
@@ -398,6 +466,8 @@ The catalog is embedded in the binary at build time, so a rebuild is required. R
 ```shell
 git checkout -- recipes/validators/catalog.yaml
 ```
+
+**Use a unique tag for every rebuild.** Catalog entries use pinned image tags, which Kubernetes resolves with `imagePullPolicy: IfNotPresent` by default — so re-pushing the same tag (e.g., `:dev`) leaves previously-pulled nodes running the stale image. In dev loops, suffix the tag per iteration (`:dev-v1`, `:dev-v2`, or `:dev-$(git rev-parse --short HEAD)`) so every rebuild forces a fresh pull cluster-wide. Release builds avoid this entirely because `on-tag.yaml` publishes semver tags that are never reused.
 
 ### Private Registry Authentication
 

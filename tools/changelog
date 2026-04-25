@@ -1,0 +1,95 @@
+#!/bin/bash
+set -euo pipefail
+
+# Dir setup
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${DIR}/common"
+
+# Parse flags
+UPDATE_FILE=false
+if [[ "${1:-}" == "--file" ]]; then
+  UPDATE_FILE=true
+fi
+
+# Check if required tools are installed
+has_tools git git-cliff
+
+# Get the latest stable release tag (skip pre-release tags like -rc1, -beta1)
+LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -v '-' | head -1)
+
+if [ -z "$LAST_TAG" ]; then
+  err "No release tags found."
+fi
+
+msg "Changes since $LAST_TAG" >&2
+
+# Generate raw changelog, strip noise lines
+RAW=$(git-cliff "${LAST_TAG}..HEAD" --strip header \
+  | grep -v '<!-- .* -->' \
+  | grep -vi 'Signed-off-by:' \
+  | grep -vi 'Co-authored-by:')
+
+# Split into sections and emit in fixed order:
+#   New Features → Bug Fixes → Other Tasks
+TMPDIR_CL=$(mktemp -d "${TMPDIR:-/tmp}/changelog.XXXXXX")
+trap 'rm -rf "$TMPDIR_CL"' EXIT
+
+current=""
+while IFS= read -r line; do
+  if [[ "$line" =~ ^###\  ]]; then
+    current="${line#\#\#\# }"
+  elif [[ -n "$current" ]]; then
+    echo "$line" >> "$TMPDIR_CL/$current"
+  fi
+done <<< "$RAW"
+
+# Emit known sections in preferred order, then any remaining groups
+# so new cliff.toml groups are never silently dropped.
+OUTPUT=""
+emitted=""
+for section in "New Features" "Bug Fixes" "Other Tasks"; do
+  if [[ -s "$TMPDIR_CL/$section" ]]; then
+    OUTPUT="${OUTPUT}### ${section}
+$(cat "$TMPDIR_CL/$section")
+"
+    emitted="${emitted}|${section}"
+  fi
+done
+
+for f in "$TMPDIR_CL"/*; do
+  [[ -s "$f" ]] || continue
+  section=$(basename "$f")
+  case "$emitted" in *"|${section}"*) continue ;; esac
+  OUTPUT="${OUTPUT}### ${section}
+$(cat "$f")
+"
+done
+
+echo "$OUTPUT"
+
+if [[ "$UPDATE_FILE" == true ]]; then
+  CHANGELOG="${DIR}/../CHANGELOG.md"
+  TODAY=$(date +%Y-%m-%d)
+  # Derive version from latest tag (stable or RC)
+  VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "unreleased")
+  VERSION="${VERSION#v}"
+
+  HEADER="## [${VERSION}] - ${TODAY}"
+
+  # Insert after the "# Changelog" heading and its following blank line
+  if [[ -f "$CHANGELOG" ]]; then
+    TMPFILE=$(mktemp "${TMPDIR:-/tmp}/changelog-insert.XXXXXX")
+    ENTRYFILE=$(mktemp "${TMPDIR:-/tmp}/changelog-entry.XXXXXX")
+    printf '%s\n\n%s' "$HEADER" "$OUTPUT" > "$ENTRYFILE"
+    # Print first two lines (heading + blank), insert entry, then the rest
+    head -2 "$CHANGELOG" > "$TMPFILE"
+    echo "" >> "$TMPFILE"
+    cat "$ENTRYFILE" >> "$TMPFILE"
+    tail -n +3 "$CHANGELOG" >> "$TMPFILE"
+    mv "$TMPFILE" "$CHANGELOG"
+    rm -f "$ENTRYFILE"
+    msg "Updated $CHANGELOG with [${VERSION}] entry"
+  else
+    err "CHANGELOG.md not found at $CHANGELOG"
+  fi
+fi

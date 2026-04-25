@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"os"
 	"slices"
 	"strings"
 	"time"
@@ -46,6 +47,8 @@ type Deployer struct {
 	factory          informers.SharedInformerFactory
 	namespace        string
 	runID            string
+	cliVersion       string // CLI version — forwarded to validator containers via AICR_CLI_VERSION for inner-image resolution
+	cliCommit        string // CLI commit SHA — forwarded via AICR_CLI_COMMIT for dev-build image resolution
 	entry            catalog.ValidatorEntry
 	jobName          string // Unique name generated client-side (set by DeployJob)
 	imagePullSecrets []string
@@ -55,10 +58,16 @@ type Deployer struct {
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
 // The factory must be a namespace-scoped SharedInformerFactory started by the caller.
+// cliVersion is the CLI's own version string; empty is acceptable for dev builds
+// and is forwarded to the validator container via the AICR_CLI_VERSION env var so
+// the validator can resolve images it references outside the catalog (e.g. the
+// AIPerf benchmark image used by inference-perf) using the same rewriting
+// rules as catalog.Load. cliCommit is the git commit SHA, forwarded via
+// AICR_CLI_COMMIT for SHA-based image tag resolution in dev builds.
 func NewDeployer(
 	clientset kubernetes.Interface,
 	factory informers.SharedInformerFactory,
-	namespace, runID string,
+	namespace, runID, cliVersion, cliCommit string,
 	entry catalog.ValidatorEntry,
 	imagePullSecrets []string,
 	tolerations []corev1.Toleration,
@@ -70,6 +79,8 @@ func NewDeployer(
 		factory:          factory,
 		namespace:        namespace,
 		runID:            runID,
+		cliVersion:       cliVersion,
+		cliCommit:        cliCommit,
 		entry:            entry,
 		imagePullSecrets: imagePullSecrets,
 		tolerations:      tolerations,
@@ -127,11 +138,17 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 	return k8s.IgnoreNotFound(err)
 }
 
-func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
-	timeout := d.entry.Timeout
-	if timeout == 0 {
-		timeout = defaults.ValidatorDefaultTimeout
+// resolvedTimeout returns the catalog entry's timeout, falling back to the
+// package default when unset (catalog Timeout == 0).
+func (d *Deployer) resolvedTimeout() time.Duration {
+	if d.entry.Timeout == 0 {
+		return defaults.ValidatorDefaultTimeout
 	}
+	return d.entry.Timeout
+}
+
+func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
+	timeout := d.resolvedTimeout()
 
 	return applybatchv1.Job(d.jobName, d.namespace).
 		WithLabels(map[string]string{
@@ -188,9 +205,19 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 		)
 }
 
+// orchestratorEnvMax upper-bounds the env vars buildEnvApply injects
+// before appending the catalog entry's own Env slice. Used only as a
+// capacity hint for the backing slice — append() resizes on overflow.
+// Breakdown: 7 always-injected (SNAPSHOT_PATH, RECIPE_PATH, VALIDATOR_NAME,
+// VALIDATOR_PHASE, RUN_ID, NAMESPACE, CHECK_TIMEOUT) plus up to 5
+// conditionally-injected (NODE_SELECTOR, TOLERATIONS, CLI_VERSION,
+// CLI_COMMIT, VALIDATOR_IMAGE_REGISTRY). Bump in lockstep when the
+// injection list changes.
+const orchestratorEnvMax = 12
+
 func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
-	orchestratorEnvCount := 8
-	env := make([]*applycorev1.EnvVarApplyConfiguration, 0, orchestratorEnvCount+len(d.entry.Env))
+	timeout := d.resolvedTimeout()
+	env := make([]*applycorev1.EnvVarApplyConfiguration, 0, orchestratorEnvMax+len(d.entry.Env))
 	env = append(env,
 		applycorev1.EnvVar().WithName("AICR_SNAPSHOT_PATH").WithValue("/data/snapshot/snapshot.yaml"),
 		applycorev1.EnvVar().WithName("AICR_RECIPE_PATH").WithValue("/data/recipe/recipe.yaml"),
@@ -200,6 +227,7 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 		applycorev1.EnvVar().WithName("AICR_NAMESPACE").
 			WithValueFrom(applycorev1.EnvVarSource().
 				WithFieldRef(applycorev1.ObjectFieldSelector().WithFieldPath("metadata.namespace"))),
+		applycorev1.EnvVar().WithName("AICR_CHECK_TIMEOUT").WithValue(timeout.String()),
 	)
 	// Pass scheduling overrides to the validator container so it can apply them
 	// to the inner workloads it creates (e.g., NCCL benchmark pods). These env
@@ -209,6 +237,27 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	}
 	if len(d.tolerations) > 0 {
 		env = append(env, applycorev1.EnvVar().WithName("AICR_TOLERATIONS").WithValue(serializeTolerations(d.tolerations)))
+	}
+	// Forward CLI version, image-registry override, and image-tag override so
+	// the validator can resolve images it references outside the catalog
+	// (e.g. inference-perf's aiperf-bench benchmark image) with the same
+	// resolution semantics that catalog.Load applies to catalog entries.
+	// All three must travel together: if a feature-branch dev build set
+	// AICR_VALIDATOR_IMAGE_TAG=latest on the CLI side to get a published
+	// outer validator image, the inner benchmark pod needs the same
+	// override or it will resolve to the same unpublished :sha-<commit>
+	// the outer pod would have hit without the override.
+	if d.cliVersion != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_CLI_VERSION").WithValue(d.cliVersion))
+	}
+	if d.cliCommit != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_CLI_COMMIT").WithValue(d.cliCommit))
+	}
+	if override := os.Getenv("AICR_VALIDATOR_IMAGE_REGISTRY"); override != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_VALIDATOR_IMAGE_REGISTRY").WithValue(override))
+	}
+	if tag := os.Getenv("AICR_VALIDATOR_IMAGE_TAG"); tag != "" {
+		env = append(env, applycorev1.EnvVar().WithName("AICR_VALIDATOR_IMAGE_TAG").WithValue(tag))
 	}
 	for _, e := range d.entry.Env {
 		env = append(env, applycorev1.EnvVar().WithName(e.Name).WithValue(e.Value))
@@ -252,23 +301,13 @@ func serializeTolerations(tols []corev1.Toleration) string {
 	return strings.Join(parts, ",")
 }
 
-// imagePullPolicy returns the appropriate pull policy based on the image reference.
-// Side-loaded images (ko.local, kind.local) use Never since they are loaded
-// via `kind load docker-image` and no registry exists to pull from.
-// All other images (including localhost registry) follow the standard policy:
-// :latest tag uses Always to ensure fresh images, versioned tags use IfNotPresent.
+// imagePullPolicy returns the appropriate pull policy for the outer validator
+// Job. Delegates to catalog.ImagePullPolicy so the outer Job and any inner
+// workload Jobs (e.g. inference-perf's aiperf-bench Job) apply the same
+// rules — side-load / digest-pin / AICR_VALIDATOR_IMAGE_TAG override /
+// :latest / versioned — without drifting.
 func (d *Deployer) imagePullPolicy() corev1.PullPolicy {
-	img := d.entry.Image
-	// Side-loaded images via kind load — no registry exists, never pull.
-	if strings.HasPrefix(img, "ko.local") ||
-		strings.HasPrefix(img, "kind.local") {
-
-		return corev1.PullNever
-	}
-	if strings.HasSuffix(img, ":latest") {
-		return corev1.PullAlways
-	}
-	return corev1.PullIfNotPresent
+	return catalog.ImagePullPolicy(d.entry.Image)
 }
 
 func (d *Deployer) buildImagePullSecretsApply() []*applycorev1.LocalObjectReferenceApplyConfiguration {

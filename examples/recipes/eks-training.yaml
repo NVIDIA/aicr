@@ -54,16 +54,16 @@ componentRefs:
     valuesFile: components/nvsentinel/values.yaml
     dependencyRefs:
       - cert-manager
-  - name: skyhook-operator
+  - name: nodewright-operator
     namespace: skyhook
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
     version: 0.14.0
-    valuesFile: components/skyhook-operator/values.yaml
+    valuesFile: components/nodewright-operator/values.yaml
 deploymentOrder:
   - cert-manager
   - kube-prometheus-stack
   - gpu-operator
   - nvsentinel
-  - skyhook-operator
+  - nodewright-operator

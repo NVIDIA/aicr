@@ -16,14 +16,14 @@
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: cli-bundle-skyhook-template
+  name: cli-bundle-nodewright-template
 spec:
   description: |
-    Validates that skyhook-customizations manifest templates render correctly
+    Validates that nodewright-customizations manifest templates render correctly
     with different inputs. Tests autoTaintNewNodes default/override, tolerations,
     node selectors, and workload selectors.
     No cluster needed -- purely CLI output validation.
-    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/skyhook-customizations
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/nodewright-customizations
   timeouts:
     exec: 30s
   steps:
@@ -36,7 +36,7 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
               ${AICR_BIN} recipe \
                 --service eks \
@@ -53,7 +53,7 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               rm -rf "${WORK}/bundle-defaults"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
@@ -64,9 +64,9 @@ spec:
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-defaults/skyhook-customizations/manifests/tuning.yaml" \
+                --resource "${WORK}/bundle-defaults/nodewright-customizations/manifests/tuning.yaml" \
                 --file ./assert-tuning-defaults.yaml \
                 --no-color --timeout 5s
 
@@ -78,21 +78,21 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               rm -rf "${WORK}/bundle-no-autotaint"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-no-autotaint" \
-                --set skyhookcustomizations:autoTaintNewNodes=false
+                --set nodewrightcustomizations:autoTaintNewNodes=false
 
     - name: assert-tuning-no-autotaint
       description: Verify tuning manifest renders with autoTaintNewNodes false.
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-no-autotaint/skyhook-customizations/manifests/tuning.yaml" \
+                --resource "${WORK}/bundle-no-autotaint/nodewright-customizations/manifests/tuning.yaml" \
                 --file ./assert-tuning-no-autotaint.yaml \
                 --no-color --timeout 5s
 
@@ -104,21 +104,21 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               rm -rf "${WORK}/bundle-garbage"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
                 --output "${WORK}/bundle-garbage" \
-                --set skyhookcustomizations:autoTaintNewNodes=banana
+                --set nodewrightcustomizations:autoTaintNewNodes=banana
 
     - name: assert-autotaint-garbage
       description: Verify autoTaintNewNodes=banana coerces to true (not "false", so ne returns true).
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-garbage/skyhook-customizations/manifests/tuning.yaml" \
+                --resource "${WORK}/bundle-garbage/nodewright-customizations/manifests/tuning.yaml" \
                 --file ./assert-tuning-defaults.yaml \
                 --no-color --timeout 5s
 
@@ -130,7 +130,7 @@ spec:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               rm -rf "${WORK}/bundle-scheduling"
               ${AICR_BIN} bundle \
                 --recipe "${WORK}/recipe.yaml" \
@@ -144,12 +144,12 @@ spec:
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-bundle-skyhook-template"
+              WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-scheduling/skyhook-customizations/manifests/tuning.yaml" \
+                --resource "${WORK}/bundle-scheduling/nodewright-customizations/manifests/tuning.yaml" \
                 --file ./assert-tuning-scheduling.yaml \
                 --no-color --timeout 5s
       cleanup:
         - script:
             content: |
-              rm -rf /tmp/chainsaw-bundle-skyhook-template
+              rm -rf /tmp/chainsaw-bundle-nodewright-template

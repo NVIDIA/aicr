@@ -111,10 +111,10 @@ type Config struct {
 	// targetRevision specifies the target revision for the Argo CD repo (default: "main").
 	targetRevision string
 
-	// workloadGateTaint specifies the taint for skyhook-operator runtime required feature.
+	// workloadGateTaint specifies the taint for nodewright-operator runtime required feature.
 	workloadGateTaint *corev1.Taint
 
-	// workloadSelector contains label selector for skyhook-customizations to prevent eviction of running training jobs.
+	// workloadSelector contains label selector for nodewright-customizations to prevent eviction of running training jobs.
 	workloadSelector map[string]string
 
 	// attest enables bundle attestation and binary verification.
@@ -124,7 +124,7 @@ type Config struct {
 	// for binary attestation verification during bundle creation.
 	certificateIdentityRegexp string
 
-	// estimatedNodeCount is the estimated number of GPU nodes (0 = unset). Used by skyhook-operator for estimatedNodeCount Helm value.
+	// estimatedNodeCount is the estimated number of GPU nodes (0 = unset). Used by nodewright-operator for estimatedNodeCount Helm value.
 	estimatedNodeCount int
 
 	// dynamicValues declares value paths that should be provided at install time.
@@ -407,7 +407,7 @@ func WithTargetRevision(targetRevision string) Option {
 	}
 }
 
-// WithWorkloadGateTaint sets the taint for skyhook-operator runtime required feature.
+// WithWorkloadGateTaint sets the taint for nodewright-operator runtime required feature.
 func WithWorkloadGateTaint(taint *corev1.Taint) Option {
 	return func(c *Config) {
 		if taint == nil {
@@ -419,7 +419,7 @@ func WithWorkloadGateTaint(taint *corev1.Taint) Option {
 	}
 }
 
-// WithWorkloadSelector sets the label selector for skyhook-customizations to prevent eviction of running training jobs.
+// WithWorkloadSelector sets the label selector for nodewright-customizations to prevent eviction of running training jobs.
 func WithWorkloadSelector(selector map[string]string) Option {
 	return func(c *Config) {
 		if selector == nil {

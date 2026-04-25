@@ -51,6 +51,14 @@ spec:
         - kube-prometheus-stack
         - kai-scheduler
       overrides:
+        # Kind inference CI does not require Dynamo's MPI SSH secret. Disable
+        # the chart's ssh-keygen pre-install hook here so fresh Kind runners do
+        # not spend hook budget creating an unused secret.
+        dynamo-operator:
+          dynamo:
+            mpiRun:
+              sshKeygen:
+                enabled: false
         # Use kind's local-path-provisioner instead of EBS gp2
         etcd:
           persistence:

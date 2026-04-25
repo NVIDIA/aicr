@@ -39,15 +39,15 @@ spec:
         - nfd
         - cert-manager
         - kube-prometheus-stack
-        - skyhook-customizations
+        - nodewright-customizations
 
-    - name: skyhook-customizations
+    - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/tuning.yaml
+        - components/nodewright-customizations/manifests/tuning.yaml
       overrides:
         service: eks
         accelerator: h100
         intent: inference
       dependencyRefs:
-        - skyhook-operator
+        - nodewright-operator

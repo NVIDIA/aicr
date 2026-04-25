@@ -58,11 +58,11 @@ spec:
         - cert-manager
         - gpu-operator
 
-    - name: skyhook-operator
+    - name: nodewright-operator
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia/skyhook
       version: v0.14.0
-      valuesFile: components/skyhook-operator/values.yaml
+      valuesFile: components/nodewright-operator/values.yaml
 
     - name: kube-prometheus-stack
       type: Helm

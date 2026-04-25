@@ -4,13 +4,13 @@ This document describes when, why, and how AICR releases are made. For contribut
 
 ## Cadence
 
-Releases follow a **bi-weekly cadence**, aligned with sprint boundaries. A new release is cut at the conclusion of each 2-week sprint.
+Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 
 | Release Type | When | Version Bump | Decision |
 |-------------|------|-------------|----------|
-| Sprint release | End of each 2-week sprint | `patch` or `minor` | Maintainer determines bump type based on changes landed |
-| Hotfix | Between sprints, as needed | `patch` | Any maintainer can initiate for critical fixes |
-| Pre-release | Before sprint release, as needed | `rc` or `beta` | Any maintainer can create for testing |
+| Regular release | Every two weeks | `patch` or `minor` | Maintainer determines bump type based on changes landed |
+| Hotfix | Between regular releases, as needed | `patch` | Any maintainer can initiate for critical fixes |
+| Pre-release | Before a regular release, as needed | `rc` | Any maintainer can create for testing |
 | Major | Planned | `major` | Requires team agreement and advance communication |
 
 ## What Goes Into a Release
@@ -20,7 +20,7 @@ A release includes everything merged to `main` since the last tag. There is no c
 **Before cutting a release, verify:**
 
 - All CI checks pass on `main` (`make qualify`)
-- No known regressions from the current sprint
+- No known regressions since the last release
 - Breaking changes use `feat!:` or `fix!:` commit prefix (drives changelog and signals consumers)
 
 ## Quality Gates
@@ -44,30 +44,34 @@ git checkout main
 git pull origin main
 make qualify          # Verify locally before releasing
 
-make bump-patch       # v1.2.3 -> v1.2.4
+make bump-patch       # v1.2.3 → v1.2.4
 # or
-make bump-minor       # v1.2.3 -> v1.3.0
+make bump-minor       # v1.2.3 → v1.3.0
 ```
 
-This automatically: validates clean state, generates changelog, commits, tags, pushes, and triggers the release pipeline.
+This validates clean state, tags the current HEAD, pushes the tag, and triggers the release pipeline. No commits are created — the tag points directly at the code.
 
-### Two-Phase Release (with review)
+Use `make changelog` to preview changes since the last tag. The changelog is generated for GitHub Release notes and is not committed to the repository.
 
-For releases where you want to review/edit the changelog before tagging:
+### Pre-release with Promotion (recommended for important releases)
+
+Use this workflow to validate an RC before promoting it to stable. The promotion re-tags the exact same SHA — no new commits, no re-builds.
 
 ```bash
 git checkout main
 git pull origin main
 make qualify
 
-make bump-prepare TYPE=patch    # Generates CHANGELOG.md, does not tag/push
-# Review and edit CHANGELOG.md
-make bump-finalize              # Commits, tags, pushes
-```
+# 1. Tag an RC (bumps minor version)
+make bump-rc                         # v1.2.3 → v1.3.0-rc1
 
-To cancel a prepared release: `make bump-abort`
+# 2. Validate the RC (CI runs, manual testing, etc.)
 
-### Pre-release
+# 3a. If issues found, fix on main and cut another RC
+make bump-rc                         # v1.3.0-rc1 → v1.3.0-rc2
+
+# 3b. When satisfied, promote the RC to stable (same SHA)
+make bump-promote TAG=v1.3.0-rc2    # → v1.3.0 on same commit
 
 Pre-releases exercise the full build/test/attest pipeline but do not update:
 
@@ -78,39 +82,13 @@ Pre-releases exercise the full build/test/attest pipeline but do not update:
 
 Slack notifications fire for both pre-releases and stable releases.
 
-```bash
-make bump-rc                     # v1.2.3 → v1.2.4-rc1
-make bump-rc                     # v1.2.4-rc1 → v1.2.4-rc2
-make bump-patch                  # v1.2.4-rc2 → v1.2.5 (promote to stable)
-
-# Or with review:
-make bump-prepare TYPE=rc        # Prepare v1.2.4-rc1 for review
-make bump-finalize               # Tag and push after review
-
-# Beta pre-releases also supported:
-make bump-beta                   # v1.2.3 → v1.2.4-beta1
-```
-
-### Manual Tag
-
-For more control:
-
-```bash
-git checkout main && git pull origin main
-make qualify
-git-cliff --tag v1.2.3 -o CHANGELOG.md       # Optional: generate changelog
-git add CHANGELOG.md && git commit -m "chore: update CHANGELOG for v1.2.3"
-git tag -a v1.2.3 -m "Release v1.2.3"
-git push origin main v1.2.3
-```
-
 ### Re-run Existing Release
 
 To rebuild artifacts from an existing tag without creating a new one: **Actions** > **On Tag Release** > **Run workflow** > enter the tag.
 
 ## Hotfix Procedure
 
-For critical fixes between sprints:
+For critical fixes between regular releases:
 
 1. Fix on `main` first (PR, review, merge as normal)
 2. Cut a patch release: `make bump-patch`
@@ -142,6 +120,15 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/`):
 | `aicr` | `nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04` | CLI with CUDA runtime |
 | `aicrd` | `gcr.io/distroless/static:nonroot` | Minimal API server |
 
+Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
+
+| Image | Base | Description |
+|-------|------|-------------|
+| `deployment` | `gcr.io/distroless/static-debian12:nonroot` | Deployment validator |
+| `performance` | `gcr.io/distroless/static-debian12:nonroot` | Performance validator |
+| `conformance` | `gcr.io/distroless/static-debian12:nonroot` | Conformance validator |
+| `aiperf-bench` | `python:3.12-slim` | AIPerf benchmark runner |
+
 Tags: `latest`, `vX.Y.Z`
 
 ### Supply Chain
@@ -156,7 +143,7 @@ Every release includes:
 ## Versioning
 
 - **Semantic versioning**: `vMAJOR.MINOR.PATCH`
-- **Pre-releases**: `v1.2.3-rc1`, `v1.2.3-beta1` (automatically marked in GitHub)
+- **Pre-releases**: `v1.2.3-rc1` (automatically marked in GitHub)
 - **Breaking changes**: Increment MAJOR version
 
 ## Verification
@@ -166,9 +153,15 @@ Every release includes:
 ```bash
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 
-# GitHub CLI
+# GitHub CLI (core images)
 gh attestation verify oci://ghcr.io/nvidia/aicr:${TAG} --owner nvidia
 gh attestation verify oci://ghcr.io/nvidia/aicrd:${TAG} --owner nvidia
+
+# GitHub CLI (validator images)
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/deployment:${TAG} --owner nvidia
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/performance:${TAG} --owner nvidia
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/conformance:${TAG} --owner nvidia
+gh attestation verify oci://ghcr.io/nvidia/aicr-validators/aiperf-bench:${TAG} --owner nvidia
 
 # Cosign
 cosign verify-attestation \
@@ -204,4 +197,4 @@ The `aicrd` API server demo deploys to Google Cloud Run on successful release (r
 
 - Repository admin access with write permissions
 - Access to GitHub Actions workflows
-- [git-cliff](https://git-cliff.org/) installed (`make tools-setup`)
+- [git-cliff](https://git-cliff.org/) installed for `make changelog` (`make tools-setup`)

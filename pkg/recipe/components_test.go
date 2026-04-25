@@ -119,7 +119,7 @@ func TestComponentRegistry_Get(t *testing.T) {
 	}{
 		{"gpu-operator", false},
 		{"cert-manager", false},
-		{"skyhook-operator", false},
+		{"nodewright-operator", false},
 		{"nvsentinel", false},
 		{"network-operator", false},
 		{"nvidia-dra-driver-gpu", false},
@@ -153,7 +153,7 @@ func TestComponentRegistry_GetByOverrideKey(t *testing.T) {
 		{"gpuoperator", "gpu-operator", false},
 		{"gpu-operator", "gpu-operator", false},
 		{"certmanager", "cert-manager", false},
-		{"skyhook", "skyhook-operator", false},
+		{"nodewright", "nodewright-operator", false},
 		{"nv-sentinel", "nvsentinel", false},
 		{"dradriver", "nvidia-dra-driver-gpu", false},
 		{"networkoperator", "network-operator", false},
@@ -216,29 +216,29 @@ func TestComponentRegistry_TaintStrPaths(t *testing.T) {
 		t.Fatalf("failed to load component registry: %v", err)
 	}
 
-	// Test skyhook-operator has taint string paths
-	skyhookOp := registry.Get("skyhook-operator")
-	if skyhookOp == nil {
-		t.Fatal("skyhook-operator not found in registry")
+	// Test nodewright-operator has taint string paths
+	nodewrightOp := registry.Get("nodewright-operator")
+	if nodewrightOp == nil {
+		t.Fatal("nodewright-operator not found in registry")
 	}
 
-	taintStrPaths := skyhookOp.GetAcceleratedTaintStrPaths()
+	taintStrPaths := nodewrightOp.GetAcceleratedTaintStrPaths()
 	if len(taintStrPaths) == 0 {
-		t.Error("skyhook-operator should have accelerated taint string paths")
+		t.Error("nodewright-operator should have accelerated taint string paths")
 	}
 
 	// Verify specific path exists
 	if !slices.Contains(taintStrPaths, "controllerManager.manager.env.runtimeRequiredTaint") {
-		t.Error("skyhook-operator should have 'controllerManager.manager.env.runtimeRequiredTaint' in accelerated taint string paths")
+		t.Error("nodewright-operator should have 'controllerManager.manager.env.runtimeRequiredTaint' in accelerated taint string paths")
 	}
 
-	// Test skyhook-operator has node count path (for --nodes bundle flag)
-	nodeCountPaths := skyhookOp.GetNodeCountPaths()
+	// Test nodewright-operator has node count path (for --nodes bundle flag)
+	nodeCountPaths := nodewrightOp.GetNodeCountPaths()
 	if len(nodeCountPaths) == 0 {
-		t.Error("skyhook-operator should have nodeCountPaths")
+		t.Error("nodewright-operator should have nodeCountPaths")
 	}
 	if !slices.Contains(nodeCountPaths, "estimatedNodeCount") {
-		t.Error("skyhook-operator should have 'estimatedNodeCount' in nodeCountPaths")
+		t.Error("nodewright-operator should have 'estimatedNodeCount' in nodeCountPaths")
 	}
 }
 
@@ -248,20 +248,20 @@ func TestComponentRegistry_WorkloadSelectorPaths(t *testing.T) {
 		t.Fatalf("failed to load component registry: %v", err)
 	}
 
-	// Test skyhook-customizations has workload selector paths
-	skyhookCust := registry.Get("skyhook-customizations")
-	if skyhookCust == nil {
-		t.Fatal("skyhook-customizations not found in registry")
+	// Test nodewright-customizations has workload selector paths
+	nodewrightCust := registry.Get("nodewright-customizations")
+	if nodewrightCust == nil {
+		t.Fatal("nodewright-customizations not found in registry")
 	}
 
-	workloadSelectorPaths := skyhookCust.GetWorkloadSelectorPaths()
+	workloadSelectorPaths := nodewrightCust.GetWorkloadSelectorPaths()
 	if len(workloadSelectorPaths) == 0 {
-		t.Error("skyhook-customizations should have workload selector paths")
+		t.Error("nodewright-customizations should have workload selector paths")
 	}
 
 	// Verify specific path exists
 	if !slices.Contains(workloadSelectorPaths, "workloadSelector") {
-		t.Error("skyhook-customizations should have 'workloadSelector' in workload selector paths")
+		t.Error("nodewright-customizations should have 'workloadSelector' in workload selector paths")
 	}
 }
 
@@ -271,15 +271,15 @@ func TestComponentRegistry_Validations(t *testing.T) {
 		t.Fatalf("failed to load component registry: %v", err)
 	}
 
-	// Test skyhook-customizations has validations
-	skyhookCust := registry.Get("skyhook-customizations")
-	if skyhookCust == nil {
-		t.Fatal("skyhook-customizations not found in registry")
+	// Test nodewright-customizations has validations
+	nodewrightCust := registry.Get("nodewright-customizations")
+	if nodewrightCust == nil {
+		t.Fatal("nodewright-customizations not found in registry")
 	}
 
-	validations := skyhookCust.GetValidations()
+	validations := nodewrightCust.GetValidations()
 	if len(validations) == 0 {
-		t.Error("skyhook-customizations should have validations configured")
+		t.Error("nodewright-customizations should have validations configured")
 	}
 
 	// Verify specific validations exist
@@ -330,10 +330,10 @@ func TestComponentRegistry_Validations(t *testing.T) {
 	}
 
 	if !foundWorkloadSelector {
-		t.Error("skyhook-customizations should have CheckWorkloadSelectorMissing validation")
+		t.Error("nodewright-customizations should have CheckWorkloadSelectorMissing validation")
 	}
 	if !foundAcceleratedSelector {
-		t.Error("skyhook-customizations should have CheckAcceleratedSelectorMissing validation")
+		t.Error("nodewright-customizations should have CheckAcceleratedSelectorMissing validation")
 	}
 }
 
@@ -415,7 +415,7 @@ func TestComponentRegistry_Names(t *testing.T) {
 	expected := []string{
 		"gpu-operator",
 		"cert-manager",
-		"skyhook-operator",
+		"nodewright-operator",
 		"nvsentinel",
 		"network-operator",
 		"nvidia-dra-driver-gpu",
@@ -738,7 +738,7 @@ func TestHelmConfig_DefaultNamespace(t *testing.T) {
 		{"network-operator", "nvidia-network-operator"},
 		{"cert-manager", "cert-manager"},
 		{"nvsentinel", "nvsentinel"},
-		{"skyhook-operator", "skyhook"},
+		{"nodewright-operator", "skyhook"},
 		{"kube-prometheus-stack", "monitoring"},
 	}
 

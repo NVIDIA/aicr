@@ -244,7 +244,7 @@ extra_crds_for_release() {
 # happy path.
 skip_preflight_for_release() {
   case "$1" in
-    skyhook-operator|kgateway) return 0 ;;
+    nodewright-operator|kgateway) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -489,28 +489,28 @@ delete_release_cluster_resources "{{ .Name }}" "{{ .Namespace }}"
 delete_orphaned_webhooks_for_ns "{{ .Namespace }}"
 {{ end -}}
 {{ end }}
-# Remove skyhook node taints that persist after operator removal.
-# Skyhook taints nodes during kernel tuning. The taint key is configurable
+# Remove nodewright node taints that persist after operator removal.
+# Nodewright taints nodes during kernel tuning. The taint key is configurable
 # via runtimeRequiredTaint (defaults to skyhook.nvidia.com).
 {{- range .ComponentsReversed }}
-{{- if eq .Name "skyhook-operator" }}
+{{- if eq .Name "nodewright-operator" }}
 # Extract the taint key from bundle values. The YAML value is a taint string
 # like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
 # If runtimeRequiredTaint is not set, use the default skyhook.nvidia.com.
-SKYHOOK_TAINT_KEY="skyhook.nvidia.com"
-custom_taint_line=$(grep 'runtimeRequiredTaint:' "${SCRIPT_DIR}/skyhook-operator/values.yaml" 2>/dev/null || true)
+NODEWRIGHT_TAINT_KEY="skyhook.nvidia.com"
+custom_taint_line=$(grep 'runtimeRequiredTaint:' "${SCRIPT_DIR}/nodewright-operator/values.yaml" 2>/dev/null || true)
 if [[ -n "${custom_taint_line}" ]]; then
   # Extract value after "runtimeRequiredTaint:", then extract taint key before "="
   taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
   if [[ -n "${taint_value}" ]]; then
     # Handle both key=value:effect and key:effect formats
-    SKYHOOK_TAINT_KEY="${taint_value%%=*}"
-    SKYHOOK_TAINT_KEY="${SKYHOOK_TAINT_KEY%%:*}"
+    NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
+    NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
   fi
 fi
-echo "Removing ${SKYHOOK_TAINT_KEY} node taints..."
+echo "Removing ${NODEWRIGHT_TAINT_KEY} node taints..."
 for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-  kubectl taint node "${node}" "${SKYHOOK_TAINT_KEY}-" 2>/dev/null || true
+  kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
 done
 {{- end }}
 {{- end }}

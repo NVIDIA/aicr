@@ -566,7 +566,7 @@ func buildNoClaimTestPod(run *draTestRun, gpuNodeName string) *corev1.Pod {
 			Containers: []corev1.Container{
 				{
 					Name:  "isolation-test",
-					Image: "busybox:1.37",
+					Image: defaults.ProbeImage,
 					Command: []string{
 						"sh", "-c",
 						"if ls /dev/nvidia* 2>/dev/null; then echo 'FAIL: GPU visible without DRA claim' && exit 1; else echo 'PASS: GPU isolated' && exit 0; fi",

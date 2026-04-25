@@ -1,0 +1,278 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Daily Issue Report
+
+on:
+  schedule:
+    # 5:30 AM Pacific (12:30 UTC during PDT Mar–Nov).
+    # During PST (Nov–Mar) this fires at 4:30 AM Pacific since
+    # GitHub Actions cron is UTC-only.
+    - cron: '30 12 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+
+  report:
+    name: Issue Status Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    steps:
+
+      - name: Collect issue metrics
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+
+            // ---- Configuration ----
+            const SLA = {
+              P0: { days: 30, warnDays: 20 },
+              P1: { days: 180, warnDays: 150 },
+            };
+            const TYPE_LABELS = ['bug', 'feature', 'documentation'];
+            const PRIORITY_LABELS = ['P0', 'P1', 'P2'];
+            const MAX_SLA_ITEMS = 5;
+            const TITLE_MAX = 50;
+            const REPO_URL = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+
+            // ---- Helpers ----
+            const hasLabel = (issue, name) =>
+              issue.labels.some(l => l.name === name);
+            const ageDays = (issue) =>
+              Math.floor((Date.now() - new Date(issue.created_at)) / 86400000);
+            const truncate = (s) =>
+              s.length > TITLE_MAX ? s.substring(0, TITLE_MAX - 3) + '...' : s;
+            // Build GitHub issue filter URL from a search query string.
+            // Each space-separated term is individually encoded, then joined
+            // with '+' which GitHub interprets as a space in the q= parameter.
+            const issueFilter = (q) => {
+              const encoded = q.split(' ').map(t => encodeURIComponent(t)).join('+');
+              return `${REPO_URL}/issues?q=${encoded}`;
+            };
+            const link = (url, text) => `<${url}|${text}>`;
+
+            // ---- Fetch open issues (excludes PRs) ----
+            const openIssues = (await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'open', per_page: 100 },
+            )).filter(i => !i.pull_request);
+
+            // ---- Fetch issues closed in last 24 h ----
+            const since = new Date(Date.now() - 86400000).toISOString();
+            const sinceDate = since.split('T')[0]; // YYYY-MM-DD for URL filters
+            const closedToday = (await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'closed', since, per_page: 100 },
+            )).filter(i =>
+              !i.pull_request && new Date(i.closed_at) >= new Date(since),
+            ).length;
+
+            // ---- Compute metrics ----
+            const total = openIssues.length;
+            const newToday = openIssues.filter(
+              i => new Date(i.created_at) >= new Date(since),
+            ).length;
+            const needsTriage = openIssues.filter(
+              i => hasLabel(i, 'needs-triage'),
+            ).length;
+
+            // Type breakdown (skip zero-count types)
+            const types = TYPE_LABELS
+              .map(l => [l, openIssues.filter(i => hasLabel(i, l)).length])
+              .filter(([, c]) => c > 0);
+
+            // Priority breakdown
+            let prioritized = 0;
+            const priorities = PRIORITY_LABELS.map(l => {
+              const c = openIssues.filter(i => hasLabel(i, l)).length;
+              prioritized += c;
+              return [l, c];
+            });
+            const noPriority = total - prioritized;
+
+            // Unassigned P0/P1
+            const unassigned = openIssues.filter(i =>
+              (hasLabel(i, 'P0') || hasLabel(i, 'P1')) &&
+              (!i.assignees || i.assignees.length === 0),
+            ).length;
+
+            // SLA analysis (P0: 30 d, P1: 180 d)
+            const breaches = [];
+            const atRisk = [];
+            for (const issue of openIssues) {
+              const age = ageDays(issue);
+              for (const [key, sla] of Object.entries(SLA)) {
+                if (!hasLabel(issue, key)) continue;
+                const title = truncate(issue.title);
+                if (age > sla.days) {
+                  breaches.push({
+                    num: issue.number, title, pri: key,
+                    age, over: age - sla.days,
+                  });
+                } else if (age > sla.warnDays) {
+                  atRisk.push({
+                    num: issue.number, title, pri: key,
+                    left: sla.days - age,
+                  });
+                }
+              }
+            }
+            breaches.sort((a, b) => b.over - a.over);
+            atRisk.sort((a, b) => a.left - b.left);
+
+            // ---- Build Slack message (mrkdwn) ----
+            const dateStr = new Date().toLocaleDateString('en-US', {
+              weekday: 'short', month: 'short', day: 'numeric',
+              timeZone: 'America/Los_Angeles',
+            });
+
+            const lines = [`*AICR Issues* — ${dateStr}`, ''];
+
+            // Summary row
+            const openUrl = issueFilter('is:issue is:open');
+            const newUrl = issueFilter(`is:issue is:open created:>=${sinceDate}`);
+            const closedUrl = issueFilter(`is:issue is:closed closed:>=${sinceDate}`);
+            lines.push(
+              `${link(openUrl, `*${total}*`)} open, ${link(newUrl, `+${newToday}`)} new, ${link(closedUrl, closedToday)} closed (24h)`,
+            );
+
+            // Type breakdown
+            if (types.length > 0) {
+              const typeParts = types.map(([l, c]) => {
+                const url = issueFilter(`is:issue is:open label:${l}`);
+                return `${l}: ${link(url, c)}`;
+              });
+              lines.push(`_By type:_ ${typeParts.join(', ')}`);
+            }
+
+            // Priority breakdown
+            const priParts = priorities.map(([l, c]) => {
+              const url = issueFilter(`is:issue is:open label:${l}`);
+              return c > 0 ? `${l}: ${link(url, `*${c}*`)}` : `${l}: 0`;
+            });
+            if (noPriority > 0) {
+              const noPriUrl = issueFilter('is:issue is:open -label:P0 -label:P1 -label:P2');
+              priParts.push(`none: ${link(noPriUrl, noPriority)}`);
+            }
+            lines.push(`_By priority:_ ${priParts.join(', ')}`);
+
+            // Flags row (triage + unassigned, only when non-zero)
+            const flags = [];
+            if (needsTriage > 0) {
+              const triageUrl = issueFilter('is:issue is:open label:needs-triage');
+              flags.push(`Triage: ${link(triageUrl, `*${needsTriage}*`)}`);
+            }
+            if (unassigned > 0) {
+              const unownedUrl = issueFilter('is:issue is:open no:assignee label:P0 label:P1');
+              flags.push(`Unowned P0/P1: ${link(unownedUrl, `*${unassigned}*`)}`);
+            }
+            if (flags.length > 0) lines.push(flags.join(', '));
+
+            // SLA breaches
+            if (breaches.length > 0) {
+              lines.push('', ':rotating_light: *SLA Breaches*');
+              for (const b of breaches.slice(0, MAX_SLA_ITEMS)) {
+                lines.push(
+                  `• <${REPO_URL}/issues/${b.num}|#${b.num}> ${b.title} (${b.pri}, ${b.age}d — ${b.over}d over)`,
+                );
+              }
+              if (breaches.length > MAX_SLA_ITEMS) {
+                lines.push(`  _…and ${breaches.length - MAX_SLA_ITEMS} more_`);
+              }
+            }
+
+            // Approaching SLA
+            if (atRisk.length > 0) {
+              lines.push('', ':warning: *Approaching SLA*');
+              for (const r of atRisk.slice(0, MAX_SLA_ITEMS)) {
+                lines.push(
+                  `• <${REPO_URL}/issues/${r.num}|#${r.num}> ${r.title} (${r.pri}, ${r.left}d left)`,
+                );
+              }
+              if (atRisk.length > MAX_SLA_ITEMS) {
+                lines.push(`  _…and ${atRisk.length - MAX_SLA_ITEMS} more_`);
+              }
+            }
+
+            // All-clear badge
+            if (breaches.length === 0 && atRisk.length === 0 && needsTriage === 0) {
+              lines.push('', ':white_check_mark: No SLA issues or untriaged items');
+            }
+
+            const message = lines.join('\n');
+            core.info('--- Slack message preview ---');
+            core.info(message);
+
+            // Write payload file for the Slack step
+            fs.writeFileSync('slack-payload.json', JSON.stringify({ text: message }));
+
+            // ---- GitHub Step Summary (markdown mirror) ----
+            const md = [];
+            md.push('## Issue Status Report');
+            md.push('');
+            md.push(`| Metric | Value |`);
+            md.push(`|--------|-------|`);
+            md.push(`| Open | ${total} |`);
+            md.push(`| New (24 h) | ${newToday} |`);
+            md.push(`| Closed (24 h) | ${closedToday} |`);
+            md.push(`| Needs triage | ${needsTriage} |`);
+            for (const [l, c] of priorities) {
+              md.push(`| ${l} | ${c} |`);
+            }
+            md.push(`| No priority | ${noPriority} |`);
+            if (unassigned > 0) md.push(`| Unowned P0/P1 | ${unassigned} |`);
+            if (breaches.length > 0) {
+              md.push('');
+              md.push('### SLA Breaches');
+              md.push('| Issue | Priority | Age | Over by |');
+              md.push('|-------|----------|-----|---------|');
+              for (const b of breaches) {
+                md.push(`| [#${b.num}](${REPO_URL}/issues/${b.num}) ${b.title} | ${b.pri} | ${b.age} d | ${b.over} d |`);
+              }
+            }
+            if (atRisk.length > 0) {
+              md.push('');
+              md.push('### Approaching SLA');
+              md.push('| Issue | Priority | Days left |');
+              md.push('|-------|----------|-----------|');
+              for (const r of atRisk) {
+                md.push(`| [#${r.num}](${REPO_URL}/issues/${r.num}) ${r.title} | ${r.pri} | ${r.left} d |`);
+              }
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md.join('\n') + '\n');
+
+      - name: Post to Slack
+        env:
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${SLACK_SERVICE}" ]]; then
+            echo "::error::SLACK_SERVICE secret is not configured"
+            exit 1
+          fi
+          curl -sSf -X POST \
+            -H 'Content-type: application/json' \
+            --data @slack-payload.json \
+            "https://hooks.slack.com/services/${SLACK_SERVICE}"

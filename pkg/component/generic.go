@@ -25,9 +25,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+// Deprecated: ComponentConfig is unused in production code. The declarative
+// registry in recipes/registry.yaml replaced per-component Go bundlers.
 // ComponentConfig defines the configuration for a bundler component.
-// This struct captures all component-specific settings, allowing the generic
-// MakeBundle function to handle the common bundling logic.
 type ComponentConfig struct {
 	// Name is the component identifier used in recipes (e.g., "gpu-operator").
 	Name string
@@ -194,6 +194,8 @@ func enrichConfigFromRegistry(cfg *ComponentConfig) {
 	}
 }
 
+// Deprecated: MakeBundle is unused in production code. Bundle generation
+// is now handled by DefaultBundler.Make with deployer generators.
 // MakeBundle generates a bundle using the generic bundling logic.
 // This function handles the common steps: creating directories, applying overrides,
 // writing values.yaml, generating README, generating checksums, and finalizing.

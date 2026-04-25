@@ -157,7 +157,7 @@ Detect when clusters diverge from recipe-defined state.
 - Scheduled drift detection via CronJob
 - Alerting integration for drift events
 
-#### Enhanced Skyhook Integration
+#### Enhanced Nodewright Integration
 
 Deeper OS-level node optimization. Ubuntu done; RHEL and Amazon Linux remain.
 
@@ -183,7 +183,7 @@ Delivered capabilities (reference only).
 - **EKS + H100 recipes** — Training (+ Ubuntu, + Kubeflow) and Inference (+ Ubuntu, + Dynamo) overlays
 - **Snapshot-to-recipe transformation** — `ExtractCriteriaFromSnapshot` in `pkg/recipe/snapshot.go`
 - **Monitoring components** — kube-prometheus-stack, prometheus-adapter, nvsentinel, ephemeral-storage-metrics in registry; monitoring-hpa overlay
-- **Skyhook Ubuntu integration** — skyhook-operator + skyhook-customizations with H100 tuning manifest
+- **Nodewright Ubuntu integration** — nodewright-operator + nodewright-customizations with H100 tuning manifest
 - **Argo CD deployer** — `pkg/bundler/deployer/argocd/` alongside Helm deployer
 - **Validation framework** — Four-phase validation (readiness, deployment, performance, conformance)
 
@@ -192,7 +192,7 @@ Delivered capabilities (reference only).
 | Date | Change |
 |------|--------|
 | 2026-02-17 | Expanded Recipe Creation Tooling with validation framework details, scaffolding, and workflow integration |
-| 2026-02-14 | Moved implemented items to Completed: EKS H100 recipes, snapshot-to-recipe, monitoring, Skyhook Ubuntu |
+| 2026-02-14 | Moved implemented items to Completed: EKS H100 recipes, snapshot-to-recipe, monitoring, Nodewright Ubuntu |
 | 2026-01-26 | Reorganized: removed completed items, streamlined structure |
 | 2026-01-05 | Added Opens section based on architectural decisions |
 | 2026-01-01 | Initial comprehensive roadmap |

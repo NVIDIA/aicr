@@ -432,7 +432,7 @@ func TestGenerate_DeployScriptFinalReadinessNote(t *testing.T) {
 		"The above status reflects Helm install and manifest apply results",
 		"not whether the cluster is ready for GPU workloads",
 		"cluster convergence may continue asynchronously",
-		"Skyhook",
+		"Nodewright",
 		"GPU operator operand rollout",
 		"DRA kubelet plugin",
 	}
@@ -2875,19 +2875,19 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 					Source:    "https://example.invalid/charts",
 				},
 				{
-					Name:      "skyhook-operator",
+					Name:      "nodewright-operator",
 					Namespace: "skyhook",
-					Chart:     "skyhook-operator",
+					Chart:     "nodewright-operator",
 					Version:   "v0.1.0",
 					Source:    "https://example.invalid/charts",
 				},
 			},
-			DeploymentOrder: []string{"cert-manager", "kgateway", "skyhook-operator"},
+			DeploymentOrder: []string{"cert-manager", "kgateway", "nodewright-operator"},
 		},
 		ComponentValues: map[string]map[string]any{
-			"cert-manager":     {},
-			"kgateway":         {},
-			"skyhook-operator": {},
+			"cert-manager":        {},
+			"kgateway":            {},
+			"nodewright-operator": {},
 		},
 		Version: "v1.0.0",
 	}
@@ -2899,7 +2899,7 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 	bashSnippet := `
         snippet=$(sed -n '/^skip_preflight_for_release()/,/^}/p' "$UNDEPLOY")
         eval "$snippet"
-        skip_preflight_for_release "skyhook-operator" && echo "skip:skyhook-operator"
+        skip_preflight_for_release "nodewright-operator" && echo "skip:nodewright-operator"
         skip_preflight_for_release "kgateway" && echo "skip:kgateway"
         if skip_preflight_for_release "cert-manager"; then
             echo "unexpected:cert-manager"
@@ -2921,8 +2921,8 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 	}
 
 	out := stdout.String()
-	if !strings.Contains(out, "skip:skyhook-operator") {
-		t.Errorf("expected skip list to include skyhook-operator; stdout: %q stderr: %q", out, stderr.String())
+	if !strings.Contains(out, "skip:nodewright-operator") {
+		t.Errorf("expected skip list to include nodewright-operator; stdout: %q stderr: %q", out, stderr.String())
 	}
 	if !strings.Contains(out, "skip:kgateway") {
 		t.Errorf("expected skip list to include kgateway; stdout: %q stderr: %q", out, stderr.String())

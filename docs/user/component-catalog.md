@@ -15,8 +15,8 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gke-nccl-tcpxo** | NCCL TCPxO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
-| **skyhook-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Skyhook](https://github.com/nvidia/skyhook) |
-| **skyhook-customizations** | Environment-specific node tuning profiles applied via Skyhook. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
+| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Nodewright](https://github.com/nvidia/nodewright) |
+| **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
 | **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver for GPUs. Advertises GPUs via the Kubernetes `resource.k8s.io/v1` API instead of the legacy device plugin. Requires Kubernetes 1.34+ (DRA is GA in 1.34). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/NVIDIA/k8s-dra-driver-gpu) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
@@ -37,7 +37,7 @@ Not every component appears in every recipe. The recipe engine selects component
 - **Base components** (cert-manager, kube-prometheus-stack) appear in most recipes.
 - **Cloud-specific components** (aws-efa, aws-ebs-csi-driver) are added when the service matches.
 - **Intent-specific components** (kubeflow-trainer, dynamo-platform, kai-scheduler) are added based on workload intent.
-- **Accelerator/OS-specific tuning** (skyhook-customizations, nvidia-dra-driver-gpu) varies by hardware and OS combination.
+- **Accelerator/OS-specific tuning** (nodewright-customizations, nvidia-dra-driver-gpu) varies by hardware and OS combination.
 
 To see exactly which components appear in a given recipe, generate one:
 

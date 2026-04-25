@@ -39,10 +39,10 @@ import (
 )
 
 const (
-	gpuOperatorComponent = "gpu-operator"
-	skyhookComponent     = "skyhook-customizations"
-	draDriverComponent   = "nvidia-dra-driver-gpu"
-	clusterPolicyName    = "cluster-policy"
+	gpuOperatorComponent              = "gpu-operator"
+	nodewrightCustomizationsComponent = "nodewright-customizations"
+	draDriverComponent                = "nvidia-dra-driver-gpu"
+	clusterPolicyName                 = "cluster-policy"
 
 	// draKubeletPluginSuffix is the chart-template-defined name suffix for
 	// the NVIDIA DRA driver's kubelet-plugin DaemonSet. The upstream chart
@@ -54,14 +54,14 @@ const (
 	draKubeletPluginSuffix = "-kubelet-plugin"
 
 	clusterPolicyReadyState = "ready"
-	skyhookCompleteState    = "complete"
+	nodewrightCompleteState = "complete"
 )
 
 var (
 	clusterPolicyGVR = schema.GroupVersionResource{
 		Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies",
 	}
-	skyhookGVR = schema.GroupVersionResource{
+	nodewrightGVR = schema.GroupVersionResource{
 		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
 	}
 )
@@ -182,8 +182,8 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentRef) []string {
 	var failures []string
 
-	if ref, ok := findEnabledComponent(refs, skyhookComponent); ok {
-		if err := verifySkyhookReady(ctx, ref); err != nil {
+	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
+		if err := verifyNodewrightReady(ctx, ref); err != nil {
 			failures = append(failures, err.Error())
 		}
 	}
@@ -212,29 +212,29 @@ func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.Compo
 	return recipe.ComponentRef{}, false
 }
 
-// verifySkyhookReady checks that the specific Skyhook CR(s) this recipe
+// verifyNodewrightReady checks that the specific Nodewright CR(s) this recipe
 // declares are present and have reached status.status == "complete".
 //
 // Deployer-neutrality stance: no Helm API calls, no reads of release
-// metadata, no dependence on release-scoped labels. The set of Skyhook CRs
+// metadata, no dependence on release-scoped labels. The set of Nodewright CRs
 // to verify is derived from the recipe's own ComponentRef.ManifestFiles —
 // the validator reads those manifests from the embedded data provider and
-// extracts each Skyhook resource's metadata.name. At runtime it then looks
+// extracts each Nodewright resource's metadata.name. At runtime it then looks
 // those exact names up on the cluster via the Kubernetes API. Unrelated
-// Skyhook CRs on the cluster (stale from previous deploys, or from other
+// Nodewright CRs on the cluster (stale from previous deploys, or from other
 // tenants) are explicitly ignored.
-func verifySkyhookReady(ctx *validators.Context, ref recipe.ComponentRef) error {
-	expectedNames, err := expectedSkyhookNames(ref)
+func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) error {
+	expectedNames, err := expectedNodewrightNames(ref)
 	if err != nil {
 		return err
 	}
 	if len(expectedNames) == 0 {
-		// The recipe enabled skyhook-customizations but declared no Skyhook
+		// The recipe enabled nodewright-customizations but declared no Nodewright
 		// manifests, so we cannot prove readiness. Fail closed rather than
 		// silently pass — treating this as a recipe misconfiguration that the
 		// user should see.
 		return errors.New(errors.ErrCodeNotFound,
-			fmt.Sprintf("no Skyhook CR names could be extracted from component %s manifestFiles=%v",
+			fmt.Sprintf("no Nodewright CR names could be extracted from component %s manifestFiles=%v",
 				ref.Name, ref.ManifestFiles))
 	}
 
@@ -242,13 +242,13 @@ func verifySkyhookReady(ctx *validators.Context, ref recipe.ComponentRef) error 
 	// verifyClusterPolicyReady pattern: CRD not registered → skip per #607;
 	// any other discovery error (RBAC, 5xx, timeout) → fail closed so a
 	// transient discovery failure cannot mask readiness.
-	gv := skyhookGVR.GroupVersion().String()
+	gv := nodewrightGVR.GroupVersion().String()
 	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
 	switch {
 	case discErr == nil:
 		// fall through to per-CR checks
 	case apierrors.IsNotFound(discErr):
-		fmt.Printf("  Skyhook: %s not registered, skipping\n", gv)
+		fmt.Printf("  Nodewright: %s not registered, skipping\n", gv)
 		return nil
 	default:
 		return errors.Wrap(errors.ErrCodeInternal,
@@ -263,45 +263,45 @@ func verifySkyhookReady(ctx *validators.Context, ref recipe.ComponentRef) error 
 	var failures []string
 	for _, name := range expectedNames {
 		verifyCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
-		sk, getErr := dynClient.Resource(skyhookGVR).Get(verifyCtx, name, metav1.GetOptions{})
+		sk, getErr := dynClient.Resource(nodewrightGVR).Get(verifyCtx, name, metav1.GetOptions{})
 		cancel()
 		if getErr != nil {
 			if apierrors.IsNotFound(getErr) {
-				failures = append(failures, fmt.Sprintf("Skyhook %s: not found (recipe declared it but the cluster has no such CR)", name))
+				failures = append(failures, fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name))
 				continue
 			}
-			failures = append(failures, fmt.Sprintf("Skyhook %s: failed to get: %v", name, getErr))
+			failures = append(failures, fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr))
 			continue
 		}
 		status, found, statusErr := unstructured.NestedString(sk.Object, "status", "status")
 		if statusErr != nil {
-			failures = append(failures, fmt.Sprintf("Skyhook %s: failed to read status.status: %v", name, statusErr))
+			failures = append(failures, fmt.Sprintf("Nodewright %s: failed to read status.status: %v", name, statusErr))
 			continue
 		}
 		if !found {
-			failures = append(failures, fmt.Sprintf("Skyhook %s: missing status.status", name))
+			failures = append(failures, fmt.Sprintf("Nodewright %s: missing status.status", name))
 			continue
 		}
-		if status != skyhookCompleteState {
-			failures = append(failures, fmt.Sprintf("Skyhook %s: status=%s (want %s)", name, status, skyhookCompleteState))
+		if status != nodewrightCompleteState {
+			failures = append(failures, fmt.Sprintf("Nodewright %s: status=%s (want %s)", name, status, nodewrightCompleteState))
 			continue
 		}
-		fmt.Printf("  Skyhook %s: %s\n", name, skyhookCompleteState)
+		fmt.Printf("  Nodewright %s: %s\n", name, nodewrightCompleteState)
 	}
 
 	if len(failures) > 0 {
 		return errors.New(errors.ErrCodeInternal,
-			fmt.Sprintf("%d of %d expected Skyhook(s) not ready:\n  %s",
+			fmt.Sprintf("%d of %d expected Nodewright(s) not ready:\n  %s",
 				len(failures), len(expectedNames), strings.Join(failures, "\n  ")))
 	}
 	return nil
 }
 
-// expectedSkyhookNames derives the set of Skyhook CR names that this
+// expectedNodewrightNames derives the set of Nodewright CR names that this
 // component is expected to deploy, by reading each ManifestFile through the
-// recipe data provider and extracting the metadata.name of every Skyhook
+// recipe data provider and extracting the metadata.name of every Nodewright
 // resource declared in those files.
-func expectedSkyhookNames(ref recipe.ComponentRef) ([]string, error) {
+func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 	seen := make(map[string]bool)
 	var names []string
 	for _, path := range ref.ManifestFiles {
@@ -310,7 +310,7 @@ func expectedSkyhookNames(ref recipe.ComponentRef) ([]string, error) {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to load manifest %s for component %s", path, ref.Name), err)
 		}
-		for _, name := range extractSkyhookNamesFromManifest(content) {
+		for _, name := range extractNodewrightNamesFromManifest(content) {
 			if seen[name] {
 				continue
 			}
@@ -321,7 +321,7 @@ func expectedSkyhookNames(ref recipe.ComponentRef) ([]string, error) {
 	return names, nil
 }
 
-// skyhookKindRE and skyhookMetadataNameRE are narrow extractors for Skyhook
+// nodewrightKindRE and nodewrightMetadataNameRE are narrow extractors for Nodewright
 // CR names out of a manifest file that may contain Helm template directives
 // ({{ ... }}). A full YAML parse is not an option: templated lines are not
 // valid YAML on their own, and evaluating Helm templates at validate time
@@ -329,31 +329,31 @@ func expectedSkyhookNames(ref recipe.ComponentRef) ([]string, error) {
 //
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in
-// recipes/components/skyhook-customizations/manifests/):
+// recipes/components/nodewright-customizations/manifests/):
 //   - "kind: Skyhook" sits at column 0.
-//   - The metadata.name of each Skyhook is a literal string (not templated)
+//   - The metadata.name of each Nodewright is a literal string (not templated)
 //     at exactly 2-space indent under a top-level "metadata:" block.
 //   - Document separators use a bare "---" on its own line.
 //
 // If those shapes change, the helper's direct unit tests fail loudly.
 var (
-	skyhookKindRE         = regexp.MustCompile(`(?m)^kind:\s*Skyhook\s*$`)
-	skyhookDocSeparatorRE = regexp.MustCompile(`(?m)^---\s*$`)
-	skyhookMetadataNameRE = regexp.MustCompile(`(?m)^  name:\s+(\S+)\s*$`)
+	nodewrightKindRE         = regexp.MustCompile(`(?m)^kind:\s*Skyhook\s*$`)
+	nodewrightDocSeparatorRE = regexp.MustCompile(`(?m)^---\s*$`)
+	nodewrightMetadataNameRE = regexp.MustCompile(`(?m)^  name:\s+(\S+)\s*$`)
 )
 
-// extractSkyhookNamesFromManifest returns the metadata.name of every Skyhook
+// extractNodewrightNamesFromManifest returns the metadata.name of every Nodewright
 // CR declared in a (possibly Helm-templated) manifest file. Names that are
 // themselves templated (e.g. "{{ .Chart.Name }}") are skipped — the
 // validator cannot evaluate them, and a templated name is never what a
 // concrete AICR recipe declares today.
-func extractSkyhookNamesFromManifest(content []byte) []string {
+func extractNodewrightNamesFromManifest(content []byte) []string {
 	var names []string
-	for _, doc := range skyhookDocSeparatorRE.Split(string(content), -1) {
-		if !skyhookKindRE.MatchString(doc) {
+	for _, doc := range nodewrightDocSeparatorRE.Split(string(content), -1) {
+		if !nodewrightKindRE.MatchString(doc) {
 			continue
 		}
-		m := skyhookMetadataNameRE.FindStringSubmatch(doc)
+		m := nodewrightMetadataNameRE.FindStringSubmatch(doc)
 		if m == nil {
 			continue
 		}

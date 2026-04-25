@@ -18,6 +18,8 @@
 // Usage:
 //
 //	performance nccl-all-reduce-bw
+//	performance nccl-all-reduce-bw-net
+//	performance nccl-all-reduce-bw-nvls
 package main
 
 import (
@@ -26,6 +28,9 @@ import (
 
 func main() {
 	validators.Run(map[string]validators.CheckFunc{
-		"nccl-all-reduce-bw": checkNCCLAllReduceBW,
+		"nccl-all-reduce-bw":      checkNCCLAllReduceBW,
+		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
+		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
+		"inference-perf":          checkInferencePerf,
 	})
 }

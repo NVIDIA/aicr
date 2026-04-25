@@ -53,8 +53,8 @@ Visual: Left-to-right horizontal pipeline, boxes connected by labeled arrows
 ┌──────────────┐  +PLATFORM=    ┌──────────────┐  +ACCELERATOR=    ┌──────────────┐
 │   RESOLVED   │◀──────────────│  + UBUNTU    │◀────────────────│  + H100      │
 │   RECIPE     │   KUBEFLOW    │              │   H100           │              │
-│              │                │ OS kernel    │                   │ +skyhook-    │
-│ 12 unique    │  +kubeflow-   │ constraint   │                   │ customizatns │
+│              │                │ OS kernel    │                   │ +nodewright- │
+│ 12 unique    │  +kubeflow-   │ constraint   │                   │ customizations │
 │ components   │  trainer      │ >= 6.8       │                   │ behavior     │
 │              │  +36 values   │              │                   │ mutations    │
 └──────────────┘                └──────────────┘                   └──────────────┘

@@ -49,7 +49,7 @@ Components are defined in recipes/registry.yaml:
   - nvidia-dra-driver-gpu: NVIDIA DRA Driver
   - cert-manager: Certificate Manager
   - nvsentinel: NVSentinel
-  - skyhook-operator: Skyhook node optimization
+  - nodewright-operator: Nodewright node optimization
 
 # Output Formats
 

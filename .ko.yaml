@@ -12,4 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-defaultBaseImage: nvcr.io/nvidia/cuda:13.1.0-runtime-ubuntu24.04
+defaultBaseImage: nvcr.io/nvidia/cuda:13.2.1-runtime-ubuntu24.04

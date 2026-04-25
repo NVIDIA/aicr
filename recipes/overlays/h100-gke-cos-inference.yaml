@@ -39,17 +39,17 @@ spec:
         - nfd
         - cert-manager
         - kube-prometheus-stack
-        - skyhook-customizations
+        - nodewright-customizations
       overrides:
         cdi:
           enabled: true
 
-    - name: skyhook-customizations
+    - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/skyhook-customizations/manifests/tuning-gke.yaml
+        - components/nodewright-customizations/manifests/tuning-gke.yaml
       overrides:
         accelerator: h100
         intent: inference
       dependencyRefs:
-        - skyhook-operator
+        - nodewright-operator
