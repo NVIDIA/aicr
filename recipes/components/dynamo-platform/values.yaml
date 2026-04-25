@@ -37,6 +37,19 @@ dynamo-operator:
         repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
         tag: v0.15.0
 
+  # Use cert-manager for the dynamo-operator admission webhook instead of the
+  # chart's default Helm-hook bootstrap. The default flow creates the
+  # ValidatingWebhookConfiguration before the post-install CA-inject job
+  # populates the caBundle, which makes Helm log a noisy
+  # "tls: failed to find any PEM data in certificate input" warning on every
+  # install and leaves a brief window where admission requests would be
+  # rejected. cert-manager.io/inject-ca-from removes both problems. Every
+  # dynamo overlay already lists cert-manager in dependencyRefs, so it is
+  # guaranteed to be installed first.
+  webhook:
+    certManager:
+      enabled: true
+
   # Use Kubernetes-native service discovery (operator-level only;
   # runtime pods still require DYN_STORE_KV=mem to skip etcd leases)
   discoveryBackend: "kubernetes"
