@@ -32,10 +32,16 @@ validate_seconds_input() {
     echo "::error::${input_name} must be an integer number of seconds, got '${input_value}'"
     exit 1
   fi
+  if (( input_value <= 0 )); then
+    echo "::error::${input_name} must be greater than 0 seconds, got '${input_value}'"
+    exit 1
+  fi
 }
 
 validate_duration_input kwok_helm_timeout "${KWOK_HELM_TIMEOUT}"
 validate_seconds_input ko_build_timeout "${KO_BUILD_TIMEOUT}"
 validate_duration_input karpenter_helm_timeout "${KARPENTER_HELM_TIMEOUT}"
 bash kwok/scripts/install-karpenter-kwok.sh
-kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f kwok/manifests/karpenter/nodepool.yaml
+timeout 30s kubectl --request-timeout=10s \
+  --context="kind-${KIND_CLUSTER_NAME}" \
+  apply -f kwok/manifests/karpenter/nodepool.yaml

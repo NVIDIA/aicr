@@ -20,6 +20,10 @@ GPU_MODEL=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | se
 GPU_COUNT=$(yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "smi") | .data["gpu-count"]' snapshot.yaml)
 echo "GPU model: ${GPU_MODEL}"
 echo "GPU count: ${GPU_COUNT}"
+if ! [[ "${GPU_COUNT}" =~ ^[0-9]+$ ]]; then
+  echo "::error::Expected numeric gpu-count in snapshot, got: ${GPU_COUNT}"
+  exit 1
+fi
 if [[ "${GPU_MODEL}" != *"${EXPECTED_GPU_MODEL}"* ]]; then
   echo "::error::Expected ${EXPECTED_GPU_MODEL} GPU in snapshot, got: ${GPU_MODEL}"
   exit 1

@@ -96,6 +96,11 @@ esac
 if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" || "${CONTROL_PLANE_LEADER_ELECTION_TUNING}" == "true" ]]; then
   patch_dir="$(mktemp -d)"
   config_template="$(mktemp)"
+  cleanup_generated_config() {
+    [[ -n "${patch_dir:-}" ]] && rm -rf "${patch_dir}"
+    [[ -n "${config_template:-}" ]] && rm -f "${config_template}"
+  }
+  trap cleanup_generated_config EXIT
 
   # Keep YAML heredocs at column 0; indentation is literal content.
   if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
@@ -361,6 +366,48 @@ static_pod_manifest_contains_arg() {
   docker exec "${node}" grep -Fq -- "- ${expected}" "/etc/kubernetes/manifests/${component}.yaml"
 }
 
+running_static_pod_container_contains_arg() {
+  local component="$1"
+  local expected="$2"
+  local node="${KIND_CLUSTER_NAME}-control-plane"
+  local container_ids
+  local container_id
+
+  if ! container_ids="$(docker exec "${node}" crictl ps --name "${component}" -q 2>/dev/null)"; then
+    return 1
+  fi
+  [[ -z "${container_ids}" ]] && return 1
+
+  for container_id in ${container_ids}; do
+    if docker exec "${node}" crictl inspect "${container_id}" 2>/dev/null | jq -e --arg expected "${expected}" '
+      ([.info.runtimeSpec.process.args[]?, .status.info.runtimeSpec.process.args[]?] | index($expected)) != null
+    ' >/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+dump_running_static_pod_container_args() {
+  local component="$1"
+  local node="${KIND_CLUSTER_NAME}-control-plane"
+  local container_ids
+  local container_id
+
+  echo "Running ${component} CRI container args:"
+  container_ids="$(docker exec "${node}" crictl ps --name "${component}" -q 2>/dev/null || true)"
+  if [[ -z "${container_ids}" ]]; then
+    echo "(no running ${component} CRI containers found)"
+    return
+  fi
+  for container_id in ${container_ids}; do
+    echo "--- ${container_id} ---"
+    docker exec "${node}" crictl inspect "${container_id}" 2>/dev/null | jq -r '
+      [.info.runtimeSpec.process.args[]?, .status.info.runtimeSpec.process.args[]?][]?
+    ' || true
+  done
+}
+
 dump_static_pod_manifest() {
   local component="$1"
   local node="${KIND_CLUSTER_NAME}-control-plane"
@@ -375,14 +422,19 @@ assert_control_plane_arg() {
   local command_args
 
   command_args="$(control_plane_command_args "${component}")"
-  if ! grep -Fxq "${expected}" <<< "${command_args}"; then
+  if ! grep -Fxq -- "${expected}" <<< "${command_args}"; then
+    if running_static_pod_container_contains_arg "${component}" "${expected}"; then
+      echo "${component} running CRI container args verified: ${expected} (live mirror pod omitted it)"
+      return
+    fi
     if static_pod_manifest_contains_arg "${component}" "${expected}"; then
-      echo "::warning::${component} live mirror pod command/args did not show ${expected}; static pod manifest is patched"
+      echo "::warning::${component} live mirror pod and running CRI container args did not show ${expected}; static pod manifest is patched"
       return
     fi
     echo "::error::${component} live pod command/args does not contain ${expected}"
     echo "Observed live command/args:"
     echo "${command_args}"
+    dump_running_static_pod_container_args "${component}"
     dump_static_pod_manifest "${component}"
     exit 1
   fi

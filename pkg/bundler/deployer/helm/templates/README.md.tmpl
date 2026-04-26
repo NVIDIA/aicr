@@ -105,7 +105,7 @@ helm upgrade --install {{ .Name }} {{ .ChartName }} \
 {{ end -}}
 ```
 {{ if eq .Name "dynamo-platform" }}
-`--server-side=false` requires a Helm client that supports the flag (Helm v4 or compatible). `deploy.sh` checks support before adding the flag and warns before falling back when unavailable.
+`--server-side=false` requires Helm v4.0.5 or later. `deploy.sh` checks the Helm version before adding the flag and warns before falling back when unavailable.
 {{ end -}}
 {{ end -}}
 {{ if .HasManifests }}

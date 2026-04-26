@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -euo pipefail
 
 if [[ -n "${VALIDATOR_PHASES}" ]]; then
@@ -14,12 +28,19 @@ fi
 
 mkdir -p dist/validator
 for phase in ${PHASES//,/ }; do
+  if ! [[ "${phase}" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+    echo "::error::invalid validator phase '${phase}'; expected ^[a-z][a-z0-9_-]*$"
+    exit 1
+  fi
   echo "Building validator binary: ${phase}"
   CGO_ENABLED=0 go build -trimpath -o "dist/validator/${phase}" "./validators/${phase}"
 done
 
 for phase in ${PHASES//,/ }; do
-  mkdir -p "validators/${phase}/testdata"
+  if [[ ! -d "validators/${phase}/testdata" ]]; then
+    echo "::warning::validators/${phase}/testdata is missing; creating empty testdata directory"
+    mkdir -p "validators/${phase}/testdata"
+  fi
   docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY dist/validator/${phase} /${phase}

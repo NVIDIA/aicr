@@ -111,7 +111,7 @@ jobs:
         run: bash .github/scripts/gpu-smoke-run-nvidia-smi.sh
 
       - name: Show nvidia-smi output
-        run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
+        run: bash .github/scripts/gpu-smoke-show-nvidia-smi-log.sh
 
       # --- Snapshot and validation ---
 

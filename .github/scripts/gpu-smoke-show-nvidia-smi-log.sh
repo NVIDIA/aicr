@@ -15,10 +15,21 @@
 
 set -euo pipefail
 
-rm -rf bundle
-./aicr bundle \
-  --recipe recipe.yaml \
-  --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
-  --output bundle
-echo "--- Bundle contents ---"
-ls -la bundle/
+pod_name=""
+if [[ -f /tmp/aicr-gpu-smoke-pod-name ]]; then
+  pod_name="$(cat /tmp/aicr-gpu-smoke-pod-name)"
+fi
+
+if [[ -z "${pod_name}" ]]; then
+  pod_name=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods \
+    -l app=gpu-smoke-test \
+    --sort-by=.metadata.creationTimestamp \
+    -o jsonpath='{.items[-1:].metadata.name}')
+fi
+
+if [[ -z "${pod_name}" ]]; then
+  echo "::error::no gpu-smoke-test pod found"
+  exit 1
+fi
+
+kubectl --context="kind-${KIND_CLUSTER_NAME}" logs "${pod_name}"

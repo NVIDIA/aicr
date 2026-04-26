@@ -4,6 +4,13 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 
 ## Composite Actions
 
+### Script Conventions
+
+Composite action helper scripts in this directory are intentionally portable
+across checkout modes: keep them mode `0644` and invoke them as
+`bash path/to/script.sh` from workflows or `action.yml` files. Do not rely on
+executable bits or `./script.sh` invocation.
+
 ### Core CI/CD Actions
 
 #### `security-scan/`

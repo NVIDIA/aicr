@@ -60,7 +60,32 @@ function backoff_seconds() {
   echo "${seconds}"
 }
 
-function helm_supports_server_side_flag() {
+function helm_supports_server_side_false_install() {
+  local version
+  local major
+  local minor
+  local patch
+
+  # Helm v4.0.0-v4.0.4 advertise --server-side=false but ignore it for the
+  # upgrade --install install-fallback path. Require v4.0.5+ before relying on
+  # the flag for Dynamo's webhook Secret conflict mitigation.
+  version="$(helm version --short 2>/dev/null | head -n 1 || true)"
+  version="${version#v}"
+  version="${version%%+*}"
+  version="${version%%-*}"
+  if ! [[ "${version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+    return 1
+  fi
+  major="${BASH_REMATCH[1]}"
+  minor="${BASH_REMATCH[2]}"
+  patch="${BASH_REMATCH[3]}"
+  if (( major < 4 )); then
+    return 1
+  fi
+  if (( major == 4 )) && (( minor == 0 )) && (( patch < 5 )); then
+    return 1
+  fi
+
   helm help upgrade 2>/dev/null | grep -q -- '--server-side'
 }
 
@@ -91,7 +116,7 @@ function retry() {
 function cleanup_helm_hooks() {
   local namespace="$1"
   local job_names
-  job_names=$(kubectl get jobs -n "${namespace}" \
+  job_names=$(kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get jobs -n "${namespace}" \
     --field-selector=status.successful=0 \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
     2>/dev/null || true)
@@ -102,7 +127,7 @@ function cleanup_helm_hooks() {
     [[ -z "${name}" ]] && continue
     # Get the full Job JSON to reliably check annotations and status
     local job_json
-    job_json=$(kubectl get job "${name}" -n "${namespace}" -o json 2>/dev/null || true)
+    job_json=$(kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get job "${name}" -n "${namespace}" -o json 2>/dev/null || true)
     [[ -z "${job_json}" ]] && continue
     # Skip non-hook Jobs (no helm.sh/hook annotation)
     local hook_val
@@ -111,13 +136,13 @@ function cleanup_helm_hooks() {
     # Capture diagnostics before deleting. This helps diagnose transient hook
     # failures (e.g., dynamo ssh-keygen) that are otherwise lost after cleanup.
     echo "  --- Failed hook Job ${name} diagnostics ---"
-    kubectl describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+    kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" describe job "${name}" -n "${namespace}" 2>/dev/null | tail -50 || true
     local pod_names
-    pod_names=$(kubectl get pods -n "${namespace}" -l "job-name=${name}" \
+    pod_names=$(kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get pods -n "${namespace}" -l "job-name=${name}" \
       -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
     for pod_name in ${pod_names}; do
       echo "  --- Hook pod ${pod_name} describe ---"
-      kubectl describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
+      kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" describe pod "${pod_name}" -n "${namespace}" 2>/dev/null | tail -50 || true
     done
     echo "  --- End diagnostics for ${name} ---"
     # Delete any non-succeeded hook Job. This function only runs after a Helm
@@ -125,7 +150,7 @@ function cleanup_helm_hooks() {
     # retry — whether it failed, is stuck Pending (timed out before the pod
     # started), or is still active with a stuck container.
     echo "  Cleaning up stale Helm hook Job ${name} in ${namespace}..."
-    kubectl delete job "${name}" -n "${namespace}" --ignore-not-found 2>/dev/null || true
+    kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" delete job "${name}" -n "${namespace}" --ignore-not-found 2>/dev/null || true
   done <<< "${job_names}"
 }
 
@@ -137,15 +162,15 @@ function dump_kai_scheduler_helm_diagnostics() {
 
   echo "  --- ${namespace} diagnostics ---"
   echo "  Jobs:"
-  kubectl get jobs -n "${namespace}" 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get jobs -n "${namespace}" 2>/dev/null || true
   echo "  Job descriptions:"
-  kubectl describe jobs -n "${namespace}" 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" describe jobs -n "${namespace}" 2>/dev/null || true
   echo "  Pods:"
-  kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get pods -n "${namespace}" -o wide 2>/dev/null || true
   echo "  Pod descriptions:"
-  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" describe pods -n "${namespace}" 2>/dev/null || true
   echo "  Recent events:"
-  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
   echo "  --- End ${namespace} diagnostics ---"
 }
 
@@ -419,11 +444,12 @@ fi
 COMPONENT_HELM_TIMEOUT="20m"
 # Grove owns the generated webhook certificate Secret data after install.
 # Client-side apply avoids server-side field ownership conflicts during retries.
-# This flag requires a Helm client that supports --server-side=false.
-if helm_supports_server_side_flag; then
+# This flag requires Helm v4.0.5+; earlier Helm v4 releases advertise the flag
+# but ignore --server-side=false on a fresh upgrade --install fallback.
+if helm_supports_server_side_false_install; then
   COMPONENT_HELM_APPLY_ARGS=(--server-side=false)
 else
-  echo "::warning::dynamo-platform conflict mitigation requires a Helm client that supports --server-side=false; proceeding without this flag"
+  echo "::warning::dynamo-platform conflict mitigation requires Helm v4.0.5+ with working --server-side=false install fallback; proceeding without this flag"
 fi
 if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]; then
   COMPONENT_MAX_RETRIES="3"

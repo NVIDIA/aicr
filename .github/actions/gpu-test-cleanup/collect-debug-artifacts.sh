@@ -13,7 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -o pipefail
+# Diagnostic artifact collection intentionally omits -e so one broken cluster
+# call does not prevent later artifacts from being collected.
+set -uo pipefail
 mkdir -p /tmp/debug-artifacts
 CONTROL_PLANE_COMPONENTS="kube-apiserver kube-controller-manager kube-scheduler etcd"
 kubectl_kind() {

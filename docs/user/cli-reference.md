@@ -1323,7 +1323,7 @@ After `helm install`, the same manifests are re-applied as post-install to ensur
 Components that use operator patterns with custom resources that reconcile asynchronously use component-specific install behavior:
 
 - `kai-scheduler` installs without `--wait` to avoid Helm timing out on CR readiness. It uses a 30-minute per-attempt timeout and caps the retry budget at 1 retry so hook diagnostics surface quickly on cold runners.
-- `dynamo-platform` uses client-side apply so retries and upgrades do not conflict with Grove-managed webhook certificate Secret data, while preserving Helm `--wait` behavior. Dynamo installs use a 20-minute per-attempt timeout and cap the retry budget at 3 retries because cold-start failures often involve operator webhook and certificate resources settling across attempts.
+- `dynamo-platform` has `deploy.sh` attempt `--server-side=false` so retries and upgrades do not conflict with Grove-managed webhook certificate Secret data, while preserving Helm `--wait` behavior. The script only adds `--server-side=false` when Helm v4.0.5 or later is detected; with older Helm clients it logs a warning and proceeds without that mitigation. Dynamo installs use a 20-minute per-attempt timeout and cap the retry budget at 3 retries because cold-start failures often involve operator webhook and certificate resources settling across attempts.
 - `kube-prometheus-stack` keeps the default timeout and retry budget because Grafana can hit its Deployment progress deadline before a longer Helm timeout would help, especially on slower H100 CI runners under image-pull and control-plane load.
 
 ##### DRA kubelet plugin registration

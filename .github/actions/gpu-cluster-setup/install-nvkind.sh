@@ -15,5 +15,11 @@
 
 set -euo pipefail
 
+if [[ -z "${NVKIND_VERSION:-}" ]]; then
+  echo "::error::NVKIND_VERSION must be set"
+  exit 1
+fi
+
 go install "github.com/NVIDIA/nvkind/cmd/nvkind@${NVKIND_VERSION}"
-nvkind --help
+nvkind_bin="${GOBIN:-$(go env GOPATH)/bin}/nvkind"
+"${nvkind_bin}" --help

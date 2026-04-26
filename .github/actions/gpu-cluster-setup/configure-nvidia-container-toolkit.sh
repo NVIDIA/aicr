@@ -18,4 +18,17 @@ set -euo pipefail
 sudo nvidia-ctk runtime configure --runtime=docker --set-as-default --cdi.enabled
 sudo nvidia-ctk config --set accept-nvidia-visible-devices-as-volume-mounts=true --in-place
 sudo nvidia-ctk config --set accept-nvidia-visible-devices-envvar-when-unprivileged=false --in-place
-sudo systemctl restart docker
+timeout 120s sudo systemctl restart docker
+
+for attempt in $(seq 1 30); do
+  if systemctl is-active --quiet docker && docker info >/dev/null 2>&1; then
+    echo "Docker is healthy after NVIDIA runtime configuration."
+    exit 0
+  fi
+  echo "Waiting for Docker to become healthy... (${attempt}/30)"
+  sleep 2
+done
+
+echo "::error::Docker did not become healthy after NVIDIA runtime configuration"
+sudo systemctl status docker --no-pager || true
+exit 1

@@ -21,9 +21,11 @@ else
   echo "Pulling kind node image: ${KIND_NODE_IMAGE}"
   timeout 600s docker pull "${KIND_NODE_IMAGE}"
 fi
-free_disk_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
-if (( free_disk_gb < MIN_FREE_DISK_GB )); then
-  echo "::error::free disk on / is ${free_disk_gb}GiB after warming ${KIND_NODE_IMAGE}, need at least ${MIN_FREE_DISK_GB}GiB"
+free_disk_bytes=$(df -B1 --output=avail / | tail -1 | tr -dc '0-9')
+min_free_disk_bytes=$((MIN_FREE_DISK_GB * 1024 * 1024 * 1024))
+free_disk_gib=$((free_disk_bytes / 1024 / 1024 / 1024))
+if (( free_disk_bytes < min_free_disk_bytes )); then
+  echo "::error::free disk on / is ${free_disk_bytes} bytes (${free_disk_gib}GiB) after warming ${KIND_NODE_IMAGE}, need at least ${min_free_disk_bytes} bytes (${MIN_FREE_DISK_GB}GiB)"
   exit 1
 fi
-echo "Runner disk remains sufficient after kind image warm-up: ${free_disk_gb}GiB"
+echo "Runner disk remains sufficient after kind image warm-up: ${free_disk_gib}GiB (${free_disk_bytes} bytes)"

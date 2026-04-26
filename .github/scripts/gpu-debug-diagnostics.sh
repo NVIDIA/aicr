@@ -1,5 +1,22 @@
 #!/usr/bin/env bash
-set -o pipefail
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Diagnostic script: intentionally omits -e so each mode can keep collecting
+# partial failure data. Keep -u and pipefail to catch script bugs and pipeline
+# failures while individual kubectl_kind calls tolerate cluster errors.
+set -uo pipefail
 
 mode="${GPU_TEST_DIAGNOSTIC_MODE:-smoke}"
 
@@ -86,6 +103,7 @@ case "${mode}" in
   training)
     print_workload_inventory cert-manager gpu-operator monitoring skyhook nvsentinel nvidia-dra-driver \
       nvidia-network-operator kai-scheduler kubeflow
+    print_common_gpu_diagnostics
     print_grafana_diagnostics
     print_kai_diagnostics
     echo "=== Kubeflow Trainer deployment ==="
@@ -96,10 +114,6 @@ case "${mode}" in
     kubectl_kind get validatingwebhookconfigurations validator.trainer.kubeflow.org -o yaml 2>/dev/null || true
     echo "=== Kubeflow Trainer CRD ==="
     kubectl_kind get crd trainjobs.trainer.kubeflow.org -o yaml 2>/dev/null || true
-    echo "=== Non-running pods (all namespaces) ==="
-    kubectl_kind get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
-    echo "=== GPU Operator pods ==="
-    kubectl_kind -n gpu-operator get pods -o wide 2>/dev/null || true
     echo "=== Node resources ==="
     kubectl_kind describe nodes 2>/dev/null | grep -A 20 "Allocated resources" || true
     ;;

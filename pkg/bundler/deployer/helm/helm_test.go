@@ -512,10 +512,10 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	if !strings.Contains(script, `dump_kai_scheduler_helm_diagnostics "${namespace}"`) {
 		t.Error("deploy.sh missing kai-scheduler diagnostics hook")
 	}
-	if !strings.Contains(script, `kubectl get jobs -n "${namespace}"`) {
+	if !strings.Contains(script, `kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get jobs -n "${namespace}"`) {
 		t.Error("deploy.sh missing job diagnostics")
 	}
-	if !strings.Contains(script, `kubectl describe pods -n "${namespace}"`) {
+	if !strings.Contains(script, `kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" describe pods -n "${namespace}"`) {
 		t.Error("deploy.sh missing pod diagnostics")
 	}
 
@@ -575,16 +575,17 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			wantRetryCap:        `if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]`,
 			wantApplyArgs:       `COMPONENT_HELM_APPLY_ARGS=(--server-side=false)`,
 			wantSnippets: []string{
-				`helm_supports_server_side_flag`,
+				`helm_supports_server_side_false_install`,
+				`Require v4.0.5+ before relying on`,
 				`--request-timeout="${KUBECTL_REQUEST_TIMEOUT}"`,
-				`dynamo-platform conflict mitigation requires a Helm client that supports --server-side=false`,
+				`dynamo-platform conflict mitigation requires Helm v4.0.5+`,
 				`dump_dynamo_platform_helm_diagnostics "${namespace}"`,
 				`deployment/dynamo-platform-dynamo-operator-controller-manager`,
 				`--previous --tail=200`,
 			},
 			wantReadmeSnippets: []string{
 				`--server-side=false`,
-				`Helm client that supports the flag`,
+				`requires Helm v4.0.5 or later`,
 				`--wait --timeout 20m`,
 			},
 		},

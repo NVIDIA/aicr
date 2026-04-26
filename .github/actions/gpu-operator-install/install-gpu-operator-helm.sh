@@ -15,7 +15,9 @@
 
 set -euo pipefail
 
-helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+GPU_OPERATOR_CHART_VERSION="v25.10.1"
+
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia --force-update
 helm repo update
 helm upgrade -i \
   --kube-context="kind-${KIND_CLUSTER_NAME}" \
@@ -25,5 +27,6 @@ helm upgrade -i \
   --set toolkit.enabled=false \
   --set dcgmExporter.enabled=false \
   --set nfd.enabled=true \
+  --version="${GPU_OPERATOR_CHART_VERSION}" \
   --wait --timeout=600s \
   gpu-operator nvidia/gpu-operator
