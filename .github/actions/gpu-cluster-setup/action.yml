@@ -309,6 +309,60 @@ runs:
       run: |
         set -euo pipefail
 
+        validate_duration_input() {
+          local input_name="$1"
+          local input_value="$2"
+
+          if ! [[ "${input_value}" =~ ^[0-9]+[smh]$ ]]; then
+            echo "::error::${input_name} must be a duration like 300s, 10m, or 1h; got '${input_value}'"
+            exit 1
+          fi
+        }
+
+        validate_generated_control_plane_config() {
+          if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
+            for patch_file in "${patch_dir}"/*.yaml; do
+              if ! grep -Fxq 'apiVersion: v1' "${patch_file}" ||
+                ! grep -Fxq 'kind: Pod' "${patch_file}" ||
+                ! grep -Eq '^[[:space:]]+resources:$' "${patch_file}"; then
+                echo "::error::rendered static pod patch ${patch_file} is missing expected top-level YAML"
+                sed 's/^/  /' "${patch_file}" || true
+                exit 1
+              fi
+            done
+
+            if ! grep -Eq '^[[:space:]]*extraMounts:$' "${config_template}" ||
+              ! grep -Fq 'directory: /patches' "${config_template}"; then
+              echo "::error::rendered kind config is missing control-plane patch mounts"
+              sed 's/^/  /' "${config_template}" || true
+              exit 1
+            fi
+          fi
+
+          if [[ "${CONTROL_PLANE_LEADER_ELECTION_TUNING}" == "true" ]]; then
+            for expected in \
+              'apiVersion: kubeadm.k8s.io/v1beta3' \
+              'apiVersion: kubeadm.k8s.io/v1beta4' \
+              "leader-elect-lease-duration: \"${LEADER_ELECTION_LEASE_DURATION}\"" \
+              "leader-elect-renew-deadline: \"${LEADER_ELECTION_RENEW_DEADLINE}\"" \
+              "leader-elect-retry-period: \"${LEADER_ELECTION_RETRY_PERIOD}\"" \
+              "value: \"${LEADER_ELECTION_LEASE_DURATION}\"" \
+              "value: \"${LEADER_ELECTION_RENEW_DEADLINE}\"" \
+              "value: \"${LEADER_ELECTION_RETRY_PERIOD}\""; do
+              if ! grep -Fq "${expected}" "${config_template}"; then
+                echo "::error::rendered kind config is missing expected leader election setting: ${expected}"
+                sed 's/^/  /' "${config_template}" || true
+                exit 1
+              fi
+            done
+          fi
+        }
+
+        validate_duration_input cluster_create_timeout "${CLUSTER_CREATE_TIMEOUT}"
+        validate_duration_input leader_election_lease_duration "${LEADER_ELECTION_LEASE_DURATION}"
+        validate_duration_input leader_election_renew_deadline "${LEADER_ELECTION_RENEW_DEADLINE}"
+        validate_duration_input leader_election_retry_period "${LEADER_ELECTION_RETRY_PERIOD}"
+
         CREATE_ARGS=(--name="${KIND_CLUSTER_NAME}")
         if [[ -n "${KIND_NODE_IMAGE}" ]]; then
           echo "Using kind node image: ${KIND_NODE_IMAGE}"
@@ -505,6 +559,7 @@ runs:
             echo "  renew-deadline=${LEADER_ELECTION_RENEW_DEADLINE}"
             echo "  retry-period=${LEADER_ELECTION_RETRY_PERIOD}"
           fi
+          validate_generated_control_plane_config
           CREATE_ARGS+=(--config-template="${config_template}")
         fi
 

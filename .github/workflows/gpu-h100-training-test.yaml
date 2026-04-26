@@ -151,6 +151,8 @@ jobs:
           wait: 'true'
           best_effort: 'false'
 
+      # Runtime install creates many CRDs, webhooks, and controllers. Keep a
+      # stability window here to catch KCM/scheduler restarts before snapshot.
       - name: Check control plane health
         id: post_runtime_control_plane_health
         uses: ./.github/actions/check-control-plane-health
@@ -170,6 +172,8 @@ jobs:
 
       # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
 
+      # Snapshot deploys a GPU Job and exercises cluster discovery; verify the
+      # control plane stayed stable before adding Karpenter/KWOK.
       - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
@@ -194,6 +198,8 @@ jobs:
           install_chainsaw: 'true'
           chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
 
+      # This gate is effectively post-Karpenter/KWOK; the chainsaw setup above
+      # only installs a runner-side binary.
       - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
@@ -223,6 +229,8 @@ jobs:
           build_snapshot_agent: 'false'
           validator_phases: 'conformance'
 
+      # Validator image build/load can contend with Docker and kind containerd;
+      # verify the control plane before the final conformance workload.
       - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:

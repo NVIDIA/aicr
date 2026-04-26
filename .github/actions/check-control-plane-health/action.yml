@@ -69,6 +69,16 @@ runs:
       run: |
         set -euo pipefail
 
+        validate_duration_input() {
+          local input_name="$1"
+          local input_value="$2"
+
+          if ! [[ "${input_value}" =~ ^[0-9]+[smh]$ ]]; then
+            echo "::error::${input_name} must be a duration like 60s, 2m, or 1h; got '${input_value}'"
+            exit 1
+          fi
+        }
+
         MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS#"${MAX_RECOVERY_ATTEMPTS%%[![:space:]]*}"}"
         MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS%"${MAX_RECOVERY_ATTEMPTS##*[![:space:]]}"}"
         if ! [[ "${MAX_RECOVERY_ATTEMPTS}" =~ ^[0-9]+$ ]]; then
@@ -76,15 +86,16 @@ runs:
           exit 1
         fi
 
+        WAIT_TIMEOUT="${WAIT_TIMEOUT#"${WAIT_TIMEOUT%%[![:space:]]*}"}"
+        WAIT_TIMEOUT="${WAIT_TIMEOUT%"${WAIT_TIMEOUT##*[![:space:]]}"}"
+        validate_duration_input wait_timeout "${WAIT_TIMEOUT}"
+
         STABILITY_WINDOW="${STABILITY_WINDOW#"${STABILITY_WINDOW%%[![:space:]]*}"}"
         STABILITY_WINDOW="${STABILITY_WINDOW%"${STABILITY_WINDOW##*[![:space:]]}"}"
         if [[ -z "${STABILITY_WINDOW}" ]]; then
           STABILITY_WINDOW="0s"
         fi
-        if ! [[ "${STABILITY_WINDOW}" =~ ^[0-9]+[smh]$ ]]; then
-          echo "::error::stability_window must be a duration like 0s, 60s, or 2m; got '${STABILITY_WINDOW}'"
-          exit 1
-        fi
+        validate_duration_input stability_window "${STABILITY_WINDOW}"
         if [[ "${STABILITY_WINDOW}" =~ ^0+[smh]$ ]]; then
           STABILITY_WINDOW="0s"
         fi
@@ -107,7 +118,11 @@ runs:
           timeout 30s docker "$@"
         }
 
+        STATIC_POD_RECREATE_SETTLE_SECONDS=5
+        RESTART_COUNT_ATTEMPTS=3
+        RESTART_COUNT_RETRY_SLEEP_SECONDS=2
         declare -A RECOVERY_ATTEMPTS=()
+        declare -A INITIAL_RESTARTS=()
 
         kubectl_kind get --raw='/readyz' || true
 
@@ -127,15 +142,26 @@ runs:
           local restart_counts
           local restart_count
           local total=0
+          local attempt
 
-          if ! restart_counts=$(kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" \
-            -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}'); then
-            echo "::error::failed to read restart counts for ${component} pods" >&2
-            dump_component_diagnostics "${component}" >&2
-            exit 1
-          fi
+          for ((attempt = 1; attempt <= RESTART_COUNT_ATTEMPTS; attempt++)); do
+            if restart_counts=$(kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" \
+              -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}'); then
+              if [[ -n "${restart_counts}" ]]; then
+                break
+              fi
+              echo "::warning::no container statuses found for ${component} pods (attempt ${attempt}/${RESTART_COUNT_ATTEMPTS})" >&2
+            else
+              echo "::warning::failed to read restart counts for ${component} pods (attempt ${attempt}/${RESTART_COUNT_ATTEMPTS})" >&2
+            fi
+
+            if (( attempt < RESTART_COUNT_ATTEMPTS )); then
+              sleep "${RESTART_COUNT_RETRY_SLEEP_SECONDS}"
+            fi
+          done
+
           if [[ -z "${restart_counts}" ]]; then
-            echo "::error::no container statuses found for ${component} pods" >&2
+            echo "::error::no container statuses found for ${component} pods after ${RESTART_COUNT_ATTEMPTS} attempts" >&2
             dump_component_diagnostics "${component}" >&2
             exit 1
           fi
@@ -358,7 +384,9 @@ runs:
             fi
           done
 
-          sleep 5
+          # Give kubelet a short interval to observe the stopped CRI container
+          # and refresh the mirror pod before kubectl wait reads pod status.
+          sleep "${STATIC_POD_RECREATE_SETTLE_SECONDS}"
           if ! wait_ready "${component}"; then
             echo "::warning::${component} did not recover after static pod container restart"
             dump_component_diagnostics "${component}"
@@ -475,8 +503,6 @@ runs:
             INITIAL_RESTARTS["${component}"]="${final_restarts}"
           done
         }
-
-        declare -A INITIAL_RESTARTS=()
 
         for component in ${COMPONENTS}; do
           check_component "${component}"

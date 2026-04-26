@@ -412,6 +412,9 @@ if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
 fi
 {{ else if eq .Name "dynamo-platform" -}}
 COMPONENT_HELM_TIMEOUT="20m"
+# Grove owns the generated webhook certificate Secret data after install.
+# Client-side apply avoids server-side field ownership conflicts during retries.
+# Requires Helm v4+ for --server-side=false; AICR bundles pin Helm v4 in .settings.yaml.
 COMPONENT_HELM_APPLY_ARGS=(--server-side=false)
 if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]; then
   COMPONENT_MAX_RETRIES="3"
