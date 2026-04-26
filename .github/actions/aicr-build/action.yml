@@ -13,9 +13,17 @@
 # limitations under the License.
 
 name: 'AICR Build'
-description: 'Builds the aicr validator image (via Dockerfile) and CLI binary, and loads the image into kind.'
+description: 'Builds the aicr CLI and optional snapshot/validator images, and loads requested images into kind.'
 
 inputs:
+  build_cli:
+    description: 'Build and stage the aicr CLI binary at the repository root'
+    required: false
+    default: 'true'
+  build_snapshot_agent:
+    description: 'Build the CUDA-based snapshot agent image and load it into kind'
+    required: false
+    default: 'true'
   build_validators:
     description: 'Deprecated: use validator_phases instead. Ignored when validator_phases is set.'
     required: false
@@ -35,15 +43,27 @@ runs:
         KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
         GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
 
-    - name: Build snapshot agent image and load into kind
+    - name: Build aicr CLI binary
+      if: inputs.build_cli == 'true' || inputs.build_snapshot_agent == 'true'
       shell: bash
       env:
         GOFLAGS: -mod=vendor
       run: |
+        set -euo pipefail
+        if [[ -x dist/aicr ]]; then
+          echo "Reusing existing dist/aicr"
+          exit 0
+        fi
+        CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
+
+    - name: Build snapshot agent image and load into kind
+      if: inputs.build_snapshot_agent == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
         # Build snapshot agent image with CUDA base (provides nvidia-smi for GPU detection).
         # Uses cuda:base (~250MB) instead of cuda:runtime (~1.8GB) — only nvidia-smi is needed.
         # GPU test workflows use --image=ko.local:smoke-test for aicr snapshot.
-        CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
         docker build -t ko.local:smoke-test -f - . <<'DOCKERFILE'
         FROM nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04
         COPY dist/aicr /usr/local/bin/aicr
@@ -69,6 +89,7 @@ runs:
       env:
         GOFLAGS: -mod=vendor
       run: |
+        set -euo pipefail
         # Determine which validator phases to build.
         # validator_phases takes precedence; build_validators is a deprecated fallback.
         if [[ -n "${{ inputs.validator_phases }}" ]]; then
@@ -109,5 +130,8 @@ runs:
         done
 
     - name: Stage aicr binary at repo root
+      if: inputs.build_cli == 'true'
       shell: bash
-      run: cp dist/aicr ./aicr
+      run: |
+        set -euo pipefail
+        cp dist/aicr ./aicr
