@@ -33,13 +33,18 @@ runs:
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: |
+        set -o pipefail
         mkdir -p /tmp/debug-artifacts
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded > /tmp/debug-artifacts/non-running-pods.txt || true
+        kubectl_kind() {
+          timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
+        }
+
+        kubectl_kind get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
+        kubectl_kind get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
+        kubectl_kind -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
+        kubectl_kind -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
+        kubectl_kind -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
+        kubectl_kind get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded > /tmp/debug-artifacts/non-running-pods.txt || true
         tar_inputs=()
         [[ -f recipe.yaml ]] && tar_inputs+=(recipe.yaml)
         [[ -d bundle ]] && tar_inputs+=(bundle)
@@ -57,7 +62,16 @@ runs:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: |
         mkdir -p /tmp/kind-logs
-        kind export logs /tmp/kind-logs --name "${KIND_CLUSTER_NAME}" || true
+        timeout 300s kind export logs /tmp/kind-logs --name "${KIND_CLUSTER_NAME}" || true
+
+    - name: Cleanup
+      if: always()
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+      run: |
+        timeout 300s kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
+        timeout 120s docker system prune -f || true
 
     - name: Upload debug artifacts
       if: failure()
@@ -68,12 +82,3 @@ runs:
           /tmp/debug-artifacts/
           /tmp/kind-logs/
         retention-days: 7
-
-    - name: Cleanup
-      if: always()
-      shell: bash
-      env:
-        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
-      run: |
-        kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
-        docker system prune -f || true

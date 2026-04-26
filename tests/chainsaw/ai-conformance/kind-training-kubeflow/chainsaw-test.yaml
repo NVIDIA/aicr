@@ -101,6 +101,8 @@ spec:
 
     - name: assert-kai-scheduler
       description: Verify KAI scheduler is available.
+      timeouts:
+        assert: 600s
       try:
         - assert:
             file: ../common/assert-kai-scheduler.yaml

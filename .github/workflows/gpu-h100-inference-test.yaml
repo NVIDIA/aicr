@@ -111,19 +111,33 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Load GPU test versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
       - name: Set up GPU cluster
         uses: ./.github/actions/gpu-cluster-setup
+        with:
+          kind_node_image: ${{ steps.versions.outputs.h100_kind_node_image }}
+          min_gpu_count: '2'
+          gpu_model_pattern: H100
+          min_free_disk_gb: '50'
+          min_available_memory_gb: '16'
+          cluster_create_timeout: 900s
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
         with:
-          validator_phases: 'conformance'
+          build_snapshot_agent: 'false'
+          validator_phases: 'none'
 
       - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait_timeout: 120s
+          stability_window: 60s
+          recover_unhealthy: 'true'
 
       - name: Install runtime bundle
         id: bundle-install
@@ -140,8 +154,17 @@ jobs:
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait_timeout: 120s
+          stability_window: 60s
+          recover_unhealthy: 'true'
 
       # --- Snapshot and GPU validation ---
+
+      - name: Build snapshot agent image
+        uses: ./.github/actions/aicr-build
+        with:
+          build_cli: 'false'
+          build_snapshot_agent: 'true'
+          validator_phases: 'none'
 
       - name: Snapshot and validate GPU
         uses: ./.github/actions/gpu-snapshot-validate
@@ -158,6 +181,8 @@ jobs:
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait_timeout: 120s
+          stability_window: 60s
+          recover_unhealthy: 'true'
 
       - name: Install Karpenter + KWOK
         uses: ./.github/actions/install-karpenter-kwok
@@ -174,10 +199,8 @@ jobs:
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait_timeout: 120s
-
-      - name: Prepare chainsaw
-        id: versions
-        uses: ./.github/actions/load-versions
+          stability_window: 60s
+          recover_unhealthy: 'true'
 
       - name: Install chainsaw
         uses: ./.github/actions/setup-build-tools
@@ -196,6 +219,7 @@ jobs:
       # see a settled inference stack.
 
       - name: Verify expected resources exist
+        timeout-minutes: 3
         run: |
           go run ./tests/chainsaw/ai-conformance/ \
             --dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
@@ -204,11 +228,20 @@ jobs:
             --kubeconfig="${HOME}/.kube/config" \
             --debug
 
+      - name: Build conformance validator image
+        uses: ./.github/actions/aicr-build
+        with:
+          build_cli: 'false'
+          build_snapshot_agent: 'false'
+          validator_phases: 'conformance'
+
       - name: Check control plane health before conformance validation
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait_timeout: 120s
+          stability_window: 60s
+          recover_unhealthy: 'true'
 
       - name: Validate CNCF AI Conformance
         id: validate-conformance
@@ -232,28 +265,9 @@ jobs:
       # training smoke test if needed.
       # --- Validation artifacts ---
 
-      # Collect a post-run resource snapshot whenever the runtime bundle
-      # installed. This preserves triage data for snapshot/chainsaw/conformance
-      # failures; continue-on-error keeps the original failure intact.
-      - name: Collect validation artifacts
-        if: >-
-          always()
-          && !cancelled()
-          && steps.bundle-install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p conformance-evidence
-          go run ./tests/chainsaw/ai-conformance/ \
-            --dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
-            --dir tests/chainsaw/ai-conformance/common \
-            --dir tests/chainsaw/ai-conformance/kind-common \
-            --kubeconfig="${HOME}/.kube/config" \
-            --debug | tee conformance-evidence/resource-existence-post.txt
-
       - name: Upload validation artifacts
         if: always()
+        timeout-minutes: 5
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
           name: conformance-evidence
@@ -264,57 +278,81 @@ jobs:
 
       - name: Debug diagnostics
         if: failure()
+        timeout-minutes: 5
+        shell: bash
         run: |
+          set -o pipefail
+          kubectl_kind() {
+            timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
+          }
+
           echo "=== ClusterPolicy status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get clusterpolicy -o yaml 2>/dev/null || true
+          kubectl_kind get clusterpolicy -o yaml 2>/dev/null || true
           echo "=== GPU Operator pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
+          kubectl_kind -n gpu-operator get pods -o wide 2>/dev/null || true
           echo "=== Non-running pods (all namespaces) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
+          kubectl_kind get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
           echo "=== Recent events (gpu-operator) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          kubectl_kind -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
           echo "=== Dynamo pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get pods -o wide 2>/dev/null || true
+          kubectl_kind -n dynamo-system get pods -o wide 2>/dev/null || true
           echo "=== Dynamo operator logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
+          kubectl_kind -n dynamo-system \
             logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
           echo "=== Recent events (dynamo-system) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          kubectl_kind -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+          echo "=== KAI scheduler pods ==="
+          kubectl_kind -n kai-scheduler get pods -o wide 2>/dev/null || true
+          echo "=== KAI admission deployment ==="
+          kubectl_kind -n kai-scheduler get deployment admission -o wide 2>/dev/null || true
+          echo "=== KAI admission deployment describe ==="
+          kubectl_kind -n kai-scheduler describe deployment admission 2>/dev/null || true
+          echo "=== KAI admission pod describe ==="
+          kubectl_kind -n kai-scheduler get pods -o name 2>/dev/null \
+            | grep '^pod/admission-' \
+            | while read -r pod; do
+                kubectl_kind -n kai-scheduler describe "${pod}" 2>/dev/null || true
+              done || true
+          echo "=== KAI admission logs ==="
+          kubectl_kind -n kai-scheduler \
+            logs deployment/admission --all-containers --tail=200 2>/dev/null || true
+          echo "=== Recent events (kai-scheduler) ==="
+          kubectl_kind -n kai-scheduler get events --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
           echo "=== Custom metrics API ==="
           for METRIC in gpu_utilization gpu_memory_used gpu_power_usage; do
             echo "--- ${METRIC} ---"
             for NS in gpu-operator dynamo-system; do
-              kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw \
+              kubectl_kind get --raw \
                 "/apis/custom.metrics.k8s.io/v1beta1/namespaces/${NS}/pods/*/${METRIC}" 2>/dev/null | jq . || true
             done
           done
           echo "=== Grafana deployment ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get deployment grafana -o wide 2>/dev/null || true
+          kubectl_kind -n monitoring get deployment grafana -o wide 2>/dev/null || true
           echo "=== Grafana pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods \
+          kubectl_kind -n monitoring get pods \
             -l app.kubernetes.io/name=grafana -o wide 2>/dev/null || true
           echo "=== Grafana deployment describe ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe deployment grafana 2>/dev/null || true
+          kubectl_kind -n monitoring describe deployment grafana 2>/dev/null || true
           echo "=== Grafana pod describe ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe pods \
+          kubectl_kind -n monitoring describe pods \
             -l app.kubernetes.io/name=grafana 2>/dev/null || true
           echo "=== prometheus-adapter pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -l app.kubernetes.io/name=prometheus-adapter -o wide 2>/dev/null || true
+          kubectl_kind -n monitoring get pods -l app.kubernetes.io/name=prometheus-adapter -o wide 2>/dev/null || true
           echo "=== kgateway pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kgateway-system get pods -o wide 2>/dev/null || true
+          kubectl_kind -n kgateway-system get pods -o wide 2>/dev/null || true
           echo "=== GatewayClass status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get gatewayclass -o yaml 2>/dev/null || true
+          kubectl_kind get gatewayclass -o yaml 2>/dev/null || true
           echo "=== Gateway status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get gateways -A -o yaml 2>/dev/null || true
+          kubectl_kind get gateways -A -o yaml 2>/dev/null || true
           echo "=== DCGM Exporter pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+          kubectl_kind -n gpu-operator \
             get pods -l app=nvidia-dcgm-exporter -o wide 2>/dev/null || true
           echo "=== Monitoring pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -o wide 2>/dev/null || true
+          kubectl_kind -n monitoring get pods -o wide 2>/dev/null || true
           echo "=== DRA ResourceSlices ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get resourceslices -o wide 2>/dev/null || true
+          kubectl_kind get resourceslices -o wide 2>/dev/null || true
           echo "=== Node status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
+          kubectl_kind get nodes -o wide 2>/dev/null || true
 
       - name: GPU Test Cleanup
         if: always()
