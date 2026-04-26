@@ -555,9 +555,9 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 				Type:      recipe.ComponentTypeHelm,
 				Source:    "https://prometheus-community.github.io/helm-charts",
 			},
-			wantTimeout:    `COMPONENT_HELM_TIMEOUT="20m"`,
-			wantComment:    `Keep the default retry budget for kube-prometheus-stack`,
-			rejectRetryCap: true,
+			wantTimeout:  `COMPONENT_HELM_TIMEOUT="20m"`,
+			wantRetryCap: `if [[ "${COMPONENT_MAX_RETRIES}" -gt 2 ]]`,
+			wantComment:  `Allow the observed third-attempt Grafana success pattern`,
 		},
 	}
 

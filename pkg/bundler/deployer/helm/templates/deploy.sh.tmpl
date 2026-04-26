@@ -387,9 +387,11 @@ if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
 fi
 {{ else if eq .Name "kube-prometheus-stack" -}}
 COMPONENT_HELM_TIMEOUT="20m"
-# Keep the default retry budget for kube-prometheus-stack. On cold H100
-# runners, Grafana can hit ProgressDeadlineExceeded multiple times before
-# images and rollout state are warm enough for a later retry to succeed.
+# Allow the observed third-attempt Grafana success pattern, but cap the budget
+# so kube-prometheus-stack cannot consume most of the H100 workflow timeout.
+if [[ "${COMPONENT_MAX_RETRIES}" -gt 2 ]]; then
+  COMPONENT_MAX_RETRIES="2"
+fi
 {{ end -}}
 # Derive wait args: global --wait/--no-wait behavior + component timeout.
 if [[ "${NO_WAIT}" == "true" ]]; then

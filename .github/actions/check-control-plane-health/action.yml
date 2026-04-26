@@ -32,7 +32,7 @@ inputs:
     required: false
     default: 60s
   max_restarts:
-    description: 'Maximum tolerated restart count. With stability_window > 0, historical restarts are diagnostic and new restarts fail.'
+    description: 'Maximum tolerated restart count for each control-plane component'
     required: false
     default: '1'
   stability_window:
@@ -150,6 +150,18 @@ runs:
             total=$((total + restart_count))
           done <<< "${restart_counts}"
           echo "${total}"
+        }
+
+        enforce_restart_budget() {
+          local component="$1"
+          local restart_count="$2"
+
+          if (( restart_count > MAX_RESTARTS )); then
+            echo "::error::${component} restartCount=${restart_count} exceeds max_restarts=${MAX_RESTARTS}"
+            dump_component_diagnostics "${component}"
+            kubectl_kind get --raw='/readyz' || true
+            exit 1
+          fi
         }
 
         dump_component_diagnostics() {
@@ -281,13 +293,9 @@ runs:
             fi
           fi
           initial_restarts=$(restart_total "${component}")
+          enforce_restart_budget "${component}" "${initial_restarts}"
 
           if [[ "${STABILITY_WINDOW}" != "0s" ]]; then
-            if (( initial_restarts > MAX_RESTARTS )); then
-              echo "::warning::${component} historical restartCount=${initial_restarts}; checking for stability over ${STABILITY_WINDOW}"
-              dump_component_diagnostics "${component}"
-            fi
-
             sleep "${STABILITY_WINDOW}"
             if ! wait_ready "${component}"; then
               if ! try_recover_component "${component}" "pods became unready during ${STABILITY_WINDOW}"; then
@@ -297,6 +305,7 @@ runs:
                 exit 1
               fi
               initial_restarts=$(restart_total "${component}")
+              enforce_restart_budget "${component}" "${initial_restarts}"
               sleep "${STABILITY_WINDOW}"
               if ! wait_ready "${component}"; then
                 echo "::error::${component} pods became unready after recovery"
@@ -306,6 +315,7 @@ runs:
               fi
             fi
             final_restarts=$(restart_total "${component}")
+            enforce_restart_budget "${component}" "${final_restarts}"
             if (( final_restarts > initial_restarts )); then
               if ! try_recover_component "${component}" "restartCount increased from ${initial_restarts} to ${final_restarts} during ${STABILITY_WINDOW}"; then
                 echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} during ${STABILITY_WINDOW}"
@@ -313,6 +323,7 @@ runs:
                 exit 1
               fi
               initial_restarts=$(restart_total "${component}")
+              enforce_restart_budget "${component}" "${initial_restarts}"
               sleep "${STABILITY_WINDOW}"
               if ! wait_ready "${component}"; then
                 echo "::error::${component} pods became unready after recovery"
@@ -321,6 +332,7 @@ runs:
                 exit 1
               fi
               final_restarts=$(restart_total "${component}")
+              enforce_restart_budget "${component}" "${final_restarts}"
               if (( final_restarts > initial_restarts )); then
                 echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} after recovery"
                 dump_component_diagnostics "${component}"
@@ -328,14 +340,6 @@ runs:
               fi
             fi
             return
-          fi
-
-          if (( initial_restarts > MAX_RESTARTS )); then
-            if ! try_recover_component "${component}" "restartCount=${initial_restarts}"; then
-              echo "::error::${component} restartCount=${initial_restarts}"
-              dump_component_diagnostics "${component}"
-              exit 1
-            fi
           fi
         }
 
