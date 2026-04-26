@@ -71,7 +71,6 @@ runs:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: |
         timeout 300s kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
-        timeout 120s docker system prune -f || true
 
     - name: Upload debug artifacts
       if: failure()

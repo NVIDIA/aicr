@@ -36,13 +36,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-
-    - name: Install ko
-      shell: bash
-      run: |
-        KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
-        GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
-
     - name: Build aicr CLI binary
       if: inputs.build_cli == 'true' || inputs.build_snapshot_agent == 'true'
       shell: bash

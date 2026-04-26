@@ -89,7 +89,6 @@ runs:
         MIN_GPU_COUNT: ${{ inputs.min_gpu_count }}
         MIN_FREE_DISK_GB: ${{ inputs.min_free_disk_gb }}
         MIN_AVAILABLE_MEMORY_GB: ${{ inputs.min_available_memory_gb }}
-        KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
       run: |
         set -euo pipefail
 
@@ -109,18 +108,6 @@ runs:
             exit 1
           fi
         done
-
-        free_disk_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
-        if (( free_disk_gb < MIN_FREE_DISK_GB )); then
-          echo "::error::free disk on / is ${free_disk_gb}GiB, need at least ${MIN_FREE_DISK_GB}GiB"
-          exit 1
-        fi
-
-        available_memory_gb=$(free -g | awk '/^Mem:/ {print $7}')
-        if (( available_memory_gb < MIN_AVAILABLE_MEMORY_GB )); then
-          echo "::error::available memory is ${available_memory_gb}GiB, need at least ${MIN_AVAILABLE_MEMORY_GB}GiB"
-          exit 1
-        fi
 
         echo "=== Docker health ==="
         docker info >/dev/null
@@ -148,16 +135,6 @@ runs:
         kind get clusters || true
         docker ps -a --filter "name=${KIND_CLUSTER_NAME}" || true
 
-        if [[ -n "${KIND_NODE_IMAGE}" ]]; then
-          echo "=== Kind node image cache ==="
-          if docker image inspect "${KIND_NODE_IMAGE}" >/dev/null 2>&1; then
-            echo "Kind node image already cached: ${KIND_NODE_IMAGE}"
-          else
-            echo "Pulling kind node image: ${KIND_NODE_IMAGE}"
-            timeout 600s docker pull "${KIND_NODE_IMAGE}"
-          fi
-        fi
-
     - name: Configure NVIDIA Container Toolkit for kind
       shell: bash
       run: |
@@ -170,7 +147,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
+        timeout 300s docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
 
     - name: Increase inotify limits
       shell: bash
@@ -184,7 +161,9 @@ runs:
         set -euo pipefail
         if kind get clusters | grep -Fxq "${KIND_CLUSTER_NAME}"; then
           echo "Deleting stale kind cluster: ${KIND_CLUSTER_NAME}"
-          timeout 180s kind delete cluster --name "${KIND_CLUSTER_NAME}"
+          if ! timeout 180s kind delete cluster --name "${KIND_CLUSTER_NAME}"; then
+            echo "::warning::kind delete cluster timed out or failed; falling back to direct container cleanup"
+          fi
         else
           echo "No stale kind cluster named ${KIND_CLUSTER_NAME}"
         fi
@@ -201,6 +180,42 @@ runs:
           echo "::error::stale containers still remain for ${KIND_CLUSTER_NAME}:"
           docker ps -a --filter "name=${KIND_CLUSTER_NAME}"
           exit 1
+        fi
+
+    - name: Check runner capacity
+      shell: bash
+      env:
+        MIN_FREE_DISK_GB: ${{ inputs.min_free_disk_gb }}
+        MIN_AVAILABLE_MEMORY_GB: ${{ inputs.min_available_memory_gb }}
+      run: |
+        set -euo pipefail
+        free_disk_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+        if (( free_disk_gb < MIN_FREE_DISK_GB )); then
+          echo "::error::free disk on / is ${free_disk_gb}GiB, need at least ${MIN_FREE_DISK_GB}GiB"
+          exit 1
+        fi
+
+        available_memory_gb=$(free -g | awk '/^Mem:/ {print $7}')
+        if (( available_memory_gb < MIN_AVAILABLE_MEMORY_GB )); then
+          echo "::error::available memory is ${available_memory_gb}GiB, need at least ${MIN_AVAILABLE_MEMORY_GB}GiB"
+          exit 1
+        fi
+
+        echo "Runner capacity is sufficient: disk=${free_disk_gb}GiB memory=${available_memory_gb}GiB"
+
+    - name: Warm kind node image
+      if: ${{ inputs.kind_node_image != '' }}
+      shell: bash
+      env:
+        KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
+      run: |
+        set -euo pipefail
+        echo "=== Kind node image cache ==="
+        if docker image inspect "${KIND_NODE_IMAGE}" >/dev/null 2>&1; then
+          echo "Kind node image already cached: ${KIND_NODE_IMAGE}"
+        else
+          echo "Pulling kind node image: ${KIND_NODE_IMAGE}"
+          timeout 600s docker pull "${KIND_NODE_IMAGE}"
         fi
 
     - name: Create GPU-enabled kind cluster

@@ -108,6 +108,10 @@ runs:
           timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
         }
 
+        docker_timeout() {
+          timeout 30s docker "$@"
+        }
+
         declare -A RECOVERY_ATTEMPTS=()
 
         kubectl_kind get --raw='/readyz' || true
@@ -209,12 +213,12 @@ runs:
           echo "::warning::${component} is unhealthy (${reason}); restarting static pod container (attempt $((attempt + 1))/${MAX_RECOVERY_ATTEMPTS})"
           dump_component_diagnostics "${component}"
 
-          if ! docker inspect "${node}" >/dev/null 2>&1; then
+          if ! docker_timeout inspect "${node}" >/dev/null 2>&1; then
             echo "::warning::cannot recover ${component}: kind node container ${node} not found"
             return 1
           fi
 
-          container_ids=$(docker exec "${node}" crictl ps --name "${component}" -q 2>/dev/null || true)
+          container_ids=$(docker_timeout exec "${node}" crictl ps --name "${component}" -q 2>/dev/null || true)
           if [[ -z "${container_ids}" ]]; then
             echo "::warning::cannot recover ${component}: no running container found in ${node}"
             return 1
@@ -222,7 +226,7 @@ runs:
 
           for container_id in ${container_ids}; do
             echo "Stopping ${component} container ${container_id} in ${node}..."
-            if ! docker exec "${node}" crictl stop "${container_id}"; then
+            if ! docker_timeout exec "${node}" crictl stop "${container_id}"; then
               echo "::warning::failed to stop ${component} container ${container_id}"
               return 1
             fi
