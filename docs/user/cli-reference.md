@@ -1318,7 +1318,7 @@ After `helm install`, the same manifests are re-applied as post-install to ensur
 
 **Async components:**
 
-Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness. The `dynamo-platform` Helm command uses client-side apply so retries and upgrades do not conflict with Grove-managed webhook certificate Secret data, while preserving Helm `--wait` behavior.
+Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness. The `dynamo-platform` Helm command uses client-side apply so retries and upgrades do not conflict with Grove-managed webhook certificate Secret data, while preserving Helm `--wait` behavior. Dynamo installs use a 20 minute per-attempt timeout and cap the retry budget at 3 retries because cold-start failures often involve operator webhook and certificate resources settling across attempts.
 
 ##### DRA kubelet plugin registration
 

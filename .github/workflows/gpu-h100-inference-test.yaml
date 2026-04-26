@@ -126,7 +126,7 @@ jobs:
           min_available_memory_gb: '16'
           cluster_create_timeout: 900s
           control_plane_resource_patches: 'true'
-          disable_control_plane_leader_election: 'true'
+          control_plane_leader_election_tuning: 'true'
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build

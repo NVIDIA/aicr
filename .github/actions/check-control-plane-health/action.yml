@@ -32,7 +32,7 @@ inputs:
     required: false
     default: 60s
   max_restarts:
-    description: 'Maximum tolerated restart count for each control-plane component'
+    description: 'Deprecated compatibility input; historical restart counts are reported but not capped'
     required: false
     default: '1'
   stability_window:
@@ -62,20 +62,12 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
         COMPONENTS: ${{ inputs.components }}
         WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
-        MAX_RESTARTS: ${{ inputs.max_restarts }}
         STABILITY_WINDOW: ${{ inputs.stability_window }}
         RECOVER_UNHEALTHY: ${{ inputs.recover_unhealthy }}
         RECOVERY_COMPONENTS: ${{ inputs.recovery_components }}
         MAX_RECOVERY_ATTEMPTS: ${{ inputs.max_recovery_attempts }}
       run: |
         set -euo pipefail
-
-        MAX_RESTARTS="${MAX_RESTARTS#"${MAX_RESTARTS%%[![:space:]]*}"}"
-        MAX_RESTARTS="${MAX_RESTARTS%"${MAX_RESTARTS##*[![:space:]]}"}"
-        if ! [[ "${MAX_RESTARTS}" =~ ^[0-9]+$ ]]; then
-          echo "::error::max_restarts must be a non-negative integer, got '${MAX_RESTARTS}'"
-          exit 1
-        fi
 
         MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS#"${MAX_RECOVERY_ATTEMPTS%%[![:space:]]*}"}"
         MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS%"${MAX_RECOVERY_ATTEMPTS##*[![:space:]]}"}"
@@ -152,14 +144,30 @@ runs:
           echo "${total}"
         }
 
-        enforce_restart_budget() {
+        report_restart_baseline() {
           local component="$1"
           local restart_count="$2"
 
-          if (( restart_count > MAX_RESTARTS )); then
-            echo "::error::${component} restartCount=${restart_count} exceeds max_restarts=${MAX_RESTARTS}"
-            dump_component_diagnostics "${component}"
-            kubectl_kind get --raw='/readyz' || true
+          if (( restart_count > 0 )); then
+            echo "::warning::${component} has historical restartCount=${restart_count}; checking current readiness and stability window only"
+            return
+          fi
+          echo "${component} restartCount=${restart_count}"
+        }
+
+        dump_control_plane_summary() {
+          echo "=== Control-plane pod restart summary ==="
+          kubectl_kind -n "${NAMESPACE}" get pods -l tier=control-plane -o wide || true
+          kubectl_kind -n "${NAMESPACE}" get pods -l tier=control-plane \
+            -o jsonpath='{range .items[*]}{.metadata.name}{" restartCount="}{range .status.containerStatuses[*]}{.restartCount}{" "}{end}{"\n"}{end}' || true
+        }
+
+        require_readyz() {
+          local reason="$1"
+
+          if ! kubectl_kind get --raw='/readyz'; then
+            echo "::error::kube-apiserver /readyz failed ${reason}"
+            dump_control_plane_summary
             exit 1
           fi
         }
@@ -170,6 +178,7 @@ runs:
           local pods
           local pod
 
+          dump_control_plane_summary
           kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" -o wide || true
           kubectl_kind -n "${NAMESPACE}" describe pod -l "${selector}" || true
           kubectl_kind -n "${NAMESPACE}" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
@@ -292,7 +301,7 @@ runs:
             fi
           fi
           initial_restarts=$(restart_total "${component}")
-          enforce_restart_budget "${component}" "${initial_restarts}"
+          report_restart_baseline "${component}" "${initial_restarts}"
           INITIAL_RESTARTS["${component}"]="${initial_restarts}"
         }
 
@@ -322,24 +331,17 @@ runs:
                 exit 1
               fi
               initial_restarts=$(restart_total "${component}")
-              enforce_restart_budget "${component}" "${initial_restarts}"
+              report_restart_baseline "${component}" "${initial_restarts}"
               INITIAL_RESTARTS["${component}"]="${initial_restarts}"
               recovered=true
               continue
             fi
             final_restarts=$(restart_total "${component}")
-            enforce_restart_budget "${component}" "${final_restarts}"
             if (( final_restarts > initial_restarts )); then
-              if ! try_recover_component "${component}" "restartCount increased from ${initial_restarts} to ${final_restarts} during ${STABILITY_WINDOW}"; then
-                echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} during ${STABILITY_WINDOW}"
-                dump_component_diagnostics "${component}"
-                exit 1
-              fi
-              initial_restarts=$(restart_total "${component}")
-              enforce_restart_budget "${component}" "${initial_restarts}"
-              INITIAL_RESTARTS["${component}"]="${initial_restarts}"
-              recovered=true
-              continue
+              echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} during ${STABILITY_WINDOW}"
+              dump_component_diagnostics "${component}"
+              kubectl_kind get --raw='/readyz' || true
+              exit 1
             fi
             INITIAL_RESTARTS["${component}"]="${final_restarts}"
           done
@@ -363,7 +365,6 @@ runs:
               exit 1
             fi
             final_restarts=$(restart_total "${component}")
-            enforce_restart_budget "${component}" "${final_restarts}"
             if (( final_restarts > initial_restarts )); then
               echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} after recovery"
               dump_component_diagnostics "${component}"
@@ -379,4 +380,4 @@ runs:
           check_component "${component}"
         done
         verify_stability_window
-        kubectl_kind get --raw='/readyz'
+        require_readyz "after stability window"

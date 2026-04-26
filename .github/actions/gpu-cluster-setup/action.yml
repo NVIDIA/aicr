@@ -44,10 +44,22 @@ inputs:
     description: 'Apply kubeadm patches that raise control-plane static pod resource requests'
     required: false
     default: 'false'
-  disable_control_plane_leader_election:
-    description: 'Disable kube-controller-manager and kube-scheduler leader election for single-control-plane kind CI clusters'
+  control_plane_leader_election_tuning:
+    description: 'Increase kube-controller-manager and kube-scheduler leader election timeouts for slow CI control planes'
     required: false
     default: 'false'
+  leader_election_lease_duration:
+    description: 'Leader election lease duration when control_plane_leader_election_tuning is true'
+    required: false
+    default: '120s'
+  leader_election_renew_deadline:
+    description: 'Leader election renew deadline when control_plane_leader_election_tuning is true'
+    required: false
+    default: '90s'
+  leader_election_retry_period:
+    description: 'Leader election retry period when control_plane_leader_election_tuning is true'
+    required: false
+    default: '10s'
   api_server_cpu_request:
     description: 'kube-apiserver CPU request when control_plane_resource_patches is true'
     required: false
@@ -282,7 +294,10 @@ runs:
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
         CLUSTER_CREATE_TIMEOUT: ${{ inputs.cluster_create_timeout }}
         CONTROL_PLANE_RESOURCE_PATCHES: ${{ inputs.control_plane_resource_patches }}
-        DISABLE_CONTROL_PLANE_LEADER_ELECTION: ${{ inputs.disable_control_plane_leader_election }}
+        CONTROL_PLANE_LEADER_ELECTION_TUNING: ${{ inputs.control_plane_leader_election_tuning }}
+        LEADER_ELECTION_LEASE_DURATION: ${{ inputs.leader_election_lease_duration }}
+        LEADER_ELECTION_RENEW_DEADLINE: ${{ inputs.leader_election_renew_deadline }}
+        LEADER_ELECTION_RETRY_PERIOD: ${{ inputs.leader_election_retry_period }}
         API_SERVER_CPU_REQUEST: ${{ inputs.api_server_cpu_request }}
         API_SERVER_MEMORY_REQUEST: ${{ inputs.api_server_memory_request }}
         CONTROLLER_MANAGER_CPU_REQUEST: ${{ inputs.controller_manager_cpu_request }}
@@ -309,16 +324,16 @@ runs:
             ;;
         esac
 
-        case "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" in
+        case "${CONTROL_PLANE_LEADER_ELECTION_TUNING}" in
           true) ;;
-          ""|false) DISABLE_CONTROL_PLANE_LEADER_ELECTION=false ;;
+          ""|false) CONTROL_PLANE_LEADER_ELECTION_TUNING=false ;;
           *)
-            echo "::error::disable_control_plane_leader_election must be true or false, got '${DISABLE_CONTROL_PLANE_LEADER_ELECTION}'"
+            echo "::error::control_plane_leader_election_tuning must be true or false, got '${CONTROL_PLANE_LEADER_ELECTION_TUNING}'"
             exit 1
             ;;
         esac
 
-        if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" || "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" == "true" ]]; then
+        if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" || "${CONTROL_PLANE_LEADER_ELECTION_TUNING}" == "true" ]]; then
           patch_dir="$(mktemp -d)"
           config_template="$(mktemp)"
 
@@ -417,19 +432,27 @@ runs:
               directory: /patches
         EOF
           fi
-          if [[ "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" == "true" ]]; then
-          cat >> "${config_template}" <<'EOF'
+          if [[ "${CONTROL_PLANE_LEADER_ELECTION_TUNING}" == "true" ]]; then
+          cat >> "${config_template}" <<EOF
           - |
             kind: ClusterConfiguration
             apiVersion: kubeadm.k8s.io/v1beta4
             controllerManager:
               extraArgs:
-              - name: leader-elect
-                value: "false"
+              - name: leader-elect-lease-duration
+                value: "${LEADER_ELECTION_LEASE_DURATION}"
+              - name: leader-elect-renew-deadline
+                value: "${LEADER_ELECTION_RENEW_DEADLINE}"
+              - name: leader-elect-retry-period
+                value: "${LEADER_ELECTION_RETRY_PERIOD}"
             scheduler:
               extraArgs:
-              - name: leader-elect
-                value: "false"
+              - name: leader-elect-lease-duration
+                value: "${LEADER_ELECTION_LEASE_DURATION}"
+              - name: leader-elect-renew-deadline
+                value: "${LEADER_ELECTION_RENEW_DEADLINE}"
+              - name: leader-elect-retry-period
+                value: "${LEADER_ELECTION_RETRY_PERIOD}"
         EOF
           fi
           cat >> "${config_template}" <<'EOF'
@@ -462,8 +485,11 @@ runs:
               sed 's/^/  /' "${patch_file}"
             done
           fi
-          if [[ "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" == "true" ]]; then
-            echo "Disabling kube-controller-manager and kube-scheduler leader election for single-control-plane kind CI."
+          if [[ "${CONTROL_PLANE_LEADER_ELECTION_TUNING}" == "true" ]]; then
+            echo "Increasing kube-controller-manager and kube-scheduler leader election timeouts for slow CI control planes:"
+            echo "  lease-duration=${LEADER_ELECTION_LEASE_DURATION}"
+            echo "  renew-deadline=${LEADER_ELECTION_RENEW_DEADLINE}"
+            echo "  retry-period=${LEADER_ELECTION_RETRY_PERIOD}"
           fi
           CREATE_ARGS+=(--config-template="${config_template}")
         fi

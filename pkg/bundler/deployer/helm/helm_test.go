@@ -530,6 +530,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 		wantRetryCap        string
 		wantApplyArgs       string
 		wantComment         string
+		wantSnippets        []string
 		rejectRetryCap      bool
 	}{
 		{
@@ -542,10 +543,15 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 				Type:      recipe.ComponentTypeHelm,
 				Source:    "oci://nvcr.io/nvidia/ai-dynamo",
 			},
-			wantTimeout:         `COMPONENT_HELM_TIMEOUT="30m"`,
-			wantRetryAssignment: `COMPONENT_MAX_RETRIES="1"`,
-			wantRetryCap:        `if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]`,
+			wantTimeout:         `COMPONENT_HELM_TIMEOUT="20m"`,
+			wantRetryAssignment: `COMPONENT_MAX_RETRIES="3"`,
+			wantRetryCap:        `if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]`,
 			wantApplyArgs:       `COMPONENT_HELM_APPLY_ARGS=(--server-side=false)`,
+			wantSnippets: []string{
+				`dump_dynamo_platform_helm_diagnostics "${namespace}"`,
+				`deployment/dynamo-platform-dynamo-operator-controller-manager`,
+				`--previous --tail=200`,
+			},
 		},
 		{
 			name: "kube-prometheus-stack",
@@ -619,6 +625,11 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			}
 			if tt.wantComment != "" && !strings.Contains(componentBlock, tt.wantComment) {
 				t.Errorf("deploy.sh missing %s retry rationale", tt.component.Name)
+			}
+			for _, snippet := range tt.wantSnippets {
+				if !strings.Contains(script, snippet) {
+					t.Errorf("deploy.sh missing %s snippet %q", tt.component.Name, snippet)
+				}
 			}
 			if tt.rejectRetryCap && retryCapPattern.MatchString(componentBlock) {
 				t.Errorf("deploy.sh should not cap %s retries in its component block", tt.component.Name)

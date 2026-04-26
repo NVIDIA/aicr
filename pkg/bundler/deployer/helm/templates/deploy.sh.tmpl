@@ -144,6 +144,34 @@ function dump_kai_scheduler_helm_diagnostics() {
   echo "  --- End ${namespace} diagnostics ---"
 }
 
+function dump_dynamo_platform_helm_diagnostics() {
+  local namespace="$1"
+  if [[ "${namespace}" != "dynamo-system" ]]; then
+    return
+  fi
+
+  echo "  --- ${namespace} diagnostics ---"
+  echo "  Deployments:"
+  kubectl get deployments -n "${namespace}" -o wide 2>/dev/null || true
+  echo "  Jobs:"
+  kubectl get jobs -n "${namespace}" 2>/dev/null || true
+  echo "  Pods:"
+  kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
+  echo "  Pod descriptions:"
+  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  echo "  Dynamo operator manager logs:"
+  kubectl logs deployment/dynamo-platform-dynamo-operator-controller-manager -n "${namespace}" -c manager --tail=200 2>/dev/null || true
+  echo "  Dynamo operator manager previous logs:"
+  kubectl logs deployment/dynamo-platform-dynamo-operator-controller-manager -n "${namespace}" -c manager --previous --tail=200 2>/dev/null || true
+  echo "  Grove operator logs:"
+  kubectl logs deployment/grove-operator -n "${namespace}" --all-containers --tail=100 2>/dev/null || true
+  echo "  Grove operator previous logs:"
+  kubectl logs deployment/grove-operator -n "${namespace}" --all-containers --previous --tail=100 2>/dev/null || true
+  echo "  Recent events:"
+  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
+  echo "  --- End ${namespace} diagnostics ---"
+}
+
 # helm_retry contract:
 #   helm_retry "<description>" "<namespace>" "<max_retries>" <command> [args...]
 # Callers must pass the retry budget as the third positional argument before the
@@ -161,6 +189,7 @@ function helm_retry() {
     fi
     attempt=$((attempt + 1))
     dump_kai_scheduler_helm_diagnostics "${namespace}"
+    dump_dynamo_platform_helm_diagnostics "${namespace}"
     if [[ ${attempt} -gt ${max_retries} ]]; then
       echo "ERROR: ${desc} failed after ${attempt} attempts"
       return 1
@@ -382,10 +411,10 @@ if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
   COMPONENT_MAX_RETRIES="1"
 fi
 {{ else if eq .Name "dynamo-platform" -}}
-COMPONENT_HELM_TIMEOUT="30m"
+COMPONENT_HELM_TIMEOUT="20m"
 COMPONENT_HELM_APPLY_ARGS=(--server-side=false)
-if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
-  COMPONENT_MAX_RETRIES="1"
+if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]; then
+  COMPONENT_MAX_RETRIES="3"
 fi
 {{ else if eq .Name "kube-prometheus-stack" -}}
 # Grafana can trip its Deployment progress deadline before a longer Helm
