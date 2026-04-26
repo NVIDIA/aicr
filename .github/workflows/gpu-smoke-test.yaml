@@ -20,8 +20,6 @@ on:
   push:
     branches:
       - "pull-request/[0-9]+"
-  pull_request:
-    types: [labeled]
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -62,11 +60,13 @@ jobs:
 
   gpu-smoke-test:
     needs: [check-paths]
+    # NVIDIA self-hosted GPU runners reject pull_request event jobs before
+    # checkout. PR GPU coverage runs through the pull-request/<number> push
+    # mirror after ok-to-test approval.
     if: >
       always() && (
         github.event_name == 'schedule' ||
         github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'pull_request' && github.event.label.name == 'run-gpu-tests') ||
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
       )
     name: GPU Smoke Test (nvkind + L40G)
