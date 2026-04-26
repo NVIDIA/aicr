@@ -25,7 +25,7 @@ reviews:
   sequence_diagrams: false
   auto_review:
     enabled: true
-    drafts: false
+    drafts: true
     base_branches:
       - ".*"
   path_filters:
