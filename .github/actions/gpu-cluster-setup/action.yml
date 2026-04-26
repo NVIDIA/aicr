@@ -40,6 +40,42 @@ inputs:
     description: 'Timeout for nvkind cluster create'
     required: false
     default: '900s'
+  control_plane_resource_patches:
+    description: 'Apply kubeadm patches that raise control-plane static pod resource requests'
+    required: false
+    default: 'false'
+  api_server_cpu_request:
+    description: 'kube-apiserver CPU request when control_plane_resource_patches is true'
+    required: false
+    default: '1000m'
+  api_server_memory_request:
+    description: 'kube-apiserver memory request when control_plane_resource_patches is true'
+    required: false
+    default: '1Gi'
+  controller_manager_cpu_request:
+    description: 'kube-controller-manager CPU request when control_plane_resource_patches is true'
+    required: false
+    default: '1000m'
+  controller_manager_memory_request:
+    description: 'kube-controller-manager memory request when control_plane_resource_patches is true'
+    required: false
+    default: '512Mi'
+  scheduler_cpu_request:
+    description: 'kube-scheduler CPU request when control_plane_resource_patches is true'
+    required: false
+    default: '500m'
+  scheduler_memory_request:
+    description: 'kube-scheduler memory request when control_plane_resource_patches is true'
+    required: false
+    default: '256Mi'
+  etcd_cpu_request:
+    description: 'etcd CPU request when control_plane_resource_patches is true'
+    required: false
+    default: '1000m'
+  etcd_memory_request:
+    description: 'etcd memory request when control_plane_resource_patches is true'
+    required: false
+    default: '1Gi'
 
 runs:
   using: 'composite'
@@ -241,6 +277,15 @@ runs:
       env:
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
         CLUSTER_CREATE_TIMEOUT: ${{ inputs.cluster_create_timeout }}
+        CONTROL_PLANE_RESOURCE_PATCHES: ${{ inputs.control_plane_resource_patches }}
+        API_SERVER_CPU_REQUEST: ${{ inputs.api_server_cpu_request }}
+        API_SERVER_MEMORY_REQUEST: ${{ inputs.api_server_memory_request }}
+        CONTROLLER_MANAGER_CPU_REQUEST: ${{ inputs.controller_manager_cpu_request }}
+        CONTROLLER_MANAGER_MEMORY_REQUEST: ${{ inputs.controller_manager_memory_request }}
+        SCHEDULER_CPU_REQUEST: ${{ inputs.scheduler_cpu_request }}
+        SCHEDULER_MEMORY_REQUEST: ${{ inputs.scheduler_memory_request }}
+        ETCD_CPU_REQUEST: ${{ inputs.etcd_cpu_request }}
+        ETCD_MEMORY_REQUEST: ${{ inputs.etcd_memory_request }}
       run: |
         set -euo pipefail
 
@@ -248,6 +293,131 @@ runs:
         if [[ -n "${KIND_NODE_IMAGE}" ]]; then
           echo "Using kind node image: ${KIND_NODE_IMAGE}"
           CREATE_ARGS+=(--image="${KIND_NODE_IMAGE}")
+        fi
+
+        case "${CONTROL_PLANE_RESOURCE_PATCHES}" in
+          true) ;;
+          ""|false) CONTROL_PLANE_RESOURCE_PATCHES=false ;;
+          *)
+            echo "::error::control_plane_resource_patches must be true or false, got '${CONTROL_PLANE_RESOURCE_PATCHES}'"
+            exit 1
+            ;;
+        esac
+
+        if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
+          patch_dir="$(mktemp -d)"
+          config_template="$(mktemp)"
+
+          # Keep heredoc body indentation aligned with this run block. GitHub
+          # Actions strips the common run: | indent before bash sees it.
+          cat > "${patch_dir}/kube-apiserver+strategic.yaml" <<EOF
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: kube-apiserver
+          namespace: kube-system
+        spec:
+          containers:
+          - name: kube-apiserver
+            resources:
+              requests:
+                cpu: ${API_SERVER_CPU_REQUEST}
+                memory: ${API_SERVER_MEMORY_REQUEST}
+        EOF
+
+          cat > "${patch_dir}/kube-controller-manager+strategic.yaml" <<EOF
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: kube-controller-manager
+          namespace: kube-system
+        spec:
+          containers:
+          - name: kube-controller-manager
+            resources:
+              requests:
+                cpu: ${CONTROLLER_MANAGER_CPU_REQUEST}
+                memory: ${CONTROLLER_MANAGER_MEMORY_REQUEST}
+        EOF
+
+          cat > "${patch_dir}/kube-scheduler+strategic.yaml" <<EOF
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: kube-scheduler
+          namespace: kube-system
+        spec:
+          containers:
+          - name: kube-scheduler
+            resources:
+              requests:
+                cpu: ${SCHEDULER_CPU_REQUEST}
+                memory: ${SCHEDULER_MEMORY_REQUEST}
+        EOF
+
+          cat > "${patch_dir}/etcd+strategic.yaml" <<EOF
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: etcd
+          namespace: kube-system
+        spec:
+          containers:
+          - name: etcd
+            resources:
+              requests:
+                cpu: ${ETCD_CPU_REQUEST}
+                memory: ${ETCD_MEMORY_REQUEST}
+        EOF
+
+          cat > "${config_template}" <<'EOF'
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        {{- if hasKey $ "name" }}
+        name: {{ $.name }}
+        {{- end }}
+        nodes:
+        - role: control-plane
+          {{- if hasKey $ "image" }}
+          image: {{ $.image }}
+          {{- end }}
+          extraMounts:
+          - hostPath: __PATCH_DIR__
+            containerPath: /patches
+          kubeadmConfigPatches:
+          - |
+            kind: InitConfiguration
+            patches:
+              directory: /patches
+        {{- range $.workers }}
+        - role: worker
+          {{- if hasKey $ "image" }}
+          image: {{ $.image }}
+          {{- end }}
+
+          {{- if hasKey . "devices" }}
+          {{- $devices := .devices }}
+          {{- if not (kindIs "slice" $devices) }}
+            {{- $devices = list .devices }}
+          {{- end }}
+          extraMounts:
+            # We inject all NVIDIA GPUs using the nvidia-container-runtime.
+            # This requires `accept-nvidia-visible-devices-as-volume-mounts = true` be set
+            # in `/etc/nvidia-container-runtime/config.toml`
+            {{- range $d := $devices }}
+            - hostPath: /dev/null
+              containerPath: /var/run/nvidia-container-devices/{{ $d }}
+            {{- end }}
+          {{- end }}
+        {{- end }}
+        EOF
+          sed -i "s#__PATCH_DIR__#${patch_dir}#g" "${config_template}"
+          echo "Applying control-plane static pod resource patches from ${patch_dir}:"
+          for patch_file in "${patch_dir}"/*.yaml; do
+            echo "--- ${patch_file}"
+            sed 's/^/  /' "${patch_file}"
+          done
+          CREATE_ARGS+=(--config-template="${config_template}")
         fi
 
         set +e
@@ -261,6 +431,16 @@ runs:
         kubectl --context="kind-${KIND_CLUSTER_NAME}" wait --for=condition=Ready nodes --all --timeout=300s
         kubectl --context="kind-${KIND_CLUSTER_NAME}" cluster-info
         kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide
+        kubectl --context="kind-${KIND_CLUSTER_NAME}" describe nodes | \
+          grep -E "^(Name:|Capacity:|Allocatable:|Allocated resources:|  cpu|  memory|  nvidia.com/gpu)" || true
+
+        echo "=== Kind node container resources ==="
+        docker ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
+          --format '{{.Names}}' | sort | while read -r node_container; do
+            [[ -z "${node_container}" ]] && continue
+            docker inspect "${node_container}" \
+              --format '{{.Name}} NanoCpus={{.HostConfig.NanoCpus}} CpuShares={{.HostConfig.CpuShares}} Memory={{.HostConfig.Memory}} MemoryReservation={{.HostConfig.MemoryReservation}}'
+          done
 
         echo "=== Control-plane resource requests/limits ==="
         kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kube-system \

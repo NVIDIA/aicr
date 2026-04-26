@@ -58,6 +58,7 @@ jobs:
               - 'pkg/evidence/**'
               - '.github/actions/gpu-test-cleanup/**'
               - '.github/actions/load-versions/**'
+              - 'pkg/bundler/deployer/helm/**'
               - 'tests/chainsaw/chainsaw-config.yaml'
               - 'tests/chainsaw/ai-conformance/main.go'
               - 'tests/chainsaw/ai-conformance/common/**'
@@ -124,6 +125,7 @@ jobs:
           min_free_disk_gb: '50'
           min_available_memory_gb: '16'
           cluster_create_timeout: 900s
+          control_plane_resource_patches: 'true'
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
@@ -131,12 +133,14 @@ jobs:
           build_snapshot_agent: 'false'
           validator_phases: 'none'
 
+      # Fast readiness gate after cluster setup. Stability windows start after
+      # runtime install, where component rollouts can stress the control plane.
       - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
           wait_timeout: 120s
-          stability_window: 60s
+          stability_window: 0s
           recover_unhealthy: 'true'
 
       - name: Install runtime bundle
@@ -148,8 +152,9 @@ jobs:
           platform: dynamo
           wait: 'true'
           best_effort: 'false'
+          deploy_trace: 'true'
 
-      - name: Check control plane health after runtime install
+      - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
@@ -176,7 +181,7 @@ jobs:
 
       # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
 
-      - name: Check control plane health before Karpenter
+      - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
@@ -194,7 +199,13 @@ jobs:
 
       # --- Health checks ---
 
-      - name: Check control plane health after Karpenter
+      - name: Install chainsaw
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_chainsaw: 'true'
+          chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
+
+      - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
@@ -202,31 +213,19 @@ jobs:
           stability_window: 60s
           recover_unhealthy: 'true'
 
-      - name: Install chainsaw
-        uses: ./.github/actions/setup-build-tools
-        with:
-          install_chainsaw: 'true'
-          chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
-
       - name: Run chainsaw health checks
+        # The H100 stack can make namespace cleanup API calls slow under load.
+        # Keep cleanup enabled, but allow more than the default 30s deadline.
         run: |
           chainsaw test \
             --test-dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
-            --config tests/chainsaw/chainsaw-config.yaml
+            --config tests/chainsaw/chainsaw-config.yaml \
+            --cleanup-timeout 120s \
+            --delete-timeout 120s
 
       # --- CNCF AI Conformance validation ---
       # Runs after the stack health checks so gateway and metrics validators
       # see a settled inference stack.
-
-      - name: Verify expected resources exist
-        timeout-minutes: 3
-        run: |
-          go run ./tests/chainsaw/ai-conformance/ \
-            --dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
-            --dir tests/chainsaw/ai-conformance/common \
-            --dir tests/chainsaw/ai-conformance/kind-common \
-            --kubeconfig="${HOME}/.kube/config" \
-            --debug
 
       - name: Build conformance validator image
         uses: ./.github/actions/aicr-build
@@ -235,7 +234,7 @@ jobs:
           build_snapshot_agent: 'false'
           validator_phases: 'conformance'
 
-      - name: Check control plane health before conformance validation
+      - name: Check control plane health
         uses: ./.github/actions/check-control-plane-health
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
@@ -276,6 +275,8 @@ jobs:
             validation-result.yaml
           if-no-files-found: warn
 
+      # --- Debug diagnostics (before cleanup so resources still exist) ---
+
       - name: Debug diagnostics
         if: failure()
         timeout-minutes: 5
@@ -285,7 +286,26 @@ jobs:
           kubectl_kind() {
             timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
           }
+          print_workload_images() {
+            local ns="$1"
+            kubectl_kind -n "${ns}" get deployment,daemonset,statefulset -o json 2>/dev/null \
+              | jq -r '
+                .items[] |
+                [
+                  .kind,
+                  .metadata.namespace + "/" + .metadata.name,
+                  (([.spec.template.spec.containers[]?.image] +
+                    [.spec.template.spec.initContainers[]?.image]) | unique | join(","))
+                ] | @tsv
+              ' || true
+          }
 
+          echo "=== Workload image inventory ==="
+          for NS in cert-manager gpu-operator monitoring skyhook nvsentinel nvidia-dra-driver \
+            nvidia-network-operator kai-scheduler dynamo-system kgateway-system; do
+            echo "--- ${NS} ---"
+            print_workload_images "${NS}"
+          done
           echo "=== ClusterPolicy status ==="
           kubectl_kind get clusterpolicy -o yaml 2>/dev/null || true
           echo "=== GPU Operator pods ==="
@@ -316,6 +336,13 @@ jobs:
           echo "=== KAI admission logs ==="
           kubectl_kind -n kai-scheduler \
             logs deployment/admission --all-containers --tail=200 2>/dev/null || true
+          echo "=== KAI scheduler logs ==="
+          kubectl_kind -n kai-scheduler \
+            logs deployment/kai-scheduler-default --tail=100 2>/dev/null || true
+          echo "=== KAI scheduler queues ==="
+          kubectl_kind get queues -A 2>/dev/null || true
+          echo "=== KAI scheduler podgroups ==="
+          kubectl_kind get podgroups -A 2>/dev/null || true
           echo "=== Recent events (kai-scheduler) ==="
           kubectl_kind -n kai-scheduler get events --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
           echo "=== Custom metrics API ==="

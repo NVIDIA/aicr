@@ -71,6 +71,15 @@ runs:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: |
         timeout 300s kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
+        kind_cluster_label="io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}"
+        remaining_containers=$(docker ps -aq --filter "label=${kind_cluster_label}")
+        if [[ -n "${remaining_containers}" ]]; then
+          echo "Removing leftover kind containers for ${KIND_CLUSTER_NAME}:"
+          docker ps -a --filter "label=${kind_cluster_label}"
+          docker rm -f ${remaining_containers} || true
+        fi
+        timeout 60s docker builder prune -f --filter "until=24h" || true
+        timeout 60s docker system prune -f --filter "until=24h" || true
 
     - name: Upload debug artifacts
       if: failure()

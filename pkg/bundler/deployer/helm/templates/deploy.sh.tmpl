@@ -386,12 +386,9 @@ if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]; then
   COMPONENT_MAX_RETRIES="1"
 fi
 {{ else if eq .Name "kube-prometheus-stack" -}}
-COMPONENT_HELM_TIMEOUT="20m"
-# Allow the observed third-attempt Grafana success pattern, but cap the budget
-# so kube-prometheus-stack cannot consume most of the H100 workflow timeout.
-if [[ "${COMPONENT_MAX_RETRIES}" -gt 2 ]]; then
-  COMPONENT_MAX_RETRIES="2"
-fi
+# Grafana can trip its Deployment progress deadline before a longer Helm
+# timeout helps. Keep the default 10m timeout and preserve the default retry
+# budget so later upgrades can succeed after images and controllers settle.
 {{ end -}}
 # Derive wait args: global --wait/--no-wait behavior + component timeout.
 if [[ "${NO_WAIT}" == "true" ]]; then
