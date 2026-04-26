@@ -575,12 +575,16 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			wantRetryCap:        `if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]`,
 			wantApplyArgs:       `COMPONENT_HELM_APPLY_ARGS=(--server-side=false)`,
 			wantSnippets: []string{
+				`helm_supports_server_side_flag`,
+				`--request-timeout="${KUBECTL_REQUEST_TIMEOUT}"`,
+				`dynamo-platform conflict mitigation requires a Helm client that supports --server-side=false`,
 				`dump_dynamo_platform_helm_diagnostics "${namespace}"`,
 				`deployment/dynamo-platform-dynamo-operator-controller-manager`,
 				`--previous --tail=200`,
 			},
 			wantReadmeSnippets: []string{
 				`--server-side=false`,
+				`Helm client that supports the flag`,
 				`--wait --timeout 20m`,
 			},
 		},

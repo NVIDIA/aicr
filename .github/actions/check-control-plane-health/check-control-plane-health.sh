@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+validate_duration_input() {
+  local input_name="$1"
+  local input_value="$2"
+
+  if ! [[ "${input_value}" =~ ^[0-9]+[smh]$ ]]; then
+    echo "::error::${input_name} must be a duration like 60s, 2m, or 1h; got '${input_value}'"
+    exit 1
+  fi
+}
+
+MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS#"${MAX_RECOVERY_ATTEMPTS%%[![:space:]]*}"}"
+MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS%"${MAX_RECOVERY_ATTEMPTS##*[![:space:]]}"}"
+if ! [[ "${MAX_RECOVERY_ATTEMPTS}" =~ ^[0-9]+$ ]]; then
+  echo "::error::max_recovery_attempts must be a non-negative integer, got '${MAX_RECOVERY_ATTEMPTS}'"
+  exit 1
+fi
+
+WAIT_TIMEOUT="${WAIT_TIMEOUT#"${WAIT_TIMEOUT%%[![:space:]]*}"}"
+WAIT_TIMEOUT="${WAIT_TIMEOUT%"${WAIT_TIMEOUT##*[![:space:]]}"}"
+validate_duration_input wait_timeout "${WAIT_TIMEOUT}"
+
+STABILITY_WINDOW="${STABILITY_WINDOW#"${STABILITY_WINDOW%%[![:space:]]*}"}"
+STABILITY_WINDOW="${STABILITY_WINDOW%"${STABILITY_WINDOW##*[![:space:]]}"}"
+if [[ -z "${STABILITY_WINDOW}" ]]; then
+  STABILITY_WINDOW="0s"
+fi
+validate_duration_input stability_window "${STABILITY_WINDOW}"
+if [[ "${STABILITY_WINDOW}" =~ ^0+[smh]$ ]]; then
+  STABILITY_WINDOW="0s"
+fi
+
+RECOVER_UNHEALTHY="${RECOVER_UNHEALTHY#"${RECOVER_UNHEALTHY%%[![:space:]]*}"}"
+RECOVER_UNHEALTHY="${RECOVER_UNHEALTHY%"${RECOVER_UNHEALTHY##*[![:space:]]}"}"
+case "${RECOVER_UNHEALTHY}" in
+  true|false) ;;
+  *)
+    echo "::error::recover_unhealthy must be true or false, got '${RECOVER_UNHEALTHY}'"
+    exit 1
+    ;;
+esac
+
+kubectl_kind() {
+  timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
+}
+
+docker_timeout() {
+  timeout 30s docker "$@"
+}
+
+STATIC_POD_RECREATE_SETTLE_SECONDS=5
+RESTART_COUNT_ATTEMPTS=3
+RESTART_COUNT_RETRY_SLEEP_SECONDS=2
+declare -A RECOVERY_ATTEMPTS=()
+declare -A INITIAL_RESTARTS=()
+
+kubectl_kind get --raw='/readyz' || true
+
+wait_ready() {
+  local component="$1"
+  local selector="component=${component}"
+
+  if ! timeout "${WAIT_TIMEOUT}" kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+    wait --for=condition=Ready pod -l "${selector}" --timeout="${WAIT_TIMEOUT}"; then
+    return 1
+  fi
+}
+
+restart_total() {
+  local component="$1"
+  local selector="component=${component}"
+  local restart_counts
+  local restart_count
+  local total=0
+  local attempt
+
+  for ((attempt = 1; attempt <= RESTART_COUNT_ATTEMPTS; attempt++)); do
+    if restart_counts=$(kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" \
+      -o jsonpath='{range .items[*]}{range .status.containerStatuses[*]}{.restartCount}{"\n"}{end}{end}'); then
+      if [[ -n "${restart_counts}" ]]; then
+        break
+      fi
+      echo "::warning::no container statuses found for ${component} pods (attempt ${attempt}/${RESTART_COUNT_ATTEMPTS})" >&2
+    else
+      echo "::warning::failed to read restart counts for ${component} pods (attempt ${attempt}/${RESTART_COUNT_ATTEMPTS})" >&2
+    fi
+
+    if (( attempt < RESTART_COUNT_ATTEMPTS )); then
+      sleep "${RESTART_COUNT_RETRY_SLEEP_SECONDS}"
+    fi
+  done
+
+  if [[ -z "${restart_counts}" ]]; then
+    echo "::error::no container statuses found for ${component} pods after ${RESTART_COUNT_ATTEMPTS} attempts" >&2
+    dump_component_diagnostics "${component}" >&2
+    exit 1
+  fi
+
+  while IFS= read -r restart_count; do
+    [[ -z "${restart_count}" ]] && continue
+    total=$((total + restart_count))
+  done <<< "${restart_counts}"
+  echo "${total}"
+}
+
+report_restart_baseline() {
+  local component="$1"
+  local restart_count="$2"
+
+  if (( restart_count > 0 )); then
+    echo "::warning::${component} has historical restartCount=${restart_count}; checking current readiness and stability window only"
+    return
+  fi
+  echo "${component} restartCount=${restart_count}"
+}
+
+dump_control_plane_summary() {
+  echo "=== Control-plane pod restart summary ==="
+  kubectl_kind -n "${NAMESPACE}" get pods -l tier=control-plane -o wide || true
+  kubectl_kind -n "${NAMESPACE}" get pods -l tier=control-plane \
+    -o jsonpath='{range .items[*]}{.metadata.name}{" restartCount="}{range .status.containerStatuses[*]}{.restartCount}{" "}{end}{"\n"}{end}' || true
+}
+
+require_readyz() {
+  local reason="$1"
+
+  if ! kubectl_kind get --raw='/readyz'; then
+    echo "::error::kube-apiserver /readyz failed ${reason}"
+    dump_all_control_plane_runtime_diagnostics
+    exit 1
+  fi
+}
+
+dump_api_server_health() {
+  local endpoint
+
+  for endpoint in '/livez?verbose' '/readyz?verbose' '/healthz'; do
+    echo "=== kube-apiserver ${endpoint} ==="
+    kubectl_kind get --raw="${endpoint}" || true
+  done
+}
+
+dump_kind_node_runtime_summary() {
+  local node="${KIND_CLUSTER_NAME}-control-plane"
+
+  if ! docker_timeout inspect "${node}" >/dev/null 2>&1; then
+    echo "::warning::cannot collect node runtime summary: kind node container ${node} not found"
+    return
+  fi
+
+  echo "=== ${node} docker stats ==="
+  docker_timeout stats --no-stream \
+    --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' \
+    "${node}" || true
+
+  echo "=== ${node} docker inspect state ==="
+  docker_timeout inspect \
+    --format 'status={{.State.Status}} running={{.State.Running}} oomKilled={{.State.OOMKilled}} pid={{.State.Pid}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' \
+    "${node}" || true
+
+  echo "=== ${node} node pressure snapshot ==="
+  docker_timeout exec "${node}" sh -c '
+    date
+    uptime || true
+    free -h || true
+    df -h / /var/lib/containerd /var/lib/kubelet 2>/dev/null || df -h
+    echo "--- top cpu/memory processes ---"
+    ps -eo pid,ppid,stat,etime,%cpu,%mem,comm,args --sort=-%cpu | head -40 || true
+  ' || true
+
+  echo "=== ${node} CRI pod/container summary ==="
+  docker_timeout exec "${node}" crictl pods || true
+  docker_timeout exec "${node}" crictl ps -a || true
+  docker_timeout exec "${node}" crictl stats || true
+}
+
+dump_static_pod_runtime_diagnostics() {
+  local component="$1"
+  local node="${KIND_CLUSTER_NAME}-control-plane"
+  local container_ids
+  local container_id
+  local count=0
+
+  if ! docker_timeout inspect "${node}" >/dev/null 2>&1; then
+    echo "::warning::cannot collect ${component} runtime diagnostics: kind node container ${node} not found"
+    return
+  fi
+
+  echo "=== ${node} ${component} static pod manifest ==="
+  docker_timeout exec "${node}" sh -c "sed -n '1,220p' /etc/kubernetes/manifests/${component}.yaml" || true
+
+  echo "=== ${node} ${component} CRI containers ==="
+  docker_timeout exec "${node}" crictl ps -a --name "${component}" || true
+
+  container_ids=$(docker_timeout exec "${node}" crictl ps -a --name "${component}" -q 2>/dev/null || true)
+  for container_id in ${container_ids}; do
+    count=$((count + 1))
+    if (( count > 8 )); then
+      echo "Skipping remaining ${component} CRI containers after first 8 entries."
+      break
+    fi
+
+    echo "=== ${node} crictl inspect ${component} ${container_id} ==="
+    docker_timeout exec "${node}" crictl inspect "${container_id}" || true
+    echo "=== ${node} crictl logs ${component} ${container_id} ==="
+    docker_timeout exec "${node}" crictl logs --tail=200 "${container_id}" || true
+  done
+
+  echo "=== ${node} kubelet journal (${component}) ==="
+  docker_timeout exec "${node}" journalctl -u kubelet --since '45 minutes ago' --no-pager 2>/dev/null \
+    | grep -Ei "${component}|static pod|mirror pod|probe|liveness|readiness|startup|back-off|backoff|container|failed|error|oom|killed" \
+    | tail -200 || true
+
+  echo "=== ${node} containerd journal (${component}) ==="
+  docker_timeout exec "${node}" journalctl -u containerd --since '45 minutes ago' --no-pager 2>/dev/null \
+    | grep -Ei "${component}|container|task|shim|deadline|failed|error|oom|killed" \
+    | tail -200 || true
+}
+
+dump_all_control_plane_runtime_diagnostics() {
+  local component
+
+  dump_control_plane_summary
+  dump_api_server_health
+  dump_kind_node_runtime_summary
+  for component in ${COMPONENTS}; do
+    dump_static_pod_runtime_diagnostics "${component}"
+    kubectl_kind -n "${NAMESPACE}" get lease "${component}" -o yaml 2>/dev/null || true
+  done
+}
+
+dump_component_diagnostics() {
+  local component="$1"
+  local selector="component=${component}"
+  local pods
+  local pod
+
+  dump_control_plane_summary
+  kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" -o wide || true
+  kubectl_kind -n "${NAMESPACE}" describe pod -l "${selector}" || true
+  kubectl_kind -n "${NAMESPACE}" get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+
+  pods=$(kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" -o name 2>/dev/null || true)
+  while IFS= read -r pod; do
+    [[ -z "${pod}" ]] && continue
+    echo "=== ${pod} logs ==="
+    kubectl_kind -n "${NAMESPACE}" logs "${pod}" --all-containers --tail=100 2>/dev/null || true
+    echo "=== ${pod} previous logs ==="
+    kubectl_kind -n "${NAMESPACE}" logs "${pod}" --all-containers --previous --tail=100 2>/dev/null || true
+  done <<< "${pods}"
+
+  dump_all_control_plane_runtime_diagnostics
+  kubectl_kind -n "${NAMESPACE}" get lease "${component}" -o yaml 2>/dev/null || true
+}
+
+is_recovery_component() {
+  local component="$1"
+  local candidate
+
+  for candidate in ${RECOVERY_COMPONENTS}; do
+    if [[ "${candidate}" == "${component}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+try_recover_component() {
+  local component="$1"
+  local reason="$2"
+  local node="${KIND_CLUSTER_NAME}-control-plane"
+  local attempt
+  local container_ids
+  local container_id
+
+  if [[ "${RECOVER_UNHEALTHY}" != "true" ]]; then
+    return 1
+  fi
+  if (( MAX_RECOVERY_ATTEMPTS == 0 )); then
+    return 1
+  fi
+  if ! is_recovery_component "${component}"; then
+    return 1
+  fi
+
+  attempt="${RECOVERY_ATTEMPTS[${component}]:-0}"
+  if (( attempt >= MAX_RECOVERY_ATTEMPTS )); then
+    return 1
+  fi
+  RECOVERY_ATTEMPTS["${component}"]=$((attempt + 1))
+
+  echo "::warning::${component} is unhealthy (${reason}); restarting static pod container (attempt $((attempt + 1))/${MAX_RECOVERY_ATTEMPTS})"
+  dump_component_diagnostics "${component}"
+
+  if ! docker_timeout inspect "${node}" >/dev/null 2>&1; then
+    echo "::warning::cannot recover ${component}: kind node container ${node} not found"
+    return 1
+  fi
+
+  if ! container_ids=$(docker_timeout exec "${node}" crictl ps --name "${component}" -q 2>/dev/null); then
+    echo "::warning::cannot recover ${component}: timed out or failed to list containers in ${node}"
+    return 1
+  fi
+  if [[ -z "${container_ids}" ]]; then
+    echo "::warning::cannot recover ${component}: no running container found in ${node}"
+    return 1
+  fi
+
+  for container_id in ${container_ids}; do
+    echo "Stopping ${component} container ${container_id} in ${node}..."
+    if ! docker_timeout exec "${node}" crictl stop "${container_id}"; then
+      echo "::warning::failed to stop ${component} container ${container_id}"
+      return 1
+    fi
+  done
+
+  # Give kubelet a short interval to observe the stopped CRI container
+  # and refresh the mirror pod before kubectl wait reads pod status.
+  sleep "${STATIC_POD_RECREATE_SETTLE_SECONDS}"
+  if ! wait_ready "${component}"; then
+    echo "::warning::${component} did not recover after static pod container restart"
+    dump_component_diagnostics "${component}"
+    kubectl_kind get --raw='/readyz' || true
+    return 1
+  fi
+
+  echo "${component} recovered after static pod container restart."
+  return 0
+}
+
+check_component() {
+  local component="$1"
+  local selector="component=${component}"
+  local pods
+  local initial_restarts
+
+  if ! pods=$(kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" -o name); then
+    if ! try_recover_component "${component}" "failed to list pods in ${NAMESPACE} with selector ${selector}"; then
+      echo "::error::failed to list ${component} pods in ${NAMESPACE} with selector ${selector}"
+      kubectl_kind -n "${NAMESPACE}" get pods -o wide || true
+      exit 1
+    fi
+    if ! pods=$(kubectl_kind -n "${NAMESPACE}" get pod -l "${selector}" -o name); then
+      echo "::error::failed to list ${component} pods after recovery"
+      kubectl_kind -n "${NAMESPACE}" get pods -o wide || true
+      exit 1
+    fi
+  fi
+  if [[ -z "${pods}" ]]; then
+    echo "::error::no ${component} pods found in ${NAMESPACE} with selector ${selector}"
+    kubectl_kind -n "${NAMESPACE}" get pods -o wide || true
+    exit 1
+  fi
+
+  if ! wait_ready "${component}"; then
+    if ! try_recover_component "${component}" "pods did not become Ready within ${WAIT_TIMEOUT}"; then
+      echo "::error::${component} pods did not become Ready within ${WAIT_TIMEOUT}"
+      dump_component_diagnostics "${component}"
+      kubectl_kind get --raw='/readyz' || true
+      exit 1
+    fi
+  fi
+  initial_restarts=$(restart_total "${component}")
+  report_restart_baseline "${component}" "${initial_restarts}"
+  INITIAL_RESTARTS["${component}"]="${initial_restarts}"
+}
+
+verify_stability_window() {
+  local component
+  local initial_restarts
+  local final_restarts
+  local recovered=false
+
+  if [[ "${STABILITY_WINDOW}" == "0s" ]]; then
+    return
+  fi
+
+  echo "Observing control-plane stability for ${STABILITY_WINDOW}..."
+  sleep "${STABILITY_WINDOW}"
+  for component in ${COMPONENTS}; do
+    initial_restarts="${INITIAL_RESTARTS[${component}]:-}"
+    if [[ -z "${initial_restarts}" ]]; then
+      echo "::error::missing initial restart count for ${component}"
+      exit 1
+    fi
+    if ! wait_ready "${component}"; then
+      if ! try_recover_component "${component}" "pods became unready during ${STABILITY_WINDOW}"; then
+        echo "::error::${component} pods became unready during ${STABILITY_WINDOW}"
+        dump_component_diagnostics "${component}"
+        kubectl_kind get --raw='/readyz' || true
+        exit 1
+      fi
+      initial_restarts=$(restart_total "${component}")
+      report_restart_baseline "${component}" "${initial_restarts}"
+      INITIAL_RESTARTS["${component}"]="${initial_restarts}"
+      recovered=true
+      continue
+    fi
+    final_restarts=$(restart_total "${component}")
+    if (( final_restarts > initial_restarts )); then
+      echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} during ${STABILITY_WINDOW}"
+      dump_component_diagnostics "${component}"
+      kubectl_kind get --raw='/readyz' || true
+      exit 1
+    fi
+    INITIAL_RESTARTS["${component}"]="${final_restarts}"
+  done
+
+  if [[ "${recovered}" != "true" ]]; then
+    return
+  fi
+
+  echo "::warning::control-plane recovery occurred; observing one additional ${STABILITY_WINDOW} stability window"
+  sleep "${STABILITY_WINDOW}"
+  for component in ${COMPONENTS}; do
+    initial_restarts="${INITIAL_RESTARTS[${component}]:-}"
+    if [[ -z "${initial_restarts}" ]]; then
+      echo "::error::missing post-recovery restart count for ${component}"
+      exit 1
+    fi
+    if ! wait_ready "${component}"; then
+      echo "::error::${component} pods became unready after recovery"
+      dump_component_diagnostics "${component}"
+      kubectl_kind get --raw='/readyz' || true
+      exit 1
+    fi
+    final_restarts=$(restart_total "${component}")
+    if (( final_restarts > initial_restarts )); then
+      echo "::error::${component} restartCount increased from ${initial_restarts} to ${final_restarts} after recovery"
+      dump_component_diagnostics "${component}"
+      exit 1
+    fi
+    INITIAL_RESTARTS["${component}"]="${final_restarts}"
+  done
+}
+
+for component in ${COMPONENTS}; do
+  check_component "${component}"
+done
+verify_stability_window
+require_readyz "after stability window"

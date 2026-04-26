@@ -38,6 +38,8 @@ jobs:
       should-run: ${{ steps.filter.outputs.matched }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
         id: filter
         with:
@@ -106,28 +108,7 @@ jobs:
           method: helm
 
       - name: Run nvidia-smi in a pod
-        run: |
-          cat <<'EOF' | kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: gpu-smoke-test
-          spec:
-            restartPolicy: Never
-            containers:
-            - name: nvidia-smi
-              image: ubuntu:22.04
-              command: ["nvidia-smi"]
-              resources:
-                limits:
-                  nvidia.com/gpu: 1
-          EOF
-
-          echo "Waiting for gpu-smoke-test pod to complete..."
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait pod/gpu-smoke-test \
-            --for=condition=Ready --timeout=120s || true
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait pod/gpu-smoke-test \
-            --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s
+        run: bash .github/scripts/gpu-smoke-run-nvidia-smi.sh
 
       - name: Show nvidia-smi output
         run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
@@ -143,17 +124,9 @@ jobs:
 
       - name: Debug diagnostics
         if: failure()
-        run: |
-          echo "=== ClusterPolicy status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get clusterpolicy -o yaml 2>/dev/null || true
-          echo "=== GPU Operator pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
-          echo "=== Non-running pods (all namespaces) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
-          echo "=== Recent events (gpu-operator) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-          echo "=== Node status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
+        env:
+          GPU_TEST_DIAGNOSTIC_MODE: smoke
+        run: bash .github/scripts/gpu-debug-diagnostics.sh
 
       - name: GPU Test Cleanup
         if: always()

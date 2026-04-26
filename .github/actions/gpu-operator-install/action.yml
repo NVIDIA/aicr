@@ -49,105 +49,33 @@ runs:
     - name: Install GPU Operator (helm)
       if: inputs.method == 'helm'
       shell: bash
-      run: |
-        helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
-        helm repo update
-        helm upgrade -i \
-          --kube-context="kind-${KIND_CLUSTER_NAME}" \
-          --namespace gpu-operator \
-          --create-namespace \
-          --set driver.enabled=false \
-          --set toolkit.enabled=false \
-          --set dcgmExporter.enabled=false \
-          --set nfd.enabled=true \
-          --wait --timeout=600s \
-          gpu-operator nvidia/gpu-operator
-
+      run: bash "${{ github.action_path }}/install-gpu-operator-helm.sh"
     - name: Wait for GPU operands (helm)
       if: inputs.method == 'helm'
       shell: bash
-      run: |
-        echo "Waiting for device plugin to be ready..."
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-          rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s || true
-        echo "GPU Operator pods:"
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods
-
+      run: bash "${{ github.action_path }}/wait-gpu-operands-helm.sh"
     # --- Bundle mode: aicr recipe → bundle → deploy ---
 
     - name: Generate recipe
       if: inputs.method == 'bundle'
       shell: bash
-      run: |
-        PLATFORM_FLAG=""
-        if [[ -n "${{ inputs.platform }}" ]]; then
-          PLATFORM_FLAG="--platform ${{ inputs.platform }}"
-        fi
-        ./aicr recipe \
-          --service kind \
-          --accelerator ${{ inputs.accelerator }} \
-          --os ubuntu \
-          --intent ${{ inputs.intent }} \
-          ${PLATFORM_FLAG} \
-          --output recipe.yaml
-        echo "Recipe written to recipe.yaml"
-
+      env:
+        AICR_ACCELERATOR: ${{ inputs.accelerator }}
+        AICR_INTENT: ${{ inputs.intent }}
+        AICR_PLATFORM: ${{ inputs.platform }}
+      run: bash "${{ github.action_path }}/generate-recipe.sh"
     - name: Generate deployment bundle
       if: inputs.method == 'bundle'
       shell: bash
-      run: |
-        ./aicr bundle \
-          --recipe recipe.yaml \
-          --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
-          --output bundle
-        echo "--- Bundle contents ---"
-        ls -la bundle/
-
+      run: bash "${{ github.action_path }}/generate-bundle.sh"
     - name: Install bundle into cluster
       if: inputs.method == 'bundle'
       shell: bash
-      run: |
-        cd bundle
-        # The default keeps legacy bundle-mode behavior: do not wait on every
-        # Helm resource and keep deploying after component failures. H100
-        # qualification jobs override these inputs to hard-fail and wait.
-        chmod +x deploy.sh
-        DEPLOY_ARGS=()
-        if [[ "${{ inputs.wait }}" != "true" ]]; then
-          DEPLOY_ARGS+=(--no-wait)
-        fi
-        if [[ "${{ inputs.best_effort }}" == "true" ]]; then
-          DEPLOY_ARGS+=(--best-effort)
-        fi
-        if [[ "${#DEPLOY_ARGS[@]}" -gt 0 ]]; then
-          echo "Deploying bundle with args: ${DEPLOY_ARGS[*]}"
-        else
-          echo "Deploying bundle with default args"
-        fi
-        ./deploy.sh "${DEPLOY_ARGS[@]}"
-
+      env:
+        AICR_DEPLOY_WAIT: ${{ inputs.wait }}
+        AICR_DEPLOY_BEST_EFFORT: ${{ inputs.best_effort }}
+      run: bash "${{ github.action_path }}/install-bundle.sh"
     - name: Wait for GPU operands (bundle)
       if: inputs.method == 'bundle'
       shell: bash
-      run: |
-        echo "Waiting for GPU operator controller to deploy operands..."
-        # The GPU operator controller watches ClusterPolicy and creates
-        # DaemonSets for device-plugin, NFD, GFD, etc. This happens
-        # asynchronously after the helm install completes.
-        for i in $(seq 1 30); do
-          count=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-            get daemonset -l app=nvidia-device-plugin-daemonset --no-headers 2>/dev/null | wc -l)
-          if [[ "$count" -gt 0 ]]; then
-            echo "Device plugin DaemonSet found."
-            break
-          fi
-          echo "Waiting for device plugin DaemonSet to be created... (${i}/30)"
-          sleep 10
-        done
-        echo "Waiting for device plugin rollout..."
-        # Operands are excluded from control-plane nodes via nodeAffinity in
-        # the kind overlay, so all scheduled pods should become ready.
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-          rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s
-        echo "GPU Operator pods:"
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods
+      run: bash "${{ github.action_path }}/wait-gpu-operands-bundle.sh"

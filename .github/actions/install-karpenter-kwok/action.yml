@@ -38,11 +38,7 @@ runs:
     - name: Resolve versions
       id: versions
       shell: bash
-      run: |
-        echo "karpenter=$(yq eval '.testing_tools.karpenter' .settings.yaml)" >> "$GITHUB_OUTPUT"
-        echo "ko=$(yq eval '.build_tools.ko' .settings.yaml)" >> "$GITHUB_OUTPUT"
-        echo "go=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
-
+      run: bash "${{ github.action_path }}/resolve-versions.sh"
     - name: Install ko
       uses: ./.github/actions/setup-build-tools
       with:
@@ -68,30 +64,4 @@ runs:
         KWOK_HELM_TIMEOUT: ${{ inputs.kwok_helm_timeout }}
         KO_BUILD_TIMEOUT: ${{ inputs.ko_build_timeout }}
         KARPENTER_HELM_TIMEOUT: ${{ inputs.karpenter_helm_timeout }}
-      run: |
-        set -euo pipefail
-        validate_duration_input() {
-          local input_name="$1"
-          local input_value="$2"
-
-          if ! [[ "${input_value}" =~ ^[0-9]+[smh]$ ]]; then
-            echo "::error::${input_name} must be a duration like 300s, 10m, or 1h; got '${input_value}'"
-            exit 1
-          fi
-        }
-
-        validate_seconds_input() {
-          local input_name="$1"
-          local input_value="$2"
-
-          if ! [[ "${input_value}" =~ ^[0-9]+$ ]]; then
-            echo "::error::${input_name} must be an integer number of seconds, got '${input_value}'"
-            exit 1
-          fi
-        }
-
-        validate_duration_input kwok_helm_timeout "${KWOK_HELM_TIMEOUT}"
-        validate_seconds_input ko_build_timeout "${KO_BUILD_TIMEOUT}"
-        validate_duration_input karpenter_helm_timeout "${KARPENTER_HELM_TIMEOUT}"
-        bash kwok/scripts/install-karpenter-kwok.sh
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f kwok/manifests/karpenter/nodepool.yaml
+      run: bash "${{ github.action_path }}/install-karpenter-kwok.sh"

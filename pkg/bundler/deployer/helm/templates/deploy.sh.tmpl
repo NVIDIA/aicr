@@ -24,6 +24,7 @@ trap 'rm -rf "${HELM_WORKDIR}"' EXIT
 cd "${HELM_WORKDIR}"
 
 HELM_TIMEOUT="10m"
+KUBECTL_REQUEST_TIMEOUT="10s"
 NO_WAIT=false
 BEST_EFFORT=false
 FAILED_COMPONENTS=""
@@ -57,6 +58,10 @@ function backoff_seconds() {
   local seconds=$(( attempt * attempt * 5 ))
   if [[ ${seconds} -gt 120 ]]; then seconds=120; fi
   echo "${seconds}"
+}
+
+function helm_supports_server_side_flag() {
+  helm help upgrade 2>/dev/null | grep -q -- '--server-side'
 }
 
 function retry() {
@@ -152,23 +157,23 @@ function dump_dynamo_platform_helm_diagnostics() {
 
   echo "  --- ${namespace} diagnostics ---"
   echo "  Deployments:"
-  kubectl get deployments -n "${namespace}" -o wide 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get deployments -n "${namespace}" -o wide 2>/dev/null || true
   echo "  Jobs:"
-  kubectl get jobs -n "${namespace}" 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get jobs -n "${namespace}" 2>/dev/null || true
   echo "  Pods:"
-  kubectl get pods -n "${namespace}" -o wide 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get pods -n "${namespace}" -o wide 2>/dev/null || true
   echo "  Pod descriptions:"
-  kubectl describe pods -n "${namespace}" 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" describe pods -n "${namespace}" 2>/dev/null || true
   echo "  Dynamo operator manager logs:"
-  kubectl logs deployment/dynamo-platform-dynamo-operator-controller-manager -n "${namespace}" -c manager --tail=200 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" logs deployment/dynamo-platform-dynamo-operator-controller-manager -n "${namespace}" -c manager --tail=200 2>/dev/null || true
   echo "  Dynamo operator manager previous logs:"
-  kubectl logs deployment/dynamo-platform-dynamo-operator-controller-manager -n "${namespace}" -c manager --previous --tail=200 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" logs deployment/dynamo-platform-dynamo-operator-controller-manager -n "${namespace}" -c manager --previous --tail=200 2>/dev/null || true
   echo "  Grove operator logs:"
-  kubectl logs deployment/grove-operator -n "${namespace}" --all-containers --tail=100 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" logs deployment/grove-operator -n "${namespace}" --all-containers --tail=100 2>/dev/null || true
   echo "  Grove operator previous logs:"
-  kubectl logs deployment/grove-operator -n "${namespace}" --all-containers --previous --tail=100 2>/dev/null || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" logs deployment/grove-operator -n "${namespace}" --all-containers --previous --tail=100 2>/dev/null || true
   echo "  Recent events:"
-  kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
   echo "  --- End ${namespace} diagnostics ---"
 }
 
@@ -414,8 +419,12 @@ fi
 COMPONENT_HELM_TIMEOUT="20m"
 # Grove owns the generated webhook certificate Secret data after install.
 # Client-side apply avoids server-side field ownership conflicts during retries.
-# Requires Helm v4+ for --server-side=false; AICR bundles pin Helm v4 in .settings.yaml.
-COMPONENT_HELM_APPLY_ARGS=(--server-side=false)
+# This flag requires a Helm client that supports --server-side=false.
+if helm_supports_server_side_flag; then
+  COMPONENT_HELM_APPLY_ARGS=(--server-side=false)
+else
+  echo "::warning::dynamo-platform conflict mitigation requires a Helm client that supports --server-side=false; proceeding without this flag"
+fi
 if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]; then
   COMPONENT_MAX_RETRIES="3"
 fi
