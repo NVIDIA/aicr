@@ -32,7 +32,7 @@ inputs:
     required: false
     default: 60s
   max_restarts:
-    description: 'Maximum tolerated restart count for each control-plane container'
+    description: 'Maximum tolerated restart count. With stability_window > 0, historical restarts are diagnostic and new restarts fail.'
     required: false
     default: '1'
   stability_window:
@@ -218,7 +218,10 @@ runs:
             return 1
           fi
 
-          container_ids=$(docker_timeout exec "${node}" crictl ps --name "${component}" -q 2>/dev/null || true)
+          if ! container_ids=$(docker_timeout exec "${node}" crictl ps --name "${component}" -q 2>/dev/null); then
+            echo "::warning::cannot recover ${component}: timed out or failed to list containers in ${node}"
+            return 1
+          fi
           if [[ -z "${container_ids}" ]]; then
             echo "::warning::cannot recover ${component}: no running container found in ${node}"
             return 1
