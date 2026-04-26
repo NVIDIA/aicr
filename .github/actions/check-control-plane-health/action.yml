@@ -120,7 +120,7 @@ runs:
           local component="$1"
           local selector="component=${component}"
 
-          if ! kubectl --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
+          if ! timeout "${WAIT_TIMEOUT}" kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n "${NAMESPACE}" \
             wait --for=condition=Ready pod -l "${selector}" --timeout="${WAIT_TIMEOUT}"; then
             return 1
           fi

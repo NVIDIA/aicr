@@ -43,6 +43,7 @@ runs:
         GOFLAGS: -mod=vendor
       run: |
         set -euo pipefail
+        mkdir -p dist
         if [[ -x dist/aicr ]]; then
           echo "Reusing existing dist/aicr"
           exit 0
