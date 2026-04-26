@@ -44,6 +44,10 @@ inputs:
     description: 'Apply kubeadm patches that raise control-plane static pod resource requests'
     required: false
     default: 'false'
+  disable_control_plane_leader_election:
+    description: 'Disable kube-controller-manager and kube-scheduler leader election for single-control-plane kind CI clusters'
+    required: false
+    default: 'false'
   api_server_cpu_request:
     description: 'kube-apiserver CPU request when control_plane_resource_patches is true'
     required: false
@@ -278,6 +282,7 @@ runs:
         KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
         CLUSTER_CREATE_TIMEOUT: ${{ inputs.cluster_create_timeout }}
         CONTROL_PLANE_RESOURCE_PATCHES: ${{ inputs.control_plane_resource_patches }}
+        DISABLE_CONTROL_PLANE_LEADER_ELECTION: ${{ inputs.disable_control_plane_leader_election }}
         API_SERVER_CPU_REQUEST: ${{ inputs.api_server_cpu_request }}
         API_SERVER_MEMORY_REQUEST: ${{ inputs.api_server_memory_request }}
         CONTROLLER_MANAGER_CPU_REQUEST: ${{ inputs.controller_manager_cpu_request }}
@@ -304,12 +309,22 @@ runs:
             ;;
         esac
 
-        if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
+        case "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" in
+          true) ;;
+          ""|false) DISABLE_CONTROL_PLANE_LEADER_ELECTION=false ;;
+          *)
+            echo "::error::disable_control_plane_leader_election must be true or false, got '${DISABLE_CONTROL_PLANE_LEADER_ELECTION}'"
+            exit 1
+            ;;
+        esac
+
+        if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" || "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" == "true" ]]; then
           patch_dir="$(mktemp -d)"
           config_template="$(mktemp)"
 
           # Keep heredoc body indentation aligned with this run block. GitHub
           # Actions strips the common run: | indent before bash sees it.
+          if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
           cat > "${patch_dir}/kube-apiserver+strategic.yaml" <<EOF
         apiVersion: v1
         kind: Pod
@@ -369,6 +384,7 @@ runs:
                 cpu: ${ETCD_CPU_REQUEST}
                 memory: ${ETCD_MEMORY_REQUEST}
         EOF
+          fi
 
           cat > "${config_template}" <<'EOF'
         kind: Cluster
@@ -381,14 +397,42 @@ runs:
           {{- if hasKey $ "image" }}
           image: {{ $.image }}
           {{- end }}
+        EOF
+          if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
+          cat >> "${config_template}" <<EOF
           extraMounts:
-          - hostPath: __PATCH_DIR__
+          - hostPath: ${patch_dir}
             containerPath: /patches
+        EOF
+          fi
+          cat >> "${config_template}" <<'EOF'
           kubeadmConfigPatches:
+        EOF
+          if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
+          cat >> "${config_template}" <<'EOF'
           - |
             kind: InitConfiguration
+            apiVersion: kubeadm.k8s.io/v1beta4
             patches:
               directory: /patches
+        EOF
+          fi
+          if [[ "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" == "true" ]]; then
+          cat >> "${config_template}" <<'EOF'
+          - |
+            kind: ClusterConfiguration
+            apiVersion: kubeadm.k8s.io/v1beta4
+            controllerManager:
+              extraArgs:
+              - name: leader-elect
+                value: "false"
+            scheduler:
+              extraArgs:
+              - name: leader-elect
+                value: "false"
+        EOF
+          fi
+          cat >> "${config_template}" <<'EOF'
         {{- range $.workers }}
         - role: worker
           {{- if hasKey $ "image" }}
@@ -411,12 +455,16 @@ runs:
           {{- end }}
         {{- end }}
         EOF
-          sed -i "s#__PATCH_DIR__#${patch_dir}#g" "${config_template}"
-          echo "Applying control-plane static pod resource patches from ${patch_dir}:"
-          for patch_file in "${patch_dir}"/*.yaml; do
-            echo "--- ${patch_file}"
-            sed 's/^/  /' "${patch_file}"
-          done
+          if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
+            echo "Applying control-plane static pod resource patches from ${patch_dir}:"
+            for patch_file in "${patch_dir}"/*.yaml; do
+              echo "--- ${patch_file}"
+              sed 's/^/  /' "${patch_file}"
+            done
+          fi
+          if [[ "${DISABLE_CONTROL_PLANE_LEADER_ELECTION}" == "true" ]]; then
+            echo "Disabling kube-controller-manager and kube-scheduler leader election for single-control-plane kind CI."
+          fi
           CREATE_ARGS+=(--config-template="${config_template}")
         fi
 

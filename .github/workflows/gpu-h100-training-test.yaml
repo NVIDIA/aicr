@@ -122,6 +122,7 @@ jobs:
           min_available_memory_gb: '16'
           cluster_create_timeout: 900s
           control_plane_resource_patches: 'true'
+          disable_control_plane_leader_election: 'true'
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
@@ -149,7 +150,6 @@ jobs:
           platform: kubeflow
           wait: 'true'
           best_effort: 'false'
-          deploy_trace: 'true'
 
       - name: Check control plane health
         id: post_runtime_control_plane_health

@@ -39,10 +39,6 @@ inputs:
     description: 'Continue deploying remaining bundle components after a component failure'
     required: false
     default: 'true'
-  deploy_trace:
-    description: 'Run generated deploy.sh with bash xtrace for CI diagnostics. Do not enable for bundles with secret command arguments.'
-    required: false
-    default: 'false'
 
 runs:
   using: 'composite'
@@ -128,14 +124,7 @@ runs:
         else
           echo "Deploying bundle with default args"
         fi
-        if [[ "${{ inputs.deploy_trace }}" == "true" ]]; then
-          echo "Deploy trace enabled: running deploy.sh with bash xtrace"
-          echo "::warning::deploy_trace prints shell command arguments; disable it for bundles with secret values"
-          export PS4='+ ${BASH_SOURCE}:${LINENO}: '
-          bash -x ./deploy.sh "${DEPLOY_ARGS[@]}"
-        else
-          ./deploy.sh "${DEPLOY_ARGS[@]}"
-        fi
+        ./deploy.sh "${DEPLOY_ARGS[@]}"
 
     - name: Wait for GPU operands (bundle)
       if: inputs.method == 'bundle'

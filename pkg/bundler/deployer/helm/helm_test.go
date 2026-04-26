@@ -528,6 +528,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 		wantTimeout         string
 		wantRetryAssignment string
 		wantRetryCap        string
+		wantApplyArgs       string
 		wantComment         string
 		rejectRetryCap      bool
 	}{
@@ -544,6 +545,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			wantTimeout:         `COMPONENT_HELM_TIMEOUT="30m"`,
 			wantRetryAssignment: `COMPONENT_MAX_RETRIES="1"`,
 			wantRetryCap:        `if [[ "${COMPONENT_MAX_RETRIES}" -gt 1 ]]`,
+			wantApplyArgs:       `COMPONENT_HELM_APPLY_ARGS=(--server-side=false)`,
 		},
 		{
 			name: "kube-prometheus-stack",
@@ -608,6 +610,12 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			}
 			if tt.wantRetryCap != "" && !strings.Contains(componentBlock, tt.wantRetryCap) {
 				t.Errorf("deploy.sh missing %s retry cap %q", tt.component.Name, tt.wantRetryCap)
+			}
+			if tt.wantApplyArgs != "" && !strings.Contains(componentBlock, tt.wantApplyArgs) {
+				t.Errorf("deploy.sh missing %s apply args %q", tt.component.Name, tt.wantApplyArgs)
+			}
+			if tt.wantApplyArgs != "" && !strings.Contains(script[blockStart:], `"${COMPONENT_HELM_APPLY_ARGS[@]}"`) {
+				t.Errorf("deploy.sh missing %s apply args in helm command", tt.component.Name)
 			}
 			if tt.wantComment != "" && !strings.Contains(componentBlock, tt.wantComment) {
 				t.Errorf("deploy.sh missing %s retry rationale", tt.component.Name)
