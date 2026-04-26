@@ -15,6 +15,32 @@
 name: 'GPU Cluster Setup'
 description: 'Creates a GPU-enabled kind cluster using nvkind with CDI-mode GPU passthrough.'
 
+inputs:
+  kind_node_image:
+    description: 'Kind node image for nvkind cluster creation'
+    required: false
+    default: ''
+  min_gpu_count:
+    description: 'Minimum visible GPU count required before cluster setup'
+    required: false
+    default: '1'
+  gpu_model_pattern:
+    description: 'Optional grep-compatible GPU model pattern required for visible GPUs'
+    required: false
+    default: ''
+  min_free_disk_gb:
+    description: 'Minimum free disk space on / required before cluster setup'
+    required: false
+    default: '20'
+  min_available_memory_gb:
+    description: 'Minimum available system memory required before cluster setup'
+    required: false
+    default: '8'
+  cluster_create_timeout:
+    description: 'Timeout for nvkind cluster create'
+    required: false
+    default: '900s'
+
 runs:
   using: 'composite'
   steps:
@@ -53,12 +79,84 @@ runs:
     - name: Install nvkind
       shell: bash
       run: |
-        go install github.com/NVIDIA/nvkind/cmd/nvkind@latest
+        go install "github.com/NVIDIA/nvkind/cmd/nvkind@${{ steps.versions.outputs.nvkind }}"
         nvkind --help
 
-    - name: Verify host GPU
+    - name: Runner preflight
       shell: bash
-      run: nvidia-smi -L
+      env:
+        GPU_MODEL_PATTERN: ${{ inputs.gpu_model_pattern }}
+        MIN_GPU_COUNT: ${{ inputs.min_gpu_count }}
+        MIN_FREE_DISK_GB: ${{ inputs.min_free_disk_gb }}
+        MIN_AVAILABLE_MEMORY_GB: ${{ inputs.min_available_memory_gb }}
+        KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
+      run: |
+        set -euo pipefail
+
+        echo "=== Runner baseline ==="
+        date -u
+        hostname
+        uptime
+        nproc
+        free -h
+        df -h /
+        df -ih /
+
+        for value_name in MIN_GPU_COUNT MIN_FREE_DISK_GB MIN_AVAILABLE_MEMORY_GB; do
+          value="${!value_name}"
+          if ! [[ "${value}" =~ ^[0-9]+$ ]]; then
+            echo "::error::${value_name} must be an integer, got '${value}'"
+            exit 1
+          fi
+        done
+
+        free_disk_gb=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+        if (( free_disk_gb < MIN_FREE_DISK_GB )); then
+          echo "::error::free disk on / is ${free_disk_gb}GiB, need at least ${MIN_FREE_DISK_GB}GiB"
+          exit 1
+        fi
+
+        available_memory_gb=$(free -g | awk '/^Mem:/ {print $7}')
+        if (( available_memory_gb < MIN_AVAILABLE_MEMORY_GB )); then
+          echo "::error::available memory is ${available_memory_gb}GiB, need at least ${MIN_AVAILABLE_MEMORY_GB}GiB"
+          exit 1
+        fi
+
+        echo "=== Docker health ==="
+        docker info >/dev/null
+        docker version
+
+        echo "=== Host GPUs ==="
+        nvidia-smi -L
+        nvidia-smi
+
+        mapfile -t gpu_names < <(nvidia-smi --query-gpu=name --format=csv,noheader)
+        if [[ -n "${GPU_MODEL_PATTERN}" ]]; then
+          gpu_count=$(printf '%s\n' "${gpu_names[@]}" | grep -Eic "${GPU_MODEL_PATTERN}" || true)
+          echo "Visible GPUs matching '${GPU_MODEL_PATTERN}': ${gpu_count}"
+        else
+          gpu_count="${#gpu_names[@]}"
+          echo "Visible GPUs: ${gpu_count}"
+        fi
+
+        if (( gpu_count < MIN_GPU_COUNT )); then
+          echo "::error::visible GPU count ${gpu_count} is below required minimum ${MIN_GPU_COUNT}"
+          exit 1
+        fi
+
+        echo "=== Existing kind state ==="
+        kind get clusters || true
+        docker ps -a --filter "name=${KIND_CLUSTER_NAME}" || true
+
+        if [[ -n "${KIND_NODE_IMAGE}" ]]; then
+          echo "=== Kind node image cache ==="
+          if docker image inspect "${KIND_NODE_IMAGE}" >/dev/null 2>&1; then
+            echo "Kind node image already cached: ${KIND_NODE_IMAGE}"
+          else
+            echo "Pulling kind node image: ${KIND_NODE_IMAGE}"
+            timeout 600s docker pull "${KIND_NODE_IMAGE}"
+          fi
+        fi
 
     - name: Configure NVIDIA Container Toolkit for kind
       shell: bash
@@ -70,7 +168,9 @@ runs:
 
     - name: Validate Docker GPU access
       shell: bash
-      run: docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
+      run: |
+        set -euo pipefail
+        docker run --rm -v /dev/null:/var/run/nvidia-container-devices/all ubuntu:22.04 nvidia-smi -L
 
     - name: Increase inotify limits
       shell: bash
@@ -78,13 +178,67 @@ runs:
         sudo sysctl -w fs.inotify.max_user_watches=524288
         sudo sysctl -w fs.inotify.max_user_instances=1024
 
-    - name: Create GPU-enabled kind cluster
+    - name: Delete stale kind cluster
       shell: bash
       run: |
-        nvkind cluster create --name="${KIND_CLUSTER_NAME}" || echo "::warning::nvkind cluster create returned non-zero (umount errors are expected with CDI mode)"
+        set -euo pipefail
+        if kind get clusters | grep -Fxq "${KIND_CLUSTER_NAME}"; then
+          echo "Deleting stale kind cluster: ${KIND_CLUSTER_NAME}"
+          timeout 180s kind delete cluster --name "${KIND_CLUSTER_NAME}"
+        else
+          echo "No stale kind cluster named ${KIND_CLUSTER_NAME}"
+        fi
+
+        remaining_containers=$(docker ps -aq --filter "name=${KIND_CLUSTER_NAME}")
+        if [[ -n "${remaining_containers}" ]]; then
+          echo "Removing stale containers for ${KIND_CLUSTER_NAME}:"
+          docker ps -a --filter "name=${KIND_CLUSTER_NAME}"
+          docker rm -f ${remaining_containers}
+        fi
+
+        remaining_containers=$(docker ps -aq --filter "name=${KIND_CLUSTER_NAME}")
+        if [[ -n "${remaining_containers}" ]]; then
+          echo "::error::stale containers still remain for ${KIND_CLUSTER_NAME}:"
+          docker ps -a --filter "name=${KIND_CLUSTER_NAME}"
+          exit 1
+        fi
+
+    - name: Create GPU-enabled kind cluster
+      shell: bash
+      env:
+        KIND_NODE_IMAGE: ${{ inputs.kind_node_image }}
+        CLUSTER_CREATE_TIMEOUT: ${{ inputs.cluster_create_timeout }}
+      run: |
+        set -euo pipefail
+
+        CREATE_ARGS=(--name="${KIND_CLUSTER_NAME}")
+        if [[ -n "${KIND_NODE_IMAGE}" ]]; then
+          echo "Using kind node image: ${KIND_NODE_IMAGE}"
+          CREATE_ARGS+=(--image="${KIND_NODE_IMAGE}")
+        fi
+
+        set +e
+        timeout "${CLUSTER_CREATE_TIMEOUT}" nvkind cluster create "${CREATE_ARGS[@]}"
+        create_status=$?
+        set -e
+        if (( create_status != 0 )); then
+          echo "::warning::nvkind cluster create exited with status ${create_status}; continuing only if post-create checks pass"
+        fi
+
         kubectl --context="kind-${KIND_CLUSTER_NAME}" wait --for=condition=Ready nodes --all --timeout=300s
         kubectl --context="kind-${KIND_CLUSTER_NAME}" cluster-info
         kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide
+
+        echo "=== Control-plane resource requests/limits ==="
+        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kube-system \
+          get pods -l tier=control-plane -o json | jq -r '
+            .items[] as $pod |
+            $pod.metadata.name,
+            ($pod.spec.containers[] |
+              "  " + .name +
+              " requests=" + ((.resources.requests // {}) | tostring) +
+              " limits=" + ((.resources.limits // {}) | tostring))
+          ' || true
 
     - name: Print GPUs (nvkind)
       shell: bash

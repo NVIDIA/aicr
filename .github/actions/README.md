@@ -50,7 +50,8 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **When to use**: When you need version values in workflow steps
 **Outputs**:
 - `go`, `goreleaser`, `ko`, `crane`, `golangci_lint`, `yamllint`, `addlicense`
-- `grype`, `kubectl`, `kind`, `ctlptl`, `tilt`, `helm`
+- `grype`, `kubectl`, `kind`, `nvkind`, `ctlptl`, `tilt`, `helm`
+- `kind_node_image`, `h100_kind_node_image`
 
 **Example**:
 ```yaml
