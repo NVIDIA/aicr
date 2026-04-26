@@ -518,20 +518,47 @@ func TestGenerate_DeployScriptKaiSchedulerTimeout(t *testing.T) {
 	if !strings.Contains(script, `kubectl describe pods -n "${namespace}"`) {
 		t.Error("deploy.sh missing pod diagnostics")
 	}
+
+	rootReadmeContent, err := os.ReadFile(filepath.Join(outputDir, "README.md"))
+	if err != nil {
+		t.Fatalf("failed to read root README: %v", err)
+	}
+	componentReadmeContent, err := os.ReadFile(filepath.Join(outputDir, "kai-scheduler", "README.md"))
+	if err != nil {
+		t.Fatalf("failed to read component README: %v", err)
+	}
+	rootReadme := string(rootReadmeContent)
+	componentReadme := string(componentReadmeContent)
+	if !strings.Contains(rootReadme, `--timeout 30m`) {
+		t.Error("root README missing kai-scheduler 30m timeout")
+	}
+	if !strings.Contains(componentReadme, `--timeout 30m`) {
+		t.Error("component README missing kai-scheduler 30m timeout")
+	}
+	if strings.Contains(componentReadme, `--wait --timeout 30m`) {
+		t.Error("component README should document kai-scheduler without --wait")
+	}
+	if strings.Contains(componentReadme, `--wait --timeout 10m`) {
+		t.Error("component README should not use default timeout for kai-scheduler")
+	}
 }
 
 func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 	retryCapPattern := regexp.MustCompile(`(?m)(if \[\[ "\$\{COMPONENT_MAX_RETRIES\}" -gt \d+ \]\]|COMPONENT_MAX_RETRIES="\d+")`)
+	applyArgsExpansion := `${COMPONENT_HELM_APPLY_ARGS[@]+"${COMPONENT_HELM_APPLY_ARGS[@]}"}`
 	tests := []struct {
-		name                string
-		component           recipe.ComponentRef
-		wantTimeout         string
-		wantRetryAssignment string
-		wantRetryCap        string
-		wantApplyArgs       string
-		wantComment         string
-		wantSnippets        []string
-		rejectRetryCap      bool
+		name                 string
+		component            recipe.ComponentRef
+		wantTimeout          string
+		wantRetryAssignment  string
+		wantRetryCap         string
+		wantApplyArgs        string
+		wantComment          string
+		wantSnippets         []string
+		wantReadmeSnippets   []string
+		rejectSnippets       []string
+		rejectReadmeSnippets []string
+		rejectRetryCap       bool
 	}{
 		{
 			name: "dynamo-platform",
@@ -552,6 +579,10 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 				`deployment/dynamo-platform-dynamo-operator-controller-manager`,
 				`--previous --tail=200`,
 			},
+			wantReadmeSnippets: []string{
+				`--server-side=false`,
+				`--wait --timeout 20m`,
+			},
 		},
 		{
 			name: "kube-prometheus-stack",
@@ -565,6 +596,33 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			},
 			wantTimeout:    `COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"`,
 			wantComment:    `preserve the default retry`,
+			rejectRetryCap: true,
+		},
+		{
+			name: "ordinary component defaults",
+			component: recipe.ComponentRef{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.10.1",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+			wantTimeout:   `COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"`,
+			wantApplyArgs: `COMPONENT_HELM_APPLY_ARGS=()`,
+			wantReadmeSnippets: []string{
+				`--wait --timeout 10m`,
+			},
+			rejectSnippets: []string{
+				`--server-side=false`,
+				`COMPONENT_MAX_RETRIES="1"`,
+				`COMPONENT_MAX_RETRIES="3"`,
+			},
+			rejectReadmeSnippets: []string{
+				`--server-side=false`,
+				`--wait --timeout 20m`,
+				`--timeout 30m`,
+			},
 			rejectRetryCap: true,
 		},
 	}
@@ -620,7 +678,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			if tt.wantApplyArgs != "" && !strings.Contains(componentBlock, tt.wantApplyArgs) {
 				t.Errorf("deploy.sh missing %s apply args %q", tt.component.Name, tt.wantApplyArgs)
 			}
-			if tt.wantApplyArgs != "" && !strings.Contains(script[blockStart:], `"${COMPONENT_HELM_APPLY_ARGS[@]}"`) {
+			if tt.wantApplyArgs != "" && !strings.Contains(script[blockStart:], applyArgsExpansion) {
 				t.Errorf("deploy.sh missing %s apply args in helm command", tt.component.Name)
 			}
 			if tt.wantComment != "" && !strings.Contains(componentBlock, tt.wantComment) {
@@ -631,8 +689,40 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 					t.Errorf("deploy.sh missing %s snippet %q", tt.component.Name, snippet)
 				}
 			}
+			for _, snippet := range tt.rejectSnippets {
+				if strings.Contains(componentBlock, snippet) {
+					t.Errorf("deploy.sh should not include %s snippet %q", tt.component.Name, snippet)
+				}
+			}
 			if tt.rejectRetryCap && retryCapPattern.MatchString(componentBlock) {
 				t.Errorf("deploy.sh should not cap %s retries in its component block", tt.component.Name)
+			}
+
+			rootReadmeContent, err := os.ReadFile(filepath.Join(outputDir, "README.md"))
+			if err != nil {
+				t.Fatalf("failed to read root README: %v", err)
+			}
+			componentReadmeContent, err := os.ReadFile(filepath.Join(outputDir, tt.component.Name, "README.md"))
+			if err != nil {
+				t.Fatalf("failed to read component README: %v", err)
+			}
+			rootReadme := string(rootReadmeContent)
+			componentReadme := string(componentReadmeContent)
+			for _, snippet := range tt.wantReadmeSnippets {
+				if !strings.Contains(rootReadme, snippet) {
+					t.Errorf("root README missing %s snippet %q", tt.component.Name, snippet)
+				}
+				if !strings.Contains(componentReadme, snippet) {
+					t.Errorf("component README missing %s snippet %q", tt.component.Name, snippet)
+				}
+			}
+			for _, snippet := range tt.rejectReadmeSnippets {
+				if strings.Contains(rootReadme, snippet) {
+					t.Errorf("root README should not include %s snippet %q", tt.component.Name, snippet)
+				}
+				if strings.Contains(componentReadme, snippet) {
+					t.Errorf("component README should not include %s snippet %q", tt.component.Name, snippet)
+				}
 			}
 		})
 	}

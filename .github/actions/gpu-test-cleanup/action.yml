@@ -28,19 +28,36 @@ runs:
   using: 'composite'
   steps:
     - name: Collect debug artifacts
-      if: failure()
+      if: failure() || cancelled()
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: |
         set -o pipefail
         mkdir -p /tmp/debug-artifacts
+        CONTROL_PLANE_COMPONENTS="kube-apiserver kube-controller-manager kube-scheduler etcd"
         kubectl_kind() {
           timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
         }
 
         kubectl_kind get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
         kubectl_kind get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
+        kubectl_kind get --raw='/livez?verbose' > /tmp/debug-artifacts/apiserver-livez.txt 2>&1 || true
+        kubectl_kind get --raw='/readyz?verbose' > /tmp/debug-artifacts/apiserver-readyz.txt 2>&1 || true
+        kubectl_kind -n kube-system get pods -l tier=control-plane -o wide \
+          > /tmp/debug-artifacts/control-plane-pods.txt 2>&1 || true
+        kubectl_kind -n kube-system get events --sort-by='.lastTimestamp' \
+          > /tmp/debug-artifacts/kube-system-events.txt 2>&1 || true
+        for component in ${CONTROL_PLANE_COMPONENTS}; do
+          kubectl_kind -n kube-system describe pod -l "component=${component}" \
+            > "/tmp/debug-artifacts/${component}-describe.txt" 2>&1 || true
+          kubectl_kind -n kube-system logs -l "component=${component}" --all-containers --tail=300 \
+            > "/tmp/debug-artifacts/${component}-logs.txt" 2>&1 || true
+          kubectl_kind -n kube-system logs -l "component=${component}" --all-containers --previous --tail=300 \
+            > "/tmp/debug-artifacts/${component}-previous-logs.txt" 2>&1 || true
+          kubectl_kind -n kube-system get lease "${component}" -o yaml \
+            > "/tmp/debug-artifacts/${component}-lease.yaml" 2>&1 || true
+        done
         kubectl_kind -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
         kubectl_kind -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
         kubectl_kind -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
@@ -55,8 +72,54 @@ runs:
           echo "No recipe.yaml or bundle directory found; skipping runtime bundle archive"
         fi
 
+        docker ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
+          --format '{{.Names}}' | sort | while read -r node_container; do
+            [[ -z "${node_container}" ]] && continue
+            node_file="${node_container//[^A-Za-z0-9_.-]/_}"
+            timeout 30s docker exec "${node_container}" journalctl -u kubelet \
+              --since "90 minutes ago" --no-pager \
+              > "/tmp/debug-artifacts/${node_file}-kubelet-journal.txt" 2>&1 || true
+            timeout 30s docker exec "${node_container}" journalctl -u containerd \
+              --since "90 minutes ago" --no-pager \
+              > "/tmp/debug-artifacts/${node_file}-containerd-journal.txt" 2>&1 || true
+            timeout 30s docker exec "${node_container}" crictl ps -a \
+              > "/tmp/debug-artifacts/${node_file}-crictl-ps-a.txt" 2>&1 || true
+            timeout 30s docker exec "${node_container}" crictl pods \
+              > "/tmp/debug-artifacts/${node_file}-crictl-pods.txt" 2>&1 || true
+            timeout 30s docker exec "${node_container}" crictl stats \
+              > "/tmp/debug-artifacts/${node_file}-crictl-stats.txt" 2>&1 || true
+            timeout 30s docker exec "${node_container}" sh -c '
+              date
+              uptime || true
+              free -h || true
+              df -h / /var/lib/containerd /var/lib/kubelet 2>/dev/null || df -h
+              echo "--- top cpu/memory processes ---"
+              ps -eo pid,ppid,stat,etime,%cpu,%mem,comm,args --sort=-%cpu | head -40 || true
+            ' > "/tmp/debug-artifacts/${node_file}-node-pressure.txt" 2>&1 || true
+            timeout 120s docker exec "${node_container}" sh -c '
+              for component in kube-apiserver kube-controller-manager kube-scheduler etcd; do
+                echo "=== ${component} static pod manifest ==="
+                sed -n "1,220p" "/etc/kubernetes/manifests/${component}.yaml" 2>/dev/null || true
+                echo "=== ${component} CRI containers ==="
+                crictl ps -a --name "${component}" || true
+                count=0
+                for container_id in $(crictl ps -a --name "${component}" -q 2>/dev/null); do
+                  count=$((count + 1))
+                  if [ "${count}" -gt 8 ]; then
+                    echo "Skipping remaining ${component} CRI containers after first 8 entries."
+                    break
+                  fi
+                  echo "=== crictl inspect ${component} ${container_id} ==="
+                  crictl inspect "${container_id}" || true
+                  echo "=== crictl logs ${component} ${container_id} ==="
+                  crictl logs --tail=300 "${container_id}" || true
+                done
+              done
+            ' > "/tmp/debug-artifacts/${node_file}-control-plane-cri.txt" 2>&1 || true
+          done
+
     - name: Export kind logs
-      if: failure()
+      if: failure() || cancelled()
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
@@ -82,7 +145,7 @@ runs:
         timeout 60s docker system prune -f --filter "until=24h" || true
 
     - name: Upload debug artifacts
-      if: failure()
+      if: failure() || cancelled()
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
         name: ${{ inputs.artifact_name_prefix }}-${{ github.run_id }}

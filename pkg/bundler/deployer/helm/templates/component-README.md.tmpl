@@ -43,19 +43,31 @@ Namespace: {{ .Namespace }}
 ```bash
 {{ if .IsOCI -}}
 helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  {{ if eq .Name "dynamo-platform" }}--server-side=false \
+  {{ end -}}
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f values.yaml \
   -f cluster-values.yaml \
-  --wait --timeout 10m
+  {{ if eq .Name "kai-scheduler" -}}
+  --timeout 30m
+  {{ else -}}
+  --wait --timeout {{ if eq .Name "dynamo-platform" }}20m{{ else }}10m{{ end }}
+  {{ end -}}
 {{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
+  {{ if eq .Name "dynamo-platform" }}--server-side=false \
+  {{ end -}}
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f values.yaml \
   -f cluster-values.yaml \
-  --wait --timeout 10m
+  {{ if eq .Name "kai-scheduler" -}}
+  --timeout 30m
+  {{ else -}}
+  --wait --timeout {{ if eq .Name "dynamo-platform" }}20m{{ else }}10m{{ end }}
+  {{ end -}}
 {{ end -}}
 ```
 {{ if .HasManifests }}
@@ -70,19 +82,31 @@ kubectl apply -f manifests/
 ```bash
 {{ if .IsOCI -}}
 helm upgrade {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  {{ if eq .Name "dynamo-platform" }}--server-side=false \
+  {{ end -}}
   --version {{ .Version }} \
   -n {{ .Namespace }} \
   -f values.yaml \
   -f cluster-values.yaml \
-  --wait --timeout 10m
+  {{ if eq .Name "kai-scheduler" -}}
+  --timeout 30m
+  {{ else -}}
+  --wait --timeout {{ if eq .Name "dynamo-platform" }}20m{{ else }}10m{{ end }}
+  {{ end -}}
 {{ else -}}
 helm upgrade {{ .Name }} {{ .ChartName }} \
+  {{ if eq .Name "dynamo-platform" }}--server-side=false \
+  {{ end -}}
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} \
   -f values.yaml \
   -f cluster-values.yaml \
-  --wait --timeout 10m
+  {{ if eq .Name "kai-scheduler" -}}
+  --timeout 30m
+  {{ else -}}
+  --wait --timeout {{ if eq .Name "dynamo-platform" }}20m{{ else }}10m{{ end }}
+  {{ end -}}
 {{ end -}}
 ```
 

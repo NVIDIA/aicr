@@ -85,6 +85,9 @@ runs:
           echo "::error::stability_window must be a duration like 0s, 60s, or 2m; got '${STABILITY_WINDOW}'"
           exit 1
         fi
+        if [[ "${STABILITY_WINDOW}" =~ ^0+[smh]$ ]]; then
+          STABILITY_WINDOW="0s"
+        fi
 
         RECOVER_UNHEALTHY="${RECOVER_UNHEALTHY#"${RECOVER_UNHEALTHY%%[![:space:]]*}"}"
         RECOVER_UNHEALTHY="${RECOVER_UNHEALTHY%"${RECOVER_UNHEALTHY##*[![:space:]]}"}"
@@ -167,9 +170,107 @@ runs:
 
           if ! kubectl_kind get --raw='/readyz'; then
             echo "::error::kube-apiserver /readyz failed ${reason}"
-            dump_control_plane_summary
+            dump_all_control_plane_runtime_diagnostics
             exit 1
           fi
+        }
+
+        dump_api_server_health() {
+          local endpoint
+
+          for endpoint in '/livez?verbose' '/readyz?verbose' '/healthz'; do
+            echo "=== kube-apiserver ${endpoint} ==="
+            kubectl_kind get --raw="${endpoint}" || true
+          done
+        }
+
+        dump_kind_node_runtime_summary() {
+          local node="${KIND_CLUSTER_NAME}-control-plane"
+
+          if ! docker_timeout inspect "${node}" >/dev/null 2>&1; then
+            echo "::warning::cannot collect node runtime summary: kind node container ${node} not found"
+            return
+          fi
+
+          echo "=== ${node} docker stats ==="
+          docker_timeout stats --no-stream \
+            --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}\t{{.PIDs}}' \
+            "${node}" || true
+
+          echo "=== ${node} docker inspect state ==="
+          docker_timeout inspect \
+            --format 'status={{.State.Status}} running={{.State.Running}} oomKilled={{.State.OOMKilled}} pid={{.State.Pid}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' \
+            "${node}" || true
+
+          echo "=== ${node} node pressure snapshot ==="
+          docker_timeout exec "${node}" sh -c '
+            date
+            uptime || true
+            free -h || true
+            df -h / /var/lib/containerd /var/lib/kubelet 2>/dev/null || df -h
+            echo "--- top cpu/memory processes ---"
+            ps -eo pid,ppid,stat,etime,%cpu,%mem,comm,args --sort=-%cpu | head -40 || true
+          ' || true
+
+          echo "=== ${node} CRI pod/container summary ==="
+          docker_timeout exec "${node}" crictl pods || true
+          docker_timeout exec "${node}" crictl ps -a || true
+          docker_timeout exec "${node}" crictl stats || true
+        }
+
+        dump_static_pod_runtime_diagnostics() {
+          local component="$1"
+          local node="${KIND_CLUSTER_NAME}-control-plane"
+          local container_ids
+          local container_id
+          local count=0
+
+          if ! docker_timeout inspect "${node}" >/dev/null 2>&1; then
+            echo "::warning::cannot collect ${component} runtime diagnostics: kind node container ${node} not found"
+            return
+          fi
+
+          echo "=== ${node} ${component} static pod manifest ==="
+          docker_timeout exec "${node}" sh -c "sed -n '1,220p' /etc/kubernetes/manifests/${component}.yaml" || true
+
+          echo "=== ${node} ${component} CRI containers ==="
+          docker_timeout exec "${node}" crictl ps -a --name "${component}" || true
+
+          container_ids=$(docker_timeout exec "${node}" crictl ps -a --name "${component}" -q 2>/dev/null || true)
+          for container_id in ${container_ids}; do
+            count=$((count + 1))
+            if (( count > 8 )); then
+              echo "Skipping remaining ${component} CRI containers after first 8 entries."
+              break
+            fi
+
+            echo "=== ${node} crictl inspect ${component} ${container_id} ==="
+            docker_timeout exec "${node}" crictl inspect "${container_id}" || true
+            echo "=== ${node} crictl logs ${component} ${container_id} ==="
+            docker_timeout exec "${node}" crictl logs --tail=200 "${container_id}" || true
+          done
+
+          echo "=== ${node} kubelet journal (${component}) ==="
+          docker_timeout exec "${node}" journalctl -u kubelet --since '45 minutes ago' --no-pager 2>/dev/null \
+            | grep -Ei "${component}|static pod|mirror pod|probe|liveness|readiness|startup|back-off|backoff|container|failed|error|oom|killed" \
+            | tail -200 || true
+
+          echo "=== ${node} containerd journal (${component}) ==="
+          docker_timeout exec "${node}" journalctl -u containerd --since '45 minutes ago' --no-pager 2>/dev/null \
+            | grep -Ei "${component}|container|task|shim|deadline|failed|error|oom|killed" \
+            | tail -200 || true
+        }
+
+        dump_all_control_plane_runtime_diagnostics() {
+          local component
+
+          dump_control_plane_summary
+          dump_api_server_health
+          dump_kind_node_runtime_summary
+          for component in ${COMPONENTS}; do
+            dump_static_pod_runtime_diagnostics "${component}"
+            kubectl_kind -n kube-system get lease "${component}" -o yaml 2>/dev/null || true
+          done
         }
 
         dump_component_diagnostics() {
@@ -192,6 +293,7 @@ runs:
             kubectl_kind -n "${NAMESPACE}" logs "${pod}" --all-containers --previous --tail=100 2>/dev/null || true
           done <<< "${pods}"
 
+          dump_all_control_plane_runtime_diagnostics
           kubectl_kind -n kube-system get lease "${component}" -o yaml 2>/dev/null || true
         }
 

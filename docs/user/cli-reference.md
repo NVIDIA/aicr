@@ -1308,6 +1308,8 @@ Unknown flags are rejected with an error to catch typos (e.g., `--best-effort`).
 
 The deploy script retries failed `helm upgrade --install` and `kubectl apply` operations with exponential backoff. By default, each operation is retried up to 5 times (6 total attempts). The backoff delay increases quadratically: 5s, 20s, 45s, 80s, 120s (capped) between retries.
 
+On slower H100 CI runners, `kube-prometheus-stack` can hit Grafana's Deployment progress deadline before a longer Helm timeout would help. The deploy script intentionally keeps the default timeout and retry budget for `kube-prometheus-stack` so subsequent upgrade attempts can succeed after image pulls and controllers settle. Kind H100 Chainsaw health checks do not require Grafana because AICR conformance metrics use Prometheus, DCGM exporter, and prometheus-adapter directly.
+
 Use `--retries 0` to disable retries (fail-fast behavior). When `--best-effort` is also set, retries are exhausted first before falling through to best-effort handling.
 
 **Pre-install manifests and CRD ordering:**
@@ -1318,7 +1320,7 @@ After `helm install`, the same manifests are re-applied as post-install to ensur
 
 **Async components:**
 
-Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness. The `dynamo-platform` Helm command uses client-side apply so retries and upgrades do not conflict with Grove-managed webhook certificate Secret data, while preserving Helm `--wait` behavior. Dynamo installs use a 20 minute per-attempt timeout and cap the retry budget at 3 retries because cold-start failures often involve operator webhook and certificate resources settling across attempts.
+Components that use operator patterns with custom resources that reconcile asynchronously (e.g., `kai-scheduler`) are installed without `--wait` to avoid Helm timing out on CR readiness. Kai Scheduler installs use a 30 minute per-attempt timeout and cap the retry budget at 1 retry so hook diagnostics surface quickly on cold runners. The `dynamo-platform` Helm command uses client-side apply so retries and upgrades do not conflict with Grove-managed webhook certificate Secret data, while preserving Helm `--wait` behavior. Dynamo installs use a 20 minute per-attempt timeout and cap the retry budget at 3 retries because cold-start failures often involve operator webhook and certificate resources settling across attempts.
 
 ##### DRA kubelet plugin registration
 

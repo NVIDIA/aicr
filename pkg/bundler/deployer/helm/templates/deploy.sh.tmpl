@@ -418,7 +418,8 @@ if [[ "${COMPONENT_MAX_RETRIES}" -gt 3 ]]; then
 fi
 {{ else if eq .Name "kube-prometheus-stack" -}}
 # Grafana can trip its Deployment progress deadline before a longer Helm
-# timeout helps. Keep the default 10m timeout and preserve the default retry
+# timeout helps, especially on slower H100 CI runners under image-pull and
+# control-plane load. Keep the default 10m timeout and preserve the default retry
 # budget so later upgrades can succeed after images and controllers settle.
 {{ end -}}
 # Derive wait args: global --wait/--no-wait behavior + component timeout.
@@ -436,7 +437,7 @@ fi
 helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   "${COMPONENT_MAX_RETRIES}" \
   helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
-  "${COMPONENT_HELM_APPLY_ARGS[@]}" \
+  ${COMPONENT_HELM_APPLY_ARGS[@]+"${COMPONENT_HELM_APPLY_ARGS[@]}"} \
   {{ if .Version }}--version {{ .Version }} \
   {{ end -}}
   -n {{ .Namespace }} --create-namespace \
@@ -448,7 +449,7 @@ helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
 helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   "${COMPONENT_MAX_RETRIES}" \
   helm upgrade --install {{ .Name }} {{ .ChartName }} \
-  "${COMPONENT_HELM_APPLY_ARGS[@]}" \
+  ${COMPONENT_HELM_APPLY_ARGS[@]+"${COMPONENT_HELM_APPLY_ARGS[@]}"} \
   --repo {{ .Repository }} \
   {{ if .Version }}--version {{ .Version }} \
   {{ end -}}

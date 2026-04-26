@@ -77,19 +77,31 @@ kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ en
 ```bash
 {{ if .IsOCI -}}
 helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
+  {{ if eq .Name "dynamo-platform" }}--server-side=false \
+  {{ end -}}
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
   -f {{ .Name }}/cluster-values.yaml \
-  --wait --timeout 10m
+  {{ if eq .Name "kai-scheduler" -}}
+  --timeout 30m
+  {{ else -}}
+  --wait --timeout {{ if eq .Name "dynamo-platform" }}20m{{ else }}10m{{ end }}
+  {{ end -}}
 {{ else -}}
 helm upgrade --install {{ .Name }} {{ .ChartName }} \
+  {{ if eq .Name "dynamo-platform" }}--server-side=false \
+  {{ end -}}
   --repo {{ .Repository }} \
   --version {{ .Version }} \
   -n {{ .Namespace }} --create-namespace \
   -f {{ .Name }}/values.yaml \
   -f {{ .Name }}/cluster-values.yaml \
-  --wait --timeout 10m
+  {{ if eq .Name "kai-scheduler" -}}
+  --timeout 30m
+  {{ else -}}
+  --wait --timeout {{ if eq .Name "dynamo-platform" }}20m{{ else }}10m{{ end }}
+  {{ end -}}
 {{ end -}}
 ```
 {{ end -}}
@@ -119,7 +131,9 @@ Each Helm component has two values files in its directory:
 
 ## Upgrade
 
-To upgrade a specific Helm component:
+To upgrade a specific Helm component, use the generic form below. Some
+components require component-specific flags; use the component subdirectory
+`README.md` for the exact command.
 
 ```bash
 helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml -f <component>/cluster-values.yaml --wait --timeout 10m

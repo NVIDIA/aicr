@@ -124,10 +124,10 @@ jobs:
           control_plane_resource_patches: 'true'
           control_plane_leader_election_tuning: 'true'
 
-      - name: Build aicr
+      - name: Build aicr and snapshot agent image
         uses: ./.github/actions/aicr-build
         with:
-          build_snapshot_agent: 'false'
+          build_snapshot_agent: 'true'
           validator_phases: 'none'
 
       # Fast readiness gate after cluster setup. Stability windows start after
@@ -159,15 +159,6 @@ jobs:
           wait_timeout: 120s
           stability_window: 60s
           recover_unhealthy: 'true'
-
-      # --- Snapshot and GPU validation ---
-
-      - name: Build snapshot agent image
-        uses: ./.github/actions/aicr-build
-        with:
-          build_cli: 'false'
-          build_snapshot_agent: 'true'
-          validator_phases: 'none'
 
       - name: Snapshot and validate GPU
         uses: ./.github/actions/gpu-snapshot-validate

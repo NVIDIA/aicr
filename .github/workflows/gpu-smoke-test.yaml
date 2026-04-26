@@ -88,6 +88,12 @@ jobs:
 
       - name: Set up GPU cluster
         uses: ./.github/actions/gpu-cluster-setup
+        with:
+          # Keep smoke runner preflight explicit so action default changes do not
+          # silently alter L40G coverage.
+          min_gpu_count: '1'
+          min_free_disk_gb: '20'
+          min_available_memory_gb: '8'
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
