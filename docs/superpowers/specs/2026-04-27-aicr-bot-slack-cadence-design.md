@@ -44,7 +44,7 @@ Recent release cadence saw up to ~5 patch releases per workday during release we
 
 ### Mon-Fri (daily threaded)
 
-```
+```text
 05:00 UTC   daily-status.yaml      (NEW)        → "Daily AICR-bot status — 2026-04-27"   [parent]
 06:00 UTC   vuln-scan-images.yaml  (modified)   → Vulnerability Scan: …                  [thread reply]
 12:30 UTC   issue-report.yaml      (modified)   → AICR Issues — Mon, Apr 27 …            [thread reply]
@@ -53,7 +53,7 @@ on tag      on-tag.yaml notify     (modified)   → AICR v0.12.0 has been releas
 
 ### Sat-Sun (weekly only, no daily noise)
 
-```
+```text
 Sat 14:00 UTC   weekly-summary.yaml (NEW)       → "AICR weekly — week of 2026-04-21"     [top-level]
                                                     Releases (5):
                                                       • v0.12.0 (Mon) — link
@@ -74,7 +74,7 @@ Sat 14:00 UTC   weekly-summary.yaml (NEW)       → "AICR weekly — week of 202
 
 The first line of every weekday parent message is exactly:
 
-```
+```text
 Daily AICR-bot status — {YYYY-MM-DD}
 ```
 
@@ -200,7 +200,7 @@ Permissions: `contents: read`, `issues: read`, `actions: read` (for `gh run list
 |---|---|
 | Bot not in channel | `chat.postMessage` returns `not_in_channel`. Action fails with explicit error pointing to the operational prerequisite. No retry — operator action required. |
 | `conversations.history` rate-limited or fails | Fall back to creating a fresh parent. Worst case: one orphaned top-level message that day. Workflow does not fail. |
-| `chat.postMessage` fails on the post/reply | Log message body to `$GITHUB_STEP_SUMMARY`, exit non-zero. Matches today's behaviour on webhook failure. |
+| `chat.postMessage` fails on the post/reply | `slack_api` emits the failed response as a workflow `::error::` annotation and exits non-zero. The job fails so the operator sees the run in red. |
 | Race producing two daily parents | Both survive; later workflows reply to most recent matching parent. Self-heals next day. |
 | `SLACK_BOT_TOKEN` / `SLACK_CHANNEL_ID` unset | Action fails immediately with explicit message naming the missing setting. |
 | UTC date rollover during a workflow run | Marker is computed once at step start; subsequent calls in the same run use that snapshot. A workflow that begins at 23:59 UTC and posts at 00:01 UTC threads under yesterday's parent — acceptable. |
