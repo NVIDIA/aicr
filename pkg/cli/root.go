@@ -159,6 +159,7 @@ func newRootCmd() *cli.Command {
 			bundleVerifyCmd(),
 			validateCmd(),
 			trustCmd(),
+			skillCmd(),
 		},
 		ShellComplete: completeWithAllFlags,
 	}
