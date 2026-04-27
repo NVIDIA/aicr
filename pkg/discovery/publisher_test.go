@@ -248,33 +248,33 @@ func TestPublisher_ValidationRejectsInvalidNames(t *testing.T) {
 	defer cancel()
 
 	tests := []struct {
-		name     string
-		reg      AgentRegistration
-		errMsg   string
+		name   string
+		reg    AgentRegistration
+		errMsg string
 	}{
 		{
-			name: "uppercase name",
-			reg:  AgentRegistration{Name: "MyAgent", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
+			name:   "uppercase name",
+			reg:    AgentRegistration{Name: "MyAgent", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
 			errMsg: "not a valid DNS label",
 		},
 		{
-			name: "name with slash",
-			reg:  AgentRegistration{Name: "../etc", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
+			name:   "name with slash",
+			reg:    AgentRegistration{Name: "../etc", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
 			errMsg: "not a valid DNS label",
 		},
 		{
-			name: "empty name",
-			reg:  AgentRegistration{Name: "", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
+			name:   "empty name",
+			reg:    AgentRegistration{Name: "", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
 			errMsg: "not a valid DNS label",
 		},
 		{
-			name: "name starting with hyphen",
-			reg:  AgentRegistration{Name: "-bad", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
+			name:   "name starting with hyphen",
+			reg:    AgentRegistration{Name: "-bad", Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
 			errMsg: "not a valid DNS label",
 		},
 		{
-			name: "name exceeding limit",
-			reg:  AgentRegistration{Name: strings.Repeat("a", 250), Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
+			name:   "name exceeding limit",
+			reg:    AgentRegistration{Name: strings.Repeat("a", 250), Protocol: ProtocolMCP, ServiceName: "svc", Version: "1.0"},
 			errMsg: "exceeds 253 character limit",
 		},
 	}

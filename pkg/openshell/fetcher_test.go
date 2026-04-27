@@ -16,6 +16,7 @@ package openshell
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -144,6 +145,60 @@ func TestFetcherRejectsOversized(t *testing.T) {
 	_, err := f.Fetch(context.Background(), srv.URL+"/policy.json")
 	if err == nil {
 		t.Error("expected error for oversized document")
+	}
+}
+
+func TestFetcherSSRFDialBlocksPrivateIP(t *testing.T) {
+	// Regression test: a fetcher with the default safe transport must refuse
+	// to dial private/loopback IPs even when the URL parses cleanly. httptest
+	// always binds to 127.0.0.1 so a default-configured fetcher should fail.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"1.0","agent":"x","rules":{}}`))
+	}))
+	defer srv.Close()
+
+	// Use the test server's TLS root pool but our own safe transport so the
+	// dial-time SSRF check applies. WithHTTPClient is intentionally NOT used.
+	f := NewFetcher()
+	// Replace transport with one that has the same RootCAs but our SSRF guard.
+	transport := newSafeTransport(false)
+	transport.TLSClientConfig = srv.Client().Transport.(*http.Transport).TLSClientConfig
+	f.client = &http.Client{Transport: transport, Timeout: 2 * time.Second}
+
+	_, err := f.Fetch(context.Background(), srv.URL+"/policy.json")
+	if err == nil {
+		t.Fatal("expected dial-time SSRF rejection, got nil")
+	}
+}
+
+func TestIsBlockedIP(t *testing.T) {
+	tests := []struct {
+		ip      string
+		blocked bool
+	}{
+		{"127.0.0.1", true},
+		{"10.0.0.5", true},
+		{"192.168.1.1", true},
+		{"172.16.0.1", true},
+		{"169.254.1.1", true},
+		{"0.0.0.0", true},
+		{"::1", true},
+		{"fe80::1", true},
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+		{"2606:4700:4700::1111", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			ip := net.ParseIP(tt.ip)
+			if ip == nil {
+				t.Fatalf("could not parse %q", tt.ip)
+			}
+			if got := isBlockedIP(ip); got != tt.blocked {
+				t.Errorf("isBlockedIP(%s) = %v, want %v", tt.ip, got, tt.blocked)
+			}
+		})
 	}
 }
 

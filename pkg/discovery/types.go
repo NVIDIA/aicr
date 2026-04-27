@@ -73,17 +73,25 @@ type AgentRegistration struct {
 
 // bapVersions returns the BAP values for this registration.
 // Uses explicit BAP if set, otherwise derives from Protocol and Version.
+// A leading semver "v" prefix (e.g. "v2.1.0") is stripped so the result is
+// "mcp/2" rather than "mcp/v2".
 func (r AgentRegistration) bapVersions() []string {
 	if len(r.BAP) > 0 {
 		return r.BAP
 	}
 	ver := "1"
 	if r.Version != "" {
+		v := r.Version
+		// Strip a single leading "v" or "V" only when followed by a digit
+		// (semver style); leave non-semver strings untouched.
+		if len(v) >= 2 && (v[0] == 'v' || v[0] == 'V') && v[1] >= '0' && v[1] <= '9' {
+			v = v[1:]
+		}
 		// Use major version only (e.g., "2.1.0" -> "2")
-		if idx := strings.IndexByte(r.Version, '.'); idx > 0 {
-			ver = r.Version[:idx]
+		if idx := strings.IndexByte(v, '.'); idx > 0 {
+			ver = v[:idx]
 		} else {
-			ver = r.Version
+			ver = v
 		}
 	}
 	return []string{string(r.Protocol) + "/" + ver}

@@ -64,9 +64,13 @@ type Fetcher struct {
 }
 
 // NewFetcher creates a Fetcher with functional options.
+//
+// The default HTTP client uses a Transport with a safeDialContext that rejects
+// connections to private/loopback addresses even when the URL hostname resolves
+// to one (closing the SSRF bypass via DNS). Tests that need to reach localhost
+// via httptest must pass WithHTTPClient or WithAllowPrivate(true).
 func NewFetcher(opts ...FetcherOption) *Fetcher {
 	f := &Fetcher{
-		client:   &http.Client{Timeout: defaults.PolicyFetchTimeout},
 		cacheTTL: defaults.PolicyCacheTTL,
 		maxBytes: defaults.PolicyMaxBytes,
 		cache:    make(map[string]cacheEntry),
@@ -74,7 +78,52 @@ func NewFetcher(opts ...FetcherOption) *Fetcher {
 	for _, opt := range opts {
 		opt(f)
 	}
+	if f.client == nil {
+		f.client = &http.Client{
+			Timeout:   defaults.PolicyFetchTimeout,
+			Transport: newSafeTransport(f.allowPrivate),
+		}
+	}
 	return f
+}
+
+// newSafeTransport returns an http.Transport whose DialContext rejects
+// connections to private, loopback, or link-local addresses post-resolution.
+// When allowPrivate is true (test mode only), the check is skipped.
+func newSafeTransport(allowPrivate bool) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	dialer := &net.Dialer{
+		Timeout:   defaults.HTTPConnectTimeout,
+		KeepAlive: defaults.HTTPKeepAlive,
+	}
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		if !allowPrivate {
+			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+			if err != nil {
+				return nil, err
+			}
+			for _, ipa := range ips {
+				if isBlockedIP(ipa.IP) {
+					return nil, errors.New(errors.ErrCodePolicyFetch,
+						"refusing to connect to private/loopback address: "+ipa.IP.String())
+				}
+			}
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
+	return t
+}
+
+// isBlockedIP reports whether the IP is in a range that should not be reachable
+// from a policy fetcher (loopback, private, link-local, unspecified).
+func isBlockedIP(ip net.IP) bool {
+	return ip.IsLoopback() || ip.IsPrivate() ||
+		ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified()
 }
 
 // Fetch retrieves a policy document from the given URI. Results are cached
@@ -93,6 +142,12 @@ func (f *Fetcher) Fetch(ctx context.Context, policyURI string) (*PolicyDocument,
 	// Slow path: coalesce concurrent fetches for the same URI via singleflight.
 	// singleflight deduplicates in-flight requests; only one goroutine actually
 	// performs the HTTP fetch, and the result is shared with all waiters.
+	//
+	// Caveat: the ctx passed into the fetch closure is the context of the FIRST
+	// caller. If that caller cancels mid-flight, all coalesced waiters receive
+	// the same error even if their own contexts are still valid. With the 3s
+	// PolicyFetchTimeout this is an acceptable trade-off — a fetch that takes
+	// longer would have timed out for everyone anyway.
 	result, err, _ := f.group.Do(policyURI, func() (any, error) {
 		// Double-check cache after acquiring singleflight slot
 		f.mu.RLock()
@@ -202,7 +257,9 @@ func (f *Fetcher) validateURL(rawURL string) error {
 }
 
 // validateFetchURL checks that the policy URI is safe to fetch.
-// Rejects non-HTTPS schemes, private/loopback IPs, and link-local addresses.
+// Rejects non-HTTPS schemes and private/loopback IPs in the URL itself.
+// Hostnames that resolve to private addresses are rejected at dial time
+// by the transport's safeDialContext (see newSafeTransport).
 // If allowPrivate is true, private/loopback IP checks are skipped (testing only).
 func validateFetchURL(rawURL string, allowPrivate bool) error {
 	u, err := url.Parse(rawURL)
@@ -218,11 +275,12 @@ func validateFetchURL(rawURL string, allowPrivate bool) error {
 	hostname := u.Hostname()
 	ip := net.ParseIP(hostname)
 	if ip == nil {
-		// Not a raw IP — hostname is fine, DNS resolution will happen at fetch time.
+		// Not a raw IP — DNS resolution and the post-resolution IP check
+		// happen at dial time in safeDialContext.
 		return nil
 	}
 
-	if !allowPrivate && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+	if !allowPrivate && isBlockedIP(ip) {
 		return errors.New(errors.ErrCodePolicyFetch,
 			"policy URI must not point to private/loopback address")
 	}

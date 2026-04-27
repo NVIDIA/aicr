@@ -17,42 +17,18 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/discovery"
 	"github.com/miekg/dns"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/NVIDIA/aicr/internal/testdns"
+	"github.com/NVIDIA/aicr/pkg/discovery"
 )
-
-// startMockDNS starts a mock DNS server for testing.
-// Duplicated from pkg/discovery/testhelper_test.go because Go test helpers
-// cannot be shared across packages without a non-test dependency.
-func startMockDNS(t *testing.T, handler dns.HandlerFunc) string {
-	t.Helper()
-
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
-	require.NoError(t, err)
-
-	server := &dns.Server{
-		PacketConn: pc,
-		Handler:    handler,
-	}
-
-	go func() {
-		_ = server.ActivateAndServe()
-	}()
-
-	t.Cleanup(func() {
-		_ = server.Shutdown()
-	})
-
-	return pc.LocalAddr().String()
-}
 
 func TestHandleAgents(t *testing.T) {
 	handler := func(w dns.ResponseWriter, r *dns.Msg) {
@@ -83,7 +59,7 @@ func TestHandleAgents(t *testing.T) {
 		_ = w.WriteMsg(m)
 	}
 
-	addr := startMockDNS(t, handler)
+	addr := testdns.Start(t, handler)
 	disc := discovery.NewDiscoverer(
 		discovery.WithDNSServer(addr),
 		discovery.WithDNSTimeout(2*time.Second),
@@ -146,7 +122,7 @@ func TestHandleAgentsEmptyIndex(t *testing.T) {
 		_ = w.WriteMsg(m)
 	}
 
-	addr := startMockDNS(t, handler)
+	addr := testdns.Start(t, handler)
 	disc := discovery.NewDiscoverer(
 		discovery.WithDNSServer(addr),
 		discovery.WithDNSTimeout(2*time.Second),

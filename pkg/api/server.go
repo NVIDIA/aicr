@@ -16,7 +16,6 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -173,22 +172,16 @@ func setupDiscovery() ([]server.Option, http.HandlerFunc, error) {
 		discovery.WithLabels(map[string]string{"app.kubernetes.io/managed-by": name}),
 	)
 
+	// Use the same PORT resolution as pkg/server so the agent registration
+	// always advertises the port the server actually binds to.
 	reg := discovery.AgentRegistration{
 		Name:         name,
 		Protocol:     discovery.ProtocolMCP,
 		Namespace:    ns,
 		ServiceName:  name,
-		Port:         defaults.ServerDefaultPort,
+		Port:         uint16(server.ResolvePort(defaults.ServerDefaultPort)),
 		Capabilities: []string{"recipe", "bundle", "validate", "query"},
 		Version:      version,
-	}
-
-	// Override port from env if set
-	if portStr := os.Getenv("PORT"); portStr != "" {
-		var port int
-		if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
-			reg.Port = uint16(port)
-		}
 	}
 
 	disc := discovery.NewDiscoverer()

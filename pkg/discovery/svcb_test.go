@@ -324,6 +324,10 @@ func TestBapVersions(t *testing.T) {
 		{"derived from version", AgentRegistration{Protocol: ProtocolMCP, Version: "2.1.0"}, []string{"mcp/2"}},
 		{"no version defaults to 1", AgentRegistration{Protocol: ProtocolA2A}, []string{"a2a/1"}},
 		{"simple version", AgentRegistration{Protocol: ProtocolMCP, Version: "3"}, []string{"mcp/3"}},
+		{"semver v-prefix", AgentRegistration{Protocol: ProtocolMCP, Version: "v2.1.0"}, []string{"mcp/2"}},
+		{"semver V-prefix", AgentRegistration{Protocol: ProtocolMCP, Version: "V3.0.0"}, []string{"mcp/3"}},
+		{"v-prefix simple", AgentRegistration{Protocol: ProtocolMCP, Version: "v4"}, []string{"mcp/4"}},
+		{"non-semver leading v", AgentRegistration{Protocol: ProtocolMCP, Version: "vendor1"}, []string{"mcp/vendor1"}},
 	}
 
 	for _, tt := range tests {

@@ -141,12 +141,24 @@ func TestGuardFailOpenOnFetchError(t *testing.T) {
 	)
 
 	result, err := g.Check(context.Background(), newTestRecord(srv.URL+"/policy.json"))
-	// err is returned for observability but result is still allowed (fail-open)
-	if err == nil {
-		t.Error("expected error from failed fetch")
+	// Contract: fetch errors are logged internally and the guard returns
+	// (Allowed=true, nil error). A single check on result.Allowed is enough.
+	if err != nil {
+		t.Errorf("fetch errors must not surface as Check errors, got: %v", err)
 	}
-	if !result.Allowed {
-		t.Error("should fail-open when fetch fails")
+	if result == nil || !result.Allowed {
+		t.Error("should fail-open (Allowed=true) when fetch fails")
+	}
+}
+
+func TestGuardNilRecordReturnsError(t *testing.T) {
+	g := NewGuard(WithMode(ModeStrict))
+	result, err := g.Check(context.Background(), nil)
+	if err == nil {
+		t.Fatal("expected error for nil record")
+	}
+	if result != nil {
+		t.Errorf("expected nil result on programmer error, got %+v", result)
 	}
 }
 
@@ -181,15 +193,6 @@ func TestGuardStrictAllowsCompliantCaller(t *testing.T) {
 	if !result.Allowed {
 		t.Errorf("compliant caller should be allowed, got: %s", result.Reason())
 	}
-}
-
-func TestGuardInvalidModePanics(t *testing.T) {
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("expected panic for invalid mode")
-		}
-	}()
-	NewGuard(WithMode(Mode("yolo")))
 }
 
 func TestValidMode(t *testing.T) {

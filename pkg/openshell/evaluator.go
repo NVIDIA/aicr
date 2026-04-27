@@ -100,18 +100,18 @@ func Evaluate(doc *PolicyDocument, pctx PolicyContext, layer EnforcementLayer) P
 		}
 	}
 
-	// rate_limits: enforced at Layer 2 only. At Layer 1 we emit an
-	// informational warning so callers are aware of target rate limits.
-	if rules.RateLimits != nil && (layer == LayerCaller || appliesToLayer("rate_limits", layer)) {
-		if appliesToLayer("rate_limits", layer) {
-			// At the enforcement layer (Layer 2), this would be a violation.
+	// rate_limits: enforced at the layer named in ruleEnforcementLayers
+	// (currently Layer 2 only). At Layer 1 we emit an informational warning
+	// so callers are aware that the target has rate limits in effect.
+	if rules.RateLimits != nil {
+		switch {
+		case appliesToLayer("rate_limits", layer):
 			violations = append(violations, PolicyViolation{
 				Rule:   "rate_limits",
 				Detail: "rate limits exceeded",
 				Layer:  string(layer),
 			})
-		} else {
-			// At Layer 1, emit a warning only.
+		case layer == LayerCaller:
 			warnings = append(warnings, PolicyViolation{
 				Rule:   "rate_limits",
 				Detail: "target has rate limits configured (enforced at target)",

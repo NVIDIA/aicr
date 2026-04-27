@@ -31,6 +31,25 @@ import (
 // OnShutdown hooks receive a context bounded by the server's shutdown timeout.
 type LifecycleHook func(ctx context.Context) error
 
+// ResolvePort returns the port to bind to, honoring the PORT environment
+// variable when set and falling back to defaultPort otherwise. A malformed
+// PORT value is logged and ignored. This is the single source of truth for
+// the server port across the API server and any sidecars (e.g. discovery
+// publishers) that need to register the same port.
+func ResolvePort(defaultPort int) int {
+	portStr := os.Getenv("PORT")
+	if portStr == "" {
+		return defaultPort
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil || port <= 0 || port > 65535 {
+		slog.Warn("invalid PORT env var, using default",
+			"value", portStr, "default", defaultPort, "error", err)
+		return defaultPort
+	}
+	return port
+}
+
 // config holds server configuration
 type config struct {
 	// Server identity
@@ -75,14 +94,7 @@ func parseConfig() *config {
 	}
 
 	// Override with environment variables if set
-	if portStr := os.Getenv("PORT"); portStr != "" {
-		var port int
-		if _, err := fmt.Sscanf(portStr, "%d", &port); err == nil {
-			cfg.Port = port
-		} else {
-			slog.Warn("failed to parse PORT env var, using default", "value", portStr, "error", err)
-		}
-	}
+	cfg.Port = ResolvePort(cfg.Port)
 
 	// Allow customization of shutdown timeout to match K8s eviction grace period
 	if shutdownStr := os.Getenv("SHUTDOWN_TIMEOUT_SECONDS"); shutdownStr != "" {

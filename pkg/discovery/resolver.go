@@ -103,17 +103,22 @@ func (d *Discoverer) DiscoverAll(ctx context.Context, domain string) ([]AgentRec
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(maxDiscoverConcurrency)
 
+	// Loop variables are per-iteration scoped under Go 1.22+; no shadowing needed.
 	for _, entry := range entries {
-		entry := entry // capture loop variable
 		g.Go(func() error {
 			record, err := d.Discover(gctx, entry.Name, entry.Protocol, domain)
 			if err != nil {
+				// Treat context cancellation as fatal so the caller learns the
+				// result is incomplete; everything else is logged and skipped.
+				if gctx.Err() != nil {
+					return gctx.Err()
+				}
 				slog.Warn("failed to resolve agent from index",
 					slog.String("name", entry.Name),
 					slog.String("protocol", string(entry.Protocol)),
 					slog.String("error", err.Error()),
 				)
-				return nil // non-fatal: skip unresolvable agents
+				return nil
 			}
 			mu.Lock()
 			records = append(records, *record)
@@ -122,8 +127,16 @@ func (d *Discoverer) DiscoverAll(ctx context.Context, domain string) ([]AgentRec
 		})
 	}
 
+	// g.Wait() may return ctx.Err() if any goroutine propagated cancellation.
 	if err := g.Wait(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "agent discovery failed", err)
+		return nil, errors.Wrap(errors.ErrCodeTimeout,
+			"agent discovery interrupted before completion", err)
+	}
+	// Defensive: if the parent context was canceled after all goroutines
+	// returned successfully but before we got here, surface that too.
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout,
+			"agent discovery interrupted before completion", err)
 	}
 
 	return records, nil

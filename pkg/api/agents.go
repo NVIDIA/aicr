@@ -107,14 +107,15 @@ func handleAgents(disc *discovery.Discoverer, guard *openshell.Guard, defaultDom
 				},
 			}
 
-			// Evaluate OpenShell policy if a guard is configured
+			// Evaluate OpenShell policy if a guard is configured.
+			// Check returns a non-nil error only on programmer errors (e.g.
+			// nil record); fetch failures are surfaced via Allowed + logs.
 			if guard != nil && rec.Params.Policy != "" {
 				result, err := guard.Check(ctx, rec)
 				if err != nil {
-					slog.Debug("openshell policy fetch error (fail-open)",
+					slog.Warn("openshell guard check failed",
 						"agent", rec.Name, "error", err)
-				}
-				if result != nil {
+				} else {
 					summary := policyResultSummary{Allowed: result.Allowed}
 					for _, v := range result.Violations {
 						summary.Violations = append(summary.Violations, v.Rule+": "+v.Detail)

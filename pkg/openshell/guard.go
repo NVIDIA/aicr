@@ -45,6 +45,8 @@ type Guard struct {
 }
 
 // ValidMode returns true if m is a recognized enforcement mode.
+// Callers that read the mode from external input (env vars, config files)
+// should validate via ValidMode before constructing a Guard.
 func ValidMode(m Mode) bool {
 	switch m {
 	case ModeStrict, ModePermissive, ModeDisabled:
@@ -55,7 +57,11 @@ func ValidMode(m Mode) bool {
 }
 
 // NewGuard creates a Guard with functional options.
-// Panics if the configured mode is not a recognized value.
+//
+// The caller is responsible for validating the mode via ValidMode before
+// construction. Unrecognized modes default to strict-like behavior (any
+// violation denies) — calling code that accepts external input should reject
+// invalid modes up front rather than relying on the default.
 func NewGuard(opts ...GuardOption) *Guard {
 	g := &Guard{
 		fetcher: NewFetcher(),
@@ -64,23 +70,28 @@ func NewGuard(opts ...GuardOption) *Guard {
 	for _, opt := range opts {
 		opt(g)
 	}
-	if !ValidMode(g.mode) {
-		panic("openshell: invalid guard mode: " + string(g.mode))
-	}
 	return g
 }
 
 // Check evaluates the target agent's policy against the calling agent's context.
-// Returns the policy result and any fetch/evaluation error.
+// Returns the policy result and a non-nil error only on programmer/configuration
+// errors (e.g. nil record). Fetch/parse failures are NOT returned as errors —
+// they are logged and the guard fails open with Allowed=true so a single
+// callsite check (`!result.Allowed`) is sufficient to deny.
 //
 // Behavior by mode:
 //   - ModeDisabled: always returns allowed, no fetch or evaluation.
 //   - ModePermissive: evaluates policy, logs violations, but returns allowed.
 //   - ModeStrict: evaluates policy, returns denied if violations exist.
 //
-// On fetch errors, the guard fails open (returns allowed) regardless of mode,
-// matching dns-aid-core's behavior.
+// On fetch errors, the guard fails open (returns Allowed=true, nil error)
+// regardless of mode, matching dns-aid-core's behavior. The fetch error is
+// logged for observability.
 func (g *Guard) Check(ctx context.Context, record *discovery.AgentRecord) (*PolicyResult, error) {
+	if record == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"openshell: nil agent record")
+	}
 	allowed := &PolicyResult{Allowed: true}
 
 	if g.mode == ModeDisabled {
@@ -107,14 +118,15 @@ func (g *Guard) Check(ctx context.Context, record *discovery.AgentRecord) (*Poli
 
 	doc, err := g.fetcher.Fetch(ctx, policyURI)
 	if err != nil {
-		// Fail-open: log the error and allow the connection
+		// Fail-open: log the error and allow the connection. Returning
+		// nil error keeps the caller contract simple — a single check on
+		// result.Allowed is enough to gate a connection.
 		slog.Warn("failed to fetch policy document, allowing connection (fail-open)",
 			"policy_uri", policyURI,
 			"target_agent", record.Name,
 			"error", err,
 		)
-		return allowed, errors.Wrap(errors.ErrCodePolicyFetch,
-			"policy fetch failed (fail-open)", err)
+		return allowed, nil
 	}
 
 	pctx := PolicyContext{
