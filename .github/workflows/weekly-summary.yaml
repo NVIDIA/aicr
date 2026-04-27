@@ -129,13 +129,18 @@ jobs:
               .map(l => [l, open.filter(i => hasLabel(i, l)).length])
               .filter(([, c]) => c > 0);
 
-            let prioritized = 0;
-            const pri = PRIORITY_LABELS.map(l => {
-              const c = open.filter(i => hasLabel(i, l)).length;
-              prioritized += c;
-              return [l, c];
-            });
-            const noPri = total - prioritized;
+            // Per-priority counts (an issue may appear in multiple buckets
+            // if it carries multiple priority labels — that's fine here).
+            const pri = PRIORITY_LABELS.map(l => [
+              l, open.filter(i => hasLabel(i, l)).length,
+            ]);
+            // For the noPri remainder, dedupe by issue number — an issue
+            // with both P0 and P1 counts once toward "prioritized".
+            const prioritizedNums = new Set(
+              open.filter(i => PRIORITY_LABELS.some(l => hasLabel(i, l)))
+                  .map(i => i.number),
+            );
+            const noPri = total - prioritizedNums.size;
 
             const unowned = open.filter(i =>
               (hasLabel(i, 'P0') || hasLabel(i, 'P1')) &&
