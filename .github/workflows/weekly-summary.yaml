@@ -1,0 +1,220 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Weekly AICR Summary
+
+on:
+  schedule:
+    - cron: '0 14 * * 6'   # Saturday 14:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+
+  summary:
+    name: Post Weekly Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+      actions: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Collect releases (last 7 days)
+        id: releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Window: now - 7 days, UTC
+          SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
+
+          RELEASES_JSON=$(gh release list --repo "${REPO}" --limit 20 \
+            --json tagName,publishedAt)
+
+          # Filter to publishedAt >= SINCE
+          FILTERED=$(printf '%s' "${RELEASES_JSON}" \
+            | jq --arg since "${SINCE}" \
+                '[.[] | select(.publishedAt >= $since)]')
+
+          COUNT=$(printf '%s' "${FILTERED}" | jq 'length')
+
+          if [[ "${COUNT}" -eq 0 ]]; then
+            BLOCK="*Releases (0):* _none this week_"
+          else
+            BULLETS=$(printf '%s' "${FILTERED}" | jq -r \
+              --arg repo "${REPO}" \
+              '.[] | "• <https://github.com/\($repo)/releases/tag/\(.tagName)|\(.tagName)> (\(.publishedAt | sub("T.*"; "")))"')
+            BLOCK="*Releases (${COUNT}):*"$'\n'"${BULLETS}"
+          fi
+
+          {
+            echo "RELEASES_BLOCK<<REL_EOF"
+            echo "${BLOCK}"
+            echo "REL_EOF"
+          } >> "${GITHUB_ENV}"
+
+      - name: Collect issue movement (last 7 days)
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          script: |
+            const fs = require('fs');
+            const TYPE_LABELS = ['bug', 'feature', 'documentation'];
+            const PRIORITY_LABELS = ['P0', 'P1', 'P2'];
+            const SLA = {
+              P0: { days: 30 },
+              P1: { days: 180 },
+            };
+            const SEVEN_DAYS_MS = 7 * 86400000;
+            const since = new Date(Date.now() - SEVEN_DAYS_MS).toISOString();
+
+            const hasLabel = (i, n) => i.labels.some(l => l.name === n);
+            const ageDays = (i) =>
+              Math.floor((Date.now() - new Date(i.created_at)) / 86400000);
+
+            const open = (await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'open', per_page: 100 },
+            )).filter(i => !i.pull_request);
+
+            const closed = (await github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: 'closed', since, per_page: 100 },
+            )).filter(i => !i.pull_request &&
+                          new Date(i.closed_at) >= new Date(since)).length;
+
+            const total = open.length;
+            const newCount = open.filter(
+              i => new Date(i.created_at) >= new Date(since)).length;
+
+            const types = TYPE_LABELS
+              .map(l => [l, open.filter(i => hasLabel(i, l)).length])
+              .filter(([, c]) => c > 0);
+
+            let prioritized = 0;
+            const pri = PRIORITY_LABELS.map(l => {
+              const c = open.filter(i => hasLabel(i, l)).length;
+              prioritized += c;
+              return [l, c];
+            });
+            const noPri = total - prioritized;
+
+            const unowned = open.filter(i =>
+              (hasLabel(i, 'P0') || hasLabel(i, 'P1')) &&
+              (!i.assignees || i.assignees.length === 0)).length;
+
+            const breaches = [];
+            for (const i of open) {
+              const age = ageDays(i);
+              for (const [k, sla] of Object.entries(SLA)) {
+                if (hasLabel(i, k) && age > sla.days) {
+                  breaches.push({ num: i.number, pri: k, over: age - sla.days });
+                }
+              }
+            }
+
+            const lines = [
+              '*Issue movement (7d):*',
+              `${total} open, +${newCount} new, -${closed} closed`,
+            ];
+            const priParts = pri
+              .filter(([, c]) => c > 0)
+              .map(([l, c]) => `${l}: ${c}`);
+            if (noPri > 0) priParts.push(`none: ${noPri}`);
+            lines.push(`Priority: ${priParts.join(', ')}`);
+            if (types.length > 0) {
+              lines.push(`Type: ${types.map(([l, c]) => `${l}: ${c}`).join(', ')}`);
+            }
+            if (unowned > 0) {
+              lines.push(`Unowned P0/P1: *${unowned}*`);
+            }
+            if (breaches.length > 0) {
+              lines.push(`:rotating_light: ${breaches.length} SLA breach${breaches.length === 1 ? '' : 'es'}`);
+            }
+
+            const block = lines.join('\n');
+            fs.appendFileSync(process.env.GITHUB_ENV,
+              `ISSUES_BLOCK<<ISS_EOF\n${block}\nISS_EOF\n`);
+
+      - name: Collect latest vuln scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          RUN_JSON=$(gh run list --repo "${REPO}" \
+            --workflow=vuln-scan-images.yaml --status=success --limit=1 \
+            --json databaseId,createdAt,url)
+
+          COUNT=$(printf '%s' "${RUN_JSON}" | jq 'length')
+          if [[ "${COUNT}" -eq 0 ]]; then
+            BLOCK="*Latest vuln scan:* _no successful run found — see Actions tab_"
+          else
+            URL=$(printf '%s' "${RUN_JSON}" | jq -r '.[0].url')
+            CREATED=$(printf '%s' "${RUN_JSON}" | jq -r '.[0].createdAt')
+            DAY=$(date -u -d "${CREATED}" '+%a %H:%M UTC' 2>/dev/null \
+              || date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${CREATED}" '+%a %H:%M UTC')
+            BLOCK="*Latest vuln scan:* ${DAY} — <${URL}|view run>"
+          fi
+
+          {
+            echo "VULN_BLOCK<<VULN_EOF"
+            echo "${BLOCK}"
+            echo "VULN_EOF"
+          } >> "${GITHUB_ENV}"
+
+      - name: Assemble summary message
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Week-of label: Monday of the current calendar week (UTC)
+          # date -u +%u gives 1=Mon..7=Sun; subtract that minus 1 to get Monday
+          DOW=$(date -u +%u)
+          WEEK_START=$(date -u -d "$((DOW - 1)) days ago" +%Y-%m-%d 2>/dev/null \
+            || date -u -v-$((DOW - 1))d +%Y-%m-%d)
+
+          MESSAGE="*AICR weekly* — week of ${WEEK_START}"$'\n\n'
+          MESSAGE+="${RELEASES_BLOCK}"$'\n\n'
+          MESSAGE+="${ISSUES_BLOCK}"$'\n\n'
+          MESSAGE+="${VULN_BLOCK}"
+
+          {
+            echo "SLACK_MESSAGE<<SLACK_EOF"
+            echo "${MESSAGE}"
+            echo "SLACK_EOF"
+          } >> "${GITHUB_ENV}"
+
+      - name: Post to Slack (top-level)
+        uses: ./.github/actions/slack-thread-post
+        with:
+          bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: ${{ vars.SLACK_CHANNEL_ID }}
+          body: ${{ env.SLACK_MESSAGE }}
+          mode: top-level
