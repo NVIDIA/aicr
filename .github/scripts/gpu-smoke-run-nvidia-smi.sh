@@ -15,7 +15,19 @@
 
 set -euo pipefail
 
-pod_name=$(cat <<'EOF' | kubectl --context="kind-${KIND_CLUSTER_NAME}" create -f - -o jsonpath='{.metadata.name}'
+KUBECTL_REQUEST_TIMEOUT="${KUBECTL_REQUEST_TIMEOUT:-10s}"
+KUBECTL_WAIT_REQUEST_TIMEOUT="${KUBECTL_WAIT_REQUEST_TIMEOUT:-130s}"
+POD_NAME_FILE="${POD_NAME_FILE:-/tmp/aicr-gpu-smoke-pod-name-${KIND_CLUSTER_NAME}}"
+
+kubectl_kind() {
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" --context="kind-${KIND_CLUSTER_NAME}" "$@"
+}
+
+kubectl_kind_wait() {
+  timeout 150s kubectl --request-timeout="${KUBECTL_WAIT_REQUEST_TIMEOUT}" --context="kind-${KIND_CLUSTER_NAME}" "$@"
+}
+
+pod_name=$(cat <<'EOF' | kubectl_kind create -f - -o jsonpath='{.metadata.name}'
 apiVersion: v1
 kind: Pod
 metadata:
@@ -34,10 +46,10 @@ spec:
 EOF
 )
 
-echo "${pod_name}" > /tmp/aicr-gpu-smoke-pod-name
+echo "${pod_name}" > "${POD_NAME_FILE}"
 
 echo "Waiting for ${pod_name} pod to complete..."
-kubectl --context="kind-${KIND_CLUSTER_NAME}" wait "pod/${pod_name}" \
+kubectl_kind_wait wait "pod/${pod_name}" \
   --for=condition=Ready --timeout=120s || true
-kubectl --context="kind-${KIND_CLUSTER_NAME}" wait "pod/${pod_name}" \
+kubectl_kind_wait wait "pod/${pod_name}" \
   --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s

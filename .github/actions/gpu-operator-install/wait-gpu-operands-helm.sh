@@ -32,6 +32,6 @@ for i in $(seq 1 30); do
 done
 
 kubectl --request-timeout=300s --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-  rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s || true
+  rollout status daemonset -l app=nvidia-device-plugin-daemonset --timeout=300s
 echo "GPU Operator pods:"
 kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods

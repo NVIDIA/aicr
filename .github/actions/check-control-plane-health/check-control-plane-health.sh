@@ -25,11 +25,37 @@ validate_duration_input() {
   fi
 }
 
+duration_seconds() {
+  local input_value="$1"
+  local number="${input_value%[smh]}"
+  local unit="${input_value: -1}"
+  local amount
+
+  amount=$((10#${number}))
+
+  case "${unit}" in
+    s) echo "${amount}" ;;
+    m) echo $((amount * 60)) ;;
+    h) echo $((amount * 3600)) ;;
+    *)
+      echo "::error::unsupported duration unit in '${input_value}'" >&2
+      exit 1
+      ;;
+  esac
+}
+
 MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS#"${MAX_RECOVERY_ATTEMPTS%%[![:space:]]*}"}"
 MAX_RECOVERY_ATTEMPTS="${MAX_RECOVERY_ATTEMPTS%"${MAX_RECOVERY_ATTEMPTS##*[![:space:]]}"}"
 if ! [[ "${MAX_RECOVERY_ATTEMPTS}" =~ ^[0-9]+$ ]]; then
   echo "::error::max_recovery_attempts must be a non-negative integer, got '${MAX_RECOVERY_ATTEMPTS}'"
   exit 1
+fi
+
+MAX_RESTARTS="${MAX_RESTARTS:-}"
+MAX_RESTARTS="${MAX_RESTARTS#"${MAX_RESTARTS%%[![:space:]]*}"}"
+MAX_RESTARTS="${MAX_RESTARTS%"${MAX_RESTARTS##*[![:space:]]}"}"
+if [[ -n "${MAX_RESTARTS}" ]] && [[ "${MAX_RESTARTS}" != "1" ]]; then
+  echo "::warning::max_restarts is deprecated and ignored; use stability_window to fail on new control-plane restarts"
 fi
 
 WAIT_TIMEOUT="${WAIT_TIMEOUT#"${WAIT_TIMEOUT%%[![:space:]]*}"}"
@@ -44,6 +70,42 @@ fi
 validate_duration_input stability_window "${STABILITY_WINDOW}"
 if [[ "${STABILITY_WINDOW}" =~ ^0+[smh]$ ]]; then
   STABILITY_WINDOW="0s"
+fi
+STABILITY_WINDOW_SECONDS="$(duration_seconds "${STABILITY_WINDOW}")"
+
+STABILITY_PROBE_INTERVAL="${STABILITY_PROBE_INTERVAL:-10s}"
+STABILITY_PROBE_INTERVAL="${STABILITY_PROBE_INTERVAL#"${STABILITY_PROBE_INTERVAL%%[![:space:]]*}"}"
+STABILITY_PROBE_INTERVAL="${STABILITY_PROBE_INTERVAL%"${STABILITY_PROBE_INTERVAL##*[![:space:]]}"}"
+validate_duration_input stability_probe_interval "${STABILITY_PROBE_INTERVAL}"
+STABILITY_PROBE_INTERVAL_SECONDS="$(duration_seconds "${STABILITY_PROBE_INTERVAL}")"
+if (( STABILITY_PROBE_INTERVAL_SECONDS <= 0 )); then
+  echo "::error::stability_probe_interval must be greater than 0, got '${STABILITY_PROBE_INTERVAL}'"
+  exit 1
+fi
+STABILITY_PROBE_FAILURE_THRESHOLD="${STABILITY_PROBE_FAILURE_THRESHOLD:-2}"
+STABILITY_PROBE_FAILURE_THRESHOLD="${STABILITY_PROBE_FAILURE_THRESHOLD#"${STABILITY_PROBE_FAILURE_THRESHOLD%%[![:space:]]*}"}"
+STABILITY_PROBE_FAILURE_THRESHOLD="${STABILITY_PROBE_FAILURE_THRESHOLD%"${STABILITY_PROBE_FAILURE_THRESHOLD##*[![:space:]]}"}"
+if ! [[ "${STABILITY_PROBE_FAILURE_THRESHOLD}" =~ ^[0-9]+$ ]]; then
+  echo "::error::stability_probe_failure_threshold must be a positive integer, got '${STABILITY_PROBE_FAILURE_THRESHOLD}'"
+  exit 1
+fi
+if (( STABILITY_PROBE_FAILURE_THRESHOLD <= 0 )); then
+  echo "::error::stability_probe_failure_threshold must be greater than 0, got '${STABILITY_PROBE_FAILURE_THRESHOLD}'"
+  exit 1
+fi
+
+LEASE_COMPONENTS="${LEASE_COMPONENTS:-kube-controller-manager kube-scheduler}"
+LEASE_COMPONENTS="${LEASE_COMPONENTS#"${LEASE_COMPONENTS%%[![:space:]]*}"}"
+LEASE_COMPONENTS="${LEASE_COMPONENTS%"${LEASE_COMPONENTS##*[![:space:]]}"}"
+
+LEASE_STALE_TIMEOUT="${LEASE_STALE_TIMEOUT:-120s}"
+LEASE_STALE_TIMEOUT="${LEASE_STALE_TIMEOUT#"${LEASE_STALE_TIMEOUT%%[![:space:]]*}"}"
+LEASE_STALE_TIMEOUT="${LEASE_STALE_TIMEOUT%"${LEASE_STALE_TIMEOUT##*[![:space:]]}"}"
+validate_duration_input lease_stale_timeout "${LEASE_STALE_TIMEOUT}"
+LEASE_STALE_TIMEOUT_SECONDS="$(duration_seconds "${LEASE_STALE_TIMEOUT}")"
+if (( LEASE_STALE_TIMEOUT_SECONDS <= 0 )); then
+  echo "::error::lease_stale_timeout must be greater than 0, got '${LEASE_STALE_TIMEOUT}'"
+  exit 1
 fi
 
 RECOVER_UNHEALTHY="${RECOVER_UNHEALTHY#"${RECOVER_UNHEALTHY%%[![:space:]]*}"}"
@@ -145,6 +207,114 @@ require_readyz() {
     dump_all_control_plane_runtime_diagnostics
     exit 1
   fi
+}
+
+probe_control_plane_api() {
+  local reason="$1"
+  local component
+  local lease_summary
+
+  if ! kubectl_kind get --raw='/readyz' >/dev/null; then
+    echo "::error::kube-apiserver /readyz probe failed ${reason}"
+    return 1
+  fi
+
+  for component in ${LEASE_COMPONENTS}; do
+    if ! lease_summary=$(kubectl_kind -n "${NAMESPACE}" get lease "${component}" \
+      -o jsonpath='{.metadata.name}{" holder="}{.spec.holderIdentity}{" renewTime="}{.spec.renewTime}{"\n"}' 2>/dev/null); then
+      echo "::error::failed to read leader election lease ${component} ${reason}"
+      return 1
+    fi
+    echo "${lease_summary}"
+  done
+}
+
+lease_renew_epoch() {
+  local renew_time="$1"
+
+  date -u -d "${renew_time}" +%s 2>/dev/null
+}
+
+verify_leader_lease_freshness() {
+  local component
+  local now_epoch
+  local renew_time
+  local renew_epoch
+  local lease_age
+
+  [[ -z "${LEASE_COMPONENTS}" ]] && return
+
+  now_epoch="$(date -u +%s)"
+  echo "Checking leader election lease freshness (max age ${LEASE_STALE_TIMEOUT})..."
+  for component in ${LEASE_COMPONENTS}; do
+    if ! renew_time=$(kubectl_kind -n "${NAMESPACE}" get lease "${component}" -o jsonpath='{.spec.renewTime}' 2>/dev/null); then
+      echo "::error::failed to read leader election lease ${component}"
+      dump_all_control_plane_runtime_diagnostics
+      exit 1
+    fi
+    if [[ -z "${renew_time}" ]]; then
+      echo "::error::leader election lease ${component} has empty spec.renewTime"
+      dump_all_control_plane_runtime_diagnostics
+      exit 1
+    fi
+    if ! renew_epoch="$(lease_renew_epoch "${renew_time}")"; then
+      echo "::error::failed to parse leader election lease ${component} renewTime '${renew_time}'"
+      dump_all_control_plane_runtime_diagnostics
+      exit 1
+    fi
+    lease_age=$((now_epoch - renew_epoch))
+    if (( lease_age < 0 )); then
+      lease_age=0
+    fi
+    echo "${component} lease renewTime=${renew_time} age=${lease_age}s"
+    if (( lease_age > LEASE_STALE_TIMEOUT_SECONDS )); then
+      echo "::error::leader election lease ${component} is stale: age=${lease_age}s exceeds ${LEASE_STALE_TIMEOUT}"
+      dump_all_control_plane_runtime_diagnostics
+      exit 1
+    fi
+  done
+}
+
+observe_stability_window() {
+  local label="$1"
+  local elapsed=0
+  local probe=0
+  local sleep_seconds
+  local consecutive_failures=0
+  local total_failures=0
+
+  echo "Observing control-plane stability for ${STABILITY_WINDOW} (${label}); probing every ${STABILITY_PROBE_INTERVAL}, failing after ${STABILITY_PROBE_FAILURE_THRESHOLD} consecutive probe failure(s)..."
+  while (( elapsed < STABILITY_WINDOW_SECONDS )); do
+    sleep_seconds="${STABILITY_PROBE_INTERVAL_SECONDS}"
+    if (( elapsed + sleep_seconds > STABILITY_WINDOW_SECONDS )); then
+      sleep_seconds=$((STABILITY_WINDOW_SECONDS - elapsed))
+    fi
+    if (( sleep_seconds > 0 )); then
+      sleep "${sleep_seconds}"
+      elapsed=$((elapsed + sleep_seconds))
+    fi
+
+    probe=$((probe + 1))
+    echo "=== Control-plane stability probe ${probe} (${elapsed}/${STABILITY_WINDOW_SECONDS}s, ${label}) ==="
+    if probe_control_plane_api "during ${label} stability probe ${probe}"; then
+      consecutive_failures=0
+      continue
+    fi
+
+    total_failures=$((total_failures + 1))
+    consecutive_failures=$((consecutive_failures + 1))
+    echo "::warning::control-plane stability probe ${probe} failed (${consecutive_failures} consecutive, ${total_failures} total)"
+    if (( consecutive_failures >= STABILITY_PROBE_FAILURE_THRESHOLD )); then
+      echo "::error::control-plane had ${consecutive_failures} consecutive failed stability probes during ${label}"
+      dump_all_control_plane_runtime_diagnostics
+      exit 1
+    fi
+  done
+
+  if (( total_failures > 0 )); then
+    echo "::warning::control-plane had ${total_failures} transient failed stability probe(s) during ${label}; final health checks must still pass"
+  fi
+  verify_leader_lease_freshness
 }
 
 dump_api_server_health() {
@@ -391,8 +561,7 @@ verify_stability_window() {
     return
   fi
 
-  echo "Observing control-plane stability for ${STABILITY_WINDOW}..."
-  sleep "${STABILITY_WINDOW}"
+  observe_stability_window "primary"
   for component in ${COMPONENTS}; do
     initial_restarts="${INITIAL_RESTARTS[${component}]:-}"
     if [[ -z "${initial_restarts}" ]]; then
@@ -427,7 +596,7 @@ verify_stability_window() {
   fi
 
   echo "::warning::control-plane recovery occurred; observing one additional ${STABILITY_WINDOW} stability window"
-  sleep "${STABILITY_WINDOW}"
+  observe_stability_window "post-recovery"
   for component in ${COMPONENTS}; do
     initial_restarts="${INITIAL_RESTARTS[${component}]:-}"
     if [[ -z "${initial_restarts}" ]]; then

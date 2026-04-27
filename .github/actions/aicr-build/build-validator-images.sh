@@ -15,6 +15,7 @@
 
 set -euo pipefail
 
+VALIDATOR_PHASES="${VALIDATOR_PHASES:-}"
 if [[ -n "${VALIDATOR_PHASES}" ]]; then
   if [[ "${VALIDATOR_PHASES}" == "none" ]]; then
     echo "Skipping validator builds (validator_phases=none)"
@@ -25,6 +26,8 @@ else
   # Default: build all phases (backwards compatible).
   PHASES="deployment,performance,conformance"
 fi
+
+: "${KIND_CLUSTER_NAME:?KIND_CLUSTER_NAME must be set}"
 
 mkdir -p dist/validator
 for phase in ${PHASES//,/ }; do

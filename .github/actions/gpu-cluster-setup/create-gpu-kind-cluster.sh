@@ -25,6 +25,20 @@ validate_duration_input() {
   fi
 }
 
+kubectl_kind() {
+  timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
+}
+
+kubectl_kind_wait() {
+  timeout 330s kubectl --request-timeout=300s --context="kind-${KIND_CLUSTER_NAME}" "$@"
+}
+
+docker_timeout() {
+  local limit="$1"
+  shift
+  timeout "${limit}" docker "$@"
+}
+
 validate_generated_control_plane_config() {
   if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then
     for patch_file in "${patch_dir}"/*.yaml; do
@@ -288,22 +302,22 @@ case "${create_status}" in
     ;;
 esac
 
-kubectl --context="kind-${KIND_CLUSTER_NAME}" wait --for=condition=Ready nodes --all --timeout=300s
-kubectl --context="kind-${KIND_CLUSTER_NAME}" cluster-info
-kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide
-kubectl --context="kind-${KIND_CLUSTER_NAME}" describe nodes | \
+kubectl_kind_wait wait --for=condition=Ready nodes --all --timeout=300s
+kubectl_kind cluster-info
+kubectl_kind get nodes -o wide
+kubectl_kind describe nodes | \
   grep -E "^(Name:|Capacity:|Allocatable:|Allocated resources:|  cpu|  memory|  nvidia.com/gpu)" || true
 
 echo "=== Kind node container resources ==="
-docker ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
+docker_timeout 30s ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
   --format '{{.Names}}' | sort | while read -r node_container; do
     [[ -z "${node_container}" ]] && continue
-    docker inspect "${node_container}" \
+    docker_timeout 30s inspect "${node_container}" \
       --format '{{.Name}} NanoCpus={{.HostConfig.NanoCpus}} CpuShares={{.HostConfig.CpuShares}} Memory={{.HostConfig.Memory}} MemoryReservation={{.HostConfig.MemoryReservation}}'
   done
 
 echo "=== Control-plane resource requests/limits ==="
-kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kube-system \
+kubectl_kind -n kube-system \
   get pods -l tier=control-plane -o json | jq -r '
     .items[] as $pod |
     $pod.metadata.name,
@@ -327,7 +341,7 @@ control_plane_request() {
   local component="$1"
   local resource="$2"
 
-  kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kube-system \
+  kubectl_kind -n kube-system \
     get pod -l "component=${component}" \
     -o "jsonpath={.items[0].spec.containers[0].resources.requests.${resource}}"
 }
@@ -353,7 +367,7 @@ assert_control_plane_request() {
 control_plane_command_args() {
   local component="$1"
 
-  kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kube-system \
+  kubectl_kind -n kube-system \
     get pod -l "component=${component}" \
     -o json | jq -r '.items[0].spec.containers[0] | ((.command // []) + (.args // []))[]?'
 }
@@ -363,7 +377,7 @@ static_pod_manifest_contains_arg() {
   local expected="$2"
   local node="${KIND_CLUSTER_NAME}-control-plane"
 
-  docker exec "${node}" grep -Fq -- "- ${expected}" "/etc/kubernetes/manifests/${component}.yaml"
+  docker_timeout 30s exec "${node}" grep -Fq -- "- ${expected}" "/etc/kubernetes/manifests/${component}.yaml"
 }
 
 running_static_pod_container_contains_arg() {
@@ -372,16 +386,18 @@ running_static_pod_container_contains_arg() {
   local node="${KIND_CLUSTER_NAME}-control-plane"
   local container_ids
   local container_id
+  local inspect_output
 
-  if ! container_ids="$(docker exec "${node}" crictl ps --name "${component}" -q 2>/dev/null)"; then
+  if ! container_ids="$(docker_timeout 30s exec "${node}" crictl ps --name "${component}" -q 2>/dev/null)"; then
     return 1
   fi
   [[ -z "${container_ids}" ]] && return 1
 
   for container_id in ${container_ids}; do
-    if docker exec "${node}" crictl inspect "${container_id}" 2>/dev/null | jq -e --arg expected "${expected}" '
+    inspect_output="$(docker_timeout 30s exec "${node}" crictl inspect "${container_id}" 2>/dev/null || true)"
+    if jq -e --arg expected "${expected}" '
       ([.info.runtimeSpec.process.args[]?, .status.info.runtimeSpec.process.args[]?] | index($expected)) != null
-    ' >/dev/null; then
+    ' >/dev/null 2>&1 <<< "${inspect_output}" || grep -Fq -- "${expected}" <<< "${inspect_output}"; then
       return 0
     fi
   done
@@ -395,14 +411,14 @@ dump_running_static_pod_container_args() {
   local container_id
 
   echo "Running ${component} CRI container args:"
-  container_ids="$(docker exec "${node}" crictl ps --name "${component}" -q 2>/dev/null || true)"
+  container_ids="$(docker_timeout 30s exec "${node}" crictl ps --name "${component}" -q 2>/dev/null || true)"
   if [[ -z "${container_ids}" ]]; then
     echo "(no running ${component} CRI containers found)"
     return
   fi
   for container_id in ${container_ids}; do
     echo "--- ${container_id} ---"
-    docker exec "${node}" crictl inspect "${container_id}" 2>/dev/null | jq -r '
+    docker_timeout 30s exec "${node}" crictl inspect "${container_id}" 2>/dev/null | jq -r '
       [.info.runtimeSpec.process.args[]?, .status.info.runtimeSpec.process.args[]?][]?
     ' || true
   done
@@ -413,32 +429,40 @@ dump_static_pod_manifest() {
   local node="${KIND_CLUSTER_NAME}-control-plane"
 
   echo "Static pod manifest /etc/kubernetes/manifests/${component}.yaml:"
-  docker exec "${node}" sed -n '1,220p' "/etc/kubernetes/manifests/${component}.yaml" || true
+  docker_timeout 30s exec "${node}" sed -n '1,220p' "/etc/kubernetes/manifests/${component}.yaml" || true
 }
 
 assert_control_plane_arg() {
   local component="$1"
   local expected="$2"
+  local attempt
   local command_args
 
-  command_args="$(control_plane_command_args "${component}")"
-  if ! grep -Fxq -- "${expected}" <<< "${command_args}"; then
+  for attempt in $(seq 1 12); do
+    command_args="$(control_plane_command_args "${component}" || true)"
+    if grep -Fxq -- "${expected}" <<< "${command_args}"; then
+      echo "${component} command/args verified: ${expected}"
+      return
+    fi
     if running_static_pod_container_contains_arg "${component}" "${expected}"; then
       echo "${component} running CRI container args verified: ${expected} (live mirror pod omitted it)"
       return
     fi
     if static_pod_manifest_contains_arg "${component}" "${expected}"; then
-      echo "::warning::${component} live mirror pod and running CRI container args did not show ${expected}; static pod manifest is patched"
-      return
+      echo "::warning::${component} static pod manifest has ${expected}, but the running container does not yet; waiting for kubelet to converge (${attempt}/12)"
+      sleep 5
+      continue
     fi
-    echo "::error::${component} live pod command/args does not contain ${expected}"
-    echo "Observed live command/args:"
-    echo "${command_args}"
-    dump_running_static_pod_container_args "${component}"
-    dump_static_pod_manifest "${component}"
-    exit 1
-  fi
-  echo "${component} command/args verified: ${expected}"
+
+    break
+  done
+
+  echo "::error::${component} running command/args does not contain ${expected}"
+  echo "Observed live command/args:"
+  echo "${command_args:-}"
+  dump_running_static_pod_container_args "${component}"
+  dump_static_pod_manifest "${component}"
+  exit 1
 }
 
 if [[ "${CONTROL_PLANE_RESOURCE_PATCHES}" == "true" ]]; then

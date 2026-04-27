@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -euo pipefail
+name: 'GPU Debug Diagnostics'
+description: 'Print bounded GPU CI diagnostics while the kind cluster is still present.'
 
-mkdir -p dist
-CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
+inputs:
+  cluster_name:
+    description: 'Kind cluster name'
+    required: true
+  mode:
+    description: 'Diagnostic mode: smoke, training, or inference'
+    required: false
+    default: 'smoke'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Print GPU debug diagnostics
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        GPU_TEST_DIAGNOSTIC_MODE: ${{ inputs.mode }}
+      run: bash "${{ github.workspace }}/.github/scripts/gpu-debug-diagnostics.sh"

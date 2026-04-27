@@ -19,16 +19,28 @@ echo "Waiting for GPU operator controller to deploy operands..."
 # The GPU operator controller watches ClusterPolicy and creates
 # DaemonSets for device-plugin, NFD, GFD, etc. This happens
 # asynchronously after the helm install completes.
+daemonset_found=false
 for i in $(seq 1 30); do
-  count=$(kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-    get daemonset -l app=nvidia-device-plugin-daemonset --no-headers 2>/dev/null | wc -l)
-  if [[ "$count" -gt 0 ]]; then
+  daemonsets=""
+  if daemonsets=$(kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
+    get daemonset -l app=nvidia-device-plugin-daemonset --no-headers 2>/dev/null); then
+    if [[ -n "${daemonsets}" ]]; then
+      daemonset_found=true
+    fi
+  fi
+  if [[ "${daemonset_found}" == "true" ]]; then
     echo "Device plugin DaemonSet found."
     break
   fi
   echo "Waiting for device plugin DaemonSet to be created... (${i}/30)"
   sleep 10
 done
+if [[ "${daemonset_found}" != "true" ]]; then
+  echo "::error::device plugin DaemonSet was not created within 300s"
+  kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods || true
+  kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' || true
+  exit 1
+fi
 echo "Waiting for device plugin rollout..."
 # Operands are excluded from control-plane nodes via nodeAffinity in
 # the kind overlay, so all scheduled pods should become ready.

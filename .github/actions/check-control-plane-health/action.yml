@@ -39,6 +39,22 @@ inputs:
     description: 'Optional duration to watch for new control-plane restarts after pods are Ready'
     required: false
     default: '0s'
+  stability_probe_interval:
+    description: 'Interval for active API server probes during the stability window'
+    required: false
+    default: '10s'
+  stability_probe_failure_threshold:
+    description: 'Consecutive active stability probe failures allowed before failing'
+    required: false
+    default: '2'
+  lease_components:
+    description: 'Space-separated leader election lease names to check for freshness'
+    required: false
+    default: kube-controller-manager kube-scheduler
+  lease_stale_timeout:
+    description: 'Maximum allowed leader election lease age at the end of a stability window'
+    required: false
+    default: '120s'
   recover_unhealthy:
     description: 'Restart eligible Kind control-plane static pod containers when they are currently unhealthy'
     required: false
@@ -62,7 +78,12 @@ runs:
         NAMESPACE: ${{ inputs.namespace }}
         COMPONENTS: ${{ inputs.components }}
         WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
+        MAX_RESTARTS: ${{ inputs.max_restarts }}
         STABILITY_WINDOW: ${{ inputs.stability_window }}
+        STABILITY_PROBE_INTERVAL: ${{ inputs.stability_probe_interval }}
+        STABILITY_PROBE_FAILURE_THRESHOLD: ${{ inputs.stability_probe_failure_threshold }}
+        LEASE_COMPONENTS: ${{ inputs.lease_components }}
+        LEASE_STALE_TIMEOUT: ${{ inputs.lease_stale_timeout }}
         RECOVER_UNHEALTHY: ${{ inputs.recover_unhealthy }}
         RECOVERY_COMPONENTS: ${{ inputs.recovery_components }}
         MAX_RECOVERY_ATTEMPTS: ${{ inputs.max_recovery_attempts }}

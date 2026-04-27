@@ -15,13 +15,20 @@
 
 set -euo pipefail
 
+KUBECTL_REQUEST_TIMEOUT="${KUBECTL_REQUEST_TIMEOUT:-10s}"
+POD_NAME_FILE="${POD_NAME_FILE:-/tmp/aicr-gpu-smoke-pod-name-${KIND_CLUSTER_NAME}}"
+
+kubectl_kind() {
+  kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" --context="kind-${KIND_CLUSTER_NAME}" "$@"
+}
+
 pod_name=""
-if [[ -f /tmp/aicr-gpu-smoke-pod-name ]]; then
-  pod_name="$(cat /tmp/aicr-gpu-smoke-pod-name)"
+if [[ -f "${POD_NAME_FILE}" ]]; then
+  pod_name="$(cat "${POD_NAME_FILE}")"
 fi
 
 if [[ -z "${pod_name}" ]]; then
-  pod_name=$(kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods \
+  pod_name=$(kubectl_kind get pods \
     -l app=gpu-smoke-test \
     --sort-by=.metadata.creationTimestamp \
     -o jsonpath='{.items[-1:].metadata.name}')
@@ -32,4 +39,5 @@ if [[ -z "${pod_name}" ]]; then
   exit 1
 fi
 
-kubectl --context="kind-${KIND_CLUSTER_NAME}" logs "${pod_name}"
+kubectl_kind logs "${pod_name}"
+rm -f "${POD_NAME_FILE}"

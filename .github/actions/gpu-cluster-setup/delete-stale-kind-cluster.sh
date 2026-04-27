@@ -19,6 +19,21 @@ docker_timeout() {
   timeout 30s docker "$@"
 }
 
+read_kind_container_ids() {
+  local output
+
+  if ! output="$(docker_timeout ps -aq --filter "label=${kind_cluster_label}" 2>&1)"; then
+    echo "::error::failed to query stale kind containers for ${KIND_CLUSTER_NAME}"
+    echo "${output}"
+    exit 1
+  fi
+
+  remaining_containers=()
+  if [[ -n "${output}" ]]; then
+    mapfile -t remaining_containers <<< "${output}"
+  fi
+}
+
 if kind get clusters | grep -Fxq "${KIND_CLUSTER_NAME}"; then
   echo "Deleting stale kind cluster: ${KIND_CLUSTER_NAME}"
   if ! timeout 180s kind delete cluster --name "${KIND_CLUSTER_NAME}"; then
@@ -28,14 +43,14 @@ else
   echo "No stale kind cluster named ${KIND_CLUSTER_NAME}"
 fi
 
-mapfile -t remaining_containers < <(docker_timeout ps -aq --filter "label=${kind_cluster_label}")
+read_kind_container_ids
 if (( ${#remaining_containers[@]} > 0 )); then
   echo "Removing stale containers for ${KIND_CLUSTER_NAME}:"
   docker_timeout ps -a --filter "label=${kind_cluster_label}"
   docker_timeout rm -f "${remaining_containers[@]}"
 fi
 
-mapfile -t remaining_containers < <(docker_timeout ps -aq --filter "label=${kind_cluster_label}")
+read_kind_container_ids
 if (( ${#remaining_containers[@]} > 0 )); then
   echo "::error::stale containers still remain for ${KIND_CLUSTER_NAME}:"
   docker_timeout ps -a --filter "label=${kind_cluster_label}"

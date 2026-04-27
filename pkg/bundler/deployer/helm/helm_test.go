@@ -588,6 +588,10 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 				`requires Helm v4.0.5 or later`,
 				`--wait --timeout 20m`,
 			},
+			rejectSnippets: []string{
+				`local prerelease`,
+				`if [[ -n "${prerelease}" ]]`,
+			},
 		},
 		{
 			name: "kube-prometheus-stack",

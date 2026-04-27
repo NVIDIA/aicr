@@ -16,7 +16,7 @@ name: GPU Inference Test (nvkind + H100 x2)
 
 on:
   schedule:
-    - cron: '15 6,18 * * *'  # Every 12 hours (2x daily), offset from T4 smoke test
+    - cron: '15 6,18 * * *'  # Every 12 hours (2x daily), offset from training test
   push:
     branches:
       - "pull-request/[0-9]+"
@@ -56,8 +56,14 @@ jobs:
               - '.github/actions/install-karpenter-kwok/**'
               - 'validators/*/Dockerfile'
               - 'pkg/evidence/**'
+              - '.github/workflows/gpu-h100-kind-runtime-test.yaml'
+              - '.github/actions/gpu-debug-diagnostics/**'
               - '.github/actions/gpu-test-cleanup/**'
               - '.github/actions/load-versions/**'
+              - '.github/scripts/gpu-chainsaw-health.sh'
+              - '.github/scripts/gpu-debug-diagnostics.sh'
+              - '.github/scripts/gpu-runtime-component-health.sh'
+              - '.github/scripts/gpu-validate-conformance.sh'
               - 'pkg/bundler/deployer/helm/**'
               - 'tests/chainsaw/chainsaw-config.yaml'
               - 'tests/chainsaw/ai-conformance/main.go'
@@ -84,11 +90,11 @@ jobs:
               - 'pkg/defaults/timeouts.go'
               - 'validators/conformance/**'
 
+  # NVIDIA self-hosted GPU runners reject pull_request event jobs before
+  # checkout. PR GPU coverage runs through the pull-request/<number> push
+  # mirror after ok-to-test approval.
   gpu-inference-test:
     needs: [check-paths]
-    # NVIDIA self-hosted GPU runners reject pull_request event jobs before
-    # checkout. PR GPU coverage runs through the pull-request/<number> push
-    # mirror after ok-to-test approval.
     if: >
       always() && (
         github.event_name == 'schedule' ||
@@ -96,184 +102,11 @@ jobs:
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
       )
     name: GPU Inference Test (nvkind + H100 x2)
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-      cancel-in-progress: true
-    runs-on: linux-amd64-gpu-h100-latest-2
-    # Cold self-hosted H100 runners can spend most of the old budget pulling
-    # images and loading Kind nodes before validation starts.
-    timeout-minutes: 180
-
-    env:
-      KIND_CLUSTER_NAME: gpu-inference-test
-
-    steps:
-
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Load GPU test versions
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Set up GPU cluster
-        uses: ./.github/actions/gpu-cluster-setup
-        with:
-          kind_node_image: ${{ steps.versions.outputs.h100_kind_node_image }}
-          min_gpu_count: '2'
-          gpu_model_pattern: H100
-          min_free_disk_gb: '50'
-          min_available_memory_gb: '16'
-          cluster_create_timeout: 900s
-          control_plane_resource_patches: 'true'
-          control_plane_leader_election_tuning: 'true'
-
-      - name: Build aicr and snapshot agent image
-        uses: ./.github/actions/aicr-build
-        with:
-          build_snapshot_agent: 'true'
-          validator_phases: 'none'
-
-      # Fast readiness gate after cluster setup. Stability windows start after
-      # runtime install, where component rollouts can stress the control plane.
-      - name: Check control plane health
-        uses: ./.github/actions/check-control-plane-health
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          wait_timeout: 120s
-          stability_window: 0s
-          recover_unhealthy: 'true'
-
-      - name: Install runtime bundle
-        id: bundle-install
-        uses: ./.github/actions/gpu-operator-install
-        with:
-          method: bundle
-          accelerator: h100
-          platform: dynamo
-          wait: 'true'
-          best_effort: 'false'
-
-      # Runtime install creates many CRDs, webhooks, and controllers. Keep a
-      # stability window here to catch KCM/scheduler restarts before snapshot.
-      - name: Check control plane health
-        uses: ./.github/actions/check-control-plane-health
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          wait_timeout: 120s
-          stability_window: 60s
-          recover_unhealthy: 'true'
-
-      # --- Snapshot and GPU validation ---
-
-      - name: Snapshot and validate GPU
-        uses: ./.github/actions/gpu-snapshot-validate
-        with:
-          gpu_model: H100
-          min_gpu_count: '2'
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          snapshot_timeout: 10m
-
-      # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
-
-      # Snapshot deploys a GPU Job and exercises cluster discovery; verify the
-      # control plane stayed stable before adding Karpenter/KWOK.
-      - name: Check control plane health
-        uses: ./.github/actions/check-control-plane-health
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          wait_timeout: 120s
-          stability_window: 60s
-          recover_unhealthy: 'true'
-
-      - name: Install Karpenter + KWOK
-        uses: ./.github/actions/install-karpenter-kwok
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          kwok_helm_timeout: 600s
-          ko_build_timeout: '1200'
-          karpenter_helm_timeout: 600s
-
-      # --- Health checks ---
-
-      - name: Install chainsaw
-        uses: ./.github/actions/setup-build-tools
-        with:
-          install_chainsaw: 'true'
-          chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
-
-      # This gate is effectively post-Karpenter/KWOK; the chainsaw setup above
-      # only installs a runner-side binary.
-      - name: Check control plane health
-        uses: ./.github/actions/check-control-plane-health
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          wait_timeout: 120s
-          stability_window: 60s
-          recover_unhealthy: 'true'
-
-      - name: Run chainsaw health checks
-        # The H100 stack can make namespace cleanup API calls slow under load.
-        # Keep cleanup enabled, but allow more than the default 30s deadline.
-        run: bash .github/scripts/gpu-chainsaw-health.sh tests/chainsaw/ai-conformance/kind-inference-dynamo
-
-      # --- CNCF AI Conformance validation ---
-      # Runs after the stack health checks so gateway and metrics validators
-      # see a settled inference stack.
-
-      - name: Build conformance validator image
-        uses: ./.github/actions/aicr-build
-        with:
-          build_cli: 'false'
-          build_snapshot_agent: 'false'
-          validator_phases: 'conformance'
-
-      # Validator image build/load can contend with Docker and kind containerd;
-      # verify the control plane before the final conformance workload.
-      - name: Check control plane health
-        uses: ./.github/actions/check-control-plane-health
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          wait_timeout: 120s
-          stability_window: 60s
-          recover_unhealthy: 'true'
-
-      - name: Validate CNCF AI Conformance
-        id: validate-conformance
-        run: bash .github/scripts/gpu-validate-conformance.sh
-
-      # Dynamo smoke is intentionally disabled for now. The vLLM runtime image
-      # adds significant latency and flakiness in Kind CI, and training has no
-      # matching smoke path yet. Reintroduce it later alongside a symmetric
-      # training smoke test if needed.
-      # --- Validation artifacts ---
-
-      - name: Upload validation artifacts
-        if: always()
-        timeout-minutes: 5
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: conformance-evidence
-          path: |
-            conformance-evidence/
-            validation-result.yaml
-          if-no-files-found: warn
-
-      # --- Debug diagnostics (before cleanup so resources still exist) ---
-
-      - name: Debug diagnostics
-        if: failure()
-        timeout-minutes: 5
-        shell: bash
-        env:
-          GPU_TEST_DIAGNOSTIC_MODE: inference
-        run: bash .github/scripts/gpu-debug-diagnostics.sh
-
-      - name: GPU Test Cleanup
-        if: always()
-        uses: ./.github/actions/gpu-test-cleanup
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact_name_prefix: gpu-inference-test-debug
+    uses: ./.github/workflows/gpu-h100-kind-runtime-test.yaml
+    with:
+      job_name: GPU Inference Test (nvkind + H100 x2)
+      cluster_name: gpu-inference-test
+      intent: inference
+      platform: dynamo
+      chainsaw_path: tests/chainsaw/ai-conformance/kind-inference-dynamo
+      artifact_name_prefix: gpu-inference-test-debug

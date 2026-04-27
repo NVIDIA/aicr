@@ -16,6 +16,7 @@
 # Diagnostic artifact collection intentionally omits -e so one broken cluster
 # call does not prevent later artifacts from being collected.
 set -uo pipefail
+rm -rf /tmp/debug-artifacts
 mkdir -p /tmp/debug-artifacts
 CONTROL_PLANE_COMPONENTS="kube-apiserver kube-controller-manager kube-scheduler etcd"
 kubectl_kind() {
@@ -26,6 +27,23 @@ docker_timeout() {
   shift
   timeout "${limit}" docker "$@"
 }
+
+{
+  date -u || true
+  hostname || true
+  uptime || true
+  nproc || true
+  free -h || true
+  df -h / || true
+  df -ih / || true
+} > /tmp/debug-artifacts/runner-baseline.txt 2>&1 || true
+docker_timeout 30s version > /tmp/debug-artifacts/docker-version.txt 2>&1 || true
+docker_timeout 30s info > /tmp/debug-artifacts/docker-info.txt 2>&1 || true
+nvidia-smi -L > /tmp/debug-artifacts/host-gpus.txt 2>&1 || true
+nvidia-smi >> /tmp/debug-artifacts/host-gpus.txt 2>&1 || true
+kind get clusters > /tmp/debug-artifacts/kind-clusters.txt 2>&1 || true
+docker_timeout 30s ps -a --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
+  > /tmp/debug-artifacts/kind-node-containers.txt 2>&1 || true
 
 kubectl_kind get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
 kubectl_kind get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
@@ -48,6 +66,24 @@ done
 kubectl_kind -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
 kubectl_kind -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
 kubectl_kind -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
+kubectl_kind -n monitoring get deployment,statefulset,daemonset,pods -o wide \
+  > /tmp/debug-artifacts/monitoring-workloads.txt 2>&1 || true
+kubectl_kind -n monitoring describe deployment kube-prometheus-operator \
+  > /tmp/debug-artifacts/kube-prometheus-operator-deployment-describe.txt 2>&1 || true
+kubectl_kind -n monitoring logs deployment/kube-prometheus-operator --all-containers --tail=300 \
+  > /tmp/debug-artifacts/kube-prometheus-operator-logs.txt 2>&1 || true
+kubectl_kind -n monitoring logs deployment/kube-prometheus-operator --all-containers --previous --tail=300 \
+  > /tmp/debug-artifacts/kube-prometheus-operator-previous-logs.txt 2>&1 || true
+kubectl_kind -n monitoring get events --sort-by='.lastTimestamp' \
+  > /tmp/debug-artifacts/monitoring-events.txt 2>&1 || true
+{
+  kubectl_kind -n monitoring get pods -o name 2>/dev/null \
+    | grep '^pod/kube-prometheus-operator-' \
+    | while read -r pod; do
+        echo "=== ${pod} ==="
+        kubectl_kind -n monitoring describe "${pod}" 2>&1 || true
+      done
+} > /tmp/debug-artifacts/kube-prometheus-operator-pods-describe.txt 2>&1 || true
 kubectl_kind get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded > /tmp/debug-artifacts/non-running-pods.txt || true
 tar_inputs=()
 [[ -f recipe.yaml ]] && tar_inputs+=(recipe.yaml)
@@ -63,6 +99,8 @@ docker_timeout 30s ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}
   --format '{{.Names}}' | sort | while read -r node_container; do
     [[ -z "${node_container}" ]] && continue
     node_file="${node_container//[^A-Za-z0-9_.-]/_}"
+    docker_timeout 30s inspect "${node_container}" \
+      > "/tmp/debug-artifacts/${node_file}-docker-inspect.json" 2>&1 || true
     docker_timeout 30s exec "${node_container}" journalctl -u kubelet \
       --since "90 minutes ago" --no-pager \
       > "/tmp/debug-artifacts/${node_file}-kubelet-journal.txt" 2>&1 || true
@@ -83,6 +121,7 @@ docker_timeout 30s ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}
       echo "--- top cpu/memory processes ---"
       ps -eo pid,ppid,stat,etime,%cpu,%mem,comm,args --sort=-%cpu | head -40 || true
     ' > "/tmp/debug-artifacts/${node_file}-node-pressure.txt" 2>&1 || true
+    # shellcheck disable=SC2016 # Expanded inside the kind node shell.
     docker_timeout 120s exec "${node_container}" sh -c '
       for component in kube-apiserver kube-controller-manager kube-scheduler etcd; do
         echo "=== ${component} static pod manifest ==="

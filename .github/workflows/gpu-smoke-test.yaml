@@ -50,8 +50,13 @@ jobs:
               - '.github/actions/gpu-cluster-setup/**'
               - '.github/actions/gpu-operator-install/**'
               - '.github/actions/aicr-build/**'
+              - '.github/actions/gpu-debug-diagnostics/**'
               - '.github/actions/gpu-test-cleanup/**'
+              - '.github/actions/gpu-smoke-nvidia-smi/**'
               - '.github/actions/load-versions/**'
+              - '.github/scripts/gpu-debug-diagnostics.sh'
+              - '.github/scripts/gpu-smoke-run-nvidia-smi.sh'
+              - '.github/scripts/gpu-smoke-show-nvidia-smi-log.sh'
               - 'pkg/collector/**'
               - 'pkg/snapshotter/**'
               - '.github/actions/gpu-snapshot-validate/**'
@@ -108,10 +113,9 @@ jobs:
           method: helm
 
       - name: Run nvidia-smi in a pod
-        run: bash .github/scripts/gpu-smoke-run-nvidia-smi.sh
-
-      - name: Show nvidia-smi output
-        run: bash .github/scripts/gpu-smoke-show-nvidia-smi-log.sh
+        uses: ./.github/actions/gpu-smoke-nvidia-smi
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
       # --- Snapshot and validation ---
 
@@ -124,12 +128,20 @@ jobs:
 
       - name: Debug diagnostics
         if: failure()
-        env:
-          GPU_TEST_DIAGNOSTIC_MODE: smoke
-        run: bash .github/scripts/gpu-debug-diagnostics.sh
+        uses: ./.github/actions/gpu-debug-diagnostics
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          mode: smoke
+
+      - name: Mark debug artifact collection
+        id: gpu-debug-artifacts
+        if: failure() || cancelled()
+        shell: bash
+        run: echo "collect=true" >> "${GITHUB_OUTPUT}"
 
       - name: GPU Test Cleanup
         if: always()
         uses: ./.github/actions/gpu-test-cleanup
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          collect_artifacts: ${{ steps.gpu-debug-artifacts.outputs.collect == 'true' }}

@@ -18,10 +18,19 @@ set -euo pipefail
 sudo nvidia-ctk runtime configure --runtime=docker --set-as-default --cdi.enabled
 sudo nvidia-ctk config --set accept-nvidia-visible-devices-as-volume-mounts=true --in-place
 sudo nvidia-ctk config --set accept-nvidia-visible-devices-envvar-when-unprivileged=false --in-place
+set +e
 timeout 120s sudo systemctl restart docker
+restart_status=$?
+set -e
+if (( restart_status != 0 )); then
+  echo "::error::Docker restart failed after NVIDIA runtime configuration"
+  sudo systemctl status docker --no-pager || true
+  journalctl -u docker --since "10 minutes ago" --no-pager || true
+  exit "${restart_status}"
+fi
 
 for attempt in $(seq 1 30); do
-  if systemctl is-active --quiet docker && docker info >/dev/null 2>&1; then
+  if systemctl is-active --quiet docker && timeout 5s docker info >/dev/null 2>&1; then
     echo "Docker is healthy after NVIDIA runtime configuration."
     exit 0
   fi

@@ -32,7 +32,7 @@ validate_seconds_input() {
     echo "::error::${input_name} must be an integer number of seconds, got '${input_value}'"
     exit 1
   fi
-  if (( input_value <= 0 )); then
+  if (( 10#${input_value} <= 0 )); then
     echo "::error::${input_name} must be greater than 0 seconds, got '${input_value}'"
     exit 1
   fi

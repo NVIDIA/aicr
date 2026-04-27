@@ -23,18 +23,22 @@ inputs:
     description: 'Prefix for the uploaded artifact name'
     required: false
     default: 'gpu-test-debug'
+  collect_artifacts:
+    description: 'Collect and upload debug artifacts before deleting the kind cluster'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
   steps:
     - name: Collect debug artifacts
-      if: failure() || cancelled()
+      if: inputs.collect_artifacts == 'true'
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: bash "${{ github.action_path }}/collect-debug-artifacts.sh"
     - name: Export kind logs
-      if: failure() || cancelled()
+      if: always() && inputs.collect_artifacts == 'true'
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
@@ -46,7 +50,7 @@ runs:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
       run: bash "${{ github.action_path }}/cleanup-kind-cluster.sh"
     - name: Upload debug artifacts
-      if: failure() || cancelled()
+      if: always() && inputs.collect_artifacts == 'true'
       uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
       with:
         name: ${{ inputs.artifact_name_prefix }}-${{ github.run_id }}

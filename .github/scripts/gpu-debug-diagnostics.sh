@@ -24,6 +24,39 @@ kubectl_kind() {
   timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
 }
 
+docker_timeout() {
+  local limit="$1"
+  shift
+  timeout "${limit}" docker "$@"
+}
+
+print_setup_diagnostics() {
+  echo "=== Runner baseline ==="
+  date -u || true
+  hostname || true
+  uptime || true
+  nproc || true
+  free -h || true
+  df -h / || true
+  df -ih / || true
+  echo "=== Docker health ==="
+  docker info >/dev/null 2>&1 && docker version || true
+  echo "=== Host GPUs ==="
+  nvidia-smi -L || true
+  nvidia-smi || true
+  echo "=== Kind clusters ==="
+  kind get clusters || true
+  echo "=== Kind node containers ==="
+  docker_timeout 30s ps -a --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" || true
+  echo "=== Kind node container resources ==="
+  docker_timeout 30s ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
+    --format '{{.Names}}' | sort | while read -r node_container; do
+      [[ -z "${node_container}" ]] && continue
+      docker_timeout 30s inspect "${node_container}" \
+        --format '{{.Name}} State={{.State.Status}} NanoCpus={{.HostConfig.NanoCpus}} CpuShares={{.HostConfig.CpuShares}} Memory={{.HostConfig.Memory}} MemoryReservation={{.HostConfig.MemoryReservation}}' || true
+    done || true
+}
+
 print_workload_images() {
   local ns="$1"
   kubectl_kind -n "${ns}" get deployment,daemonset,statefulset -o json 2>/dev/null \
@@ -47,15 +80,39 @@ print_workload_inventory() {
   done
 }
 
-print_grafana_diagnostics() {
-  echo "=== Grafana deployment ==="
-  kubectl_kind -n monitoring get deployment grafana -o wide 2>/dev/null || true
-  echo "=== Grafana pods ==="
-  kubectl_kind -n monitoring get pods -l app.kubernetes.io/name=grafana -o wide 2>/dev/null || true
-  echo "=== Grafana deployment describe ==="
-  kubectl_kind -n monitoring describe deployment grafana 2>/dev/null || true
-  echo "=== Grafana pod describe ==="
-  kubectl_kind -n monitoring describe pods -l app.kubernetes.io/name=grafana 2>/dev/null || true
+print_component_status_summary() {
+  echo "=== Component workload status ==="
+  kubectl_kind get deployments,statefulsets,daemonsets,pods -A -o wide 2>/dev/null || true
+  echo "=== Component rollout conditions ==="
+  kubectl_kind get deployments,statefulsets,daemonsets -A \
+    -o custom-columns='KIND:.kind,NAMESPACE:.metadata.namespace,NAME:.metadata.name,READY:.status.readyReplicas,AVAILABLE:.status.availableReplicas,DESIRED:.status.replicas,UPDATED:.status.updatedReplicas,AGE:.metadata.creationTimestamp' \
+    2>/dev/null || true
+  echo "=== Non-ready pods ==="
+  kubectl_kind get pods -A \
+    --field-selector=status.phase!=Running,status.phase!=Succeeded \
+    -o wide 2>/dev/null || true
+}
+
+print_kube_prometheus_operator_diagnostics() {
+  echo "=== Monitoring workloads ==="
+  kubectl_kind -n monitoring get deployment,statefulset,daemonset,pods -o wide 2>/dev/null || true
+  echo "=== kube-prometheus-operator deployment ==="
+  kubectl_kind -n monitoring get deployment kube-prometheus-operator -o wide 2>/dev/null || true
+  echo "=== kube-prometheus-operator deployment describe ==="
+  kubectl_kind -n monitoring describe deployment kube-prometheus-operator 2>/dev/null || true
+  echo "=== kube-prometheus-operator pod describe ==="
+  kubectl_kind -n monitoring get pods -o name 2>/dev/null \
+    | grep '^pod/kube-prometheus-operator-' \
+    | while read -r pod; do
+        echo "--- ${pod} ---"
+        kubectl_kind -n monitoring describe "${pod}" 2>/dev/null || true
+      done || true
+  echo "=== kube-prometheus-operator logs ==="
+  kubectl_kind -n monitoring logs deployment/kube-prometheus-operator --all-containers --tail=200 2>/dev/null || true
+  echo "=== kube-prometheus-operator previous logs ==="
+  kubectl_kind -n monitoring logs deployment/kube-prometheus-operator --all-containers --previous --tail=200 2>/dev/null || true
+  echo "=== Recent events (monitoring) ==="
+  kubectl_kind -n monitoring get events --sort-by='.lastTimestamp' 2>/dev/null | tail -80 || true
 }
 
 print_kai_diagnostics() {
@@ -83,6 +140,34 @@ print_kai_diagnostics() {
   kubectl_kind -n kai-scheduler get events --sort-by='.lastTimestamp' 2>/dev/null | tail -50 || true
 }
 
+print_custom_metrics() {
+  local metric
+  local ns
+  local namespaces=("$@")
+
+  echo "=== Custom metrics API ==="
+  for metric in gpu_utilization gpu_memory_used gpu_power_usage; do
+    for ns in "${namespaces[@]}"; do
+      echo "--- ${ns}/${metric} ---"
+      kubectl_kind get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/${ns}/pods/*/${metric}" 2>/dev/null \
+        | jq . || true
+    done
+  done
+}
+
+print_metrics_pipeline_diagnostics() {
+  echo "=== prometheus-adapter pods ==="
+  kubectl_kind -n monitoring get pods -l app.kubernetes.io/name=prometheus-adapter -o wide 2>/dev/null || true
+  echo "=== DCGM Exporter pods ==="
+  kubectl_kind -n gpu-operator get pods -l app=nvidia-dcgm-exporter -o wide 2>/dev/null || true
+  echo "=== Monitoring pods ==="
+  kubectl_kind -n monitoring get pods -o wide 2>/dev/null || true
+  echo "=== DRA ResourceSlices ==="
+  kubectl_kind get resourceslices -o wide 2>/dev/null || true
+  echo "=== Node status ==="
+  kubectl_kind get nodes -o wide 2>/dev/null || true
+}
+
 print_common_gpu_diagnostics() {
   echo "=== ClusterPolicy status ==="
   kubectl_kind get clusterpolicy -o yaml 2>/dev/null || true
@@ -94,64 +179,75 @@ print_common_gpu_diagnostics() {
   kubectl_kind -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
 }
 
+print_h100_common_diagnostics() {
+  local metric_namespaces=("$@")
+  local common_namespaces=(
+    cert-manager
+    gpu-operator
+    monitoring
+    skyhook
+    nvsentinel
+    nvidia-dra-driver
+    nvidia-network-operator
+    kai-scheduler
+  )
+
+  print_setup_diagnostics
+  print_component_status_summary
+  print_workload_inventory "${common_namespaces[@]}" "${metric_namespaces[@]}"
+  print_common_gpu_diagnostics
+  print_kube_prometheus_operator_diagnostics
+  print_kai_diagnostics
+  print_custom_metrics gpu-operator "${metric_namespaces[@]}"
+  print_metrics_pipeline_diagnostics
+  echo "=== Node resources ==="
+  kubectl_kind describe nodes 2>/dev/null | grep -A 20 "Allocated resources" || true
+}
+
+print_kubeflow_diagnostics() {
+  echo "=== Kubeflow Trainer deployment ==="
+  kubectl_kind -n kubeflow get deployment kubeflow-trainer-controller-manager -o wide 2>/dev/null || true
+  echo "=== Kubeflow pods ==="
+  kubectl_kind -n kubeflow get pods -o wide 2>/dev/null || true
+  echo "=== Kubeflow validating webhooks ==="
+  kubectl_kind get validatingwebhookconfigurations validator.trainer.kubeflow.org -o yaml 2>/dev/null || true
+  echo "=== Kubeflow Trainer CRD ==="
+  kubectl_kind get crd trainjobs.trainer.kubeflow.org -o yaml 2>/dev/null || true
+}
+
+print_dynamo_diagnostics() {
+  echo "=== Dynamo pods ==="
+  kubectl_kind -n dynamo-system get pods -o wide 2>/dev/null || true
+  echo "=== Dynamo operator logs ==="
+  kubectl_kind -n dynamo-system logs deployment/dynamo-platform-dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
+  echo "=== Recent events (dynamo-system) ==="
+  kubectl_kind -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
+}
+
+print_kgateway_diagnostics() {
+  echo "=== kgateway pods ==="
+  kubectl_kind -n kgateway-system get pods -o wide 2>/dev/null || true
+  echo "=== GatewayClass status ==="
+  kubectl_kind get gatewayclass -o yaml 2>/dev/null || true
+  echo "=== Gateway status ==="
+  kubectl_kind get gateways -A -o yaml 2>/dev/null || true
+}
+
 case "${mode}" in
   smoke)
+    print_setup_diagnostics
     print_common_gpu_diagnostics
     echo "=== Node status ==="
     kubectl_kind get nodes -o wide 2>/dev/null || true
     ;;
   training)
-    print_workload_inventory cert-manager gpu-operator monitoring skyhook nvsentinel nvidia-dra-driver \
-      nvidia-network-operator kai-scheduler kubeflow
-    print_common_gpu_diagnostics
-    print_grafana_diagnostics
-    print_kai_diagnostics
-    echo "=== Kubeflow Trainer deployment ==="
-    kubectl_kind -n kubeflow get deployment kubeflow-trainer-controller-manager -o wide 2>/dev/null || true
-    echo "=== Kubeflow pods ==="
-    kubectl_kind -n kubeflow get pods -o wide 2>/dev/null || true
-    echo "=== Kubeflow validating webhooks ==="
-    kubectl_kind get validatingwebhookconfigurations validator.trainer.kubeflow.org -o yaml 2>/dev/null || true
-    echo "=== Kubeflow Trainer CRD ==="
-    kubectl_kind get crd trainjobs.trainer.kubeflow.org -o yaml 2>/dev/null || true
-    echo "=== Node resources ==="
-    kubectl_kind describe nodes 2>/dev/null | grep -A 20 "Allocated resources" || true
+    print_h100_common_diagnostics kubeflow
+    print_kubeflow_diagnostics
     ;;
   inference)
-    print_workload_inventory cert-manager gpu-operator monitoring skyhook nvsentinel nvidia-dra-driver \
-      nvidia-network-operator kai-scheduler dynamo-system kgateway-system
-    print_common_gpu_diagnostics
-    echo "=== Dynamo pods ==="
-    kubectl_kind -n dynamo-system get pods -o wide 2>/dev/null || true
-    echo "=== Dynamo operator logs ==="
-    kubectl_kind -n dynamo-system logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
-    echo "=== Recent events (dynamo-system) ==="
-    kubectl_kind -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-    print_kai_diagnostics
-    echo "=== Custom metrics API ==="
-    for metric in gpu_utilization gpu_memory_used gpu_power_usage; do
-      echo "--- ${metric} ---"
-      for ns in gpu-operator dynamo-system; do
-        kubectl_kind get --raw "/apis/custom.metrics.k8s.io/v1beta1/namespaces/${ns}/pods/*/${metric}" 2>/dev/null | jq . || true
-      done
-    done
-    print_grafana_diagnostics
-    echo "=== prometheus-adapter pods ==="
-    kubectl_kind -n monitoring get pods -l app.kubernetes.io/name=prometheus-adapter -o wide 2>/dev/null || true
-    echo "=== kgateway pods ==="
-    kubectl_kind -n kgateway-system get pods -o wide 2>/dev/null || true
-    echo "=== GatewayClass status ==="
-    kubectl_kind get gatewayclass -o yaml 2>/dev/null || true
-    echo "=== Gateway status ==="
-    kubectl_kind get gateways -A -o yaml 2>/dev/null || true
-    echo "=== DCGM Exporter pods ==="
-    kubectl_kind -n gpu-operator get pods -l app=nvidia-dcgm-exporter -o wide 2>/dev/null || true
-    echo "=== Monitoring pods ==="
-    kubectl_kind -n monitoring get pods -o wide 2>/dev/null || true
-    echo "=== DRA ResourceSlices ==="
-    kubectl_kind get resourceslices -o wide 2>/dev/null || true
-    echo "=== Node status ==="
-    kubectl_kind get nodes -o wide 2>/dev/null || true
+    print_h100_common_diagnostics dynamo-system kgateway-system
+    print_dynamo_diagnostics
+    print_kgateway_diagnostics
     ;;
   *)
     echo "::error::unknown GPU_TEST_DIAGNOSTIC_MODE: ${mode}"
