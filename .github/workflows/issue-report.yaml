@@ -16,10 +16,8 @@ name: Daily Issue Report
 
 on:
   schedule:
-    # 5:30 AM Pacific (12:30 UTC during PDT Mar–Nov).
-    # During PST (Nov–Mar) this fires at 4:30 AM Pacific since
-    # GitHub Actions cron is UTC-only.
-    - cron: '30 12 * * *'
+    # 5:30 AM Pacific (12:30 UTC during PDT Mar–Nov, Mon-Fri only).
+    - cron: '30 12 * * 1-5'
   workflow_dispatch: {}
 
 permissions:
@@ -39,6 +37,11 @@ jobs:
       contents: read
       issues: read
     steps:
+
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Collect issue metrics
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9.0.0
@@ -263,16 +266,19 @@ jobs:
             }
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md.join('\n') + '\n');
 
-      - name: Post to Slack
-        env:
-          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+      - name: Stage Slack message
         run: |
           set -euo pipefail
-          if [[ -z "${SLACK_SERVICE}" ]]; then
-            echo "::error::SLACK_SERVICE secret is not configured"
-            exit 1
-          fi
-          curl -sSf -X POST \
-            -H 'Content-type: application/json' \
-            --data @slack-payload.json \
-            "https://hooks.slack.com/services/${SLACK_SERVICE}"
+          {
+            echo "SLACK_MESSAGE<<SLACK_EOF"
+            jq -r '.text' slack-payload.json
+            echo "SLACK_EOF"
+          } >> "${GITHUB_ENV}"
+
+      - name: Post to Slack
+        uses: ./.github/actions/slack-thread-post
+        with:
+          bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: ${{ vars.SLACK_CHANNEL_ID }}
+          body: ${{ env.SLACK_MESSAGE }}
+          mode: reply
