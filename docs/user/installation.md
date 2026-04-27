@@ -66,12 +66,6 @@ sudo mv aicr /usr/local/bin/
 sudo chmod +x /usr/local/bin/aicr
 ```
 
-3. **Verify installation**
-
-```shell
-aicr --version
-```
-
 ### Option 4: Build from Source
 
 **Requirements:**
