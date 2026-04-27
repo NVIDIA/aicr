@@ -99,8 +99,20 @@ runs:
           if [[ "${ok}" != "true" ]]; then
             local err
             err=$(printf '%s' "${response}" | jq -r '.error // "unknown_error"')
-            echo "::error::Slack ${method} failed: ${err}" >&2
             printf '%s' "${response}" | jq . >&2 || true
+            # Permanent misconfiguration — operator must fix; do not lazy-create.
+            case "${err}" in
+              invalid_auth|not_authed|token_revoked|token_expired|\
+              missing_scope|invalid_scope|not_allowed_token_type|\
+              channel_not_found|not_in_channel)
+                echo "::error::Slack ${method} failed: ${err} — fix Slack app config or repo secrets/vars" >&2
+                exit 1
+                ;;
+            esac
+            # Transient (rate_limited, request_timeout, internal_error,
+            # fatal_error, service_unavailable, 5xx) — caller decides whether
+            # to lazy-create.
+            echo "::warning::Slack ${method} transient failure: ${err}" >&2
             return 1
           fi
           printf '%s' "${response}"
