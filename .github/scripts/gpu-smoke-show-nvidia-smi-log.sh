@@ -17,6 +17,7 @@ set -euo pipefail
 
 KUBECTL_REQUEST_TIMEOUT="${KUBECTL_REQUEST_TIMEOUT:-10s}"
 POD_NAME_FILE="${POD_NAME_FILE:-/tmp/aicr-gpu-smoke-pod-name-${KIND_CLUSTER_NAME}}"
+trap 'rm -f "${POD_NAME_FILE}"' EXIT
 
 kubectl_kind() {
   kubectl --request-timeout="${KUBECTL_REQUEST_TIMEOUT}" --context="kind-${KIND_CLUSTER_NAME}" "$@"
@@ -25,6 +26,9 @@ kubectl_kind() {
 pod_name=""
 if [[ -f "${POD_NAME_FILE}" ]]; then
   pod_name="$(cat "${POD_NAME_FILE}")"
+  if [[ -n "${pod_name}" ]] && ! kubectl_kind get pod "${pod_name}" >/dev/null 2>&1; then
+    pod_name=""
+  fi
 fi
 
 if [[ -z "${pod_name}" ]]; then
@@ -40,4 +44,3 @@ if [[ -z "${pod_name}" ]]; then
 fi
 
 kubectl_kind logs "${pod_name}"
-rm -f "${POD_NAME_FILE}"

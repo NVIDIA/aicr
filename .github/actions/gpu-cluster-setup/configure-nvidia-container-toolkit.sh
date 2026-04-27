@@ -25,7 +25,7 @@ set -e
 if (( restart_status != 0 )); then
   echo "::error::Docker restart failed after NVIDIA runtime configuration"
   sudo systemctl status docker --no-pager || true
-  journalctl -u docker --since "10 minutes ago" --no-pager || true
+  sudo journalctl -u docker --since "10 minutes ago" --no-pager || true
   exit "${restart_status}"
 fi
 

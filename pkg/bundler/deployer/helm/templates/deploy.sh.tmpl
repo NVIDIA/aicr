@@ -174,8 +174,9 @@ function dump_kai_scheduler_helm_diagnostics() {
 }
 
 function dump_dynamo_platform_helm_diagnostics() {
-  local namespace="$1"
-  if [[ "${namespace}" != "dynamo-system" ]]; then
+  local component="$1"
+  local namespace="$2"
+  if [[ "${component}" != "dynamo-platform" ]]; then
     return
   fi
 
@@ -202,15 +203,16 @@ function dump_dynamo_platform_helm_diagnostics() {
 }
 
 # helm_retry contract:
-#   helm_retry "<description>" "<namespace>" "<max_retries>" <command> [args...]
-# Callers must pass the retry budget as the third positional argument before the
-# command to execute. This keeps per-component retry tuning explicit at the
-# callsite instead of relying on the global MAX_RETRIES fallback.
+#   helm_retry "<description>" "<component>" "<namespace>" "<max_retries>" <command> [args...]
+# Callers must pass the component name and retry budget before the command to
+# execute. This keeps per-component retry tuning and diagnostics explicit at the
+# callsite instead of relying on global fallbacks.
 function helm_retry() {
   local desc="$1"
-  local namespace="$2"
-  local max_retries="$3"
-  shift 3
+  local component="$2"
+  local namespace="$3"
+  local max_retries="$4"
+  shift 4
   local attempt=0
   while true; do
     if "$@"; then
@@ -218,7 +220,7 @@ function helm_retry() {
     fi
     attempt=$((attempt + 1))
     dump_kai_scheduler_helm_diagnostics "${namespace}"
-    dump_dynamo_platform_helm_diagnostics "${namespace}"
+    dump_dynamo_platform_helm_diagnostics "${component}" "${namespace}"
     if [[ ${attempt} -gt ${max_retries} ]]; then
       echo "ERROR: ${desc} failed after ${attempt} attempts"
       return 1
@@ -471,7 +473,8 @@ if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then
   echo "  (async component — skipping --wait, keeping --timeout for hooks)"
 fi
 {{ if .IsOCI -}}
-helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
+helm_retry "{{ .Name }} helm install" "{{ .Name }}" \
+  "{{ .Namespace }}" \
   "${COMPONENT_MAX_RETRIES}" \
   helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
   ${COMPONENT_HELM_APPLY_ARGS[@]+"${COMPONENT_HELM_APPLY_ARGS[@]}"} \
@@ -483,7 +486,8 @@ helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
   ${COMPONENT_WAIT_ARGS} \
   || helm_failed "{{ .Name }}"
 {{ else -}}
-helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
+helm_retry "{{ .Name }} helm install" "{{ .Name }}" \
+  "{{ .Namespace }}" \
   "${COMPONENT_MAX_RETRIES}" \
   helm upgrade --install {{ .Name }} {{ .ChartName }} \
   ${COMPONENT_HELM_APPLY_ARGS[@]+"${COMPONENT_HELM_APPLY_ARGS[@]}"} \

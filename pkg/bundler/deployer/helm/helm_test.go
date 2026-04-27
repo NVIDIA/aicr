@@ -557,6 +557,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 		wantSnippets         []string
 		wantReadmeSnippets   []string
 		rejectSnippets       []string
+		rejectScriptSnippets []string
 		rejectReadmeSnippets []string
 		rejectRetryCap       bool
 	}{
@@ -579,7 +580,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 				`Require v4.0.5+ before relying on`,
 				`--request-timeout="${KUBECTL_REQUEST_TIMEOUT}"`,
 				`dynamo-platform conflict mitigation requires Helm v4.0.5+`,
-				`dump_dynamo_platform_helm_diagnostics "${namespace}"`,
+				`dump_dynamo_platform_helm_diagnostics "${component}" "${namespace}"`,
 				`deployment/dynamo-platform-dynamo-operator-controller-manager`,
 				`--previous --tail=200`,
 			},
@@ -588,7 +589,7 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 				`requires Helm v4.0.5 or later`,
 				`--wait --timeout 20m`,
 			},
-			rejectSnippets: []string{
+			rejectScriptSnippets: []string{
 				`local prerelease`,
 				`if [[ -n "${prerelease}" ]]`,
 			},
@@ -701,6 +702,11 @@ func TestGenerate_DeployScriptComponentTimeouts(t *testing.T) {
 			for _, snippet := range tt.rejectSnippets {
 				if strings.Contains(componentBlock, snippet) {
 					t.Errorf("deploy.sh should not include %s snippet %q", tt.component.Name, snippet)
+				}
+			}
+			for _, snippet := range tt.rejectScriptSnippets {
+				if strings.Contains(script, snippet) {
+					t.Errorf("deploy.sh should not include %s script snippet %q", tt.component.Name, snippet)
 				}
 			}
 			if tt.rejectRetryCap && retryCapPattern.MatchString(componentBlock) {

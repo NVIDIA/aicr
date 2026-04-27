@@ -23,6 +23,22 @@ fi
 mode="$1"
 COMPONENT_HEALTH_TIMEOUT="${COMPONENT_HEALTH_TIMEOUT:-120s}"
 
+duration_seconds() {
+  local input_value="$1"
+  local number="${input_value%[smh]}"
+  local unit="${input_value: -1}"
+
+  case "${unit}" in
+    s) echo "$((10#${number}))" ;;
+    m) echo "$((10#${number} * 60))" ;;
+    h) echo "$((10#${number} * 3600))" ;;
+    *)
+      echo "::error::unsupported duration '${input_value}'" >&2
+      exit 1
+      ;;
+  esac
+}
+
 kubectl_kind() {
   timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
 }
@@ -62,13 +78,23 @@ wait_for_deployments() {
 
 wait_for_required_object() {
   local resource="$1"
+  local timeout_seconds
+  local deadline
 
-  echo "Verifying ${resource}"
-  if kubectl_kind get "${resource}" >/dev/null; then
-    return 0
-  fi
+  timeout_seconds="$(duration_seconds "${COMPONENT_HEALTH_TIMEOUT}")"
+  deadline=$((SECONDS + timeout_seconds))
+
+  echo "Waiting up to ${COMPONENT_HEALTH_TIMEOUT} for ${resource}"
+  while (( SECONDS <= deadline )); do
+    if kubectl_kind get "${resource}" >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
 
   echo "::error::Required object is missing: ${resource}"
+  kubectl_kind get "${resource}" -o yaml 2>/dev/null || true
+  kubectl_kind describe "${resource}" 2>/dev/null || true
   return 1
 }
 

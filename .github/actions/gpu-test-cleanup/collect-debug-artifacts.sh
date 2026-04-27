@@ -19,6 +19,7 @@ set -uo pipefail
 rm -rf /tmp/debug-artifacts
 mkdir -p /tmp/debug-artifacts
 CONTROL_PLANE_COMPONENTS="kube-apiserver kube-controller-manager kube-scheduler etcd"
+MAX_KIND_NODE_ARTIFACT_SECONDS="${MAX_KIND_NODE_ARTIFACT_SECONDS:-600}"
 kubectl_kind() {
   timeout 30s kubectl --request-timeout=10s --context="kind-${KIND_CLUSTER_NAME}" "$@"
 }
@@ -95,9 +96,15 @@ else
   echo "No recipe.yaml or bundle directory found; skipping runtime bundle archive"
 fi
 
+artifact_loop_start="$(date +%s)"
 docker_timeout 30s ps --filter "label=io.x-k8s.kind.cluster=${KIND_CLUSTER_NAME}" \
   --format '{{.Names}}' | sort | while read -r node_container; do
     [[ -z "${node_container}" ]] && continue
+    artifact_loop_elapsed=$(($(date +%s) - artifact_loop_start))
+    if (( artifact_loop_elapsed > MAX_KIND_NODE_ARTIFACT_SECONDS )); then
+      echo "Kind node artifact collection exceeded ${MAX_KIND_NODE_ARTIFACT_SECONDS}s; stopping after partial collection."
+      break
+    fi
     node_file="${node_container//[^A-Za-z0-9_.-]/_}"
     docker_timeout 30s inspect "${node_container}" \
       > "/tmp/debug-artifacts/${node_file}-docker-inspect.json" 2>&1 || true
