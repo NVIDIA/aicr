@@ -1,0 +1,154 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Slack Thread Post'
+description: 'Post messages to Slack with daily-thread coordination via marker pattern'
+
+inputs:
+  bot-token:
+    description: 'Slack bot token (xoxb-...)'
+    required: true
+  channel-id:
+    description: 'Slack channel ID (e.g. C012ABC3DEF)'
+    required: true
+  body:
+    description: 'Message text. Required when mode=reply or mode=top-level; ignored when mode=heartbeat-only.'
+    required: false
+    default: ''
+  mode:
+    description: 'heartbeat-only | reply | top-level'
+    required: true
+
+outputs:
+  parent-ts:
+    description: "Timestamp of today's daily parent (set in heartbeat-only and reply modes)"
+    value: ${{ steps.post.outputs.parent_ts }}
+  posted-ts:
+    description: 'Timestamp of the posted message (set in reply and top-level modes)'
+    value: ${{ steps.post.outputs.posted_ts }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Post to Slack
+      id: post
+      shell: bash
+      env:
+        BOT_TOKEN: ${{ inputs.bot-token }}
+        CHANNEL_ID: ${{ inputs.channel-id }}
+        BODY: ${{ inputs.body }}
+        MODE: ${{ inputs.mode }}
+      run: |
+        set -euo pipefail
+
+        # ---- Input validation -----------------------------------------------
+        if [[ -z "${BOT_TOKEN}" ]]; then
+          echo "::error::SLACK_BOT_TOKEN is empty — set the secret in repo settings"
+          exit 1
+        fi
+        if [[ -z "${CHANNEL_ID}" ]]; then
+          echo "::error::SLACK_CHANNEL_ID is empty — set the variable in repo settings"
+          exit 1
+        fi
+        case "${MODE}" in
+          heartbeat-only|reply|top-level) ;;
+          *)
+            echo "::error::invalid mode: '${MODE}' (must be heartbeat-only, reply, or top-level)"
+            exit 1
+            ;;
+        esac
+        if [[ "${MODE}" != "heartbeat-only" && -z "${BODY}" ]]; then
+          echo "::error::input 'body' is required when mode=${MODE}"
+          exit 1
+        fi
+
+        # ---- Daily marker (UTC) — internal, not caller-controlled ----------
+        MARKER="Daily AICR-bot status — $(date -u +%Y-%m-%d)"
+
+        # ---- Slack API helper -----------------------------------------------
+        # Calls https://slack.com/api/<method>, fails on response.ok != true.
+        # Echoes the full response on success so the caller can jq it.
+        slack_api() {
+          local method="$1"; shift
+          local response
+          response=$(curl -sS --max-time 30 --connect-timeout 10 \
+            -H "Authorization: Bearer ${BOT_TOKEN}" \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            "$@" \
+            "https://slack.com/api/${method}")
+          local ok
+          ok=$(printf '%s' "${response}" | jq -r '.ok')
+          if [[ "${ok}" != "true" ]]; then
+            local err
+            err=$(printf '%s' "${response}" | jq -r '.error // "unknown_error"')
+            echo "::error::Slack ${method} failed: ${err}" >&2
+            printf '%s' "${response}" | jq . >&2 || true
+            return 1
+          fi
+          printf '%s' "${response}"
+        }
+
+        # ---- Top-level mode: post and exit ----------------------------------
+        if [[ "${MODE}" == "top-level" ]]; then
+          payload=$(jq -n --arg ch "${CHANNEL_ID}" --arg t "${BODY}" \
+            '{channel: $ch, text: $t}')
+          response=$(slack_api chat.postMessage --data "${payload}")
+          posted_ts=$(printf '%s' "${response}" | jq -r '.ts')
+          echo "posted_ts=${posted_ts}" >> "${GITHUB_OUTPUT}"
+          echo "Posted top-level message: ts=${posted_ts}"
+          exit 0
+        fi
+
+        # ---- heartbeat-only / reply: find or lazy-create today's parent -----
+        # conversations.history may rate-limit; on failure we treat as "no parent
+        # found" and fall through to lazy-create. Worst case is a duplicate
+        # parent, which self-heals next day.
+        parent_ts=""
+        if history=$(slack_api conversations.history --get \
+              --data-urlencode "channel=${CHANNEL_ID}" \
+              --data-urlencode "limit=20"); then
+          parent_ts=$(printf '%s' "${history}" \
+            | jq -r --arg m "${MARKER}" \
+                '[.messages[]? | select(.text != null and (.text | startswith($m)))] | .[0].ts // empty')
+        else
+          echo "::warning::conversations.history failed — proceeding with lazy-create"
+        fi
+
+        if [[ -z "${parent_ts}" ]]; then
+          payload=$(jq -n --arg ch "${CHANNEL_ID}" --arg t "${MARKER}" \
+            '{channel: $ch, text: $t}')
+          response=$(slack_api chat.postMessage --data "${payload}")
+          parent_ts=$(printf '%s' "${response}" | jq -r '.ts')
+          echo "Created parent: ts=${parent_ts}"
+        else
+          echo "Found existing parent: ts=${parent_ts}"
+        fi
+
+        echo "parent_ts=${parent_ts}" >> "${GITHUB_OUTPUT}"
+
+        # ---- heartbeat-only: stop after parent is ensured -------------------
+        if [[ "${MODE}" == "heartbeat-only" ]]; then
+          exit 0
+        fi
+
+        # ---- reply: post body as thread reply -------------------------------
+        payload=$(jq -n \
+          --arg ch "${CHANNEL_ID}" \
+          --arg t "${BODY}" \
+          --arg ts "${parent_ts}" \
+          '{channel: $ch, text: $t, thread_ts: $ts}')
+        response=$(slack_api chat.postMessage --data "${payload}")
+        posted_ts=$(printf '%s' "${response}" | jq -r '.ts')
+        echo "posted_ts=${posted_ts}" >> "${GITHUB_OUTPUT}"
+        echo "Posted thread reply: ts=${posted_ts} (parent=${parent_ts})"
