@@ -53,7 +53,10 @@ jobs:
           SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
             || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
 
-          RELEASES_JSON=$(gh release list --repo "${REPO}" --limit 20 \
+          # --limit 200 covers ~6 months at AICR's release cadence; the
+          # publishedAt >= SINCE filter below trims to the 7-day window.
+          # Pagination is YAGNI for this volume.
+          RELEASES_JSON=$(gh release list --repo "${REPO}" --limit 200 \
             --json tagName,publishedAt)
 
           # Filter to publishedAt >= SINCE
