@@ -106,15 +106,24 @@ jobs:
               { ...context.repo, state: 'open', per_page: 100 },
             )).filter(i => !i.pull_request);
 
-            const closed = (await github.paginate(
+            // Pull recently-closed issues (not just count) so we can union
+            // their "newly-created in this window" subset with the open
+            // newly-created subset. Without this, an issue opened and
+            // closed in the same 7 days never counts toward "+new".
+            const recentClosed = (await github.paginate(
               github.rest.issues.listForRepo,
               { ...context.repo, state: 'closed', since, per_page: 100 },
             )).filter(i => !i.pull_request &&
-                          new Date(i.closed_at) >= new Date(since)).length;
+                          new Date(i.closed_at) >= new Date(since));
+            const closed = recentClosed.length;
 
             const total = open.length;
-            const newCount = open.filter(
-              i => new Date(i.created_at) >= new Date(since)).length;
+            const sinceMs = new Date(since).getTime();
+            const newOpen = open.filter(
+              i => new Date(i.created_at).getTime() >= sinceMs).length;
+            const newClosed = recentClosed.filter(
+              i => new Date(i.created_at).getTime() >= sinceMs).length;
+            const newCount = newOpen + newClosed;
 
             const types = TYPE_LABELS
               .map(l => [l, open.filter(i => hasLabel(i, l)).length])
