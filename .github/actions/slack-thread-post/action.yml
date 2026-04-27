@@ -76,6 +76,13 @@ runs:
         # ---- Daily marker (UTC) — internal, not caller-controlled ----------
         MARKER="Daily AICR-bot status — $(date -u +%Y-%m-%d)"
 
+        # Unix timestamp at 00:00:00 UTC today. Used as 'oldest' on
+        # conversations.history so the lookup window is exactly today's UTC
+        # day — independent of channel chatter volume.
+        TODAY_START_TS=$(date -u -d 'today 00:00:00' +%s 2>/dev/null \
+          || date -u -j -f '%Y-%m-%d %H:%M:%S' \
+              "$(date -u +%Y-%m-%d) 00:00:00" +%s)
+
         # ---- Slack API helper -----------------------------------------------
         # Calls https://slack.com/api/<method>, fails on response.ok != true.
         # Echoes the full response on success so the caller can jq it.
@@ -117,7 +124,8 @@ runs:
         parent_ts=""
         if history=$(slack_api conversations.history --get \
               --data-urlencode "channel=${CHANNEL_ID}" \
-              --data-urlencode "limit=20"); then
+              --data-urlencode "limit=100" \
+              --data-urlencode "oldest=${TODAY_START_TS}"); then
           parent_ts=$(printf '%s' "${history}" \
             | jq -r --arg m "${MARKER}" \
                 '[.messages[]? | select(.text != null and (.text | startswith($m)))] | .[0].ts // empty')
