@@ -171,13 +171,23 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          RUN_JSON=$(gh run list --repo "${REPO}" \
-            --workflow=vuln-scan-images.yaml --status=success --limit=1 \
+          # Pull the last 50 successful runs so the 7-day filter has plenty
+          # to choose from even if the workflow runs >1x/day.
+          ALL_RUNS=$(gh run list --repo "${REPO}" \
+            --workflow=vuln-scan-images.yaml --status=success --limit=50 \
             --json databaseId,createdAt,url)
+
+          # 7-day-ago threshold (UTC), with macOS BSD-date fallback.
+          THRESHOLD=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+            || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
+
+          RUN_JSON=$(printf '%s' "${ALL_RUNS}" \
+            | jq --arg t "${THRESHOLD}" \
+                '[.[] | select(.createdAt >= $t)] | sort_by(.createdAt) | reverse | .[0:1]')
 
           COUNT=$(printf '%s' "${RUN_JSON}" | jq 'length')
           if [[ "${COUNT}" -eq 0 ]]; then
-            BLOCK="*Latest vuln scan:* _no successful run found — see Actions tab_"
+            BLOCK="*Latest vuln scan:* _no successful run this week — see Actions tab_"
           else
             URL=$(printf '%s' "${RUN_JSON}" | jq -r '.[0].url')
             CREATED=$(printf '%s' "${RUN_JSON}" | jq -r '.[0].createdAt')
