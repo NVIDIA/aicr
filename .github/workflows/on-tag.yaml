@@ -530,8 +530,14 @@ jobs:
           RELEASE_URL="${SERVER}/${REPO}/releases/tag/${TAG}"
           MESSAGE="AICR ${TAG} has been released (${RELEASE_TYPE}): ${RELEASE_URL}"
 
-          # date -u +%u: 1=Mon … 7=Sun
-          DOW=$(date -u +%u)
+          # Derive DOW from the commit's committer timestamp, not the
+          # notify-job runner clock. A tag pushed late on Friday UTC whose
+          # notify job runs after midnight would otherwise post top-level
+          # on Saturday instead of replying under Friday's daily parent.
+          # TZ=UTC + git's --date=format-local:%u gives UTC day-of-week
+          # (1=Mon..7=Sun) without invoking the date binary, sidestepping
+          # GNU/BSD portability differences.
+          DOW=$(TZ=UTC git log -1 --format=%cd --date=format-local:%u HEAD)
           if [[ "${DOW}" -le 5 ]]; then
             MODE="reply"
           else
