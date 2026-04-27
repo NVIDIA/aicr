@@ -16,7 +16,7 @@ name: Daily Image Vulnerability Scan
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # Daily at 6:00 AM UTC
+    - cron: '0 6 * * 1-5'  # Mon-Fri 06:00 UTC
   workflow_dispatch: {}
 
 permissions:
@@ -266,6 +266,11 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Download all scan results
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
         with:
@@ -273,9 +278,8 @@ jobs:
           merge-multiple: true
           path: scan-results
 
-      - name: Post to Slack
+      - name: Build Slack message
         env:
-          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
           SHA: ${{ github.sha }}
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
@@ -286,24 +290,26 @@ jobs:
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M')
           RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
 
-          RESULTS=""
+          MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})"
           for f in scan-results/*.txt; do
             [[ -f "$f" ]] || continue
-            LINE=$(cat "$f")
-            RESULTS="${RESULTS}\\n• ${LINE}"
+            MESSAGE="${MESSAGE}"$'\n'"• $(cat "$f")"
           done
+          MESSAGE="${MESSAGE}"$'\n'"<${RUN_URL}|View run>"
 
-          MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}\\n<${RUN_URL}|View run>"
+          {
+            echo "SLACK_MESSAGE<<SLACK_EOF"
+            echo "${MESSAGE}"
+            echo "SLACK_EOF"
+          } >> "${GITHUB_ENV}"
 
-          if [[ -n "${SLACK_SERVICE}" ]]; then
-            curl -sSf -X POST \
-              -H 'Content-type: application/json' \
-              --data "{\"text\":\"${MESSAGE}\"}" \
-              "https://hooks.slack.com/services/${SLACK_SERVICE}"
-          else
-            echo "SLACK_SERVICE not set, skipping notification"
-            echo -e "${MESSAGE}"
-          fi
+      - name: Post to Slack
+        uses: ./.github/actions/slack-thread-post
+        with:
+          bot-token: ${{ secrets.SLACK_BOT_TOKEN }}
+          channel-id: ${{ vars.SLACK_CHANNEL_ID }}
+          body: ${{ env.SLACK_MESSAGE }}
+          mode: reply
 
   # =============================================================================
   # Cleanup: Delete all scan-* images from GHCR (always runs)
