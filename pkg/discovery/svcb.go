@@ -49,6 +49,11 @@ func ParseSVCBAnswer(msg *dns.Msg, name string, protocol Protocol, domain string
 		if svcb.Priority == 0 {
 			continue
 		}
+		// Strict less-than keeps the first record at the lowest priority. RFC
+		// 9460 §2.4.3 says equal-priority records are eligible for load
+		// balancing; we currently rely on resolver answer order rather than
+		// implementing randomized selection, since the typical AICR deployment
+		// publishes one SVCB per agent.
 		if best == nil || svcb.Priority < best.Priority {
 			best = svcb
 		}
@@ -95,7 +100,14 @@ func parseDNSAIDParam(local *dns.SVCBLocal, params *SvcParams) {
 	case SvcParamKeyCapSHA256:
 		params.CapSHA256 = val
 	case SvcParamKeyBAP:
-		params.BAP = strings.Split(val, ",")
+		// strings.Split("", ",") returns [""], which would make
+		// AgentRegistration.bapVersions() think BAP is explicitly set and
+		// skip protocol-derived defaults. Treat empty as unset.
+		if val == "" {
+			params.BAP = nil
+		} else {
+			params.BAP = strings.Split(val, ",")
+		}
 	case SvcParamKeyPolicy:
 		params.Policy = val
 	case SvcParamKeyRealm:

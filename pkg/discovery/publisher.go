@@ -188,22 +188,46 @@ func (p *Publisher) ensureAgentConfigMap(ctx context.Context, reg AgentRegistrat
 		},
 	}
 
-	// Create-or-update semantics per CLAUDE.md rules
+	// Create-or-update semantics. On AlreadyExists we GET the current
+	// ConfigMap to pick up its resourceVersion, then Update against that
+	// version. This makes concurrent publishers (or admission-controller
+	// mutations between Create and Update) produce a clean Conflict error
+	// and a single bounded retry rather than silently clobbering peer data.
 	_, err = p.clientset.CoreV1().ConfigMaps(p.namespace).Create(ctx, cm, metav1.CreateOptions{})
-	if k8serrors.IsAlreadyExists(err) {
-		_, err = p.clientset.CoreV1().ConfigMaps(p.namespace).Update(ctx, cm, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to update ConfigMap %q", cmName), err)
-		}
+	if err == nil {
 		return nil
 	}
-	if err != nil {
+	if !k8serrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to create ConfigMap %q", cmName), err)
 	}
-
-	return nil
+	for range maxIndexUpdateRetries {
+		existing, getErr := p.clientset.CoreV1().ConfigMaps(p.namespace).Get(ctx, cmName, metav1.GetOptions{})
+		if getErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to fetch existing ConfigMap %q", cmName), getErr)
+		}
+		// Preserve the existing resourceVersion (and any mutated metadata)
+		// while replacing the data/labels we manage.
+		existing.Data = cm.Data
+		if existing.Labels == nil {
+			existing.Labels = map[string]string{}
+		}
+		for k, v := range cm.Labels {
+			existing.Labels[k] = v
+		}
+		_, updateErr := p.clientset.CoreV1().ConfigMaps(p.namespace).Update(ctx, existing, metav1.UpdateOptions{})
+		if updateErr == nil {
+			return nil
+		}
+		if !k8serrors.IsConflict(updateErr) {
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to update ConfigMap %q", cmName), updateErr)
+		}
+		slog.Debug("ConfigMap update conflict, retrying", "name", cmName)
+	}
+	return errors.New(errors.ErrCodeInternal,
+		fmt.Sprintf("failed to update ConfigMap %q after %d retries due to conflicts", cmName, maxIndexUpdateRetries))
 }
 
 // updateIndex scans all dns-aid agent ConfigMaps in the namespace and

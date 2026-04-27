@@ -20,6 +20,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
@@ -111,8 +113,10 @@ func Serve() error {
 		server.WithVersion(version),
 	)
 
-	// Wire DNS-AID discovery when enabled via environment
-	if os.Getenv("AICR_DISCOVERY_ENABLED") == "true" {
+	// Wire DNS-AID discovery when enabled via environment.
+	// Accept the full set of stdlib truthy values ("true", "1", "T", "TRUE", ...)
+	// rather than only the lowercase "true" literal so misconfiguration is loud.
+	if discoveryEnabled() {
 		opts, agentHandler, err := setupDiscovery()
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to setup discovery", err)
@@ -134,15 +138,43 @@ func Serve() error {
 	return nil
 }
 
+// discoveryEnabled reports whether DNS-AID discovery should be wired up. It
+// honors the standard set of truthy values supported by strconv.ParseBool so
+// "1", "True", "TRUE" all work, not just lowercase "true".
+func discoveryEnabled() bool {
+	v := os.Getenv("AICR_DISCOVERY_ENABLED")
+	if v == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(v)
+	if err != nil {
+		slog.Warn("invalid AICR_DISCOVERY_ENABLED value, treating as disabled",
+			"value", v, "error", err)
+		return false
+	}
+	return enabled
+}
+
+// saNamespacePath is the path to the K8s service-account namespace token.
+// Held in a variable so tests can redirect it to a tempfile (or empty path
+// to force the "default" fallback) and run deterministically off-cluster.
+var saNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
 // podNamespace returns the Kubernetes namespace this pod is running in.
 // Reads from AICR_DISCOVERY_NAMESPACE env var, then the service account mount,
-// and falls back to "default".
+// and falls back to "default". The SA file content is whitespace-trimmed
+// because some CRI runtimes append a trailing newline that would otherwise
+// produce an invalid namespace string downstream.
 func podNamespace() string {
 	if ns := os.Getenv("AICR_DISCOVERY_NAMESPACE"); ns != "" {
-		return ns
+		return strings.TrimSpace(ns)
 	}
-	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-		return string(data)
+	if saNamespacePath != "" {
+		if data, err := os.ReadFile(saNamespacePath); err == nil {
+			if ns := strings.TrimSpace(string(data)); ns != "" {
+				return ns
+			}
+		}
 	}
 	return "default"
 }

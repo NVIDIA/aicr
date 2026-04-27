@@ -39,7 +39,12 @@ type Discoverer struct {
 }
 
 // NewDiscoverer creates a Discoverer with functional options.
-// If no DNS server is specified, it defaults to the system resolver at 127.0.0.1:53.
+//
+// The default DNS server is 127.0.0.1:53. This works in Kubernetes pods where
+// CoreDNS / kube-dns is reached through the cluster DNS service IP injected
+// into resolv.conf — it is NOT the host's "system resolver" in the general
+// sense. Callers running outside a cluster should pass WithDNSServer (or
+// eventually parse /etc/resolv.conf via dns.ClientConfigFromFile).
 func NewDiscoverer(opts ...DiscovererOption) *Discoverer {
 	d := &Discoverer{
 		dnsClient: new(dns.Client),
@@ -61,6 +66,12 @@ func (d *Discoverer) Discover(ctx context.Context, name string, protocol Protoco
 	msg, err := d.querySVCB(ctx, fqdn)
 	if err != nil {
 		return nil, err
+	}
+	// miekg/dns can return (nil, nil) on certain header read failures; guard
+	// against that so a nominally successful exchange cannot panic the handler.
+	if msg == nil {
+		return nil, errors.New(errors.ErrCodeUnavailable,
+			fmt.Sprintf("DNS SVCB query for %s returned nil response", fqdn))
 	}
 
 	if msg.Rcode == dns.RcodeNameError {
@@ -155,6 +166,10 @@ func (d *Discoverer) ListIndex(ctx context.Context, domain string) ([]IndexEntry
 		return nil, errors.Wrap(errors.ErrCodeUnavailable,
 			fmt.Sprintf("DNS query failed for %s", fqdn), err)
 	}
+	if resp == nil {
+		return nil, errors.New(errors.ErrCodeUnavailable,
+			fmt.Sprintf("DNS query for %s returned nil response", fqdn))
+	}
 
 	if resp.Rcode == dns.RcodeNameError {
 		return nil, nil // No index = no agents
@@ -162,6 +177,12 @@ func (d *Discoverer) ListIndex(ctx context.Context, domain string) ([]IndexEntry
 
 	var entries []IndexEntry
 	for _, rr := range resp.Answer {
+		// Honor context cancellation: a misbehaving resolver returning a
+		// huge TXT list shouldn't block the handler past its deadline.
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"index parse interrupted", err)
+		}
 		txt, ok := rr.(*dns.TXT)
 		if !ok {
 			continue
@@ -192,6 +213,10 @@ func (d *Discoverer) querySVCB(ctx context.Context, fqdn string) (*dns.Msg, erro
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable,
 			fmt.Sprintf("DNS SVCB query failed for %s", fqdn), err)
+	}
+	if resp == nil {
+		return nil, errors.New(errors.ErrCodeUnavailable,
+			fmt.Sprintf("DNS SVCB query for %s returned nil response", fqdn))
 	}
 
 	return resp, nil

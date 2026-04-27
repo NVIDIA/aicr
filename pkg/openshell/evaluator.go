@@ -103,12 +103,20 @@ func Evaluate(doc *PolicyDocument, pctx PolicyContext, layer EnforcementLayer) P
 	// rate_limits: enforced at the layer named in ruleEnforcementLayers
 	// (currently Layer 2 only). At Layer 1 we emit an informational warning
 	// so callers are aware that the target has rate limits in effect.
+	//
+	// TODO(openshell): Layer 2 violation requires per-caller request counters
+	// (max_per_minute / max_per_hour) which PolicyContext does not yet carry.
+	// Until counters are wired in, the LayerTarget branch below would deny
+	// 100% of requests, so it is intentionally unreachable: Guard.Check only
+	// invokes Evaluate at LayerCaller. When Layer 2 enforcement ships, this
+	// branch must compare PolicyContext.RequestsPerMinute (TBD) against
+	// rules.RateLimits.MaxPerMinute / MaxPerHour rather than always denying.
 	if rules.RateLimits != nil {
 		switch {
 		case appliesToLayer("rate_limits", layer):
 			violations = append(violations, PolicyViolation{
 				Rule:   "rate_limits",
-				Detail: "rate limits exceeded",
+				Detail: "rate limits not yet implemented at this layer",
 				Layer:  string(layer),
 			})
 		case layer == LayerCaller:
@@ -270,20 +278,22 @@ func compareTLSVersion(a, b string) int {
 }
 
 // parseTLSVersion parses a "major.minor" TLS version string into integers.
-func parseTLSVersion(v string) (major, minor int, ok bool) {
+// Local variable names are intentionally distinct from the predeclared min/max
+// identifiers introduced in Go 1.21.
+func parseTLSVersion(v string) (majorVer, minorVer int, ok bool) {
 	parts := strings.SplitN(v, ".", 2)
 	if len(parts) != 2 {
 		return 0, 0, false
 	}
-	maj, err := strconv.Atoi(parts[0])
+	majorVer, err := strconv.Atoi(parts[0])
 	if err != nil {
 		return 0, 0, false
 	}
-	min, err := strconv.Atoi(parts[1])
+	minorVer, err = strconv.Atoi(parts[1])
 	if err != nil {
 		return 0, 0, false
 	}
-	return maj, min, true
+	return majorVer, minorVer, true
 }
 
 // isWithinAvailability checks if the given time falls within the

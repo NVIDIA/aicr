@@ -21,6 +21,8 @@ import (
 
 	"log/slog"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/discovery"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -28,6 +30,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/server"
 )
+
+// maxPolicyCheckConcurrency bounds the number of in-flight policy fetches
+// per /v1/agents request. Sequential fetches with a 3s PolicyFetchTimeout
+// would otherwise risk N×3s latency under fanout.
+const maxPolicyCheckConcurrency = 8
 
 // dnsNameRegex validates DNS domain names: labels separated by dots, optional trailing dot.
 // Each label: 1-63 chars of [a-z0-9_-], total <= 253 chars.
@@ -90,10 +97,12 @@ func handleAgents(disc *discovery.Discoverer, guard *openshell.Guard, defaultDom
 			return
 		}
 
-		agents := make([]agentResponse, 0, len(records))
+		// Build the response shells first so per-agent policy checks can fan
+		// out concurrently into stable indices.
+		agents := make([]agentResponse, len(records))
 		for i := range records {
 			rec := &records[i]
-			resp := agentResponse{
+			agents[i] = agentResponse{
 				Name:     rec.Name,
 				Protocol: string(rec.Protocol),
 				Endpoint: rec.Endpoint,
@@ -106,25 +115,37 @@ func handleAgents(disc *discovery.Discoverer, guard *openshell.Guard, defaultDom
 					ConnectClass: rec.Params.ConnectClass,
 				},
 			}
+		}
 
-			// Evaluate OpenShell policy if a guard is configured.
-			// Check returns a non-nil error only on programmer errors (e.g.
-			// nil record); fetch failures are surfaced via Allowed + logs.
-			if guard != nil && rec.Params.Policy != "" {
-				result, err := guard.Check(ctx, rec)
-				if err != nil {
-					slog.Warn("openshell guard check failed",
-						"agent", rec.Name, "error", err)
-				} else {
+		// Evaluate OpenShell policy concurrently. Sequential checks would
+		// scale as N×PolicyFetchTimeout (3s) on a cold cache and risk
+		// blowing past DiscoveryHandlerTimeout.
+		if guard != nil {
+			g, gctx := errgroup.WithContext(ctx)
+			g.SetLimit(maxPolicyCheckConcurrency)
+			for i := range records {
+				if records[i].Params.Policy == "" {
+					continue
+				}
+				g.Go(func() error {
+					rec := &records[i]
+					result, err := guard.Check(gctx, rec)
+					if err != nil {
+						slog.Warn("openshell guard check failed",
+							"agent", rec.Name, "error", err)
+						return nil // skip; do not fail the whole request
+					}
 					summary := policyResultSummary{Allowed: result.Allowed}
 					for _, v := range result.Violations {
 						summary.Violations = append(summary.Violations, v.Rule+": "+v.Detail)
 					}
-					resp.PolicyResult = &summary
-				}
+					agents[i].PolicyResult = &summary
+					return nil
+				})
 			}
-
-			agents = append(agents, resp)
+			// Goroutines never return errors today, but Wait() also surfaces
+			// gctx cancellation if the request deadline trips first.
+			_ = g.Wait()
 		}
 
 		resp := map[string]any{

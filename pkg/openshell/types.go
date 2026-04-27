@@ -58,7 +58,10 @@ type CELRule struct {
 }
 
 // PolicyRules contains the 16 native policy rules and optional CEL rules.
-// All fields are pointers or slices to distinguish "not set" from zero values.
+// Most "value-bearing" fields use pointers or slices to distinguish "not set"
+// from zero values. The three boolean rules (RequireDNSSEC, RequireMutualTLS,
+// ConsentRequired) are plain bool by design: a missing JSON key and an
+// explicit "false" both mean "not required", which is the correct default.
 type PolicyRules struct {
 	RequiredProtocols        []string            `json:"required_protocols,omitempty"`
 	RequiredAuthTypes        []string            `json:"required_auth_types,omitempty"`

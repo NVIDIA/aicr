@@ -149,26 +149,49 @@ func TestFetcherRejectsOversized(t *testing.T) {
 }
 
 func TestFetcherSSRFDialBlocksPrivateIP(t *testing.T) {
-	// Regression test: a fetcher with the default safe transport must refuse
-	// to dial private/loopback IPs even when the URL parses cleanly. httptest
-	// always binds to 127.0.0.1 so a default-configured fetcher should fail.
+	// Exercises the post-resolution dial-time SSRF guard. URL validation
+	// only catches IP literals; this test points the URL at the hostname
+	// "localhost" so URL validation accepts it, then expects the safe
+	// transport to look up localhost, see 127.0.0.1, and refuse to dial.
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"version":"1.0","agent":"x","rules":{}}`))
 	}))
 	defer srv.Close()
 
-	// Use the test server's TLS root pool but our own safe transport so the
-	// dial-time SSRF check applies. WithHTTPClient is intentionally NOT used.
-	f := NewFetcher()
-	// Replace transport with one that has the same RootCAs but our SSRF guard.
+	// Build a transport with our SSRF guard but trust the httptest CA.
 	transport := newSafeTransport(false)
 	transport.TLSClientConfig = srv.Client().Transport.(*http.Transport).TLSClientConfig
+
+	f := NewFetcher()
 	f.client = &http.Client{Transport: transport, Timeout: 2 * time.Second}
 
-	_, err := f.Fetch(context.Background(), srv.URL+"/policy.json")
-	if err == nil {
+	_, port, err := net.SplitHostPort(srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+	// localhost resolves to 127.0.0.1 (loopback) — dial guard must reject.
+	policyURL := "https://localhost:" + port + "/policy.json"
+
+	if _, err := f.Fetch(context.Background(), policyURL); err == nil {
 		t.Fatal("expected dial-time SSRF rejection, got nil")
+	}
+}
+
+func TestFetcherRejectsNonHTTPSRedirect(t *testing.T) {
+	// Verify CheckRedirect rejects a Location header that downgrades to http.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Location", "http://example.com/policy.json")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+
+	f := NewFetcher(WithHTTPClient(srv.Client()), WithAllowPrivate(true))
+	// httptest.Server.Client() does not install a CheckRedirect; add ours.
+	f.client.CheckRedirect = checkRedirect
+
+	if _, err := f.Fetch(context.Background(), srv.URL+"/policy.json"); err == nil {
+		t.Fatal("expected CheckRedirect to reject http:// redirect")
 	}
 }
 

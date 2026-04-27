@@ -16,9 +16,9 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -49,7 +49,7 @@ func TestHandleAgents(t *testing.T) {
 				&dns.SVCB{
 					Hdr:      dns.RR_Header{Name: qname, Rrtype: dns.TypeSVCB, Class: dns.ClassINET, Ttl: 300},
 					Priority: 1,
-					Target:   fmt.Sprintf("aicrd.default.svc.cluster.local."),
+					Target:   "aicrd.default.svc.cluster.local.",
 					Value: []dns.SVCBKeyValue{
 						&dns.SVCBPort{Port: 8080},
 					},
@@ -176,14 +176,36 @@ func TestHandleAgentsInvalidDomain(t *testing.T) {
 }
 
 func TestDiscoveryDomain(t *testing.T) {
-	// Without any env vars or service account, should fall back to default
-	t.Setenv("AICR_DISCOVERY_DOMAIN", "")
-	domain := discoveryDomain()
-	// When no SA namespace file exists, expect default
-	assert.Contains(t, domain, "svc.cluster.local.")
+	// Force the "default" fallback path by pointing the SA-namespace lookup
+	// at a non-existent file. Otherwise this test is host-dependent: a dev
+	// machine with the path mounted (or in-cluster CI) would return the
+	// real namespace and the assertion would still pass for the wrong reason.
+	saved := saNamespacePath
+	t.Cleanup(func() { saNamespacePath = saved })
+	saNamespacePath = ""
 
-	// With env var set
+	t.Setenv("AICR_DISCOVERY_DOMAIN", "")
+	t.Setenv("AICR_DISCOVERY_NAMESPACE", "")
+	assert.Equal(t, "default.svc.cluster.local.", discoveryDomain())
+
+	// AICR_DISCOVERY_NAMESPACE overrides the SA file
+	t.Setenv("AICR_DISCOVERY_NAMESPACE", "tenant-a")
+	assert.Equal(t, "tenant-a.svc.cluster.local.", discoveryDomain())
+
+	// AICR_DISCOVERY_DOMAIN overrides everything
 	t.Setenv("AICR_DISCOVERY_DOMAIN", "custom.example.com.")
-	domain = discoveryDomain()
-	assert.Equal(t, "custom.example.com.", domain)
+	assert.Equal(t, "custom.example.com.", discoveryDomain())
+}
+
+func TestPodNamespaceTrimsWhitespace(t *testing.T) {
+	saved := saNamespacePath
+	t.Cleanup(func() { saNamespacePath = saved })
+
+	dir := t.TempDir()
+	path := dir + "/namespace"
+	require.NoError(t, os.WriteFile(path, []byte("ns-with-newline\n"), 0o600))
+	saNamespacePath = path
+
+	t.Setenv("AICR_DISCOVERY_NAMESPACE", "")
+	assert.Equal(t, "ns-with-newline", podNamespace())
 }

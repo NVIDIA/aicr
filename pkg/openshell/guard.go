@@ -37,6 +37,24 @@ const (
 // Guard is the top-level OpenShell policy enforcement gate. It fetches a
 // target agent's policy document and evaluates it as Layer 1 (caller-side)
 // before allowing the calling agent to connect.
+//
+// Layer 1 limitations:
+//
+// At Layer 1 (pre-connection), only a subset of PolicyContext fields can be
+// populated — currently CallerID, CallerDomain, and Protocol. Fields that
+// require an established connection or per-request signal (AuthType,
+// HasMutualTLS, TLSVersion, DNSSECValidated, CallerTrustScore, Method,
+// Intent, GeoCountry, ConsentToken) cannot be filled in here. In
+// ModePermissive (the default), rules that depend on those unavailable
+// fields surface as warnings only. In ModeStrict, those rules will deny
+// because the zero value never satisfies them.
+//
+// Callers running in ModeStrict against rich policies SHOULD either:
+//   - constrain published policies to caller-side rules (allowed_caller_domains,
+//     blocked_caller_domains, required_protocols, availability), or
+//   - re-evaluate at Layer 2 (target-side) where the connection state is
+//     observable, or
+//   - run in ModePermissive at Layer 1 and rely on Layer 2 for enforcement.
 type Guard struct {
 	fetcher      *Fetcher
 	mode         Mode

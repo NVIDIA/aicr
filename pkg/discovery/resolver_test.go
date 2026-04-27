@@ -16,7 +16,6 @@ package discovery
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -234,7 +233,7 @@ func TestDiscoverer_DiscoverAll(t *testing.T) {
 				&dns.SVCB{
 					Hdr:      dns.RR_Header{Name: qname, Rrtype: dns.TypeSVCB, Class: dns.ClassINET, Ttl: 300},
 					Priority: 1,
-					Target:   fmt.Sprintf("aicrd.default.svc.cluster.local."),
+					Target:   "aicrd.default.svc.cluster.local.",
 					Value: []dns.SVCBKeyValue{
 						&dns.SVCBPort{Port: 8080},
 					},

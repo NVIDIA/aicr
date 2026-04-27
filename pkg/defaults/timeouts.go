@@ -80,6 +80,12 @@ const (
 
 	// ServerShutdownTimeout is the maximum duration for graceful shutdown.
 	ServerShutdownTimeout = 30 * time.Second
+
+	// ServerHookTimeout is the maximum duration any single OnStart or
+	// OnShutdown lifecycle hook may take. A misbehaving hook that blocks
+	// indefinitely (e.g. an unreachable K8s API in a discovery publisher)
+	// would otherwise stall server startup or shutdown.
+	ServerHookTimeout = 30 * time.Second
 )
 
 // Kubernetes timeouts for K8s API operations.

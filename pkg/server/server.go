@@ -154,9 +154,14 @@ func (s *Server) setReady(ready bool) {
 func (s *Server) Start(ctx context.Context) error {
 	slog.Debug("server start", "port", s.httpServer.Addr)
 
-	// Run OnStart lifecycle hooks before accepting traffic
+	// Run OnStart lifecycle hooks before accepting traffic. Each hook gets
+	// its own bounded context so a misbehaving hook (e.g. blocked on an
+	// unreachable backend) cannot stall the server indefinitely.
 	for _, hook := range s.config.OnStart {
-		if err := hook(ctx); err != nil {
+		hookCtx, cancel := context.WithTimeout(ctx, defaults.ServerHookTimeout)
+		err := hook(hookCtx)
+		cancel()
+		if err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "OnStart hook failed", err)
 		}
 	}
@@ -198,9 +203,14 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	slog.Info("shutting down server")
 
-	// Run OnShutdown lifecycle hooks (best-effort: log errors but continue shutdown)
+	// Run OnShutdown lifecycle hooks (best-effort: log errors but continue
+	// shutdown). Each hook is bounded so one slow hook can't consume the
+	// whole shutdown budget.
 	for _, hook := range s.config.OnShutdown {
-		if err := hook(shutdownCtx); err != nil {
+		hookCtx, cancel := context.WithTimeout(shutdownCtx, defaults.ServerHookTimeout)
+		err := hook(hookCtx)
+		cancel()
+		if err != nil {
 			slog.Error("OnShutdown hook failed", "error", err)
 		}
 	}

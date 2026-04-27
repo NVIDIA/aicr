@@ -16,19 +16,20 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"golang.org/x/time/rate"
 )
 
-// LifecycleHook is a function executed at server lifecycle events (start/shutdown).
-// OnStart hooks receive the parent server context.
-// OnShutdown hooks receive a context bounded by the server's shutdown timeout.
+// LifecycleHook is a function executed at server lifecycle events
+// (start/shutdown). The lifecycle dispatcher wraps each invocation in a
+// per-hook context bounded by defaults.ServerHookTimeout, so hooks should
+// honor ctx.Done() and not perform unbounded blocking I/O.
 type LifecycleHook func(ctx context.Context) error
 
 // ResolvePort returns the port to bind to, honoring the PORT environment
@@ -36,13 +37,17 @@ type LifecycleHook func(ctx context.Context) error
 // PORT value is logged and ignored. This is the single source of truth for
 // the server port across the API server and any sidecars (e.g. discovery
 // publishers) that need to register the same port.
+//
+// strconv.Atoi (rather than fmt.Sscanf) is used because Sscanf accepts
+// trailing garbage — "8080abc" would silently parse as 8080. Atoi requires
+// the entire string to be a valid integer.
 func ResolvePort(defaultPort int) int {
 	portStr := os.Getenv("PORT")
 	if portStr == "" {
 		return defaultPort
 	}
-	var port int
-	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil || port <= 0 || port > 65535 {
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
 		slog.Warn("invalid PORT env var, using default",
 			"value", portStr, "default", defaultPort, "error", err)
 		return defaultPort
@@ -98,8 +103,8 @@ func parseConfig() *config {
 
 	// Allow customization of shutdown timeout to match K8s eviction grace period
 	if shutdownStr := os.Getenv("SHUTDOWN_TIMEOUT_SECONDS"); shutdownStr != "" {
-		var seconds int
-		if _, err := fmt.Sscanf(shutdownStr, "%d", &seconds); err == nil && seconds > 0 {
+		seconds, err := strconv.Atoi(shutdownStr)
+		if err == nil && seconds > 0 {
 			cfg.ShutdownTimeout = time.Duration(seconds) * time.Second
 		} else {
 			slog.Warn("failed to parse SHUTDOWN_TIMEOUT_SECONDS env var, using default", "value", shutdownStr, "error", err)

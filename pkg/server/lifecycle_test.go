@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -31,7 +32,9 @@ func freePort(t *testing.T) int {
 		t.Fatalf("failed to get free port: %v", err)
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	l.Close()
+	if err := l.Close(); err != nil {
+		t.Fatalf("failed to release listener for free port: %v", err)
+	}
 	return port
 }
 
@@ -199,32 +202,115 @@ func TestOnShutdownHookExecutesOnShutdown(t *testing.T) {
 	}
 }
 
-func TestMultipleHooksExecuteInOrder(t *testing.T) {
-	var order []int
+func TestMultipleOnStartHooksExecuteInOrder(t *testing.T) {
+	// Drive Start() rather than calling hooks manually so we cover the
+	// real lifecycle code path (otherwise we'd just be testing slice append).
+	port := freePort(t)
+	cfg := parseConfig()
+	cfg.Port = port
+	cfg.ShutdownTimeout = 1 * time.Second
 
-	s := New(
-		WithOnStart(func(_ context.Context) error {
-			order = append(order, 1)
-			return nil
-		}),
-		WithOnStart(func(_ context.Context) error {
-			order = append(order, 2)
-			return nil
-		}),
+	var (
+		mu    sync.Mutex
+		order []int
 	)
-
-	if len(s.config.OnStart) != 2 {
-		t.Fatalf("expected 2 OnStart hooks, got %d", len(s.config.OnStart))
-	}
-
-	// Simulate execution
-	for _, hook := range s.config.OnStart {
-		if err := hook(context.Background()); err != nil {
-			t.Fatalf("hook error: %v", err)
+	record := func(n int) LifecycleHook {
+		return func(_ context.Context) error {
+			mu.Lock()
+			order = append(order, n)
+			mu.Unlock()
+			return nil
 		}
 	}
 
-	if len(order) != 2 || order[0] != 1 || order[1] != 2 {
-		t.Errorf("hooks executed in wrong order: %v", order)
+	s := New(
+		withConfig(cfg),
+		WithOnStart(record(1)),
+		WithOnStart(record(2)),
+		WithOnStart(record(3)),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errChan := make(chan error, 1)
+	go func() { errChan <- s.Start(ctx) }()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-errChan:
+	case <-time.After(2 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 3 || order[0] != 1 || order[1] != 2 || order[2] != 3 {
+		t.Errorf("OnStart hooks executed in wrong order: %v", order)
+	}
+}
+
+func TestMultipleOnShutdownHooksExecuteInOrder(t *testing.T) {
+	// Pair test for OnShutdown to cover the full contract.
+	port := freePort(t)
+	cfg := parseConfig()
+	cfg.Port = port
+	cfg.ShutdownTimeout = 2 * time.Second
+
+	var (
+		mu    sync.Mutex
+		order []int
+	)
+	record := func(n int) LifecycleHook {
+		return func(_ context.Context) error {
+			mu.Lock()
+			order = append(order, n)
+			mu.Unlock()
+			return nil
+		}
+	}
+
+	s := New(
+		withConfig(cfg),
+		WithOnShutdown(record(1)),
+		WithOnShutdown(record(2)),
+		WithOnShutdown(record(3)),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errChan := make(chan error, 1)
+	go func() { errChan <- s.Start(ctx) }()
+
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	select {
+	case <-errChan:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown timed out")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 3 || order[0] != 1 || order[1] != 2 || order[2] != 3 {
+		t.Errorf("OnShutdown hooks executed in wrong order: %v", order)
 	}
 }

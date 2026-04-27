@@ -67,8 +67,10 @@ type Fetcher struct {
 //
 // The default HTTP client uses a Transport with a safeDialContext that rejects
 // connections to private/loopback addresses even when the URL hostname resolves
-// to one (closing the SSRF bypass via DNS). Tests that need to reach localhost
-// via httptest must pass WithHTTPClient or WithAllowPrivate(true).
+// to one (closing the SSRF bypass via DNS). Redirects are followed only when
+// the redirect target is HTTPS; cross-scheme redirects are rejected. Tests that
+// need to reach localhost via httptest must pass WithHTTPClient or
+// WithAllowPrivate(true).
 func NewFetcher(opts ...FetcherOption) *Fetcher {
 	f := &Fetcher{
 		cacheTTL: defaults.PolicyCacheTTL,
@@ -80,16 +82,37 @@ func NewFetcher(opts ...FetcherOption) *Fetcher {
 	}
 	if f.client == nil {
 		f.client = &http.Client{
-			Timeout:   defaults.PolicyFetchTimeout,
-			Transport: newSafeTransport(f.allowPrivate),
+			Timeout:       defaults.PolicyFetchTimeout,
+			Transport:     newSafeTransport(f.allowPrivate),
+			CheckRedirect: checkRedirect,
 		}
 	}
 	return f
 }
 
+// checkRedirect re-validates each redirect target so a 30x response cannot
+// downgrade the connection from HTTPS or steer it to a private IP that would
+// be missed by the up-front URL validation. The dial-time SSRF guard still
+// runs, but rejecting non-HTTPS redirects up front gives a clearer error.
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New(errors.ErrCodePolicyFetch, "too many redirects")
+	}
+	if req.URL.Scheme != "https" {
+		return errors.New(errors.ErrCodePolicyFetch,
+			"refusing to follow non-HTTPS redirect: "+req.URL.Scheme)
+	}
+	return nil
+}
+
 // newSafeTransport returns an http.Transport whose DialContext rejects
 // connections to private, loopback, or link-local addresses post-resolution.
 // When allowPrivate is true (test mode only), the check is skipped.
+//
+// Implementation note: to avoid a TOCTOU between the IP-allowlist check and
+// the dialer's own DNS resolution, we pin the dial to the first allowed IP
+// from our lookup. Hostname is preserved for TLS SNI/cert verification by
+// leaving http.Transport's TLS config untouched (it uses URL.Host, not addr).
 func newSafeTransport(allowPrivate bool) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	dialer := &net.Dialer{
@@ -97,23 +120,39 @@ func newSafeTransport(allowPrivate bool) *http.Transport {
 		KeepAlive: defaults.HTTPKeepAlive,
 	}
 	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
+		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, err
 		}
-		if !allowPrivate {
-			ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-			if err != nil {
-				return nil, err
+		if allowPrivate {
+			return dialer.DialContext(ctx, network, addr)
+		}
+		// If the host is already an IP literal, validate and dial directly.
+		if ip := net.ParseIP(host); ip != nil {
+			if isBlockedIP(ip) {
+				return nil, errors.New(errors.ErrCodePolicyFetch,
+					"refusing to connect to private/loopback address: "+ip.String())
 			}
-			for _, ipa := range ips {
-				if isBlockedIP(ipa.IP) {
-					return nil, errors.New(errors.ErrCodePolicyFetch,
-						"refusing to connect to private/loopback address: "+ipa.IP.String())
-				}
+			return dialer.DialContext(ctx, network, addr)
+		}
+		// Resolve once, validate every result, then dial the first allowed IP.
+		// Pinning the IP closes the TOCTOU window where a second resolution
+		// (inside the stdlib dialer) could return a different, blocked address.
+		ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, errors.New(errors.ErrCodePolicyFetch,
+				"no IPs resolved for "+host)
+		}
+		for _, ipa := range ips {
+			if isBlockedIP(ipa.IP) {
+				return nil, errors.New(errors.ErrCodePolicyFetch,
+					"refusing to connect to private/loopback address: "+ipa.IP.String())
 			}
 		}
-		return dialer.DialContext(ctx, network, addr)
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
 	}
 	return t
 }
