@@ -172,7 +172,16 @@ jobs:
               lines.push(`Unowned P0/P1: *${unowned}*`);
             }
             if (breaches.length > 0) {
-              lines.push(`:rotating_light: ${breaches.length} SLA breach${breaches.length === 1 ? '' : 'es'}`);
+              const repoUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}`;
+              const SHOW = 5;
+              const shown = breaches
+                .slice(0, SHOW)
+                .map(b => `<${repoUrl}/issues/${b.num}|#${b.num}> (${b.pri}, +${b.over}d over)`);
+              const overflow = breaches.length > SHOW
+                ? ` _+${breaches.length - SHOW} more_`
+                : '';
+              const word = breaches.length === 1 ? 'breach' : 'breaches';
+              lines.push(`:rotating_light: ${breaches.length} SLA ${word}: ${shown.join(', ')}${overflow}`);
             }
 
             const block = lines.join('\n');
