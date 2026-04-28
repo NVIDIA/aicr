@@ -116,8 +116,17 @@ type VerifyResult struct {
 	// HasExternalData indicates the bundle contains external data files (data/ directory).
 	HasExternalData bool `json:"hasExternalData"`
 
+	// TrustReason explains why the trust level was set to its current value.
+	TrustReason string `json:"trustReason,omitempty"`
+
 	// Errors contains verification failure messages.
 	Errors []string `json:"errors,omitempty"`
+}
+
+// setTrust sets the trust level and the human-readable reason together.
+func (r *VerifyResult) setTrust(level TrustLevel, reason string) {
+	r.TrustLevel = level
+	r.TrustReason = reason
 }
 
 // Policy defines verification requirements to enforce after verification.

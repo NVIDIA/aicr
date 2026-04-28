@@ -39,6 +39,9 @@ func TestIntegration_VerifyChecksumOnly(t *testing.T) {
 	if result.TrustLevel != TrustUnverified {
 		t.Errorf("TrustLevel = %s, want unverified", result.TrustLevel)
 	}
+	if result.TrustReason == "" {
+		t.Error("TrustReason should be set")
+	}
 	if result.BundleAttested {
 		t.Error("BundleAttested should be false")
 	}
@@ -69,6 +72,9 @@ func TestIntegration_VerifyTamperedBundle(t *testing.T) {
 	}
 	if result.TrustLevel != TrustUnknown {
 		t.Errorf("TrustLevel = %s, want unknown (tampered)", result.TrustLevel)
+	}
+	if result.TrustReason == "" {
+		t.Error("TrustReason should be set")
 	}
 	if len(result.Errors) == 0 {
 		t.Error("expected errors describing tampered file")
@@ -112,6 +118,9 @@ func TestIntegration_VerifyWithDataDir(t *testing.T) {
 	// The data/ check only applies when full chain is verified
 	if result.TrustLevel != TrustUnverified {
 		t.Errorf("TrustLevel = %s, want unverified (no attestation)", result.TrustLevel)
+	}
+	if result.TrustReason == "" {
+		t.Error("TrustReason should be set")
 	}
 }
 
