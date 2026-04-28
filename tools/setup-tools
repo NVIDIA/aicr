@@ -491,7 +491,22 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
                 GRYPE_TMP=$(mktemp -d)
                 curl -fsSL "$GRYPE_SCRIPT_URL" -o "$GRYPE_TMP/install.sh"
                 verify_sha256 "$GRYPE_TMP/install.sh" "${GRYPE_INSTALL_SHA256:-SKIP}"
-                sh "$GRYPE_TMP/install.sh" -b "$GRYPE_TMP" "${GRYPE_VERSION}"
+                # The anchore install.sh queries github.com for release metadata,
+                # which intermittently 502s. Retry with quadratic backoff so a brief
+                # CDN blip does not fail the whole CI step.
+                grype_attempt=0
+                grype_max_attempts=3
+                until sh "$GRYPE_TMP/install.sh" -b "$GRYPE_TMP" "${GRYPE_VERSION}"; do
+                    grype_attempt=$((grype_attempt + 1))
+                    if [[ ${grype_attempt} -ge ${grype_max_attempts} ]]; then
+                        log_error "grype install failed after ${grype_max_attempts} attempts"
+                        rm -rf "$GRYPE_TMP"
+                        exit 1
+                    fi
+                    grype_delay=$((grype_attempt * grype_attempt * 5))
+                    log_warning "grype install attempt ${grype_attempt} failed (likely transient github.com 502); retrying in ${grype_delay}s"
+                    sleep "${grype_delay}"
+                done
                 sudo mv "$GRYPE_TMP/grype" /usr/local/bin/grype
                 sudo chmod +x /usr/local/bin/grype
                 rm -rf "$GRYPE_TMP"
