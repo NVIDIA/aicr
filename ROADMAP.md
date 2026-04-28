@@ -21,7 +21,7 @@ Recipe portfolio is the defining, perpetual theme of the project — expanding t
 matrix of optimized GPU-accelerated Kubernetes configurations. Coverage is judged
 along four axes plus the validation that keeps it honest.
 
-**Service axis.** Validate end-to-end AICR on managed Kubernetes services CSP, NCP, and vanilla Kubernetes.
+**Service axis.** Validate end-to-end AICR on managed Kubernetes services — both Cloud Service Provider (CSP) and partner-cloud offerings — alongside vanilla Kubernetes.
 
 **Accelerator axis.** H100 is mature; v1 needs L40 and B200 in addition to the
 GB200 work already in flight, with GB300 framed as a near-horizon target.
@@ -33,9 +33,11 @@ that cell is in scope.
 through NFD-based discovery so recipes are derivable from real cluster state, not
 hand-authored criteria.
 
-**Sustained validation.** KWOK-tiered tests already gate every recipe in CI;
-v1 adds a nightly UAT cadence on the live CSPs so coverage cannot silently rot
-between releases.
+**Sustained validation.** KWOK-tiered tests exercise the recipe matrix today —
+advisory on PRs (Tier 1 generic plus diff-aware Tier 2) with the full matrix
+running on merges to `main` and nightly. v1 closes the gap by adding a nightly
+UAT cadence on live managed Kubernetes services and tightening these signals
+into the merge path so coverage cannot silently rot between releases.
 
 **CNCF AI Conformance.** Certify AICR-on-EKS as conformant once the WG finalizes
 requirements. Treat conformance evidence as a first-class output of the validator.
