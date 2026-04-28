@@ -17,18 +17,14 @@ for GPU-accelerated Kubernetes workloads.
 
 ## Components
 
-The following components are included (deployed in order):
+The following components are included (deployed in order). Each component
+lives in a numbered `NNN-<name>/` folder and is installed as a Helm release
+via its own `install.sh`:
 
-| Component | Type | Version | Namespace | Source |
-|-----------|------|---------|-----------|--------|
+| Component | Version | Namespace | Source |
+|-----------|---------|-----------|--------|
 {{ range .Components -}}
-{{ if .IsKustomize -}}
-| {{ .Name }} | Kustomize | {{ .Tag }} | {{ .Namespace }} | {{ .Repository }} ({{ .Path }}) |
-{{ else if .HasChart -}}
-| {{ .Name }} | Helm | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
-{{ else -}}
-| {{ .Name }} | Manifests | | {{ .Namespace }} | |
-{{ end -}}
+| {{ .Name }} | {{ .Version }} | {{ .Namespace }} | {{ .ChartName }} ({{ .Repository }}) |
 {{ end }}
 
 {{ if .Constraints }}
@@ -62,84 +58,47 @@ Use `--no-wait` to skip Helm chart-level waiting where AICR uses `--wait` (keeps
 
 ## Manual Installation
 
-Install components individually in order:
+Each component folder contains an `install.sh` that runs `helm upgrade --install`
+with the right arguments baked in. To install a single component manually:
 
-{{ range .Components }}
-### {{ .Name }}
-
-{{ if .IsKustomize -}}
 ```bash
-kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f -
-kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
-  | kubectl apply -n {{ .Namespace }} -f -
+cd NNN-<component-name>
+bash install.sh
 ```
-{{ else if .HasChart -}}
-```bash
-{{ if .IsOCI -}}
-helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
-  --version {{ .Version }} \
-  -n {{ .Namespace }} --create-namespace \
-  -f {{ .Name }}/values.yaml \
-  -f {{ .Name }}/cluster-values.yaml \
-  --wait --timeout 10m
-{{ else -}}
-helm upgrade --install {{ .Name }} {{ .ChartName }} \
-  --repo {{ .Repository }} \
-  --version {{ .Version }} \
-  -n {{ .Namespace }} --create-namespace \
-  -f {{ .Name }}/values.yaml \
-  -f {{ .Name }}/cluster-values.yaml \
-  --wait --timeout 10m
-{{ end -}}
-```
-{{ end -}}
-{{ if .HasManifests }}
-```bash
-kubectl apply -f {{ .Name }}/manifests/
-```
-{{ end }}
-{{ end }}
 
 ## Customization
 
-Each Helm component has two values files in its directory:
+Each component folder has its own `values.yaml` (static) and `cluster-values.yaml`
+(dynamic, per-cluster). Edit either before deploying:
 
-- `values.yaml` — resolved configuration from the recipe. Edit to override defaults:
-
-  ```bash
-  vim gpu-operator/values.yaml
-  ```
-
-- `cluster-values.yaml` — install-time parameters. Any paths declared with
-  `aicr bundle --dynamic <component>:<path>` are pulled out of `values.yaml`
-  and placed here for you to fill in. The file is always created (empty if
-  no dynamic paths were declared) and passed to `helm upgrade --install`
-  alongside `values.yaml` by both `deploy.sh` and the per-component commands
-  in the "Manual Installation" section above.
+```bash
+vim NNN-<component-name>/values.yaml
+vim NNN-<component-name>/cluster-values.yaml
+```
 
 ## Upgrade
 
-To upgrade a specific Helm component:
+Re-run the per-component install.sh to upgrade an already-installed release:
 
 ```bash
-helm upgrade <component> <chart> --version <version> -n <namespace> -f <component>/values.yaml -f <component>/cluster-values.yaml --wait --timeout 10m
+cd NNN-<component-name>
+bash install.sh
 ```
 
 ## Uninstall
 
 To remove components (reverse order):
 
-{{ range .ComponentsReversed -}}
-{{ if .IsKustomize -}}
 ```bash
-kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
-  | kubectl delete -n {{ .Namespace }} --ignore-not-found -f -
+./undeploy.sh
 ```
-{{ else -}}
+
+Or remove a single release manually:
+
+{{ range .ComponentsReversed -}}
 ```bash
 helm uninstall {{ .Name }} -n {{ .Namespace }}
 ```
-{{ end -}}
 {{ end }}
 
 ## Troubleshooting

@@ -66,7 +66,7 @@ spec:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-defaults/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "$(ls "${WORK}"/bundle-defaults/[0-9]*-skyhook-customizations/templates/tuning.yaml 2>/dev/null | head -1)" \
                 --file ./assert-tuning-defaults.yaml \
                 --no-color --timeout 5s
 
@@ -92,7 +92,7 @@ spec:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-no-autotaint/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "$(ls "${WORK}"/bundle-no-autotaint/[0-9]*-skyhook-customizations/templates/tuning.yaml 2>/dev/null | head -1)" \
                 --file ./assert-tuning-no-autotaint.yaml \
                 --no-color --timeout 5s
 
@@ -118,7 +118,7 @@ spec:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-garbage/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "$(ls "${WORK}"/bundle-garbage/[0-9]*-skyhook-customizations/templates/tuning.yaml 2>/dev/null | head -1)" \
                 --file ./assert-tuning-defaults.yaml \
                 --no-color --timeout 5s
 
@@ -146,7 +146,7 @@ spec:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
               chainsaw assert \
-                --resource "${WORK}/bundle-scheduling/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "$(ls "${WORK}"/bundle-scheduling/[0-9]*-skyhook-customizations/templates/tuning.yaml 2>/dev/null | head -1)" \
                 --file ./assert-tuning-scheduling.yaml \
                 --no-color --timeout 5s
       cleanup:
