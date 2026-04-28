@@ -17,9 +17,9 @@ v1 will be the first release we declare stable and production-ready. The bar:
 
 ### 1. Coverage
 
-Recipe portfolio is the defining, perpetual theme of the project — expanding the
-matrix of optimized GPU-accelerated Kubernetes configurations. Coverage is judged
-along four axes plus the validation that keeps it honest.
+Recipe portfolio is the ongoing focus of the project: expanding the matrix of
+optimized GPU-accelerated Kubernetes configurations. Coverage is judged along
+four axes plus the validation that backs it.
 
 **Service axis.** Validate end-to-end AICR on managed Kubernetes services — both Cloud Service Provider (CSP) and partner-cloud offerings — alongside vanilla Kubernetes.
 
@@ -37,7 +37,7 @@ hand-authored criteria.
 advisory on PRs (Tier 1 generic plus diff-aware Tier 2) with the full matrix
 running on merges to `main` and nightly. v1 closes the gap by adding a nightly
 UAT cadence on live managed Kubernetes services and tightening these signals
-into the merge path so coverage cannot silently rot between releases.
+into the merge path so coverage stays validated between releases.
 
 **CNCF AI Conformance.** Certify AICR-on-EKS as conformant once the WG finalizes
 requirements. Treat conformance evidence as a first-class output of the validator.
@@ -97,8 +97,9 @@ GPU clusters are high-value targets. A fully configured GPU training environment
 can carry hundreds of configuration values across many components; verifiable
 provenance is foundational for production trust.
 
-**Build-time provenance** — SLSA build attestation, cosign signatures, trust-level
-evaluation, and bundle attestation for `argocd-helm` are all in place.
+**Build-time provenance.** SLSA build attestation, cosign signing, trust-level
+evaluation in `aicr bundle verify`, and bundle attestation for the `argocd-helm`
+output are shipped.
 
 **Enterprise signing modes.** v1 closes the gap for production users who can't
 rely on the public Sigstore: air-gapped signing flows, private Sigstore deployment,
