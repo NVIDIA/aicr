@@ -16,7 +16,8 @@
 //
 // It implements the Attester interface with two implementations:
 //   - KeylessAttester: Signs using OIDC-based Fulcio certificates and logs to Rekor.
-//     Supports both ambient tokens (GitHub Actions) and interactive browser flow.
+//     The OIDC token can come from any of the helpers below or be supplied directly
+//     by the caller (e.g., a token fetched out of band).
 //   - NoOpAttester: Returns nil (used when --attest is not set).
 //
 // Attestations use industry-standard formats:
@@ -32,9 +33,24 @@
 //
 // # OIDC Token Acquisition
 //
-// Two paths for obtaining OIDC tokens:
+// Three flows are exposed for obtaining a Sigstore OIDC identity token; the
+// CLI selects one and may also accept a pre-fetched token directly:
 //   - FetchAmbientOIDCToken: Uses ACTIONS_ID_TOKEN_REQUEST_URL/TOKEN env vars
 //     (GitHub Actions). No browser required.
-//   - FetchInteractiveOIDCToken: Opens browser for Sigstore OIDC authentication
-//     (GitHub, Google, or Microsoft accounts). Has a 5-minute timeout.
+//   - FetchInteractiveOIDCToken: Opens a browser and binds a localhost
+//     redirect callback (default for workstations). Has a 5-minute timeout.
+//   - FetchDeviceCodeOIDCToken: OAuth 2.0 Device Authorization Grant
+//     (RFC 8628). Works on headless hosts — the user enters a code on a
+//     separate device. Has a 5-minute timeout.
+//
+// Both interactive helpers accept an io.Writer for user-facing prompts (the
+// verification URL and code) instead of writing directly to stdout, so the
+// package stays usable from non-CLI consumers (pass io.Discard to suppress
+// or os.Stderr for typical CLI behavior).
+//
+// ResolveAttester walks the four-tier source precedence (identity-token →
+// ambient → device-flow → interactive) and returns a ready-to-use Attester.
+// CLI/API callers should populate ResolveOptions from their own surface
+// (flags, env vars, request bodies) and call ResolveAttester rather than
+// re-implementing the precedence — the resolver itself reads no environment.
 package attestation

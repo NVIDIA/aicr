@@ -1,0 +1,187 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-headless-oidc-ci
+  labels:
+    requires: attested-binary
+    ci: "true" # required binary built in CI
+spec:
+  description: |
+    Headless OIDC paths for `bundle --attest`: --identity-token flag,
+    COSIGN_IDENTITY_TOKEN env, and --oidc-device-flow smoke test.
+
+    Each path must produce a signed bundle (or, for device-flow, emit the
+    expected verification prompt) without an ambient GitHub Actions OIDC
+    credential — proving the path works on a headless host.
+
+    Requires an attested binary (AICR_ATTESTED=true). Only runs in CI via
+    the cli-e2e action where ambient OIDC credentials are available to seed
+    the explicit-token tests. Use --selector 'requires!=attested-binary'
+    to skip locally.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: setup
+      description: Generate recipe shared by all OIDC variants.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+            check:
+              ($error == null): true
+
+    - name: identity-token-flag
+      description: |
+        --identity-token flag short-circuits ambient OIDC. Fetch the ambient
+        token explicitly via curl, then unset the ambient env so the test
+        proves the flag (not ambient detection) is what produced the bundle.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
+              IDENTITY_REGEXP="${AICR_IDENTITY_REGEXP:-https://github.com/NVIDIA/aicr/.github/workflows/.*}"
+
+              # Fetch token from the ambient endpoint (audience=sigstore).
+              # curl -fsSL exits non-zero on HTTP error so an empty $TOKEN is
+              # caught by the test below (we cannot rely on pipefail because
+              # chainsaw runs scripts under /bin/sh, which is dash on Ubuntu).
+              TOKEN=$(curl -fsSL \
+                -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+                "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" \
+                | jq -r .value)
+              test -n "${TOKEN}"
+
+              # Drop ambient env — the only auth source must be --identity-token.
+              unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/b-flag" \
+                --attest --identity-token "${TOKEN}" \
+                --certificate-identity-regexp "${IDENTITY_REGEXP}"
+
+              # Bundle must contain both attestation files and a checksums file.
+              test -s "${WORK}/b-flag/attestation/bundle-attestation.sigstore.json"
+              test -s "${WORK}/b-flag/attestation/aicr-attestation.sigstore.json"
+              test -s "${WORK}/b-flag/checksums.txt"
+            check:
+              ($error == null): true
+
+    - name: identity-token-env
+      description: |
+        COSIGN_IDENTITY_TOKEN env var produces the same result as the flag
+        (matches cosign upstream ergonomics).
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
+              IDENTITY_REGEXP="${AICR_IDENTITY_REGEXP:-https://github.com/NVIDIA/aicr/.github/workflows/.*}"
+
+              TOKEN=$(curl -fsSL \
+                -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+                "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" \
+                | jq -r .value)
+              test -n "${TOKEN}"
+
+              unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+
+              COSIGN_IDENTITY_TOKEN="${TOKEN}" \
+                ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/b-env" \
+                --attest --certificate-identity-regexp "${IDENTITY_REGEXP}"
+
+              test -s "${WORK}/b-env/attestation/bundle-attestation.sigstore.json"
+              test -s "${WORK}/b-env/attestation/aicr-attestation.sigstore.json"
+            check:
+              ($error == null): true
+
+    - name: oidc-device-flow-prompt
+      description: |
+        --oidc-device-flow emits a Sigstore device-code verification prompt
+        before any user input. The full handshake needs human interaction,
+        so this is a smoke test: drop ambient env, run with a short timeout,
+        and confirm the device-flow code path was selected (not the browser
+        callback or ambient flow) by matching the printed prompt.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
+
+              # Ambient env must be empty for the device-flow branch to run.
+              unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+
+              # 30s is enough for the issuer to respond with a device code;
+              # we kill before the user-input step. timeout exit codes 124
+              # (TERM) and 143 (128+15) are expected — anything else means
+              # the binary exited on its own and the smoke test is invalid.
+              set +e
+              timeout 30 ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" \
+                -o "${WORK}/b-device" --attest --oidc-device-flow \
+                >"${WORK}/device.out" 2>"${WORK}/device.err"
+              rc=$?
+              set -e
+              cat "${WORK}/device.out" "${WORK}/device.err"
+              test "${rc}" -eq 124 -o "${rc}" -eq 143
+
+              # Must have hit the device-flow path, not the browser path.
+              # This grep matches the slog message emitted before any network
+              # call, so the assertion stays local — it does not depend on
+              # oauth2.sigstore.dev being reachable in the runner. (We
+              # deliberately do not assert the prompt URL: that would couple
+              # the smoke test to live Sigstore availability and turn issuer
+              # outages into spurious CI failures.)
+              grep -q "device-code" "${WORK}/device.err"
+            check:
+              ($error == null): true
+
+    - name: env-toggle-oidc-device-flow
+      description: |
+        AICR_OIDC_DEVICE_FLOW env var enables the same code path as the flag.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-headless-oidc-ci"
+              unset ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_ID_TOKEN_REQUEST_TOKEN
+
+              set +e
+              AICR_OIDC_DEVICE_FLOW=1 timeout 30 ${AICR_BIN} bundle \
+                -r "${WORK}/recipe.yaml" -o "${WORK}/b-device-env" --attest \
+                >"${WORK}/device-env.out" 2>"${WORK}/device-env.err"
+              rc=$?
+              set -e
+              cat "${WORK}/device-env.out" "${WORK}/device-env.err"
+              test "${rc}" -eq 124 -o "${rc}" -eq 143
+              grep -q "device-code" "${WORK}/device-env.err"
+            check:
+              ($error == null): true
+
+    - name: cleanup
+      description: Remove temporary files.
+      try:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-bundle-headless-oidc-ci

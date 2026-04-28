@@ -853,6 +853,8 @@ aicr bundle [flags]
 | `--image-refs` | | string | Path to image references file for OCI registry |
 | `--attest` | | bool | Enable bundle attestation and binary provenance verification. Requires OIDC authentication. See [Bundle Attestation](#bundle-attestation). |
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
+| `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
+| `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
 
 #### Node Scheduling
 
@@ -1283,12 +1285,36 @@ Argo CD Applications use multi-source to:
 When `--attest` is passed, the bundle command performs five steps:
 
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
-2. **Acquires an OIDC token** — In GitHub Actions the ambient OIDC token is used automatically. Locally, a browser window opens for Sigstore OIDC authentication.
+2. **Acquires an OIDC token** — see [OIDC Token Sources](#oidc-token-sources) below.
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
 4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the bundle content (via `checksums.txt` digest) and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. Signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log). For verification, see [`aicr verify`](#aicr-verify).
+
+##### OIDC Token Sources
+
+`--attest` resolves an OIDC identity token from the first matching source, in
+order:
+
+1. `--identity-token` flag (or `COSIGN_IDENTITY_TOKEN` env) — a pre-fetched
+   token. Use this when a token is obtained out of band (e.g., from a cloud
+   workload-identity exchange or another `cosign` invocation). On shared
+   hosts prefer the env var: a flag value is visible in `ps` and
+   `/proc/<pid>/cmdline` to any user on the same machine.
+2. `ACTIONS_ID_TOKEN_REQUEST_URL` + `ACTIONS_ID_TOKEN_REQUEST_TOKEN` — the
+   ambient GitHub Actions OIDC credential. Used automatically in CI.
+3. `--oidc-device-flow` flag (or `AICR_OIDC_DEVICE_FLOW` env) — OAuth 2.0
+   Device Authorization Grant (RFC 8628). The CLI prints a verification URL
+   and short code; the user enters the code in a browser **on a separate
+   device**. Use on headless hosts (bastions, remote build boxes) where the
+   default browser callback cannot reach the machine running `aicr`. The
+   host still needs outbound network access to Sigstore's OIDC and signing
+   endpoints.
+4. Interactive browser flow — opens the default browser and listens on a
+   random `localhost` port for the redirect. Default on workstations.
+
+Both interactive flows time out after 5 minutes.
 
 Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
 

@@ -16,7 +16,9 @@ package attestation
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -133,5 +135,22 @@ func TestFetchAmbientOIDCToken_InvalidResponseJSON(t *testing.T) {
 	_, err := FetchAmbientOIDCToken(context.Background(), server.URL, "token")
 	if err == nil {
 		t.Error("FetchAmbientOIDCToken() with invalid JSON response should return error")
+	}
+}
+
+// TestFetchDeviceCodeOIDCToken_CancelledContext pins the canceled-context
+// path of the device-code flow. We assert errors.Is(err, context.Canceled) so
+// a regression that collapses cancel into the deadline branch (or any
+// unrelated failure) is caught here rather than silently passing.
+func TestFetchDeviceCodeOIDCToken_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := FetchDeviceCodeOIDCToken(ctx, io.Discard)
+	if err == nil {
+		t.Fatal("FetchDeviceCodeOIDCToken() with canceled context should return error")
+	}
+	if !stderrors.Is(err, context.Canceled) {
+		t.Fatalf("FetchDeviceCodeOIDCToken() error = %v, want wrapped context.Canceled", err)
 	}
 }

@@ -15,7 +15,10 @@
 package cli
 
 import (
+	"context"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 )
 
 // TestParseOutputTarget is now in pkg/oci/reference_test.go
@@ -72,5 +75,44 @@ func TestBundleCmd(t *testing.T) {
 		if flagNames[flag] {
 			t.Errorf("flag %q should have been removed (use --output oci://... instead)", flag)
 		}
+	}
+
+	// Verify headless-OIDC flags are wired
+	for _, flag := range []string{"identity-token", "oidc-device-flow"} {
+		if !flagNames[flag] {
+			t.Errorf("expected flag %q to be defined", flag)
+		}
+	}
+}
+
+// TestSelectAttester_WiresEnvAndFlags is a thin smoke test for the CLI shim
+// over attestation.ResolveAttester. The OIDC source-precedence logic itself
+// is exhaustively covered in the attestation package's resolver_test.go;
+// here we only verify that selectAttester forwards CLI flags and the two
+// ACTIONS_ID_TOKEN_REQUEST_* env vars into the resolver correctly.
+func TestSelectAttester_WiresEnvAndFlags(t *testing.T) {
+	// Disabled path: shim must short-circuit without inspecting env or flags.
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://example.invalid")
+	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "x")
+
+	att, err := selectAttester(context.Background(), &bundleCmdOptions{attest: false})
+	if err != nil {
+		t.Fatalf("selectAttester returned error: %v", err)
+	}
+	if _, ok := att.(*attestation.NoOpAttester); !ok {
+		t.Fatalf("expected *NoOpAttester when attest=false, got %T", att)
+	}
+
+	// Identity-token flag: the shim must pass identityToken through; resolver
+	// returns a KeylessAttester synchronously without any network call.
+	att, err = selectAttester(context.Background(), &bundleCmdOptions{
+		attest:        true,
+		identityToken: "pre-fetched-token",
+	})
+	if err != nil {
+		t.Fatalf("selectAttester returned error: %v", err)
+	}
+	if _, ok := att.(*attestation.KeylessAttester); !ok {
+		t.Errorf("expected *KeylessAttester, got %T", att)
 	}
 }

@@ -63,6 +63,15 @@ type bundleCmdOptions struct {
 	// certificateIdentityRegexp overrides the identity pattern for binary attestation.
 	certificateIdentityRegexp string
 
+	// identityToken is a pre-fetched OIDC identity token used for keyless signing.
+	// When non-empty it short-circuits all OIDC acquisition flows. Mirrors cosign's
+	// --identity-token / COSIGN_IDENTITY_TOKEN.
+	identityToken string
+
+	// oidcDeviceFlow opts in to the OAuth 2.0 Device Authorization Grant flow
+	// (RFC 8628) for headless hosts where a browser callback is unavailable.
+	oidcDeviceFlow bool
+
 	// OCI output reference (nil if outputting to local directory)
 	ociRef        *oci.Reference
 	plainHTTP     bool
@@ -78,6 +87,8 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		repoURL:                   cmd.String("repo"),
 		attest:                    cmd.Bool("attest"),
 		certificateIdentityRegexp: cmd.String("certificate-identity-regexp"),
+		identityToken:             cmd.String("identity-token"),
+		oidcDeviceFlow:            cmd.Bool("oidc-device-flow"),
 		insecureTLS:               cmd.Bool("insecure-tls"),
 		plainHTTP:                 cmd.Bool("plain-http"),
 		imageRefsPath:             cmd.String("image-refs"),
@@ -352,6 +363,18 @@ Package with explicit tag (overrides CLI version):
 	workflows (e.g., build-attested.yaml). Not intended for production use.`,
 				Category: "Deployment",
 			},
+			&cli.StringFlag{
+				Name:     "identity-token",
+				Usage:    "Pre-fetched OIDC identity token for --attest keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
+				Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
+				Category: "Deployment",
+			},
+			&cli.BoolFlag{
+				Name:     "oidc-device-flow",
+				Usage:    "Use the OAuth 2.0 device authorization grant for --attest OIDC instead of opening a browser callback. Useful on headless hosts (bastions, remote build boxes) when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
+				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
+				Category: "Deployment",
+			},
 			kubeconfigFlag,
 			dataFlag,
 			// OCI registry connection flags (used when --output is oci://...)
@@ -442,7 +465,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	)
 
 	// Note: binary attestation pre-flight check is handled by bundler.New().
-	attester, err := selectAttester(ctx, opts.attest)
+	attester, err := selectAttester(ctx, opts)
 	if err != nil {
 		return err
 	}
@@ -486,32 +509,31 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	return nil
 }
 
-// selectAttester returns the appropriate attester based on flags and environment.
-func selectAttester(ctx context.Context, attest bool) (attestation.Attester, error) {
-	if !attest {
-		return attestation.NewNoOpAttester(), nil
+// selectAttester wires CLI flags and runtime environment into the
+// attestation package's source-precedence resolver. All token-acquisition
+// and precedence logic lives in attestation.ResolveAttester; this function
+// only translates pkg/cli surface (flags + env vars + stderr) into a
+// ResolveOptions value.
+//
+// On failure it surfaces the "remove --attest to skip" remediation hint via
+// slog so headless users who hit a 5-minute device-flow timeout know the
+// escape hatch — the underlying error is propagated unchanged so its
+// pkg/errors classification (and the resulting CLI exit code) is preserved.
+func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.Attester, error) {
+	att, err := attestation.ResolveAttester(ctx, attestation.ResolveOptions{
+		Attest:        opts.attest,
+		IdentityToken: opts.identityToken,
+		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+		AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+		DeviceFlow:    opts.oidcDeviceFlow,
+		// Prompts (verification URL + user code) go to stderr so they don't
+		// pollute stdout when callers redirect bundle output.
+		PromptWriter: os.Stderr,
+	})
+	if err != nil && opts.attest {
+		slog.Error("bundle attestation requires authentication; remove --attest to bundle without signing", "error", err)
 	}
-
-	// Try ambient OIDC (GitHub Actions)
-	requestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
-	requestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
-	if requestURL != "" && requestToken != "" {
-		oidcToken, err := attestation.FetchAmbientOIDCToken(ctx, requestURL, requestToken)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeUnavailable,
-				"failed to fetch OIDC token for attestation; remove --attest to skip", err)
-		}
-		return attestation.NewKeylessAttester(oidcToken), nil
-	}
-
-	// No ambient OIDC — try interactive browser flow
-	slog.Info("no ambient OIDC token, attempting interactive authentication")
-	oidcToken, err := attestation.FetchInteractiveOIDCToken(ctx)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeUnavailable,
-			"bundle attestation requires authentication; remove --attest to skip", err)
-	}
-	return attestation.NewKeylessAttester(oidcToken), nil
+	return att, err
 }
 
 // pushOCIBundle packages and pushes the bundle to an OCI registry.

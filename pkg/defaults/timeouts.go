@@ -135,10 +135,13 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
-	// InteractiveOIDCTimeout is the maximum time to wait for a user to complete
-	// browser-based OIDC authentication. Prevents indefinite blocking if the
-	// browser flow is started but never completed.
-	InteractiveOIDCTimeout = 5 * time.Minute
+	// OIDCAuthTimeout is the maximum time to wait for a user to complete
+	// any interactive OIDC authentication flow — browser callback or
+	// device-code (RFC 8628). Prevents indefinite blocking if the flow is
+	// started but never completed. Same budget for both flows today; split
+	// per-flow if a future tuning need (e.g., longer device-code window
+	// for typing the user code) makes the shared ceiling cramped.
+	OIDCAuthTimeout = 5 * time.Minute
 )
 
 // Validation phase timeouts for validation phase operations.

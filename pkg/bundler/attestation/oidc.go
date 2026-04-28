@@ -17,6 +17,8 @@ package attestation
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -95,19 +97,76 @@ const (
 // FetchInteractiveOIDCToken opens a browser for the user to authenticate with
 // a Sigstore-supported identity provider (GitHub, Google, or Microsoft) and
 // returns an OIDC identity token.
-func FetchInteractiveOIDCToken(ctx context.Context) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, defaults.InteractiveOIDCTimeout)
+//
+// msgOut receives any user-facing prompts emitted by the OIDC handshake (for
+// example the OOB fallback URL). Pass os.Stderr for typical CLI behavior, or
+// io.Discard to suppress prompts in tests / non-interactive callers. A nil
+// writer is treated as io.Discard so the package never silently writes to
+// stdout/stderr.
+func FetchInteractiveOIDCToken(ctx context.Context, msgOut io.Writer) (string, error) {
+	if msgOut == nil {
+		msgOut = io.Discard
+	}
+	// Clone the package singleton so we inherit any default fields the
+	// upstream may add later (HTMLPage today; potentially more), then
+	// overwrite only what we need to inject.
+	getter := *oauthflow.DefaultIDTokenGetter
+	getter.Output = msgOut
+	return runOIDCConnect(ctx, "interactive", &getter,
+		"opening browser for Sigstore OIDC authentication...")
+}
+
+// FetchDeviceCodeOIDCToken authenticates the user against Sigstore's public-good
+// OIDC issuer using the OAuth 2.0 Device Authorization Grant (RFC 8628). The
+// user is shown a verification URL and code to enter on a separate device,
+// which makes the flow work on headless hosts (no local browser callback).
+//
+// msgOut receives the verification URL, user code, and progress messages from
+// the device handshake. See FetchInteractiveOIDCToken for the writer contract.
+func FetchDeviceCodeOIDCToken(ctx context.Context, msgOut io.Writer) (string, error) {
+	if msgOut == nil {
+		msgOut = io.Discard
+	}
+	getter := oauthflow.NewDeviceFlowTokenGetterForIssuer(SigstoreOIDCIssuer)
+	getter.MessagePrinter = func(s string) {
+		_, _ = fmt.Fprintln(msgOut, s)
+	}
+	return runOIDCConnect(ctx, "device-code", getter,
+		"starting Sigstore OIDC device-code authentication...")
+}
+
+// runOIDCConnect drives oauthflow.OIDConnect with the given TokenGetter under
+// a context deadline. oauthflow.OIDConnect does not accept a context, so the
+// call is run in a goroutine and a select cancels on timeout.
+//
+// Cancellation is honored before any background work starts (so a pre-canceled
+// caller never spawns a browser/device-code handshake), and context.Canceled
+// is reported separately from deadline expiry so callers can tell explicit
+// cancellation apart from a real timeout.
+//
+// Known limitation: once the goroutine is launched, it cannot be canceled
+// because oauthflow.OIDConnect is context-unaware (vendored upstream). After
+// ctx.Done() the wrapper returns immediately, but the goroutine continues
+// running until the HTTP layer times out on its own. This is acceptable for
+// the CLI (the process exits shortly after), but long-lived callers should
+// expect a brief background-resource overhang on cancel/timeout. Removing it
+// requires either a context-aware fork of sigstore/oauthflow or replacing the
+// dependency with a custom OIDC client.
+func runOIDCConnect(ctx context.Context, label string, getter oauthflow.TokenGetter, startMsg string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", classifyOIDCContextError(label, err)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, defaults.OIDCAuthTimeout)
 	defer cancel()
 
-	slog.Info("opening browser for Sigstore OIDC authentication...")
+	slog.Info(startMsg)
 
 	type oidcResult struct {
 		token *oauthflow.OIDCIDToken
 		err   error
 	}
 
-	// Channel + select because oauthflow.OIDConnect does not accept context —
-	// errgroup.Wait would block until it returns even after ctx expires.
 	ch := make(chan oidcResult, 1)
 	go func() {
 		token, err := oauthflow.OIDConnect(
@@ -115,18 +174,17 @@ func FetchInteractiveOIDCToken(ctx context.Context) (string, error) {
 			SigstoreClientID,
 			"",
 			"",
-			oauthflow.DefaultIDTokenGetter,
+			getter,
 		)
 		ch <- oidcResult{token: token, err: err}
 	}()
 
 	select {
 	case <-ctx.Done():
-		return "", errors.Wrap(errors.ErrCodeTimeout,
-			"interactive OIDC authentication timed out", ctx.Err())
+		return "", classifyOIDCContextError(label, ctx.Err())
 	case result := <-ch:
 		if result.err != nil {
-			return "", errors.Wrap(errors.ErrCodeUnavailable, "interactive OIDC authentication failed", result.err)
+			return "", errors.Wrap(errors.ErrCodeUnavailable, label+" OIDC authentication failed", result.err)
 		}
 		if result.token == nil || result.token.RawString == "" {
 			return "", errors.New(errors.ErrCodeInternal, "OIDC authentication returned empty token")
@@ -134,4 +192,18 @@ func FetchInteractiveOIDCToken(ctx context.Context) (string, error) {
 		slog.Info("authenticated successfully", "subject", result.token.Subject)
 		return result.token.RawString, nil
 	}
+}
+
+// classifyOIDCContextError wraps a context error into the appropriate
+// pkg/errors structured error code. context.Canceled is a deliberate
+// caller-side cancel (mapped to Unavailable so it's not mistaken for a
+// service timeout); anything else — typically context.DeadlineExceeded
+// — is treated as a true timeout.
+func classifyOIDCContextError(label string, err error) error {
+	if stderrors.Is(err, context.Canceled) {
+		return errors.Wrap(errors.ErrCodeUnavailable,
+			label+" OIDC authentication canceled", err)
+	}
+	return errors.Wrap(errors.ErrCodeTimeout,
+		label+" OIDC authentication timed out", err)
 }
