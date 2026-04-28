@@ -2,13 +2,49 @@
 
 KWOK (Kubernetes WithOut Kubelet) tests AICR bundles against simulated GPU clusters without real hardware.
 
-## Quick Start
+## Prerequisites
+
+The following tools must be installed before using any `make kwok-*` target. Versions are pinned in `.settings.yaml`.
+
+**Docker Desktop must be running** — Kind uses it to create the local cluster.
 
 ```bash
-make build                              # Build aicr binary
-make kwok-test-all                      # Test all recipes (serial)
-make kwok-test-all-parallel             # Test all recipes (parallel, faster)
-make kwok-e2e RECIPE=h100-eks-ubuntu-training-kubeflow # Test single recipe
+# Kind and cluster lifecycle management
+brew install kind
+brew install tilt-dev/tap/ctlptl
+
+# Bundle deployment and YAML processing (used by KWOK scripts)
+brew install helm yq
+
+# Build the aicr binary (KWOK scripts look for it in dist/, not PATH)
+brew install goreleaser
+```
+
+> **Note:** The `kwok` and `kwokctl` binaries are not required — the KWOK controller is installed into the cluster automatically by `make kwok-cluster` via `kubectl apply`.
+
+> **Note:** If `GITLAB_TOKEN` is set in your environment, `make build` will fail. Always run `unset GITLAB_TOKEN` before building.
+
+Before running KWOK tests, use `aicr recipe`, `aicr query`, and `aicr bundle` to generate and inspect configuration without a cluster. See the [CLI reference](../docs/user/cli-reference.md) for details.
+
+## Quick Start
+
+All `make` commands must be run from the **repo root**. Run `cd /path/to/aicr` first, then:
+
+**Build** (one-time, or after code changes):
+```bash
+unset GITLAB_TOKEN
+make build
+```
+
+**Test a single recipe:**
+```bash
+make kwok-e2e RECIPE=h100-eks-ubuntu-training-kubeflow
+```
+
+**Test all recipes:**
+```bash
+make kwok-test-all
+make kwok-test-all-parallel
 ```
 
 ## Architecture
@@ -135,6 +171,7 @@ spec:
 Test it:
 
 ```bash
+unset GITLAB_TOKEN
 make build
 make kwok-e2e RECIPE=your-recipe-name
 ```
