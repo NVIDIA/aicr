@@ -1100,7 +1100,7 @@ func TestMake_DynamicValuesUnknownComponent(t *testing.T) {
 
 	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
 	if err == nil {
-		t.Fatal("expected error for unknown component in --dynamic, got nil")
+		t.Fatal("expected error for unknown component in dynamic declaration, got nil")
 	}
 	if !strings.Contains(err.Error(), "nonexistent-component") {
 		t.Errorf("error should mention the unknown component, got: %v", err)
@@ -1135,7 +1135,7 @@ func TestMake_DynamicValuesValidComponent(t *testing.T) {
 
 	out, err := bundler.Make(context.Background(), recipeResult, t.TempDir())
 	if err != nil {
-		t.Fatalf("expected success for valid --dynamic component, got: %v", err)
+		t.Fatalf("expected success for valid dynamic component, got: %v", err)
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
@@ -1215,8 +1215,8 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 	}
 }
 
-// TestMake_ArgoCDRejectsDynamic verifies that --deployer argocd with --dynamic
-// returns a clear error directing users to --deployer argocd-helm.
+// TestMake_ArgoCDRejectsDynamic verifies that deployer argocd with dynamic declarations
+// returns a clear error directing users to deployer argocd-helm.
 func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithDeployer(config.DeployerArgoCD),
@@ -1239,7 +1239,7 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 
 	_, err = bundler.Make(context.Background(), recipeResult, t.TempDir())
 	if err == nil {
-		t.Fatal("expected error for --deployer argocd with --dynamic")
+		t.Fatal("expected error for deployer argocd with dynamic declarations")
 	}
 	if !strings.Contains(err.Error(), "argocd-helm") {
 		t.Errorf("error should suggest argocd-helm, got: %v", err)
