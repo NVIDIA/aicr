@@ -254,7 +254,7 @@ jobs:
           retention-days: 1
 
   # =============================================================================
-  # Notify: Post scan results to Slack (always runs)
+  # Notify: Post scan results to Slack (only on critical/high findings)
   # =============================================================================
 
   notify:
@@ -286,12 +286,27 @@ jobs:
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M')
           RUN_URL="${SERVER}/${REPO}/actions/runs/${RUN_ID}"
 
+          # Aggregate critical and high counts across all images
+          TOTAL_CRITICAL=0
+          TOTAL_HIGH=0
           RESULTS=""
           for f in scan-results/*.txt; do
             [[ -f "$f" ]] || continue
             LINE=$(cat "$f")
             RESULTS="${RESULTS}\\n• ${LINE}"
+            # Parse "name: N critical, N high, ..."
+            C=$(echo "${LINE}" | grep -oP '\d+(?= critical)' || echo 0)
+            H=$(echo "${LINE}" | grep -oP '\d+(?= high)' || echo 0)
+            TOTAL_CRITICAL=$((TOTAL_CRITICAL + C))
+            TOTAL_HIGH=$((TOTAL_HIGH + H))
           done
+
+          # Only notify when critical or high vulnerabilities are found
+          if [[ "${TOTAL_CRITICAL}" -eq 0 && "${TOTAL_HIGH}" -eq 0 ]]; then
+            echo "No critical or high vulnerabilities found, skipping Slack notification"
+            echo -e "Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}"
+            exit 0
+          fi
 
           MESSAGE="Vulnerability Scan: ${TIMESTAMP} (${SHORT_SHA})${RESULTS}\\n<${RUN_URL}|View run>"
 
