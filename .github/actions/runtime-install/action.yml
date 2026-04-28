@@ -39,6 +39,10 @@ inputs:
     description: 'Continue deploying remaining bundle components after a component failure'
     required: false
     default: 'true'
+  gpu_operator_chart_version:
+    description: 'GPU Operator Helm chart version for helm mode; defaults to .settings.yaml via load-versions'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -58,9 +62,15 @@ runs:
 
     # --- Helm mode: standalone GPU operator chart ---
 
+    - name: Load GPU Operator chart version
+      if: inputs.method == 'helm' && inputs.gpu_operator_chart_version == ''
+      id: helm-versions
+      uses: ./.github/actions/load-versions
     - name: Install GPU Operator (helm)
       if: inputs.method == 'helm'
       shell: bash
+      env:
+        GPU_OPERATOR_CHART_VERSION: ${{ inputs.gpu_operator_chart_version || steps.helm-versions.outputs.gpu_operator_chart_version }}
       run: bash "${{ github.action_path }}/install-gpu-operator-helm.sh"
     - name: Wait for GPU operands (helm)
       if: inputs.method == 'helm'

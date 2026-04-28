@@ -15,14 +15,8 @@
 
 set -euo pipefail
 
-if ! command -v yq >/dev/null 2>&1; then
-  echo "::error::yq is required to read testing.snapshot_agent_cuda_image from .settings.yaml"
-  exit 1
-fi
-
-SNAPSHOT_AGENT_CUDA_IMAGE="$(yq eval '.testing.snapshot_agent_cuda_image // ""' .settings.yaml)"
-if [[ -z "${SNAPSHOT_AGENT_CUDA_IMAGE}" || "${SNAPSHOT_AGENT_CUDA_IMAGE}" == "null" ]]; then
-  echo "::error::testing.snapshot_agent_cuda_image must be set in .settings.yaml"
+if [[ -z "${SNAPSHOT_AGENT_CUDA_IMAGE:-}" || "${SNAPSHOT_AGENT_CUDA_IMAGE}" == "null" ]]; then
+  echo "::error::SNAPSHOT_AGENT_CUDA_IMAGE must be provided by the aicr-build action"
   exit 1
 fi
 

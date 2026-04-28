@@ -73,6 +73,8 @@ docs_tools:
 testing:
   kind_node_image: 'kindest/node:v1.32.0'
   h100_kind_node_image: 'kindest/node:v1.35.0'
+
+  # GPU CI runtime pins consumed through .github/actions/load-versions.
   gpu_operator_chart_version: 'v25.10.1'
   snapshot_agent_cuda_image: 'nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04'
 
