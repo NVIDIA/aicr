@@ -15,14 +15,8 @@
 
 set -euo pipefail
 
-if ! command -v yq >/dev/null 2>&1; then
-  echo "::error::yq is required to read testing.gpu_operator_chart_version from .settings.yaml"
-  exit 1
-fi
-
-GPU_OPERATOR_CHART_VERSION="$(yq eval '.testing.gpu_operator_chart_version // ""' .settings.yaml)"
-if [[ -z "${GPU_OPERATOR_CHART_VERSION}" || "${GPU_OPERATOR_CHART_VERSION}" == "null" ]]; then
-  echo "::error::testing.gpu_operator_chart_version must be set in .settings.yaml"
+if [[ -z "${GPU_OPERATOR_CHART_VERSION:-}" || "${GPU_OPERATOR_CHART_VERSION}" == "null" ]]; then
+  echo "::error::GPU_OPERATOR_CHART_VERSION must be provided by the runtime-install action"
   exit 1
 fi
 
