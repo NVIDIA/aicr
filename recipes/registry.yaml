@@ -63,11 +63,16 @@ components:
           # run on tainted system nodes (not just GPU nodes) to publish
           # hardware features cluster-wide.
           - worker.tolerations
+          - topologyUpdater.tolerations
       accelerated:
-        # Worker intentionally excluded from accelerated nodeSelector —
-        # NFD workers must run on ALL nodes to detect hardware features.
+        # Worker and topologyUpdater intentionally excluded from
+        # accelerated nodeSelector — both must run on ALL nodes:
+        # worker discovers hardware features, topologyUpdater publishes
+        # NUMA topology. Tolerations still applied so they can land on
+        # tainted GPU nodes.
         tolerationPaths:
           - worker.tolerations
+          - topologyUpdater.tolerations
 
   - name: gpu-operator
     displayName: gpu-operator

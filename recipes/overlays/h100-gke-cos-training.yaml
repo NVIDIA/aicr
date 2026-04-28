@@ -68,6 +68,12 @@ spec:
       dependencyRefs:
         - nodewright-operator
 
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
   validation:
     performance:
       checks:

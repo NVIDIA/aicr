@@ -40,12 +40,31 @@ import (
 )
 
 func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
-	tests := []struct {
+	type tc struct {
 		name    string
 		spec    RecipeMetadataSpec
 		wantErr bool
 		errMsg  string
-	}{
+	}
+	run := func(tests []tc) {
+		t.Helper()
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				err := tt.spec.ValidateDependencies()
+				if (err != nil) != tt.wantErr {
+					t.Errorf("ValidateDependencies() error = %v, wantErr %v", err, tt.wantErr)
+					return
+				}
+				if tt.wantErr && tt.errMsg != "" && err != nil {
+					if !strings.Contains(err.Error(), tt.errMsg) {
+						t.Errorf("ValidateDependencies() error = %v, want error containing %q", err, tt.errMsg)
+					}
+				}
+			})
+		}
+	}
+
+	run([]tc{
 		{
 			name: "valid no dependencies",
 			spec: RecipeMetadataSpec{
@@ -123,22 +142,7 @@ func TestRecipeMetadataSpecValidateDependencies(t *testing.T) {
 			},
 			wantErr: false,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.spec.ValidateDependencies()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateDependencies() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && tt.errMsg != "" && err != nil {
-				if !strings.Contains(err.Error(), tt.errMsg) {
-					t.Errorf("ValidateDependencies() error = %v, want error containing %q", err, tt.errMsg)
-				}
-			}
-		})
-	}
+	})
 }
 
 func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
@@ -208,13 +212,29 @@ func TestRecipeMetadataSpecTopologicalSort(t *testing.T) {
 }
 
 func TestRecipeMetadataSpecMerge(t *testing.T) {
-	tests := []struct {
+	type tc struct {
 		name        string
 		base        RecipeMetadataSpec
 		overlay     RecipeMetadataSpec
 		wantCompCnt int
 		wantConCnt  int
-	}{
+	}
+	run := func(tests []tc) {
+		t.Helper()
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				tt.base.Merge(&tt.overlay)
+				if tt.wantCompCnt > 0 && len(tt.base.ComponentRefs) != tt.wantCompCnt {
+					t.Errorf("Merge() componentRefs count = %d, want %d", len(tt.base.ComponentRefs), tt.wantCompCnt)
+				}
+				if tt.wantConCnt > 0 && len(tt.base.Constraints) != tt.wantConCnt {
+					t.Errorf("Merge() constraints count = %d, want %d", len(tt.base.Constraints), tt.wantConCnt)
+				}
+			})
+		}
+	}
+
+	run([]tc{
 		{
 			name: "merge disjoint components",
 			base: RecipeMetadataSpec{
@@ -271,19 +291,7 @@ func TestRecipeMetadataSpecMerge(t *testing.T) {
 			},
 			wantConCnt: 1,
 		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.base.Merge(&tt.overlay)
-			if tt.wantCompCnt > 0 && len(tt.base.ComponentRefs) != tt.wantCompCnt {
-				t.Errorf("Merge() componentRefs count = %d, want %d", len(tt.base.ComponentRefs), tt.wantCompCnt)
-			}
-			if tt.wantConCnt > 0 && len(tt.base.Constraints) != tt.wantConCnt {
-				t.Errorf("Merge() constraints count = %d, want %d", len(tt.base.Constraints), tt.wantConCnt)
-			}
-		})
-	}
+	})
 }
 
 func TestComponentRefIsEnabled(t *testing.T) {
@@ -1358,4 +1366,106 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 			t.Errorf("Path = %q, want %q (should be from overlay)", comp.Path, "deploy/staging")
 		}
 	})
+}
+
+// TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU platform+intent
+// overlay rooted at a real-cluster platform base (descendants such as Ubuntu /
+// Kubeflow / Dynamo variants inherit through base:) flips
+// componentRefs[nfd].overrides.topologyUpdater.enable to true, and that the
+// kind-chain overlays leave it off. Guards against regressions in both
+// directions: an accidentally-omitted platform+intent overlay loses NRT
+// publishing for that recipe, and an overlay edit accidentally propagating
+// through the kind chain would CrashLoopBackOff TU on KWOK/kind clusters that
+// lack the kubelet podResources gRPC socket.
+func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
+	type criteria struct {
+		service     CriteriaServiceType
+		accelerator CriteriaAcceleratorType
+		os          CriteriaOSType // empty if not constrained
+		intent      CriteriaIntentType
+	}
+
+	tests := []struct {
+		name     string
+		c        criteria
+		wantTUOn bool
+	}{
+		// Real-cluster GPU leaves — TU must be ON
+		{"h100-eks-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, "", CriteriaIntentTraining}, true},
+		{"h100-eks-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorH100, "", CriteriaIntentInference}, true},
+		{"h100-aks-training", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, "", CriteriaIntentTraining}, true},
+		{"h100-aks-inference", criteria{CriteriaServiceAKS, CriteriaAcceleratorH100, "", CriteriaIntentInference}, true},
+		{"h100-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining}, true},
+		{"h100-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference}, true},
+		{"gb200-eks-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, "", CriteriaIntentTraining}, true},
+		{"gb200-eks-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, "", CriteriaIntentInference}, true},
+		{"gb200-oke-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, "", CriteriaIntentTraining}, true},
+		{"gb200-oke-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, "", CriteriaIntentInference}, true},
+		{"rtx-pro-6000-lke-training", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentTraining}, true},
+		{"rtx-pro-6000-lke-inference", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentInference}, true},
+		// Kind-chain — TU must be OFF (KWOK/kind has no kubelet podResources socket)
+		{"h100-kind-training", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentTraining}, false},
+		{"h100-kind-inference", criteria{CriteriaServiceKind, CriteriaAcceleratorH100, "", CriteriaIntentInference}, false},
+	}
+
+	ctx := context.Background()
+	builder := NewBuilder()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cr := NewCriteria()
+			cr.Service = tt.c.service
+			cr.Accelerator = tt.c.accelerator
+			if tt.c.os != "" {
+				cr.OS = tt.c.os
+			}
+			cr.Intent = tt.c.intent
+
+			result, err := builder.BuildFromCriteria(ctx, cr)
+			if err != nil {
+				t.Fatalf("BuildFromCriteria(%+v): %v", tt.c, err)
+			}
+
+			nfd := result.GetComponentRef("nfd")
+			if nfd == nil {
+				t.Fatalf("nfd component missing from resolved recipe; base.yaml should always include it")
+			}
+
+			rawTU, hasTU := nfd.Overrides["topologyUpdater"]
+
+			if tt.wantTUOn {
+				tuMap, ok := rawTU.(map[string]any)
+				if !ok {
+					t.Fatalf("topologyUpdater override is missing or wrong shape; got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s",
+						rawTU, rawTU, tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent)
+				}
+				enable, ok := tuMap["enable"].(bool)
+				if !ok {
+					t.Fatalf("topologyUpdater.enable is not a bool; got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s",
+						tuMap["enable"], tuMap["enable"], tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent)
+				}
+				if !enable {
+					t.Errorf("topologyUpdater.enable = false, want true for criteria service=%s accelerator=%s os=%q intent=%s",
+						tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent)
+				}
+				return
+			}
+
+			// wantTUOn=false: kind chain. The override must be absent OR explicitly false.
+			// Absent is the expected steady state; an explicit topologyUpdater block
+			// with enable=true on a kind overlay is a regression.
+			if !hasTU {
+				return
+			}
+			tuMap, ok := rawTU.(map[string]any)
+			if !ok {
+				t.Fatalf("topologyUpdater override has wrong shape on kind chain; got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s",
+					rawTU, rawTU, tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent)
+			}
+			if enable, ok := tuMap["enable"].(bool); ok && enable {
+				t.Errorf("topologyUpdater.enable = true on kind chain (KWOK lacks podResources socket); criteria service=%s accelerator=%s os=%q intent=%s",
+					tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent)
+			}
+		})
+	}
 }
