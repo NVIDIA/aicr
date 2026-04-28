@@ -117,7 +117,7 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	}
 	if _, statErr := os.Stat(bundleAttestPath); os.IsNotExist(statErr) {
 		// No attestation — checksums valid but unverified
-		result.TrustLevel = TrustUnverified
+		result.setTrust(TrustUnverified, "checksums valid but no attestation files found (bundle created without --attest)")
 		return result, nil
 	}
 
@@ -133,7 +133,7 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	bundleCreator, err := verifySigstoreBundle(ctx, bundleAttestPath, checksumDigest)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("bundle attestation verification failed: %v", err))
-		result.TrustLevel = TrustUnknown
+		result.setTrust(TrustUnknown, "bundle attestation verification failed")
 		return result, nil
 	}
 	result.BundleAttested = true
@@ -149,7 +149,7 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	}
 	if _, statErr := os.Stat(binaryAttestPath); os.IsNotExist(statErr) {
 		// Bundle attested but no binary attestation — chain incomplete
-		result.TrustLevel = TrustAttested
+		result.setTrust(TrustAttested, "bundle attested but binary attestation not found (incomplete chain)")
 		return result, nil
 	}
 
@@ -160,14 +160,14 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	binaryDigest, err := extractBinaryDigest(bundleAttestPath)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("could not extract binary digest from bundle attestation: %v", err))
-		result.TrustLevel = TrustAttested
+		result.setTrust(TrustAttested, "could not extract binary digest from bundle attestation")
 		return result, nil
 	}
 
 	binaryBuilder, err := VerifyBinaryAttestation(ctx, binaryAttestPath, identityPattern, binaryDigest)
 	if err != nil {
 		result.Errors = append(result.Errors, fmt.Sprintf("binary attestation verification failed: %v", err))
-		result.TrustLevel = TrustAttested
+		result.setTrust(TrustAttested, "binary attestation verification failed")
 		return result, nil
 	}
 	result.BinaryAttested = true
@@ -183,11 +183,11 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 	}
 	if _, dataDirErr := os.Stat(dataDir); dataDirErr == nil {
 		result.HasExternalData = true
-		result.TrustLevel = TrustAttested
+		result.setTrust(TrustAttested, "external --data files included; verified requires only embedded recipe data")
 		return result, nil
 	}
 
-	result.TrustLevel = TrustVerified
+	result.setTrust(TrustVerified, "full chain verified: checksums, bundle attestation, binary attestation with NVIDIA CI identity")
 	return result, nil
 }
 
@@ -197,18 +197,18 @@ func Verify(ctx context.Context, bundleDir string, opts *VerifyOptions) (*Verify
 func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
 	checksumPath, joinErr := deployer.SafeJoin(bundleDir, checksum.ChecksumFileName)
 	if joinErr != nil {
-		result.TrustLevel = TrustUnknown
+		result.setTrust(TrustUnknown, "unsafe checksum path")
 		result.Errors = append(result.Errors, fmt.Sprintf("unsafe checksum path: %v", joinErr))
 		return nil, true
 	}
 	checksumData, err := os.ReadFile(checksumPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			result.TrustLevel = TrustUnknown
+			result.setTrust(TrustUnknown, "checksums.txt not found")
 			result.Errors = append(result.Errors, "checksums.txt not found")
 			return nil, true
 		}
-		result.TrustLevel = TrustUnknown
+		result.setTrust(TrustUnknown, "failed to read checksums.txt")
 		result.Errors = append(result.Errors, fmt.Sprintf("failed to read checksums.txt: %v", err))
 		return nil, true
 	}
@@ -216,7 +216,7 @@ func verifyChecksumStep(bundleDir string, result *VerifyResult) ([]byte, bool) {
 	checksumErrors := checksum.VerifyChecksumsFromData(bundleDir, checksumData)
 	if len(checksumErrors) > 0 {
 		result.Errors = append(result.Errors, checksumErrors...)
-		result.TrustLevel = TrustUnknown
+		result.setTrust(TrustUnknown, "checksum verification failed")
 		return nil, true
 	}
 	result.ChecksumsPassed = true

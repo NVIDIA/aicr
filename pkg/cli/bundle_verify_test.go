@@ -115,6 +115,19 @@ func TestOutputText_Verdict(t *testing.T) {
 			wantAbsent:   "FAILED",
 		},
 		{
+			name: "trust reason displayed when set",
+			result: &verifier.VerifyResult{
+				ChecksumsPassed: true,
+				ChecksumFiles:   5,
+				BundleAttested:  true,
+				HasExternalData: true,
+				TrustLevel:      verifier.TrustAttested,
+				TrustReason:     "external --data files included; verified requires only embedded recipe data",
+			},
+			wantContains: "external --data files included",
+			wantAbsent:   "FAILED",
+		},
+		{
 			name: "attestation verification error shows FAILED",
 			result: &verifier.VerifyResult{
 				ChecksumsPassed: true,

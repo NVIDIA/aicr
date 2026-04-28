@@ -179,6 +179,9 @@ func outputText(w io.Writer, r *verifier.VerifyResult, policyFailure string) {
 	}
 
 	fmt.Fprintf(w, "  Trust level: %s\n", r.TrustLevel)
+	if r.TrustReason != "" {
+		fmt.Fprintf(w, "    ↳ %s\n", r.TrustReason)
+	}
 
 	if len(r.Errors) > 0 {
 		fmt.Fprintf(w, "\nDetails:\n")
