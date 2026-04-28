@@ -194,6 +194,52 @@ func TestRunValidations(t *testing.T) {
 			wantMsgInWarn: false,
 			wantMsg:       "This is an error",
 		},
+		{
+			name:          "info severity suppresses warnings",
+			componentName: "nodewright-customizations",
+			validations: []recipe.ComponentValidationConfig{
+				{
+					Function:   "CheckWorkloadSelectorMissing",
+					Severity:   "info",
+					Conditions: map[string][]string{"intent": {"training"}},
+					Message:    "Consider setting --workload-selector",
+				},
+			},
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Intent: recipe.CriteriaIntentTraining,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "info severity suppresses errors from checks",
+			componentName: "nodewright-customizations",
+			validations: []recipe.ComponentValidationConfig{
+				{
+					Function:   "CheckAcceleratedSelectorMissing",
+					Severity:   "info",
+					Conditions: map[string][]string{"intent": {"training", "inference"}},
+					Message:    "Consider setting --accelerated-node-selector",
+				},
+			},
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Intent: recipe.CriteriaIntentTraining,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
 	}
 
 	for _, tt := range tests {

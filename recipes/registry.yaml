@@ -204,13 +204,13 @@ components:
           - workloadSelector
     validations:
       - function: CheckWorkloadSelectorMissing
-        severity: warning
+        severity: info
         conditions:
           intent:
             - training
         message: "This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction."
       - function: CheckAcceleratedSelectorMissing
-        severity: warning
+        severity: info
         conditions:
           intent:
             - training

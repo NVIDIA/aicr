@@ -101,11 +101,13 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 		// Execute validation function
 		checkWarnings, checkErrors := fn(ctx, componentName, recipeResult, bundlerConfig, validation.Conditions)
 
-		// Process results based on severity
-		// If severity is "error", convert warnings to errors
-		// If severity is "warning", keep as warnings
+		// Process results based on severity:
+		//   "error"   — convert all check results to blocking errors
+		//   "info"    — log only (visible with --debug), not surfaced in deployment notes
+		//   "warning" — (default) non-blocking deployment notes
 		severity := strings.ToLower(validation.Severity)
-		if severity == "error" {
+		switch severity {
+		case "error":
 			// Convert all check results to errors
 			for _, warning := range checkWarnings {
 				msg := warning
@@ -121,7 +123,23 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 					errors = append(errors, err)
 				}
 			}
-		} else {
+		case "info":
+			// Log as informational only — not surfaced in deployment notes.
+			// Visible when debug logging is enabled (--debug).
+			for _, warning := range checkWarnings {
+				msg := warning
+				if validation.Message != "" {
+					msg = warning + ". " + validation.Message
+				}
+				slog.Info(msg, "component", componentName)
+			}
+			for _, err := range checkErrors {
+				slog.Info("validation check reported error",
+					"component", componentName,
+					"error", err,
+				)
+			}
+		default:
 			// Default to warning severity
 			for _, warning := range checkWarnings {
 				if validation.Message != "" {

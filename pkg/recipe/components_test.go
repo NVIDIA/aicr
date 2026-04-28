@@ -288,8 +288,8 @@ func TestComponentRegistry_Validations(t *testing.T) {
 	for _, v := range validations {
 		if v.Function == "CheckWorkloadSelectorMissing" {
 			foundWorkloadSelector = true
-			if v.Severity != "warning" {
-				t.Errorf("CheckWorkloadSelectorMissing should have severity 'warning', got %q", v.Severity)
+			if v.Severity != "info" {
+				t.Errorf("CheckWorkloadSelectorMissing should have severity 'info', got %q", v.Severity)
 			}
 			if v.Conditions == nil {
 				t.Error("CheckWorkloadSelectorMissing should have conditions")
@@ -305,8 +305,8 @@ func TestComponentRegistry_Validations(t *testing.T) {
 		}
 		if v.Function == "CheckAcceleratedSelectorMissing" {
 			foundAcceleratedSelector = true
-			if v.Severity != "warning" {
-				t.Errorf("CheckAcceleratedSelectorMissing should have severity 'warning', got %q", v.Severity)
+			if v.Severity != "info" {
+				t.Errorf("CheckAcceleratedSelectorMissing should have severity 'info', got %q", v.Severity)
 			}
 			if v.Conditions == nil {
 				t.Error("CheckAcceleratedSelectorMissing should have conditions")
