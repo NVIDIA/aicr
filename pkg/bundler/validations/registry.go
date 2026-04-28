@@ -136,6 +136,8 @@ func RunValidations(ctx context.Context, componentName string, validations []rec
 			for _, err := range checkErrors {
 				slog.Info("validation check reported error",
 					"component", componentName,
+					"function", validation.Function,
+					"message", validation.Message,
 					"error", err,
 				)
 			}
