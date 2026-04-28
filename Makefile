@@ -156,11 +156,13 @@ license: ## Add/verify license headers in source files
 	@echo "Ensuring license headers..."
 	@addlicense -f .github/headers/LICENSE $(LICENSE_IGNORES) .
 
+#### DO NOT CHANGE THIS SET OF ALLOWED LICENSES, DO NOT ADD IGNORES
 license-check: ## Check license is approved
 	@echo "Checking license headers..."
 	@STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
-        --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0 \
+        --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,Zlib \
+		--ignore github.com/hashicorp/go-cleanhttp,github.com/hashicorp/go-retryablehttp \
         --ignore=$$STDLIB_IGNORE
 
 .PHONY: test
