@@ -522,7 +522,7 @@ func ParseDynamicValues(inputs []string) ([]ComponentPath, error) {
 		}
 		if cp.Value != nil {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid format %q: --dynamic does not accept '=value'", input))
+				fmt.Sprintf("invalid format %q: dynamic declaration does not accept '=value'", input))
 		}
 		result = append(result, cp)
 	}

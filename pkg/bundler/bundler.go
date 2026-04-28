@@ -298,7 +298,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	case config.DeployerArgoCD:
 		if b.Config.HasDynamicValues() {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"--dynamic is not supported with --deployer argocd; use --deployer argocd-helm instead")
+				"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
 		}
 		return &argocd.Generator{
 			RecipeResult:     recipeResult,
@@ -942,7 +942,7 @@ func (b *DefaultBundler) buildDynamicValuesMap() (map[string][]string, error) {
 
 	registry, err := recipe.GetComponentRegistry()
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load component registry for --dynamic resolution", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load component registry for dynamic resolution", err)
 	}
 
 	raw := b.Config.DynamicValues()
@@ -951,7 +951,7 @@ func (b *DefaultBundler) buildDynamicValuesMap() (map[string][]string, error) {
 		comp := registry.GetByOverrideKey(key)
 		if comp == nil {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("unknown component %q in --dynamic flag: not found in component registry", key))
+				fmt.Sprintf("unknown component %q in dynamic declaration: not found in component registry", key))
 		}
 		result[comp.Name] = append(result[comp.Name], paths...)
 	}
