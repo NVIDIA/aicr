@@ -162,7 +162,7 @@ license-check: ## Check license is approved
 	@STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
         --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,Zlib \
-		--ignore github.com/hashicorp/go-cleanhttp,github.com/hashicorp/go-retryablehttp \
+        --ignore=github.com/hashicorp/go-cleanhttp,github.com/hashicorp/go-retryablehttp \
         --ignore=$$STDLIB_IGNORE
 
 .PHONY: test
