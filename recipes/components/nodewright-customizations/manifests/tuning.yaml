@@ -65,8 +65,8 @@ spec:
   packages:
     # Check for kernel being >= to 6.14.0-1018 and if not install
     nvidia-setup-kernel:
-      image: ghcr.io/nvidia/skyhook-packages/nvidia-setup
-      version: "0.2.1"
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.2.2"
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
@@ -84,8 +84,8 @@ spec:
         memoryRequest: 4096Mi
 
     nvidia-tuned:
-      image: ghcr.io/nvidia/skyhook-packages/nvidia-tuned
-      version: "0.2.3"
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
       interrupt:
         type: reboot
       env:
@@ -100,12 +100,12 @@ spec:
         service: {{ $cust.service }}
         {{- end }}
       dependsOn:
-        nvidia-setup-kernel: "0.2.1"
+        nvidia-setup-kernel: "0.2.2"
 
     # Full setup after kernel is in place
     nvidia-setup-full:
-      image: ghcr.io/nvidia/skyhook-packages/nvidia-setup
-      version: "0.2.1"
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.2.2"
       interrupt:
         type: reboot
       resources:
@@ -122,5 +122,5 @@ spec:
         - name: NVIDIA_SETUP_INSTALL_KERNEL
           value: "false"
       dependsOn:
-        nvidia-tuned: "0.2.3"
+        nvidia-tuned: "0.3.0"
 {{- end }}

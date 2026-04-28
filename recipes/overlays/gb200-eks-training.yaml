@@ -71,7 +71,7 @@ spec:
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/tuning.yaml
       overrides:
         service: eks
         accelerator: gb200
