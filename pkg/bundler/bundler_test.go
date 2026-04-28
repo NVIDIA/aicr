@@ -423,11 +423,10 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 			}
 
 			// When included, the component appears as the second numbered folder
-			// (gpu-operator is 001, aws-ebs-csi-driver is 002). When excluded,
-			// neither numbering nor flat name should exist.
-			_, statErr1 := os.Stat(filepath.Join(tmpDir, "002-aws-ebs-csi-driver"))
-			_, statErr2 := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver"))
-			included := !os.IsNotExist(statErr1) || !os.IsNotExist(statErr2)
+			// (gpu-operator is 001, aws-ebs-csi-driver is 002). The flat layout
+			// is gone in this PR — only assert against the numbered path.
+			_, statErr := os.Stat(filepath.Join(tmpDir, "002-aws-ebs-csi-driver"))
+			included := !os.IsNotExist(statErr)
 
 			if included != tt.expectIncluded {
 				t.Errorf("aws-ebs-csi-driver included=%v, want %v", included, tt.expectIncluded)
@@ -1197,13 +1196,11 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 		t.Fatalf("Make() error = %v", makeErr)
 	}
 
-	// Disabled component should NOT have a directory at all (under any numbering)
+	// Disabled component should NOT have a directory at all (under any numbering).
+	// The directory check implies cluster-values.yaml absence, so don't double-check.
 	for _, dir := range []string{"aws-ebs-csi-driver", "001-aws-ebs-csi-driver", "002-aws-ebs-csi-driver"} {
 		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
 			t.Errorf("expected %s directory to NOT be created (component is disabled)", dir)
-		}
-		if _, statErr := os.Stat(filepath.Join(tmpDir, dir, "cluster-values.yaml")); !os.IsNotExist(statErr) {
-			t.Errorf("expected %s/cluster-values.yaml to NOT exist (component is disabled)", dir)
 		}
 	}
 

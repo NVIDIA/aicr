@@ -19,8 +19,11 @@ cd "${SCRIPT_DIR}"
 # shellcheck source=/dev/null
 source ./upstream.env
 
+# CHART carries the full OCI URI for OCI charts and just the chart name for
+# HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
+# ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
 helm upgrade --install cert-manager "${CHART}" \
-  --repo "${REPO}" --version "${VERSION}" \
+  ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
   --namespace cert-manager --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

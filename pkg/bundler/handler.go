@@ -58,9 +58,11 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 // The response is a zip archive containing the Helm per-component bundle:
 //   - README.md: Root deployment guide
 //   - deploy.sh: Automation script
+//   - undeploy.sh: Reverse-order uninstall script
 //   - recipe.yaml: Copy of the input recipe
-//   - <component>/values.yaml: Helm values per component
-//   - <component>/README.md: Component install/upgrade/uninstall
+//   - NNN-<component>/install.sh: Per-folder install script
+//   - NNN-<component>/values.yaml: Static Helm values
+//   - NNN-<component>/cluster-values.yaml: Per-cluster dynamic values
 //   - checksums.txt: SHA256 checksums of generated files
 //
 // Example:

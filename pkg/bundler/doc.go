@@ -56,10 +56,13 @@ Components are defined in recipes/registry.yaml:
 Helm (default):
   - README.md: Root deployment guide with ordered steps
   - deploy.sh: Automation script (0755)
+  - undeploy.sh: Reverse-order uninstall script (0755)
   - recipe.yaml: Copy of the input recipe
-  - <component>/values.yaml: Helm values per component
-  - <component>/README.md: Component install/upgrade/uninstall
-  - <component>/manifests/: Optional manifest files
+  - NNN-<component>/install.sh: Per-folder install script
+  - NNN-<component>/values.yaml: Static Helm values
+  - NNN-<component>/cluster-values.yaml: Per-cluster dynamic values
+  - NNN-<component>/upstream.env: CHART/REPO/VERSION (upstream-helm folders)
+  - NNN-<component>/Chart.yaml + templates/: Local chart (local-helm folders)
 
 Argo CD:
   - app-of-apps.yaml: Parent Argo CD Application

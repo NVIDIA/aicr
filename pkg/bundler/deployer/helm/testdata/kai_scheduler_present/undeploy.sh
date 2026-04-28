@@ -248,7 +248,7 @@ extra_crds_for_release() {
 # deleted from manifests before the controller is uninstalled.
 skip_preflight_for_release() {
   case "$1" in
-    skyhook-operator|kgateway) return 0 ;;
+    nodewright-operator|kgateway) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -464,13 +464,26 @@ for dir in $(ls -1d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/ 2>/dev/null | sort -r); d
     continue
   fi
   echo "Uninstalling ${name} (${ns})..."
+  # For local-helm folders (Chart.yaml + templates/), kubectl-delete the
+  # rendered templates BEFORE helm uninstall. The templates may carry
+  # helm.sh/hook annotations (post-install/post-upgrade) which helm does
+  # not track or clean up on uninstall — so without this pre-delete, the
+  # operator gets removed but its hook-created CRs (and their finalizers)
+  # linger. Doing the delete while the controller is still running lets
+  # finalizers clear naturally.
+  if [[ -d "${dir}/templates" ]]; then
+    for tpl in "${dir}/templates/"*.yaml; do
+      [[ -f "${tpl}" ]] || continue
+      kubectl delete -n "${ns}" -f "${tpl}" --ignore-not-found --timeout="${HELM_TIMEOUT}s" || true
+    done
+  fi
   helm_force_uninstall "${name}" "${ns}"
   delete_release_cluster_resources "${name}" "${ns}"
   delete_orphaned_webhooks_for_ns "${ns}"
 done
 
-# Remove skyhook node taints that persist after operator removal.
-# Skyhook taints nodes during kernel tuning. The taint key is configurable
+# Remove nodewright node taints that persist after operator removal.
+# Nodewright taints nodes during kernel tuning. The taint key is configurable
 # via runtimeRequiredTaint (defaults to skyhook.nvidia.com).
 
 # Clean up orphaned CRDs that were owned by this bundle's releases.

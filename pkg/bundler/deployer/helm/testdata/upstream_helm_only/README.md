@@ -38,7 +38,7 @@ Use `--no-wait` to skip Helm chart-level waiting where AICR uses `--wait` (keeps
 ./deploy.sh --no-wait
 ```
 
-> **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** mean the cluster is ready for GPU workloads. On fresh GPU nodes, cluster convergence (Skyhook node tuning, GPU operator operand rollout, DRA kubelet plugin registration) continues asynchronously after the script exits. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
+> **Note:** The deploy script's final status reflects install/apply results. If `--best-effort` was used, one or more components may still have failed; check warning lines and logs. This does **not** guarantee the cluster is ready to schedule workloads — operator-driven cluster convergence (CRD reconciliation, node tuning, plugin registration, etc.) continues asynchronously after the script exits, in operator-specific ways. See the [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh) for details.
 
 ## Manual Installation
 
@@ -89,22 +89,19 @@ helm uninstall cert-manager -n cert-manager
 ### Check deployment status
 
 ```bash
-kubectl get pods -A | grep -E 'gpu-operator|network-operator|cert-manager'
+kubectl get pods -A | grep -E 'cert-manager'
 ```
 
 ### View component logs
 
-```bash
-kubectl logs -n gpu-operator -l app=gpu-operator
-```
-
-### Verify GPU access
+Inspect a single component's pods (replace `<component>` and `<namespace>`
+with one of the entries from the table above):
 
 ```bash
-kubectl get nodes -o jsonpath='{.items[*].status.allocatable}' | jq '.["nvidia.com/gpu"]'
+kubectl logs -n <namespace> -l app.kubernetes.io/instance=<component>
 ```
+
 
 ## References
 
-- [GPU Operator Documentation](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)
-- [Network Operator Documentation](https://docs.nvidia.com/networking/display/cokan10/network+operator)
+- [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md)

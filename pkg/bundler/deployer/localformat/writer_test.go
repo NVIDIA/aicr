@@ -298,8 +298,9 @@ func TestWrite_Kustomize(t *testing.T) {
 		Components: []localformat.Component{{
 			Name:      "my-kustomize",
 			Namespace: "mk",
-			// Kustomize fields (no Repository / ChartName / Version):
-			Tag:  "v1.0.0",
+			// Local kustomize: Path only. Tag/Repository are only meaningful
+			// for git-sourced kustomizations and are validated as a pair by
+			// Write — a Tag without Repository would (correctly) be rejected.
 			Path: kustomizePath,
 		}},
 	})
@@ -322,6 +323,10 @@ func TestWrite_Kustomize(t *testing.T) {
 }
 
 func TestWrite_Deterministic(t *testing.T) {
+	kustomizePath, err := filepath.Abs(filepath.Join("testdata", "kustomize_input"))
+	if err != nil {
+		t.Fatalf("abs path: %v", err)
+	}
 	opts := func(dir string) localformat.Options {
 		return localformat.Options{
 			OutputDir: dir,
@@ -340,6 +345,13 @@ func TestWrite_Deterministic(t *testing.T) {
 					Repository: "https://b.example",
 					ChartName:  "b",
 					Version:    "v1",
+				},
+				{
+					// Kustomize component to lock determinism on the
+					// kustomize build path (manifest.yaml ordering, etc.).
+					Name:      "k",
+					Namespace: "k",
+					Path:      kustomizePath,
 				},
 			},
 			// b is mixed — exercise the -post injection path in the determinism check

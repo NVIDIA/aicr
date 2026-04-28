@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package localformat writes the uniform numbered local-chart bundle layout
-// consumed by deployers (helm, helmfile, argocd, future Flux).
+// Package localformat writes the uniform numbered local-chart bundle layout.
+// Currently consumed by the helm deployer (--deployer helm). Designed to be
+// consumable by additional deployers (e.g. helmfile per #632, argocd, Flux)
+// without per-deployer changes to the writer; those integrations are not yet
+// wired in this package.
 //
 // # Layout
 //

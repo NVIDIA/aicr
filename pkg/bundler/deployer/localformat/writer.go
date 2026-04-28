@@ -73,9 +73,55 @@ func renderInputFor(c Component) manifest.RenderInput {
 }
 
 // Write emits the numbered folder layout. Deterministic and idempotent.
+//
+// Removes any pre-existing NNN-* folders under OutputDir before writing, so
+// reusing the same --output across recipe regenerations does not leave stale
+// component folders that the deployer's loop would later install. Top-level
+// orchestration files (deploy.sh, undeploy.sh, README.md, attestation/) are
+// left intact; only files under [0-9][0-9][0-9]-* are removed.
 func Write(ctx context.Context, opts Options) ([]Folder, error) {
+	// Honor cancellation before any filesystem mutation.
+	if err := ctx.Err(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+	}
+	// Fail fast if the layout's three-digit prefix can't accommodate the
+	// component count. Mixed components inject a second folder per
+	// component, so the upper bound is 2*len(Components). The deploy/undeploy
+	// templates glob [0-9][0-9][0-9]-*/, so a 4-digit prefix would be
+	// silently skipped.
+	if 2*len(opts.Components) > 999 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("too many components (%d): NNN- folder prefix supports at most 999 entries",
+				len(opts.Components)))
+	}
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "create output dir", err)
+	}
+	if err := pruneStaleFolders(opts.OutputDir); err != nil {
+		return nil, err
+	}
+
+	// Detect <name>-post collisions up front: if a recipe declares both a
+	// mixed component "foo" (Helm + manifests) and a separate component
+	// "foo-post", the injection rule would synthesize a second "foo-post"
+	// folder/release that collides with the explicitly-declared one.
+	declared := make(map[string]struct{}, len(opts.Components))
+	for _, c := range opts.Components {
+		declared[c.Name] = struct{}{}
+	}
+	for _, c := range opts.Components {
+		if len(opts.ComponentManifests[c.Name]) == 0 {
+			continue
+		}
+		// Mixed component (helm + manifests) → would inject "<name>-post".
+		if c.Repository == "" {
+			continue // manifest-only doesn't inject; already a single local-helm folder
+		}
+		if _, clash := declared[c.Name+"-post"]; clash {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+					c.Name, c.Name, c.Name))
+		}
 	}
 
 	folders := make([]Folder, 0, len(opts.Components))
@@ -134,7 +180,32 @@ func Write(ctx context.Context, opts Options) ([]Folder, error) {
 			if c.Tag != "" || c.Path != "" {
 				// Kustomize-typed: materialize the overlay output to a single
 				// templates/manifest.yaml inside the wrapped chart.
-				rendered, kerr := buildKustomize(ctx, c.Path)
+				//
+				// Path is required (kustomize needs somewhere to build from);
+				// Tag is only meaningful with a git Repository. Reject the
+				// incomplete combinations explicitly so a recipe author sees
+				// the misconfiguration rather than a silent empty build.
+				if c.Path == "" {
+					return nil, errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("kustomize component %q has Tag but no Path; Path is required", c.Name))
+				}
+				if c.Tag != "" && c.Repository == "" {
+					return nil, errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("kustomize component %q has Tag but no Repository; Tag is only meaningful with a git Repository", c.Name))
+				}
+				// Build target: git URL form for git-sourced kustomizations
+				// (matches the original deploy.sh.tmpl convention), or local
+				// filesystem path otherwise. Only append ?ref= when Tag is
+				// non-empty — kustomize distinguishes `repo//path` (no ref,
+				// HEAD) from `repo//path?ref=` (empty ref, error).
+				target := c.Path
+				if c.Repository != "" {
+					target = fmt.Sprintf("%s//%s", c.Repository, c.Path)
+					if c.Tag != "" {
+						target += "?ref=" + c.Tag
+					}
+				}
+				rendered, kerr := buildKustomize(ctx, target)
 				if kerr != nil {
 					return nil, kerr
 				}
@@ -166,23 +237,9 @@ type valueSplit struct {
 // dynamic map with an empty-string value so cluster-values.yaml carries the
 // full set of dynamic keys for operators to fill in at install time.
 //
-// Unexported because the only consumers are the two per-folder writers
-// (upstream-helm and local-helm) in this package. A separate shared helper
-// lifted into pkg/bundler/deployer would create an import cycle:
-// pkg/bundler/deployer → pkg/component → pkg/bundler/checksum →
-// pkg/bundler/deployer. Keeping the logic in this leaf subpackage avoids
-// that.
-//
-// Two other identical copies of this split live elsewhere in the tree today:
-//   - pkg/bundler/deployer/helm/helm.go writeClusterValuesFile — writes the
-//     dynamic side to cluster-values.yaml.
-//   - pkg/bundler/deployer/argocdhelm/argocdhelm.go per-component loop —
-//     writes the dynamic side to a stubs map that becomes --set flags in
-//     the generated README.
-//
-// Each copy disappears when its deployer is rewired to consume localformat:
-// the helm deployer in #662 Task 15; argocdhelm in its own future rewire.
-// At that point this function becomes the single source of truth.
+// Unexported because lifting it into pkg/bundler/deployer would create an
+// import cycle (deployer → component → checksum → deployer); keeping it
+// in this leaf subpackage avoids that.
 func splitDynamicPaths(values map[string]any, dynamicPaths []string) valueSplit {
 	static := component.DeepCopyMap(values)
 	dynamic := make(map[string]any)
@@ -247,6 +304,50 @@ func renderTemplateToFile(tmpl *template.Template, data any,
 			fmt.Sprintf("%s path unsafe", filename), err)
 	}
 	return writeFile(outPath, buf.Bytes(), mode)
+}
+
+// pruneStaleFolders removes pre-existing NNN-<name>/ directories under
+// outputDir so a reused output directory cannot accumulate components from
+// a previous recipe generation. Only directories matching the strict
+// `[0-9][0-9][0-9]-*` pattern are removed; top-level orchestration files
+// (deploy.sh, README.md, etc.) and any other directories are left alone.
+func pruneStaleFolders(outputDir string) error {
+	entries, err := os.ReadDir(outputDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return errors.Wrap(errors.ErrCodeInternal, "read output dir", err)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		// Must be NNN-<something>: 3 digits then a hyphen.
+		if len(name) < 4 || name[3] != '-' {
+			continue
+		}
+		ok := true
+		for i := 0; i < 3; i++ {
+			if name[i] < '0' || name[i] > '9' {
+				ok = false
+				break
+			}
+		}
+		if !ok {
+			continue
+		}
+		full, joinErr := deployer.SafeJoin(outputDir, name)
+		if joinErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "prune stale folder unsafe", joinErr)
+		}
+		if rmErr := os.RemoveAll(full); rmErr != nil {
+			return errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("remove stale folder %s", name), rmErr)
+		}
+	}
+	return nil
 }
 
 // writeFile writes contents to path with the given mode, returning any

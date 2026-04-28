@@ -28,7 +28,12 @@ import (
 // Uses filesys.MakeFsOnDisk so relative resource refs inside the kustomization
 // resolve as they would on the command line.
 //
-// Returns ErrCodeInternal on kustomize build or YAML marshal failure,
+// Cancellation is best-effort: krusty.Kustomizer.Run does not accept a
+// context, so we honor ctx by checking ctx.Err() before invocation. A
+// cancellation that fires mid-build is observed only after Run returns;
+// for bundle overlays Run completes in milliseconds, so this is acceptable.
+//
+// Returns ErrCodeInternal on kustomize build or YAML marshal failure;
 // ErrCodeTimeout if the context is canceled before invocation.
 func buildKustomize(ctx context.Context, path string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {

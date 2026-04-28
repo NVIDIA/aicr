@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/template"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -27,6 +28,17 @@ import (
 
 //go:embed templates/install-upstream-helm.sh.tmpl
 var upstreamHelmTemplates embed.FS
+
+// shellSingleQuote wraps s in single quotes for safe inclusion in a shell
+// `source`-able file (e.g. KEY='value'). Embedded single quotes are escaped
+// with the canonical close-escape-reopen sequence `'\”`.
+//
+// Single quotes (vs double quotes) are required: inside double quotes,
+// `$()`, backticks, and `$VAR` still expand, so a malicious or
+// pathological value could execute when sourced.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
 
 var upstreamHelmTmpl = template.Must(
 	template.ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
@@ -48,7 +60,22 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 		return Folder{}, err
 	}
 
-	envContent := fmt.Sprintf("CHART=%s\nREPO=%s\nVERSION=%s\n", c.ChartName, c.Repository, c.Version)
+	// For OCI charts, helm wants the full URI as the chart argument (no --repo).
+	// For HTTP/HTTPS charts, helm wants the chart name + a separate --repo flag.
+	// Encode that into upstream.env so install.sh can be branch-free.
+	chart, repo := c.ChartName, c.Repository
+	if c.IsOCI {
+		chart = strings.TrimRight(c.Repository, "/") + "/" + c.ChartName
+		repo = ""
+	}
+	// install.sh sources upstream.env; values must be shell-safe so a value
+	// containing a single quote, $(...), or backticks can't escape into
+	// command execution. shellSingleQuote wraps the value in single quotes
+	// and replaces any embedded single quote with the four-character
+	// sequence '\'' — a closed quote, an escaped quote, then a re-opened
+	// one — which is the only POSIX-safe escape inside single quotes.
+	envContent := fmt.Sprintf("CHART=%s\nREPO=%s\nVERSION=%s\n",
+		shellSingleQuote(chart), shellSingleQuote(repo), shellSingleQuote(c.Version))
 	envPath, err := deployer.SafeJoin(folderDir, "upstream.env")
 	if err != nil {
 		return Folder{}, errors.Wrap(errors.ErrCodeInvalidRequest, "upstream.env path unsafe", err)
@@ -60,8 +87,7 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 	installData := struct {
 		Name      string
 		Namespace string
-		IsOCI     bool
-	}{c.Name, c.Namespace, c.IsOCI}
+	}{c.Name, c.Namespace}
 	if err = renderTemplateToFile(upstreamHelmTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}

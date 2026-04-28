@@ -31,7 +31,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Run helm commands from a temp directory to prevent local chart directories
-# (e.g., bundle/001-skyhook-operator/) from shadowing remote chart references.
+# (e.g., bundle/001-nodewright-operator/) from shadowing remote chart references.
 HELM_WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${HELM_WORKDIR}"; exit 130' INT TERM
 trap 'rm -rf "${HELM_WORKDIR}"' EXIT
@@ -76,25 +76,6 @@ function backoff_seconds() {
   local seconds=$(( attempt * attempt * 5 ))
   if [[ ${seconds} -gt 120 ]]; then seconds=120; fi
   echo "${seconds}"
-}
-
-function retry() {
-  local desc="$1"; shift
-  local attempt=0
-  while true; do
-    if "$@"; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    if [[ ${attempt} -gt ${MAX_RETRIES} ]]; then
-      echo "ERROR: ${desc} failed after ${attempt} attempts"
-      return 1
-    fi
-    local wait_secs
-    wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${desc} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${wait_secs}s..."
-    sleep "${wait_secs}"
-  done
 }
 
 # Clean up stale Helm hook Jobs before retrying. When a hook Job (e.g.,
@@ -243,36 +224,36 @@ for group in ${ORPHANED_CRD_GROUPS}; do
   fi
 done
 
-# Check for stale skyhook node taints from a previous deployment.
-# Only remove taints if skyhook-operator is NOT already running (i.e., fresh deploy).
+# Check for stale nodewright node taints from a previous deployment.
+# Only remove taints if nodewright-operator is NOT already running (i.e., fresh deploy).
 # If the operator is running, taints are legitimate scheduling guards.
-# Only remove taints if skyhook-operator is not running with available replicas.
+# Only remove taints if nodewright-operator is not running with available replicas.
 # A crashlooping or scaled-to-zero operator still leaves stale taints.
-skyhook_available=$(kubectl get deploy -n skyhook -l app.kubernetes.io/name=skyhook-operator -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null || echo "0")
-if [[ "${skyhook_available}" == "0" || -z "${skyhook_available}" ]]; then
+nodewright_available=$(kubectl get deploy -n skyhook -l app.kubernetes.io/name=skyhook-operator -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null || echo "0")
+if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
   # Extract the taint key from bundle values. The YAML value is a taint string
   # like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
   # If runtimeRequiredTaint is not set, use the default skyhook.nvidia.com.
-  SKYHOOK_TAINT_KEY="skyhook.nvidia.com"
-  # Locate skyhook-operator's NNN-prefixed directory at runtime.
-  skyhook_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-skyhook-operator 2>/dev/null | head -1)"
-  if [[ -n "${skyhook_dir}" && -f "${skyhook_dir}/values.yaml" ]]; then
-    custom_taint_line=$(grep 'runtimeRequiredTaint:' "${skyhook_dir}/values.yaml" 2>/dev/null || true)
+  NODEWRIGHT_TAINT_KEY="skyhook.nvidia.com"
+  # Locate nodewright-operator's NNN-prefixed directory at runtime.
+  nodewright_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-nodewright-operator 2>/dev/null | head -1)"
+  if [[ -n "${nodewright_dir}" && -f "${nodewright_dir}/values.yaml" ]]; then
+    custom_taint_line=$(grep 'runtimeRequiredTaint:' "${nodewright_dir}/values.yaml" 2>/dev/null || true)
     if [[ -n "${custom_taint_line}" ]]; then
       taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
       if [[ -n "${taint_value}" ]]; then
         # Handle both key=value:effect and key:effect formats
-        SKYHOOK_TAINT_KEY="${taint_value%%=*}"
-        SKYHOOK_TAINT_KEY="${SKYHOOK_TAINT_KEY%%:*}"
+        NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
+        NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
       fi
     fi
   fi
-  stale_skyhook=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${SKYHOOK_TAINT_KEY}" | awk '{print $1}' || true)
-  if [[ -n "${stale_skyhook}" ]]; then
-    echo "WARNING: nodes with stale ${SKYHOOK_TAINT_KEY} taints (no running skyhook-operator): ${stale_skyhook}"
+  stale_nodewright=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
+  if [[ -n "${stale_nodewright}" ]]; then
+    echo "WARNING: nodes with stale ${NODEWRIGHT_TAINT_KEY} taints (no running nodewright-operator): ${stale_nodewright}"
     echo "  Removing stale taints to unblock scheduling..."
-    for node in ${stale_skyhook}; do
-      kubectl taint node "${node}" "${SKYHOOK_TAINT_KEY}-" 2>/dev/null || true
+    for node in ${stale_nodewright}; do
+      kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
     done
   fi
 fi
@@ -300,7 +281,13 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   dir="${dir%/}"
   base="${dir##*/}"
   name="${base#[0-9][0-9][0-9]-}"
-  echo "Installing ${name} (${base})..."
+  # Source the namespace from the folder's install.sh — not the folder
+  # basename — because the helm release name and its target namespace can
+  # differ (e.g. nodewright-operator → namespace skyhook; gpu-operator-post →
+  # namespace gpu-operator). cleanup_helm_hooks and the kai diagnostics
+  # both operate on the namespace.
+  namespace=$(awk '{ for (i=1;i<NF;i++) if ($i=="--namespace") { print $(i+1); exit } }' "${dir}/install.sh")
+  echo "Installing ${name} (${base}) into namespace ${namespace}..."
 
   # Derive wait args: global --wait/--no-wait behavior + per-component timeout.
   COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
@@ -331,13 +318,13 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       break
     fi
     attempt=$((attempt + 1))
-    dump_kai_scheduler_helm_diagnostics "${name}"
+    dump_kai_scheduler_helm_diagnostics "${namespace}"
     if [[ ${attempt} -gt ${COMPONENT_MAX_RETRIES} ]]; then
       echo "ERROR: ${name} install failed after ${attempt} attempts"
       helm_failed "${name}"
       break
     fi
-    cleanup_helm_hooks "${name}"
+    cleanup_helm_hooks "${namespace}"
     wait_secs=$(backoff_seconds "${attempt}")
     echo "RETRY: ${name} install failed (attempt ${attempt}/${COMPONENT_MAX_RETRIES}), retrying in ${wait_secs}s..."
     sleep "${wait_secs}"
@@ -357,7 +344,7 @@ echo "NOTE: The above status reflects Helm install and manifest apply results,"
 echo "not whether the cluster is ready for GPU workloads. On fresh"
 echo "GPU nodes, cluster convergence may continue asynchronously after this"
 echo "script exits. Full workload readiness can take additional time for:"
-echo "  - node tuning (e.g., Skyhook, ~10-20 min on fresh nodes)"
+echo "  - node tuning (e.g., Nodewright, ~10-20 min on fresh nodes)"
 echo "  - GPU operator operand rollout (driver, toolkit, device-plugin DS)"
 echo "  - NVIDIA DRA kubelet plugin registration"
 echo

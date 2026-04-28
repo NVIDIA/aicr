@@ -31,7 +31,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Run helm commands from a temp directory to prevent local chart directories
-# (e.g., bundle/001-skyhook-operator/) from shadowing remote chart references.
+# (e.g., bundle/001-nodewright-operator/) from shadowing remote chart references.
 HELM_WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${HELM_WORKDIR}"; exit 130' INT TERM
 trap 'rm -rf "${HELM_WORKDIR}"' EXIT
@@ -76,25 +76,6 @@ function backoff_seconds() {
   local seconds=$(( attempt * attempt * 5 ))
   if [[ ${seconds} -gt 120 ]]; then seconds=120; fi
   echo "${seconds}"
-}
-
-function retry() {
-  local desc="$1"; shift
-  local attempt=0
-  while true; do
-    if "$@"; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    if [[ ${attempt} -gt ${MAX_RETRIES} ]]; then
-      echo "ERROR: ${desc} failed after ${attempt} attempts"
-      return 1
-    fi
-    local wait_secs
-    wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${desc} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${wait_secs}s..."
-    sleep "${wait_secs}"
-  done
 }
 
 # Clean up stale Helm hook Jobs before retrying. When a hook Job (e.g.,
@@ -243,8 +224,8 @@ for group in ${ORPHANED_CRD_GROUPS}; do
   fi
 done
 
-# Check for stale skyhook node taints from a previous deployment.
-# Only remove taints if skyhook-operator is NOT already running (i.e., fresh deploy).
+# Check for stale nodewright node taints from a previous deployment.
+# Only remove taints if nodewright-operator is NOT already running (i.e., fresh deploy).
 # If the operator is running, taints are legitimate scheduling guards.
 
 if [[ "${preflight_failed}" == "true" ]]; then
@@ -270,7 +251,13 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
   dir="${dir%/}"
   base="${dir##*/}"
   name="${base#[0-9][0-9][0-9]-}"
-  echo "Installing ${name} (${base})..."
+  # Source the namespace from the folder's install.sh — not the folder
+  # basename — because the helm release name and its target namespace can
+  # differ (e.g. nodewright-operator → namespace skyhook; gpu-operator-post →
+  # namespace gpu-operator). cleanup_helm_hooks and the kai diagnostics
+  # both operate on the namespace.
+  namespace=$(awk '{ for (i=1;i<NF;i++) if ($i=="--namespace") { print $(i+1); exit } }' "${dir}/install.sh")
+  echo "Installing ${name} (${base}) into namespace ${namespace}..."
 
   # Derive wait args: global --wait/--no-wait behavior + per-component timeout.
   COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
@@ -301,13 +288,13 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       break
     fi
     attempt=$((attempt + 1))
-    dump_kai_scheduler_helm_diagnostics "${name}"
+    dump_kai_scheduler_helm_diagnostics "${namespace}"
     if [[ ${attempt} -gt ${COMPONENT_MAX_RETRIES} ]]; then
       echo "ERROR: ${name} install failed after ${attempt} attempts"
       helm_failed "${name}"
       break
     fi
-    cleanup_helm_hooks "${name}"
+    cleanup_helm_hooks "${namespace}"
     wait_secs=$(backoff_seconds "${attempt}")
     echo "RETRY: ${name} install failed (attempt ${attempt}/${COMPONENT_MAX_RETRIES}), retrying in ${wait_secs}s..."
     sleep "${wait_secs}"
@@ -327,7 +314,7 @@ echo "NOTE: The above status reflects Helm install and manifest apply results,"
 echo "not whether the cluster is ready for GPU workloads. On fresh"
 echo "GPU nodes, cluster convergence may continue asynchronously after this"
 echo "script exits. Full workload readiness can take additional time for:"
-echo "  - node tuning (e.g., Skyhook, ~10-20 min on fresh nodes)"
+echo "  - node tuning (e.g., Nodewright, ~10-20 min on fresh nodes)"
 echo "  - GPU operator operand rollout (driver, toolkit, device-plugin DS)"
 echo "  - NVIDIA DRA kubelet plugin registration"
 echo

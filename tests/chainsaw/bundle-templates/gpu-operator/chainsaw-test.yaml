@@ -64,7 +64,7 @@ spec:
               # gpu-operator is mixed (helm + manifests): manifests live in the
               # sibling -post folder under templates/. Glob the indexed prefix
               # since the deployment-order index can shift across recipes.
-              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9]*-gpu-operator-post/templates/dcgm-exporter.yaml 2>/dev/null | head -1)
+              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml 2>/dev/null | head -1)
               [ -n "${MANIFEST}" ] || { echo "dcgm-exporter.yaml not found in any *-gpu-operator-post/templates/" >&2; exit 1; }
               chainsaw assert \
                 --resource "${MANIFEST}" \
@@ -94,7 +94,7 @@ spec:
               WORK="/tmp/chainsaw-bundle-gpu-operator-templates"
               ## When create=false, the template gate prevents any YAML objects
               ## from being rendered. The bundler removes empty manifests.
-              MATCHES=$(ls "${WORK}"/bundle-dcgm-disabled/[0-9]*-gpu-operator-post/templates/dcgm-exporter.yaml 2>/dev/null | wc -l)
+              MATCHES=$(ls "${WORK}"/bundle-dcgm-disabled/[0-9][0-9][0-9]-gpu-operator-post/templates/dcgm-exporter.yaml 2>/dev/null | wc -l)
               if [ "${MATCHES}" -ne 0 ]; then
                 echo "FAIL: dcgm-exporter.yaml should not exist when create=false"
                 exit 1

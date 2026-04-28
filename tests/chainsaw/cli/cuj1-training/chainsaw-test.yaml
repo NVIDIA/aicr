@@ -122,7 +122,7 @@ spec:
               WORK="/tmp/chainsaw-cuj1-training"
               # gpu-operator is mixed (helm + manifests): values.yaml lives in the
               # upstream-helm half (NNN-gpu-operator), not the -post sibling.
-              GPU_VALUES=$(ls "${WORK}"/bundle/[0-9]*-gpu-operator/values.yaml 2>/dev/null \
+              GPU_VALUES=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${GPU_VALUES}" ] || { echo "gpu-operator values.yaml not found" >&2; exit 1; }
               printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/gpu-operator-values.yaml"
@@ -138,7 +138,7 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-cuj1-training"
-              NFD_VALUES=$(ls "${WORK}"/bundle/[0-9]*-nfd/values.yaml 2>/dev/null | head -1)
+              NFD_VALUES=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-nfd/values.yaml 2>/dev/null | head -1)
               [ -n "${NFD_VALUES}" ] || { echo "nfd values.yaml not found" >&2; exit 1; }
               printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/nfd-values.yaml"
               sed '/^---$/d' "${NFD_VALUES}" >> "${WORK}/nfd-values.yaml"

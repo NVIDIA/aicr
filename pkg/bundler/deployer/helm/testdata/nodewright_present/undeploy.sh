@@ -248,7 +248,7 @@ extra_crds_for_release() {
 # deleted from manifests before the controller is uninstalled.
 skip_preflight_for_release() {
   case "$1" in
-    skyhook-operator|kgateway) return 0 ;;
+    nodewright-operator|kgateway) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -415,11 +415,11 @@ else
     rm -f "${PREFLIGHT_DETAILS}"
     exit 1
   fi
-  if skip_preflight_for_release "skyhook-operator"; then
-    echo "  Skipping skyhook-operator (skyhook): bundle deletes dependent manifests before controller uninstall."
+  if skip_preflight_for_release "nodewright-operator"; then
+    echo "  Skipping nodewright-operator (skyhook): bundle deletes dependent manifests before controller uninstall."
   else
-    echo "  Checking skyhook-operator (skyhook)..."
-    check_release_for_stuck_crds "skyhook-operator" "skyhook"
+    echo "  Checking nodewright-operator (skyhook)..."
+    check_release_for_stuck_crds "nodewright-operator" "skyhook"
   fi
   
   if [[ -s "${PREFLIGHT_DETAILS}" ]]; then
@@ -456,52 +456,65 @@ for dir in $(ls -1d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/ 2>/dev/null | sort -r); d
   # Derive the namespace from the component name via the per-component blocks
   # below. We still need it for helm_force_uninstall and cluster-resource cleanup.
   ns=""
-  if [[ "${name}" == "skyhook-operator" ]]; then ns="skyhook"; fi
+  if [[ "${name}" == "nodewright-operator" ]]; then ns="skyhook"; fi
   # Injected mixed-component "-post" folders share their parent's namespace.
-  if [[ "${name}" == "skyhook-operator-post" ]]; then ns="skyhook"; fi
+  if [[ "${name}" == "nodewright-operator-post" ]]; then ns="skyhook"; fi
   if [[ -z "${ns}" ]]; then
     echo "Warning: no namespace known for ${name}; skipping uninstall" >&2
     continue
   fi
   echo "Uninstalling ${name} (${ns})..."
+  # For local-helm folders (Chart.yaml + templates/), kubectl-delete the
+  # rendered templates BEFORE helm uninstall. The templates may carry
+  # helm.sh/hook annotations (post-install/post-upgrade) which helm does
+  # not track or clean up on uninstall — so without this pre-delete, the
+  # operator gets removed but its hook-created CRs (and their finalizers)
+  # linger. Doing the delete while the controller is still running lets
+  # finalizers clear naturally.
+  if [[ -d "${dir}/templates" ]]; then
+    for tpl in "${dir}/templates/"*.yaml; do
+      [[ -f "${tpl}" ]] || continue
+      kubectl delete -n "${ns}" -f "${tpl}" --ignore-not-found --timeout="${HELM_TIMEOUT}s" || true
+    done
+  fi
   helm_force_uninstall "${name}" "${ns}"
   delete_release_cluster_resources "${name}" "${ns}"
   delete_orphaned_webhooks_for_ns "${ns}"
 done
 
-# Remove skyhook node taints that persist after operator removal.
-# Skyhook taints nodes during kernel tuning. The taint key is configurable
+# Remove nodewright node taints that persist after operator removal.
+# Nodewright taints nodes during kernel tuning. The taint key is configurable
 # via runtimeRequiredTaint (defaults to skyhook.nvidia.com).
-SKYHOOK_TAINT_KEY="skyhook.nvidia.com"
-# Locate skyhook-operator's NNN-prefixed directory at runtime.
-skyhook_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-skyhook-operator 2>/dev/null | head -1)"
-if [[ -n "${skyhook_dir}" && -f "${skyhook_dir}/values.yaml" ]]; then
-  custom_taint_line=$(grep 'runtimeRequiredTaint:' "${skyhook_dir}/values.yaml" 2>/dev/null || true)
+NODEWRIGHT_TAINT_KEY="skyhook.nvidia.com"
+# Locate nodewright-operator's NNN-prefixed directory at runtime.
+nodewright_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-nodewright-operator 2>/dev/null | head -1)"
+if [[ -n "${nodewright_dir}" && -f "${nodewright_dir}/values.yaml" ]]; then
+  custom_taint_line=$(grep 'runtimeRequiredTaint:' "${nodewright_dir}/values.yaml" 2>/dev/null || true)
   if [[ -n "${custom_taint_line}" ]]; then
     # Extract value after "runtimeRequiredTaint:", then extract taint key before "="
     taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
     if [[ -n "${taint_value}" ]]; then
       # Handle both key=value:effect and key:effect formats
-      SKYHOOK_TAINT_KEY="${taint_value%%=*}"
-      SKYHOOK_TAINT_KEY="${SKYHOOK_TAINT_KEY%%:*}"
+      NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
+      NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
     fi
   fi
 fi
-echo "Removing ${SKYHOOK_TAINT_KEY} node taints..."
+echo "Removing ${NODEWRIGHT_TAINT_KEY} node taints..."
 for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-  kubectl taint node "${node}" "${SKYHOOK_TAINT_KEY}-" 2>/dev/null || true
+  kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
 done
 
 # Clean up orphaned CRDs that were owned by this bundle's releases.
 # Only delete CRDs whose Helm release annotation matches a component we just uninstalled.
 kubectl get crd -o json 2>/dev/null \
-  | jq -r --arg rel "skyhook-operator" --arg ns "skyhook" \
+  | jq -r --arg rel "nodewright-operator" --arg ns "skyhook" \
     '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns) | .metadata.name' 2>/dev/null \
   | while read -r name; do
-      echo "Deleting CRD ${name} (owned by skyhook-operator/skyhook)..."
+      echo "Deleting CRD ${name} (owned by nodewright-operator/skyhook)..."
       kubectl delete crd "${name}" --ignore-not-found --wait=false \
-        || echo "Warning: failed to delete CRD ${name} (owned by skyhook-operator/skyhook); leftovers will surface in post-flight" >&2
-    done || echo "Warning: orphan-CRD cleanup for skyhook-operator/skyhook failed (kubectl get / jq error); leftovers will surface in post-flight" >&2
+        || echo "Warning: failed to delete CRD ${name} (owned by nodewright-operator/skyhook); leftovers will surface in post-flight" >&2
+    done || echo "Warning: orphan-CRD cleanup for nodewright-operator/skyhook failed (kubectl get / jq error); leftovers will surface in post-flight" >&2
 
 # Intentionally skip automatic deletion of unannotated CRDs matched only by
 # API group. On shared clusters, those CRDs may be serving another tenant's
@@ -600,7 +613,7 @@ postflight_all_crds_json=""
 if capture_kubectl_json postflight_all_crds_json get crd -o json; then
   :
   remaining_helm_crds=$(echo "${postflight_all_crds_json}" \
-    | jq -r --arg rel "skyhook-operator" --arg ns "skyhook" \
+    | jq -r --arg rel "nodewright-operator" --arg ns "skyhook" \
       '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns and .metadata.deletionTimestamp==null) | .metadata.name' 2>/dev/null || true)
   if [[ -n "${remaining_helm_crds}" ]]; then
     helm_orphaned_crds="${helm_orphaned_crds} ${remaining_helm_crds}"
@@ -613,7 +626,7 @@ if capture_kubectl_json postflight_all_crds_json get crd -o json; then
     if [[ -n "${remaining_explicit_crd}" ]]; then
       explicit_orphaned_crds="${explicit_orphaned_crds}${remaining_explicit_crd}"$'\n'
     fi
-  done < <(extra_crds_for_release "skyhook-operator")
+  done < <(extra_crds_for_release "nodewright-operator")
 else
   echo "Warning: failed to enumerate post-flight CRDs; kubectl output: ${postflight_all_crds_json}" >&2
   postflight_issues=true

@@ -82,6 +82,10 @@ spec:
               test -x "${WORK}/bundle/deploy.sh"
               test -f "${WORK}/bundle/recipe.yaml"
               # Verify all 15 component directories exist (aws-ebs-csi-driver excluded: disabled by default in EKS overlay)
+              # Helm deployer now produces NNN-<component>/ numbered folders
+              # (#662). Mixed components (helm + raw manifests) emit two
+              # adjacent folders — the primary plus an injected "-post"
+              # wrapper — so glob to the primary only by excluding "-post".
               for component in \
                 aws-efa cert-manager \
                 dynamo-crds dynamo-platform gpu-operator \
@@ -89,7 +93,8 @@ spec:
                 kgateway kgateway-crds kube-prometheus-stack \
                 nvidia-dra-driver-gpu nvsentinel prometheus-adapter \
                 nodewright-customizations nodewright-operator; do
-                test -d "${WORK}/bundle/${component}" || { echo "missing: ${component}"; exit 1; }
+                match=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-"${component}" 2>/dev/null | head -1)
+                [ -n "${match}" ] || { echo "missing: ${component}"; exit 1; }
               done
             check:
               ($error == null): true

@@ -180,7 +180,6 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 		"set -euo pipefail",
 		"MAX_RETRIES=5",
 		"backoff_seconds()",
-		"retry()",
 		"cleanup_helm_hooks()",
 		"HELM_TIMEOUT=",
 		"NO_WAIT=",
@@ -1430,7 +1429,7 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager", Version: "v1.17.2", Source: "https://charts.jetstack.io"},
 				{Name: "kgateway", Namespace: "kgateway-system", Chart: "kgateway", Version: "v0.1.0", Source: "https://example.invalid/charts"},
-				{Name: "skyhook-operator", Namespace: "skyhook", Chart: "skyhook-operator", Version: "v0.1.0", Source: "https://example.invalid/charts"},
+				{Name: "nodewright-operator", Namespace: "skyhook", Chart: "nodewright-operator", Version: "v0.1.0", Source: "https://example.invalid/charts"},
 			},
 			DeploymentOrder: []string{"cert-manager", "kgateway", "nodewright-operator"},
 		},
@@ -1471,7 +1470,7 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 	}
 
 	out := stdout.String()
-	for _, want := range []string{"skip:skyhook-operator", "skip:kgateway", "check:cert-manager"} {
+	for _, want := range []string{"skip:nodewright-operator", "skip:kgateway", "check:cert-manager"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output; stdout=%q stderr=%q", want, out, stderr.String())
 		}
@@ -1795,7 +1794,7 @@ func TestUndeployScript_DynamoPlatformOwnsExplicitGroveCRDs(t *testing.T) {
 // The goldens double as reference examples of what a rendered bundle looks
 // like for each common shape: upstream-helm-only, manifest-only, mixed
 // (upstream + raw manifests → primary + -post folder), kai-scheduler (async
-// block), and skyhook-operator (pre-install taint cleanup block).
+// block), and nodewright-operator (pre-install taint cleanup block).
 
 func TestBundleGolden_UpstreamHelmOnly(t *testing.T) {
 	outDir := t.TempDir()
@@ -1911,19 +1910,24 @@ func TestBundleGolden_KaiSchedulerPresent(t *testing.T) {
 	assertBundleGolden(t, outDir, "testdata/kai_scheduler_present")
 }
 
-func TestBundleGolden_SkyhookPresent(t *testing.T) {
+func TestBundleGolden_NodewrightPresent(t *testing.T) {
 	outDir := t.TempDir()
+	// Mirror the production registry: component name "nodewright-operator"
+	// but the upstream chart is still named "skyhook-operator". This shape
+	// is what real recipes have post-rename — the registry component name
+	// drives the name-matched taint cleanup blocks; the chart name drives
+	// helm install.
 	g := &Generator{
 		RecipeResult: singleComponentRecipe(
-			"skyhook-operator", "skyhook", "skyhook-operator", "v0.1.0",
+			"nodewright-operator", "skyhook", "skyhook-operator", "v0.1.0",
 			"https://example.invalid/charts"),
-		ComponentValues: map[string]map[string]any{"skyhook-operator": {}},
+		ComponentValues: map[string]map[string]any{"nodewright-operator": {}},
 		Version:         "v1.0.0",
 	}
 	if _, err := g.Generate(context.Background(), outDir); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	assertBundleGolden(t, outDir, "testdata/skyhook_present")
+	assertBundleGolden(t, outDir, "testdata/nodewright_present")
 }
 
 // ---------------------------------------------------------------------------

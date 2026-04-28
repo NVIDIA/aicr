@@ -48,7 +48,7 @@ spec:
               # Components live in NNN-<name>/ folders (per-component bundle layout).
               # gpu-operator is mixed (helm + manifests): the upstream-helm half holds
               # cluster-values.yaml. Index can shift, so glob the prefix.
-              CV=$(ls "${WORK}"/helm-dynamic/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              CV=$(ls "${WORK}"/helm-dynamic/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${CV}" ] || { echo "cluster-values.yaml not found for gpu-operator" >&2; exit 1; }
 
@@ -58,7 +58,7 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-dynamic"
-              CV=$(ls "${WORK}"/helm-dynamic/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              CV=$(ls "${WORK}"/helm-dynamic/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${CV}" ] || { echo "cluster-values.yaml not found for gpu-operator" >&2; exit 1; }
               printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/cluster-values-check.yaml"
@@ -80,7 +80,7 @@ spec:
                   || { echo "${comp} missing cluster-values.yaml" >&2; exit 1; }
               done
               # Only gpu-operator's should have dynamic content
-              CV=$(ls "${WORK}"/helm-dynamic/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              CV=$(ls "${WORK}"/helm-dynamic/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               grep -q "driver" "${CV}"
             check:
@@ -96,7 +96,7 @@ spec:
             content: |
               WORK="/tmp/chainsaw-bundle-dynamic"
               # Spot-check at least one folder's install.sh references cluster-values.yaml
-              INSTALL=$(ls "${WORK}"/helm-dynamic/[0-9]*-gpu-operator/install.sh 2>/dev/null \
+              INSTALL=$(ls "${WORK}"/helm-dynamic/[0-9][0-9][0-9]-gpu-operator/install.sh 2>/dev/null \
                 | grep -v -- "-post/" | head -1)
               [ -n "${INSTALL}" ] || { echo "gpu-operator install.sh not found" >&2; exit 1; }
               grep -q "cluster-values.yaml" "${INSTALL}"
@@ -215,10 +215,10 @@ spec:
               ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/helm-combined" \
                 --dynamic gpuoperator:driver.version \
                 --set gpuoperator:gds.enabled=true
-              CV=$(ls "${WORK}"/helm-combined/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              CV=$(ls "${WORK}"/helm-combined/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${CV}" ] || { echo "cluster-values.yaml not found for gpu-operator" >&2; exit 1; }
-              VAL=$(ls "${WORK}"/helm-combined/[0-9]*-gpu-operator/values.yaml 2>/dev/null \
+              VAL=$(ls "${WORK}"/helm-combined/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${VAL}" ] || { echo "values.yaml not found for gpu-operator" >&2; exit 1; }
               grep -q "gds" "${VAL}"
@@ -236,10 +236,10 @@ spec:
                 --dynamic gpuoperator:driver.version \
                 --dynamic certmanager:crds.enabled
               # Both components should have cluster-values.yaml
-              GPU_CV=$(ls "${WORK}"/helm-multi-dynamic/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              GPU_CV=$(ls "${WORK}"/helm-multi-dynamic/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${GPU_CV}" ] || { echo "gpu-operator cluster-values.yaml missing" >&2; exit 1; }
-              CM_CV=$(ls "${WORK}"/helm-multi-dynamic/[0-9]*-cert-manager/cluster-values.yaml 2>/dev/null | head -1)
+              CM_CV=$(ls "${WORK}"/helm-multi-dynamic/[0-9][0-9][0-9]-cert-manager/cluster-values.yaml 2>/dev/null | head -1)
               [ -n "${CM_CV}" ] || { echo "cert-manager cluster-values.yaml missing" >&2; exit 1; }
               # Dynamic components should have pre-populated content
               grep -q "driver" "${GPU_CV}"
@@ -261,7 +261,7 @@ spec:
               WORK="/tmp/chainsaw-bundle-dynamic"
               ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/helm-nonexistent" \
                 --dynamic gpuoperator:nonexistent.field
-              CV=$(ls "${WORK}"/helm-nonexistent/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              CV=$(ls "${WORK}"/helm-nonexistent/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${CV}" ] || { echo "gpu-operator cluster-values.yaml missing" >&2; exit 1; }
               grep -q "nonexistent" "${CV}"
@@ -281,12 +281,12 @@ spec:
                 --set awsebscsidriver:enabled=false \
                 --dynamic awsebscsidriver:controller.replicaCount
               # Disabled component directory should NOT exist (any NNN-aws-ebs-csi-driver folder)
-              MATCHES=$(ls -d "${WORK}"/helm-disabled-dynamic/[0-9]*-aws-ebs-csi-driver 2>/dev/null | wc -l)
+              MATCHES=$(ls -d "${WORK}"/helm-disabled-dynamic/[0-9][0-9][0-9]-aws-ebs-csi-driver 2>/dev/null | wc -l)
               [ "${MATCHES}" -eq 0 ] || { echo "disabled aws-ebs-csi-driver folder still exists" >&2; exit 1; }
               # deploy.sh should not mention disabled component
               ! grep -q "aws-ebs-csi-driver" "${WORK}/helm-disabled-dynamic/deploy.sh"
               # Enabled component should still work
-              VAL=$(ls "${WORK}"/helm-disabled-dynamic/[0-9]*-gpu-operator/values.yaml 2>/dev/null \
+              VAL=$(ls "${WORK}"/helm-disabled-dynamic/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${VAL}" ] || { echo "gpu-operator values.yaml missing" >&2; exit 1; }
             check:
@@ -298,9 +298,9 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-dynamic"
-              VALUES=$(ls "${WORK}"/helm-dynamic/[0-9]*-gpu-operator/values.yaml 2>/dev/null \
+              VALUES=$(ls "${WORK}"/helm-dynamic/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
-              CLUSTER=$(ls "${WORK}"/helm-dynamic/[0-9]*-gpu-operator/cluster-values.yaml 2>/dev/null \
+              CLUSTER=$(ls "${WORK}"/helm-dynamic/[0-9][0-9][0-9]-gpu-operator/cluster-values.yaml 2>/dev/null \
                 | grep -v -- '-gpu-operator-post' | head -1)
               [ -n "${VALUES}" ] && [ -n "${CLUSTER}" ] \
                 || { echo "gpu-operator values.yaml or cluster-values.yaml missing" >&2; exit 1; }

@@ -14,13 +14,19 @@
 
 // Package helm generates per-component Helm bundles from recipe results.
 //
-// Generates a directory per component with individual values and install instructions:
+// Per-component folder layout (NNN-prefixed, written by pkg/bundler/deployer/localformat):
 //
-//   - <component>/values.yaml: Helm values per component
-//   - <component>/README.md: Component install/upgrade/uninstall
-//   - <component>/manifests/: Optional manifest files
+//   - NNN-<component>/install.sh: Per-folder install script
+//   - NNN-<component>/values.yaml: Static Helm values
+//   - NNN-<component>/cluster-values.yaml: Per-cluster dynamic values
+//   - NNN-<component>/upstream.env: CHART/REPO/VERSION (upstream-helm folders)
+//   - NNN-<component>/Chart.yaml + templates/: Local chart (local-helm folders)
+//
+// Top-level files (owned by this deployer):
+//
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
+//   - undeploy.sh: Reverse-order uninstall script (0755)
 //   - checksums.txt: SHA256 digests for verification (optional)
 //
 // Usage:

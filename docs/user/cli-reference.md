@@ -1156,7 +1156,7 @@ bundles/
 
 Previous releases used a flat `<component>/` layout with `manifests/` siblings and a `--deployer helm` script that branched on component kind. The new format is uniform:
 
-- All folders carry a rendered `install.sh`. The top-level `deploy.sh` is a generic loop with no per-component branching — name-matched special-case blocks (skyhook taint cleanup, kai-scheduler async timeout, orphan-CRD scan, DRA kubelet-plugin restart) live around the loop, not inside it.
+- All folders carry a rendered `install.sh`. The top-level `deploy.sh` is a generic loop with no per-component branching — name-matched special-case blocks (nodewright-operator taint cleanup, kai-scheduler async timeout, orphan-CRD scan, DRA kubelet-plugin restart) live around the loop, not inside it.
 - Raw manifests for mixed components now apply **post-install only**, via the injected `-post` wrapped chart. The earlier pre-apply mechanism with a CRD-race retry wrapper is gone — Helm now owns CRD ordering for mixed components natively.
 - Tooling that parsed bundle paths by bare component name must account for the `NNN-` prefix.
 
@@ -1301,11 +1301,11 @@ If you need to enforce specific install-time values (e.g., pinning `driver.versi
 
 ```shell
 # Navigate to bundle
-cd bundles/gpu-operator
+cd bundles
 
-# Review configuration
-cat values.yaml
+# Review root README and a component's values
 cat README.md
+cat 001-gpu-operator/values.yaml
 
 # Verify integrity
 sha256sum -c checksums.txt
@@ -1314,7 +1314,7 @@ sha256sum -c checksums.txt
 chmod +x deploy.sh && ./deploy.sh
 ```
 
-> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each component subdirectory contains a `README.md` with the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
+> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each `NNN-<component>/` folder contains a rendered `install.sh` that runs the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
 
 #### Deploy Script Behavior (`deploy.sh`)
 

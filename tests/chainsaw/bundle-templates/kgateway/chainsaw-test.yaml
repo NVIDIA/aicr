@@ -64,7 +64,7 @@ spec:
               ## kgateway is a mixed component (upstream Helm + raw manifests),
               ## so its raw manifests render into an injected NNN-kgateway-post/
               ## wrapped chart's templates/ folder under #662's layout.
-              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9]*-kgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
+              MANIFEST=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-kgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
               [ -n "${MANIFEST}" ] || { echo "kgateway inference-gateway.yaml not found" >&2; exit 1; }
               ## The manifest contains two resources (GatewayParameters + Gateway).
               ## Verify both are present.
@@ -92,7 +92,7 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-kgateway-templates"
-              MANIFEST=$(ls "${WORK}"/bundle-scheduling/[0-9]*-kgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
+              MANIFEST=$(ls "${WORK}"/bundle-scheduling/[0-9][0-9][0-9]-kgateway-post/templates/inference-gateway.yaml 2>/dev/null | head -1)
               [ -n "${MANIFEST}" ] || { echo "kgateway inference-gateway.yaml not found in scheduling bundle" >&2; exit 1; }
               ## Verify nodeSelector was injected into GatewayParameters
               grep -q 'nodeSelector:' "${MANIFEST}"
