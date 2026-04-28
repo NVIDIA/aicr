@@ -13,9 +13,17 @@
 # limitations under the License.
 
 name: 'AICR Build'
-description: 'Builds the aicr validator image (via Dockerfile) and CLI binary, and loads the image into kind.'
+description: 'Builds the aicr CLI and optional snapshot/validator images, and loads requested images into kind.'
 
 inputs:
+  build_cli:
+    description: 'Build and stage the standalone aicr CLI binary at the repository root'
+    required: false
+    default: 'true'
+  build_snapshot_agent:
+    description: 'Build the CUDA-based snapshot agent image and load it into kind'
+    required: false
+    default: 'true'
   build_validators:
     description: 'Deprecated: use validator_phases instead. Ignored when validator_phases is set.'
     required: false
@@ -28,86 +36,34 @@ inputs:
 runs:
   using: 'composite'
   steps:
-
-    - name: Install ko
-      shell: bash
-      run: |
-        KO_VERSION=$(yq eval '.build_tools.ko' .settings.yaml)
-        GOFLAGS= go install "github.com/google/ko@${KO_VERSION}"
-
-    - name: Build snapshot agent image and load into kind
+    - name: Build standalone aicr CLI binary
+      if: inputs.build_cli == 'true'
       shell: bash
       env:
         GOFLAGS: -mod=vendor
-      run: |
-        # Build snapshot agent image with CUDA base (provides nvidia-smi for GPU detection).
-        # Uses cuda:base (~250MB) instead of cuda:runtime (~1.8GB) — only nvidia-smi is needed.
-        # GPU test workflows use --image=ko.local:smoke-test for aicr snapshot.
-        CGO_ENABLED=0 go build -trimpath -o dist/aicr ./cmd/aicr
-        docker build -t ko.local:smoke-test -f - . <<'DOCKERFILE'
-        FROM nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04
-        COPY dist/aicr /usr/local/bin/aicr
-        ENTRYPOINT ["/usr/local/bin/aicr"]
-        DOCKERFILE
+      run: bash "${{ github.action_path }}/build-cli.sh"
 
-        # Load onto all nodes. The snapshot agent requests nvidia.com/gpu but
-        # does not set a node selector, so it can land on any GPU-capable node
-        # including the control-plane (e.g., T4 smoke test).
-        #
-        # Timeout is intentionally generous (900s per attempt). H100 self-hosted
-        # runners transfer images over a shared Docker-in-Docker bridge; large
-        # CUDA base images (~250MB compressed) combined with I/O contention from
-        # parallel GPU operator pods regularly exceed the previous 600s limit.
-        timeout 900 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}" || {
-          echo "::warning::kind load attempt 1 failed for ko.local:smoke-test, retrying..."
-          timeout 900 kind load docker-image ko.local:smoke-test --name "${KIND_CLUSTER_NAME}"
-        }
+    - name: Build snapshot agent CLI binary
+      if: inputs.build_cli != 'true' && inputs.build_snapshot_agent == 'true'
+      shell: bash
+      env:
+        GOFLAGS: -mod=vendor
+      run: bash "${{ github.action_path }}/build-cli.sh"
+
+    - name: Build snapshot agent image and load into kind
+      if: inputs.build_snapshot_agent == 'true'
+      shell: bash
+      run: bash "${{ github.action_path }}/build-snapshot-agent.sh"
 
     - name: Build validator images and load into kind
       if: "!(inputs.validator_phases == 'none' || (inputs.validator_phases == '' && inputs.build_validators == 'false'))"
       shell: bash
       env:
         GOFLAGS: -mod=vendor
-      run: |
-        # Determine which validator phases to build.
-        # validator_phases takes precedence; build_validators is a deprecated fallback.
-        if [[ -n "${{ inputs.validator_phases }}" ]]; then
-          if [[ "${{ inputs.validator_phases }}" == "none" ]]; then
-            echo "Skipping validator builds (validator_phases=none)"
-            exit 0
-          fi
-          PHASES="${{ inputs.validator_phases }}"
-        else
-          # Default: build all phases (backwards compatible)
-          PHASES="deployment,performance,conformance"
-        fi
-
-        # Compile only the requested validator binaries.
-        mkdir -p dist/validator
-        for phase in ${PHASES//,/ }; do
-          echo "Building validator binary: ${phase}"
-          CGO_ENABLED=0 go build -trimpath -o "dist/validator/${phase}" "./validators/${phase}"
-        done
-
-        for phase in ${PHASES//,/ }; do
-          mkdir -p "validators/${phase}/testdata"
-          docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
-        FROM gcr.io/distroless/static-debian12:nonroot
-        COPY dist/validator/${phase} /${phase}
-        COPY validators/${phase}/testdata /app/testdata
-        WORKDIR /app
-        USER nonroot
-        ENTRYPOINT ["/${phase}"]
-        DOCKERFILE
-          # Validator images are small (~30MB distroless), but share the same
-          # Docker-in-Docker bridge as the smoke-test load above. 600s per
-          # attempt accommodates I/O queuing behind concurrent image pulls.
-          timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {
-            echo "::warning::kind load attempt 1 failed for ko.local/aicr-validators/${phase}:latest, retrying..."
-            timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"
-          }
-        done
+        VALIDATOR_PHASES: ${{ inputs.validator_phases }}
+      run: bash "${{ github.action_path }}/build-validator-images.sh"
 
     - name: Stage aicr binary at repo root
+      if: inputs.build_cli == 'true'
       shell: bash
-      run: cp dist/aicr ./aicr
+      run: bash "${{ github.action_path }}/stage-cli.sh"

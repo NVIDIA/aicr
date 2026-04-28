@@ -26,7 +26,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/validators"
-	"github.com/NVIDIA/aicr/validators/helper"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,7 +39,6 @@ const (
 	gangTestNamespace = "gang-scheduling-test"
 	gangTestPrefix    = "gang-test-"
 	gangPodPrefix     = "gang-worker-"
-	gangClaimPrefix   = "gang-gpu-claim-"
 	gangGroupPrefix   = "gang-group-"
 	gangMinMembers    = 2
 )
@@ -60,12 +58,15 @@ var podGroupGVR = schema.GroupVersionResource{
 	Group: "scheduling.run.ai", Version: "v2alpha2", Resource: "podgroups",
 }
 
+// Gang scheduling scope: this check validates KAI PodGroup co-scheduling only.
+// GPU access and DRA allocation are covered by the DRA support and secure
+// accelerator access checks so full conformance can run on one H100.
+
 // gangTestRun holds per-invocation resource names to avoid collisions.
 type gangTestRun struct {
 	suffix    string
 	groupName string
 	pods      [gangMinMembers]string
-	claims    [gangMinMembers]string
 }
 
 type gangSchedulingReport struct {
@@ -86,15 +87,16 @@ func newGangTestRun() (*gangTestRun, error) {
 	}
 	for i := range gangMinMembers {
 		run.pods[i] = fmt.Sprintf("%s%s-%d", gangPodPrefix, suffix, i)
-		run.claims[i] = fmt.Sprintf("%s%s-%d", gangClaimPrefix, suffix, i)
 	}
 	return run, nil
 }
 
 // CheckGangScheduling validates CNCF requirement #7: Gang Scheduling.
 // Verifies KAI scheduler deployments are running, required CRDs exist, and
-// exercises gang scheduling by creating a PodGroup with 2 GPU pods that must
-// be co-scheduled via the KAI scheduler.
+// exercises gang scheduling by creating a PodGroup with 2 CPU-only pods that
+// must be co-scheduled via the KAI scheduler. GPU access and DRA isolation are
+// validated separately by the DRA and secure accelerator access checks; keeping
+// this workload CPU-only lets one-GPU CI clusters run the full conformance phase.
 func CheckGangScheduling(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -162,20 +164,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		"kubectl get crd queues.scheduling.run.ai podgroups.scheduling.run.ai",
 		crdSummary.String())
 
-	// 3. Pre-flight: ensure enough free GPUs for the gang test.
-	total, free, gpuErr := countAvailableGPUs(ctx.Ctx, dynClient)
-	if gpuErr != nil {
-		return gpuErr
-	}
-	recordArtifact(ctx, "GPU Availability",
-		fmt.Sprintf("Total GPUs: %d\nFree GPUs:  %d\nRequired:   %d", total, free, gangMinMembers))
-	if free < gangMinMembers {
-		return errors.New(errors.ErrCodeUnavailable,
-			fmt.Sprintf("insufficient free GPUs for gang scheduling test: %d free of %d total (need %d)",
-				free, total, gangMinMembers))
-	}
-
-	// 4. Functional test: create PodGroup with 2 GPU pods, verify co-scheduling.
+	// 3. Functional test: create PodGroup with 2 CPU-only pods, verify co-scheduling.
 	run, err := newGangTestRun()
 	if err != nil {
 		return err
@@ -187,13 +176,13 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
 		recordRawTextArtifact(ctx, "Delete test namespace",
 			"kubectl delete namespace gang-scheduling-test --ignore-not-found",
-			"Deleted gang test pods, claims, and PodGroup; namespace retained intentionally to avoid DRA finalizer stalls.")
+			"Deleted gang test pods and PodGroup; namespace retained intentionally to keep cleanup bounded.")
 	}()
 
 	recordRawTextArtifact(ctx, "Apply test manifest",
-		"kubectl apply -f docs/conformance/cncf/manifests/gang-scheduling-test.yaml",
-		fmt.Sprintf("Created PodGroup=%s ResourceClaims=%s,%s Pods=%s,%s in namespace=%s",
-			run.groupName, run.claims[0], run.claims[1], run.pods[0], run.pods[1], gangTestNamespace))
+		"kubectl apply generated CPU-only PodGroup test resources",
+		fmt.Sprintf("Created PodGroup=%s Pods=%s,%s in namespace=%s",
+			run.groupName, run.pods[0], run.pods[1], gangTestNamespace))
 
 	if err = deployGangTestResources(ctx.Ctx, ctx.Clientset, dynClient, run, ctx.Tolerations); err != nil {
 		return err
@@ -274,7 +263,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 	}
 }
 
-// deployGangTestResources creates the namespace, PodGroup, ResourceClaims, and Pods.
+// deployGangTestResources creates the namespace, PodGroup, and worker Pods.
 // tolerations, when non-nil, replace the default tolerate-all policy on test pods.
 func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun, tolerations []corev1.Toleration) error {
 	// 1. Create namespace (idempotent).
@@ -292,15 +281,8 @@ func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create PodGroup", err)
 	}
 
-	// 3. Create ResourceClaims and Pods.
+	// 3. Create Pods.
 	for i := range gangMinMembers {
-		claim := buildGangResourceClaim(run, i)
-		if _, err := dynClient.Resource(claimGVR).Namespace(gangTestNamespace).Create(
-			ctx, claim, metav1.CreateOptions{}); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to create ResourceClaim %s", run.claims[i]), err)
-		}
-
 		pod := buildGangTestPod(run, i, tolerations)
 		if _, err := clientset.CoreV1().Pods(gangTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal,
@@ -380,10 +362,11 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 					run.pods[i], run.groupName))
 		}
 
-		// Pod must use DRA (resourceClaims, not device plugin).
-		if len(pod.Spec.ResourceClaims) == 0 {
+		// Gang scheduling is intentionally CPU-only. DRA behavior is validated
+		// separately by dra-support and secure-accelerator-access.
+		if len(pod.Spec.ResourceClaims) != 0 {
 			return nil, errors.New(errors.ErrCodeInternal,
-				fmt.Sprintf("gang test pod %s does not use DRA resourceClaims", run.pods[i]))
+				fmt.Sprintf("gang test pod %s unexpectedly uses resourceClaims", run.pods[i]))
 		}
 	}
 
@@ -445,11 +428,6 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 			return err
 		})
 	}
-	// Delete claims.
-	for i := range gangMinMembers {
-		_ = k8s.IgnoreNotFound(dynClient.Resource(claimGVR).Namespace(gangTestNamespace).Delete(
-			ctx, run.claims[i], metav1.DeleteOptions{}))
-	}
 	// Delete PodGroup.
 	_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).Delete(
 		ctx, run.groupName, metav1.DeleteOptions{}))
@@ -468,38 +446,6 @@ func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
 			"spec": map[string]interface{}{
 				"minMember": int64(gangMinMembers),
 				"queue":     "default-queue",
-			},
-		},
-	}
-}
-
-// buildGangResourceClaim returns the unstructured ResourceClaim for a gang test pod.
-// The kai.scheduler/queue label is required by KAI v0.13.0+ for DRA claims.
-func buildGangResourceClaim(run *gangTestRun, index int) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "resource.k8s.io/v1",
-			"kind":       "ResourceClaim",
-			"metadata": map[string]interface{}{
-				"name":      run.claims[index],
-				"namespace": gangTestNamespace,
-				"labels": map[string]interface{}{
-					"kai.scheduler/queue": "default-queue",
-				},
-			},
-			"spec": map[string]interface{}{
-				"devices": map[string]interface{}{
-					"requests": []interface{}{
-						map[string]interface{}{
-							"name": "gpu",
-							"exactly": map[string]interface{}{
-								"deviceClassName": "gpu.nvidia.com",
-								"allocationMode":  "ExactCount",
-								"count":           int64(1),
-							},
-						},
-					},
-				},
 			},
 		},
 	}
@@ -524,22 +470,11 @@ func buildGangTestPod(run *gangTestRun, index int, tolerations []corev1.Tolerati
 			SchedulerName: "kai-scheduler",
 			RestartPolicy: corev1.RestartPolicyNever,
 			Tolerations:   tolerations,
-			ResourceClaims: []corev1.PodResourceClaim{
-				{
-					Name:              "gpu",
-					ResourceClaimName: helper.StrPtr(run.claims[index]),
-				},
-			},
 			Containers: []corev1.Container{
 				{
 					Name:    "worker",
-					Image:   "nvidia/cuda:12.9.0-base-ubuntu24.04",
-					Command: []string{"bash", "-c", fmt.Sprintf("nvidia-smi && echo 'Gang worker %d completed successfully'", index)},
-					Resources: corev1.ResourceRequirements{
-						Claims: []corev1.ResourceClaim{
-							{Name: "gpu"},
-						},
-					},
+					Image:   defaults.ProbeImage,
+					Command: []string{"sh", "-c", fmt.Sprintf("echo 'Gang worker %d completed successfully'", index)},
 				},
 			},
 		},

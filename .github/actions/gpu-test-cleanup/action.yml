@@ -23,48 +23,74 @@ inputs:
     description: 'Prefix for the uploaded artifact name'
     required: false
     default: 'gpu-test-debug'
+  collect_artifacts:
+    description: 'Collect and upload debug artifacts before deleting the kind cluster'
+    required: false
+    default: 'false'
+  collect_node_runtime_artifacts:
+    description: 'Collect expensive kind node runtime artifacts such as journalctl, crictl, and kind export logs'
+    required: false
+    default: 'false'
+  diagnostic_mode:
+    description: 'Optional gpu-debug-diagnostics mode to run when collect_artifacts is true'
+    required: false
+    default: ''
+  upload_validation_artifacts:
+    description: 'Upload validation result and evidence artifacts before cleanup'
+    required: false
+    default: 'false'
+  validation_artifact_name:
+    description: 'Name for uploaded validation artifacts'
+    required: false
+    default: 'conformance-evidence'
+  validation_artifact_paths:
+    description: 'Newline-separated validation artifact paths'
+    required: false
+    default: |
+      conformance-evidence/
+      validation-result.yaml
 
 runs:
   using: 'composite'
   steps:
+    - name: Debug diagnostics
+      if: inputs.collect_artifacts == 'true' && inputs.diagnostic_mode != ''
+      uses: ./.github/actions/gpu-debug-diagnostics
+      with:
+        cluster_name: ${{ inputs.cluster_name }}
+        mode: ${{ inputs.diagnostic_mode }}
+    - name: Upload validation artifacts
+      if: always() && inputs.upload_validation_artifacts == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+      with:
+        name: ${{ inputs.validation_artifact_name }}
+        path: ${{ inputs.validation_artifact_paths }}
+        if-no-files-found: warn
     - name: Collect debug artifacts
-      if: failure()
+      if: always() && inputs.collect_artifacts == 'true'
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
-      run: |
-        mkdir -p /tmp/debug-artifacts
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" get all --all-namespaces > /tmp/debug-artifacts/all-resources.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" get events --all-namespaces --sort-by='.lastTimestamp' > /tmp/debug-artifacts/events.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide > /tmp/debug-artifacts/gpu-operator-pods.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app=nvidia-device-plugin-daemonset --tail=100 > /tmp/debug-artifacts/device-plugin-logs.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator logs -l app.kubernetes.io/component=gpu-operator --tail=100 > /tmp/debug-artifacts/gpu-operator-logs.txt || true
-        kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded > /tmp/debug-artifacts/non-running-pods.txt || true
-
+        COLLECT_NODE_RUNTIME_ARTIFACTS: ${{ inputs.collect_node_runtime_artifacts }}
+      run: bash "${{ github.action_path }}/collect-debug-artifacts.sh"
     - name: Export kind logs
-      if: failure()
+      if: always() && inputs.collect_artifacts == 'true' && inputs.collect_node_runtime_artifacts == 'true'
       shell: bash
       env:
         KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
-      run: |
-        mkdir -p /tmp/kind-logs
-        kind export logs /tmp/kind-logs --name "${KIND_CLUSTER_NAME}" || true
-
+      run: bash "${{ github.action_path }}/export-kind-logs.sh"
+    - name: Cleanup
+      if: always()
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+      run: bash "${{ github.action_path }}/cleanup-kind-cluster.sh"
     - name: Upload debug artifacts
-      if: failure()
-      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      if: always() && inputs.collect_artifacts == 'true'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
       with:
         name: ${{ inputs.artifact_name_prefix }}-${{ github.run_id }}
         path: |
           /tmp/debug-artifacts/
           /tmp/kind-logs/
         retention-days: 7
-
-    - name: Cleanup
-      if: always()
-      shell: bash
-      env:
-        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
-      run: |
-        kind delete cluster --name "${KIND_CLUSTER_NAME}" || true
-        docker system prune -f || true

@@ -12,17 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: GPU Inference Test (nvkind + H100 x2)
+name: GPU Inference Test (nvkind + H100 x1)
 
 on:
   schedule:
-    - cron: '15 6,18 * * *'  # Every 12 hours (2x daily), offset from T4 smoke test
+    - cron: '15 6 * * *'  # Daily, 6h offset from training test
   push:
     branches:
       - "pull-request/[0-9]+"
-  pull_request:
-    types: [labeled]
-  workflow_dispatch: {}  # Allow manual runs
+  workflow_dispatch:
+    inputs:
+      run_full_validation:
+        description: 'Run snapshot and CNCF AI Conformance validation'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +44,8 @@ jobs:
       should-run: ${{ steps.filter.outputs.matched }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
         id: filter
         with:
@@ -49,16 +55,24 @@ jobs:
               - '.github/workflows/gpu-h100-inference-test.yaml'
               - '.settings.yaml'
               - '.github/actions/gpu-cluster-setup/**'
-              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/runtime-install/**'
+              - '.github/actions/check-control-plane-health/**'
               - '.github/actions/aicr-build/**'
               - '.github/actions/setup-build-tools/**'
-              - '.github/actions/install-karpenter-kwok/**'
               - 'validators/*/Dockerfile'
-              - 'pkg/evidence/**'
+              - 'validators/conformance/**'
+              - 'recipes/validators/catalog.yaml'
+              - '.github/workflows/gpu-h100-kind-runtime-test.yaml'
+              - '.github/actions/gpu-workflow-prepare/**'
+              - '.github/actions/gpu-debug-diagnostics/**'
+              - '.github/actions/gpu-chainsaw-health/**'
+              - '.github/actions/gpu-validate-conformance/**'
               - '.github/actions/gpu-test-cleanup/**'
               - '.github/actions/load-versions/**'
+              - '.github/scripts/gpu-chainsaw-health.sh'
+              - '.github/scripts/gpu-debug-diagnostics.sh'
+              - 'pkg/bundler/deployer/helm/**'
               - 'tests/chainsaw/chainsaw-config.yaml'
-              - 'tests/chainsaw/ai-conformance/main.go'
               - 'tests/chainsaw/ai-conformance/common/**'
               - 'tests/chainsaw/ai-conformance/kind-common/**'
               - 'tests/chainsaw/ai-conformance/kind-inference-dynamo/**'
@@ -72,213 +86,28 @@ jobs:
               - 'recipes/overlays/kind-inference.yaml'
               - 'recipes/overlays/h100-kind-inference.yaml'
               - 'recipes/overlays/h100-kind-inference-dynamo.yaml'
-              - 'kwok/manifests/karpenter/**'
-              - 'kwok/scripts/install-karpenter-kwok.sh'
               - 'pkg/collector/**'
               - 'pkg/snapshotter/**'
               - '.github/actions/gpu-snapshot-validate/**'
-              - 'pkg/validator/job/**'
-              - 'pkg/validator/catalog/**'
-              - 'pkg/defaults/timeouts.go'
-              - 'validators/conformance/**'
 
+  # NVIDIA self-hosted GPU runners reject pull_request event jobs before
+  # checkout. PR GPU coverage runs through the pull-request/<number> push
+  # mirror after ok-to-test approval.
   gpu-inference-test:
     needs: [check-paths]
     if: >
       always() && (
         github.event_name == 'schedule' ||
         github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'pull_request' && github.event.label.name == 'run-gpu-tests') ||
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
       )
-    name: GPU Inference Test (nvkind + H100 x2)
-    concurrency:
-      group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-      cancel-in-progress: true
-    runs-on: linux-amd64-gpu-h100-latest-2
-    timeout-minutes: 120
-
-    env:
-      KIND_CLUSTER_NAME: gpu-inference-test
-
-    steps:
-
-      - name: Checkout Code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Set up GPU cluster
-        uses: ./.github/actions/gpu-cluster-setup
-
-      - name: Build aicr
-        uses: ./.github/actions/aicr-build
-        with:
-          validator_phases: 'conformance'
-
-      - name: Install runtime bundle
-        id: bundle-install
-        uses: ./.github/actions/gpu-operator-install
-        with:
-          method: bundle
-          accelerator: h100
-          platform: dynamo
-
-      # --- Snapshot and GPU validation ---
-
-      - name: Snapshot and validate GPU
-        uses: ./.github/actions/gpu-snapshot-validate
-        with:
-          gpu_model: H100
-          min_gpu_count: '2'
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-
-      # --- Install Karpenter + KWOK early to give monitoring stack settle time ---
-
-      - name: Install Karpenter + KWOK
-        uses: ./.github/actions/install-karpenter-kwok
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-
-      # --- Health checks ---
-
-      - name: Prepare chainsaw
-        id: versions
-        uses: ./.github/actions/load-versions
-
-      - name: Install chainsaw
-        uses: ./.github/actions/setup-build-tools
-        with:
-          install_chainsaw: 'true'
-          chainsaw_version: '${{ steps.versions.outputs.chainsaw }}'
-
-      - name: Run chainsaw health checks
-        run: |
-          chainsaw test \
-            --test-dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
-            --config tests/chainsaw/chainsaw-config.yaml
-
-      # --- CNCF AI Conformance validation ---
-      # Runs after the stack health checks so gateway and metrics validators
-      # see a settled inference stack.
-
-      - name: Verify expected resources exist
-        run: |
-          go run ./tests/chainsaw/ai-conformance/ \
-            --dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
-            --dir tests/chainsaw/ai-conformance/common \
-            --dir tests/chainsaw/ai-conformance/kind-common \
-            --kubeconfig="${HOME}/.kube/config" \
-            --debug
-
-      - name: Validate CNCF AI Conformance
-        id: validate-conformance
-        run: |
-          AICR_VALIDATOR_IMAGE_REGISTRY=ko.local \
-          ./aicr validate \
-            --recipe recipe.yaml \
-            --phase conformance \
-            --namespace gpu-operator \
-            --kubeconfig="${HOME}/.kube/config" \
-            --require-gpu \
-            --image=ko.local:smoke-test \
-            --timeout=10m \
-            --toleration '*' \
-            --output=validation-result.yaml \
-            --evidence-dir=conformance-evidence
-
-      # Dynamo smoke is intentionally disabled for now. The vLLM runtime image
-      # adds significant latency and flakiness in Kind CI, and training has no
-      # matching smoke path yet. Reintroduce it later alongside a symmetric
-      # training smoke test if needed.
-      # --- Validation artifacts ---
-
-      # Collect a post-run resource snapshot regardless of whether conformance
-      # validation ran, so triage always has a cluster-state artifact.
-      - name: Collect validation artifacts
-        if: >-
-          always()
-          && !cancelled()
-          && steps.bundle-install.outcome == 'success'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p conformance-evidence
-          go run ./tests/chainsaw/ai-conformance/ \
-            --dir tests/chainsaw/ai-conformance/kind-inference-dynamo \
-            --dir tests/chainsaw/ai-conformance/common \
-            --dir tests/chainsaw/ai-conformance/kind-common \
-            --kubeconfig="${HOME}/.kube/config" \
-            --debug | tee conformance-evidence/resource-existence-post.txt
-
-      - name: Upload validation artifacts
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: conformance-evidence
-          path: |
-            conformance-evidence/
-            validation-result.yaml
-          if-no-files-found: warn
-
-      - name: Debug diagnostics
-        if: failure()
-        run: |
-          echo "=== ClusterPolicy status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get clusterpolicy -o yaml 2>/dev/null || true
-          echo "=== GPU Operator pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
-          echo "=== Non-running pods (all namespaces) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
-          echo "=== Recent events (gpu-operator) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-          echo "=== Dynamo pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get pods -o wide 2>/dev/null || true
-          echo "=== Dynamo operator logs ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system \
-            logs deployment/dynamo-operator-controller-manager --tail=100 -c manager 2>/dev/null || true
-          echo "=== Recent events (dynamo-system) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n dynamo-system get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-          echo "=== Custom metrics API ==="
-          for METRIC in gpu_utilization gpu_memory_used gpu_power_usage; do
-            echo "--- ${METRIC} ---"
-            for NS in gpu-operator dynamo-system; do
-              kubectl --context="kind-${KIND_CLUSTER_NAME}" get --raw \
-                "/apis/custom.metrics.k8s.io/v1beta1/namespaces/${NS}/pods/*/${METRIC}" 2>/dev/null | jq . || true
-            done
-          done
-          echo "=== Grafana deployment ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get deployment grafana -o wide 2>/dev/null || true
-          echo "=== Grafana pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods \
-            -l app.kubernetes.io/name=grafana -o wide 2>/dev/null || true
-          echo "=== Grafana deployment describe ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe deployment grafana 2>/dev/null || true
-          echo "=== Grafana pod describe ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring describe pods \
-            -l app.kubernetes.io/name=grafana 2>/dev/null || true
-          echo "=== prometheus-adapter pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -l app.kubernetes.io/name=prometheus-adapter -o wide 2>/dev/null || true
-          echo "=== kgateway pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n kgateway-system get pods -o wide 2>/dev/null || true
-          echo "=== GatewayClass status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get gatewayclass -o yaml 2>/dev/null || true
-          echo "=== Gateway status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get gateways -A -o yaml 2>/dev/null || true
-          echo "=== DCGM Exporter pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator \
-            get pods -l app=nvidia-dcgm-exporter -o wide 2>/dev/null || true
-          echo "=== Monitoring pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n monitoring get pods -o wide 2>/dev/null || true
-          echo "=== DRA ResourceSlices ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get resourceslices -o wide 2>/dev/null || true
-          echo "=== Node status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
-
-      - name: GPU Test Cleanup
-        if: always()
-        uses: ./.github/actions/gpu-test-cleanup
-        with:
-          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          artifact_name_prefix: gpu-inference-test-debug
+    name: GPU Inference Test (nvkind + H100 x1)
+    uses: ./.github/workflows/gpu-h100-kind-runtime-test.yaml
+    with:
+      job_name: GPU Inference Test (nvkind + H100 x1)
+      cluster_name: gpu-inference-test
+      intent: inference
+      platform: dynamo
+      chainsaw_path: tests/chainsaw/ai-conformance/kind-inference-dynamo
+      artifact_name_prefix: gpu-inference-test-debug
+      run_full_validation: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_full_validation) }}

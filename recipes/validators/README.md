@@ -55,7 +55,7 @@ Applied by `catalog.Load` in order:
 | Name | Description | Timeout |
 |------|-------------|---------|
 | `dra-support` | Verify Dynamic Resource Allocation support | 5m |
-| `gang-scheduling` | Verify gang scheduling with KAI scheduler | 10m |
+| `gang-scheduling` | Verify gang scheduling with KAI scheduler using CPU-only workers | 10m |
 | `accelerator-metrics` | Verify accelerator metrics from DCGM exporter | 5m |
 | `ai-service-metrics` | Verify AI service metrics via Prometheus | 5m |
 | `inference-gateway` | Verify inference gateway (kgateway) is operational | 5m |

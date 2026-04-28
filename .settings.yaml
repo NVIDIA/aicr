@@ -40,6 +40,7 @@ security_tools:
 testing_tools:
   kubectl: 'v1.35.0'
   kind: '0.31.0'
+  nvkind: '78a0a514c41c3e77ac0d935f38d971d3b4455138'
   ctlptl: '0.9.0'
   tilt: '0.37.0'
   helm: 'v4.1.1'
@@ -71,6 +72,9 @@ docs_tools:
 # Testing Configuration
 testing:
   kind_node_image: 'kindest/node:v1.32.0'
+  h100_kind_node_image: 'kindest/node:v1.35.0'
+  gpu_operator_chart_version: 'v25.10.1'
+  snapshot_agent_cuda_image: 'nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04'
 
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components

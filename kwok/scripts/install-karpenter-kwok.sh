@@ -41,7 +41,10 @@ KARPENTER_VERSION="${KARPENTER_VERSION:-v1.8.0}"
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:?KIND_CLUSTER_NAME must be set}"
 KARPENTER_NAMESPACE="${KARPENTER_NAMESPACE:-karpenter}"
 KARPENTER_CLONE_DIR="${KARPENTER_CLONE_DIR:-/tmp/karpenter}"
-KO_BUILD_TIMEOUT="${KO_BUILD_TIMEOUT:-900}"  # 15 minutes
+KWOK_HELM_TIMEOUT="${KWOK_HELM_TIMEOUT:-300s}"
+KO_BUILD_TIMEOUT="${KO_BUILD_TIMEOUT:-900s}"  # 15 minutes
+KARPENTER_HELM_TIMEOUT="${KARPENTER_HELM_TIMEOUT:-300s}"
+KUBE_CONTEXT="${KUBE_CONTEXT:-kind-${KIND_CLUSTER_NAME}}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -52,6 +55,14 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+kubectl_kind() {
+    kubectl --context="${KUBE_CONTEXT}" "$@"
+}
+
+helm_kind() {
+    helm --kube-context "${KUBE_CONTEXT}" "$@"
+}
+
 # -------------------------------------------------------------------
 # Step 1: Install KWOK controller
 # Uses the same approach as kwok/scripts/run-all-recipes.sh
@@ -59,19 +70,20 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 install_kwok() {
     log_info "Installing KWOK controller..."
 
-    if kubectl get deployment -n kube-system kwok-controller &>/dev/null; then
+    if kubectl_kind get deployment -n kube-system kwok-controller &>/dev/null; then
         log_info "KWOK controller already installed, skipping"
         return 0
     fi
 
     helm repo add kwok https://kwok.sigs.k8s.io/charts/ --force-update
-    helm upgrade --install kwok-controller kwok/kwok \
+    helm_kind upgrade --install kwok-controller kwok/kwok \
         --namespace kube-system \
         --set hostNetwork=true \
-        --wait --timeout 300s
+        --wait --timeout "${KWOK_HELM_TIMEOUT}"
 
-    helm upgrade --install kwok-stage-fast kwok/stage-fast \
-        --namespace kube-system
+    helm_kind upgrade --install kwok-stage-fast kwok/stage-fast \
+        --namespace kube-system \
+        --wait --timeout "${KWOK_HELM_TIMEOUT}"
 
     log_info "KWOK controller installed"
 }
@@ -98,11 +110,16 @@ build_karpenter() {
     # Redirect stderr to avoid Go compilation warnings corrupting the image reference.
     # Output format: kind.local/<name>:<content-hash>
     # Hard timeout prevents a slow/stuck compilation from consuming the entire job.
+    local ko_stderr="${KARPENTER_CLONE_DIR}/ko-build.stderr"
     CONTROLLER_IMG=$(timeout "${KO_BUILD_TIMEOUT}" \
         env KO_DOCKER_REPO=kind.local \
         KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME}" \
-        ko build sigs.k8s.io/karpenter/kwok 2>/dev/null) || {
-        log_error "ko build failed or timed out after ${KO_BUILD_TIMEOUT}s"
+        ko build sigs.k8s.io/karpenter/kwok 2>"${ko_stderr}") || {
+        log_error "ko build failed or timed out after ${KO_BUILD_TIMEOUT}"
+        if [[ -s "${ko_stderr}" ]]; then
+            log_error "ko build stderr:"
+            sed 's/^/  /' "${ko_stderr}" || true
+        fi
         exit 1
     }
 
@@ -141,20 +158,20 @@ deploy_karpenter() {
     log_info "Deploying Karpenter to namespace ${KARPENTER_NAMESPACE}..."
 
     # Apply CRDs first
-    kubectl apply -f "${KARPENTER_CLONE_DIR}/kwok/charts/crds"
+    kubectl_kind apply -f "${KARPENTER_CLONE_DIR}/kwok/charts/crds"
 
     # Create namespace and instance types ConfigMap before Helm install
     # so the volume mount can reference it immediately.
-    kubectl create namespace "${KARPENTER_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+    kubectl_kind create namespace "${KARPENTER_NAMESPACE}" --dry-run=client -o yaml | kubectl_kind apply -f -
 
     local instance_types_file="${MANIFESTS_DIR}/instance-types.json"
     if [[ ! -f "${instance_types_file}" ]]; then
         log_error "Instance types file not found: ${instance_types_file}"
         exit 1
     fi
-    kubectl create configmap -n "${KARPENTER_NAMESPACE}" karpenter-instance-types \
+    kubectl_kind create configmap -n "${KARPENTER_NAMESPACE}" karpenter-instance-types \
         --from-file=instance-types.json="${instance_types_file}" \
-        --dry-run=client -o yaml | kubectl apply -f -
+        --dry-run=client -o yaml | kubectl_kind apply -f -
 
     # Build the image tag argument. If ko provided a tag, use it.
     # If not, omit it and let the chart default to its AppVersion.
@@ -169,7 +186,7 @@ deploy_karpenter() {
     # - extraVolumes + extraVolumeMounts: mount the instance types ConfigMap
     # - controller.env: set INSTANCE_TYPES_FILE_PATH for the KWOK provider
     # shellcheck disable=SC2086
-    helm upgrade --install karpenter "${KARPENTER_CLONE_DIR}/kwok/charts" \
+    helm_kind upgrade --install karpenter "${KARPENTER_CLONE_DIR}/kwok/charts" \
         --namespace "${KARPENTER_NAMESPACE}" --create-namespace \
         --set controller.image.repository="${IMG_REPOSITORY}" \
         ${tag_arg} \
@@ -187,17 +204,17 @@ deploy_karpenter() {
         --set 'controller.extraVolumeMounts[0].readOnly=true' \
         --set 'controller.env[0].name=INSTANCE_TYPES_FILE_PATH' \
         --set 'controller.env[0].value=/etc/karpenter/instance-types/instance-types.json' \
-        --wait --timeout 300s \
+        --wait --timeout "${KARPENTER_HELM_TIMEOUT}" \
         || {
             log_error "Helm install failed. Diagnostics:"
-            kubectl -n "${KARPENTER_NAMESPACE}" get pods -o wide 2>/dev/null || true
-            kubectl -n "${KARPENTER_NAMESPACE}" describe deployment karpenter 2>/dev/null || true
+            kubectl_kind -n "${KARPENTER_NAMESPACE}" get pods -o wide 2>/dev/null || true
+            kubectl_kind -n "${KARPENTER_NAMESPACE}" describe deployment karpenter 2>/dev/null || true
             local POD
-            POD=$(kubectl -n "${KARPENTER_NAMESPACE}" get pods -l app.kubernetes.io/name=karpenter \
+            POD=$(kubectl_kind -n "${KARPENTER_NAMESPACE}" get pods -l app.kubernetes.io/name=karpenter \
                 -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
             if [[ -n "${POD}" ]]; then
-                kubectl -n "${KARPENTER_NAMESPACE}" describe pod "${POD}" 2>/dev/null || true
-                kubectl -n "${KARPENTER_NAMESPACE}" logs "${POD}" --tail=50 2>/dev/null || true
+                kubectl_kind -n "${KARPENTER_NAMESPACE}" describe pod "${POD}" 2>/dev/null || true
+                kubectl_kind -n "${KARPENTER_NAMESPACE}" logs "${POD}" --tail=50 2>/dev/null || true
             fi
             exit 1
         }
@@ -212,7 +229,9 @@ main() {
     log_info "=== Karpenter KWOK Provider Installation ==="
     log_info "Karpenter version: ${KARPENTER_VERSION}"
     log_info "Kind cluster: ${KIND_CLUSTER_NAME}"
+    log_info "Kube context: ${KUBE_CONTEXT}"
     log_info "Namespace: ${KARPENTER_NAMESPACE}"
+    log_info "Timeouts: kwok=${KWOK_HELM_TIMEOUT} ko-build=${KO_BUILD_TIMEOUT} karpenter=${KARPENTER_HELM_TIMEOUT}"
 
     install_kwok
     build_karpenter

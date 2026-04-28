@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -397,12 +398,6 @@ func TestNewGangTestRun(t *testing.T) {
 		if !strings.HasPrefix(run.pods[i], gangPodPrefix) {
 			t.Errorf("newGangTestRun() pods[%d] = %q, want prefix %q", i, run.pods[i], gangPodPrefix)
 		}
-		if run.claims[i] == "" {
-			t.Errorf("newGangTestRun() claims[%d] is empty", i)
-		}
-		if !strings.HasPrefix(run.claims[i], gangClaimPrefix) {
-			t.Errorf("newGangTestRun() claims[%d] = %q, want prefix %q", i, run.claims[i], gangClaimPrefix)
-		}
 	}
 
 	// Two calls should produce different suffixes.
@@ -412,5 +407,33 @@ func TestNewGangTestRun(t *testing.T) {
 	}
 	if run.suffix == run2.suffix {
 		t.Error("newGangTestRun() two calls produced identical suffixes")
+	}
+}
+
+func TestBuildGangTestPodUsesCPUOnlyWorkload(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatalf("newGangTestRun() error = %v", err)
+	}
+
+	pod := buildGangTestPod(run, 0, nil)
+	if pod.Spec.SchedulerName != "kai-scheduler" {
+		t.Errorf("SchedulerName = %q, want kai-scheduler", pod.Spec.SchedulerName)
+	}
+	if got := pod.Labels["pod-group.scheduling.run.ai/name"]; got != run.groupName {
+		t.Errorf("pod group label = %q, want %q", got, run.groupName)
+	}
+	if len(pod.Spec.ResourceClaims) != 0 {
+		t.Fatalf("ResourceClaims length = %d, want 0", len(pod.Spec.ResourceClaims))
+	}
+	if len(pod.Spec.Containers) != 1 {
+		t.Fatalf("containers length = %d, want 1", len(pod.Spec.Containers))
+	}
+	container := pod.Spec.Containers[0]
+	if container.Image != defaults.ProbeImage {
+		t.Errorf("container image = %q, want %q", container.Image, defaults.ProbeImage)
+	}
+	if len(container.Resources.Claims) != 0 {
+		t.Errorf("container resource claims length = %d, want 0", len(container.Resources.Claims))
 	}
 }

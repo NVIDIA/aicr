@@ -1,0 +1,57 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'GPU Validate Conformance'
+description: 'Run CNCF AI Conformance validation for a GPU Kind test cluster.'
+
+inputs:
+  cluster_name:
+    description: 'Kind cluster name'
+    required: true
+  kwok_helm_timeout:
+    description: 'Timeout for KWOK controller Helm install'
+    required: false
+    default: '300s'
+  ko_build_timeout:
+    description: 'Timeout for Karpenter KWOK provider ko build'
+    required: false
+    default: '900s'
+  karpenter_helm_timeout:
+    description: 'Timeout for Karpenter Helm install'
+    required: false
+    default: '300s'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Karpenter + KWOK
+      uses: ./.github/actions/install-karpenter-kwok
+      with:
+        cluster_name: ${{ inputs.cluster_name }}
+        kwok_helm_timeout: ${{ inputs.kwok_helm_timeout }}
+        ko_build_timeout: ${{ inputs.ko_build_timeout }}
+        karpenter_helm_timeout: ${{ inputs.karpenter_helm_timeout }}
+    - name: Build conformance validator image
+      uses: ./.github/actions/aicr-build
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+      with:
+        build_cli: 'false'
+        build_snapshot_agent: 'false'
+        validator_phases: 'conformance'
+    - name: Validate CNCF AI Conformance
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+      run: bash "${{ github.workspace }}/.github/scripts/gpu-validate-conformance.sh"

@@ -1,0 +1,47 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'GPU Workflow Prepare'
+description: 'Print early runner diagnostics and load GPU workflow tool/image versions.'
+
+outputs:
+  chainsaw:
+    description: 'Chainsaw version'
+    value: ${{ steps.versions.outputs.chainsaw }}
+  chainsaw_sha256_linux_amd64:
+    description: 'Chainsaw SHA256 checksum for linux/amd64'
+    value: ${{ steps.versions.outputs.chainsaw_sha256_linux_amd64 }}
+  h100_kind_node_image:
+    description: 'Kind node image for H100 GPU tests'
+    value: ${{ steps.versions.outputs.h100_kind_node_image }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Runner preflight snapshot
+      shell: bash
+      run: |
+        echo "::group::Runner preflight snapshot"
+        echo "hostname:     $(hostname)"
+        echo "kernel:       $(uname -a)"
+        echo "uptime:       $(uptime)"
+        echo "loadavg:      $(cat /proc/loadavg 2>/dev/null || echo unavailable)"
+        echo "nproc:        $(nproc 2>/dev/null || echo unavailable)"
+        free -h 2>/dev/null || true
+        df -h / 2>/dev/null || true
+        echo "::endgroup::"
+
+    - name: Load GPU test versions
+      id: versions
+      uses: ./.github/actions/load-versions

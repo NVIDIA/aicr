@@ -1,0 +1,80 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: 'Check Control Plane Health'
+description: 'Fails if Kind control-plane static pods are missing, unready, or unstable.'
+
+inputs:
+  cluster_name:
+    description: 'Kind cluster name'
+    required: true
+  namespace:
+    description: 'Namespace that contains the control-plane pods'
+    required: false
+    default: kube-system
+  components:
+    description: 'Space-separated component label values to check'
+    required: false
+    default: kube-apiserver kube-controller-manager kube-scheduler etcd
+  wait_timeout:
+    description: 'Timeout for each component readiness wait'
+    required: false
+    default: 60s
+  max_restarts:
+    description: 'Compatibility input; with stability_window=0s, fail if historical restartCount exceeds this ceiling'
+    required: false
+    default: '1'
+  stability_window:
+    description: 'Optional duration to watch for new control-plane restarts after pods are Ready'
+    required: false
+    default: '0s'
+  stability_probe_interval:
+    description: 'Interval for active API server probes during the stability window'
+    required: false
+    default: '10s'
+  stability_probe_failure_threshold:
+    description: 'Consecutive active stability probe failures allowed before failing'
+    required: false
+    default: '2'
+  lease_components:
+    description: 'Space-separated leader election lease names to check for freshness'
+    required: false
+    default: kube-controller-manager kube-scheduler
+  lease_stale_timeout:
+    description: 'Maximum allowed leader election lease age at the end of a stability window'
+    required: false
+    default: '120s'
+  runtime_diagnostics:
+    description: 'Collect expensive kind node runtime diagnostics such as docker stats, crictl, and journalctl on failure'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check control-plane pods
+      shell: bash
+      env:
+        KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        NAMESPACE: ${{ inputs.namespace }}
+        COMPONENTS: ${{ inputs.components }}
+        WAIT_TIMEOUT: ${{ inputs.wait_timeout }}
+        MAX_RESTARTS: ${{ inputs.max_restarts }}
+        STABILITY_WINDOW: ${{ inputs.stability_window }}
+        STABILITY_PROBE_INTERVAL: ${{ inputs.stability_probe_interval }}
+        STABILITY_PROBE_FAILURE_THRESHOLD: ${{ inputs.stability_probe_failure_threshold }}
+        LEASE_COMPONENTS: ${{ inputs.lease_components }}
+        LEASE_STALE_TIMEOUT: ${{ inputs.lease_stale_timeout }}
+        RUNTIME_DIAGNOSTICS: ${{ inputs.runtime_diagnostics }}
+      run: bash "${{ github.action_path }}/check-control-plane-health.sh"

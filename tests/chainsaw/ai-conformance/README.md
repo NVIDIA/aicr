@@ -73,10 +73,11 @@ tests/chainsaw/ai-conformance/
 │   ├── assert-cert-manager.yaml         # cert-manager healthy
 │   ├── assert-dra-driver.yaml           # DRA driver healthy
 │   ├── assert-kai-scheduler.yaml        # KAI scheduler healthy
-│   ├── assert-monitoring.yaml           # Prometheus stack healthy
+│   ├── assert-monitoring.yaml           # Prometheus stack healthy with Grafana
 │   └── assert-skyhook.yaml              # Skyhook operator healthy
 ├── kind-common/                         # Shared Kind-only assertions
 │   ├── assert-gpu-operator.yaml         # GPU operator healthy on kind
+│   ├── assert-monitoring.yaml           # Prometheus stack healthy without Grafana
 │   ├── assert-network-operator.yaml     # Network operator healthy on kind
 │   └── assert-nvsentinel.yaml           # NVSentinel healthy on kind
 ├── kind-inference-dynamo/               # Kind + H100 + inference + dynamo leaf suite

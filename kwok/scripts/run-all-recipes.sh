@@ -37,6 +37,31 @@ log_info() { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+retry_command() {
+    local description="$1"
+    shift
+
+    local max_attempts="${KWOK_COMMAND_RETRIES:-3}"
+    local delay="${KWOK_COMMAND_RETRY_DELAY:-5}"
+    local attempt=1
+
+    while true; do
+        if "$@"; then
+            return 0
+        fi
+
+        if ((attempt >= max_attempts)); then
+            log_error "${description} failed after ${attempt} attempt(s)"
+            return 1
+        fi
+
+        log_warn "${description} failed (attempt ${attempt}/${max_attempts}); retrying in ${delay}s..."
+        sleep "${delay}"
+        attempt=$((attempt + 1))
+        delay=$((delay * 2))
+    done
+}
+
 # Find recipes with service criteria (testable cloud configurations)
 get_recipes() {
     for overlay in "${OVERLAYS_DIR}"/*.yaml; do
@@ -68,10 +93,13 @@ ensure_cluster() {
 
     if ! kubectl get deployment -n kube-system kwok-controller &>/dev/null; then
         log_info "Installing KWOK controller..."
-        helm repo add kwok https://kwok.sigs.k8s.io/charts/ --force-update
-        helm upgrade --install kwok-controller kwok/kwok \
+        retry_command "Adding KWOK Helm repository" \
+            helm repo add kwok https://kwok.sigs.k8s.io/charts/ --force-update
+        retry_command "Installing KWOK controller" \
+            helm upgrade --install kwok-controller kwok/kwok \
             --namespace kube-system --set hostNetwork=true --wait
-        helm upgrade --install kwok-stage-fast kwok/stage-fast --namespace kube-system
+        retry_command "Installing KWOK stage-fast" \
+            helm upgrade --install kwok-stage-fast kwok/stage-fast --namespace kube-system
     fi
 
     # Patch kindnet to exclude KWOK nodes

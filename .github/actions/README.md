@@ -4,6 +4,13 @@ This directory contains a modular, reusable GitHub Actions architecture optimize
 
 ## Composite Actions
 
+### Script Conventions
+
+Composite action helper scripts in this directory are intentionally portable
+across checkout modes: keep them mode `0644` and invoke them as
+`bash path/to/script.sh` from workflows or `action.yml` files. Do not rely on
+executable bits or `./script.sh` invocation.
+
 ### Core CI/CD Actions
 
 #### `security-scan/`
@@ -50,7 +57,8 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **When to use**: When you need version values in workflow steps
 **Outputs**:
 - `go`, `goreleaser`, `ko`, `crane`, `golangci_lint`, `yamllint`, `addlicense`
-- `grype`, `kubectl`, `kind`, `ctlptl`, `tilt`, `helm`
+- `grype`, `kubectl`, `kind`, `nvkind`, `ctlptl`, `tilt`, `helm`
+- `kind_node_image`, `h100_kind_node_image`
 
 **Example**:
 ```yaml

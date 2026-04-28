@@ -60,10 +60,10 @@ spec:
             file: ../kind-common/assert-gpu-operator.yaml
 
     - name: assert-monitoring
-      description: Verify kube-prometheus-stack, ephemeral storage metrics, and prometheus-adapter.
+      description: Verify kind monitoring stack components.
       try:
         - assert:
-            file: ../common/assert-monitoring.yaml
+            file: ../kind-common/assert-monitoring.yaml
 
     - name: assert-skyhook
       description: Verify Skyhook operator controller-manager is available.
@@ -73,6 +73,8 @@ spec:
 
     - name: assert-kubeflow-trainer
       description: Verify Kubeflow Trainer controller, validating webhook, and TrainJob CRD are available.
+      timeouts:
+        assert: 600s
       try:
         - assert:
             file: assert-kubeflow-trainer.yaml
@@ -99,6 +101,8 @@ spec:
 
     - name: assert-kai-scheduler
       description: Verify KAI scheduler is available.
+      timeouts:
+        assert: 600s
       try:
         - assert:
             file: ../common/assert-kai-scheduler.yaml

@@ -1,0 +1,146 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: GPU H100 Kind Runtime Test
+
+on:
+  workflow_call:
+    inputs:
+      job_name:
+        description: 'Display name for the H100 runtime job'
+        required: true
+        type: string
+      cluster_name:
+        description: 'Kind cluster name'
+        required: true
+        type: string
+      intent:
+        description: 'Runtime intent passed to the bundle installer'
+        required: true
+        type: string
+      platform:
+        description: 'Runtime platform passed to the bundle installer'
+        required: true
+        type: string
+      chainsaw_path:
+        description: 'Chainsaw health-check directory'
+        required: true
+        type: string
+      artifact_name_prefix:
+        description: 'Prefix for uploaded debug artifacts'
+        required: true
+        type: string
+      run_full_validation:
+        description: 'Run snapshot validation and CNCF AI Conformance validation'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  gpu-h100-kind-runtime-test:
+    name: ${{ inputs.job_name }}
+    runs-on: linux-amd64-gpu-h100-latest-1
+    timeout-minutes: ${{ inputs.run_full_validation && 180 || 150 }}
+    concurrency:
+      group: gpu-h100-${{ github.event_name }}-${{ github.ref }}-${{ inputs.intent }}
+      cancel-in-progress: true
+
+    env:
+      KIND_CLUSTER_NAME: ${{ inputs.cluster_name }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Prepare GPU workflow
+        id: prepare
+        uses: ./.github/actions/gpu-workflow-prepare
+
+      - name: Set up GPU cluster
+        timeout-minutes: 25
+        uses: ./.github/actions/gpu-cluster-setup
+        with:
+          kind_node_image: ${{ steps.prepare.outputs.h100_kind_node_image }}
+          min_gpu_count: '1'
+          gpu_model_pattern: H100
+          min_free_disk_gb: '50'
+          min_available_memory_gb: '16'
+          cluster_create_timeout: 900s
+          control_plane_resource_patches: 'true'
+          control_plane_leader_election_tuning: 'true'
+
+      - name: Build AICR CLI
+        timeout-minutes: 10
+        uses: ./.github/actions/aicr-build
+        with:
+          build_snapshot_agent: 'false'
+          validator_phases: 'none'
+
+      - name: Install runtime bundle
+        id: bundle-install
+        timeout-minutes: 80
+        uses: ./.github/actions/runtime-install
+        with:
+          method: bundle
+          accelerator: h100
+          intent: ${{ inputs.intent }}
+          platform: ${{ inputs.platform }}
+          wait: 'true'
+          best_effort: 'false'
+
+      - name: Snapshot and validate GPU
+        if: inputs.run_full_validation
+        timeout-minutes: 30
+        uses: ./.github/actions/gpu-snapshot-validate
+        with:
+          gpu_model: H100
+          min_gpu_count: '1'
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          snapshot_timeout: 10m
+
+      - name: Run chainsaw health checks
+        timeout-minutes: 20
+        uses: ./.github/actions/gpu-chainsaw-health
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          chainsaw_path: ${{ inputs.chainsaw_path }}
+          chainsaw_version: ${{ steps.prepare.outputs.chainsaw }}
+          chainsaw_sha256: ${{ steps.prepare.outputs.chainsaw_sha256_linux_amd64 }}
+
+      - name: Run CNCF AI Conformance
+        if: inputs.run_full_validation
+        timeout-minutes: 60
+        id: validate-conformance
+        uses: ./.github/actions/gpu-validate-conformance
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          kwok_helm_timeout: 600s
+          ko_build_timeout: 1200s
+          karpenter_helm_timeout: 600s
+
+      - name: GPU Test Cleanup
+        if: always()
+        timeout-minutes: 15
+        uses: ./.github/actions/gpu-test-cleanup
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          artifact_name_prefix: ${{ inputs.artifact_name_prefix }}
+          collect_artifacts: ${{ job.status != 'success' }}
+          diagnostic_mode: ${{ inputs.intent }}
+          upload_validation_artifacts: ${{ inputs.run_full_validation && steps.validate-conformance.outcome != 'skipped' }}

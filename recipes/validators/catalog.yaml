@@ -88,7 +88,7 @@ validators:
     env: []
   - name: gang-scheduling
     phase: conformance
-    description: "Verify gang scheduling with KAI scheduler"
+    description: "Verify gang scheduling with KAI scheduler using CPU-only workers"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 10m
     args: ["gang-scheduling"]

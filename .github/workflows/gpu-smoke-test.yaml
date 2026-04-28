@@ -20,8 +20,6 @@ on:
   push:
     branches:
       - "pull-request/[0-9]+"
-  pull_request:
-    types: [labeled]
   workflow_dispatch: {}  # Allow manual runs
 
 permissions:
@@ -40,6 +38,8 @@ jobs:
       should-run: ${{ steps.filter.outputs.matched }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
         id: filter
         with:
@@ -47,11 +47,17 @@ jobs:
           filters: |
             matched:
               - '.github/workflows/gpu-smoke-test.yaml'
+              - '.settings.yaml'
               - '.github/actions/gpu-cluster-setup/**'
-              - '.github/actions/gpu-operator-install/**'
+              - '.github/actions/runtime-install/**'
               - '.github/actions/aicr-build/**'
+              - '.github/actions/gpu-debug-diagnostics/**'
               - '.github/actions/gpu-test-cleanup/**'
+              - '.github/actions/gpu-smoke-nvidia-smi/**'
               - '.github/actions/load-versions/**'
+              - '.github/scripts/gpu-debug-diagnostics.sh'
+              - '.github/scripts/gpu-smoke-run-nvidia-smi.sh'
+              - '.github/scripts/gpu-smoke-show-nvidia-smi-log.sh'
               - 'pkg/collector/**'
               - 'pkg/snapshotter/**'
               - '.github/actions/gpu-snapshot-validate/**'
@@ -62,11 +68,13 @@ jobs:
 
   gpu-smoke-test:
     needs: [check-paths]
+    # NVIDIA self-hosted GPU runners reject pull_request event jobs before
+    # checkout. PR GPU coverage runs through the pull-request/<number> push
+    # mirror after ok-to-test approval.
     if: >
       always() && (
         github.event_name == 'schedule' ||
         github.event_name == 'workflow_dispatch' ||
-        (github.event_name == 'pull_request' && github.event.label.name == 'run-gpu-tests') ||
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')
       )
     name: GPU Smoke Test (nvkind + L40G)
@@ -86,45 +94,43 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Runner preflight snapshot
+        shell: bash
+        run: |
+          echo "::group::Runner preflight snapshot"
+          echo "hostname:     $(hostname)"
+          echo "kernel:       $(uname -a)"
+          echo "uptime:       $(uptime)"
+          echo "loadavg:      $(cat /proc/loadavg 2>/dev/null || echo unavailable)"
+          echo "nproc:        $(nproc 2>/dev/null || echo unavailable)"
+          free -h 2>/dev/null || true
+          df -h / 2>/dev/null || true
+          echo "::endgroup::"
+
       - name: Set up GPU cluster
         uses: ./.github/actions/gpu-cluster-setup
+        with:
+          # Keep smoke runner preflight explicit so action default changes do not
+          # silently alter L40G coverage.
+          min_gpu_count: '1'
+          min_free_disk_gb: '20'
+          min_available_memory_gb: '8'
 
       - name: Build aicr
         uses: ./.github/actions/aicr-build
         with:
+          build_snapshot_agent: 'false'
           validator_phases: 'none'
 
       - name: Install GPU operator (helm)
-        uses: ./.github/actions/gpu-operator-install
+        uses: ./.github/actions/runtime-install
         with:
           method: helm
 
       - name: Run nvidia-smi in a pod
-        run: |
-          cat <<'EOF' | kubectl --context="kind-${KIND_CLUSTER_NAME}" apply -f -
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: gpu-smoke-test
-          spec:
-            restartPolicy: Never
-            containers:
-            - name: nvidia-smi
-              image: ubuntu:22.04
-              command: ["nvidia-smi"]
-              resources:
-                limits:
-                  nvidia.com/gpu: 1
-          EOF
-
-          echo "Waiting for gpu-smoke-test pod to complete..."
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait pod/gpu-smoke-test \
-            --for=condition=Ready --timeout=120s || true
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" wait pod/gpu-smoke-test \
-            --for=jsonpath='{.status.phase}'=Succeeded --timeout=120s
-
-      - name: Show nvidia-smi output
-        run: kubectl --context="kind-${KIND_CLUSTER_NAME}" logs gpu-smoke-test
+        uses: ./.github/actions/gpu-smoke-nvidia-smi
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
       # --- Snapshot and validation ---
 
@@ -135,22 +141,10 @@ jobs:
           min_gpu_count: '1'
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
 
-      - name: Debug diagnostics
-        if: failure()
-        run: |
-          echo "=== ClusterPolicy status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get clusterpolicy -o yaml 2>/dev/null || true
-          echo "=== GPU Operator pods ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get pods -o wide 2>/dev/null || true
-          echo "=== Non-running pods (all namespaces) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get pods -A --field-selector=status.phase!=Running,status.phase!=Succeeded 2>/dev/null || true
-          echo "=== Recent events (gpu-operator) ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" -n gpu-operator get events --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
-          echo "=== Node status ==="
-          kubectl --context="kind-${KIND_CLUSTER_NAME}" get nodes -o wide 2>/dev/null || true
-
       - name: GPU Test Cleanup
         if: always()
         uses: ./.github/actions/gpu-test-cleanup
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          collect_artifacts: ${{ job.status != 'success' }}
+          diagnostic_mode: smoke

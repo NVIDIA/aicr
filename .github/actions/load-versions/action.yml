@@ -40,6 +40,9 @@ outputs:
   kind:
     description: 'Kind version'
     value: ${{ steps.versions.outputs.kind }}
+  nvkind:
+    description: 'nvkind git ref'
+    value: ${{ steps.versions.outputs.nvkind }}
   ctlptl:
     description: 'ctlptl version'
     value: ${{ steps.versions.outputs.ctlptl }}
@@ -91,6 +94,9 @@ outputs:
   kind_node_image:
     description: 'Kind node image for testing'
     value: ${{ steps.versions.outputs.kind_node_image }}
+  h100_kind_node_image:
+    description: 'Kind node image for H100 GPU tests'
+    value: ${{ steps.versions.outputs.h100_kind_node_image }}
 
 runs:
   using: 'composite'
@@ -121,6 +127,7 @@ runs:
         # Testing tools
         echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "kind=$(yq eval '.testing_tools.kind' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "nvkind=$(yq eval '.testing_tools.nvkind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "tilt=$(yq eval '.testing_tools.tilt' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -141,6 +148,7 @@ runs:
 
         # Testing configuration
         echo "kind_node_image=$(yq eval '.testing.kind_node_image' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "h100_kind_node_image=$(yq eval '.testing.h100_kind_node_image' .settings.yaml)" >> $GITHUB_OUTPUT
 
     - name: Display loaded versions
       shell: bash
@@ -158,6 +166,7 @@ runs:
         echo "  grype: ${{ steps.versions.outputs.grype }}"
         echo "  kubectl: ${{ steps.versions.outputs.kubectl }}"
         echo "  kind: ${{ steps.versions.outputs.kind }}"
+        echo "  nvkind: ${{ steps.versions.outputs.nvkind }}"
         echo "  ctlptl: ${{ steps.versions.outputs.ctlptl }}"
         echo "  tilt: ${{ steps.versions.outputs.tilt }}"
         echo "  helm: ${{ steps.versions.outputs.helm }}"
@@ -172,3 +181,4 @@ runs:
         echo "  lint_timeout: ${{ steps.versions.outputs.lint_timeout }}"
         echo "  test_timeout: ${{ steps.versions.outputs.test_timeout }}"
         echo "  kind_node_image: ${{ steps.versions.outputs.kind_node_image }}"
+        echo "  h100_kind_node_image: ${{ steps.versions.outputs.h100_kind_node_image }}"

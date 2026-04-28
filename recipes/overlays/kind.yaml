@@ -115,6 +115,11 @@ spec:
     - name: kube-prometheus-stack
       type: Helm
       overrides:
+        # CI only needs component health, not the full upstream alerting rule
+        # set. Skipping default rules reduces PrometheusRule churn during
+        # install on small kind control planes.
+        defaultRules:
+          create: false
         prometheus:
           prometheusSpec:
             # Smaller storage for local testing
@@ -132,14 +137,35 @@ spec:
                 memory: 1Gi
             # Shorter retention for local testing
             retention: 7d
-        grafana:
+        prometheusOperator:
+          # Keep operator-owned monitoring custom resources in the monitoring
+          # namespace for kind. Do not scope ServiceMonitor discovery here;
+          # GPU, Kubeflow, and Dynamo monitors may live in their own namespaces.
+          alertmanagerInstanceNamespaces:
+            - monitoring
+          alertmanagerConfigNamespaces:
+            - monitoring
+          prometheusInstanceNamespaces:
+            - monitoring
+          thanosRulerInstanceNamespaces:
+            - monitoring
+          # CI kind control planes can be slow under image pulls and controller
+          # startup. Avoid restarting the operator on short health probe stalls.
+          livenessProbe:
+            timeoutSeconds: 10
+            failureThreshold: 10
+          readinessProbe:
+            timeoutSeconds: 10
+            failureThreshold: 6
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              memory: 256Mi
             limits:
               cpu: 500m
               memory: 512Mi
+        grafana:
+          enabled: false
         alertmanager:
           alertmanagerSpec:
             resources:
