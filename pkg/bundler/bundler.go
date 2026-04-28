@@ -16,6 +16,7 @@ package bundler
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -241,6 +242,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// Extract values for each component from the recipe
 	componentValues, err := b.extractComponentValues(ctx, recipeResult)
 	if err != nil {
+		var se *errors.StructuredError
+		if stderrors.As(err, &se) {
+			return nil, err
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to extract component values", err)
 	}
@@ -256,6 +261,10 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	// attestation. This is a no-op when --data is not set.
 	dataFiles, err := b.copyDataFiles(dir)
 	if err != nil {
+		var se *errors.StructuredError
+		if stderrors.As(err, &se) {
+			return nil, err
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal,
 			"failed to copy external data files", err)
 	}
@@ -313,6 +322,10 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 	case config.DeployerHelm:
 		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
 		if manifestErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(manifestErr, &se) {
+				return nil, manifestErr
+			}
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				"failed to collect component manifests", manifestErr)
 		}
@@ -337,6 +350,10 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, recipeResult *recipe.RecipeResult, dir string, dataFiles []string, start time.Time) (*result.Output, error) {
 	output, err := d.Generate(ctx, dir)
 	if err != nil {
+		var se *errors.StructuredError
+		if stderrors.As(err, &se) {
+			return nil, err
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
 

@@ -16,6 +16,7 @@ package bundler
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1251,4 +1253,74 @@ func computeTestChecksum(content []byte) string {
 		hash[i%32] ^= b
 	}
 	return string(hash)
+}
+
+func TestMake_PreservesInnerErrorCode(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// "../evil" triggers deployer.IsSafePathComponent → ErrCodeInvalidRequest
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "../evil", Version: "v1.0.0", Type: "helm", Source: "https://example.com"},
+		},
+		DeploymentOrder: []string{"../evil"},
+	}
+
+	_, err = bundler.Make(ctx, recipeResult, tmpDir)
+	if err == nil {
+		t.Fatal("expected error for path-traversal component name, got nil")
+	}
+
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+
+	if se.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("expected error code %s, got %s (error: %v)",
+			errors.ErrCodeInvalidRequest, se.Code, err)
+	}
+}
+
+func TestMake_PreservesTimeoutFromExtractValues(t *testing.T) {
+	bundler, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately — extractComponentValues checks ctx.Err()
+
+	tmpDir := t.TempDir()
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1alpha1",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator", Version: "v25.3.3", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+		},
+		DeploymentOrder: []string{"gpu-operator"},
+	}
+
+	_, err = bundler.Make(ctx, recipeResult, tmpDir)
+	if err == nil {
+		t.Fatal("expected error for cancelled context, got nil")
+	}
+
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *errors.StructuredError, got %T: %v", err, err)
+	}
+
+	if se.Code != errors.ErrCodeTimeout {
+		t.Errorf("expected error code %s, got %s (error: %v)",
+			errors.ErrCodeTimeout, se.Code, err)
+	}
 }

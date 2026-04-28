@@ -675,3 +675,43 @@ func TestZipCanBeExtracted(t *testing.T) {
 		}
 	}
 }
+
+func TestBundleEndpointPathTraversalReturns400(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	body := `{
+		"apiVersion": "aicr.nvidia.com/v1alpha1",
+		"kind": "Recipe",
+		"componentRefs": [
+			{"name": "../evil", "version": "v1.0.0", "type": "helm", "source": "https://example.com"}
+		],
+		"deploymentOrder": ["../evil"]
+	}`
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	b.HandleBundles(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d. Body: %s",
+			http.StatusBadRequest, w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if code, ok := resp["code"].(string); !ok || code != "INVALID_REQUEST" {
+		t.Errorf("expected code INVALID_REQUEST, got %q", resp["code"])
+	}
+
+	if retryable, ok := resp["retryable"].(bool); !ok || retryable {
+		t.Errorf("expected retryable=false, got %v", resp["retryable"])
+	}
+}
