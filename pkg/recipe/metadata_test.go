@@ -1383,6 +1383,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 	// function as non-vacuous even when scanning a truncated window.
 	if NewBuilder() == nil {
 		t.Fatal("NewBuilder() returned nil — cannot run overlay coverage checks")
+		return
 	}
 
 	type criteria struct {
@@ -1453,6 +1454,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 	// Guard: an empty table would make every sub-test vacuously pass.
 	if len(tests) == 0 {
 		t.Fatal("test table is empty — every overlay must be explicitly covered")
+		return
 	}
 
 	ctx := context.Background()
@@ -1474,11 +1476,13 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 			result, err := builder.BuildFromCriteria(ctx, cr)
 			if err != nil {
 				t.Fatalf("BuildFromCriteria(%+v): %v", tt.c, err)
+				return
 			}
 
 			nfd := result.GetComponentRef("nfd")
 			if nfd == nil {
 				t.Fatalf("nfd component missing from resolved recipe; base.yaml should always include it")
+				return
 			}
 
 			rawTU, hasTU := nfd.Overrides["topologyUpdater"]
@@ -1488,11 +1492,13 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 				if !ok {
 					t.Fatalf("topologyUpdater override is missing or wrong shape; got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s platform=%s",
 						rawTU, rawTU, tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent, tt.c.platform)
+					return
 				}
 				enable, ok := tuMap["enable"].(bool)
 				if !ok {
 					t.Fatalf("topologyUpdater.enable is not a bool; got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s platform=%s",
 						tuMap["enable"], tuMap["enable"], tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent, tt.c.platform)
+					return
 				}
 				if !enable {
 					t.Errorf("topologyUpdater.enable = false, want true for criteria service=%s accelerator=%s os=%q intent=%s platform=%s",
@@ -1513,6 +1519,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 			if !ok {
 				t.Fatalf("topologyUpdater override has wrong shape on kind chain; got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s platform=%s",
 					rawTU, rawTU, tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent, tt.c.platform)
+				return
 			}
 			rawEnable, hasEnable := tuMap["enable"]
 			if !hasEnable {
@@ -1522,6 +1529,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 			if !ok {
 				t.Fatalf("topologyUpdater.enable on kind chain has wrong type (Helm may evaluate truthy); got %T (%v) for criteria service=%s accelerator=%s os=%q intent=%s platform=%s",
 					rawEnable, rawEnable, tt.c.service, tt.c.accelerator, tt.c.os, tt.c.intent, tt.c.platform)
+				return
 			}
 			if enable {
 				t.Errorf("topologyUpdater.enable = true on kind chain (KWOK lacks podResources socket); criteria service=%s accelerator=%s os=%q intent=%s platform=%s",
