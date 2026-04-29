@@ -124,8 +124,6 @@ componentRefs:
     dependencyRefs:
       - cert-manager
       - gpu-operator
-    manifestFiles:
-      - components/nvsentinel/manifests/allow-intra-namespace.yaml
   - name: prometheus-adapter
     namespace: monitoring
     chart: prometheus-adapter
