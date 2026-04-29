@@ -323,9 +323,13 @@ func TestParseOSEnv(t *testing.T) {
 		env  string
 		want string
 	}{
-		{"unset", "", ""},
+		{"empty", "", ""},
 		{"talos", "talos", "talos"},
 		{"ubuntu passthrough", "ubuntu", "ubuntu"},
+		{"uppercase normalized", "Talos", "talos"},
+		{"whitespace trimmed", "  talos  ", "talos"},
+		{"invalid value drops to default", "talsoo", ""},
+		{"unknown OS drops to default", "windows", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
