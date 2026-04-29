@@ -21,6 +21,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -194,7 +195,7 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 	// instead. Skipping these hostPath mounts is what unblocks agent
 	// deployment on Talos clusters (the systemd hostPath mount is the
 	// documented blocker — see issue #565).
-	if d.config.OS == OSTalos {
+	if d.config.OS == oskind.Talos {
 		return
 	}
 

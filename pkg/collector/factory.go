@@ -21,13 +21,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
 	"github.com/NVIDIA/aicr/pkg/collector/talos"
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 )
-
-// OSTalos is the OS criteria value that routes service collection to the
-// Talos backend. Kept as a string literal here (rather than imported from
-// pkg/recipe) to avoid the import cycle pkg/recipe → pkg/snapshotter →
-// pkg/collector. Must stay in sync with recipe.CriteriaOSTalos.
-const OSTalos = "talos"
 
 // Factory defines the interface for creating collector instances.
 // Implementations of Factory provide configured collectors for various system components.
@@ -111,7 +106,7 @@ func (f *DefaultFactory) CreateGPUCollector() Collector {
 // service collector (which emits the same SystemD measurement type for
 // schema compatibility); any other value uses the systemd D-Bus collector.
 func (f *DefaultFactory) CreateSystemDCollector() Collector {
-	if f.OS == OSTalos {
+	if f.OS == oskind.Talos {
 		return talos.NewServiceCollector()
 	}
 	return &systemd.Collector{
@@ -126,7 +121,7 @@ func (f *DefaultFactory) CreateSystemDCollector() Collector {
 // the host filesystem accessible to unprivileged pods); any other value
 // uses the standard /proc-based collector.
 func (f *DefaultFactory) CreateOSCollector() Collector {
-	if f.OS == OSTalos {
+	if f.OS == oskind.Talos {
 		return talos.NewOSCollector()
 	}
 	return &os.Collector{}

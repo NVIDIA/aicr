@@ -17,6 +17,7 @@ package agent
 import (
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -31,9 +32,9 @@ func TestBuildPodSpec_TalosSkipsSystemDHostPath(t *testing.T) {
 	}{
 		{
 			name:           "talos: no systemd hostPath, AICR_OS env set",
-			os:             OSTalos,
+			os:             oskind.Talos,
 			wantHostPath:   false,
-			wantAICROSEnv:  OSTalos,
+			wantAICROSEnv:  oskind.Talos,
 			wantHostMounts: nil,
 		},
 		{
@@ -109,7 +110,7 @@ func TestBuildPodSpec_TalosSkipsSystemDHostPath(t *testing.T) {
 					hasHostOSRelease = true
 				}
 			}
-			if tt.os == OSTalos && (hasRunSystemD || hasHostOSRelease) {
+			if tt.os == oskind.Talos && (hasRunSystemD || hasHostOSRelease) {
 				t.Errorf("Talos pod must not mount /run/systemd or /etc/os-release; got %v", gotMountPaths)
 			}
 			if tt.wantHostPath && (!hasRunSystemD || !hasHostOSRelease) {

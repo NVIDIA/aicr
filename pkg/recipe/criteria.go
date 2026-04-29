@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -146,14 +147,16 @@ func GetCriteriaIntentTypes() []string {
 // CriteriaOSType represents an operating system type.
 type CriteriaOSType string
 
-// CriteriaOSType constants for supported operating systems.
+// CriteriaOSType constants for supported operating systems. Values come
+// from pkg/recipe/oskind (the single source of truth for OS string values
+// shared across pkg/recipe, pkg/collector, pkg/k8s/agent, and the CLI).
 const (
-	CriteriaOSAny         CriteriaOSType = "any"
-	CriteriaOSUbuntu      CriteriaOSType = "ubuntu"
-	CriteriaOSRHEL        CriteriaOSType = "rhel"
-	CriteriaOSCOS         CriteriaOSType = "cos"
-	CriteriaOSAmazonLinux CriteriaOSType = "amazonlinux"
-	CriteriaOSTalos       CriteriaOSType = "talos"
+	CriteriaOSAny         CriteriaOSType = oskind.Any
+	CriteriaOSUbuntu      CriteriaOSType = oskind.Ubuntu
+	CriteriaOSRHEL        CriteriaOSType = oskind.RHEL
+	CriteriaOSCOS         CriteriaOSType = oskind.COS
+	CriteriaOSAmazonLinux CriteriaOSType = oskind.AmazonLinux
+	CriteriaOSTalos       CriteriaOSType = oskind.Talos
 )
 
 // ParseCriteriaOSType parses a string into a CriteriaOSType.
@@ -177,8 +180,10 @@ func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
 }
 
 // GetCriteriaOSTypes returns all supported OS types sorted alphabetically.
+// Delegates to oskind.All so the list stays in sync with the canonical
+// constants without duplication.
 func GetCriteriaOSTypes() []string {
-	return []string{"amazonlinux", "cos", "rhel", "talos", "ubuntu"}
+	return oskind.All()
 }
 
 // CriteriaPlatformType represents a platform/framework type.

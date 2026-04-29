@@ -21,6 +21,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector/gpu"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
 	"github.com/NVIDIA/aicr/pkg/collector/talos"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 )
 
 func TestDefaultCollectorFactory_CreateSystemDCollector(t *testing.T) {
@@ -44,7 +45,7 @@ func TestDefaultCollectorFactory_CreateSystemDCollector(t *testing.T) {
 }
 
 func TestDefaultCollectorFactory_CreateSystemDCollector_TalosBackend(t *testing.T) {
-	factory := NewDefaultFactory(WithOS(OSTalos))
+	factory := NewDefaultFactory(WithOS(oskind.Talos))
 
 	col := factory.CreateSystemDCollector()
 	if col == nil {
@@ -57,7 +58,7 @@ func TestDefaultCollectorFactory_CreateSystemDCollector_TalosBackend(t *testing.
 }
 
 func TestDefaultCollectorFactory_CreateOSCollector_TalosBackend(t *testing.T) {
-	factory := NewDefaultFactory(WithOS(OSTalos))
+	factory := NewDefaultFactory(WithOS(oskind.Talos))
 
 	col := factory.CreateOSCollector()
 	if col == nil {
