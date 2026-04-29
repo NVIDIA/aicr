@@ -313,7 +313,7 @@ Supported content types:
 | `accelerator` | AcceleratorType | Enum: h100, gb200, b200, a100, l40, rtx-pro-6000, any | `accelerator=h100` |
 | `gpu` | AcceleratorType | Alias for accelerator | `gpu=h100` |
 | `intent` | IntentType | Enum: training, inference, any | `intent=training` |
-| `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, any | `os=ubuntu` |
+| `os` | OSType | Enum: ubuntu, rhel, cos, amazonlinux, talos, any | `os=ubuntu` |
 | `nodes` | int | >= 0 | `nodes=8` |
 
 ### Recipe Builder: `pkg/recipe/builder.go`
@@ -335,7 +335,7 @@ Shared with CLI - same logic as described in CLI architecture.
 - `accelerator` - GPU/accelerator type (h100, gb200, b200, a100, l40, rtx-pro-6000)
 - `gpu` - Alias for accelerator (backwards compatibility)
 - `intent` - Workload intent (training, inference)
-- `os` - Operating system family (ubuntu, rhel, cos, amazonlinux)
+- `os` - Operating system family (ubuntu, rhel, cos, amazonlinux, talos)
 - `nodes` - Number of GPU nodes (0 = any/unspecified)
 
 #### POST Method

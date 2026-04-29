@@ -28,7 +28,7 @@
 //	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, any
 //	    Accelerator CriteriaAcceleratorType // h100, gb200, b200, a100, l40, rtx-pro-6000, any
 //	    Intent      CriteriaIntentType      // training, inference, any
-//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, any
+//	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, talos, any
 //	    Platform    CriteriaPlatformType    // kubeflow, dynamo, nim, any
 //	    Nodes       int                     // node count (0 = any)
 //	}

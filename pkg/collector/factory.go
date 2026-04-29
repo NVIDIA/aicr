@@ -19,8 +19,15 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/collector/os"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
+	"github.com/NVIDIA/aicr/pkg/collector/talos"
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
 )
+
+// OSTalos is the OS criteria value that routes service collection to the
+// Talos backend. Kept as a string literal here (rather than imported from
+// pkg/recipe) to avoid the import cycle pkg/recipe → pkg/snapshotter →
+// pkg/collector. Must stay in sync with recipe.CriteriaOSTalos.
+const OSTalos = "talos"
 
 // Factory defines the interface for creating collector instances.
 // Implementations of Factory provide configured collectors for various system components.
@@ -51,11 +58,25 @@ func WithMaxNodesPerEntry(max int) Option {
 	}
 }
 
+// WithOS configures the OS criteria value, used to select the appropriate
+// collector backend (e.g., systemd vs. Talos for service collection).
+// Empty string preserves the systemd default for backwards compatibility.
+func WithOS(os string) Option {
+	return func(f *DefaultFactory) {
+		f.OS = os
+	}
+}
+
 // DefaultFactory is the standard implementation of Factory that creates collectors
 // with production dependencies. It configures default systemd services to monitor.
 type DefaultFactory struct {
 	SystemDServices  []string
 	MaxNodesPerEntry int
+	// OS routes service collection to the OS-appropriate backend. When set to
+	// OSTalos, CreateSystemDCollector returns a Talos-aware collector that
+	// reads service state from the Kubernetes API. Empty preserves the
+	// existing systemd D-Bus default.
+	OS string
 }
 
 // NewDefaultFactory creates a new DefaultFactory with default configuration.
@@ -85,15 +106,29 @@ func (f *DefaultFactory) CreateGPUCollector() Collector {
 	)
 }
 
-// CreateSystemDCollector creates a systemd collector that monitors the configured services.
+// CreateSystemDCollector creates a service collector. The backend is selected
+// from the OS criteria: os: talos routes to the Kubernetes-API-backed Talos
+// service collector (which emits the same SystemD measurement type for
+// schema compatibility); any other value uses the systemd D-Bus collector.
 func (f *DefaultFactory) CreateSystemDCollector() Collector {
+	if f.OS == OSTalos {
+		return talos.NewServiceCollector()
+	}
 	return &systemd.Collector{
 		Services: f.SystemDServices,
 	}
 }
 
-// CreateOSCollector creates an OS collector.
+// CreateOSCollector creates an OS collector. The backend is selected from
+// the OS criteria: os: talos routes to a Kubernetes-API-backed collector
+// that emits release + extensions subtypes derived from Node.Status.NodeInfo
+// and `extensions.talos.dev/*` labels (Talos has no /etc/os-release on
+// the host filesystem accessible to unprivileged pods); any other value
+// uses the standard /proc-based collector.
 func (f *DefaultFactory) CreateOSCollector() Collector {
+	if f.OS == OSTalos {
+		return talos.NewOSCollector()
+	}
 	return &os.Collector{}
 }
 

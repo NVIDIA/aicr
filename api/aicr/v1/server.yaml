@@ -144,7 +144,7 @@ paths:
           description: GPU node operating system. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
             default: any
         - name: platform
           in: query
@@ -511,7 +511,7 @@ paths:
           description: GPU node operating system. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, any]
+            enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
             default: any
         - name: platform
           in: query
@@ -1236,7 +1236,7 @@ components:
         os:
           type: string
           description: Operating system family
-          enum: [ubuntu, rhel, cos, amazonlinux, any]
+          enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
           example: ubuntu
         nodes:
           type: integer

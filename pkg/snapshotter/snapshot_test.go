@@ -316,3 +316,23 @@ func (m *mockCollector) Collect(ctx context.Context) (*measurement.Measurement, 
 		Subtypes: []measurement.Subtype{},
 	}, nil
 }
+
+func TestParseOSEnv(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{"unset", "", ""},
+		{"talos", "talos", "talos"},
+		{"ubuntu passthrough", "ubuntu", "ubuntu"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICR_OS", tt.env)
+			if got := parseOSEnv(); got != tt.want {
+				t.Errorf("parseOSEnv() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

@@ -153,6 +153,7 @@ const (
 	CriteriaOSRHEL        CriteriaOSType = "rhel"
 	CriteriaOSCOS         CriteriaOSType = "cos"
 	CriteriaOSAmazonLinux CriteriaOSType = "amazonlinux"
+	CriteriaOSTalos       CriteriaOSType = "talos"
 )
 
 // ParseCriteriaOSType parses a string into a CriteriaOSType.
@@ -168,6 +169,8 @@ func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
 		return CriteriaOSCOS, nil
 	case "amazonlinux", "al2", "al2023":
 		return CriteriaOSAmazonLinux, nil
+	case "talos":
+		return CriteriaOSTalos, nil
 	default:
 		return CriteriaOSAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid os type: %s", s))
 	}
@@ -175,7 +178,7 @@ func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
 
 // GetCriteriaOSTypes returns all supported OS types sorted alphabetically.
 func GetCriteriaOSTypes() []string {
-	return []string{"amazonlinux", "cos", "rhel", "ubuntu"}
+	return []string{"amazonlinux", "cos", "rhel", "talos", "ubuntu"}
 }
 
 // CriteriaPlatformType represents a platform/framework type.

@@ -316,7 +316,7 @@ Generate recipes using direct system parameters:
 | `--service` | | string | K8s service: eks, gke, aks, oke, kind, lke |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, gb200, b200, a100, l40, rtx-pro-6000 |
 | `--intent` | | string | Workload intent: training, inference |
-| `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux |
+| `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, talos |
 | `--platform` | | string | Platform/framework type: kubeflow |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |

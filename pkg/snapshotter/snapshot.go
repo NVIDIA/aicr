@@ -82,12 +82,21 @@ func parseMaxNodesPerEntryEnv() int {
 	return n
 }
 
+// parseOSEnv reads the AICR_OS env var set by the agent Job. Returns the empty
+// string when unset, which preserves the existing default-backend behavior.
+func parseOSEnv() string {
+	return os.Getenv("AICR_OS")
+}
+
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	if n.Factory == nil {
 		var opts []collector.Option
 		if maxNodes := parseMaxNodesPerEntryEnv(); maxNodes > 0 {
 			opts = append(opts, collector.WithMaxNodesPerEntry(maxNodes))
+		}
+		if osVal := parseOSEnv(); osVal != "" {
+			opts = append(opts, collector.WithOS(osVal))
 		}
 		n.Factory = collector.NewDefaultFactory(opts...)
 	}
