@@ -91,6 +91,7 @@ aicr snapshot [flags]
 | `--runtime-class` | | string | | Runtime class for GPU access without consuming a GPU allocation (e.g., `nvidia`). Mutually exclusive with `--require-gpu`. |
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
+| `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
 
 **Output Destinations:**
 - **stdout**: Default when no `-o` flag specified
