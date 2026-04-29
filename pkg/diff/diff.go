@@ -95,17 +95,6 @@ func Snapshots(baseline, target *snapshotter.Snapshot) *Result {
 		Changes: make([]Change, 0),
 	}
 
-	if baseline.Metadata != nil {
-		if src, ok := baseline.Metadata["source-node"]; ok {
-			result.BaselineSource = src
-		}
-	}
-	if target.Metadata != nil {
-		if src, ok := target.Metadata["source-node"]; ok {
-			result.TargetSource = src
-		}
-	}
-
 	baseByType := indexMeasurements(baseline.Measurements)
 	targetByType := indexMeasurements(target.Measurements)
 
@@ -232,16 +221,16 @@ func compareReadings(prefix string, base, target map[string]measurement.Reading)
 
 func addedMeasurement(m *measurement.Measurement) []Change {
 	changes := make([]Change, 0, len(m.Subtypes))
-	for _, st := range m.Subtypes {
-		changes = append(changes, addedSubtype(string(m.Type)+"."+st.Name, &st)...)
+	for i := range m.Subtypes {
+		changes = append(changes, addedSubtype(string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])...)
 	}
 	return changes
 }
 
 func removedMeasurement(m *measurement.Measurement) []Change {
 	changes := make([]Change, 0, len(m.Subtypes))
-	for _, st := range m.Subtypes {
-		changes = append(changes, removedSubtype(string(m.Type)+"."+st.Name, &st)...)
+	for i := range m.Subtypes {
+		changes = append(changes, removedSubtype(string(m.Type)+"."+m.Subtypes[i].Name, &m.Subtypes[i])...)
 	}
 	return changes
 }

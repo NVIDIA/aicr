@@ -358,18 +358,21 @@ func TestSnapshots_RemovedMeasurementType(t *testing.T) {
 	}
 }
 
-func TestSnapshots_MetadataSourceNode(t *testing.T) {
-	baseline := makeSnapshot()
-	baseline.Metadata = map[string]string{"source-node": "node-a"}
-	target := makeSnapshot()
-	target.Metadata = map[string]string{"source-node": "node-b"}
-
-	result := Snapshots(baseline, target)
-	if result.BaselineSource != "node-a" {
-		t.Errorf("expected baseline source node-a, got %s", result.BaselineSource)
+func TestSnapshots_SourceSetByCaller(t *testing.T) {
+	// Snapshots() does not populate BaselineSource/TargetSource from metadata.
+	// The caller (CLI) sets these after the call to provide the file path or URI.
+	result := Snapshots(makeSnapshot(), makeSnapshot())
+	if result.BaselineSource != "" {
+		t.Errorf("expected empty baseline source, got %q", result.BaselineSource)
 	}
-	if result.TargetSource != "node-b" {
-		t.Errorf("expected target source node-b, got %s", result.TargetSource)
+	if result.TargetSource != "" {
+		t.Errorf("expected empty target source, got %q", result.TargetSource)
+	}
+
+	result.BaselineSource = "before.yaml"
+	result.TargetSource = "after.yaml"
+	if result.BaselineSource != "before.yaml" {
+		t.Errorf("expected baseline source before.yaml, got %q", result.BaselineSource)
 	}
 }
 
@@ -457,7 +460,7 @@ func TestWriteTable_PropagatesWriteErrors(t *testing.T) {
 		successes int
 	}{
 		{
-			name: "no changes path fails on first write",
+			name: "no changes fails on first write",
 			result: &Result{
 				Changes: []Change{},
 				Summary: Summary{},
@@ -465,7 +468,7 @@ func TestWriteTable_PropagatesWriteErrors(t *testing.T) {
 			successes: 0,
 		},
 		{
-			name: "with changes path fails mid-table",
+			name: "with changes fails on first write",
 			result: &Result{
 				Changes: []Change{
 					{Kind: Modified, Severity: SeverityInfo, Path: "K8s.server.version", Baseline: "1.31.0", Target: "1.32.4"},
@@ -473,6 +476,16 @@ func TestWriteTable_PropagatesWriteErrors(t *testing.T) {
 				Summary: Summary{Modified: 1, Total: 1},
 			},
 			successes: 0,
+		},
+		{
+			name: "with changes fails mid-stream after header succeeds",
+			result: &Result{
+				Changes: []Change{
+					{Kind: Modified, Severity: SeverityInfo, Path: "K8s.server.version", Baseline: "1.31.0", Target: "1.32.4"},
+				},
+				Summary: Summary{Modified: 1, Total: 1},
+			},
+			successes: 2,
 		},
 	}
 

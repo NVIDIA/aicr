@@ -106,7 +106,7 @@ func TestDiffCmd_Validation(t *testing.T) {
 	}
 }
 
-func TestWritTable_ToFile(t *testing.T) {
+func TestWriteTable_ToFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	outFile := filepath.Join(tmpDir, "out.txt")
 
