@@ -137,7 +137,7 @@
 //   - accelerator: h100, gb200, b200, a100, l40, rtx-pro-6000, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
-//   - os: ubuntu, cos, rhel, any (default: any)
+//   - os: ubuntu, rhel, cos, amazonlinux, talos, any (default: any)
 //   - nodes: integer node count (default: 0 = any)
 //
 // # Criteria Files (CLI and HTTP API - POST)
