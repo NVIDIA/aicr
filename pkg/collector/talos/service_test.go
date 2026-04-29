@@ -111,15 +111,32 @@ func TestServiceCollector_PopulatesFromNodeInfo(t *testing.T) {
 			wantSubtypeCount: 2,
 		},
 		{
-			name: "node with malformed runtime id (no scheme separator)",
+			name: "node with malformed runtime id (no scheme separator) is unknown",
 			nodeInfo: corev1.NodeSystemInfo{
 				ContainerRuntimeVersion: "containerd-1.7.20",
 				KubeletVersion:          "v1.30.0",
 			},
 			wantContainerd: map[string]string{
-				keyActiveState: "active",
+				keyActiveState: "unknown",
 				keyRuntimeName: "containerd-1.7.20",
-				keyVersion:     "",
+				keySource:      sourceTalosNodeInfo,
+			},
+			wantKubelet: map[string]string{
+				keyActiveState: "active",
+				keyVersion:     "v1.30.0",
+				keySource:      sourceTalosNodeInfo,
+			},
+			wantSubtypeCount: 2,
+		},
+		{
+			name: "non-containerd runtime (cri-o) is unknown for the containerd subtype",
+			nodeInfo: corev1.NodeSystemInfo{
+				ContainerRuntimeVersion: "cri-o://1.30.0",
+				KubeletVersion:          "v1.30.0",
+			},
+			wantContainerd: map[string]string{
+				keyActiveState: "unknown",
+				keyRuntimeName: "cri-o",
 				keySource:      sourceTalosNodeInfo,
 			},
 			wantKubelet: map[string]string{

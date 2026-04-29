@@ -87,6 +87,15 @@ func (s *ServiceCollector) Collect(ctx context.Context) (*measurement.Measuremen
 
 // buildContainerdSubtype derives a containerd.service-equivalent subtype
 // from NodeInfo.ContainerRuntimeVersion (e.g., "containerd://1.7.20").
+//
+// ActiveState semantics:
+//   - empty                          -> "unknown" (no signal from kubelet)
+//   - parseable as "containerd://X"  -> "active"  (containerd is the runtime)
+//   - any other non-empty value      -> "unknown" (CRI-O, malformed, etc.)
+//
+// The conservative "unknown" for non-containerd runtimes prevents
+// constraints written against SystemD.containerd.service from silently
+// matching nodes that aren't actually running containerd.
 func buildContainerdSubtype(info *corev1.NodeSystemInfo) measurement.Subtype {
 	b := measurement.NewSubtypeBuilder(SubtypeContainerd).
 		SetString(keyUnitFileName, SubtypeContainerd).
@@ -98,8 +107,13 @@ func buildContainerdSubtype(info *corev1.NodeSystemInfo) measurement.Subtype {
 	}
 
 	runtimeName, runtimeVersion := splitRuntimeID(info.ContainerRuntimeVersion)
+	b.SetString(keyRuntimeName, runtimeName)
+
+	if runtimeName != "containerd" || runtimeVersion == "" {
+		b.SetString(keyActiveState, "unknown")
+		return b.Build()
+	}
 	b.SetString(keyActiveState, "active").
-		SetString(keyRuntimeName, runtimeName).
 		SetString(keyVersion, runtimeVersion)
 
 	return b.Build()
