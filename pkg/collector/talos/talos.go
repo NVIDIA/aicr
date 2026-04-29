@@ -26,6 +26,7 @@ package talos
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -66,11 +67,30 @@ func WithNodeName(name string) Option {
 	return func(c *config) { c.nodeName = name }
 }
 
-// config carries the shared resolution state for a Talos collector. It is
-// not safe for concurrent use; each collector owns its own config.
+// config carries the shared resolution state for a Talos collector.
+//
+// fetchNode caches its result through a sync.Once so multiple collectors
+// sharing the same config (see NewCollectors) issue at most one Node
+// API round-trip per snapshot, even when they run in parallel from the
+// snapshotter's errgroup.
 type config struct {
 	clientSet kubernetes.Interface
 	nodeName  string
+
+	once sync.Once
+	node *corev1.Node
+}
+
+// NewCollectors constructs both the Talos ServiceCollector and OSCollector
+// against a single shared config. They will perform exactly one Node API
+// fetch per snapshot collection cycle, even when invoked in parallel.
+//
+// Use this from the collector factory; tests that exercise a single
+// collector in isolation can keep using NewServiceCollector /
+// NewOSCollector.
+func NewCollectors(opts ...Option) (*ServiceCollector, *OSCollector) {
+	cfg := newConfig(opts)
+	return &ServiceCollector{cfg: cfg}, &OSCollector{cfg: cfg}
 }
 
 func newConfig(opts []Option) *config {
@@ -81,11 +101,20 @@ func newConfig(opts []Option) *config {
 	return c
 }
 
-// fetchNode performs the Node Get call shared by all Talos collectors. On
-// any failure (no client, no node name, API error) it returns nil with the
-// failure already logged so the caller can emit a graceful empty
-// measurement instead of propagating an error up the snapshot pipeline.
+// fetchNode returns the Kubernetes Node for this config, performing the
+// API Get on the first call and caching the result for subsequent calls.
+// On any failure (no client, no node name, API error) it returns nil with
+// the failure already logged and that nil result is also cached, so the
+// caller emits a graceful empty measurement without retrying inside the
+// same collection pass.
 func (c *config) fetchNode(ctx context.Context) *corev1.Node {
+	c.once.Do(func() {
+		c.node = c.doFetchNode(ctx)
+	})
+	return c.node
+}
+
+func (c *config) doFetchNode(ctx context.Context) *corev1.Node {
 	cs, err := c.resolveClient()
 	if err != nil {
 		slog.Warn("kubernetes client unavailable - no Talos data will be collected",

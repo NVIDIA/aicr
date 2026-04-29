@@ -16,13 +16,53 @@ package talos
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
+
+// TestNewCollectors_SharedConfigFetchesNodeOnce verifies that when the
+// service and OS collectors are constructed via NewCollectors, they share
+// a single config and perform exactly one Node API call between them
+// regardless of invocation order. This is what the factory relies on to
+// keep one Talos snapshot to one round-trip.
+func TestNewCollectors_SharedConfigFetchesNodeOnce(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "talos-node-0"},
+		Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{
+			ContainerRuntimeVersion: "containerd://1.7.20",
+			KubeletVersion:          "v1.32.4",
+			OSImage:                 "Talos (v1.7.6)",
+		}},
+	}
+	cs := fake.NewSimpleClientset(node)
+
+	var gets atomic.Int32
+	cs.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		gets.Add(1)
+		// Returning false lets the default tracker handle the call.
+		return false, nil, nil
+	})
+
+	svc, osCol := NewCollectors(WithClientSet(cs), WithNodeName("talos-node-0"))
+
+	if _, err := svc.Collect(context.Background()); err != nil {
+		t.Fatalf("ServiceCollector.Collect() error = %v", err)
+	}
+	if _, err := osCol.Collect(context.Background()); err != nil {
+		t.Fatalf("OSCollector.Collect() error = %v", err)
+	}
+
+	if got := gets.Load(); got != 1 {
+		t.Errorf("expected exactly 1 Node Get across both collectors, got %d", got)
+	}
+}
 
 func TestServiceCollector_PopulatesFromNodeInfo(t *testing.T) {
 	tests := []struct {
