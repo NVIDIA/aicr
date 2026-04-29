@@ -167,11 +167,15 @@ func TestOSCollector_PopulatesReleaseAndExtensions(t *testing.T) {
 }
 
 func TestOSCollector_GracefulDegradation(t *testing.T) {
+	// Intentionally do NOT pass WithNodeName so the collector exercises
+	// the env-resolution fallback chain (NODE_NAME, KUBERNETES_NODE_NAME,
+	// HOSTNAME). All three are cleared here so resolveNodeName returns ""
+	// and Collect should return an empty TypeOS measurement.
 	t.Setenv("NODE_NAME", "")
 	t.Setenv("KUBERNETES_NODE_NAME", "")
 	t.Setenv("HOSTNAME", "")
 
-	c := NewOSCollector(WithClientSet(fake.NewSimpleClientset()), WithNodeName("missing-node"))
+	c := NewOSCollector(WithClientSet(fake.NewSimpleClientset()))
 	m, err := c.Collect(context.Background())
 	if err != nil {
 		t.Fatalf("Collect() error = %v, want nil (graceful)", err)
