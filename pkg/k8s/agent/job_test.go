@@ -117,15 +117,26 @@ func TestBuildPodSpec_TalosSkipsSystemDHostPath(t *testing.T) {
 				t.Errorf("non-Talos privileged pod must mount /run/systemd and /etc/os-release; got %v", gotMountPaths)
 			}
 
-			// Verify AICR_OS env var.
+			// Verify AICR_OS env var. Distinguish "absent" from
+			// "present-but-empty": the in-pod parser treats both the
+			// same today, but the agent should never emit AICR_OS at
+			// all when OS is unset (avoids cluttering the env with a
+			// no-op variable that can confuse log greps and shells).
 			gotOSEnv := ""
+			foundOSEnv := false
 			for _, e := range spec.Containers[0].Env {
 				if e.Name == "AICR_OS" {
 					gotOSEnv = e.Value
+					foundOSEnv = true
+					break
 				}
 			}
-			if gotOSEnv != tt.wantAICROSEnv {
-				t.Errorf("AICR_OS env = %q, want %q", gotOSEnv, tt.wantAICROSEnv)
+			wantPresent := tt.wantAICROSEnv != ""
+			if foundOSEnv != wantPresent {
+				t.Errorf("AICR_OS env presence = %v, want %v (OS=%q)", foundOSEnv, wantPresent, tt.os)
+			}
+			if foundOSEnv && gotOSEnv != tt.wantAICROSEnv {
+				t.Errorf("AICR_OS env value = %q, want %q (OS=%q)", gotOSEnv, tt.wantAICROSEnv, tt.os)
 			}
 		})
 	}
