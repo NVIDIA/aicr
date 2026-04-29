@@ -79,13 +79,12 @@ func TestOSCollector_PopulatesReleaseAndExtensions(t *testing.T) {
 			wantSubtypeCount: 1,
 		},
 		{
-			name: "ubuntu-format OSImage parses ID without version when no parens",
+			name: "non-Talos OSImage emits PRETTY_NAME but leaves ID/VERSION_ID unset",
 			nodeInfo: corev1.NodeSystemInfo{
 				OSImage: "Ubuntu 22.04.5 LTS",
 			},
 			wantRelease: map[string]string{
 				keySource:              sourceTalosNodeInfo,
-				keyOSReleaseID:         "ubuntu",
 				keyOSReleasePrettyName: "Ubuntu 22.04.5 LTS",
 			},
 			wantSubtypeCount: 1,
@@ -141,6 +140,18 @@ func TestOSCollector_PopulatesReleaseAndExtensions(t *testing.T) {
 				t.Fatalf("missing %q subtype", SubtypeRelease)
 			}
 			assertSubtypeData(t, release, tt.wantRelease)
+			// Assert keys not in wantRelease are absent — protects against
+			// regressions where a parser change starts emitting misleading
+			// fields (e.g., ID=red for a RHEL OSImage).
+			for _, k := range []string{keyOSReleaseID, keyOSReleaseVersionID} {
+				if _, want := tt.wantRelease[k]; want {
+					continue
+				}
+				if release.Has(k) {
+					got, _ := release.GetString(k)
+					t.Errorf("release subtype unexpectedly has %q = %q", k, got)
+				}
+			}
 
 			ext := m.GetSubtype(SubtypeExtensions)
 			if len(tt.wantExtensions) > 0 {
@@ -180,12 +191,18 @@ func TestParseOSImage(t *testing.T) {
 		wantID      string
 		wantVersion string
 	}{
+		// Talos-format strings that should parse.
 		{"talos with v-prefix", "Talos (v1.7.6)", "talos", "1.7.6"},
 		{"talos without v-prefix", "Talos (1.7.6)", "talos", "1.7.6"},
-		{"ubuntu LTS", "Ubuntu 22.04.5 LTS", "ubuntu", ""},
-		{"rhel", "Red Hat Enterprise Linux 9.4 (Plow)", "red", "Plow"},
+		{"talos lowercase tag", "talos (v1.7.6)", "talos", "1.7.6"},
+
+		// Non-Talos formats: parser declines to invent ID/VERSION_ID.
+		// The caller (buildReleaseSubtype) leaves those keys unset, which
+		// is more honest than emitting a misleading parse.
+		{"ubuntu LTS", "Ubuntu 22.04.5 LTS", "", ""},
+		{"rhel parenthesized codename", "Red Hat Enterprise Linux 9.4 (Plow)", "", ""},
+		{"single word no parens", "Flatcar", "", ""},
 		{"empty", "", "", ""},
-		{"single word no parens", "Flatcar", "flatcar", ""},
 	}
 
 	for _, tt := range tests {

@@ -132,27 +132,31 @@ func buildReleaseSubtype(info *corev1.NodeSystemInfo) measurement.Subtype {
 }
 
 // parseOSImage extracts an os-release-style ID and VERSION_ID from
-// NodeInfo.OSImage. Talos formats it as `Talos (v1.7.6)`; other distros
-// vary (`Ubuntu 22.04.5 LTS`, `Red Hat Enterprise Linux 9.4 (Plow)`), so
-// this parser is permissive: the first whitespace-separated token becomes
-// the ID, and the parenthesized value (if any, with a leading "v" stripped)
-// becomes the VERSION_ID. Empty input yields empty outputs.
+// NodeInfo.OSImage. The Talos format is `Talos (vX.Y.Z)`. This parser
+// is intentionally Talos-specific: any other format (RHEL's
+// `Red Hat Enterprise Linux 9.4 (Plow)`, Ubuntu's `Ubuntu 22.04.5 LTS`,
+// etc.) yields empty results so the caller leaves ID/VERSION_ID unset
+// rather than emitting a misleading parse like ID=red, VERSION_ID=Plow.
+//
+// This collector only runs when the OS criterion is talos, so non-Talos
+// inputs are off the production path; declining to parse them keeps the
+// data shape honest if someone ever exercises this code with another
+// OSImage.
 func parseOSImage(image string) (id, version string) {
 	if image == "" {
 		return "", ""
 	}
 	parts := strings.SplitN(image, " (", 2)
-	id = strings.ToLower(strings.TrimSpace(parts[0]))
-	// Strip secondary words from the ID for distros that omit the
-	// parenthesis form (e.g., "Ubuntu 22.04.5 LTS" → "ubuntu").
-	if spaceIdx := strings.Index(id, " "); spaceIdx >= 0 {
-		id = id[:spaceIdx]
+	if len(parts) != 2 {
+		return "", ""
 	}
-	if len(parts) == 2 {
-		v := strings.TrimSuffix(strings.TrimSpace(parts[1]), ")")
-		v = strings.TrimPrefix(v, "v")
-		version = v
+	if !strings.EqualFold(strings.TrimSpace(parts[0]), "Talos") {
+		return "", ""
 	}
+	id = "talos"
+	v := strings.TrimSuffix(strings.TrimSpace(parts[1]), ")")
+	v = strings.TrimPrefix(v, "v")
+	version = v
 	return id, version
 }
 
