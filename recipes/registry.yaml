@@ -495,3 +495,13 @@ components:
         tolerationPaths:
           - manager.tolerations
           - jobset.controller.tolerations
+      # accelerated paths target top-level keys; consumed by the
+      # torch-distributed ClusterTrainingRuntime template in
+      # components/kubeflow-trainer/manifests/. Lets users submit a bare
+      # TrainJob with no podTemplateOverrides / runtimePatches — the
+      # runtime carries the per-cluster scheduling baked in at bundle time.
+      accelerated:
+        nodeSelectorPaths:
+          - acceleratedNodeSelector
+        tolerationPaths:
+          - acceleratedTolerations

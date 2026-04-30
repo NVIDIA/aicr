@@ -97,30 +97,10 @@ spec:
         nvidia.com/gpu: 1
       limits:
         nvidia.com/gpu: 1
-  # Inject AICR-standard GPU node scheduling. kubeflow-trainer v2.2.0 replaced
-  # podTemplateOverrides with the runtimePatches API (PR kubeflow/trainer#3309).
-  runtimePatches:
-    - manager: aicr.nvidia.com/demo
-      trainingRuntimeSpec:
-        template:
-          spec:
-            replicatedJobs:
-              - name: node
-                template:
-                  spec:
-                    template:
-                      spec:
-                        nodeSelector:
-                          nodeGroup: gpu-worker
-                        tolerations:
-                          - key: dedicated
-                            operator: Equal
-                            value: worker-workload
-                            effect: NoSchedule
-                          - key: dedicated
-                            operator: Equal
-                            value: worker-workload
-                            effect: NoExecute
+  # No podTemplateOverrides / runtimePatches needed — the torch-distributed
+  # ClusterTrainingRuntime carries the cluster-aware nodeSelector and
+  # tolerations baked in at bundle time from --accelerated-node-selector /
+  # --accelerated-node-toleration flags.
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org
