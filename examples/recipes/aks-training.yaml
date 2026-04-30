@@ -76,8 +76,8 @@ componentRefs:
     namespace: kai-scheduler
     chart: kai-scheduler
     type: Helm
-    source: oci://ghcr.io/nvidia/kai-scheduler
-    version: v0.13.0
+    source: oci://ghcr.io/kai-scheduler/kai-scheduler
+    version: v0.14.1
     valuesFile: components/kai-scheduler/values.yaml
     dependencyRefs:
       - gpu-operator

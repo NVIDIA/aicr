@@ -430,7 +430,7 @@ Deployers respect the `deploymentOrder` field from the recipe to ensure componen
 ```yaml
 componentRefs:
   - name: cert-manager
-    version: v1.17.2
+    version: v1.20.2
   - name: gpu-operator
     version: v25.3.3
   - name: network-operator

@@ -333,7 +333,7 @@ spec:
     - name: cert-manager
       type: Helm
       source: https://charts.jetstack.io
-      version: v1.17.2
+      version: v1.20.2
       valuesFile: components/cert-manager/values.yaml
 
     - name: gpu-operator
@@ -615,7 +615,7 @@ Components can declare dependencies via `dependencyRefs`:
 componentRefs:
   - name: cert-manager
     type: Helm
-    version: v1.17.2
+    version: v1.20.2
 
   - name: gpu-operator
     type: Helm
@@ -997,7 +997,7 @@ curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=gb200&in
       "name": "cert-manager",
       "type": "Helm",
       "source": "https://charts.jetstack.io",
-      "version": "v1.17.2",
+      "version": "v1.20.2",
       "valuesFile": "components/cert-manager/values.yaml"
     },
     {

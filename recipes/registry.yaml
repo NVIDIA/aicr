@@ -364,9 +364,9 @@ components:
     healthCheck:
       assertFile: checks/kai-scheduler/health-check.yaml
     helm:
-      defaultRepository: oci://ghcr.io/nvidia/kai-scheduler
+      defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
-      defaultVersion: v0.13.0
+      defaultVersion: v0.14.1
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:
@@ -485,7 +485,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
-      defaultVersion: 2.1.0
+      defaultVersion: 2.2.0
       defaultNamespace: kubeflow
     nodeScheduling:
       system:

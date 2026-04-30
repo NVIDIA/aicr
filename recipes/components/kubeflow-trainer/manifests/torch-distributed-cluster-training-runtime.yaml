@@ -25,8 +25,11 @@ metadata:
 spec:
   mlPolicy:
     numNodes: 1
-    torch:
-      numProcPerNode: auto
+    # numProcPerNode was removed from mlPolicy.torch in kubeflow-trainer v2.2.0
+    # (kubeflow/trainer#3239) — Torch now infers parallelism from
+    # the container's nvidia.com/gpu resource limit. mlPolicy.mpi.numProcPerNode
+    # is unaffected.
+    torch: {}
   template:
     spec:
       replicatedJobs:

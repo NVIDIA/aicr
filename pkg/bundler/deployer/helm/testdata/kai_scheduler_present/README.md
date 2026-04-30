@@ -18,7 +18,7 @@ via its own `install.sh`:
 
 | Component | Version | Namespace | Source |
 |-----------|---------|-----------|--------|
-| kai-scheduler | v0.13.0 | kai-scheduler | kai-scheduler (oci://ghcr.io/nvidia/kai-scheduler) |
+| kai-scheduler | v0.14.1 | kai-scheduler | kai-scheduler (oci://ghcr.io/kai-scheduler/kai-scheduler) |
 
 
 

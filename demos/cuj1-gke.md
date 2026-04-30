@@ -99,12 +99,32 @@ spec:
         nvidia.com/gpu: 1
       limits:
         nvidia.com/gpu: 1
-  podTemplateOverrides:
-    - targetJobs:
-        - name: node
-      spec:
-        tolerations:
-          - operator: Exists
+  # Inject GKE GPU node scheduling. Matches the snapshot/bundle/validate
+  # tolerations above (`dedicated=gpu-workload:NoSchedule` plus the GKE-managed
+  # `nvidia.com/gpu=present:NoSchedule` taint). kubeflow-trainer v2.2.0 replaced
+  # podTemplateOverrides with the runtimePatches API (PR kubeflow/trainer#3309).
+  runtimePatches:
+    - manager: aicr.nvidia.com/demo
+      trainingRuntimeSpec:
+        template:
+          spec:
+            replicatedJobs:
+              - name: node
+                template:
+                  spec:
+                    template:
+                      spec:
+                        nodeSelector:
+                          nodeGroup: gpu-worker
+                        tolerations:
+                          - key: dedicated
+                            operator: Equal
+                            value: gpu-workload
+                            effect: NoSchedule
+                          - key: nvidia.com/gpu
+                            operator: Equal
+                            value: present
+                            effect: NoSchedule
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org

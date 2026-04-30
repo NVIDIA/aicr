@@ -47,8 +47,8 @@ import (
 )
 
 const (
-	// trainerArchiveURL is the GitHub tar.gz archive for Kubeflow Trainer v2.1.0.
-	trainerArchiveURL = "https://github.com/kubeflow/trainer/archive/refs/tags/v2.1.0.tar.gz"
+	// trainerArchiveURL is the GitHub tar.gz archive for Kubeflow Trainer v2.2.0.
+	trainerArchiveURL = "https://github.com/kubeflow/trainer/archive/refs/tags/v2.2.0.tar.gz"
 
 	// trainerKustomizePath is the path within the extracted archive to the manager overlay.
 	trainerKustomizePath = "manifests/overlays/manager"
@@ -89,7 +89,7 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (b
 	return true, nil
 }
 
-// installTrainer downloads the Kubeflow Trainer v2.1.0 archive from GitHub, builds the
+// installTrainer downloads the Kubeflow Trainer v2.2.0 archive from GitHub, builds the
 // kustomize manager overlay entirely in Go (no CLI), and applies every resource to the
 // cluster via the dynamic client.  It returns the list of resources it created so the
 // caller can defer deleteTrainer for cleanup.
