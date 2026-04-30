@@ -231,8 +231,8 @@ components:
     healthCheck:
       assertFile: checks/nvsentinel/health-check.yaml
     helm:
-      defaultRepository: https://helm.ngc.nvidia.com/nvidia
-      defaultChart: nvidia/nvsentinel
+      defaultRepository: oci://ghcr.io/nvidia
+      defaultChart: nvsentinel
       defaultVersion: v1.3.0
       defaultNamespace: nvsentinel
     nodeScheduling:
