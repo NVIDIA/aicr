@@ -19,18 +19,23 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 	oras "oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/file"
 	"oras.land/oras-go/v2/content/oci"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -937,39 +942,39 @@ func TestContextCancellation(t *testing.T) {
 // TestCreateAuthClient tests the auth client creation function.
 func TestCreateAuthClient(t *testing.T) {
 	t.Run("creates client with default settings", func(t *testing.T) {
-		client, _ := createAuthClient(false, false)
+		client, _ := createAuthClientForHost("ghcr.io", false, false)
 		if client == nil {
-			t.Fatal("createAuthClient() returned nil client")
+			t.Fatal("createAuthClientForHost() returned nil client")
 		}
 		if client.Client == nil {
-			t.Error("createAuthClient() client.Client is nil")
+			t.Error("createAuthClientForHost() client.Client is nil")
 		}
 		if client.Cache == nil {
-			t.Error("createAuthClient() client.Cache is nil")
+			t.Error("createAuthClientForHost() client.Cache is nil")
 		}
 	})
 
 	t.Run("creates client with plainHTTP", func(t *testing.T) {
-		client, _ := createAuthClient(true, false)
+		client, _ := createAuthClientForHost("ghcr.io", true, false)
 		if client == nil {
-			t.Fatal("createAuthClient() returned nil client")
+			t.Fatal("createAuthClientForHost() returned nil client")
 		}
 	})
 
 	t.Run("creates client with insecureTLS", func(t *testing.T) {
-		client, _ := createAuthClient(false, true)
+		client, _ := createAuthClientForHost("ghcr.io", false, true)
 		if client == nil {
-			t.Fatal("createAuthClient() returned nil client")
+			t.Fatal("createAuthClientForHost() returned nil client")
 		}
 		// Verify TLS config has InsecureSkipVerify set
 		transport, ok := client.Client.Transport.(*http.Transport)
 		if !ok {
-			t.Fatal("createAuthClient() transport is not *http.Transport")
+			t.Fatal("createAuthClientForHost() transport is not *http.Transport")
 		}
 		if transport.TLSClientConfig == nil {
-			t.Error("createAuthClient() TLSClientConfig is nil with insecureTLS=true")
+			t.Error("createAuthClientForHost() TLSClientConfig is nil with insecureTLS=true")
 		} else if !transport.TLSClientConfig.InsecureSkipVerify {
-			t.Error("createAuthClient() InsecureSkipVerify is false with insecureTLS=true")
+			t.Error("createAuthClientForHost() InsecureSkipVerify is false with insecureTLS=true")
 		}
 	})
 }
@@ -1070,6 +1075,267 @@ func TestPackage_MorePaths(t *testing.T) {
 		})
 		if err == nil {
 			t.Error("Package() expected error for invalid output dir, got nil")
+		}
+	})
+}
+
+// fakeNetTimeoutErr satisfies net.Error with Timeout()=true so we can drive
+// the transient-error branch without hitting the network.
+type fakeNetTimeoutErr struct{}
+
+func (fakeNetTimeoutErr) Error() string   { return "fake network timeout" }
+func (fakeNetTimeoutErr) Timeout() bool   { return true }
+func (fakeNetTimeoutErr) Temporary() bool { return true } //nolint:staticcheck // legacy net.Error API
+
+// stubCopy returns a copyFunc that records its invocations and returns the
+// supplied per-attempt errors in order. After the slice is exhausted it
+// returns nil (success).
+func stubCopy(errs []error, calls *atomic.Int32) copyFunc {
+	return func(_ context.Context, _ oras.ReadOnlyTarget, _ string, _ oras.Target, _ string, _ oras.CopyOptions) (ociv1.Descriptor, error) {
+		idx := int(calls.Add(1)) - 1
+		if idx >= len(errs) {
+			return ociv1.Descriptor{}, nil
+		}
+		return ociv1.Descriptor{}, errs[idx]
+	}
+}
+
+func TestCopyWithRetry_SucceedsOnFirstAttempt(t *testing.T) {
+	var calls atomic.Int32
+	stub := stubCopy(nil, &calls) // never returns error
+
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	if err != nil {
+		t.Fatalf("copyWithRetryConfig() unexpected error: %v", err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("copy attempts = %d, want 1", got)
+	}
+}
+
+func TestCopyWithRetry_RetriesTransientThenSucceeds(t *testing.T) {
+	var calls atomic.Int32
+	// First two calls return transient timeouts, third succeeds.
+	stub := stubCopy([]error{fakeNetTimeoutErr{}, fakeNetTimeoutErr{}}, &calls)
+
+	start := time.Now()
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("copyWithRetryConfig() unexpected error: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("copy attempts = %d, want 3", got)
+	}
+	// With a 1ms initial backoff and +/-25% jitter, doubling per attempt,
+	// total sleep is at most a few ms; 5s is a generous upper bound for CI.
+	if elapsed > 5*time.Second {
+		t.Errorf("copyWithRetryConfig took too long: %v", elapsed)
+	}
+}
+
+func TestCopyWithRetry_ExhaustsRetriesOnPersistentTransient(t *testing.T) {
+	var calls atomic.Int32
+	stub := stubCopy([]error{fakeNetTimeoutErr{}, fakeNetTimeoutErr{}, fakeNetTimeoutErr{}}, &calls)
+
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	if err == nil {
+		t.Fatal("copyWithRetryConfig() expected error after retries exhausted, got nil")
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("copy attempts = %d, want 3", got)
+	}
+	if !strings.Contains(err.Error(), "registry push failed after retries") {
+		t.Errorf("error = %q, want to contain 'registry push failed after retries'", err.Error())
+	}
+}
+
+func TestCopyWithRetry_DoesNotRetryNonTransientError(t *testing.T) {
+	var calls atomic.Int32
+	// 401 Unauthorized — must not retry.
+	respErr := &errcode.ErrorResponse{StatusCode: http.StatusUnauthorized}
+	stub := stubCopy([]error{respErr}, &calls)
+
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	if err == nil {
+		t.Fatal("copyWithRetryConfig() expected error for 401, got nil")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("copy attempts = %d, want 1 (no retry on 4xx)", got)
+	}
+	if !strings.Contains(err.Error(), "registry push failed") {
+		t.Errorf("error = %q, want to contain 'registry push failed'", err.Error())
+	}
+	if strings.Contains(err.Error(), "after retries") {
+		t.Errorf("error should not mention retries for non-transient error: %q", err.Error())
+	}
+}
+
+func TestCopyWithRetry_RetriesOn5xxAnd429(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantCalls  int32
+	}{
+		{"500 internal server error", http.StatusInternalServerError, 3},
+		{"502 bad gateway", http.StatusBadGateway, 3},
+		{"503 service unavailable", http.StatusServiceUnavailable, 3},
+		{"429 too many requests", http.StatusTooManyRequests, 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			respErr := &errcode.ErrorResponse{StatusCode: tt.statusCode}
+			stub := stubCopy([]error{respErr, respErr, respErr}, &calls)
+
+			_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+				oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+			if err == nil {
+				t.Fatal("expected error after exhausting retries on transient status")
+			}
+			if got := calls.Load(); got != tt.wantCalls {
+				t.Errorf("copy attempts = %d, want %d", got, tt.wantCalls)
+			}
+		})
+	}
+}
+
+func TestCopyWithRetry_DoesNotRetryOn4xxOtherThan429(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+	}{
+		{"400 bad request", http.StatusBadRequest},
+		{"401 unauthorized", http.StatusUnauthorized},
+		{"403 forbidden", http.StatusForbidden},
+		{"404 not found", http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			respErr := &errcode.ErrorResponse{StatusCode: tt.statusCode}
+			stub := stubCopy([]error{respErr, respErr, respErr}, &calls)
+
+			_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+				oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+			if err == nil {
+				t.Fatal("expected error for non-transient 4xx")
+			}
+			if got := calls.Load(); got != 1 {
+				t.Errorf("copy attempts = %d, want 1 (no retry on 4xx)", got)
+			}
+		})
+	}
+}
+
+func TestCopyWithRetry_DoesNotRetryOnContextCanceled(t *testing.T) {
+	var calls atomic.Int32
+	stub := stubCopy([]error{context.Canceled}, &calls)
+
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	if err == nil {
+		t.Fatal("copyWithRetryConfig() expected error for context.Canceled, got nil")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("copy attempts = %d, want 1 (no retry on context.Canceled)", got)
+	}
+}
+
+func TestCopyWithRetry_StopsWhenParentContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before any attempt
+
+	var calls atomic.Int32
+	stub := stubCopy([]error{fakeNetTimeoutErr{}, fakeNetTimeoutErr{}, fakeNetTimeoutErr{}}, &calls)
+
+	_, err := copyWithRetryConfig(ctx, nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	if err == nil {
+		t.Fatal("copyWithRetryConfig() expected error for canceled parent context, got nil")
+	}
+	if got := calls.Load(); got > 0 {
+		t.Errorf("copy attempts = %d, want 0 when parent ctx already canceled", got)
+	}
+}
+
+func TestCopyWithRetry_SingleAttemptHonored(t *testing.T) {
+	// maxAttempts=1 should never retry, even for a transient error.
+	var calls atomic.Int32
+	stub := stubCopy([]error{fakeNetTimeoutErr{}}, &calls)
+
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 1, time.Millisecond, time.Second)
+	if err == nil {
+		t.Fatal("copyWithRetryConfig() expected error, got nil")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Errorf("copy attempts = %d, want 1", got)
+	}
+}
+
+func TestCopyWithRetry_RetriesOnPerAttemptDeadlineExceeded(t *testing.T) {
+	var calls atomic.Int32
+	stub := stubCopy([]error{context.DeadlineExceeded, context.DeadlineExceeded}, &calls)
+
+	_, err := copyWithRetryConfig(context.Background(), nil, "src", nil, "dst",
+		oras.DefaultCopyOptions, stub, 3, time.Millisecond, time.Second)
+	if err != nil {
+		t.Fatalf("copyWithRetryConfig() expected success after retry, got %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("copy attempts = %d, want 3", got)
+	}
+}
+
+func TestIsTransientPushError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"context.Canceled", context.Canceled, false},
+		{"context.DeadlineExceeded", context.DeadlineExceeded, true},
+		{"net timeout", fakeNetTimeoutErr{}, true},
+		{"500", &errcode.ErrorResponse{StatusCode: 500}, true},
+		{"502", &errcode.ErrorResponse{StatusCode: 502}, true},
+		{"429", &errcode.ErrorResponse{StatusCode: 429}, true},
+		{"401", &errcode.ErrorResponse{StatusCode: 401}, false},
+		{"404", &errcode.ErrorResponse{StatusCode: 404}, false},
+		{"plain error", stderrors.New("something else"), false},
+		{"network error string", &net.OpError{Op: "dial", Err: stderrors.New("connection refused")}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTransientPushError(tt.err); got != tt.want {
+				t.Errorf("isTransientPushError(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJitterDuration(t *testing.T) {
+	t.Run("zero returns zero", func(t *testing.T) {
+		if got := jitterDuration(0); got != 0 {
+			t.Errorf("jitterDuration(0) = %v, want 0", got)
+		}
+	})
+
+	t.Run("within +/-25%", func(t *testing.T) {
+		base := 100 * time.Millisecond
+		minD := time.Duration(float64(base) * 0.75)
+		maxD := time.Duration(float64(base) * 1.25)
+		// Sample several times to guard against single unlucky draws.
+		for i := 0; i < 100; i++ {
+			got := jitterDuration(base)
+			if got < minD || got >= maxD {
+				t.Fatalf("jitterDuration(%v) = %v, want in [%v, %v)", base, got, minD, maxD)
+			}
 		}
 	})
 }

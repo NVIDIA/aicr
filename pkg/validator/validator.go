@@ -373,7 +373,9 @@ func (v *Validator) runPhase(
 				slog.Warn("failed to cleanup Job", "name", entry.Name, "error", cleanupErr)
 			}
 			termCtx, termCancel := context.WithTimeout(context.Background(), defaults.K8sPodTerminationWaitTimeout) //nolint:contextcheck // Fresh context: parent may be canceled
-			deployer.WaitForPodTermination(termCtx)                                                                 //nolint:contextcheck // Uses fresh context above
+			if termErr := deployer.WaitForPodTermination(termCtx); termErr != nil {                                 //nolint:contextcheck // Uses fresh context above
+				slog.Warn("failed to wait for pod termination", "name", entry.Name, "error", termErr)
+			}
 			termCancel()
 		}
 	}

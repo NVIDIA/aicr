@@ -15,12 +15,18 @@
 package build
 
 import (
+	"bytes"
 	"context"
+	stderrors "errors"
 	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
 	"os"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -69,24 +75,44 @@ type ImageStatus struct {
 	Digest     string `yaml:"digest,omitempty"`
 }
 
-// LoadSpec reads and parses a build spec file from disk.
+// LoadSpec reads and parses a build spec file from disk. The input is bounded
+// by defaults.MaxSpecFileBytes to prevent unbounded memory allocation from a
+// corrupted or hostile file. YAML decoding rejects unknown fields to surface
+// typos rather than silently dropping them.
 func LoadSpec(ctx context.Context, path string) (*BuildSpec, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled before reading spec", err)
 	}
 
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if stderrors.Is(err, fs.ErrNotExist) {
 			return nil, errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("spec file not found: %q", path), err)
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to open spec file %q", path), err)
+	}
+	defer f.Close()
+
+	// Read up to MaxSpecFileBytes+1 to detect oversize without loading more
+	// than necessary. If the read returns exactly cap+1 bytes, the file is
+	// over the limit.
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxSpecFileBytes+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to read spec file %q", path), err)
+	}
+	if len(data) > defaults.MaxSpecFileBytes {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("spec file exceeds maximum size of %d bytes: %q", defaults.MaxSpecFileBytes, path),
+			fmt.Errorf("read more than %d bytes", defaults.MaxSpecFileBytes))
 	}
 
 	var spec BuildSpec
-	if err := yaml.Unmarshal(data, &spec); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&spec); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to parse spec file %q", path), err)
 	}
@@ -117,7 +143,10 @@ func (s *BuildSpec) Validate() error {
 	return nil
 }
 
-// WriteBack marshals the spec (including updated status) back to disk.
+// WriteBack marshals the spec (including updated status) back to disk
+// atomically. It writes to a sibling temp file, fsyncs, closes, and renames
+// over the destination so a crash mid-write cannot leave the controller
+// observing a truncated or partially-written spec.
 func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 	if err := ctx.Err(); err != nil {
 		return errors.Wrap(errors.ErrCodeTimeout, "context cancelled before writing spec", err)
@@ -128,9 +157,40 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal spec", err)
 	}
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, defaults.SpecFileMode)
+	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to write spec file %q", path), err)
+			fmt.Sprintf("failed to create temp spec file %q", tmp), err)
+	}
+
+	// On any error after this point, attempt to remove the temp file so we
+	// don't leave debris next to the destination.
+	var writeErr error
+	if _, writeErr = f.Write(data); writeErr == nil {
+		writeErr = f.Sync()
+	}
+	closeErr := f.Close()
+	if writeErr == nil {
+		writeErr = closeErr
+	}
+
+	if writeErr != nil {
+		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) {
+			slog.Warn("failed to remove temp spec file after write error",
+				"path", tmp, "error", rmErr)
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to write spec file %q", path), writeErr)
+	}
+
+	if err := os.Rename(tmp, path); err != nil {
+		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) {
+			slog.Warn("failed to remove temp spec file after rename error",
+				"path", tmp, "error", rmErr)
+		}
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to rename temp spec file to %q", path), err)
 	}
 
 	return nil

@@ -17,6 +17,7 @@ package recipe
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,6 +44,8 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), defaults.RecipeHandlerTimeout)
 	defer cancel()
 
+	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
+
 	var criteria *Criteria
 	var selector string
 	var err error
@@ -52,13 +55,27 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		criteria, err = ParseCriteriaFromRequest(r)
 		selector = r.URL.Query().Get("selector")
 	case http.MethodPost:
-		req, parseErr := parseQueryRequestFromBody(r.Body, r.Header.Get("Content-Type"))
+		// Bound request body to defend against memory exhaustion.
+		bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
 		defer func() {
 			if r.Body != nil {
 				r.Body.Close()
 			}
 		}()
+		req, parseErr := parseQueryRequestFromBody(bounded, r.Header.Get("Content-Type"))
 		if parseErr != nil {
+			var maxBytesErr *http.MaxBytesError
+			if stderrors.As(parseErr, &maxBytesErr) {
+				logger.Warn("query POST body exceeded size limit",
+					"limit", defaults.MaxRecipePOSTBytes,
+					"received", maxBytesErr.Limit,
+				)
+				server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
+					"Request body exceeds maximum allowed size", false, map[string]any{
+						"limit_bytes": defaults.MaxRecipePOSTBytes,
+					})
+				return
+			}
 			server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 				"Invalid query request body", false, map[string]any{
 					"error": parseErr.Error(),
@@ -100,7 +117,7 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Debug("query",
+	logger.Debug("query",
 		"service", criteria.Service,
 		"accelerator", criteria.Accelerator,
 		"intent", criteria.Intent,

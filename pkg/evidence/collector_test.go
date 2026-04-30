@@ -15,7 +15,13 @@
 package evidence
 
 import (
+	"context"
+	stderrors "errors"
+	"os/exec"
+	"sync/atomic"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestResolveFeature(t *testing.T) {
@@ -153,4 +159,207 @@ func TestFeatureDescriptionsComplete(t *testing.T) {
 			t.Errorf("ValidFeature %q missing from featureToScript", f)
 		}
 	}
+}
+
+// TestRunNoClusterShortCircuit verifies that --no-cluster mode returns nil
+// immediately without invoking the section runner (and thus without exec).
+func TestRunNoClusterShortCircuit(t *testing.T) {
+	var calls int32
+	c := NewCollector(t.TempDir(),
+		WithNoCluster(true),
+		WithFeatures([]string{"dra-support", "gang-scheduling"}),
+	)
+	// Replace runner with a counter; should never be invoked.
+	c.runSectionFn = func(_ context.Context, _, _, _ string) error {
+		atomic.AddInt32(&calls, 1)
+		return nil
+	}
+
+	if err := c.Run(context.Background()); err != nil {
+		t.Fatalf("Run(no-cluster) returned error: %v", err)
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("section runner invoked %d times in no-cluster mode; want 0", got)
+	}
+}
+
+// TestRunMissingBinary verifies that a missing required binary causes Run to
+// fail fast with ErrCodeUnavailable and includes the binary name in context.
+func TestRunMissingBinary(t *testing.T) {
+	// Force LookPath to fail for both `bash` and `kubectl` by clearing PATH.
+	t.Setenv("PATH", "")
+
+	c := NewCollector(t.TempDir(),
+		WithFeatures([]string{"dra-support"}),
+	)
+	// Defensive stub: section runner should never run because the binary
+	// probe must short-circuit before any feature is dispatched.
+	c.runSectionFn = func(_ context.Context, _, _, _ string) error {
+		t.Fatal("runSectionFn invoked despite missing required binary")
+		return nil
+	}
+
+	err := c.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error for missing required binary, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is not *StructuredError: %T (%v)", err, err)
+	}
+	if se.Code != errors.ErrCodeUnavailable {
+		t.Fatalf("error code = %v, want %v", se.Code, errors.ErrCodeUnavailable)
+	}
+	if _, ok := se.Context["binary"]; !ok {
+		t.Errorf("expected context to include 'binary' key; got %v", se.Context)
+	}
+}
+
+// TestRunAggregatesSectionFailures verifies that failures in multiple sections
+// are aggregated into a single returned error, rather than the previous
+// behavior where only the last failure was retained.
+func TestRunAggregatesSectionFailures(t *testing.T) {
+	// Ensure required binaries resolve so we reach section dispatch.
+	if !pathHasBinaries(t) {
+		t.Skip("required binaries (bash, kubectl) not on PATH; cannot exercise dispatch path")
+	}
+
+	tmp := t.TempDir()
+	c := NewCollector(tmp,
+		WithFeatures([]string{"dra-support", "gang-scheduling", "secure-access"}),
+	)
+
+	// Stub returns a distinct error per section so we can verify all are
+	// preserved in the aggregated error rather than overwritten.
+	errA := errors.New(errors.ErrCodeInternal, "section-a failed")
+	errB := errors.New(errors.ErrCodeInternal, "section-b failed")
+	c.runSectionFn = func(_ context.Context, _, _, section string) error {
+		switch section {
+		case "dra":
+			return errA
+		case "gang":
+			return errB
+		case "secure":
+			return nil // one passing section in the middle of failures
+		}
+		return nil
+	}
+
+	err := c.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected aggregated error, got nil")
+	}
+	if !stderrors.Is(err, errA) {
+		t.Errorf("aggregated error does not contain first failure: %v", err)
+	}
+	if !stderrors.Is(err, errB) {
+		t.Errorf("aggregated error does not contain second failure (regression: prior behavior dropped earlier errors): %v", err)
+	}
+
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("aggregated error is not *StructuredError: %T", err)
+	}
+	if se.Code != errors.ErrCodeInternal {
+		t.Errorf("aggregated error code = %v, want %v", se.Code, errors.ErrCodeInternal)
+	}
+	failed, ok := se.Context["failed_sections"].([]string)
+	if !ok {
+		t.Fatalf("expected failed_sections []string in context, got %T (%v)", se.Context["failed_sections"], se.Context)
+	}
+	wantFailed := map[string]bool{"dra-support": true, "gang-scheduling": true}
+	if len(failed) != len(wantFailed) {
+		t.Errorf("failed_sections = %v, want 2 entries (%v)", failed, wantFailed)
+	}
+	for _, name := range failed {
+		if !wantFailed[name] {
+			t.Errorf("unexpected entry %q in failed_sections; want one of %v", name, wantFailed)
+		}
+	}
+}
+
+// TestBoundedBuffer verifies that boundedBuffer caps retained bytes,
+// reports truncation, and never returns short writes (which would cause
+// exec.Cmd to abort the subprocess on stdout/stderr writes).
+func TestBoundedBuffer(t *testing.T) {
+	t.Run("under cap", func(t *testing.T) {
+		b := newBoundedBuffer(100)
+		n, err := b.Write([]byte("hello"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 5 {
+			t.Errorf("Write returned %d, want 5", n)
+		}
+		if b.Truncated() {
+			t.Error("Truncated() = true, want false")
+		}
+		if got := b.String(); got != "hello" {
+			t.Errorf("String() = %q, want %q", got, "hello")
+		}
+	})
+
+	t.Run("crosses cap mid-write", func(t *testing.T) {
+		b := newBoundedBuffer(4)
+		n, err := b.Write([]byte("hello"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 5 {
+			t.Errorf("Write returned %d, want 5 (must report full len(p) to avoid exec.Cmd abort)", n)
+		}
+		if !b.Truncated() {
+			t.Error("Truncated() = false, want true")
+		}
+		if got := b.String(); got != "hell" {
+			t.Errorf("String() = %q, want %q", got, "hell")
+		}
+	})
+
+	t.Run("write past full cap", func(t *testing.T) {
+		b := newBoundedBuffer(3)
+		if _, err := b.Write([]byte("abc")); err != nil {
+			t.Fatalf("first write failed: %v", err)
+		}
+		n, err := b.Write([]byte("def"))
+		if err != nil {
+			t.Fatalf("second write failed: %v", err)
+		}
+		if n != 3 {
+			t.Errorf("Write returned %d, want 3", n)
+		}
+		if !b.Truncated() {
+			t.Error("Truncated() = false, want true after writing past cap")
+		}
+		if b.Len() != 3 {
+			t.Errorf("Len() = %d, want 3", b.Len())
+		}
+	})
+
+	t.Run("zero cap", func(t *testing.T) {
+		b := newBoundedBuffer(0)
+		n, err := b.Write([]byte("x"))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n != 1 {
+			t.Errorf("Write returned %d, want 1", n)
+		}
+		if !b.Truncated() {
+			t.Error("Truncated() = false, want true with zero cap")
+		}
+	})
+}
+
+// pathHasBinaries reports whether bash and kubectl are resolvable on PATH.
+// Used to gate tests that exercise post-probe dispatch logic so they remain
+// portable across CI runners that may not have kubectl installed.
+func pathHasBinaries(t *testing.T) bool {
+	t.Helper()
+	for _, bin := range requiredBinaries {
+		if _, err := exec.LookPath(bin); err != nil {
+			return false
+		}
+	}
+	return true
 }

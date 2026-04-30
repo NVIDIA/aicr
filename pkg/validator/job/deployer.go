@@ -28,13 +28,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
+	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
-	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
 	applybatchv1 "k8s.io/client-go/applyconfigurations/batch/v1"
 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/informers"
@@ -336,122 +335,40 @@ func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
 // to determine pass/fail/skip from the exit code.
 //
 // Returns error only for infrastructure failures (watch error, timeout).
-// Job failure (exit != 0) is NOT an error return.
+// Job failure (exit != 0) is NOT an error return — that decision lives here
+// in the validator orchestrator, not in the shared pod.WaitForJobTerminal
+// helper, which intentionally treats both Complete and Failed Jobs as
+// legitimate completions and lets the caller classify them.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
 	waitTimeout := timeout + defaults.ValidatorWaitBuffer
-	timeoutCtx, cancel := context.WithTimeout(ctx, waitTimeout)
-	defer cancel()
-
-	// Fast path: Job may already be terminal.
-	currentJob, err := d.clientset.BatchV1().Jobs(d.namespace).Get(timeoutCtx, d.jobName, metav1.GetOptions{})
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to get Job", err)
+	if _, err := pod.WaitForJobTerminal(ctx, d.clientset, d.namespace, d.jobName, waitTimeout); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "validator job did not reach terminal state", err)
 	}
-	if terminal, _ := checkJobTerminal(currentJob); terminal {
-		return nil
-	}
-
-	// Watch for state changes, starting from the current resourceVersion.
-	watcher, err := d.clientset.BatchV1().Jobs(d.namespace).Watch(timeoutCtx, metav1.ListOptions{
-		FieldSelector:   "metadata.name=" + d.jobName,
-		ResourceVersion: currentJob.ResourceVersion,
-	})
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to watch Job", err)
-	}
-	defer watcher.Stop()
-
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout, "validator wait timeout", timeoutCtx.Err())
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				// Watch channel closed — re-check Job status directly.
-				recheck, recheckErr := d.clientset.BatchV1().Jobs(d.namespace).Get(timeoutCtx, d.jobName, metav1.GetOptions{})
-				if recheckErr != nil {
-					return errors.Wrap(errors.ErrCodeInternal, "watch closed and Job not found", recheckErr)
-				}
-				if terminal, _ := checkJobTerminal(recheck); terminal {
-					return nil
-				}
-				return errors.New(errors.ErrCodeInternal, "watch channel closed, Job still running")
-			}
-
-			if event.Type == watch.Deleted {
-				return errors.New(errors.ErrCodeInternal, "Job was deleted externally")
-			}
-
-			watchedJob, ok := event.Object.(*batchv1.Job)
-			if !ok {
-				continue
-			}
-			if terminal, _ := checkJobTerminal(watchedJob); terminal {
-				return nil
-			}
-		}
-	}
+	return nil
 }
 
 // WaitForPodTermination watches the Job's pod until it reaches a terminal
 // state. Prevents RBAC cleanup from racing with in-progress pod operations.
-func (d *Deployer) WaitForPodTermination(ctx context.Context) {
+//
+// Returns the underlying error from pod.WaitForTermination so callers can
+// decide log severity. A nil error means the pod is gone or terminal; a
+// non-nil error means the wait was abandoned (timeout, watch failure, or
+// repeated watch closures) and the cleanup may race with an in-progress pod.
+func (d *Deployer) WaitForPodTermination(ctx context.Context) error {
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
 		slog.Debug("no pod found, skipping termination wait", "job", d.jobName)
-		return
+		// Pod not found is the expected steady state once the Job's TTL
+		// controller or foreground-propagation delete has already run.
+		return nil
 	}
 
 	if jobPod.Status.Phase == corev1.PodSucceeded || jobPod.Status.Phase == corev1.PodFailed {
-		return
+		return nil
 	}
 
 	slog.Debug("waiting for pod termination", "pod", jobPod.Name)
-
-	watcher, err := d.clientset.CoreV1().Pods(d.namespace).Watch(ctx, metav1.ListOptions{
-		FieldSelector:   "metadata.name=" + jobPod.Name,
-		ResourceVersion: jobPod.ResourceVersion,
-	})
-	if err != nil {
-		slog.Warn("failed to watch pod for termination", "error", err)
-		return
-	}
-	defer watcher.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			slog.Warn("timed out waiting for pod termination", "pod", jobPod.Name)
-			return
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				return
-			}
-			if event.Type == watch.Deleted {
-				return
-			}
-			watchedPod, ok := event.Object.(*corev1.Pod)
-			if !ok {
-				continue
-			}
-			if watchedPod.Status.Phase == corev1.PodSucceeded || watchedPod.Status.Phase == corev1.PodFailed {
-				return
-			}
-		}
-	}
-}
-
-// checkJobTerminal returns true if the Job is in a terminal state (Complete or Failed).
-func checkJobTerminal(job *batchv1.Job) (bool, string) {
-	for _, c := range job.Status.Conditions {
-		if c.Status != corev1.ConditionTrue {
-			continue
-		}
-		if c.Type == batchv1.JobComplete || c.Type == batchv1.JobFailed {
-			return true, c.Reason
-		}
-	}
-	return false, ""
+	return pod.WaitForTermination(ctx, d.clientset, d.namespace, jobPod.Name)
 }
 
 func preferCPUNodeAffinityApply() *applycorev1.AffinityApplyConfiguration {

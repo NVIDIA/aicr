@@ -17,12 +17,15 @@ package build
 import (
 	"context"
 	stderrors "errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -92,6 +95,11 @@ func TestLoadSpec_NotFound(t *testing.T) {
 	}
 	if sErr.Code != errors.ErrCodeNotFound {
 		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeNotFound)
+	}
+	// The structured error must still chain to fs.ErrNotExist so callers
+	// using stderrors.Is continue to work after the os.IsNotExist swap.
+	if !stderrors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected error to wrap fs.ErrNotExist, chain = %v", err)
 	}
 }
 
@@ -365,5 +373,185 @@ func TestBuildSpec_SetImageStatus(t *testing.T) {
 
 	if len(spec.Status.Images) != 2 {
 		t.Errorf("len(Status.Images) = %d, want 2", len(spec.Status.Images))
+	}
+}
+
+func TestLoadSpec_OversizeFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "huge.yaml")
+
+	// Build a payload larger than MaxSpecFileBytes. Use valid YAML so the
+	// size check is what trips, not the parser.
+	var b strings.Builder
+	b.WriteString("apiVersion: aicr.nvidia.com/v1beta1\nkind: AICRRuntime\nspec:\n  registry:\n    host: r\n    repository: r\n  comment: \"")
+	pad := strings.Repeat("x", defaults.MaxSpecFileBytes+16)
+	b.WriteString(pad)
+	b.WriteString("\"\n")
+
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	_, err := LoadSpec(context.Background(), path)
+	if err == nil {
+		t.Fatal("expected error for oversize file")
+	}
+
+	var sErr *errors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeInvalidRequest)
+	}
+}
+
+func TestLoadSpec_UnknownField(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "typo.yaml")
+
+	// "regestry" instead of "registry" — KnownFields(true) must reject it.
+	content := `apiVersion: aicr.nvidia.com/v1beta1
+kind: AICRRuntime
+spec:
+  regestry:
+    host: registry.example.com
+    repository: aicr-runtime
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	_, err := LoadSpec(context.Background(), path)
+	if err == nil {
+		t.Fatal("expected error for unknown YAML field")
+	}
+
+	var sErr *errors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeInvalidRequest)
+	}
+	if !strings.Contains(err.Error(), "regestry") {
+		t.Errorf("expected error message to contain unknown key %q, got %q", "regestry", err.Error())
+	}
+}
+
+func TestBuildSpec_WriteBack_AtomicNoTempLeftover(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	spec := &BuildSpec{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Spec: BuildSpecConfig{
+			Recipe:   "/data/recipes/eks-training.yaml",
+			Version:  "1.0.0",
+			Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+		},
+	}
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "spec.yaml")
+
+	if err := spec.WriteBack(ctx, outPath); err != nil {
+		t.Fatalf("WriteBack() unexpected error: %v", err)
+	}
+
+	// Destination must exist with restrictive perms.
+	info, err := os.Stat(outPath)
+	if err != nil {
+		t.Fatalf("stat dest: %v", err)
+	}
+	if got := info.Mode().Perm(); got != defaults.SpecFileMode.Perm() {
+		t.Errorf("dest perms = %v, want %v", got, defaults.SpecFileMode.Perm())
+	}
+
+	// .tmp sibling must not remain after a successful write.
+	if _, err := os.Stat(outPath + ".tmp"); !stderrors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected no .tmp leftover, stat err = %v", err)
+	}
+
+	// Repeated writes must overwrite cleanly without leaking the .tmp file.
+	spec.SetImageStatus("charts", ImageStatus{
+		Registry:   "registry.example.com",
+		Repository: "test/charts",
+		Tag:        "v2",
+	})
+	if err := spec.WriteBack(ctx, outPath); err != nil {
+		t.Fatalf("WriteBack() second call: %v", err)
+	}
+	if _, err := os.Stat(outPath + ".tmp"); !stderrors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected no .tmp leftover after rewrite, stat err = %v", err)
+	}
+}
+
+func TestBuildSpec_WriteBack_RenameFailurePreservesOriginal(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	// Seed an existing destination with known content.
+	original := &BuildSpec{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Spec: BuildSpecConfig{
+			Recipe:   "/data/recipes/original.yaml",
+			Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+		},
+	}
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "spec.yaml")
+	if err := original.WriteBack(ctx, outPath); err != nil {
+		t.Fatalf("seed WriteBack: %v", err)
+	}
+	originalBytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+
+	// Now make WriteBack fail at the OpenFile step by pre-creating the
+	// destination's .tmp path as a directory — os.OpenFile with O_TRUNC on
+	// a directory fails on every supported platform, so we never reach
+	// rename. The original must remain byte-for-byte unchanged.
+	if mkErr := os.Mkdir(outPath+".tmp", 0o755); mkErr != nil {
+		t.Fatalf("mkdir tmp blocker: %v", mkErr)
+	}
+
+	updated := &BuildSpec{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Spec: BuildSpecConfig{
+			Recipe:   "/data/recipes/updated.yaml",
+			Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+		},
+	}
+	err = updated.WriteBack(ctx, outPath)
+	if err == nil {
+		t.Fatal("expected WriteBack to fail when temp path is unwritable")
+	}
+	var sErr *errors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != errors.ErrCodeInternal {
+		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeInternal)
+	}
+
+	// Original destination must be untouched.
+	currentBytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read after failed WriteBack: %v", err)
+	}
+	if string(currentBytes) != string(originalBytes) {
+		t.Errorf("original file was modified after failed WriteBack:\nbefore: %s\nafter:  %s",
+			originalBytes, currentBytes)
 	}
 }

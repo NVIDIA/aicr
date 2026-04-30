@@ -14,6 +14,8 @@
 
 package server
 
+import "context"
+
 // contextKey is a custom type for context keys to avoid collisions
 type contextKey string
 
@@ -23,3 +25,14 @@ const (
 	// contextKeyAPIVersion is the context key for API version
 	contextKeyAPIVersion contextKey = "apiVersion"
 )
+
+// RequestIDFromContext returns the request ID stored in ctx by
+// requestIDMiddleware. Returns an empty string if the value is missing
+// or not of type string. Safe to call with a nil context.
+func RequestIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(contextKeyRequestID).(string)
+	return id
+}

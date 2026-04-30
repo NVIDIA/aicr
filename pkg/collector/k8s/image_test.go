@@ -16,8 +16,11 @@ package k8s
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +30,7 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
+	clienttesting "k8s.io/client-go/testing"
 )
 
 const (
@@ -171,6 +175,158 @@ func TestImageCollector_MultipleLocations(t *testing.T) {
 		// Should have just the tag, regardless of how many pods use it
 		assert.Equal(t, "1.21", reading.Any())
 	}
+}
+
+// installPaginatedPodReactor paginates pods using a Continue token of
+// "page-N" where N is the next page index. State is tracked on a closure
+// counter, sufficient for our deterministic tests.
+func installPaginatedPodReactor(t *testing.T, c *fake.Clientset, pods []corev1.Pod, pageSize int, pageCalls *atomic.Int32) {
+	t.Helper()
+	var calls atomic.Int32
+	c.PrependReactor("list", "pods", func(_ clienttesting.Action) (bool, runtime.Object, error) {
+		callIdx := int(calls.Add(1)) - 1
+		if pageCalls != nil {
+			pageCalls.Add(1)
+		}
+		startIdx := callIdx * pageSize
+		end := startIdx + pageSize
+		if end > len(pods) {
+			end = len(pods)
+		}
+		if startIdx >= len(pods) {
+			return true, &corev1.PodList{}, nil
+		}
+		page := &corev1.PodList{}
+		for i := startIdx; i < end; i++ {
+			page.Items = append(page.Items, pods[i])
+		}
+		if end < len(pods) {
+			page.Continue = fmt.Sprintf("page-%d", callIdx+1)
+		}
+		return true, page, nil
+	})
+}
+
+// makePods returns n distinct pods, each with one container whose image
+// includes the pod index. This produces n unique image names so the
+// aggregator's deduplication does not mask missed pages.
+func makePods(n int) []corev1.Pod {
+	pods := make([]corev1.Pod, n)
+	for i := 0; i < n; i++ {
+		pods[i] = corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("pod-%d", i),
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{
+					{Name: "c", Image: fmt.Sprintf("repo/img-%d:v1", i)},
+				},
+			},
+		}
+	}
+	return pods
+}
+
+func TestImageCollector_Pagination_MultiplePages(t *testing.T) {
+	t.Setenv("NODE_NAME", testNodeName)
+
+	const total = 1250 // forces 3 pages at default page size of 500
+	pods := makePods(total)
+
+	collector := createTestCollector()
+	fakeClient, ok := collector.ClientSet.(*fake.Clientset)
+	if !assert.True(t, ok, "expected *fake.Clientset") {
+		return
+	}
+
+	var pageCalls atomic.Int32
+	installPaginatedPodReactor(t, fakeClient, pods, int(defaults.K8sPodListPageSize), &pageCalls)
+
+	images, err := collector.collectContainerImages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, images, total, "expected one unique image per pod across all pages")
+
+	// 1250 / 500 = 2.5 -> 3 pages
+	assert.Equal(t, int32(3), pageCalls.Load(), "expected 3 paginated list calls")
+
+	// Verify first and last pod's images survived dedup across pages.
+	if reading, ok := images["img-0"]; assert.True(t, ok) {
+		assert.Equal(t, "v1", reading.Any())
+	}
+	if reading, ok := images["img-1249"]; assert.True(t, ok) {
+		assert.Equal(t, "v1", reading.Any())
+	}
+}
+
+func TestImageCollector_Pagination_SinglePage(t *testing.T) {
+	t.Setenv("NODE_NAME", testNodeName)
+
+	pods := makePods(10) // well under page size; single call, no Continue
+	collector := createTestCollector()
+	fakeClient, ok := collector.ClientSet.(*fake.Clientset)
+	if !assert.True(t, ok) {
+		return
+	}
+
+	var pageCalls atomic.Int32
+	installPaginatedPodReactor(t, fakeClient, pods, int(defaults.K8sPodListPageSize), &pageCalls)
+
+	images, err := collector.collectContainerImages(context.Background())
+	assert.NoError(t, err)
+	assert.Len(t, images, 10)
+	assert.Equal(t, int32(1), pageCalls.Load(), "expected exactly one list call")
+}
+
+func TestImageCollector_Pagination_ContextCancellationBreaksLoop(t *testing.T) {
+	t.Setenv("NODE_NAME", testNodeName)
+
+	pods := makePods(2000) // 4 pages
+	collector := createTestCollector()
+	fakeClient, ok := collector.ClientSet.(*fake.Clientset)
+	if !assert.True(t, ok) {
+		return
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Reactor cancels ctx after the first page so the loop exits cleanly
+	// before issuing further List calls.
+	var pageCalls atomic.Int32
+	var calls atomic.Int32
+	pageSize := int(defaults.K8sPodListPageSize)
+	fakeClient.PrependReactor("list", "pods", func(_ clienttesting.Action) (bool, runtime.Object, error) {
+		callIdx := int(calls.Add(1)) - 1
+		pageCalls.Add(1)
+		startIdx := callIdx * pageSize
+		end := startIdx + pageSize
+		if end > len(pods) {
+			end = len(pods)
+		}
+		page := &corev1.PodList{}
+		for i := startIdx; i < end; i++ {
+			page.Items = append(page.Items, pods[i])
+		}
+		if end < len(pods) {
+			page.Continue = fmt.Sprintf("page-%d", callIdx+1)
+		}
+		// Cancel after the first page is returned; the next loop iteration
+		// must observe ctx.Err() and exit before calling List again.
+		if callIdx == 0 {
+			cancel()
+		}
+		return true, page, nil
+	})
+
+	images, err := collector.collectContainerImages(ctx)
+	// Cancellation triggers a wrapped timeout error; result must be nil.
+	assert.Error(t, err)
+	assert.Nil(t, images)
+	assert.ErrorIs(t, err, context.Canceled)
+	// Reactor should have been called exactly once (cancellation observed
+	// at the top of the next iteration before the second List).
+	assert.Equal(t, int32(1), pageCalls.Load(), "loop should exit before issuing a second List call")
+	_ = ctx
 }
 
 func TestImageCollector_WithDigest(t *testing.T) {

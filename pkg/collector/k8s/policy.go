@@ -27,16 +27,15 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 )
 
 // collectClusterPolicies retrieves ClusterPolicy custom resources from all API groups and namespaces.
 // It dynamically discovers all ClusterPolicy CRDs regardless of their API group.
 func (k *Collector) collectClusterPolicies(ctx context.Context) (map[string]measurement.Reading, error) {
-	// Create dynamic client
-	dynamicClient, err := dynamic.NewForConfig(k.RestConfig)
+	// Resolve the cached dynamic client (constructed lazily on first call).
+	dynamicClient, err := k.getDynamicClient()
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create dynamic client", err)
+		return nil, err
 	}
 
 	// Discover all API resources

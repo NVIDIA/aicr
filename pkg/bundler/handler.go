@@ -18,6 +18,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -71,6 +72,8 @@ const DefaultBundleTimeout = defaults.BundleHandlerTimeout
 //	Content-Type: application/json
 //	Body: { "apiVersion": "aicr.nvidia.com/v1alpha1", "kind": "Recipe", ... }
 func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
+	logger := slog.With("requestID", server.RequestIDFromContext(r.Context()))
+
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
@@ -91,10 +94,24 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body directly as RecipeResult
+	// Parse request body directly as RecipeResult.
+	// Bound the body to defend against memory exhaustion.
+	bounded := http.MaxBytesReader(w, r.Body, defaults.MaxBundlePOSTBytes)
 	var recipeResult recipe.RecipeResult
-	err = json.NewDecoder(r.Body).Decode(&recipeResult)
+	err = json.NewDecoder(bounded).Decode(&recipeResult)
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if stderrors.As(err, &maxBytesErr) {
+			logger.Warn("bundle POST body exceeded size limit",
+				"limit", defaults.MaxBundlePOSTBytes,
+				"received", maxBytesErr.Limit,
+			)
+			server.WriteError(w, r, http.StatusRequestEntityTooLarge, aicrerrors.ErrCodeInvalidRequest,
+				"Request body exceeds maximum allowed size", false, map[string]any{
+					"limit_bytes": defaults.MaxBundlePOSTBytes,
+				})
+			return
+		}
 		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid request body", false, map[string]any{
 				"error": err.Error(),
@@ -117,7 +134,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Debug("bundle request received",
+	logger.Debug("bundle request received",
 		"components", len(recipeResult.ComponentRefs),
 		"value_overrides", len(params.valueOverrides),
 		"dynamic_declarations", len(params.dynamicValues),
@@ -184,7 +201,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	// Stream zip response
 	if err := streamZipResponse(w, tempDir, output); err != nil {
 		// Can't write error response if we've already started writing
-		slog.Error("failed to stream zip response", "error", err)
+		logger.Error("failed to stream zip response", "error", err)
 		return
 	}
 }

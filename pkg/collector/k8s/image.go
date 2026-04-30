@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 
@@ -26,12 +27,11 @@ import (
 )
 
 // collectContainerImages extracts unique container images from all pods.
+//
+// Pods are listed via paginated API calls (see defaults.K8sPodListPageSize)
+// to bound peak memory on large clusters. Iteration honors ctx cancellation
+// between pages and within each page's pod loop.
 func (k *Collector) collectContainerImages(ctx context.Context) (map[string]measurement.Reading, error) {
-	pods, err := k.ClientSet.CoreV1().Pods("").List(ctx, v1.ListOptions{})
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list pods", err)
-	}
-
 	// Track unique images (map of image name to version)
 	imageVersions := make(map[string]string)
 	recordImage := func(imageRef string) {
@@ -48,20 +48,46 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 		}
 	}
 
-	for _, pod := range pods.Items {
-		// Check for context cancellation
+	continueToken := ""
+	pageCount := 0
+	podCount := 0
+	for {
 		if err := ctx.Err(); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
 		}
 
-		for _, container := range pod.Spec.Containers {
-			recordImage(container.Image)
+		podList, err := k.ClientSet.CoreV1().Pods("").List(ctx, v1.ListOptions{
+			Limit:    defaults.K8sPodListPageSize,
+			Continue: continueToken,
+		})
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list pods", err)
 		}
-		for _, container := range pod.Spec.InitContainers {
-			recordImage(container.Image)
+		pageCount++
+
+		for i := range podList.Items {
+			// Check for context cancellation
+			if err := ctx.Err(); err != nil {
+				return nil, errors.Wrap(errors.ErrCodeTimeout, "image collection cancelled", err)
+			}
+
+			pod := &podList.Items[i]
+			podCount++
+
+			for _, container := range pod.Spec.Containers {
+				recordImage(container.Image)
+			}
+			for _, container := range pod.Spec.InitContainers {
+				recordImage(container.Image)
+			}
+			for _, container := range pod.Spec.EphemeralContainers {
+				recordImage(container.Image)
+			}
 		}
-		for _, container := range pod.Spec.EphemeralContainers {
-			recordImage(container.Image)
+
+		continueToken = podList.Continue
+		if continueToken == "" {
+			break
 		}
 	}
 
@@ -71,7 +97,10 @@ func (k *Collector) collectContainerImages(ctx context.Context) (map[string]meas
 		images[name] = measurement.Str(tag)
 	}
 
-	slog.Debug("collected container images", slog.Int("count", len(images)))
+	slog.Debug("collected container images",
+		slog.Int("images", len(images)),
+		slog.Int("pods", podCount),
+		slog.Int("pages", pageCount))
 	return images, nil
 }
 

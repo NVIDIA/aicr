@@ -21,11 +21,9 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
-	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ExtractResult reads the exit code, termination message, and stdout from a
@@ -168,19 +166,9 @@ func filterStdoutLines(lines []string, maxLineLen int) []string {
 	return lines
 }
 
-// getPodForJob finds the pod created by the validator Job using label selection.
+// getPodForJob finds the pod created by the validator Job using the shared
+// pod.GetPodForJob helper. Kept as a thin wrapper so existing call sites
+// inside this file remain readable.
 func (d *Deployer) getPodForJob(ctx context.Context) (*corev1.Pod, error) {
-	pods, err := d.clientset.CoreV1().Pods(d.namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "batch.kubernetes.io/job-name=" + d.jobName,
-	})
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list pods for Job", err)
-	}
-
-	if len(pods.Items) == 0 {
-		return nil, errors.New(errors.ErrCodeNotFound,
-			fmt.Sprintf("no pods found for Job %q", d.jobName))
-	}
-
-	return &pods.Items[0], nil
+	return pod.GetPodForJob(ctx, d.clientset, d.namespace, d.jobName)
 }

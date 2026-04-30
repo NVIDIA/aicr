@@ -17,24 +17,44 @@ package k8s
 import (
 	"context"
 	"log/slog"
+	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"golang.org/x/sync/errgroup"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
 // Collector collects information about the Kubernetes cluster.
+//
+// The dynamic client used by collectClusterPolicies is initialized lazily on
+// first use and cached for subsequent calls. ClientSet and RestConfig may be
+// injected by tests; production code populates them via getClient.
 type Collector struct {
 	ClientSet  kubernetes.Interface
 	RestConfig *rest.Config
+
+	// DynamicClient may be set by tests to inject a fake. When nil, it is
+	// constructed lazily from RestConfig on first use.
+	DynamicClient dynamic.Interface
+
+	dynamicOnce sync.Once
+	dynamicErr  error
 }
 
 // Collect retrieves Kubernetes cluster information from the API server.
 // Individual sub-collectors degrade gracefully — if any sub-collector fails,
 // a warning is logged and that subtype is populated with empty data.
+//
+// Sub-collectors run concurrently under an errgroup. Each writes to its own
+// local result variable; the final measurement is assembled after Wait. Each
+// sub-collector's failure is logged and swallowed (returning nil to errgroup),
+// matching the prior sequential collectSafe semantics so the snapshot
+// continues on partial failure.
 func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, error) {
 	slog.Info("collecting Kubernetes cluster information")
 
@@ -51,22 +71,45 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		return emptyK8sMeasurement(), nil
 	}
 
-	// Each sub-collector degrades gracefully: log warning and use empty data on failure.
-	versions := collectSafe("server", func() (map[string]measurement.Reading, error) {
-		return k.collectServer(ctx)
+	var (
+		versions map[string]measurement.Reading
+		images   map[string]measurement.Reading
+		policies map[string]measurement.Reading
+		node     map[string]measurement.Reading
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		versions = collectSafe("server", func() (map[string]measurement.Reading, error) {
+			return k.collectServer(gctx)
+		})
+		return nil
 	})
 
-	images := collectSafe("image", func() (map[string]measurement.Reading, error) {
-		return k.collectContainerImages(ctx)
+	g.Go(func() error {
+		images = collectSafe("image", func() (map[string]measurement.Reading, error) {
+			return k.collectContainerImages(gctx)
+		})
+		return nil
 	})
 
-	policies := collectSafe("policy", func() (map[string]measurement.Reading, error) {
-		return k.collectClusterPolicies(ctx)
+	g.Go(func() error {
+		policies = collectSafe("policy", func() (map[string]measurement.Reading, error) {
+			return k.collectClusterPolicies(gctx)
+		})
+		return nil
 	})
 
-	node := collectSafe("node", func() (map[string]measurement.Reading, error) {
-		return k.collectNode(ctx)
+	g.Go(func() error {
+		node = collectSafe("node", func() (map[string]measurement.Reading, error) {
+			return k.collectNode(gctx)
+		})
+		return nil
 	})
+
+	// All goroutines return nil; Wait cannot fail. Kept for goroutine join.
+	_ = g.Wait()
 
 	res := measurement.NewMeasurement(measurement.TypeK8s).
 		WithSubtypeBuilder(
@@ -116,4 +159,29 @@ func (k *Collector) getClient() error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to get kubernetes client", err)
 	}
 	return nil
+}
+
+// getDynamicClient returns the cached dynamic client, constructing it lazily
+// on first use from RestConfig. Safe for concurrent callers via sync.Once.
+// Tests may pre-populate Collector.DynamicClient to skip construction.
+func (k *Collector) getDynamicClient() (dynamic.Interface, error) {
+	k.dynamicOnce.Do(func() {
+		if k.DynamicClient != nil {
+			return
+		}
+		if k.RestConfig == nil {
+			k.dynamicErr = errors.New(errors.ErrCodeInternal, "rest config is nil")
+			return
+		}
+		dc, err := dynamic.NewForConfig(k.RestConfig)
+		if err != nil {
+			k.dynamicErr = errors.Wrap(errors.ErrCodeInternal, "failed to create dynamic client", err)
+			return
+		}
+		k.DynamicClient = dc
+	})
+	if k.dynamicErr != nil {
+		return nil, k.dynamicErr
+	}
+	return k.DynamicClient, nil
 }

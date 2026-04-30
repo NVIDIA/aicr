@@ -15,10 +15,14 @@
 package recipe
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 func TestHandleRecipes_MethodNotAllowed(t *testing.T) {
@@ -107,5 +111,41 @@ func TestHandleRecipes_GET_ValidCriteria(t *testing.T) {
 		if cc == "" {
 			t.Error("Cache-Control header not set on successful response")
 		}
+	}
+}
+
+// TestHandleRecipes_POST_BodyTooLarge verifies that a POST body exceeding
+// defaults.MaxRecipePOSTBytes is rejected with HTTP 413 and a structured
+// INVALID_REQUEST error code.
+func TestHandleRecipes_POST_BodyTooLarge(t *testing.T) {
+	builder := NewBuilder()
+
+	// Build a body strictly larger than the cap. The body need not be valid
+	// JSON; the size check fires before the decoder consumes the payload.
+	oversize := int(defaults.MaxRecipePOSTBytes) + 1024
+	body := strings.Repeat("a", oversize)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/recipe", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	builder.HandleRecipes(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+
+	var resp struct {
+		Code    string         `json:"code"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if resp.Code != string(aicrerrors.ErrCodeInvalidRequest) {
+		t.Errorf("error code = %q, want %q", resp.Code, aicrerrors.ErrCodeInvalidRequest)
+	}
+	if _, ok := resp.Details["limit_bytes"]; !ok {
+		t.Errorf("expected limit_bytes in error details, got %v", resp.Details)
 	}
 }

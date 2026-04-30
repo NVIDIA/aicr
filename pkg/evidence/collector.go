@@ -15,14 +15,18 @@
 package evidence
 
 import (
+	"bytes"
 	"context"
 	"embed"
+	stderrors "errors"
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -31,6 +35,15 @@ var collectScript []byte
 
 //go:embed scripts/manifests
 var manifestsFS embed.FS
+
+// SkippedNoClusterStatus is the section status emitted when the collector
+// runs in --no-cluster mode (test mode). Mirrors the validator idiom for
+// consistency across CNCF submission tooling.
+const SkippedNoClusterStatus = "skipped - no-cluster mode (test mode)"
+
+// requiredBinaries are the binaries the collector must locate in PATH
+// before invoking any section. Probed once at the start of Run.
+var requiredBinaries = []string{"bash", "kubectl"}
 
 // ValidFeatures lists all supported evidence collection features.
 // These are the user-facing names shown in help text and used with --feature.
@@ -117,13 +130,22 @@ var FeatureDescriptions = map[string]string{
 // CollectorOption configures the Collector.
 type CollectorOption func(*Collector)
 
+// sectionRunner is the function used to execute a single evidence section.
+// Stored as a field so tests can substitute a deterministic stub without
+// invoking exec. Production code uses (*Collector).runSection.
+type sectionRunner func(ctx context.Context, scriptPath, scriptDir, section string) error
+
 // Collector orchestrates behavioral evidence collection by invoking the
 // embedded collect-evidence.sh script against a live Kubernetes cluster.
 type Collector struct {
 	outputDir  string
 	features   []string
 	noCleanup  bool
+	noCluster  bool
 	kubeconfig string
+
+	// runSectionFn is overridable in tests. Defaults to c.runSection.
+	runSectionFn sectionRunner
 }
 
 // NewCollector creates a new evidence Collector.
@@ -133,6 +155,9 @@ func NewCollector(outputDir string, opts ...CollectorOption) *Collector {
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	if c.runSectionFn == nil {
+		c.runSectionFn = c.runSection
 	}
 	return c
 }
@@ -159,14 +184,55 @@ func WithKubeconfig(kubeconfig string) CollectorOption {
 	}
 }
 
+// WithNoCluster enables test mode: Run short-circuits without invoking
+// any subprocess. Used by unit tests and `aicr --no-cluster` flows.
+func WithNoCluster(noCluster bool) CollectorOption {
+	return func(c *Collector) {
+		c.noCluster = noCluster
+	}
+}
+
 // Run executes evidence collection for the configured features.
+//
+// In --no-cluster mode the call short-circuits, logging a skip per section
+// using the validator idiom and returning nil.
+//
+// On a real run, Run probes for required binaries (bash, kubectl) once,
+// then iterates configured sections under a per-section timeout. Errors
+// from individual sections are aggregated; Run returns a single wrapped
+// error containing the failing section names.
 func (c *Collector) Run(ctx context.Context) error {
+	// --no-cluster short-circuit: emit a deterministic skip per section
+	// without touching the filesystem or invoking exec.
+	if c.noCluster {
+		slog.Info("evidence collection skipped: no-cluster mode")
+		for _, section := range c.resolveFeatures() {
+			slog.Info("evidence section skipped",
+				"section", section, "status", SkippedNoClusterStatus)
+		}
+		return nil
+	}
+
+	// Probe required binaries once. Missing tooling is a deployment-time
+	// problem, not a per-section failure — fail fast with ErrCodeUnavailable.
+	for _, bin := range requiredBinaries {
+		if _, err := exec.LookPath(bin); err != nil {
+			return errors.WrapWithContext(errors.ErrCodeUnavailable,
+				"required binary not found in PATH", err,
+				map[string]any{"binary": bin})
+		}
+	}
+
 	// Write embedded script and manifests to temp directory.
 	tmpDir, err := os.MkdirTemp("", "aicr-evidence-")
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create temp directory", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		if rerr := os.RemoveAll(tmpDir); rerr != nil {
+			slog.Warn("failed to remove evidence tmpdir", "dir", tmpDir, "error", rerr)
+		}
+	}()
 
 	scriptPath := filepath.Join(tmpDir, "collect-evidence.sh")
 	if err := os.WriteFile(scriptPath, collectScript, 0o700); err != nil { //nolint:gosec // script needs execute permission
@@ -183,45 +249,65 @@ func (c *Collector) Run(ctx context.Context) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create output directory", err)
 	}
 
-	// Determine features to run. "all" or empty means run everything.
-	// Resolve any aliases (e.g., "gang" → "gang-scheduling").
+	features := c.resolveFeatures()
+
+	// Run each feature, translating to script section names. Aggregate
+	// per-section errors so a transient failure in one feature doesn't
+	// mask failures in later features.
+	var sectionErrs []error
+	var failedSections []string
+	for _, feature := range features {
+		scriptSection := ScriptSection(feature)
+		slog.Info("collecting evidence", "feature", feature)
+		if err := c.runSectionFn(ctx, scriptPath, tmpDir, scriptSection); err != nil {
+			slog.Warn("evidence collection failed for feature",
+				"feature", feature, "error", err)
+			sectionErrs = append(sectionErrs, err)
+			failedSections = append(failedSections, feature)
+			// Continue with remaining features.
+		}
+	}
+
+	if len(sectionErrs) > 0 {
+		joined := stderrors.Join(sectionErrs...)
+		return errors.WrapWithContext(errors.ErrCodeInternal,
+			"one or more evidence sections failed", joined,
+			map[string]any{"failed_sections": failedSections})
+	}
+	return nil
+}
+
+// resolveFeatures returns the list of canonical features to collect,
+// expanding aliases and collapsing to {"all"} when "all" is present or
+// no features were requested.
+func (c *Collector) resolveFeatures() []string {
 	features := make([]string, 0, len(c.features))
 	for _, f := range c.features {
 		features = append(features, ResolveFeature(f))
 	}
 	if len(features) == 0 {
-		features = []string{"all"}
+		return []string{"all"}
 	}
 	for _, f := range features {
 		if f == "all" {
-			features = []string{"all"}
-			break
+			return []string{"all"}
 		}
 	}
-
-	// Run each feature, translating to script section names.
-	var lastErr error
-	for _, feature := range features {
-		scriptSection := ScriptSection(feature)
-		slog.Info("collecting evidence", "feature", feature)
-		if err := c.runSection(ctx, scriptPath, tmpDir, scriptSection); err != nil {
-			slog.Warn("evidence collection failed for feature",
-				"feature", feature, "error", err)
-			lastErr = err
-			// Continue with remaining features.
-		}
-	}
-
-	if lastErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
-			"one or more evidence sections failed", lastErr)
-	}
-	return nil
+	return features
 }
 
 // runSection executes the evidence script for a single section.
+//
+// The subprocess runs under a per-section deadline derived from
+// defaults.EvidenceSectionTimeout to bound runaway shell scripts. Stdout
+// and stderr are captured into bounded buffers (capped at
+// defaults.EvidenceMaxOutputBytes) and surfaced via slog instead of
+// streaming to the parent process's stdio.
 func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, section string) error {
-	cmd := exec.CommandContext(ctx, "bash", scriptPath, section)
+	subCtx, cancel := context.WithTimeout(ctx, defaults.EvidenceSectionTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(subCtx, "bash", scriptPath, section)
 	cmd.Dir = scriptDir
 	cmd.Env = append(os.Environ(),
 		"EVIDENCE_DIR="+c.outputDir,
@@ -233,13 +319,85 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 	if c.kubeconfig != "" {
 		cmd.Env = append(cmd.Env, "KUBECONFIG="+c.kubeconfig)
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "evidence collection command failed", err)
+
+	stdout := newBoundedBuffer(defaults.EvidenceMaxOutputBytes)
+	stderr := newBoundedBuffer(defaults.EvidenceMaxOutputBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+
+	// Always emit byte-count metric and debug-level captured output, even
+	// on success, so operators can grep for slow/chatty sections later.
+	slog.Info("evidence section stdout",
+		"section", section, "bytes", stdout.Len(), "truncated", stdout.Truncated())
+	slog.Debug("evidence section stdout content",
+		"section", section, "content", stdout.String())
+
+	if runErr != nil {
+		slog.Error("evidence section failed",
+			"section", section,
+			"error", runErr,
+			"stderr_bytes", stderr.Len(),
+			"stderr", stderr.String())
+		return errors.WrapWithContext(errors.ErrCodeInternal,
+			"evidence collection command failed", runErr,
+			map[string]any{"section": section})
+	}
+
+	if stderr.Len() > 0 {
+		slog.Debug("evidence section stderr content",
+			"section", section, "bytes", stderr.Len(), "content", stderr.String())
 	}
 	return nil
 }
+
+// boundedBuffer is an io.Writer that caps the number of bytes retained in
+// memory. Writes past the cap are silently discarded; the Truncated flag
+// records whether any data was dropped so callers can surface it in logs.
+type boundedBuffer struct {
+	buf       bytes.Buffer
+	max       int
+	truncated bool
+}
+
+func newBoundedBuffer(maxBytes int) *boundedBuffer {
+	if maxBytes < 0 {
+		maxBytes = 0
+	}
+	return &boundedBuffer{max: maxBytes}
+}
+
+// Write implements io.Writer. Returns len(p) for all writes (even when
+// data is truncated) so exec.Cmd does not treat truncation as an I/O
+// error and abort the subprocess.
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	remaining := b.max - b.buf.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return len(p), nil
+	}
+	if len(p) <= remaining {
+		return b.buf.Write(p)
+	}
+	if _, err := b.buf.Write(p[:remaining]); err != nil {
+		return 0, err
+	}
+	b.truncated = true
+	return len(p), nil
+}
+
+// Len returns the number of bytes currently retained.
+func (b *boundedBuffer) Len() int { return b.buf.Len() }
+
+// Truncated reports whether any bytes were dropped due to the cap.
+func (b *boundedBuffer) Truncated() bool { return b.truncated }
+
+// String returns the retained content as a string.
+func (b *boundedBuffer) String() string { return b.buf.String() }
+
+// Compile-time guarantee that boundedBuffer satisfies io.Writer.
+var _ io.Writer = (*boundedBuffer)(nil)
 
 // writeEmbeddedManifests extracts the embedded manifests to the target directory.
 func writeEmbeddedManifests(targetDir string) error {

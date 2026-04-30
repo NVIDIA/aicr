@@ -23,6 +23,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // TestBundlerHandlerNew verifies DefaultBundler can be created for HTTP handling.
@@ -713,5 +716,50 @@ func TestBundleEndpointPathTraversalReturns400(t *testing.T) {
 
 	if retryable, ok := resp["retryable"].(bool); !ok || retryable {
 		t.Errorf("expected retryable=false, got %v", resp["retryable"])
+	}
+}
+
+// TestBundleEndpointBodyTooLarge verifies that POST bodies exceeding
+// defaults.MaxBundlePOSTBytes are rejected with HTTP 413 and a structured
+// INVALID_REQUEST error code.
+//
+// The body is a valid JSON prefix wrapping a giant string so that
+// json.Decoder consumes past the limit before erroring; this exercises the
+// http.MaxBytesError detection path in the handler.
+func TestBundleEndpointBodyTooLarge(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	oversize := int(defaults.MaxBundlePOSTBytes) + 1024
+	prefix := `{"apiVersion":"aicr.nvidia.com/v1alpha1","kind":"Recipe","metadata":{"name":"`
+	suffix := `"}}`
+	padding := strings.Repeat("a", oversize-len(prefix)-len(suffix))
+	body := prefix + padding + suffix
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	b.HandleBundles(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d. Body: %s",
+			w.Code, http.StatusRequestEntityTooLarge, w.Body.String())
+	}
+
+	var resp struct {
+		Code    string         `json:"code"`
+		Details map[string]any `json:"details"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if resp.Code != string(aicrerrors.ErrCodeInvalidRequest) {
+		t.Errorf("error code = %q, want %q", resp.Code, aicrerrors.ErrCodeInvalidRequest)
+	}
+	if _, ok := resp.Details["limit_bytes"]; !ok {
+		t.Errorf("expected limit_bytes in error details, got %v", resp.Details)
 	}
 }

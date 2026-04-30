@@ -18,13 +18,17 @@ package oci
 import (
 	"context"
 	"crypto/tls"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/distribution/reference"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -34,6 +38,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -247,8 +252,14 @@ func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult
 		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", ctxErr)
 	}
 
-	// Copy from file store to OCI layout store
-	desc, err := oras.Copy(ctx, fs, opts.Tag, ociStore, opts.Tag, oras.DefaultCopyOptions)
+	// Copy from file store to OCI layout store. This is a local-only copy
+	// (no network), but still bounded so a wedged store can't hang forever.
+	copyOpts := oras.DefaultCopyOptions
+	copyOpts.Concurrency = defaults.OCIPushConcurrency
+
+	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.RegistryPushTimeout)
+	defer pushCancel()
+	desc, err := oras.Copy(pushCtx, fs, opts.Tag, ociStore, opts.Tag, copyOpts)
 	if err != nil {
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy to OCI store", err)
 	}
@@ -299,23 +310,154 @@ func PushFromStore(ctx context.Context, storePath string, opts PushOptions) (*Pu
 	repo.PlainHTTP = opts.PlainHTTP
 
 	// Configure auth client using Docker credentials if available
-	authClient, err := createAuthClient(opts.PlainHTTP, opts.InsecureTLS)
+	authClient, err := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
 	if err != nil {
 		slog.Warn("failed to initialize Docker credential store, continuing without authentication",
 			"error", err)
 	}
 	repo.Client = authClient
 
-	// Copy from OCI store to remote repository
-	desc, err := oras.Copy(ctx, ociStore, opts.Tag, repo, opts.Tag, oras.DefaultCopyOptions)
+	// Copy from OCI store to remote repository, bounded by a per-attempt
+	// timeout and wrapped in a small retry policy for transient failures.
+	copyOpts := oras.DefaultCopyOptions
+	copyOpts.Concurrency = defaults.OCIPushConcurrency
+
+	desc, err := copyWithRetry(ctx, ociStore, opts.Tag, repo, opts.Tag, copyOpts, oras.Copy)
 	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeUnavailable, "failed to push artifact to registry", err)
+		return nil, err
 	}
 
 	return &PushResult{
 		Digest:    desc.Digest.String(),
 		Reference: refString,
 	}, nil
+}
+
+// copyFunc matches the signature of oras.Copy and is injected into
+// copyWithRetry so tests can stub network behavior without a registry.
+type copyFunc func(ctx context.Context, src oras.ReadOnlyTarget, srcRef string, dst oras.Target, dstRef string, opts oras.CopyOptions) (ociv1.Descriptor, error)
+
+// copyWithRetry wraps a copy call with a per-attempt timeout, bounded
+// retries, and exponential backoff with +/-25% jitter. Only transient
+// errors are retried; context.Canceled and 4xx-class registry responses
+// fail fast.
+func copyWithRetry(ctx context.Context, src oras.ReadOnlyTarget, srcRef string, dst oras.Target, dstRef string, opts oras.CopyOptions, copy copyFunc) (ociv1.Descriptor, error) {
+	return copyWithRetryConfig(ctx, src, srcRef, dst, dstRef, opts, copy,
+		defaults.RegistryPushRetries, defaults.RegistryPushBackoff, defaults.RegistryPushTimeout)
+}
+
+// copyWithRetryConfig is the underlying retry implementation, parameterized
+// for testability. Production callers should use copyWithRetry which
+// supplies the defaults.
+func copyWithRetryConfig(ctx context.Context, src oras.ReadOnlyTarget, srcRef string, dst oras.Target, dstRef string, opts oras.CopyOptions, copy copyFunc, maxAttempts int, initialBackoff, perAttemptTimeout time.Duration) (ociv1.Descriptor, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+	var (
+		desc    ociv1.Descriptor
+		lastErr error
+	)
+	backoff := initialBackoff
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled before push", ctxErr)
+		}
+
+		pushCtx, pushCancel := context.WithTimeout(ctx, perAttemptTimeout)
+		desc, lastErr = copy(pushCtx, src, srcRef, dst, dstRef, opts)
+		pushCancel()
+		if lastErr == nil {
+			return desc, nil
+		}
+
+		// Don't retry if the parent context was canceled or for non-transient
+		// errors (e.g., 4xx auth/validation failures from the registry).
+		if stderrors.Is(lastErr, context.Canceled) || stderrors.Is(ctx.Err(), context.Canceled) {
+			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push canceled", lastErr)
+		}
+		if !isTransientPushError(lastErr) {
+			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push failed", lastErr)
+		}
+
+		if attempt == maxAttempts {
+			break
+		}
+
+		slog.Warn("oci push retry", "attempt", attempt, "error", lastErr)
+
+		// Sleep with backoff, but honor context cancellation.
+		sleep := jitterDuration(backoff)
+		timer := time.NewTimer(sleep)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push canceled during backoff", ctx.Err())
+		case <-timer.C:
+		}
+		backoff *= 2
+	}
+
+	return ociv1.Descriptor{}, apperrors.Wrap(apperrors.ErrCodeUnavailable, "registry push failed after retries", lastErr)
+}
+
+// isTransientPushError reports whether err looks like a recoverable
+// registry/network failure that warrants a retry.
+//
+// Transient: per-attempt context.DeadlineExceeded, net.Error with Timeout()
+// true, generic network connectivity failures (matched by pkg/errors.IsNetworkError),
+// and 5xx / 429 registry responses.
+//
+// Not transient: context.Canceled (caller asked to stop) and 4xx registry
+// responses (auth, not-found, invalid manifest, etc.).
+func isTransientPushError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if stderrors.Is(err, context.Canceled) {
+		return false
+	}
+
+	// Per-attempt deadline expired — registry is slow but the caller's parent
+	// context still has budget. Worth another attempt.
+	if stderrors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	// Typed network timeouts (e.g., TLS handshake, response header) usually
+	// satisfy net.Error.Timeout().
+	var netErr net.Error
+	if stderrors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// HTTP responses surfaced through oras-go's errcode.ErrorResponse.
+	// Retry only on 5xx and 429; 4xx are caller errors.
+	var respErr *errcode.ErrorResponse
+	if stderrors.As(err, &respErr) {
+		switch {
+		case respErr.StatusCode >= 500 && respErr.StatusCode <= 599:
+			return true
+		case respErr.StatusCode == http.StatusTooManyRequests:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// Generic network-level errors (DNS, dial, connection refused, etc.).
+	return apperrors.IsNetworkError(err)
+}
+
+// jitterDuration applies +/-25% jitter to d.
+func jitterDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return 0
+	}
+	// Range: [0.75*d, 1.25*d). rand.Float64 is in [0.0, 1.0).
+	// math/rand/v2 is appropriate here: jitter is a backoff scheduler input,
+	// not a security-sensitive value.
+	jitter := 0.75 + rand.Float64()*0.5 //nolint:gosec // non-cryptographic jitter
+	return time.Duration(float64(d) * jitter)
 }
 
 // preparePushDir prepares the directory for pushing.
@@ -361,19 +503,18 @@ func stripProtocol(registry string) string {
 	return registry
 }
 
-// createAuthClient creates an HTTP client with optional TLS configuration
-// and Docker credential support. Returns an error if credential store
-// initialization fails, but the client is still usable without credentials.
-func createAuthClient(plainHTTP, insecureTLS bool) (*auth.Client, error) {
+// createAuthClientForHost creates an HTTP client with optional TLS
+// configuration and Docker credential support. Returns an error if the
+// credential store initialization fails, but the client is still usable
+// without credentials. The host argument is used only for logging when
+// TLS verification is disabled.
+func createAuthClientForHost(host string, plainHTTP, insecureTLS bool) (*auth.Client, error) {
 	credStore, credErr := credentials.NewStoreFromDocker(credentials.StoreOptions{})
 
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport := defaults.NewHTTPTransport()
 	if !plainHTTP && insecureTLS {
-		if transport.TLSClientConfig == nil {
-			transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
-		} else {
-			transport.TLSClientConfig.InsecureSkipVerify = true //nolint:gosec
-		}
+		slog.Warn("TLS verification disabled for OCI registry", "registry", host)
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 
 	client := &auth.Client{

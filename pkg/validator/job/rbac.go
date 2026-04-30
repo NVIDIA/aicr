@@ -16,8 +16,8 @@ package job
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
-	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
@@ -76,11 +76,11 @@ const (
 // any Jobs.
 func EnsureRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
 	if err := applyServiceAccount(ctx, clientset, namespace); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInternal, "failed to ensure ServiceAccount", err)
 	}
 
 	if err := applyClusterRoleBinding(ctx, clientset, namespace); err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInternal, "failed to ensure ClusterRoleBinding", err)
 	}
 
 	slog.Debug("RBAC resources applied",
@@ -93,23 +93,33 @@ func EnsureRBAC(ctx context.Context, clientset kubernetes.Interface, namespace s
 
 // CleanupRBAC removes the ServiceAccount and ClusterRoleBinding.
 // Ignores NotFound errors (idempotent). Call once at end of validation run.
+//
+// When both deletes fail, the returned StructuredError wraps the joined
+// underlying errors via stderrors.Join so callers can inspect individual
+// failures with errors.Is / errors.As.
 func CleanupRBAC(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	var errs []string
+	var errs []error
 
 	if err := clientset.CoreV1().ServiceAccounts(namespace).Delete(ctx, ServiceAccountName, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
-			errs = append(errs, "ServiceAccount: "+err.Error())
+			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ServiceAccount", err))
 		}
 	}
 
 	if err := clientset.RbacV1().ClusterRoleBindings().Delete(ctx, ClusterRoleBindingName, metav1.DeleteOptions{}); err != nil {
 		if !apierrors.IsNotFound(err) {
-			errs = append(errs, "ClusterRoleBinding: "+err.Error())
+			errs = append(errs, errors.Wrap(errors.ErrCodeInternal, "failed to delete ClusterRoleBinding", err))
 		}
 	}
 
 	if len(errs) > 0 {
-		return errors.New(errors.ErrCodeInternal, "RBAC cleanup failed: "+strings.Join(errs, "; "))
+		return errors.WrapWithContext(errors.ErrCodeInternal, "RBAC cleanup failed",
+			stderrors.Join(errs...),
+			map[string]any{
+				"namespace":          namespace,
+				"serviceAccount":     ServiceAccountName,
+				"clusterRoleBinding": ClusterRoleBindingName,
+			})
 	}
 
 	slog.Debug("RBAC resources cleaned up",

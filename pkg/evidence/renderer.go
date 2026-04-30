@@ -88,10 +88,20 @@ func (r *Renderer) Render(ctx context.Context, report *ctrf.Report) error {
 		default:
 		}
 		if err := r.renderEvidence(entry); err != nil {
-			return err
+			return errors.WrapWithContext(errors.ErrCodeInternal,
+				"render evidence entry", err,
+				map[string]any{
+					"requirement": entry.RequirementID,
+					"file":        entry.Filename,
+				})
 		}
 	}
 
+	select {
+	case <-ctx.Done():
+		return errors.Wrap(errors.ErrCodeTimeout, "evidence rendering canceled", ctx.Err())
+	default:
+	}
 	return r.renderIndex(entries)
 }
 
