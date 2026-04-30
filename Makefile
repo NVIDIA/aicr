@@ -150,7 +150,9 @@ LICENSE_IGNORES = \
 	-ignore '**/testdata/**' \
 	-ignore 'site/public/**' \
 	-ignore 'site/resources/**' \
-	-ignore 'site/node_modules/**'
+	-ignore 'site/node_modules/**' \
+	-ignore 'THIRD_PARTY_NOTICES.md' \
+	-ignore '.licenses-cache/**'
 
 .PHONY: license
 license: ## Add/verify license headers in source files
@@ -345,8 +347,12 @@ validate-local: image-validators ## Builds validator images and runs validation 
 		--recipe "$(RECIPE)" \
 		--phase deployment
 
+.PHONY: notices
+notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's license
+	@bash tools/generate-notices
+
 .PHONY: release
-release: ## Runs the full release process with goreleaser
+release: notices ## Runs the full release process with goreleaser (generates THIRD_PARTY_NOTICES.md first)
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
@@ -379,8 +385,8 @@ changelog-file: ## Updates CHANGELOG.md with changes since the last release
 	@tools/changelog --file
 
 .PHONY: clean
-clean: ## Cleans build artifacts (dist, coverage files)
-	@rm -rf ./dist ./bin ./coverage.out
+clean: ## Cleans build artifacts (dist, coverage files, third-party notices)
+	@rm -rf ./dist ./bin ./coverage.out ./THIRD_PARTY_NOTICES.md ./.licenses-cache
 	@go clean ./...
 	@echo "Cleaned build artifacts"
 
@@ -714,6 +720,7 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Build & Release ===\033[0m"
 	@echo "  make build          Build binaries for current OS/arch"
 	@echo "  make image          Build and push container image"
+	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps"
 	@echo "  make release        Full release with goreleaser"
 	@echo "  make bump-rc        Tag RC pre-release (v1.2.3 -> v1.3.0-rc1)"
 	@echo "  make bump-promote   Promote RC to stable (TAG=v1.2.4-rc1)"
