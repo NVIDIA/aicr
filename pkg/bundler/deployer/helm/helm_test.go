@@ -1754,7 +1754,7 @@ func TestUndeployScript_DynamoPlatformOwnsExplicitGroveCRDs(t *testing.T) {
         platform_crds=$(extra_crds_for_release "dynamo-platform")
         printf '%s\n' "$platform_crds"
         test -n "$platform_crds"
-        test -z "$(extra_crds_for_release "dynamo-crds")"
+        test -z "$(extra_crds_for_release "grove")"
     `
 
 	subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

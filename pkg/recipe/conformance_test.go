@@ -90,7 +90,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"kai-scheduler",
 				"kgateway-crds",
 				"kgateway",
-				"dynamo-crds",
+				"grove",
 				"dynamo-platform",
 			},
 			requiredChecks: []string{
@@ -191,7 +191,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"kai-scheduler",
 				"kgateway-crds",
 				"kgateway",
-				"dynamo-crds",
+				"grove",
 				"dynamo-platform",
 			},
 			requiredChecks: []string{
@@ -320,7 +320,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"kai-scheduler",
 				"kgateway-crds",
 				"kgateway",
-				"dynamo-crds",
+				"grove",
 				"dynamo-platform",
 			},
 			requiredChecks: []string{

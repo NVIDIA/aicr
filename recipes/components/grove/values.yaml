@@ -12,12 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo CRDs Helm values
-# Installs Custom Resource Definitions for NVIDIA Dynamo inference platform.
-# CRDs: DynamoGraphDeployment, DynamoGraphDeploymentRequest,
-#        DynamoComponentDeployment, DynamoModel, DynamoWorkerMetadata,
-#        DynamoGraphDeploymentScalingAdapter
+# Grove Helm values
+# Pod lifecycle management for Dynamo inference platform.
+# Installed as a standalone AICR component so the Dynamo operator can
+# reference it via global.grove.enabled: true / install: false.
 
-# This chart has no configurable values — it only installs CRDs.
-# The enabled flag is managed by the umbrella chart condition.
-enabled: true
+# No custom overrides required — chart defaults are sufficient.

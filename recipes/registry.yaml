@@ -368,15 +368,21 @@ components:
         tolerationPaths:
           - global.tolerations
 
-  - name: dynamo-crds
-    displayName: dynamo-crds
+  - name: grove
+    displayName: grove
     valueOverrideKeys:
-      - dynamocrds
+      - grove
     helm:
-      defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      defaultChart: dynamo-crds
-      defaultVersion: "0.9.1"
+      defaultRepository: oci://ghcr.io/ai-dynamo/grove
+      defaultChart: grove-charts
+      defaultVersion: "v0.1.0-alpha.6"
       defaultNamespace: dynamo-system
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
 
   - name: dynamo-platform
     displayName: dynamo-platform
@@ -388,16 +394,14 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
-      defaultVersion: "0.9.1"
+      defaultVersion: "1.0.2"
       defaultNamespace: dynamo-system
     nodeScheduling:
       system:
         nodeSelectorPaths:
           - dynamo-operator.controllerManager.nodeSelector
-          - grove.nodeSelector
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
-          - grove.tolerations
 
   - name: kgateway-crds
     displayName: kgateway-crds
