@@ -186,7 +186,9 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 	}
 
 	if writeErr != nil {
-		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) {
+		// tmp came from os.CreateTemp on the same dir we just wrote to;
+		// removing it is the inverse of that creation, not a tainted-path op.
+		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) { //nolint:gosec // G703: tmp is from os.CreateTemp above
 			slog.Warn("failed to remove temp spec file after write error",
 				"path", tmp, "error", rmErr)
 		}
@@ -195,7 +197,7 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 	}
 
 	if err := renameFn(tmp, path); err != nil {
-		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) {
+		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) { //nolint:gosec // G703: tmp is from os.CreateTemp above
 			slog.Warn("failed to remove temp spec file after rename error",
 				"path", tmp, "error", rmErr)
 		}
