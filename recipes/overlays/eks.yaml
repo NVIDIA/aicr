@@ -38,7 +38,7 @@ spec:
     - name: aws-ebs-csi-driver
       type: Helm
       source: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
-      version: 2.55.0
+      version: 2.59.0
       valuesFile: components/aws-ebs-csi-driver/values.yaml
 
     # Enable Prometheus persistent storage for EKS (requires EBS CSI driver)

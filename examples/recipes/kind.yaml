@@ -30,21 +30,21 @@ componentRefs:
     chart: cert-manager
     type: Helm
     source: https://charts.jetstack.io
-    version: v1.17.2
+    version: v1.20.2
     valuesFile: components/cert-manager/values.yaml
   - name: nodewright-operator
     namespace: skyhook
     chart: skyhook-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia/skyhook
-    version: 0.14.0
+    version: v0.15.1
     valuesFile: components/nodewright-operator/values.yaml
   - name: kube-prometheus-stack
     namespace: nvidia-system
     chart: kube-prometheus-stack
     type: Helm
     source: https://prometheus-community.github.io/helm-charts
-    version: 82.8.0
+    version: 84.4.0
     valuesFile: components/kube-prometheus-stack/values.yaml
   - name: k8s-ephemeral-storage-metrics
     namespace: nvidia-system
