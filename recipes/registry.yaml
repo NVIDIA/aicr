@@ -145,7 +145,7 @@ components:
     helm:
       defaultRepository: https://charts.jetstack.io
       defaultChart: jetstack/cert-manager
-      defaultVersion: v1.17.2
+      defaultVersion: v1.20.2
       defaultNamespace: cert-manager
     nodeScheduling:
       system:
@@ -228,7 +228,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/nvsentinel
-      defaultVersion: v1.1.0
+      defaultVersion: v1.3.0
       defaultNamespace: nvsentinel
     nodeScheduling:
       system:
@@ -269,7 +269,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
-      defaultVersion: 82.8.0
+      defaultVersion: 84.4.0
       defaultNamespace: monitoring
     nodeScheduling:
       system:
@@ -320,7 +320,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
-      defaultVersion: 2.55.0
+      defaultVersion: 2.59.0
       defaultNamespace: kube-system
     nodeScheduling:
       system:
@@ -461,7 +461,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
-      defaultVersion: "0.17.0"
+      defaultVersion: "0.17.1"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:
