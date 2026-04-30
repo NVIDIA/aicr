@@ -61,8 +61,8 @@ The Kind GPU workflows use these leaf recipes instead:
 | nodewright-customizations | skyhook | Manifest | No workloads (NodeConfiguration CRs) |
 | nvidia-dra-driver-gpu | nvidia-dra-driver | Helm | Controller Deployment, kubelet-plugin DaemonSet |
 | kai-scheduler | kai-scheduler | Helm | Scheduler Deployment |
-| dynamo-crds | dynamo-system | Helm | CRDs only |
-| dynamo-platform | dynamo-system | Helm | Operator Deployment, etcd StatefulSet, NATS StatefulSet |
+| grove | dynamo-system | Helm | Pod lifecycle management |
+| dynamo-platform | dynamo-system | Helm | Operator Deployment (CRDs bundled) |
 
 ## Test Structure
 

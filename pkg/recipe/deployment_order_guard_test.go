@@ -73,7 +73,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"dynamo-crds", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
+				"dynamo-platform": {"grove", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "dynamo-platform"},
@@ -93,7 +93,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"dynamo-crds", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
+				"dynamo-platform": {"grove", "cert-manager", "kube-prometheus-stack", "gpu-operator", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
 				{"gpu-operator", "dynamo-platform"},
@@ -150,7 +150,7 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				return c
 			},
 			requiredDeps: map[string][]string{
-				"dynamo-platform": {"dynamo-crds", "cert-manager", "kube-prometheus-stack", "kai-scheduler"},
+				"dynamo-platform": {"grove", "cert-manager", "kube-prometheus-stack", "kai-scheduler"},
 			},
 			requiredOrdering: [][2]string{
 				{"kai-scheduler", "dynamo-platform"},

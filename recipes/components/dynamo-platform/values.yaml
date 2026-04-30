@@ -12,30 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v0.9.1)
-# NVIDIA Dynamo inference serving platform: operator and grove.
+# Dynamo Platform Helm values (v1.0.2)
+# NVIDIA Dynamo inference serving platform operator.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
-#
-# NOTE: etcd and NATS are disabled below. The Dynamo team confirmed these
-# are no longer required (Kubernetes-native discovery replaces etcd, ZMQ
-# replaces NATS for KV events). However, the current chart (v0.9.0) still
-# renders --etcdAddr in operator args, and the runtime SDK still tries to
-# connect to etcd for lease creation. This is a known upstream issue.
-# Workloads must set DYN_STORE_KV=mem and DYN_EVENT_PLANE=zmq to bypass.
+# Grove is installed as a separate AICR component (see recipes/components/grove/).
+
+# --- Global subchart controls (new in 1.0) ---
+# Disable etcd — Kubernetes-native discovery replaces it for the operator.
+# Runtime pods bypass etcd via DYN_STORE_KV=mem on workloads.
+global:
+  etcd:
+    install: false
+  # Disable kai-scheduler sub-chart install — managed as a separate AICR component.
+  # Keep enabled: true so the Dynamo operator detects and uses the external scheduler.
+  kai-scheduler:
+    install: false
+    enabled: true
+  # Disable grove sub-chart install — installed as a separate AICR component.
+  # Keep enabled: true so the Dynamo operator detects the external grove.
+  grove:
+    install: false
+    enabled: true
 
 dynamo-operator:
-  controllerManager:
-    manager:
-      image:
-        # Pin to 0.9.0 — chart default renders 0.7.1 which lacks --enable-webhooks
-        tag: "0.9.0"
-    kubeRbacProxy:
-      image:
-        # gcr.io/kubebuilder/kube-rbac-proxy is no longer available after gcr.io deprecation.
-        # TODO: remove once upstream dynamo chart updates the default image reference.
-        repository: registry.k8s.io/kubebuilder/kube-rbac-proxy
-        tag: v0.15.0
+  # Upgrade CRDs via the platform chart (no separate dynamo-crds 1.0 chart)
+  upgradeCRD: true
 
   # Use Kubernetes-native service discovery (operator-level only;
   # runtime pods still require DYN_STORE_KV=mem to skip etcd leases)
@@ -55,16 +57,12 @@ dynamo-operator:
 kai-scheduler:
   enabled: false
 
-# Grove operator for pod lifecycle management (required by DynamoGraphDeployment)
-grove:
-  enabled: true
-
-# Disable etcd — Kubernetes-native discovery replaces it for the operator.
-# Runtime pods bypass etcd via DYN_STORE_KV=mem on workloads.
-etcd:
-  enabled: false
-
-# Disable NATS — ZMQ event plane replaces it.
+# Disable NATS sub-chart — ZMQ event plane replaces it.
 # Runtime pods bypass NATS via DYN_EVENT_PLANE=zmq on workloads.
 nats:
+  enabled: false
+
+# Disable etcd sub-chart — Kubernetes-native discovery replaces it for the operator.
+# Runtime pods bypass etcd via DYN_STORE_KV=mem on workloads.
+etcd:
   enabled: false

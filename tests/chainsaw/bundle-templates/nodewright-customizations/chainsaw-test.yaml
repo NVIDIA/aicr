@@ -65,8 +65,12 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
+              TUNING=$(ls "${WORK}"/bundle-defaults/[0-9][0-9][0-9]-nodewright-customizations/templates/tuning.yaml 2>/dev/null | head -1)
+
+              [ -n "${TUNING}" ] || { echo "tuning.yaml not found" >&2; exit 1; }
+
               chainsaw assert \
-                --resource "${WORK}/bundle-defaults/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "${TUNING}" \
                 --file ./assert-tuning-defaults.yaml \
                 --no-color --timeout 5s
 
@@ -91,8 +95,12 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
+              TUNING=$(ls "${WORK}"/bundle-no-autotaint/[0-9][0-9][0-9]-nodewright-customizations/templates/tuning.yaml 2>/dev/null | head -1)
+
+              [ -n "${TUNING}" ] || { echo "tuning.yaml not found" >&2; exit 1; }
+
               chainsaw assert \
-                --resource "${WORK}/bundle-no-autotaint/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "${TUNING}" \
                 --file ./assert-tuning-no-autotaint.yaml \
                 --no-color --timeout 5s
 
@@ -117,8 +125,12 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
+              TUNING=$(ls "${WORK}"/bundle-garbage/[0-9][0-9][0-9]-nodewright-customizations/templates/tuning.yaml 2>/dev/null | head -1)
+
+              [ -n "${TUNING}" ] || { echo "tuning.yaml not found" >&2; exit 1; }
+
               chainsaw assert \
-                --resource "${WORK}/bundle-garbage/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "${TUNING}" \
                 --file ./assert-tuning-defaults.yaml \
                 --no-color --timeout 5s
 
@@ -145,8 +157,12 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-nodewright-template"
+              TUNING=$(ls "${WORK}"/bundle-scheduling/[0-9][0-9][0-9]-nodewright-customizations/templates/tuning.yaml 2>/dev/null | head -1)
+
+              [ -n "${TUNING}" ] || { echo "tuning.yaml not found" >&2; exit 1; }
+
               chainsaw assert \
-                --resource "${WORK}/bundle-scheduling/nodewright-customizations/manifests/tuning.yaml" \
+                --resource "${TUNING}" \
                 --file ./assert-tuning-scheduling.yaml \
                 --no-color --timeout 5s
       cleanup:

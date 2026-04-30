@@ -20,24 +20,18 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
-	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
-
-//go:embed templates/component-README.md.tmpl
-var componentReadmeTemplate string
 
 //go:embed templates/deploy.sh.tmpl
 var deployScriptTemplate string
@@ -48,20 +42,20 @@ var undeployScriptTemplate string
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
-// ComponentData contains data for rendering per-component templates.
+// ComponentData contains data for rendering per-component template blocks.
+// The helm deployer no longer owns per-component folder content (localformat
+// does). ComponentData now carries only the fields needed by the orchestration
+// templates: README.md's component table and deploy.sh / undeploy.sh
+// name-matched special-case blocks.
 type ComponentData struct {
-	Name         string
-	Namespace    string
-	Repository   string
-	ChartName    string
-	Version      string // Original version string (preserves 'v' prefix) for helm install --version
-	ChartVersion string // Normalized version (no 'v' prefix) for chart metadata labels
-	HasManifests bool
-	HasChart     bool
-	IsOCI        bool
-	IsKustomize  bool   // True when the component uses Kustomize instead of Helm
-	Tag          string // Git ref for Kustomize components (tag, branch, or commit)
-	Path         string // Path within the repository to the kustomization
+	Name       string
+	Namespace  string
+	Repository string
+	ChartName  string
+	Version    string // Original version string (preserves 'v' prefix) for helm install --version
+	IsOCI      bool
+	Tag        string // Git ref for Kustomize-typed components (tag/branch/commit)
+	Path       string // Path within the repository to the kustomization
 }
 
 // compile-time interface check
@@ -97,6 +91,9 @@ type Generator struct {
 }
 
 // Generate creates a per-component Helm bundle from the configured generator fields.
+// Per-component folder content (Chart.yaml, values.yaml, install.sh, templates/*)
+// is delegated to pkg/bundler/deployer/localformat. The helm deployer owns only
+// the top-level orchestration: README.md, deploy.sh, undeploy.sh, and checksums.
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 
@@ -120,14 +117,36 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 
-	// Generate per-component directories
-	files, size, err := g.generateComponentDirectories(ctx, components, outputDir)
+	// Map ComponentData to localformat.Component and write per-component folders.
+	// localformat owns: folder naming, values.yaml/cluster-values.yaml split,
+	// Chart.yaml, templates/*, install.sh. The helm deployer just orchestrates.
+	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues)
+	folders, err := localformat.Write(ctx, localformat.Options{
+		OutputDir:          outputDir,
+		Components:         lfComponents,
+		ComponentManifests: g.ComponentManifests,
+	})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to generate component directories", err)
+		// localformat.Write returns StructuredErrors; propagate as-is.
+		return nil, err
 	}
-	output.Files = append(output.Files, files...)
-	output.TotalSize += size
+	for _, f := range folders {
+		// localformat returns paths relative to outputDir. Downstream consumers
+		// (checksum.WriteChecksums, output.TotalSize, deployment reporting) all
+		// expect absolute paths, so resolve each entry via SafeJoin before
+		// appending. SafeJoin also enforces containment.
+		for _, rel := range f.Files {
+			abs, joinErr := deployer.SafeJoin(outputDir, rel)
+			if joinErr != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("path from localformat escapes outputDir: %s", rel), joinErr)
+			}
+			output.Files = append(output.Files, abs)
+			if info, statErr := os.Stat(abs); statErr == nil {
+				output.TotalSize += info.Size()
+			}
+		}
+	}
 
 	// Generate root README.md
 	readmePath, readmeSize, err := g.generateRootREADME(ctx, components, outputDir)
@@ -188,12 +207,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 // buildComponentDataList builds a sorted list of ComponentData from the recipe.
 // It validates that all component names are safe for use as directory names.
+// Only the fields consumed by the orchestration templates are populated.
 func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
-	componentMap := make(map[string]recipe.ComponentRef)
-	for _, ref := range g.RecipeResult.ComponentRefs {
-		componentMap[ref.Name] = ref
-	}
-
 	// Sort by deployment order
 	sorted := deployer.SortComponentRefsByDeploymentOrder(
 		g.RecipeResult.ComponentRefs,
@@ -207,166 +222,51 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 				fmt.Sprintf("invalid component name %q: must not contain path separators or parent directory references", ref.Name))
 		}
 
-		hasManifests := false
-		if g.ComponentManifests != nil {
-			if m, ok := g.ComponentManifests[ref.Name]; ok && len(m) > 0 {
-				hasManifests = true
-			}
-		}
-
-		isKustomize := ref.Type == recipe.ComponentTypeKustomize
-
 		chartName := ref.Chart
 		if chartName == "" {
 			chartName = ref.Name
 		}
 
-		isOCI := strings.HasPrefix(ref.Source, "oci://")
-		// Preserve version string as-is for deploy.sh --version flag.
-		// Helm handles 'v' prefixes correctly via fuzzy matching.
-		version := ref.Version
-
 		components = append(components, ComponentData{
-			Name:         ref.Name,
-			Namespace:    ref.Namespace,
-			Repository:   ref.Source,
-			ChartName:    chartName,
-			Version:      version,
-			ChartVersion: deployer.NormalizeVersionWithDefault(ref.Version),
-			HasManifests: hasManifests,
-			HasChart:     !isKustomize && ref.Source != "",
-			IsOCI:        isOCI,
-			IsKustomize:  isKustomize,
-			Tag:          ref.Tag,
-			Path:         ref.Path,
+			Name:       ref.Name,
+			Namespace:  ref.Namespace,
+			Repository: ref.Source,
+			ChartName:  chartName,
+			Version:    ref.Version,
+			IsOCI:      strings.HasPrefix(ref.Source, "oci://"),
+			Tag:        ref.Tag,
+			Path:       ref.Path,
 		})
 	}
 
 	return components, nil
 }
 
-// generateComponentDirectories creates per-component directories with values.yaml, README.md, and optional manifests.
-func (g *Generator) generateComponentDirectories(ctx context.Context, components []ComponentData, outputDir string) ([]string, int64, error) {
-	files := make([]string, 0, len(components)*3)
-	var totalSize int64
+// toLocalformatComponents maps the orchestration ComponentData list to the
+// per-component inputs consumed by localformat.Write. Values and DynamicPaths
+// are looked up by component name from the generator's maps.
+func toLocalformatComponents(
+	components []ComponentData,
+	values map[string]map[string]any,
+	dynamic map[string][]string,
+) []localformat.Component {
 
-	for i, comp := range components {
-		select {
-		case <-ctx.Done():
-			return nil, 0, errors.Wrap(errors.ErrCodeInternal, "context cancelled", ctx.Err())
-		default:
-		}
-
-		componentDir, err := deployer.SafeJoin(outputDir, comp.Name)
-		if err != nil {
-			return nil, 0, err
-		}
-		if mkdirErr := os.MkdirAll(componentDir, 0755); mkdirErr != nil {
-			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to create directory for %s", comp.Name), mkdirErr)
-		}
-
-		// Deep-copy component values so writeClusterValuesFile can safely
-		// remove dynamic paths without mutating the caller's map.
-		values := component.DeepCopyMap(g.ComponentValues[comp.Name])
-
-		// Extract dynamic paths (if any) from values into cluster-values.yaml.
-		// Every component gets a cluster-values.yaml — dynamic paths are pre-populated,
-		// and users can add any additional overrides. deploy.sh always passes it.
-		clusterFiles, clusterSize, clusterErr := writeClusterValuesFile(values, g.DynamicValues[comp.Name], componentDir, comp.Name)
-		if clusterErr != nil {
-			return nil, 0, clusterErr
-		}
-		files = append(files, clusterFiles...)
-		totalSize += clusterSize
-
-		valuesPath, valuesSize, err := deployer.WriteValuesFile(values, componentDir, "values.yaml")
-		if err != nil {
-			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to write values.yaml for %s", comp.Name), err)
-		}
-		files = append(files, valuesPath)
-		totalSize += valuesSize
-
-		// Write component README.md
-		readmePath, readmeSize, err := deployer.GenerateFromTemplate(componentReadmeTemplate, comp, componentDir, "README.md")
-		if err != nil {
-			return nil, 0, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to write README.md for %s", comp.Name), err)
-		}
-		files = append(files, readmePath)
-		totalSize += readmeSize
-
-		// Write manifests if present
-		if g.ComponentManifests != nil {
-			if manifests, ok := g.ComponentManifests[comp.Name]; ok && len(manifests) > 0 {
-				manifestDir, manifestDirErr := deployer.SafeJoin(componentDir, "manifests")
-				if manifestDirErr != nil {
-					return nil, 0, manifestDirErr
-				}
-				if err := os.MkdirAll(manifestDir, 0755); err != nil {
-					return nil, 0, errors.Wrap(errors.ErrCodeInternal,
-						fmt.Sprintf("failed to create manifests directory for %s", comp.Name), err)
-				}
-
-				// Sort manifest paths for deterministic output
-				manifestPaths := make([]string, 0, len(manifests))
-				for p := range manifests {
-					manifestPaths = append(manifestPaths, p)
-				}
-				sort.Strings(manifestPaths)
-
-				manifestsWritten := 0
-				for _, manifestPath := range manifestPaths {
-					content := manifests[manifestPath]
-					filename := filepath.Base(manifestPath)
-					outputPath, pathErr := deployer.SafeJoin(manifestDir, filename)
-					if pathErr != nil {
-						return nil, 0, errors.New(errors.ErrCodeInvalidRequest,
-							fmt.Sprintf("invalid manifest filename %q in component %s", filename, comp.Name))
-					}
-
-					rendered, renderErr := manifest.Render(content, manifest.RenderInput{
-						ComponentName: comp.Name,
-						Namespace:     comp.Namespace,
-						ChartName:     comp.ChartName,
-						ChartVersion:  comp.ChartVersion,
-						Values:        g.ComponentValues[comp.Name],
-					})
-					if renderErr != nil {
-						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to render manifest template", renderErr,
-							map[string]any{"component": comp.Name, "filename": filename})
-					}
-
-					if !hasYAMLObjects(rendered) {
-						slog.Debug("skipping empty manifest", "component", comp.Name, "filename", filename)
-						continue
-					}
-
-					if err := os.WriteFile(outputPath, rendered, 0600); err != nil {
-						return nil, 0, errors.WrapWithContext(errors.ErrCodeInternal, "failed to write manifest", err,
-							map[string]any{"component": comp.Name, "filename": filename})
-					}
-
-					files = append(files, outputPath)
-					totalSize += int64(len(rendered))
-					manifestsWritten++
-
-					slog.Debug("wrote manifest", "component", comp.Name, "filename", filename)
-				}
-
-				// If no manifests had content, remove the empty directory and update flag
-				if manifestsWritten == 0 {
-					if rmErr := os.RemoveAll(manifestDir); rmErr != nil {
-						slog.Warn("failed to remove empty manifest directory", "dir", manifestDir, "error", rmErr)
-					}
-					components[i].HasManifests = false
-				}
-			}
-		}
+	out := make([]localformat.Component, 0, len(components))
+	for _, c := range components {
+		out = append(out, localformat.Component{
+			Name:         c.Name,
+			Namespace:    c.Namespace,
+			Repository:   c.Repository,
+			ChartName:    c.ChartName,
+			Version:      c.Version,
+			IsOCI:        c.IsOCI,
+			Tag:          c.Tag,
+			Path:         c.Path,
+			Values:       values[c.Name],
+			DynamicPaths: dynamic[c.Name],
+		})
 	}
-
-	return files, totalSize, nil
+	return out
 }
 
 // generateRootREADME creates the root README.md with deployment instructions.
@@ -492,59 +392,17 @@ func reverseComponents(components []ComponentData) []ComponentData {
 	return reversed
 }
 
-// uniqueNamespaces returns deduplicated namespaces from Helm/Kustomize components,
-// preserving order. Manifest-only components are excluded to match the previous
-// behavior where namespace cleanup only occurred inside HasChart/IsKustomize branches.
+// uniqueNamespaces returns deduplicated namespaces from all components,
+// preserving order. Every component in the uniform local-chart format is a
+// helm release with a namespace — no more per-kind filtering needed.
 func uniqueNamespaces(components []ComponentData) []string {
 	seen := make(map[string]bool)
 	var namespaces []string
 	for _, c := range components {
-		if c.Namespace != "" && !seen[c.Namespace] && (c.HasChart || c.IsKustomize) {
+		if c.Namespace != "" && !seen[c.Namespace] {
 			seen[c.Namespace] = true
 			namespaces = append(namespaces, c.Namespace)
 		}
 	}
 	return namespaces
-}
-
-// writeClusterValuesFile writes a cluster-values.yaml for per-cluster overrides.
-// If dynamicPaths is non-empty, those paths are extracted from values and pre-populated.
-// WARNING: This function mutates the values map in place (removes dynamic paths via
-// RemoveValueByPath). Callers must pass a deep copy if the original map must be preserved.
-// The file is always written — even when empty — so users can add any overrides.
-func writeClusterValuesFile(values map[string]any, dynamicPaths []string, componentDir, componentName string) ([]string, int64, error) {
-	clusterValues := make(map[string]any)
-	for _, path := range dynamicPaths {
-		val, found := component.GetValueByPath(values, path)
-		if found {
-			component.RemoveValueByPath(values, path)
-		} else {
-			val = ""
-			slog.Warn("dynamic path not found in component values; introducing empty placeholder",
-				"component", componentName, "path", path)
-		}
-		component.SetValueByPath(clusterValues, path, val)
-	}
-
-	clusterPath, clusterSize, err := deployer.WriteValuesFile(clusterValues, componentDir, "cluster-values.yaml")
-	if err != nil {
-		return nil, 0, errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to write cluster-values.yaml for %s", componentName), err)
-	}
-
-	slog.Debug("wrote cluster-values.yaml", "component", componentName, "dynamic_paths", len(dynamicPaths))
-	return []string{clusterPath}, clusterSize, nil
-}
-
-// hasYAMLObjects returns true if content contains at least one YAML object
-// (a non-comment, non-blank, non-separator line).
-func hasYAMLObjects(content []byte) bool {
-	for _, line := range strings.Split(string(content), "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {
-			continue
-		}
-		return true
-	}
-	return false
 }

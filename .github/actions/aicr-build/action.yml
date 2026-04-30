@@ -32,6 +32,10 @@ inputs:
     description: 'Comma-separated validator phases to build (e.g., "conformance,deployment"), or "none" to skip all. Takes precedence over build_validators.'
     required: false
     default: ''
+  snapshot_agent_cuda_image:
+    description: 'CUDA base image for the snapshot agent image; defaults to .settings.yaml via load-versions'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -50,9 +54,16 @@ runs:
         GOFLAGS: -mod=vendor
       run: bash "${{ github.action_path }}/build-cli.sh"
 
+    - name: Load snapshot agent image version
+      if: inputs.build_snapshot_agent == 'true' && inputs.snapshot_agent_cuda_image == ''
+      id: snapshot-versions
+      uses: ./.github/actions/load-versions
+
     - name: Build snapshot agent image and load into kind
       if: inputs.build_snapshot_agent == 'true'
       shell: bash
+      env:
+        SNAPSHOT_AGENT_CUDA_IMAGE: ${{ inputs.snapshot_agent_cuda_image || steps.snapshot-versions.outputs.snapshot_agent_cuda_image }}
       run: bash "${{ github.action_path }}/build-snapshot-agent.sh"
 
     - name: Build validator images and load into kind

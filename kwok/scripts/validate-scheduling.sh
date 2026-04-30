@@ -381,8 +381,10 @@ generate_bundle() {
     # KWOK clusters use emptyDir for Prometheus storage (no PVC/StorageClass).
     # Cloud overlays (EKS, AKS) set emptyDir: null + volumeClaimTemplate which
     # the Prometheus CRD rejects. Restore emptyDir and remove PVC for KWOK.
-    local prom_values="${WORK_DIR}/bundle/kube-prometheus-stack/values.yaml"
-    if [[ -f "$prom_values" ]] && yq eval '.prometheus.prometheusSpec.storageSpec.emptyDir' "$prom_values" 2>/dev/null | grep -q 'null'; then
+    # Bundle layout uses NNN-prefixed folders, so glob to find the kube-prometheus-stack folder.
+    local prom_values
+    prom_values=$(ls -1 "${WORK_DIR}/bundle"/[0-9][0-9][0-9]-kube-prometheus-stack/values.yaml 2>/dev/null | head -1)
+    if [[ -n "$prom_values" && -f "$prom_values" ]] && yq eval '.prometheus.prometheusSpec.storageSpec.emptyDir' "$prom_values" 2>/dev/null | grep -q 'null'; then
         log_info "Fixing kube-prometheus-stack storageSpec for KWOK (emptyDir instead of PVC)"
         yq eval -i '
             .prometheus.prometheusSpec.storageSpec.emptyDir = {"medium": "", "sizeLimit": "10Gi"} |

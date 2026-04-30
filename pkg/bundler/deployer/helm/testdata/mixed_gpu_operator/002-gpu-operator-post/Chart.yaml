@@ -12,12 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo CRDs Helm values
-# Installs Custom Resource Definitions for NVIDIA Dynamo inference platform.
-# CRDs: DynamoGraphDeployment, DynamoGraphDeploymentRequest,
-#        DynamoComponentDeployment, DynamoModel, DynamoWorkerMetadata,
-#        DynamoGraphDeploymentScalingAdapter
-
-# This chart has no configurable values — it only installs CRDs.
-# The enabled flag is managed by the umbrella chart condition.
-enabled: true
+apiVersion: v2
+name: gpu-operator-post
+description: Generated wrapper chart for gpu-operator local content.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

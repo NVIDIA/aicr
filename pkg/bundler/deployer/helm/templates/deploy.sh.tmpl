@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -euo pipefail
 
 # Cloud Native Stack Deployment Script
@@ -9,19 +23,18 @@ set -euo pipefail
 #   --best-effort  Continue past individual component failures (log warnings)
 #   --retries N    Retry failed helm/kubectl operations N times with backoff (default: 5, 0 = fail-fast)
 #
-# This script is optional — each component subdirectory has a README.md with
-# manual install commands. For detailed behavior docs (CRD ordering, async
-# components, error handling), see the AICR CLI Reference:
+# This script is optional — each component subdirectory has its own install.sh
+# with a single baked-in `helm upgrade --install` command. For detailed behavior
+# docs (CRD ordering, async components, error handling), see the AICR CLI Reference:
 #   https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Run helm commands from a temp directory to prevent local chart directories
-# (e.g., bundle/nodewright-operator/) from shadowing remote chart references.
+# (e.g., bundle/001-nodewright-operator/) from shadowing remote chart references.
 HELM_WORKDIR="$(mktemp -d)"
 trap 'rm -rf "${HELM_WORKDIR}"; exit 130' INT TERM
 trap 'rm -rf "${HELM_WORKDIR}"' EXIT
-cd "${HELM_WORKDIR}"
 
 HELM_TIMEOUT="10m"
 NO_WAIT=false
@@ -41,6 +54,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Export env vars consumed by each folder's install.sh (rendered by localformat).
+# DRY_RUN_FLAG / KUBECONFIG_FLAG / HELM_DEBUG_FLAG default to empty strings.
+export DRY_RUN_FLAG="${DRY_RUN_FLAG:-}"
+export KUBECONFIG_FLAG="${KUBECONFIG_FLAG:-}"
+export HELM_DEBUG_FLAG="${HELM_DEBUG_FLAG:-}"
+
 function helm_failed() {
   if [[ "${BEST_EFFORT}" == "true" ]]; then
     echo "WARNING: $1 install failed, continuing (--best-effort)"
@@ -57,25 +76,6 @@ function backoff_seconds() {
   local seconds=$(( attempt * attempt * 5 ))
   if [[ ${seconds} -gt 120 ]]; then seconds=120; fi
   echo "${seconds}"
-}
-
-function retry() {
-  local desc="$1"; shift
-  local attempt=0
-  while true; do
-    if "$@"; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    if [[ ${attempt} -gt ${MAX_RETRIES} ]]; then
-      echo "ERROR: ${desc} failed after ${attempt} attempts"
-      return 1
-    fi
-    local wait_secs
-    wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${desc} failed (attempt ${attempt}/${MAX_RETRIES}), retrying in ${wait_secs}s..."
-    sleep "${wait_secs}"
-  done
 }
 
 # Clean up stale Helm hook Jobs before retrying. When a hook Job (e.g.,
@@ -142,84 +142,6 @@ function dump_kai_scheduler_helm_diagnostics() {
   echo "  Recent events:"
   kubectl get events -n "${namespace}" --sort-by='.lastTimestamp' 2>/dev/null | tail -30 || true
   echo "  --- End ${namespace} diagnostics ---"
-}
-
-# helm_retry contract:
-#   helm_retry "<description>" "<namespace>" "<max_retries>" <command> [args...]
-# Callers must pass the retry budget as the third positional argument before the
-# command to execute. This keeps per-component retry tuning explicit at the
-# callsite instead of relying on the global MAX_RETRIES fallback.
-function helm_retry() {
-  local desc="$1"
-  local namespace="$2"
-  local max_retries="$3"
-  shift 3
-  local attempt=0
-  while true; do
-    if "$@"; then
-      return 0
-    fi
-    attempt=$((attempt + 1))
-    dump_kai_scheduler_helm_diagnostics "${namespace}"
-    if [[ ${attempt} -gt ${max_retries} ]]; then
-      echo "ERROR: ${desc} failed after ${attempt} attempts"
-      return 1
-    fi
-    cleanup_helm_hooks "${namespace}"
-    local wait_secs
-    wait_secs=$(backoff_seconds "${attempt}")
-    echo "RETRY: ${desc} failed (attempt ${attempt}/${max_retries}), retrying in ${wait_secs}s..."
-    sleep "${wait_secs}"
-  done
-}
-
-# kubectl apply that tolerates "no matches for kind" errors. On first deploy,
-# pre-install manifests may reference CRDs not yet registered — this is expected
-# because post-install re-applies them after helm installs the CRDs.
-
-# Patterns that indicate ignorable CRD-race conditions
-CRD_RACE_PATTERNS=(
-  "no matches for kind"
-  "ensure CRDs are installed first"
-)
-
-# Patterns that indicate real errors (auth, webhook, timeout, etc.)
-REAL_ERROR_PATTERNS=(
-  "^error:"
-  "^Error from server"
-  "forbidden"
-  "denied"
-  "timed out"
-  "unable to"
-  "failed to"
-  "invalid"
-)
-
-function apply_ignoring_crd_race() {
-  local manifest_path="$1"
-  local output
-  if output=$(kubectl apply -f "${manifest_path}" 2>&1); then
-    echo "${output}"
-    return 0
-  fi
-  # Build combined patterns from arrays
-  local crd_filter real_filter
-  crd_filter=$(IFS='|'; echo "${CRD_RACE_PATTERNS[*]}")
-  real_filter=$(IFS='|'; echo "${REAL_ERROR_PATTERNS[*]}")
-  # Strip CRD-race lines, then check if real errors remain
-  if echo "${output}" | grep -Eiv "${crd_filter}" | grep -Eiq "${real_filter}"; then
-    echo "${output}" >&2
-    return 1
-  fi
-  # Fail safe: if error output contains unrecognized lines, don't silently swallow
-  local remaining
-  remaining=$(echo "${output}" | grep -Eiv "${crd_filter}" | grep -v '^$' || true)
-  if [[ -n "${remaining}" ]]; then
-    echo "${output}" >&2
-    return 1
-  fi
-  echo "  (skipped CRD-dependent resources — will re-apply after helm install)"
-  return 0
 }
 
 # Components that use operator patterns with custom resources that reconcile
@@ -323,13 +245,17 @@ if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
   # like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
   # If runtimeRequiredTaint is not set, use the default skyhook.nvidia.com.
   NODEWRIGHT_TAINT_KEY="skyhook.nvidia.com"
-  custom_taint_line=$(grep 'runtimeRequiredTaint:' "${SCRIPT_DIR}/nodewright-operator/values.yaml" 2>/dev/null || true)
-  if [[ -n "${custom_taint_line}" ]]; then
-    taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
-    if [[ -n "${taint_value}" ]]; then
-      # Handle both key=value:effect and key:effect formats
-    NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
-    NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
+  # Locate nodewright-operator's NNN-prefixed directory at runtime.
+  nodewright_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-nodewright-operator 2>/dev/null | head -1)"
+  if [[ -n "${nodewright_dir}" && -f "${nodewright_dir}/values.yaml" ]]; then
+    custom_taint_line=$(grep 'runtimeRequiredTaint:' "${nodewright_dir}/values.yaml" 2>/dev/null || true)
+    if [[ -n "${custom_taint_line}" ]]; then
+      taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
+      if [[ -n "${taint_value}" ]]; then
+        # Handle both key=value:effect and key:effect formats
+        NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
+        NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
+      fi
     fi
   fi
   stale_nodewright=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
@@ -354,98 +280,96 @@ fi
 echo "Pre-flight checks passed."
 echo "Deploying Cloud Native Stack components..."
 
-# Install components in order
-{{ range .Components -}}
-{{ if .IsKustomize -}}
-echo "Installing {{ .Name }} ({{ .Namespace }}) via kustomize..."
-kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f - || helm_failed "{{ .Name }}"
-retry "{{ .Name }} kustomize apply" bash -c \
-  'kustomize build '\''{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}'\'' | kubectl apply -n {{ .Namespace }} -f -' \
-  || helm_failed "{{ .Name }}"
-{{ else if .HasChart -}}
-echo "Installing {{ .Name }} ({{ .Namespace }})..."
-{{ if .HasManifests -}}
-echo "Applying pre-install manifests for {{ .Name }}..."
-kubectl create namespace {{ .Namespace }} --dry-run=client -o yaml | kubectl apply -f - || helm_failed "{{ .Name }}"
-retry "{{ .Name }} pre-install manifests" apply_ignoring_crd_race "${SCRIPT_DIR}/{{ .Name }}/manifests/" \
-  || helm_failed "{{ .Name }}"
-{{ end -}}
-# Per-component timeout override. Most components use HELM_TIMEOUT (10m).
-# Components with slow hooks (e.g., kai-scheduler crd-upgrader image pull
-# on cold runners) get a longer timeout to avoid unnecessary retry cycles.
-COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
-COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
-{{ if eq .Name "kai-scheduler" -}}
-COMPONENT_HELM_TIMEOUT="20m"
-COMPONENT_MAX_RETRIES="1"
-{{ end -}}
-# Derive wait args: global --wait/--no-wait behavior + component timeout.
-if [[ "${NO_WAIT}" == "true" ]]; then
-  COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-else
-  COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
-fi
-if echo "${ASYNC_COMPONENTS}" | grep -qw "{{ .Name }}"; then
-  # Skip --wait (no readiness check) but keep --timeout for hook completion.
-  COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
-  echo "  (async component — skipping --wait, keeping --timeout for hooks)"
-fi
-{{ if .IsOCI -}}
-helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
-  "${COMPONENT_MAX_RETRIES}" \
-  helm upgrade --install {{ .Name }} {{ .Repository }}/{{ .ChartName }} \
-  {{ if .Version }}--version {{ .Version }} \
-  {{ end -}}
-  -n {{ .Namespace }} --create-namespace \
-  -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-  -f "${SCRIPT_DIR}/{{ .Name }}/cluster-values.yaml" \
-  ${COMPONENT_WAIT_ARGS} \
-  || helm_failed "{{ .Name }}"
-{{ else -}}
-helm_retry "{{ .Name }} helm install" "{{ .Namespace }}" \
-  "${COMPONENT_MAX_RETRIES}" \
-  helm upgrade --install {{ .Name }} {{ .ChartName }} \
-  --repo {{ .Repository }} \
-  {{ if .Version }}--version {{ .Version }} \
-  {{ end -}}
-  -n {{ .Namespace }} --create-namespace \
-  -f "${SCRIPT_DIR}/{{ .Name }}/values.yaml" \
-  -f "${SCRIPT_DIR}/{{ .Name }}/cluster-values.yaml" \
-  ${COMPONENT_WAIT_ARGS} \
-  || helm_failed "{{ .Name }}"
-{{ end -}}
-{{ if .HasManifests -}}
-echo "Applying post-install manifests for {{ .Name }}..."
-retry "{{ .Name }} post-install manifests" kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" \
-  || helm_failed "{{ .Name }}"
-{{ end -}}
-{{ if eq .Name "nvidia-dra-driver-gpu" -}}
-# Best-effort mitigation for kubelet DRA plugin registration drift.
-# After uninstall/reinstall, kubelet's fsnotify watcher may not detect new
-# registration sockets. Restarting the plugin DS forces fresh socket creation.
-# This does NOT fix cases where kubelet itself has lost registration state —
-# a node reboot is required for that. See docs/user/cli-reference.md.
-DRA_DS=$(kubectl get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
-if [[ -n "${DRA_DS}" ]]; then
-  echo "  Restarting DRA kubelet plugin (${DRA_DS##*/}) to ensure registration..."
-  if ! kubectl rollout restart "${DRA_DS}" -n {{ .Namespace }}; then
-    echo "  WARNING: failed to restart DRA kubelet plugin daemonset"
-  elif ! kubectl rollout status "${DRA_DS}" -n {{ .Namespace }} --timeout=120s; then
-    # Always wait for the DRA plugin rollout regardless of --no-wait.
-    # The restart+wait is a correctness gate (kubelet must re-register the
-    # DRA plugin socket), not a readiness convenience like --wait.
-    echo "  WARNING: DRA kubelet plugin rollout did not complete within 120s"
+# ==============================================================================
+# Install loop
+# ==============================================================================
+# Generic install loop. Each folder's install.sh is rendered by localformat
+# with the right helm command baked in — deploy.sh has no per-component
+# knowledge here. Per-component special-case logic (async wait, DRA plugin
+# restart) runs in the post-install blocks below, matched by component name.
+cd "${HELM_WORKDIR}"
+for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
+  [[ -d "${dir}" ]] || continue
+  dir="${dir%/}"
+  base="${dir##*/}"
+  name="${base#[0-9][0-9][0-9]-}"
+  # Source the namespace from the folder's install.sh — not the folder
+  # basename — because the helm release name and its target namespace can
+  # differ (e.g. nodewright-operator → namespace skyhook; gpu-operator-post →
+  # namespace gpu-operator). cleanup_helm_hooks and the kai diagnostics
+  # both operate on the namespace.
+  namespace=$(awk '{ for (i=1;i<NF;i++) if ($i=="--namespace") { print $(i+1); exit } }' "${dir}/install.sh")
+  echo "Installing ${name} (${base}) into namespace ${namespace}..."
+
+  # Derive wait args: global --wait/--no-wait behavior + per-component timeout.
+  COMPONENT_HELM_TIMEOUT="${HELM_TIMEOUT}"
+  COMPONENT_MAX_RETRIES="${MAX_RETRIES}"
+  case "${name}" in
+    kai-scheduler)
+      COMPONENT_HELM_TIMEOUT="20m"
+      COMPONENT_MAX_RETRIES="1"
+      ;;
+  esac
+  if [[ "${NO_WAIT}" == "true" ]]; then
+    COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
+  else
+    COMPONENT_WAIT_ARGS="--wait --timeout ${COMPONENT_HELM_TIMEOUT}"
   fi
-else
-  echo "  WARNING: no DRA kubelet plugin daemonset found in {{ .Namespace }}"
-fi
-{{ end -}}
-{{ else if .HasManifests -}}
-echo "Applying manifests for {{ .Name }}..."
-retry "{{ .Name }} manifests" kubectl apply -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" \
-  || helm_failed "{{ .Name }}"
-{{ end -}}
-{{ end }}
+  if echo "${ASYNC_COMPONENTS}" | grep -qw "${name}"; then
+    # Skip --wait (no readiness check) but keep --timeout for hook completion.
+    COMPONENT_WAIT_ARGS="--timeout ${COMPONENT_HELM_TIMEOUT}"
+    echo "  (async component — skipping --wait, keeping --timeout for hooks)"
+  fi
+  export COMPONENT_WAIT_ARGS
+
+  # Invoke the per-folder install.sh with retry. On failure, dump kai-scheduler
+  # diagnostics and clean up stale Helm hook Jobs between attempts.
+  attempt=0
+  while true; do
+    if ( cd "${dir}" && bash install.sh ); then
+      break
+    fi
+    attempt=$((attempt + 1))
+    dump_kai_scheduler_helm_diagnostics "${namespace}"
+    if [[ ${attempt} -gt ${COMPONENT_MAX_RETRIES} ]]; then
+      echo "ERROR: ${name} install failed after ${attempt} attempts"
+      helm_failed "${name}"
+      break
+    fi
+    cleanup_helm_hooks "${namespace}"
+    wait_secs=$(backoff_seconds "${attempt}")
+    echo "RETRY: ${name} install failed (attempt ${attempt}/${COMPONENT_MAX_RETRIES}), retrying in ${wait_secs}s..."
+    sleep "${wait_secs}"
+  done
+
+  # --- post-install name-matched blocks ---
+  {{- range .Components }}
+  {{- if eq .Name "nvidia-dra-driver-gpu" }}
+  if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then
+    # Best-effort mitigation for kubelet DRA plugin registration drift.
+    # After uninstall/reinstall, kubelet's fsnotify watcher may not detect new
+    # registration sockets. Restarting the plugin DS forces fresh socket creation.
+    # This does NOT fix cases where kubelet itself has lost registration state —
+    # a node reboot is required for that. See docs/user/cli-reference.md.
+    DRA_DS=$(kubectl get daemonset -n {{ .Namespace }} -o name 2>/dev/null | awk '/kubelet-plugin/{print; exit}' || true)
+    if [[ -n "${DRA_DS}" ]]; then
+      echo "  Restarting DRA kubelet plugin (${DRA_DS##*/}) to ensure registration..."
+      if ! kubectl rollout restart "${DRA_DS}" -n {{ .Namespace }}; then
+        echo "  WARNING: failed to restart DRA kubelet plugin daemonset"
+      elif ! kubectl rollout status "${DRA_DS}" -n {{ .Namespace }} --timeout=120s; then
+        # Always wait for the DRA plugin rollout regardless of --no-wait.
+        # The restart+wait is a correctness gate (kubelet must re-register the
+        # DRA plugin socket), not a readiness convenience like --wait.
+        echo "  WARNING: DRA kubelet plugin rollout did not complete within 120s"
+      fi
+    else
+      echo "  WARNING: no DRA kubelet plugin daemonset found in {{ .Namespace }}"
+    fi
+  fi
+  {{- end }}
+  {{- end }}
+done
+
 if [[ -n "${FAILED_COMPONENTS}" ]]; then
   echo "WARNING: the following components failed:${FAILED_COMPONENTS}"
   echo "Deployment completed with non-fatal errors (--best-effort)."

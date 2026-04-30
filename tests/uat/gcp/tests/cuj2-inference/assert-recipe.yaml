@@ -31,9 +31,9 @@ constraints:
     value: '>= 1.34'
 componentRefs: ## alphabetically sorted
   - name: cert-manager
-  - name: dynamo-crds
   - name: dynamo-platform
   - name: gpu-operator
+  - name: grove
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler
   - name: kgateway
@@ -47,7 +47,7 @@ componentRefs: ## alphabetically sorted
   - name: prometheus-adapter
 deploymentOrder:
   - cert-manager
-  - dynamo-crds
+  - grove
   - kgateway-crds
   - kgateway
   - kube-prometheus-stack

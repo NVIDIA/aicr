@@ -250,9 +250,7 @@ jobs:
       - name: Check licenses
         env:
           GOFLAGS: -mod=vendor
-        run: |
-          go-licenses check ./... \
-            --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MIT,MPL-2.0
+        run: make license-check
 
   verify-licenses-skip:
     needs: [check-paths]

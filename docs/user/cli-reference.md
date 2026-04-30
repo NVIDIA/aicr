@@ -1116,21 +1116,49 @@ bundles/
 ```
 bundles/
 ├── README.md                      # Deployment guide with ordered steps
-├── deploy.sh                      # One-command deployment script
+├── deploy.sh                      # Generic install loop + name-matched blocks
+├── undeploy.sh                    # Generic reverse loop
 ├── recipe.yaml                    # Recipe used to generate bundle
 ├── checksums.txt                  # SHA256 checksums
 ├── attestation/                   # Present when --attest is used
 │   ├── bundle-attestation.sigstore.json   # SLSA Build Provenance v1
 │   └── aicr-attestation.sigstore.json     # Binary SLSA provenance chain
-├── gpu-operator/
-│   ├── values.yaml                # Component-specific Helm values
-│   ├── README.md                  # Per-component install/upgrade/uninstall
-│   └── manifests/                 # Additional manifests (if any)
-│       └── dcgm-exporter.yaml
-└── cert-manager/
+├── 001-cert-manager/              # Upstream-helm folder: no Chart.yaml
+│   ├── install.sh                 # Rendered: helm upgrade --install ... --repo ${REPO}
+│   ├── values.yaml
+│   ├── cluster-values.yaml        # Dynamic-path overrides (operator-edited)
+│   └── upstream.env               # CHART, REPO, VERSION (sourced by install.sh)
+├── 002-gpu-operator/              # Mixed component primary (upstream-helm)
+│   ├── install.sh
+│   ├── values.yaml
+│   ├── cluster-values.yaml
+│   └── upstream.env
+└── 003-gpu-operator-post/         # Injected -post wrapped chart (mixed component's raw manifests)
+    ├── Chart.yaml                 # Local-helm folder: Chart.yaml + templates/ present
+    ├── install.sh                 # Rendered: helm upgrade --install ... ./
     ├── values.yaml
-    └── README.md
+    ├── cluster-values.yaml
+    └── templates/
+        └── dcgm-exporter.yaml
 ```
+
+**Folder layout rules:**
+
+- Folders are numbered `NNN-<component>/` (1-based, zero-padded). Numbering is regenerated on every bundle.
+- Each folder is one of two **kinds**, distinguished by the presence of `Chart.yaml`:
+  - **upstream-helm** — no `Chart.yaml`; `upstream.env` carries `CHART`/`REPO`/`VERSION`; `install.sh` installs the upstream chart.
+  - **local-helm** — `Chart.yaml` + `templates/`; `install.sh` installs the local chart (`helm upgrade --install <name> ./`).
+- **Mixed components** (Helm chart + raw manifests) emit **two adjacent folders**: a primary upstream-helm `NNN-<name>/` and an injected `(NNN+1)-<name>-post/` local-helm wrapper carrying the raw manifests. Subsequent components shift by one.
+- Manifest-only components (no upstream Helm chart, just raw manifests) become a single local-helm wrapped chart.
+- Kustomize-typed components run `kustomize build` at bundle time; the output becomes a single `templates/manifest.yaml` inside a local-helm folder.
+
+**Breaking change vs. earlier releases:**
+
+Previous releases used a flat `<component>/` layout with `manifests/` siblings and a `--deployer helm` script that branched on component kind. The new format is uniform:
+
+- All folders carry a rendered `install.sh`. The top-level `deploy.sh` is a generic loop with no per-component branching — name-matched special-case blocks (nodewright-operator taint cleanup, kai-scheduler async timeout, orphan-CRD scan, DRA kubelet-plugin restart) live around the loop, not inside it.
+- Raw manifests for mixed components now apply **post-install only**, via the injected `-post` wrapped chart. The earlier pre-apply mechanism with a CRD-race retry wrapper is gone — Helm now owns CRD ordering for mixed components natively.
+- Tooling that parsed bundle paths by bare component name must account for the `NNN-` prefix.
 
 **Argo CD bundle structure** (with `--deployer argocd`):
 ```
@@ -1273,11 +1301,11 @@ If you need to enforce specific install-time values (e.g., pinning `driver.versi
 
 ```shell
 # Navigate to bundle
-cd bundles/gpu-operator
+cd bundles
 
-# Review configuration
-cat values.yaml
+# Review root README and a component's values
 cat README.md
+cat 001-gpu-operator/values.yaml
 
 # Verify integrity
 sha256sum -c checksums.txt
@@ -1286,7 +1314,7 @@ sha256sum -c checksums.txt
 chmod +x deploy.sh && ./deploy.sh
 ```
 
-> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each component subdirectory contains a `README.md` with the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
+> **Note:** `deploy.sh` and `undeploy.sh` are convenience scripts — not the only deployment path. Each `NNN-<component>/` folder contains a rendered `install.sh` that runs the exact `helm upgrade --install` command for manual or pipeline-driven deployment.
 
 #### Deploy Script Behavior (`deploy.sh`)
 
