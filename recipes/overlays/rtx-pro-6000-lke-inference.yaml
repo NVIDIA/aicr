@@ -41,6 +41,12 @@ spec:
         - cert-manager
         - kube-prometheus-stack
 
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
   validation:
     conformance:
       checks:

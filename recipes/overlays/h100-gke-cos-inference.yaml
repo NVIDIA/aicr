@@ -53,3 +53,9 @@ spec:
         intent: inference
       dependencyRefs:
         - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true

@@ -147,6 +147,21 @@ spec:
                 --file ./assert-bundle-scheduling-nfd.yaml \
                 --no-color --timeout 5s
 
+    - name: assert-bundle-topology-nfd
+      description: Verify standalone nfd values.yaml has Topology Updater enabled.
+      try:
+        - script:
+            content: |
+              WORK="/tmp/chainsaw-cuj1-training"
+              NFD_VALUES=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-nfd/values.yaml 2>/dev/null | head -1)
+              [ -n "${NFD_VALUES}" ] || { echo "nfd values.yaml not found" >&2; exit 1; }
+              printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/nfd-values.yaml"
+              sed '/^---$/d' "${NFD_VALUES}" >> "${WORK}/nfd-values.yaml"
+              chainsaw assert \
+                --resource "${WORK}/nfd-values.yaml" \
+                --file ./assert-bundle-topology-nfd.yaml \
+                --no-color --timeout 5s
+
     # ── Step 4: Deploy script validation ─────────────────────────────
     - name: assert-deploy-script
       description: Verify deploy.sh exists, is executable, and has correct shebang.

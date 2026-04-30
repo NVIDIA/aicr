@@ -29,6 +29,18 @@ worker:
 # Topology Updater disabled by default (enable via overlay override)
 topologyUpdater:
   enable: false
+  # Install the noderesourcetopologies CRD via the chart on overlays
+  # that flip enable=true; managed K8s control planes (EKS / AKS /
+  # GKE / OKE / LKE) do not preinstall it. The chart guards the CRD
+  # template on (enable && createCRDs), so this is a no-op when TU
+  # is off.
+  createCRDs: true
+  # Disable the broader /var/lib/kubelet hostPath. TU only needs the
+  # pod-resources gRPC socket, which is mounted via a dedicated
+  # hostPath; setting kubeletStateDir to empty stops the chart from
+  # mounting kubelet state files (TLS material, pod manifests,
+  # checkpoint data) into the TU container.
+  kubeletStateDir: ""
 
 # GC enabled for cleanup of stale NodeFeature/NodeResourceTopology CRs
 gc:
