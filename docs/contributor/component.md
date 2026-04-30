@@ -16,6 +16,27 @@ The bundler system converts RecipeInput objects into deployment artifacts. Artif
 - **Node scheduling**: Registry defines paths for injecting node selectors and tolerations
 - **Structured errors**: Uses `pkg/errors` for error codes and wrapping
 
+### Local Format (Shared Bundle Layout)
+
+`pkg/bundler/deployer/localformat` writes the uniform numbered `NNN-<component>/` bundle layout consumed by every deployer. It owns per-folder content (Chart.yaml, values.yaml, cluster-values.yaml, install.sh, templates/, upstream.env). Deployers (`helm`, future `helmfile` per [#632](https://github.com/NVIDIA/aicr/issues/632), `argocd`, `argocd-helm`) call `localformat.Write()` and then add their own top-level orchestration files (deploy.sh, helmfile.yaml, Application CRs, etc.) — they never re-classify components or duplicate the per-folder writer.
+
+**Classification rule** (single source of truth, in `localformat.classify`):
+
+| Recipe shape | Folder kind | Notes |
+|---|---|---|
+| `helm.defaultRepository` set, no `manifestFiles` | `KindUpstreamHelm` | upstream chart referenced via `upstream.env`; no Chart.yaml |
+| `helm.defaultRepository` set + `manifestFiles` (mixed) | `KindUpstreamHelm` (primary) + `KindLocalHelm` (`-post` injected) | two adjacent folders; raw manifests deploy post-install |
+| `helm.defaultRepository == ""` + `manifestFiles` | `KindLocalHelm` | manifest-only wrapped chart |
+| `kustomize` (Tag/Path set) | `KindLocalHelm` | `kustomize build` at bundle time → `templates/manifest.yaml` |
+
+**Load-bearing invariants** (don't violate without changing the design):
+
+1. **`localformat` never writes deployer-specific files.** `deploy.sh`, `helmfile.yaml`, argocd `Application` CRs, Flux `HelmRelease`s — all produced by the respective deployer after `Write()` returns. This separation is what makes a single layout consumable by every deployer.
+2. **`install.sh` is never name-customized.** It is rendered from one of exactly two templates (`install-upstream-helm.sh.tmpl`, `install-local-helm.sh.tmpl`), parameterized only by data (name, namespace, upstream ref). Name-keyed quirks (kai-scheduler async timeout, nodewright-operator taint cleanup, DRA restart, orphan-CRD scan) stay in `deploy.sh` as name-matched blocks — not in `install.sh`. This is the structural barrier that prevents per-folder scripts from accumulating drift.
+3. **`Write` is deterministic and idempotent.** Same inputs → same on-disk bytes → same `Folder` slice. Map iteration is sorted; no timestamps or random suffixes are embedded.
+
+For the full classification table, base-format invariants, and the helm deployer's call site, see `pkg/bundler/deployer/localformat/doc.go` (godoc) and `pkg/bundler/deployer/helm/helm.go::Generate`. Further design history: ticket [#662](https://github.com/NVIDIA/aicr/issues/662).
+
 ## Quick Start
 
 ### Adding a New Component (Declarative Approach)

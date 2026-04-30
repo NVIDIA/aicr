@@ -74,8 +74,12 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-scheduling"
+              # gpu-operator's primary upstream-helm folder (not the -post one).
+              VAL=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
+                | grep -v -- "-gpu-operator-post" | head -1)
+              [ -n "${VAL}" ] || { echo "gpu-operator values.yaml not found" >&2; exit 1; }
               printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/gpu-operator-values.yaml"
-              sed '/^---$/d' "${WORK}/bundle/gpu-operator/values.yaml" >> "${WORK}/gpu-operator-values.yaml"
+              sed '/^---$/d' "${VAL}" >> "${WORK}/gpu-operator-values.yaml"
               chainsaw assert \
                 --resource "${WORK}/gpu-operator-values.yaml" \
                 --file ./assert-gpu-operator-values.yaml \

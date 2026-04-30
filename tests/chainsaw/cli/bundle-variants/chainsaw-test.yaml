@@ -49,8 +49,10 @@ spec:
               test -f "${WORK}/basic/deploy.sh"
               test -f "${WORK}/basic/README.md"
               test -f "${WORK}/basic/recipe.yaml"
-              ls "${WORK}"/basic/*/values.yaml >/dev/null 2>&1
-              test -d "${WORK}/basic/gpu-operator"
+              ls "${WORK}"/basic/[0-9]*/values.yaml >/dev/null 2>&1
+              # gpu-operator lives under NNN-gpu-operator/ (helm half) in the new layout
+              ls -d "${WORK}"/basic/[0-9][0-9][0-9]-gpu-operator >/dev/null 2>&1 \
+                || { echo "no NNN-gpu-operator folder found" >&2; exit 1; }
             check:
               ($error == null): true
 

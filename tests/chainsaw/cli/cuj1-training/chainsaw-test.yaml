@@ -109,7 +109,8 @@ spec:
               test -f "${WORK}/bundle/README.md"
               test -f "${WORK}/bundle/deploy.sh"
               test -f "${WORK}/bundle/recipe.yaml"
-              ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
+              # Components live in NNN-<name>/ folders (per-component bundle layout).
+              ls "${WORK}"/bundle/[0-9]*/values.yaml >/dev/null 2>&1
             check:
               ($error == null): true
 
@@ -119,8 +120,13 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-cuj1-training"
+              # gpu-operator is mixed (helm + manifests): values.yaml lives in the
+              # upstream-helm half (NNN-gpu-operator), not the -post sibling.
+              GPU_VALUES=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-gpu-operator/values.yaml 2>/dev/null \
+                | grep -v -- '-gpu-operator-post' | head -1)
+              [ -n "${GPU_VALUES}" ] || { echo "gpu-operator values.yaml not found" >&2; exit 1; }
               printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/gpu-operator-values.yaml"
-              sed '/^---$/d' "${WORK}/bundle/gpu-operator/values.yaml" >> "${WORK}/gpu-operator-values.yaml"
+              sed '/^---$/d' "${GPU_VALUES}" >> "${WORK}/gpu-operator-values.yaml"
               chainsaw assert \
                 --resource "${WORK}/gpu-operator-values.yaml" \
                 --file ./assert-bundle-scheduling.yaml \
@@ -132,8 +138,10 @@ spec:
         - script:
             content: |
               WORK="/tmp/chainsaw-cuj1-training"
+              NFD_VALUES=$(ls "${WORK}"/bundle/[0-9][0-9][0-9]-nfd/values.yaml 2>/dev/null | head -1)
+              [ -n "${NFD_VALUES}" ] || { echo "nfd values.yaml not found" >&2; exit 1; }
               printf 'apiVersion: helm/v1\nkind: Values\n' > "${WORK}/nfd-values.yaml"
-              sed '/^---$/d' "${WORK}/bundle/nfd/values.yaml" >> "${WORK}/nfd-values.yaml"
+              sed '/^---$/d' "${NFD_VALUES}" >> "${WORK}/nfd-values.yaml"
               chainsaw assert \
                 --resource "${WORK}/nfd-values.yaml" \
                 --file ./assert-bundle-scheduling-nfd.yaml \

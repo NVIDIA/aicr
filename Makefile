@@ -147,6 +147,7 @@ LICENSE_IGNORES = \
 	-ignore 'bundles/**' \
 	-ignore 'dist/**' \
 	-ignore 'vendor/**' \
+	-ignore '**/testdata/**' \
 	-ignore 'site/public/**' \
 	-ignore 'site/resources/**' \
 	-ignore 'site/node_modules/**'

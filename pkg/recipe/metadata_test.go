@@ -646,7 +646,7 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 	ctx := context.Background()
 
 	// Build recipe for H100 EKS inference workload with dynamo platform
-	// h100-eks-ubuntu-inference-dynamo.yaml adds kai-scheduler, dynamo-crds, dynamo-platform
+	// h100-eks-ubuntu-inference-dynamo.yaml adds kai-scheduler, grove, dynamo-platform
 	// which are NOT in base.yaml
 	builder := NewBuilder()
 	criteria := NewCriteria()
@@ -687,7 +687,7 @@ func TestOverlayAddsNewComponent(t *testing.T) {
 		t.Errorf("dynamo-platform type = %q, want Helm", dynamoPlatform.Type)
 	}
 	if len(dynamoPlatform.DependencyRefs) == 0 {
-		t.Error("dynamo-platform has no dependencies (should depend on dynamo-crds, cert-manager, kube-prometheus-stack)")
+		t.Error("dynamo-platform has no dependencies (should depend on grove, cert-manager, kube-prometheus-stack)")
 	}
 
 	// Build recipe for EKS H100 training workload with kubeflow platform

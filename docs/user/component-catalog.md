@@ -24,8 +24,8 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **kai-scheduler** | DRA-aware gang scheduler with hierarchical queues and topology-aware placement. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/NVIDIA/KAI-Scheduler) |
-| **dynamo-crds** | Custom Resource Definitions for NVIDIA Dynamo inference serving. Installed separately to support CRD lifecycle management. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
-| **dynamo-platform** | NVIDIA Dynamo inference serving platform. Distributed inference with prefix-cache-aware routing and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
+| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
+| **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with prefix-cache-aware routing and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **kgateway-crds** | Custom Resource Definitions for kgateway (Kubernetes Gateway API implementation). | [kgateway](https://github.com/kgateway-dev/kgateway) |
 | **kgateway** | Kubernetes Gateway API implementation. Provides model-aware ingress routing for inference workloads. | [kgateway](https://github.com/kgateway-dev/kgateway) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |

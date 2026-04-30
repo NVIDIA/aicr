@@ -360,7 +360,7 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
 | `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
-| `dynamo-crds` | NVIDIA Dynamo inference serving CRDs |
+| `grove` | Dynamo pod lifecycle management |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `kgateway-crds` | Kubernetes Gateway API CRDs |
 | `kgateway` | Kubernetes Gateway API implementation |

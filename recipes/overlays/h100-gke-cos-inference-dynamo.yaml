@@ -40,33 +40,23 @@ spec:
       overrides:
         gpuResourcesEnabledOverride: true
 
-    - name: dynamo-crds
+    - name: grove
       type: Helm
-      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      version: "0.9.0"
-      valuesFile: components/dynamo-crds/values.yaml
+      source: oci://ghcr.io/ai-dynamo/grove
+      version: "v0.1.0-alpha.6"
+      valuesFile: components/grove/values.yaml
 
     - name: dynamo-platform
       type: Helm
       source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
-      version: "0.9.0"
+      version: "1.0.2"
       valuesFile: components/dynamo-platform/values.yaml
       dependencyRefs:
-        - dynamo-crds
+        - grove
         - cert-manager
         - kube-prometheus-stack
         - gpu-operator
         - kai-scheduler
-      overrides:
-        etcd:
-          persistence:
-            storageClass: standard-rwo
-        nats:
-          config:
-            jetstream:
-              fileStore:
-                pvc:
-                  storageClassName: standard-rwo
 
   validation:
     deployment:

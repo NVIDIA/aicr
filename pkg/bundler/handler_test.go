@@ -286,7 +286,7 @@ func TestBundleEndpointValidRequest(t *testing.T) {
 		if _, ok := expectedFiles[f.Name]; ok {
 			expectedFiles[f.Name] = true
 		}
-		if f.Name == "gpu-operator/values.yaml" {
+		if f.Name == "001-gpu-operator/values.yaml" {
 			foundGPUValues = true
 		}
 	}
@@ -297,7 +297,7 @@ func TestBundleEndpointValidRequest(t *testing.T) {
 		}
 	}
 	if !foundGPUValues {
-		t.Error("expected gpu-operator/values.yaml not found in zip archive")
+		t.Error("expected 001-gpu-operator/values.yaml not found in zip archive")
 	}
 
 	// Log files for debugging
@@ -457,7 +457,7 @@ func TestZipResponseContainsExpectedFiles(t *testing.T) {
 		if _, ok := expectedFiles[f.Name]; ok {
 			expectedFiles[f.Name] = true
 		}
-		if f.Name == "gpu-operator/values.yaml" {
+		if f.Name == "001-gpu-operator/values.yaml" {
 			foundGPUValues = true
 		}
 	}
@@ -468,7 +468,7 @@ func TestZipResponseContainsExpectedFiles(t *testing.T) {
 		}
 	}
 	if !foundGPUValues {
-		t.Error("expected gpu-operator/values.yaml not found in zip")
+		t.Error("expected 001-gpu-operator/values.yaml not found in zip")
 	}
 
 	t.Log("Files in zip:")

@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -euo pipefail
 
 # Cloud Native Stack Undeployment Script
@@ -43,22 +57,15 @@ fi
 echo "Undeploying Cloud Native Stack components (timeout: ${HELM_TIMEOUT}s)..."
 echo ""
 
-# Color codes for component type tags (disabled when stdout is not a terminal)
-C_HELM="" C_KUST="" C_MANI="" C_RST=""
-if [[ -t 1 ]]; then
-  C_HELM="\033[36m" C_KUST="\033[33m" C_MANI="\033[35m" C_RST="\033[0m"
-fi
-
-echo "  The following components will be removed (in order):"
-{{ range .ComponentsReversed -}}
-{{ if .IsKustomize -}}
-printf "    ${C_KUST}%-12s${C_RST} %s (%s)\n" "[kustomize]" "{{ .Name }}" "{{ .Namespace }}"
-{{ else if .HasChart -}}
-printf "    ${C_HELM}%-12s${C_RST} %s (%s)\n" "[helm]" "{{ .Name }}" "{{ .Namespace }}"
-{{ else if .HasManifests -}}
-printf "    ${C_MANI}%-12s${C_RST} %s\n" "[manifests]" "{{ .Name }}"
-{{ end -}}
-{{ end }}
+echo "  The following components will be removed (in reverse install order):"
+# List NNN-* folders in reverse numeric order
+for dir in $(ls -1d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/ 2>/dev/null | sort -r); do
+  [[ -d "${dir}" ]] || continue
+  base="${dir%/}"
+  base="${base##*/}"
+  name="${base#[0-9][0-9][0-9]-}"
+  printf "    %-40s\n" "${name}"
+done
 echo ""
 
 # System namespaces that must not be deleted
@@ -238,10 +245,7 @@ extra_crds_for_release() {
 }
 
 # Skip pre-flight for releases whose bundle-managed custom resources are
-# deleted from manifests before the controller is uninstalled. Those CRs may
-# carry operator finalizers safely because undeploy removes them while the
-# controller is still running, so scanning them here would false-positive the
-# happy path.
+# deleted from manifests before the controller is uninstalled.
 skip_preflight_for_release() {
   case "$1" in
     nodewright-operator|kgateway) return 0 ;;
@@ -250,9 +254,6 @@ skip_preflight_for_release() {
 }
 
 # Run `kubectl ... -o json` while keeping stdout parseable for jq.
-# On failure, stores kubectl stderr in the destination variable and returns non-zero.
-# On success, replays any stderr warnings to the terminal without contaminating JSON.
-# Args: $1 = destination variable name, $2.. = kubectl args
 capture_kubectl_json() {
   local out_var="$1"
   shift
@@ -278,18 +279,12 @@ capture_kubectl_json() {
   return 0
 }
 
-# Check a single CRD for custom resource instances with active finalizers.
-# Appends details and remediation commands to the preflight temp files.
-# Args: $1 = CRD name, $2 = component name (for display)
 check_crd_for_stuck_resources() {
   local crd_name="$1"
   local component="$2"
   local crd_json plural group scope resource stuck stuck_json kubectl_err
   local item_name item_namespace item_finalizers
 
-  # Fail-closed on kubectl errors so a transient API/auth hiccup cannot let
-  # pre-flight silently pass. capture_kubectl_json keeps stdout parseable
-  # even when kubectl prints warnings on stderr during a successful call.
   if ! capture_kubectl_json crd_json get crd "${crd_name}" -o json; then
     kubectl_err="${crd_json}"
     echo "" >&2
@@ -304,8 +299,6 @@ check_crd_for_stuck_resources() {
   [[ -z "${plural}" || "${plural}" == "null" ]] && return 0
 
   resource="${plural}.${group}"
-  # Filter out kubernetes.io/* finalizers — those are handled by K8s controllers
-  # and will be processed regardless of whether the operator is running.
   local jq_filter='[.metadata.finalizers // [] | .[] | select(startswith("kubernetes.io/") | not)]'
   stuck=""
   if [[ "${scope}" == "Namespaced" ]]; then
@@ -320,7 +313,7 @@ check_crd_for_stuck_resources() {
     while IFS=$'\x1f' read -r item_namespace item_name item_finalizers; do
       stuck="${stuck}    ${item_namespace}/${item_name}  finalizers=[${item_finalizers}]"$'\n'
     done < <(echo "${stuck_json}" \
-      | jq -r '.items[] | ('"${jq_filter}"') as $f | select(($f | length) > 0) | [(.metadata.namespace // ""), .metadata.name, ($f | join(","))] | join("\u001f")' 2>/dev/null || true)
+      | jq -r '.items[] | ('"${jq_filter}"') as $f | select(($f | length) > 0) | [(.metadata.namespace // ""), .metadata.name, ($f | join(","))] | join("")' 2>/dev/null || true)
   else
     if ! capture_kubectl_json stuck_json get "${resource}" -o json; then
       echo "" >&2
@@ -333,7 +326,7 @@ check_crd_for_stuck_resources() {
     while IFS=$'\x1f' read -r item_name item_finalizers; do
       stuck="${stuck}    ${item_name}  finalizers=[${item_finalizers}]"$'\n'
     done < <(echo "${stuck_json}" \
-      | jq -r '.items[] | ('"${jq_filter}"') as $f | select(($f | length) > 0) | [.metadata.name, ($f | join(","))] | join("\u001f")' 2>/dev/null || true)
+      | jq -r '.items[] | ('"${jq_filter}"') as $f | select(($f | length) > 0) | [.metadata.name, ($f | join(","))] | join("")' 2>/dev/null || true)
   fi
 
   if [[ -n "${stuck}" ]]; then
@@ -344,24 +337,11 @@ check_crd_for_stuck_resources() {
   fi
 }
 
-# Check a Helm release for CRDs whose custom resources have active finalizers.
-# Discovery intentionally stays narrow:
-#   1. The chart's templates/ section, via `helm get manifest`
-#   2. CRDs annotated with this Helm release
-#   3. A tiny exact-name override list for known crds/-installed operator CRDs
-# This keeps the guard understandable and avoids broad cluster-wide ownership
-# inference while still catching the high-risk operator CRs that motivated the
-# pre-flight in the first place.
-# Args: $1 = release name, $2 = namespace
 check_release_for_stuck_crds() {
   local release="$1"
   local ns="$2"
   local manifest manifest_crds annotated_crds explicit_crds
   local all_crds_json kubectl_err crd_name
-  # `helm get manifest` is best-effort: if it fails (release missing, helm
-  # transient error), keep going and let the annotation- and exact-CRD
-  # discovery still run. Returning early here would re-introduce a false-
-  # negative path where a flaky helm hides CRDs that are still present.
   manifest=$(helm get manifest "${release}" -n "${ns}" 2>/dev/null || true)
   manifest_crds=$(echo "${manifest}" \
     | awk '/^kind:/{kind=$2} /^  name:/ && kind=="CustomResourceDefinition"{print $2; kind=""}')
@@ -401,14 +381,7 @@ check_release_for_stuck_crds() {
            )
          | .metadata.name' 2>/dev/null || true)"$'\n'
   done < <(extra_crds_for_release "${release}")
-  # All three sources empty → release isn't installed and no leftover CRDs.
-  # (Distinct from the API-error path above: here kubectl succeeded and we
-  # genuinely observed no relevant CRDs.)
   [[ -z "${manifest_crds}" && -z "${annotated_crds}" && -z "${explicit_crds}" ]] && return 0
-  # awk 'NF' drops empty lines without the exit-1-on-no-match behavior of
-  # `grep -v '^$'`, which would abort under `set -euo pipefail` when a release
-  # has no CRDs (e.g., chart ships none, installed with --skip-crds, already
-  # cleaned up).
   printf '%s\n%s\n%s\n' "${manifest_crds}" "${annotated_crds}" "${explicit_crds}" \
     | awk 'NF' \
     | sort -u \
@@ -443,14 +416,12 @@ else
     exit 1
   fi
   {{ range .ComponentsReversed -}}
-  {{ if .HasChart -}}
   if skip_preflight_for_release "{{ .Name }}"; then
     echo "  Skipping {{ .Name }} ({{ .Namespace }}): bundle deletes dependent manifests before controller uninstall."
   else
     echo "  Checking {{ .Name }} ({{ .Namespace }})..."
     check_release_for_stuck_crds "{{ .Name }}" "{{ .Namespace }}"
   fi
-  {{ end -}}
   {{ end }}
   if [[ -s "${PREFLIGHT_DETAILS}" ]]; then
     echo ""
@@ -472,40 +443,68 @@ else
   echo "Pre-flight checks passed."
 fi
 
-# Uninstall components in reverse order
-{{ range .ComponentsReversed -}}
-{{ if .HasManifests -}}
-echo "Deleting manifests for {{ .Name }}..."
-kubectl delete -f "${SCRIPT_DIR}/{{ .Name }}/manifests/" --ignore-not-found || true
-{{ end -}}
-{{ if .IsKustomize -}}
-echo "Uninstalling {{ .Name }} ({{ .Namespace }}) via kustomize..."
-kustomize build '{{ .Repository }}//{{ .Path }}{{ if .Tag }}?ref={{ .Tag }}{{ end }}' \
-  | kubectl delete -n {{ .Namespace }} --ignore-not-found -f - || true
-{{ else if .HasChart -}}
-echo "Uninstalling {{ .Name }} ({{ .Namespace }})..."
-helm_force_uninstall "{{ .Name }}" "{{ .Namespace }}"
-delete_release_cluster_resources "{{ .Name }}" "{{ .Namespace }}"
-delete_orphaned_webhooks_for_ns "{{ .Namespace }}"
-{{ end -}}
-{{ end }}
+# ==============================================================================
+# Uninstall components in reverse install order
+# ==============================================================================
+# Generic reverse loop: every folder is a Helm release (local-helm or upstream-helm).
+# `helm uninstall <release>` works uniformly for both kinds — that's one of the
+# benefits of the uniform local-chart bundle format.
+for dir in $(ls -1d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/ 2>/dev/null | sort -r); do
+  [[ -d "${dir}" ]] || continue
+  base="${dir%/}"
+  base="${base##*/}"
+  name="${base#[0-9][0-9][0-9]-}"
+  # Derive the namespace from the component name via the per-component blocks
+  # below. We still need it for helm_force_uninstall and cluster-resource cleanup.
+  ns=""
+  {{- range .ComponentsReversed }}
+  if [[ "${name}" == "{{ .Name }}" ]]; then ns="{{ .Namespace }}"; fi
+  {{- end }}
+  # Injected mixed-component "-post" folders share their parent's namespace.
+  {{- range .ComponentsReversed }}
+  if [[ "${name}" == "{{ .Name }}-post" ]]; then ns="{{ .Namespace }}"; fi
+  {{- end }}
+  if [[ -z "${ns}" ]]; then
+    echo "Warning: no namespace known for ${name}; skipping uninstall" >&2
+    continue
+  fi
+  echo "Uninstalling ${name} (${ns})..."
+  # For local-helm folders (Chart.yaml + templates/), kubectl-delete the
+  # rendered templates BEFORE helm uninstall. The templates may carry
+  # helm.sh/hook annotations (post-install/post-upgrade) which helm does
+  # not track or clean up on uninstall — so without this pre-delete, the
+  # operator gets removed but its hook-created CRs (and their finalizers)
+  # linger. Doing the delete while the controller is still running lets
+  # finalizers clear naturally.
+  if [[ -d "${dir}/templates" ]]; then
+    for tpl in "${dir}/templates/"*.yaml; do
+      [[ -f "${tpl}" ]] || continue
+      kubectl delete -n "${ns}" -f "${tpl}" --ignore-not-found --timeout="${HELM_TIMEOUT}s" || true
+    done
+  fi
+  helm_force_uninstall "${name}" "${ns}"
+  delete_release_cluster_resources "${name}" "${ns}"
+  delete_orphaned_webhooks_for_ns "${ns}"
+done
+
 # Remove nodewright node taints that persist after operator removal.
 # Nodewright taints nodes during kernel tuning. The taint key is configurable
 # via runtimeRequiredTaint (defaults to skyhook.nvidia.com).
 {{- range .ComponentsReversed }}
 {{- if eq .Name "nodewright-operator" }}
-# Extract the taint key from bundle values. The YAML value is a taint string
-# like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
-# If runtimeRequiredTaint is not set, use the default skyhook.nvidia.com.
 NODEWRIGHT_TAINT_KEY="skyhook.nvidia.com"
-custom_taint_line=$(grep 'runtimeRequiredTaint:' "${SCRIPT_DIR}/nodewright-operator/values.yaml" 2>/dev/null || true)
-if [[ -n "${custom_taint_line}" ]]; then
-  # Extract value after "runtimeRequiredTaint:", then extract taint key before "="
-  taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
-  if [[ -n "${taint_value}" ]]; then
-    # Handle both key=value:effect and key:effect formats
-    NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
-    NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
+# Locate nodewright-operator's NNN-prefixed directory at runtime.
+nodewright_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-nodewright-operator 2>/dev/null | head -1)"
+if [[ -n "${nodewright_dir}" && -f "${nodewright_dir}/values.yaml" ]]; then
+  custom_taint_line=$(grep 'runtimeRequiredTaint:' "${nodewright_dir}/values.yaml" 2>/dev/null || true)
+  if [[ -n "${custom_taint_line}" ]]; then
+    # Extract value after "runtimeRequiredTaint:", then extract taint key before "="
+    taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
+    if [[ -n "${taint_value}" ]]; then
+      # Handle both key=value:effect and key:effect formats
+      NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
+      NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
+    fi
   fi
 fi
 echo "Removing ${NODEWRIGHT_TAINT_KEY} node taints..."
@@ -516,26 +515,17 @@ done
 {{- end }}
 
 # Clean up orphaned CRDs that were owned by this bundle's releases.
-# Only delete CRDs whose Helm release annotation matches a component we just uninstalled,
-# or that belong to operator-created groups from components in this bundle.
-# This avoids deleting CRDs owned by other releases on shared clusters.
-# Delete CRDs with resource-policy: keep that were owned by this bundle's releases.
-# Match both release-name AND release-namespace to avoid deleting CRDs owned by
-# another release with the same name in a different namespace.
-{{- range .ComponentsReversed }}{{ if .HasChart }}
+# Only delete CRDs whose Helm release annotation matches a component we just uninstalled.
+{{- range .ComponentsReversed }}
 kubectl get crd -o json 2>/dev/null \
   | jq -r --arg rel "{{ .Name }}" --arg ns "{{ .Namespace }}" \
     '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns) | .metadata.name' 2>/dev/null \
   | while read -r name; do
       echo "Deleting CRD ${name} (owned by {{ .Name }}/{{ .Namespace }})..."
-      # Per-CRD `|| echo Warning:` keeps the loop making best-effort progress
-      # across the remaining CRDs while surfacing each delete failure
-      # (RBAC, timeout) with the specific CRD name -- post-flight's
-      # Helm-annotation re-check catches any that still linger.
       kubectl delete crd "${name}" --ignore-not-found --wait=false \
         || echo "Warning: failed to delete CRD ${name} (owned by {{ .Name }}/{{ .Namespace }}); leftovers will surface in post-flight" >&2
     done || echo "Warning: orphan-CRD cleanup for {{ .Name }}/{{ .Namespace }} failed (kubectl get / jq error); leftovers will surface in post-flight" >&2
-{{- end }}{{ end }}
+{{- end }}
 
 # Intentionally skip automatic deletion of unannotated CRDs matched only by
 # API group. On shared clusters, those CRDs may be serving another tenant's
@@ -544,8 +534,6 @@ kubectl get crd -o json 2>/dev/null \
 
 # Warn about CRDs stuck in deleting state (e.g., customresourcecleanup finalizer
 # can't be resolved because CR instances still have controller-managed finalizers).
-# Force-clearing CRD finalizers can orphan CR data in etcd, so list them and let
-# the user decide.
 stuck_crds=$(kubectl get crd -o json 2>/dev/null | jq -r '.items[] | select(.metadata.deletionTimestamp != null) | .metadata.name' 2>/dev/null || true)
 if [[ -n "${stuck_crds}" ]]; then
   echo ""
@@ -567,8 +555,6 @@ if [[ -n "${stuck_crds}" ]]; then
 fi
 
 # Clean up namespaces after all components are uninstalled.
-# PVC deletion is deferred here so that StatefulSet owners are removed first,
-# preventing hangs on kubernetes.io/pvc-protection finalizers.
 {{ range .Namespaces -}}
 if [[ "${DELETE_PVCS}" == "true" ]] && ! echo " ${PROTECTED_NS} " | grep -q " {{ . }} "; then
   echo "Deleting PVCs in {{ . }}..."
@@ -578,8 +564,12 @@ delete_orphaned_webhooks_for_ns "{{ . }}"
 delete_namespace "{{ . }}"
 {{ end }}
 # Clean up companion namespaces created at runtime by operators.
-# Only includes namespaces that are always created by bundle components.
+# Only emitted for components whose runtime creates them.
+{{- range .ComponentsReversed }}
+{{- if eq .Name "kai-scheduler" }}
 delete_namespace "kai-resource-reservation"
+{{- end }}
+{{- end }}
 
 # Wait for terminating namespaces to finish
 echo "Waiting for namespaces to terminate..."
@@ -599,21 +589,16 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
-# Final webhook cleanup: catch webhooks whose services were removed by namespace
-# deletion above. Before namespace deletion, services still exist so the orphan
-# check cannot trigger; this post-deletion pass closes that race.
+# Final webhook cleanup pass.
 {{ range .Namespaces -}}
 delete_orphaned_webhooks_for_ns "{{ . }}"
 {{ end }}
 # ==============================================================================
 # Post-flight verification
 # ==============================================================================
-# Verify the cluster is clean after undeployment. Warn about any stale
-# resources that could block a subsequent deploy.
 
 postflight_issues=false
 
-# Check for remaining terminating namespaces
 TERMINATING=$(kubectl get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{" "}{end}' 2>/dev/null || true)
 if [[ -n "${TERMINATING}" ]]; then
   echo "WARNING: namespaces still terminating: ${TERMINATING}"
@@ -621,8 +606,6 @@ if [[ -n "${TERMINATING}" ]]; then
   postflight_issues=true
 fi
 
-# Delete stale webhooks whose backing service no longer exists.
-# These can block pod creation (fail-closed) after undeployment.
 kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o json 2>/dev/null | \
   jq -r '.items[] | .metadata.name as $wh | .webhooks[]? | select(.clientConfig.service != null) | [$wh, .clientConfig.service.namespace, .clientConfig.service.name] | @tsv' 2>/dev/null | \
   sort -u | \
@@ -634,7 +617,6 @@ kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o jso
     fi
   done || true
 
-# Check for stale API services
 stale_apis=$(kubectl get apiservices -o json 2>/dev/null | jq -r '.items[] | select(.status.conditions[]? | .type == "Available" and .status == "False") | .metadata.name' 2>/dev/null || true)
 if [[ -n "${stale_apis}" ]]; then
   echo "WARNING: unavailable API services found: ${stale_apis}"
@@ -643,27 +625,20 @@ if [[ -n "${stale_apis}" ]]; then
 fi
 
 # Check for Helm-annotated CRDs from uninstalled releases.
-# Mirrors the per-component CRD deletion loop above: if cleanup succeeded,
-# every annotated CRD is gone and this check stays silent. Catches cases
-# where the deletion loop logged a transient kubectl/jq warning and moved on.
-# CRDs already being deleted (non-null .metadata.deletionTimestamp) are excluded --
-# the earlier `kubectl delete crd ... --wait=false` returns immediately, so a slow
-# finalizer can leave the CRD still listed here even though it is being cleaned up
-# normally. Only truly stuck (not-yet-terminating) CRDs should be surfaced.
 helm_orphaned_crds=""
 explicit_orphaned_crds=""
 postflight_all_crds_json=""
 if capture_kubectl_json postflight_all_crds_json get crd -o json; then
   :
-{{- range .ComponentsReversed }}{{ if .HasChart }}
+{{- range .ComponentsReversed }}
   remaining_helm_crds=$(echo "${postflight_all_crds_json}" \
     | jq -r --arg rel "{{ .Name }}" --arg ns "{{ .Namespace }}" \
       '.items[] | select(.metadata.annotations["meta.helm.sh/release-name"]==$rel and .metadata.annotations["meta.helm.sh/release-namespace"]==$ns and .metadata.deletionTimestamp==null) | .metadata.name' 2>/dev/null || true)
   if [[ -n "${remaining_helm_crds}" ]]; then
     helm_orphaned_crds="${helm_orphaned_crds} ${remaining_helm_crds}"
   fi
-{{- end }}{{ end }}
-{{- range .ComponentsReversed }}{{ if .HasChart }}
+{{- end }}
+{{- range .ComponentsReversed }}
   while read -r crd_name; do
     [[ -z "${crd_name}" ]] && continue
     remaining_explicit_crd=$(echo "${postflight_all_crds_json}" \
@@ -673,7 +648,7 @@ if capture_kubectl_json postflight_all_crds_json get crd -o json; then
       explicit_orphaned_crds="${explicit_orphaned_crds}${remaining_explicit_crd}"$'\n'
     fi
   done < <(extra_crds_for_release "{{ .Name }}")
-{{- end }}{{ end }}
+{{- end }}
 else
   echo "Warning: failed to enumerate post-flight CRDs; kubectl output: ${postflight_all_crds_json}" >&2
   postflight_issues=true
@@ -685,10 +660,6 @@ if [[ -n "${helm_orphaned_crds}" ]]; then
   postflight_issues=true
 fi
 
-# Check for exact-name CRDs from known crds/-installed releases.
-# These CRDs are intentionally tracked by explicit name instead of API group so
-# post-flight can surface leftovers without risking cross-tenant cleanup on
-# shared clusters.
 explicit_orphaned_crds=$(printf '%s' "${explicit_orphaned_crds}" | awk 'NF' | sort -u | tr '\n' ' ')
 if [[ -n "${explicit_orphaned_crds}" ]]; then
   echo "WARNING: explicit CRDs from this bundle still present: ${explicit_orphaned_crds}"

@@ -18,7 +18,7 @@
 #
 # Prerequisites:
 #   - KAI Scheduler installed (provides default-parent-queue)
-#   - Dynamo platform deployed (dynamo-crds + dynamo-platform)
+#   - Dynamo platform deployed (dynamo-platform with bundled CRDs)
 #   - DRA driver installed (gpu.nvidia.com DeviceClass)
 #
 # Usage:

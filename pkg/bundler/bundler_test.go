@@ -249,25 +249,25 @@ func TestMake_Success(t *testing.T) {
 		}
 	}
 
-	// Verify per-component directories
-	for _, comp := range []string{"gpu-operator", "network-operator"} {
-		valuesPath := filepath.Join(tmpDir, comp, "values.yaml")
+	// Verify per-component directories (numbered by deployment order)
+	componentDirs := map[string]string{
+		"gpu-operator":     "001-gpu-operator",
+		"network-operator": "002-network-operator",
+	}
+	for comp, dir := range componentDirs {
+		valuesPath := filepath.Join(tmpDir, dir, "values.yaml")
 		if _, statErr := os.Stat(valuesPath); os.IsNotExist(statErr) {
-			t.Errorf("expected %s/values.yaml was not created", comp)
-		}
-		readmePath := filepath.Join(tmpDir, comp, "README.md")
-		if _, statErr := os.Stat(readmePath); os.IsNotExist(statErr) {
-			t.Errorf("expected %s/README.md was not created", comp)
+			t.Errorf("expected %s/values.yaml was not created (component %s)", dir, comp)
 		}
 	}
 
-	// No Chart.yaml should exist
+	// No Chart.yaml should exist at top level
 	chartPath := filepath.Join(tmpDir, "Chart.yaml")
 	if _, statErr := os.Stat(chartPath); !os.IsNotExist(statErr) {
 		t.Error("Chart.yaml should not exist in per-component bundle")
 	}
 
-	// Verify output summary (3 root + 2 components × 2 files = 7, +1 recipe.yaml = 8)
+	// Verify output summary (3 root + 2 components × multiple files >= 7)
 	if output.TotalFiles < 7 {
 		t.Errorf("expected at least 7 files, got %d", output.TotalFiles)
 	}
@@ -317,14 +317,16 @@ func TestMake_DisabledComponentsFiltered(t *testing.T) {
 		t.Fatal("Make() returned nil output")
 	}
 
-	// Enabled component should have a directory
-	if _, statErr := os.Stat(filepath.Join(tmpDir, "gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
-		t.Error("expected gpu-operator/values.yaml to be created")
+	// Enabled component should have a directory (numbering reflects only enabled components)
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator/values.yaml to be created")
 	}
 
-	// Disabled component should NOT have a directory
-	if _, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver")); !os.IsNotExist(statErr) {
-		t.Error("expected aws-ebs-csi-driver directory to NOT be created")
+	// Disabled component should NOT have a directory (under any numbering)
+	for _, dir := range []string{"aws-ebs-csi-driver", "001-aws-ebs-csi-driver", "002-aws-ebs-csi-driver"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created", dir)
+		}
 	}
 
 	// deploy.sh should not reference the disabled component
@@ -420,7 +422,10 @@ func TestMake_SetEnabledOverridesPrecedence(t *testing.T) {
 				t.Fatalf("Make() error = %v", makeErr)
 			}
 
-			_, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver"))
+			// When included, the component appears as the second numbered folder
+			// (gpu-operator is 001, aws-ebs-csi-driver is 002). The flat layout
+			// is gone in this PR — only assert against the numbered path.
+			_, statErr := os.Stat(filepath.Join(tmpDir, "002-aws-ebs-csi-driver"))
 			included := !os.IsNotExist(statErr)
 
 			if included != tt.expectIncluded {
@@ -461,7 +466,8 @@ func TestMake_SetEnabledNotLeakedToHelmValues(t *testing.T) {
 		t.Fatalf("Make() error = %v", makeErr)
 	}
 
-	valuesPath := filepath.Join(tmpDir, "aws-ebs-csi-driver", "values.yaml")
+	// aws-ebs-csi-driver is the 2nd component in deployment order (after gpu-operator)
+	valuesPath := filepath.Join(tmpDir, "002-aws-ebs-csi-driver", "values.yaml")
 	valuesData, readErr := os.ReadFile(valuesPath)
 	if readErr != nil {
 		t.Fatalf("failed to read values.yaml: %v", readErr)
@@ -519,10 +525,10 @@ func TestMake_WithValueOverrides(t *testing.T) {
 		t.Fatal("Make() returned nil output")
 	}
 
-	// Verify gpu-operator/values.yaml was created
-	valuesPath := filepath.Join(tmpDir, "gpu-operator", "values.yaml")
+	// Verify 001-gpu-operator/values.yaml was created (single component → 001)
+	valuesPath := filepath.Join(tmpDir, "001-gpu-operator", "values.yaml")
 	if _, err := os.Stat(valuesPath); os.IsNotExist(err) {
-		t.Fatal("gpu-operator/values.yaml was not created")
+		t.Fatal("001-gpu-operator/values.yaml was not created")
 	}
 }
 
@@ -1190,19 +1196,17 @@ func TestMake_DisabledComponentWithDynamic(t *testing.T) {
 		t.Fatalf("Make() error = %v", makeErr)
 	}
 
-	// Disabled component should NOT have a directory at all
-	if _, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver")); !os.IsNotExist(statErr) {
-		t.Error("expected aws-ebs-csi-driver directory to NOT be created (component is disabled)")
+	// Disabled component should NOT have a directory at all (under any numbering).
+	// The directory check implies cluster-values.yaml absence, so don't double-check.
+	for _, dir := range []string{"aws-ebs-csi-driver", "001-aws-ebs-csi-driver", "002-aws-ebs-csi-driver"} {
+		if _, statErr := os.Stat(filepath.Join(tmpDir, dir)); !os.IsNotExist(statErr) {
+			t.Errorf("expected %s directory to NOT be created (component is disabled)", dir)
+		}
 	}
 
-	// Disabled component should NOT have cluster-values.yaml
-	if _, statErr := os.Stat(filepath.Join(tmpDir, "aws-ebs-csi-driver", "cluster-values.yaml")); !os.IsNotExist(statErr) {
-		t.Error("expected aws-ebs-csi-driver/cluster-values.yaml to NOT exist (component is disabled)")
-	}
-
-	// Enabled component should still exist
-	if _, statErr := os.Stat(filepath.Join(tmpDir, "gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
-		t.Error("expected gpu-operator/values.yaml to be created")
+	// Enabled component should still exist (gpu-operator is the only enabled → 001)
+	if _, statErr := os.Stat(filepath.Join(tmpDir, "001-gpu-operator", "values.yaml")); os.IsNotExist(statErr) {
+		t.Error("expected 001-gpu-operator/values.yaml to be created")
 	}
 
 	// deploy.sh should not reference the disabled component
