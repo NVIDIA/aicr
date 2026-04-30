@@ -27,6 +27,9 @@ inputs:
   goreleaser_version:
     description: 'GoReleaser version (from .settings.yaml)'
     required: true
+  go_licenses_version:
+    description: 'go-licenses version (from .settings.yaml)'
+    required: true
   homebrew_deploy_key:
     description: 'SSH deploy key for pushing Homebrew formula'
     required: false
@@ -48,6 +51,24 @@ runs:
         install_syft: 'true'
         install_goreleaser: 'true'
         goreleaser_version: ${{ inputs.goreleaser_version }}
+
+    - name: Install go-licenses
+      shell: bash
+      env:
+        GO_LICENSES_VERSION: ${{ inputs.go_licenses_version }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${GO_LICENSES_VERSION}" ]]; then
+          echo "::error::go_licenses_version input is required"
+          exit 1
+        fi
+        # 'go install' must run outside vendor mode, otherwise it errors
+        # with "cannot find module providing package". setup-go puts
+        # $(go env GOPATH)/bin on PATH, so the binary is reachable from
+        # later steps in this job.
+        GOFLAGS= go install "github.com/google/go-licenses@${GO_LICENSES_VERSION}"
+        go-licenses --help >/dev/null
+        echo "go-licenses installed: ${GO_LICENSES_VERSION}"
 
     - name: Authenticate to registry
       uses: ./.github/actions/ghcr-login

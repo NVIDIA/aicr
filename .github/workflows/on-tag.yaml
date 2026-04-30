@@ -122,6 +122,7 @@ jobs:
         with:
           ko_version: ${{ steps.versions.outputs.ko }}
           goreleaser_version: ${{ steps.versions.outputs.goreleaser }}
+          go_licenses_version: ${{ steps.versions.outputs.go_licenses }}
           homebrew_deploy_key: ${{ secrets.HOMEBREW_DEPLOY_KEY }}
 
       - name: Malware Scan Release Binaries
