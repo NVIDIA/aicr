@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 
@@ -36,6 +37,11 @@ const (
 	// ExpectedKind is the required kind for build spec files.
 	ExpectedKind = "AICRRuntime"
 )
+
+// renameFn is the rename implementation used by WriteBack. It exists as a
+// package-private variable so tests can stub it to exercise the rename
+// failure cleanup path; production code always uses os.Rename.
+var renameFn = os.Rename
 
 // BuildSpec represents the top-level build specification file used by the
 // runtime controller. It contains input configuration and output status.
@@ -157,12 +163,16 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal spec", err)
 	}
 
-	tmp := path + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, defaults.SpecFileMode)
+	// Use os.CreateTemp so concurrent WriteBack callers don't race on a
+	// shared "<path>.tmp" name and clobber each other before either rename.
+	// CreateTemp opens with mode 0o600, matching defaults.SpecFileMode.
+	dir := filepath.Dir(path)
+	f, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to create temp spec file %q", tmp), err)
+			fmt.Sprintf("failed to create temp spec file for %q", path), err)
 	}
+	tmp := f.Name()
 
 	// On any error after this point, attempt to remove the temp file so we
 	// don't leave debris next to the destination.
@@ -184,7 +194,7 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 			fmt.Sprintf("failed to write spec file %q", path), writeErr)
 	}
 
-	if err := os.Rename(tmp, path); err != nil {
+	if err := renameFn(tmp, path); err != nil {
 		if rmErr := os.Remove(tmp); rmErr != nil && !stderrors.Is(rmErr, fs.ErrNotExist) {
 			slog.Warn("failed to remove temp spec file after rename error",
 				"path", tmp, "error", rmErr)
@@ -193,7 +203,33 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 			fmt.Sprintf("failed to rename temp spec file to %q", path), err)
 	}
 
+	// Sync the parent directory so the rename is persisted to disk. Without
+	// this, a crash after the rename can lose the new dirent even though
+	// the file's data was already fsynced. Best-effort: a failure here just
+	// means the rename isn't yet durable on disk; the in-memory state is
+	// already correct, so log a warning rather than reverting the write.
+	if dirErr := syncDir(dir); dirErr != nil {
+		slog.Warn("failed to fsync parent directory after spec rename",
+			"dir", dir, "error", dirErr)
+	}
+
 	return nil
+}
+
+// syncDir opens the directory and calls Sync to persist directory metadata
+// (e.g., the dirent created by Rename). On platforms where directories
+// cannot be opened for sync (notably Windows), the call is a no-op.
+func syncDir(dir string) error {
+	d, err := os.Open(dir) //nolint:gosec // opening a directory for fsync is intentional
+	if err != nil {
+		return err
+	}
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
 }
 
 // SetImageStatus sets the status for a named image (e.g., "charts", "apps", "app-of-apps").

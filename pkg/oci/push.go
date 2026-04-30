@@ -514,7 +514,17 @@ func createAuthClientForHost(host string, plainHTTP, insecureTLS bool) (*auth.Cl
 	transport := defaults.NewHTTPTransport()
 	if !plainHTTP && insecureTLS {
 		slog.Warn("TLS verification disabled for OCI registry", "registry", host)
-		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
+		// Clone any existing TLS config so future hardening defaults
+		// applied in defaults.NewHTTPTransport (e.g., MinVersion, cipher
+		// suites) are preserved when toggling InsecureSkipVerify.
+		var cfg *tls.Config
+		if transport.TLSClientConfig != nil {
+			cfg = transport.TLSClientConfig.Clone()
+		} else {
+			cfg = &tls.Config{} //nolint:gosec // populated below; defaults track NewHTTPTransport
+		}
+		cfg.InsecureSkipVerify = true //nolint:gosec
+		transport.TLSClientConfig = cfg
 	}
 
 	client := &auth.Client{

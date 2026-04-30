@@ -61,7 +61,16 @@ func WaitForJobCompletion(ctx context.Context, client kubernetes.Interface, name
 			return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
+				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
+					return errors.Wrap(errors.ErrCodeTimeout, "job completion timeout", ctxErr)
+				}
 				return errors.New(errors.ErrCodeInternal, "watch channel closed unexpectedly")
+			}
+			if event.Type == watch.Error {
+				if statusErr, isErr := event.Object.(error); isErr {
+					return errors.Wrap(errors.ErrCodeInternal, "watch stream error", statusErr)
+				}
+				return errors.New(errors.ErrCodeInternal, "watch stream error")
 			}
 
 			job, ok := event.Object.(*batchv1.Job)
@@ -124,9 +133,17 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", timeoutCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
+				// If the parent context already expired, classify the
+				// failure as a timeout rather than a generic recheck error.
+				if ctxErr := timeoutCtx.Err(); ctxErr != nil {
+					return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", ctxErr)
+				}
 				// Watch channel closed — re-check Job status directly before giving up.
 				recheck, recheckErr := client.BatchV1().Jobs(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
 				if recheckErr != nil {
+					if ctxErr := timeoutCtx.Err(); ctxErr != nil {
+						return nil, errors.Wrap(errors.ErrCodeTimeout, "job terminal wait timeout", ctxErr)
+					}
 					return nil, errors.Wrap(errors.ErrCodeInternal,
 						"watch closed and Job re-check failed", recheckErr)
 				}
@@ -135,6 +152,12 @@ func WaitForJobTerminal(ctx context.Context, client kubernetes.Interface, namesp
 				}
 				return nil, errors.New(errors.ErrCodeUnavailable,
 					"watch channel closed before Job reached terminal state")
+			}
+			if event.Type == watch.Error {
+				if statusErr, isErr := event.Object.(error); isErr {
+					return nil, errors.Wrap(errors.ErrCodeInternal, "watch stream error", statusErr)
+				}
+				return nil, errors.New(errors.ErrCodeInternal, "watch stream error")
 			}
 			if event.Type == watch.Deleted {
 				return nil, errors.New(errors.ErrCodeInternal, "Job was deleted before reaching terminal state")

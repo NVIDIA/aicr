@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -341,8 +342,11 @@ func (d *Deployer) buildPodSpecApply() *applycorev1.PodSpecApplyConfiguration {
 // legitimate completions and lets the caller classify them.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
 	waitTimeout := timeout + defaults.ValidatorWaitBuffer
+	// pod.WaitForJobTerminal already returns structured errors with proper
+	// codes (ErrCodeTimeout, ErrCodeUnavailable, ErrCodeInternal). Propagate
+	// as-is so callers can distinguish retryable from terminal failures.
 	if _, err := pod.WaitForJobTerminal(ctx, d.clientset, d.namespace, d.jobName, waitTimeout); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "validator job did not reach terminal state", err)
+		return err
 	}
 	return nil
 }
@@ -357,10 +361,16 @@ func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration)
 func (d *Deployer) WaitForPodTermination(ctx context.Context) error {
 	jobPod, err := d.getPodForJob(ctx)
 	if err != nil {
-		slog.Debug("no pod found, skipping termination wait", "job", d.jobName)
-		// Pod not found is the expected steady state once the Job's TTL
+		// Pod-not-found is the expected steady state once the Job's TTL
 		// controller or foreground-propagation delete has already run.
-		return nil
+		// Anything else (RBAC, transient API failure, timeout) must
+		// propagate so the caller can decide whether to retry or escalate.
+		var sErr *errors.StructuredError
+		if stderrors.As(err, &sErr) && sErr.Code == errors.ErrCodeNotFound {
+			slog.Debug("no pod found, skipping termination wait", "job", d.jobName)
+			return nil
+		}
+		return err
 	}
 
 	if jobPod.Status.Phase == corev1.PodSucceeded || jobPod.Status.Phase == corev1.PodFailed {

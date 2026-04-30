@@ -20,6 +20,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -474,9 +475,13 @@ func TestBuildSpec_WriteBack_AtomicNoTempLeftover(t *testing.T) {
 		t.Errorf("dest perms = %v, want %v", got, defaults.SpecFileMode.Perm())
 	}
 
-	// .tmp sibling must not remain after a successful write.
-	if _, err := os.Stat(outPath + ".tmp"); !stderrors.Is(err, fs.ErrNotExist) {
-		t.Errorf("expected no .tmp leftover, stat err = %v", err)
+	// .tmp-* siblings must not remain after a successful write.
+	matches, err := filepath.Glob(outPath + ".tmp-*")
+	if err != nil {
+		t.Fatalf("glob tmp leftovers: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("expected no .tmp-* leftover, got %v", matches)
 	}
 
 	// Repeated writes must overwrite cleanly without leaking the .tmp file.
@@ -485,16 +490,25 @@ func TestBuildSpec_WriteBack_AtomicNoTempLeftover(t *testing.T) {
 		Repository: "test/charts",
 		Tag:        "v2",
 	})
-	if err := spec.WriteBack(ctx, outPath); err != nil {
+	if err = spec.WriteBack(ctx, outPath); err != nil {
 		t.Fatalf("WriteBack() second call: %v", err)
 	}
-	if _, err := os.Stat(outPath + ".tmp"); !stderrors.Is(err, fs.ErrNotExist) {
-		t.Errorf("expected no .tmp leftover after rewrite, stat err = %v", err)
+	matches2, err := filepath.Glob(outPath + ".tmp-*")
+	if err != nil {
+		t.Fatalf("glob tmp leftovers (rewrite): %v", err)
+	}
+	if len(matches2) != 0 {
+		t.Errorf("expected no .tmp-* leftover after rewrite, got %v", matches2)
 	}
 }
 
+// TestBuildSpec_WriteBack_RenameFailurePreservesOriginal verifies that when
+// the atomic rename step fails (after a successful temp write), WriteBack
+// returns an error, the existing destination remains byte-for-byte
+// unchanged, and the temp file is cleaned up. Uses the renameFn seam to
+// inject a deterministic rename failure.
 func TestBuildSpec_WriteBack_RenameFailurePreservesOriginal(t *testing.T) {
-	t.Parallel()
+	// Not parallel: mutates package-level renameFn.
 
 	ctx := context.Background()
 
@@ -517,13 +531,11 @@ func TestBuildSpec_WriteBack_RenameFailurePreservesOriginal(t *testing.T) {
 		t.Fatalf("read seed: %v", err)
 	}
 
-	// Now make WriteBack fail at the OpenFile step by pre-creating the
-	// destination's .tmp path as a directory — os.OpenFile with O_TRUNC on
-	// a directory fails on every supported platform, so we never reach
-	// rename. The original must remain byte-for-byte unchanged.
-	if mkErr := os.Mkdir(outPath+".tmp", 0o755); mkErr != nil {
-		t.Fatalf("mkdir tmp blocker: %v", mkErr)
-	}
+	// Inject a rename failure for the next WriteBack call.
+	injected := stderrors.New("injected rename failure")
+	prev := renameFn
+	renameFn = func(string, string) error { return injected }
+	t.Cleanup(func() { renameFn = prev })
 
 	updated := &BuildSpec{
 		APIVersion: ExpectedAPIVersion,
@@ -535,7 +547,95 @@ func TestBuildSpec_WriteBack_RenameFailurePreservesOriginal(t *testing.T) {
 	}
 	err = updated.WriteBack(ctx, outPath)
 	if err == nil {
-		t.Fatal("expected WriteBack to fail when temp path is unwritable")
+		t.Fatal("expected WriteBack to fail when rename is stubbed to fail")
+	}
+	if !stderrors.Is(err, injected) {
+		t.Errorf("expected wrapped injected rename failure, got %v", err)
+	}
+	var sErr *errors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != errors.ErrCodeInternal {
+		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeInternal)
+	}
+
+	// Original destination must be untouched.
+	currentBytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read after failed rename: %v", err)
+	}
+	if string(currentBytes) != string(originalBytes) {
+		t.Errorf("original file was modified after failed rename:\nbefore: %s\nafter:  %s",
+			originalBytes, currentBytes)
+	}
+
+	// Temp file should have been cleaned up.
+	matches, err := filepath.Glob(outPath + ".tmp-*")
+	if err != nil {
+		t.Fatalf("glob tmp leftovers: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("expected no .tmp-* leftover after failed rename, got %v", matches)
+	}
+}
+
+// TestBuildSpec_WriteBack_TempCreateFailurePreservesOriginal verifies that
+// when the temp file cannot be created (e.g., the destination directory is
+// read-only), WriteBack returns an error and the existing destination file
+// remains byte-for-byte unchanged. This exercises the os.CreateTemp failure
+// branch — the rename branch is unreachable here.
+func TestBuildSpec_WriteBack_TempCreateFailurePreservesOriginal(t *testing.T) {
+	// Not parallel: chmod's effect is process-wide; concurrent tests in
+	// the same temp dir would race.
+	if runtime.GOOS == "windows" {
+		t.Skip("chmod-readonly directory blocking is POSIX-specific")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+
+	ctx := context.Background()
+
+	// Seed an existing destination with known content.
+	original := &BuildSpec{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Spec: BuildSpecConfig{
+			Recipe:   "/data/recipes/original.yaml",
+			Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+		},
+	}
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "spec.yaml")
+	if err := original.WriteBack(ctx, outPath); err != nil {
+		t.Fatalf("seed WriteBack: %v", err)
+	}
+	originalBytes, err := os.ReadFile(outPath)
+	if err != nil {
+		t.Fatalf("read seed: %v", err)
+	}
+
+	// Make the directory read-only so os.CreateTemp fails inside WriteBack.
+	// Restore writability on test exit so t.TempDir's cleanup can run.
+	if err = os.Chmod(dir, 0o555); err != nil {
+		t.Fatalf("chmod dir read-only: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0o755)
+	})
+
+	updated := &BuildSpec{
+		APIVersion: ExpectedAPIVersion,
+		Kind:       ExpectedKind,
+		Spec: BuildSpecConfig{
+			Recipe:   "/data/recipes/updated.yaml",
+			Registry: RegistryConfig{Host: "registry.example.com", Repository: "test"},
+		},
+	}
+	err = updated.WriteBack(ctx, outPath)
+	if err == nil {
+		t.Fatal("expected WriteBack to fail when destination directory is read-only")
 	}
 	var sErr *errors.StructuredError
 	if !stderrors.As(err, &sErr) {
@@ -553,5 +653,14 @@ func TestBuildSpec_WriteBack_RenameFailurePreservesOriginal(t *testing.T) {
 	if string(currentBytes) != string(originalBytes) {
 		t.Errorf("original file was modified after failed WriteBack:\nbefore: %s\nafter:  %s",
 			originalBytes, currentBytes)
+	}
+
+	// And no .tmp-* debris should remain alongside it.
+	matches, err := filepath.Glob(filepath.Join(dir, "spec.yaml.tmp-*"))
+	if err != nil {
+		t.Fatalf("glob tmp leftovers: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Errorf("expected no .tmp-* leftover after failed WriteBack, got %v", matches)
 	}
 }

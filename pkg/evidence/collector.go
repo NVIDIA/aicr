@@ -257,6 +257,12 @@ func (c *Collector) Run(ctx context.Context) error {
 	var sectionErrs []error
 	var failedSections []string
 	for _, feature := range features {
+		// Stop dispatching once the parent context is done so we don't
+		// keep doing work the caller has already abandoned.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return errors.Wrap(errors.ErrCodeTimeout,
+				"evidence collection canceled before completing all sections", ctxErr)
+		}
 		scriptSection := ScriptSection(feature)
 		slog.Info("collecting evidence", "feature", feature)
 		if err := c.runSectionFn(ctx, scriptPath, tmpDir, scriptSection); err != nil {
@@ -270,7 +276,24 @@ func (c *Collector) Run(ctx context.Context) error {
 
 	if len(sectionErrs) > 0 {
 		joined := stderrors.Join(sectionErrs...)
-		return errors.WrapWithContext(errors.ErrCodeInternal,
+		// Preserve timeout/cancel semantics so callers can distinguish a
+		// bounded subprocess timeout from a genuine script failure. If any
+		// section reported a timeout (either via runSection's structured
+		// code or via a raw context error), surface the aggregate as a
+		// timeout.
+		code := errors.ErrCodeInternal
+		for _, e := range sectionErrs {
+			var sErr *errors.StructuredError
+			if stderrors.As(e, &sErr) && sErr.Code == errors.ErrCodeTimeout {
+				code = errors.ErrCodeTimeout
+				break
+			}
+			if stderrors.Is(e, context.DeadlineExceeded) || stderrors.Is(e, context.Canceled) {
+				code = errors.ErrCodeTimeout
+				break
+			}
+		}
+		return errors.WrapWithContext(code,
 			"one or more evidence sections failed", joined,
 			map[string]any{"failed_sections": failedSections})
 	}
@@ -335,12 +358,19 @@ func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, secti
 		"section", section, "content", stdout.String())
 
 	if runErr != nil {
+		// If the subprocess was killed because the per-section deadline
+		// fired, classify the error as a timeout rather than a generic
+		// command failure. This preserves retry semantics for callers.
+		code := errors.ErrCodeInternal
+		if subCtx.Err() != nil {
+			code = errors.ErrCodeTimeout
+		}
 		slog.Error("evidence section failed",
 			"section", section,
 			"error", runErr,
 			"stderr_bytes", stderr.Len(),
 			"stderr", stderr.String())
-		return errors.WrapWithContext(errors.ErrCodeInternal,
+		return errors.WrapWithContext(code,
 			"evidence collection command failed", runErr,
 			map[string]any{"section": section})
 	}

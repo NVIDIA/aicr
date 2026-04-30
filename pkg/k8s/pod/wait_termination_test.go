@@ -378,3 +378,64 @@ func TestWaitForJobTerminal(t *testing.T) {
 		})
 	}
 }
+
+func TestWaitForJobTerminal_WatchError(t *testing.T) {
+	t.Parallel()
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: "default"}}
+	client := fake.NewSimpleClientset(job)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		watcher.Error(&metav1.Status{
+			Status:  metav1.StatusFailure,
+			Reason:  metav1.StatusReasonInternalError,
+			Message: "synthetic watch error",
+		})
+	}()
+
+	gotJob, err := pod.WaitForJobTerminal(context.Background(), client, "default", "j", 2*time.Second)
+	if err == nil {
+		t.Fatal("expected error from watch.Error event")
+	}
+	if gotJob != nil {
+		t.Errorf("expected nil job on error, got %v", gotJob)
+	}
+	var sErr *errors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != errors.ErrCodeInternal {
+		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeInternal)
+	}
+}
+
+func TestWaitForJobTerminal_WatchClosedAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: "default"}}
+	client := fake.NewSimpleClientset(job)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		watcher.Stop()
+	}()
+
+	_, err := pod.WaitForJobTerminal(context.Background(), client, "default", "j", 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	var sErr *errors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != errors.ErrCodeTimeout {
+		t.Errorf("error code = %v, want %v", sErr.Code, errors.ErrCodeTimeout)
+	}
+}

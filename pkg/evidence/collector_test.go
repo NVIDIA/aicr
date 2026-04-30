@@ -278,6 +278,73 @@ func TestRunAggregatesSectionFailures(t *testing.T) {
 	}
 }
 
+// TestRunPreservesTimeoutCode verifies that when a section returns a
+// timeout-coded error, the aggregated error surfaces ErrCodeTimeout rather
+// than ErrCodeInternal so callers can distinguish bounded subprocess
+// timeouts from generic script failures.
+func TestRunPreservesTimeoutCode(t *testing.T) {
+	if !pathHasBinaries(t) {
+		t.Skip("required binaries (bash, kubectl) not on PATH; cannot exercise dispatch path")
+	}
+
+	tmp := t.TempDir()
+	c := NewCollector(tmp, WithFeatures([]string{"dra-support"}))
+	c.runSectionFn = func(_ context.Context, _, _, _ string) error {
+		return errors.New(errors.ErrCodeTimeout, "section timed out")
+	}
+
+	err := c.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *StructuredError, got %T", err)
+	}
+	if se.Code != errors.ErrCodeTimeout {
+		t.Errorf("aggregated code = %v, want %v", se.Code, errors.ErrCodeTimeout)
+	}
+}
+
+// TestRunStopsOnContextCancellation verifies that when the parent context
+// is canceled mid-loop, Run stops dispatching further sections instead of
+// continuing to invoke runSectionFn.
+func TestRunStopsOnContextCancellation(t *testing.T) {
+	if !pathHasBinaries(t) {
+		t.Skip("required binaries (bash, kubectl) not on PATH; cannot exercise dispatch path")
+	}
+
+	tmp := t.TempDir()
+	c := NewCollector(tmp,
+		WithFeatures([]string{"dra-support", "gang-scheduling", "secure-access"}),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var calls int
+	c.runSectionFn = func(_ context.Context, _, _, _ string) error {
+		calls++
+		// Cancel the parent after the first section returns. The next
+		// iteration must check ctx.Err() and return early.
+		cancel()
+		return nil
+	}
+
+	err := c.Run(ctx)
+	if err == nil {
+		t.Fatal("expected error after context cancellation, got nil")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("expected *StructuredError, got %T", err)
+	}
+	if se.Code != errors.ErrCodeTimeout {
+		t.Errorf("error code = %v, want %v", se.Code, errors.ErrCodeTimeout)
+	}
+	if calls != 1 {
+		t.Errorf("runSectionFn called %d times after cancel, want 1", calls)
+	}
+}
+
 // TestBoundedBuffer verifies that boundedBuffer caps retained bytes,
 // reports truncation, and never returns short writes (which would cause
 // exec.Cmd to abort the subprocess on stdout/stderr writes).

@@ -750,8 +750,10 @@ func TestBundleEndpointBodyTooLarge(t *testing.T) {
 	}
 
 	var resp struct {
-		Code    string         `json:"code"`
-		Details map[string]any `json:"details"`
+		Code    string `json:"code"`
+		Details struct {
+			LimitBytes int64 `json:"limit_bytes"`
+		} `json:"details"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode error response: %v", err)
@@ -759,7 +761,7 @@ func TestBundleEndpointBodyTooLarge(t *testing.T) {
 	if resp.Code != string(aicrerrors.ErrCodeInvalidRequest) {
 		t.Errorf("error code = %q, want %q", resp.Code, aicrerrors.ErrCodeInvalidRequest)
 	}
-	if _, ok := resp.Details["limit_bytes"]; !ok {
-		t.Errorf("expected limit_bytes in error details, got %v", resp.Details)
+	if resp.Details.LimitBytes != defaults.MaxBundlePOSTBytes {
+		t.Errorf("limit_bytes = %d, want %d", resp.Details.LimitBytes, defaults.MaxBundlePOSTBytes)
 	}
 }

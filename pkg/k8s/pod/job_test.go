@@ -16,9 +16,11 @@ package pod_test
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 	"time"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -129,5 +131,63 @@ func TestWaitForJobCompletion(t *testing.T) {
 				t.Errorf("WaitForJobCompletion() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestWaitForJobCompletion_WatchError(t *testing.T) {
+	t.Parallel()
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: "default"}}
+	client := fake.NewSimpleClientset(job)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	go func() {
+		time.Sleep(10 * time.Millisecond)
+		watcher.Error(&metav1.Status{
+			Status:  metav1.StatusFailure,
+			Reason:  metav1.StatusReasonInternalError,
+			Message: "synthetic watch error",
+		})
+	}()
+
+	err := pod.WaitForJobCompletion(context.Background(), client, "default", "j", 2*time.Second)
+	if err == nil {
+		t.Fatal("expected error from watch.Error event")
+	}
+	var sErr *aicrerrors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != aicrerrors.ErrCodeInternal {
+		t.Errorf("error code = %v, want %v", sErr.Code, aicrerrors.ErrCodeInternal)
+	}
+}
+
+func TestWaitForJobCompletion_WatchClosedAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "j", Namespace: "default"}}
+	client := fake.NewSimpleClientset(job)
+
+	watcher := watch.NewFake()
+	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		watcher.Stop()
+	}()
+
+	err := pod.WaitForJobCompletion(context.Background(), client, "default", "j", 20*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	var sErr *aicrerrors.StructuredError
+	if !stderrors.As(err, &sErr) {
+		t.Fatalf("expected *errors.StructuredError, got %T", err)
+	}
+	if sErr.Code != aicrerrors.ErrCodeTimeout {
+		t.Errorf("error code = %v, want %v", sErr.Code, aicrerrors.ErrCodeTimeout)
 	}
 }
