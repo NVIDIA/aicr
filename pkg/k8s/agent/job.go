@@ -21,6 +21,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -188,6 +189,16 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 			Add: []corev1.Capability{"SYS_ADMIN", "SYS_CHROOT"},
 		},
 	}
+
+	// Talos has no systemd and no /etc/os-release on the host filesystem; the
+	// Talos service collector reads service state from the Kubernetes API
+	// instead. Skipping these hostPath mounts is what unblocks agent
+	// deployment on Talos clusters (the systemd hostPath mount is the
+	// documented blocker — see issue #565).
+	if d.config.OS == oskind.Talos {
+		return
+	}
+
 	container.VolumeMounts = append(container.VolumeMounts,
 		corev1.VolumeMount{
 			Name:      "run-systemd",
@@ -289,6 +300,13 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 		envVars = append(envVars, corev1.EnvVar{
 			Name:  "AICR_MAX_NODES_PER_ENTRY",
 			Value: strconv.Itoa(d.config.MaxNodesPerEntry),
+		})
+	}
+
+	if d.config.OS != "" {
+		envVars = append(envVars, corev1.EnvVar{
+			Name:  "AICR_OS",
+			Value: d.config.OS,
 		})
 	}
 

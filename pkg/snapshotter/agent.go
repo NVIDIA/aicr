@@ -98,6 +98,11 @@ type AgentConfig struct {
 
 	// MaxNodesPerEntry limits node names per topology entry (0 = unlimited).
 	MaxNodesPerEntry int
+
+	// OS is the recipe OS criteria value (e.g., "ubuntu", "talos"). Drives
+	// per-OS pod construction and in-pod collector backend selection. When
+	// empty, defaults preserve the systemd-based behavior.
+	OS string
 }
 
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
@@ -118,6 +123,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		RequireGPU:         config.RequireGPU,
 		RuntimeClassName:   config.RuntimeClassName,
 		MaxNodesPerEntry:   config.MaxNodesPerEntry,
+		OS:                 config.OS,
 	}
 
 	deployer := agent.NewDeployer(clientset, agentConfig)

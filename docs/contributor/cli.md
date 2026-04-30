@@ -537,7 +537,7 @@ flowchart TD
 When using snapshot mode, the recipe builder extracts environment parameters from the snapshot:
 
 **From OS Measurements:**
-- **release subtype** → OS family (ubuntu, rhel, cos, amazonlinux)
+- **release subtype** → OS family (ubuntu, rhel, cos, amazonlinux, talos)
 
 **From Kubernetes Measurements:**
 - **server subtype** → K8s service provider (eks, gke, aks) inferred from images
@@ -2236,7 +2236,7 @@ volumes:
 ```bash
 # Invalid OS type
 aicr recipe --os invalid_os
-# Error: invalid os type "invalid_os", must be one of: ubuntu, rhel, cos
+# Error: invalid os type "invalid_os", must be one of: ubuntu, rhel, cos, amazonlinux, talos
 
 # Invalid version format
 aicr recipe --osv -1.0

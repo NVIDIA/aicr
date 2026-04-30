@@ -37,6 +37,7 @@ type Config struct {
 	RequireGPU         bool   // If true, request nvidia.com/gpu resource (required for CDI environments)
 	RuntimeClassName   string // If set, use this runtimeClassName on the pod and inject NVIDIA_VISIBLE_DEVICES=all (alternative to RequireGPU)
 	MaxNodesPerEntry   int    // Max node names per topology entry (0 = unlimited)
+	OS                 string // Recipe OS criteria value. When set to oskind.Talos, systemd hostPath mounts are skipped and the in-pod agent uses the Talos service backend.
 }
 
 // Deployer manages the deployment and lifecycle of the agent Job.

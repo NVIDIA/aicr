@@ -91,7 +91,7 @@ func recipeCmd() *cli.Command {
   - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke)
   - Accelerator type (e.g. h100, gb200, b200, a100, l40, rtx-pro-6000)
   - Workload intent (e.g. training, inference)
-  - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux)
+  - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux, talos)
   - Number of GPU nodes in the cluster
 
 The recipe returns a list of components with deployment order based on dependencies.

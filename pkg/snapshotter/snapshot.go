@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -82,12 +84,35 @@ func parseMaxNodesPerEntryEnv() int {
 	return n
 }
 
+// parseOSEnv reads the AICR_OS env var set by the agent Job, normalizes
+// it (lowercase, trimmed), and validates it against the supported OS
+// values in pkg/recipe/oskind. Returns the empty string when unset OR
+// when set to an unrecognized value (with a warning logged in the latter
+// case). Defense-in-depth — the controller-side CLI already validates,
+// but a silent fallback to the systemd default would be hard to debug if
+// AICR_OS ever leaked in via another path.
+func parseOSEnv() string {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv("AICR_OS")))
+	if val == "" {
+		return ""
+	}
+	if !oskind.IsKnown(val) {
+		slog.Warn("invalid AICR_OS value, ignoring (preserving default backend)",
+			slog.String("value", val))
+		return ""
+	}
+	return val
+}
+
 // measure collects configuration measurements from the current node.
 func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	if n.Factory == nil {
 		var opts []collector.Option
 		if maxNodes := parseMaxNodesPerEntryEnv(); maxNodes > 0 {
 			opts = append(opts, collector.WithMaxNodesPerEntry(maxNodes))
+		}
+		if osVal := parseOSEnv(); osVal != "" {
+			opts = append(opts, collector.WithOS(osVal))
 		}
 		n.Factory = collector.NewDefaultFactory(opts...)
 	}

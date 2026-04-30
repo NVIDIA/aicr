@@ -17,6 +17,7 @@ package snapshotter
 import (
 	"context"
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
@@ -315,4 +316,44 @@ func (m *mockCollector) Collect(ctx context.Context) (*measurement.Measurement, 
 		Type:     measurement.TypeK8s,
 		Subtypes: []measurement.Subtype{},
 	}, nil
+}
+
+func TestParseOSEnv(t *testing.T) {
+	// "unset" is the truly-absent case (the env var is removed). The other
+	// cases set AICR_OS to a literal value via t.Setenv.
+	tests := []struct {
+		name  string
+		env   string
+		unset bool
+		want  string
+	}{
+		{name: "unset", unset: true, want: ""},
+		{name: "set but empty", env: "", want: ""},
+		{name: "talos", env: "talos", want: "talos"},
+		{name: "ubuntu passthrough", env: "ubuntu", want: "ubuntu"},
+		{name: "uppercase normalized", env: "Talos", want: "talos"},
+		{name: "whitespace trimmed", env: "  talos  ", want: "talos"},
+		{name: "invalid value drops to default", env: "talsoo", want: ""},
+		{name: "unknown OS drops to default", env: "windows", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.unset {
+				prev, hadPrev := os.LookupEnv("AICR_OS")
+				if err := os.Unsetenv("AICR_OS"); err != nil {
+					t.Fatalf("os.Unsetenv() error = %v", err)
+				}
+				t.Cleanup(func() {
+					if hadPrev {
+						_ = os.Setenv("AICR_OS", prev)
+					}
+				})
+			} else {
+				t.Setenv("AICR_OS", tt.env)
+			}
+			if got := parseOSEnv(); got != tt.want {
+				t.Errorf("parseOSEnv() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }

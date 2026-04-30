@@ -17,8 +17,130 @@ package agent
 import (
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
+
+func TestBuildPodSpec_TalosSkipsSystemDHostPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		os             string
+		wantHostPath   bool
+		wantAICROSEnv  string
+		wantHostMounts []string
+	}{
+		{
+			name:           "talos: no systemd hostPath, AICR_OS env set",
+			os:             oskind.Talos,
+			wantHostPath:   false,
+			wantAICROSEnv:  oskind.Talos,
+			wantHostMounts: nil,
+		},
+		{
+			name:           "ubuntu: keeps systemd hostPath, AICR_OS env set",
+			os:             "ubuntu",
+			wantHostPath:   true,
+			wantAICROSEnv:  "ubuntu",
+			wantHostMounts: []string{"run-systemd", "host-os-release"},
+		},
+		{
+			name:           "empty OS: keeps systemd hostPath (legacy default), no AICR_OS env",
+			os:             "",
+			wantHostPath:   true,
+			wantAICROSEnv:  "",
+			wantHostMounts: []string{"run-systemd", "host-os-release"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDeployer(fake.NewClientset(), Config{
+				Namespace:          "default",
+				ServiceAccountName: "aicr",
+				JobName:            "aicr",
+				Image:              "test:latest",
+				Output:             "cm://default/aicr-snapshot",
+				Privileged:         true,
+				OS:                 tt.os,
+			})
+			job := d.buildJob()
+			spec := job.Spec.Template.Spec
+
+			gotHostMounts := []string{}
+			for _, v := range spec.Volumes {
+				if v.HostPath != nil {
+					gotHostMounts = append(gotHostMounts, v.Name)
+				}
+			}
+			if tt.wantHostPath && len(gotHostMounts) == 0 {
+				t.Errorf("expected host-path volumes for OS=%q, got none", tt.os)
+			}
+			if !tt.wantHostPath && len(gotHostMounts) != 0 {
+				t.Errorf("expected no host-path volumes for OS=%q, got %v", tt.os, gotHostMounts)
+			}
+			for _, want := range tt.wantHostMounts {
+				found := false
+				for _, got := range gotHostMounts {
+					if got == want {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected host-path volume %q for OS=%q, missing (have %v)", want, tt.os, gotHostMounts)
+				}
+			}
+
+			// Verify container VolumeMounts mirror the volume gating.
+			if len(spec.Containers) != 1 {
+				t.Fatalf("expected 1 container, got %d", len(spec.Containers))
+			}
+			gotMountPaths := []string{}
+			for _, m := range spec.Containers[0].VolumeMounts {
+				gotMountPaths = append(gotMountPaths, m.MountPath)
+			}
+			hasRunSystemD := false
+			hasHostOSRelease := false
+			for _, p := range gotMountPaths {
+				if p == "/run/systemd" {
+					hasRunSystemD = true
+				}
+				if p == "/etc/os-release" {
+					hasHostOSRelease = true
+				}
+			}
+			if tt.os == oskind.Talos && (hasRunSystemD || hasHostOSRelease) {
+				t.Errorf("Talos pod must not mount /run/systemd or /etc/os-release; got %v", gotMountPaths)
+			}
+			if tt.wantHostPath && (!hasRunSystemD || !hasHostOSRelease) {
+				t.Errorf("non-Talos privileged pod must mount /run/systemd and /etc/os-release; got %v", gotMountPaths)
+			}
+
+			// Verify AICR_OS env var. Distinguish "absent" from
+			// "present-but-empty": the in-pod parser treats both the
+			// same today, but the agent should never emit AICR_OS at
+			// all when OS is unset (avoids cluttering the env with a
+			// no-op variable that can confuse log greps and shells).
+			gotOSEnv := ""
+			foundOSEnv := false
+			for _, e := range spec.Containers[0].Env {
+				if e.Name == "AICR_OS" {
+					gotOSEnv = e.Value
+					foundOSEnv = true
+					break
+				}
+			}
+			wantPresent := tt.wantAICROSEnv != ""
+			if foundOSEnv != wantPresent {
+				t.Errorf("AICR_OS env presence = %v, want %v (OS=%q)", foundOSEnv, wantPresent, tt.os)
+			}
+			if foundOSEnv && gotOSEnv != tt.wantAICROSEnv {
+				t.Errorf("AICR_OS env value = %q, want %q (OS=%q)", gotOSEnv, tt.wantAICROSEnv, tt.os)
+			}
+		})
+	}
+}
 
 func TestToLocalObjectReferences(t *testing.T) {
 	tests := []struct {

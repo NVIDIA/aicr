@@ -20,6 +20,8 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/collector/gpu"
 	"github.com/NVIDIA/aicr/pkg/collector/systemd"
+	"github.com/NVIDIA/aicr/pkg/collector/talos"
+	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 )
 
 func TestDefaultCollectorFactory_CreateSystemDCollector(t *testing.T) {
@@ -39,6 +41,59 @@ func TestDefaultCollectorFactory_CreateSystemDCollector(t *testing.T) {
 
 	if len(systemdCollector.Services) != 1 || systemdCollector.Services[0] != "test.service" {
 		t.Errorf("Expected [test.service], got %v", systemdCollector.Services)
+	}
+}
+
+func TestDefaultCollectorFactory_CreateSystemDCollector_TalosBackend(t *testing.T) {
+	factory := NewDefaultFactory(WithOS(oskind.Talos))
+
+	col := factory.CreateSystemDCollector()
+	if col == nil {
+		t.Fatal("expected non-nil collector for OS=talos")
+	}
+
+	if _, ok := col.(*talos.ServiceCollector); !ok {
+		t.Errorf("expected *talos.ServiceCollector for OS=talos, got %T", col)
+	}
+}
+
+func TestDefaultCollectorFactory_CreateOSCollector_TalosBackend(t *testing.T) {
+	factory := NewDefaultFactory(WithOS(oskind.Talos))
+
+	col := factory.CreateOSCollector()
+	if col == nil {
+		t.Fatal("expected non-nil collector for OS=talos")
+	}
+
+	if _, ok := col.(*talos.OSCollector); !ok {
+		t.Errorf("expected *talos.OSCollector for OS=talos, got %T", col)
+	}
+}
+
+func TestDefaultCollectorFactory_CreateSystemDCollector_DefaultBackend(t *testing.T) {
+	tests := []struct {
+		name string
+		os   string
+	}{
+		{"empty OS preserves systemd default", ""},
+		{"ubuntu uses systemd", "ubuntu"},
+		{"rhel uses systemd", "rhel"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			factory := NewDefaultFactory(WithOS(tt.os))
+			col := factory.CreateSystemDCollector()
+			if _, ok := col.(*systemd.Collector); !ok {
+				t.Errorf("expected *systemd.Collector for OS=%q, got %T", tt.os, col)
+			}
+		})
+	}
+}
+
+func TestWithOS(t *testing.T) {
+	factory := NewDefaultFactory(WithOS("talos"))
+	if factory.OS != "talos" {
+		t.Errorf("expected OS=talos, got %q", factory.OS)
 	}
 }
 

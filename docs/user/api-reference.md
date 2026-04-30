@@ -120,7 +120,7 @@ Generate an optimized configuration recipe based on environment parameters.
 | `accelerator` | string | any | GPU type: `h100`, `gb200`, `b200`, `a100`, `l40`, `rtx-pro-6000`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
-| `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `any` |
+| `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `kubeflow`, `any` |
 | `nodes` | integer | 0 | GPU node count (0 = any) |
 

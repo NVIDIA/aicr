@@ -24,6 +24,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -155,6 +156,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Value:    0,
 			Category: "Output",
 		},
+		&cli.StringFlag{
+			Name:     "os",
+			Usage:    "Node OS family (ubuntu, rhel, cos, amazonlinux, talos). Selects the per-OS pod configuration and service collector backend. Talos skips systemd hostPath mounts and uses the Kubernetes-API service backend.",
+			Sources:  cli.EnvVars("AICR_OS"),
+			Category: "Agent Deployment",
+		},
 		outputFlag,
 		formatFlag(),
 		kubeconfigFlag,
@@ -233,8 +240,20 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "os"); err != nil {
 				return err
+			}
+
+			// Normalize/validate the --os value via the recipe parser so that
+			// only documented OS criteria values reach the agent and the
+			// in-pod collector factory.
+			osVal := cmd.String("os")
+			if osVal != "" {
+				parsedOS, err := recipe.ParseCriteriaOSType(osVal)
+				if err != nil {
+					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --os value", err)
+				}
+				osVal = string(parsedOS)
 			}
 
 			// Mutual exclusion: --require-gpu and --runtime-class cannot be used together
@@ -259,6 +278,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			// Create factory
 			factory := collector.NewDefaultFactory(
 				collector.WithMaxNodesPerEntry(cmd.Int("max-nodes-per-entry")),
+				collector.WithOS(osVal),
 			)
 
 			// Create output serializer
@@ -322,6 +342,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				RuntimeClassName:   cmd.String("runtime-class"),
 				TemplatePath:       tmplOpts.templatePath,
 				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
+				OS:                 osVal,
 			}
 
 			return ns.Measure(ctx)
