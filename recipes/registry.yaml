@@ -112,7 +112,9 @@ components:
     displayName: gke-nccl-tcpxo
     valueOverrideKeys:
       - gkenccltcpxo
-    manifest:
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
       defaultNamespace: kube-system
 
   - name: aws-efa
