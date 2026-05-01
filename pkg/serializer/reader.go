@@ -159,8 +159,10 @@ func NewFileReader(format Format, filePath string) (*Reader, error) {
 		name := fmt.Sprintf("aicr-%d.tmp", time.Now().UnixNano())
 		tempFilePath := filepath.Join(os.TempDir(), name)
 		httpReader := NewHTTPReader()
-		if err = httpReader.Download(filePath, tempFilePath); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to download remote file", err)
+		ctx, cancel := context.WithTimeout(context.Background(), defaults.HTTPClientTimeout)
+		defer cancel()
+		if err = httpReader.DownloadWithContext(ctx, filePath, tempFilePath); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeUnavailable, "failed to download remote file", err)
 		}
 		file, err = os.Open(tempFilePath)
 	} else {

@@ -144,7 +144,9 @@ func NewStdoutWriter(format Format) *Writer {
 // It's safe to call Close multiple times or on stdout-based writers.
 func (w *Writer) Close() error {
 	if w.closer != nil {
-		return w.closer.Close()
+		if err := w.closer.Close(); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to close writer", err)
+		}
 	}
 	return nil
 }
