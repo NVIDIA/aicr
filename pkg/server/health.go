@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"time"
 
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -31,7 +32,9 @@ type healthResponse struct {
 // handleHealth handles GET /health
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", http.MethodGet)
+		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+			"Method not allowed", false, map[string]any{"method": r.Method})
 		return
 	}
 
@@ -46,7 +49,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // handleReady handles GET /ready
 func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		w.Header().Set("Allow", http.MethodGet)
+		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+			"Method not allowed", false, map[string]any{"method": r.Method})
 		return
 	}
 

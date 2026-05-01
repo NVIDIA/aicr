@@ -176,8 +176,49 @@ func TestWriteErrorFromErr_StructuredErrorMapsStatusAndDetails(t *testing.T) {
 	if resp.Details["extra"].(string) != "yes" {
 		t.Fatalf("expected extra=yes, got %#v", resp.Details["extra"])
 	}
-	if resp.Details["error"].(string) != "db is down" {
-		t.Fatalf("expected error cause propagated, got %#v", resp.Details["error"])
+	// 5xx errors must NOT leak the underlying cause to clients (only logged
+	// server-side); the cause string is omitted from response details.
+	if _, present := resp.Details["error"]; present {
+		t.Fatalf("expected cause to be withheld for 5xx, got error=%v", resp.Details["error"])
+	}
+}
+
+func TestWriteErrorFromErr_4xxIncludesCause(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	cause := errors.New("missing field 'name'")
+	err := aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "validation failed", cause)
+
+	WriteErrorFromErr(w, req, err, "fallback", nil)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp errorResponse
+	if uerr := json.Unmarshal(w.Body.Bytes(), &resp); uerr != nil {
+		t.Fatalf("failed to unmarshal response: %v", uerr)
+	}
+	if resp.Details == nil || resp.Details["error"].(string) != "missing field 'name'" {
+		t.Fatalf("expected 4xx response to include cause string, got %#v", resp.Details)
+	}
+}
+
+func TestWriteErrorFromErr_UnstructuredErrorWithholdsCause(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	WriteErrorFromErr(w, req, errors.New("kubeconfig path /home/user/.kube/config not readable"), "internal error", nil)
+
+	var resp errorResponse
+	if uerr := json.Unmarshal(w.Body.Bytes(), &resp); uerr != nil {
+		t.Fatalf("failed to unmarshal response: %v", uerr)
+	}
+	if resp.Details != nil {
+		if _, present := resp.Details["error"]; present {
+			t.Fatalf("unstructured error must not leak Error() text, got %v", resp.Details["error"])
+		}
 	}
 }
 
@@ -244,7 +285,8 @@ func TestWriteErrorFromErr_NonStructuredFallsBackToInternal(t *testing.T) {
 	if resp.Details == nil || resp.Details["x"].(string) != "y" {
 		t.Fatalf("expected details to include x=y, got %#v", resp.Details)
 	}
-	if resp.Details["error"].(string) != "boom" {
-		t.Fatalf("expected details error=boom, got %#v", resp.Details["error"])
+	// Unstructured errors must NOT leak Error() text to clients (5xx).
+	if _, present := resp.Details["error"]; present {
+		t.Fatalf("expected unstructured cause to be withheld, got error=%v", resp.Details["error"])
 	}
 }

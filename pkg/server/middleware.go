@@ -33,12 +33,38 @@ func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 			s.requestIDMiddleware(
 				s.panicRecoveryMiddleware( // Recover first to prevent token waste on panics
 					s.rateLimitMiddleware(
-						s.loggingMiddleware(handler),
+						s.bodyLimitMiddleware(
+							s.timeoutMiddleware(
+								s.loggingMiddleware(handler),
+							),
+						),
 					),
 				),
 			),
 		),
 	)
+}
+
+// timeoutMiddleware applies a per-request context timeout per CLAUDE.md.
+// Without this, a slow upstream call would only be bounded by the server's
+// WriteTimeout, which kills the connection but leaves the goroutine running.
+func (s *Server) timeoutMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	}
+}
+
+// bodyLimitMiddleware bounds request body size as defense against
+// unbounded JSON payloads. Handlers may apply a tighter cap themselves.
+func (s *Server) bodyLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, defaults.ServerMaxBodyBytes)
+		}
+		next.ServeHTTP(w, r)
+	}
 }
 
 // Middleware implementations
@@ -94,7 +120,7 @@ func (s *Server) rateLimitMiddleware(next http.HandlerFunc) http.HandlerFunc {
 		// Add rate limit headers
 		w.Header().Set("X-RateLimit-Limit", fmt.Sprintf("%d", int(s.config.RateLimit)))
 		w.Header().Set("X-RateLimit-Remaining", fmt.Sprintf("%d", int(s.rateLimiter.Tokens())))
-		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(time.Second).Unix()))
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprintf("%d", time.Now().Add(defaults.ServerRateLimitWindow).Unix()))
 
 		next.ServeHTTP(w, r)
 	}

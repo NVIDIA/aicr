@@ -118,6 +118,12 @@ func mergeDetails(a, b map[string]any) map[string]any {
 
 // WriteErrorFromErr writes an ErrorResponse based on a canonical structured error.
 // If err is not a *errors.StructuredError, it falls back to INTERNAL.
+//
+// The underlying cause string is only embedded in the response details for
+// 4xx errors (where the cause is typically validator output the client
+// needs). For 5xx errors the cause is logged but withheld from the
+// response to avoid leaking internal paths, kubeconfig contents, or
+// service hostnames to remote clients.
 func WriteErrorFromErr(w http.ResponseWriter, r *http.Request, err error, fallbackMessage string, extraDetails map[string]any) {
 	if err == nil {
 		WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
@@ -132,15 +138,19 @@ func WriteErrorFromErr(w http.ResponseWriter, r *http.Request, err error, fallba
 			msg = fallbackMessage
 		}
 
+		status := httpStatusFromCode(se.Code)
 		details := mergeDetails(se.Context, extraDetails)
 		if se.Cause != nil {
-			details = mergeDetails(details, map[string]any{"error": se.Cause.Error()})
+			if status < http.StatusInternalServerError {
+				details = mergeDetails(details, map[string]any{"error": se.Cause.Error()})
+			}
 		}
 
-		WriteError(w, r, httpStatusFromCode(se.Code), se.Code, msg, retryableFromCode(se.Code), details)
+		WriteError(w, r, status, se.Code, msg, retryableFromCode(se.Code), details)
 		return
 	}
 
+	// Unstructured error → 500. Do not leak Error() text to clients.
 	WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
-		fallbackMessage, true, mergeDetails(extraDetails, map[string]any{"error": err.Error()}))
+		fallbackMessage, true, extraDetails)
 }

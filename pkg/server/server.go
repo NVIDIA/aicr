@@ -114,9 +114,9 @@ func New(opts ...Option) *Server {
 	s.httpServer = &http.Server{
 		Addr:              fmt.Sprintf("%s:%d", s.config.Address, s.config.Port),
 		Handler:           mux,
-		ReadTimeout:       config.ReadTimeout,
-		WriteTimeout:      config.WriteTimeout,
-		IdleTimeout:       config.IdleTimeout,
+		ReadTimeout:       s.config.ReadTimeout,
+		WriteTimeout:      s.config.WriteTimeout,
+		IdleTimeout:       s.config.IdleTimeout,
 		MaxHeaderBytes:    defaults.ServerMaxHeaderBytes,    // 64KB limit to prevent header-based attacks
 		ReadHeaderTimeout: defaults.ServerReadHeaderTimeout, // Prevent slow header attacks
 	}
@@ -137,12 +137,16 @@ func (s *Server) Start(ctx context.Context) error {
 
 	slog.Debug("server start", "port", s.httpServer.Addr)
 
-	// Start server in goroutine
+	// Start server in goroutine. Always send on errChan (nil for clean exit)
+	// so the consumer below is deterministic even when the server crashes
+	// after Shutdown is initiated.
 	errChan := make(chan error, 1)
 	go func() {
-		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errChan <- err
+		err := s.httpServer.ListenAndServe()
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
 		}
+		errChan <- err
 	}()
 
 	// Wait for context cancellation or server error
@@ -151,6 +155,9 @@ func (s *Server) Start(ctx context.Context) error {
 		// Use fresh context for shutdown - parent context is already canceled
 		return s.Shutdown(context.Background()) //nolint:contextcheck // intentional: need fresh context for graceful shutdown
 	case err := <-errChan:
+		if err == nil {
+			return nil
+		}
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "http server error", err)
 	}
 }

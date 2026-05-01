@@ -388,6 +388,22 @@ const (
 	// inputs; 1 MiB is well above any legitimate payload while bounding
 	// per-request memory.
 	MaxRecipePOSTBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
+	// ServerMaxBodyBytes is the default per-request body cap applied as a
+	// fallback when a handler does not configure its own MaxBytesReader.
+	// Set to MaxBundlePOSTBytes since bundle is the largest legitimate body.
+	ServerMaxBodyBytes int64 = 8 * 1024 * 1024 // 8 MiB
+)
+
+// Server-wide handler defaults.
+const (
+	// ServerHandlerTimeout is the default per-request handler timeout used by
+	// the timeout middleware when a handler-specific timeout is not provided.
+	ServerHandlerTimeout = 30 * time.Second
+
+	// ServerRateLimitWindow is the rate-limit window length advertised to
+	// clients via X-RateLimit-Reset. Mirrors the limiter's per-second model.
+	ServerRateLimitWindow = 1 * time.Second
 )
 
 // Server rate limiting constants.
