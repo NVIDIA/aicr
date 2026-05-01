@@ -391,8 +391,9 @@ const (
 
 	// ServerMaxBodyBytes is the default per-request body cap applied as a
 	// fallback when a handler does not configure its own MaxBytesReader.
-	// Set to MaxBundlePOSTBytes since bundle is the largest legitimate body.
-	ServerMaxBodyBytes int64 = 8 * 1024 * 1024 // 8 MiB
+	// Derived from MaxBundlePOSTBytes (the largest legitimate body) so the
+	// fallback cannot drift if the bundle limit is ever retuned.
+	ServerMaxBodyBytes = MaxBundlePOSTBytes
 )
 
 // Server-wide handler defaults.

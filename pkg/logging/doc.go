@@ -28,8 +28,7 @@
 //     gated on NO_COLOR (https://no-color.org/) and TTY detection
 //   - Structured JSON logging to stderr
 //   - Text logging with full metadata for debugging
-//   - Environment-based log level configuration (AICR_LOG_LEVEL,
-//     with LOG_LEVEL honored as a fallback for backwards compatibility)
+//   - Environment-based log level configuration (AICR_LOG_LEVEL)
 //   - Automatic module and version context
 //   - Source location tracking for debug logs
 //   - Flexible log level parsing
@@ -98,8 +97,7 @@
 //	AICR_LOG_LEVEL=debug aicr snapshot
 //	AICR_LOG_LEVEL=error aicrd
 //
-// If AICR_LOG_LEVEL is not set, the legacy LOG_LEVEL is honored as a
-// fallback. If neither is set, defaults to INFO level.
+// If AICR_LOG_LEVEL is not set, defaults to INFO level.
 //
 // CLI color output is suppressed when:
 //   - The NO_COLOR environment variable is set (any value), or

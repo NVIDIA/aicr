@@ -15,6 +15,7 @@ require (
 	github.com/sigstore/sigstore v1.10.5
 	github.com/sigstore/sigstore-go v1.1.4
 	github.com/stretchr/testify v1.11.1
+	github.com/theupdateframework/go-tuf/v2 v2.4.1
 	github.com/urfave/cli/v3 v3.8.0
 	golang.org/x/sync v0.20.0
 	golang.org/x/term v0.42.0
@@ -127,7 +128,6 @@ require (
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/theupdateframework/go-tuf v0.7.0 // indirect
-	github.com/theupdateframework/go-tuf/v2 v2.4.1 // indirect
 	github.com/transparency-dev/formats v0.1.0 // indirect
 	github.com/transparency-dev/merkle v0.0.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect

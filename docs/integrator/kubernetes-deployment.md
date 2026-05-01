@@ -390,7 +390,7 @@ CLI tests use [Kyverno Chainsaw](https://github.com/kyverno/chainsaw) for declar
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | 8080 | HTTP server port |
-| `AICR_LOG_LEVEL` | info | Logging level: debug, info, warn, error (`LOG_LEVEL` is honored as a legacy fallback) |
+| `AICR_LOG_LEVEL` | info | Logging level: debug, info, warn, error |
 | `RATE_LIMIT` | 100 | Requests per second |
 | `RATE_BURST` | 200 | Burst capacity |
 | `READ_TIMEOUT` | 30s | HTTP read timeout |

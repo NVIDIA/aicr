@@ -800,20 +800,23 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string) (*Criteria
 	httpReader := serializer.NewHTTPReader()
 	data, err := httpReader.ReadWithContext(ctx, url)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeUnavailable, "failed to read criteria from URL", err)
+		// ReadWithContext returns properly-coded errors: ErrCodeInvalidRequest
+		// for oversized bodies, ErrCodeUnavailable for transport failures.
+		// Preserve the inner code rather than overwriting it.
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeUnavailable, "failed to read criteria from URL")
 	}
 
 	// Determine format from URL extension
 	format := serializer.FormatFromPath(url)
 	reader, err := serializer.NewReader(format, strings.NewReader(string(data)))
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to create reader for criteria data", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to create reader for criteria data")
 	}
 	defer reader.Close()
 
 	var raw rawRecipeCriteria
 	if err := reader.Deserialize(&raw); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to deserialize criteria", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to deserialize criteria")
 	}
 
 	// Validate kind and apiVersion

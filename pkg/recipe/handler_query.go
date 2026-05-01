@@ -58,15 +58,13 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		// Bound request body to defend against memory exhaustion.
 		bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
 		defer func() {
-			if r.Body != nil {
-				// Drain remaining bytes so the connection can be reused, then
-				// close. Errors here are debug-only.
-				if _, drainErr := io.Copy(io.Discard, r.Body); drainErr != nil {
-					logger.Debug("query request body drain failed", "error", drainErr)
-				}
-				if closeErr := r.Body.Close(); closeErr != nil {
-					logger.Debug("query request body close failed", "error", closeErr)
-				}
+			// Drain via the bounded reader so any remaining bytes still
+			// count against MaxBytesReader. Errors are debug-only.
+			if _, drainErr := io.Copy(io.Discard, bounded); drainErr != nil {
+				logger.Debug("query request body drain failed", "error", drainErr)
+			}
+			if closeErr := bounded.Close(); closeErr != nil {
+				logger.Debug("query request body close failed", "error", closeErr)
 			}
 		}()
 		req, parseErr := parseQueryRequestFromBody(bounded, r.Header.Get("Content-Type"))

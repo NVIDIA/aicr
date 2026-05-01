@@ -338,7 +338,7 @@ func TestHTTPReader_Read_Success(t *testing.T) {
 	defer server.Close()
 
 	reader := NewHTTPReader()
-	data, err := reader.Read(server.URL)
+	data, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Read() failed: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestHTTPReader_Read_Success(t *testing.T) {
 
 func TestHTTPReader_Read_EmptyURL(t *testing.T) {
 	reader := NewHTTPReader()
-	_, err := reader.Read("")
+	_, err := reader.ReadWithContext(context.Background(), "")
 	if err == nil {
 		t.Error("expected error for empty URL")
 	}
@@ -366,7 +366,7 @@ func TestHTTPReader_Read_NotFound(t *testing.T) {
 	defer server.Close()
 
 	reader := NewHTTPReader()
-	_, err := reader.Read(server.URL)
+	_, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err == nil {
 		t.Error("expected error for 404 status")
 	}
@@ -379,7 +379,7 @@ func TestHTTPReader_Read_ServerError(t *testing.T) {
 	defer server.Close()
 
 	reader := NewHTTPReader()
-	_, err := reader.Read(server.URL)
+	_, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err == nil {
 		t.Error("expected error for 500 status")
 	}
@@ -387,7 +387,7 @@ func TestHTTPReader_Read_ServerError(t *testing.T) {
 
 func TestHTTPReader_Read_InvalidURL(t *testing.T) {
 	reader := NewHTTPReader()
-	_, err := reader.Read("not-a-valid-url")
+	_, err := reader.ReadWithContext(context.Background(), "not-a-valid-url")
 	if err == nil {
 		t.Error("expected error for invalid URL")
 	}
@@ -405,7 +405,7 @@ func TestHTTPReader_Read_JSONResponse(t *testing.T) {
 	defer server.Close()
 
 	reader := NewHTTPReader()
-	data, err := reader.Read(server.URL)
+	data, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Read() failed: %v", err)
 	}
@@ -432,7 +432,7 @@ func TestHTTPReader_Read_SetsUserAgent(t *testing.T) {
 	defer server.Close()
 
 	reader := NewHTTPReader(WithUserAgent(customUserAgent))
-	_, err := reader.Read(server.URL)
+	_, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Read() failed: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestHTTPReader_ReadToFile_Success(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test-output.txt")
 
 	reader := NewHTTPReader()
-	err := reader.Download(server.URL, filePath)
+	err := reader.DownloadWithContext(context.Background(), server.URL, filePath)
 	if err != nil {
 		t.Fatalf("ReadToFile() failed: %v", err)
 	}
@@ -506,7 +506,7 @@ func TestHTTPReader_ReadToFile_ReadError(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test-output.txt")
 
 	reader := NewHTTPReader()
-	err := reader.Download("not-a-valid-url", filePath)
+	err := reader.DownloadWithContext(context.Background(), "not-a-valid-url", filePath)
 	if err == nil {
 		t.Error("expected error for invalid URL")
 	}
@@ -524,7 +524,7 @@ func TestHTTPReader_ReadToFile_WriteError(t *testing.T) {
 	invalidPath := "/nonexistent/directory/file.txt"
 
 	reader := NewHTTPReader()
-	err := reader.Download(server.URL, invalidPath)
+	err := reader.DownloadWithContext(context.Background(), server.URL, invalidPath)
 	if err == nil {
 		t.Error("expected error for invalid file path")
 	}
@@ -545,7 +545,7 @@ func TestHTTPReader_ReadToFile_JSONFile(t *testing.T) {
 	filePath := filepath.Join(tmpDir, "test.json")
 
 	reader := NewHTTPReader()
-	err := reader.Download(server.URL, filePath)
+	err := reader.DownloadWithContext(context.Background(), server.URL, filePath)
 	if err != nil {
 		t.Fatalf("ReadToFile() failed: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestHTTPReader_Read_UserAgentHeader(t *testing.T) {
 
 	// Note: The current implementation doesn't set User-Agent header in requests
 	// This test documents current behavior
-	_, err := reader.Read(server.URL)
+	_, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Read() failed: %v", err)
 	}
@@ -605,7 +605,7 @@ func TestHTTPReader_Read_LargeResponse(t *testing.T) {
 	defer server.Close()
 
 	reader := NewHTTPReader()
-	data, err := reader.Read(server.URL)
+	data, err := reader.ReadWithContext(context.Background(), server.URL)
 	if err != nil {
 		t.Fatalf("Read() failed: %v", err)
 	}
@@ -628,7 +628,7 @@ func TestHTTPReader_Read_MultipleRequests(t *testing.T) {
 
 	// Make multiple requests with same reader
 	for i := 1; i <= 3; i++ {
-		data, err := reader.Read(server.URL)
+		data, err := reader.ReadWithContext(context.Background(), server.URL)
 		if err != nil {
 			t.Fatalf("Read() request %d failed: %v", i, err)
 		}

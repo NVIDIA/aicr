@@ -305,17 +305,6 @@ func (r *HTTPReader) apply() {
 	tr.TLSClientConfig.InsecureSkipVerify = *r.InsecureSkipVerify
 }
 
-// Read fetches data from the specified URL and returns it as a byte slice.
-// The request is bounded by the HTTPReader's TotalTimeout.
-//
-// Deprecated: use ReadWithContext to honor caller cancellation. Read derives
-// a context from context.Background() with TotalTimeout; callers cannot cancel.
-func (r *HTTPReader) Read(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), *r.TotalTimeout)
-	defer cancel()
-	return r.ReadWithContext(ctx, url)
-}
-
 // ReadWithContext fetches data from the specified URL and returns it as a byte slice.
 // The request is bound to the provided context for cancellation and deadlines.
 // Callers must provide a non-nil context.
@@ -360,23 +349,15 @@ func (r *HTTPReader) ReadWithContext(ctx context.Context, url string) ([]byte, e
 	return data, nil
 }
 
-// Download reads data from the specified URL and writes it to the given file path.
-// The request is bounded by the HTTPReader's TotalTimeout.
-//
-// Deprecated: use DownloadWithContext to honor caller cancellation. Download
-// derives a context from context.Background() with TotalTimeout; callers cannot cancel.
-func (r *HTTPReader) Download(url, filePath string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), *r.TotalTimeout)
-	defer cancel()
-	return r.DownloadWithContext(ctx, url, filePath)
-}
-
 // DownloadWithContext reads data from the specified URL and writes it to the given file path.
 // The request is bound to the provided context for cancellation and deadlines.
 func (r *HTTPReader) DownloadWithContext(ctx context.Context, url, filePath string) error {
 	data, err := r.ReadWithContext(ctx, url)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeUnavailable, fmt.Sprintf("failed to read from url %s", url), err)
+		// ReadWithContext already returns properly-coded errors:
+		// ErrCodeInvalidRequest for oversized bodies, ErrCodeUnavailable
+		// for transport. Preserve the inner code rather than overwriting.
+		return errors.PropagateOrWrap(err, errors.ErrCodeUnavailable, fmt.Sprintf("failed to read from url %s", url))
 	}
 
 	if err := os.WriteFile(filepath.Clean(filePath), data, 0600); err != nil { //nolint:gosec // G703 -- path from caller-provided download target

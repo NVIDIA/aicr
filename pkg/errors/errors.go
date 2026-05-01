@@ -14,7 +14,10 @@
 
 package errors
 
-import "fmt"
+import (
+	stderrors "errors"
+	"fmt"
+)
 
 // ErrorCode represents a structured error classification.
 type ErrorCode string
@@ -112,4 +115,20 @@ func WrapWithContext(code ErrorCode, message string, cause error, context map[st
 		Cause:   cause,
 		Context: context,
 	}
+}
+
+// PropagateOrWrap returns err as-is when it already carries a *StructuredError
+// in its Unwrap chain (preserving the inner Code), otherwise wraps it with the
+// supplied fallback code and message. Use this when the called function may
+// return a coded error you want to preserve, but its non-coded errors still
+// need classification at this layer.
+func PropagateOrWrap(err error, fallbackCode ErrorCode, message string) error {
+	if err == nil {
+		return nil
+	}
+	var se *StructuredError
+	if stderrors.As(err, &se) {
+		return err
+	}
+	return Wrap(fallbackCode, message, err)
 }

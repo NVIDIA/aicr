@@ -141,12 +141,15 @@ func NewStdoutWriter(format Format) *Writer {
 
 // Close releases any resources associated with the Writer.
 // It should be called when done writing, especially for file-based writers.
-// It's safe to call Close multiple times or on stdout-based writers.
+// Idempotent: subsequent calls are no-ops.
 func (w *Writer) Close() error {
-	if w.closer != nil {
-		if err := w.closer.Close(); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to close writer", err)
-		}
+	if w.closer == nil {
+		return nil
+	}
+	closer := w.closer
+	w.closer = nil // mark closed first so retries no-op even if Close panics
+	if err := closer.Close(); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to close writer", err)
 	}
 	return nil
 }

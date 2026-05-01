@@ -98,13 +98,15 @@ func (t *TemplateWriter) Serialize(ctx context.Context, data any) error {
 }
 
 // Close releases any resources associated with the TemplateWriter.
-// It should be called when done writing, especially for file-based writers.
-// It's safe to call Close multiple times or on stdout-based writers.
+// Idempotent: subsequent calls are no-ops.
 func (t *TemplateWriter) Close() error {
-	if t.closer != nil {
-		if err := t.closer.Close(); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to close template writer", err)
-		}
+	if t.closer == nil {
+		return nil
+	}
+	closer := t.closer
+	t.closer = nil // mark closed first so retries no-op even if Close panics
+	if err := closer.Close(); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to close template writer", err)
 	}
 	return nil
 }

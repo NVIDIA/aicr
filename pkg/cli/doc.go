@@ -152,7 +152,6 @@
 // # Environment Variables
 //
 //	AICR_LOG_LEVEL         Set logging verbosity (debug, info, warn, error)
-//	LOG_LEVEL              Legacy fallback for AICR_LOG_LEVEL (still honored)
 //	AICR_LOG_PREFIX        Override the CLI log prefix (default: "cli")
 //	NO_COLOR               Suppress ANSI color codes in CLI logger output
 //	NODE_NAME              Override node name for Kubernetes collection

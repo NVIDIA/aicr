@@ -282,7 +282,9 @@ func (b *BaseBundler) GenerateFileFromTemplate(ctx context.Context, getTemplate 
 	templateName, outputPath string, data any, perm os.FileMode) error {
 
 	if err := b.CheckContext(ctx); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "context canceled before template generation", err)
+		// CheckContext already wraps ctx.Err() with ErrCodeTimeout; preserve
+		// the inner code rather than re-wrapping with ErrCodeInternal.
+		return err
 	}
 
 	tmpl, ok := getTemplate(templateName)

@@ -141,10 +141,18 @@ return errors.WrapWithContext(errors.ErrCodeTimeout, "operation timed out", ctx.
 
 **Error Codes:** `ErrCodeNotFound`, `ErrCodeUnauthorized`, `ErrCodeTimeout`, `ErrCodeInternal`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`, `ErrCodeMethodNotAllowed`, `ErrCodeRateLimitExceeded`, `ErrCodeConflict` (resource state conflict, e.g., already exists / version mismatch — distinct from `ErrCodeInvalidRequest` because the request itself is well-formed; maps to HTTP 409).
 
-**Code-based matching with `errors.Is`:** `*StructuredError.Is` reports a match when the target is a `*StructuredError` with the same `Code`. Prefer this over `errors.As` + manual code comparison:
+**Code-based matching with `errors.Is`:** `*StructuredError.Is` reports a match when the target is a `*StructuredError` with the same `Code`. Prefer this over `errors.As` + manual code comparison.
+
+In files that import `pkg/errors`, the stdlib `errors` package is aliased as `stderrors`, so the call site uses `stderrors.Is`:
+
 ```go
+import (
+    stderrors "errors"
+    "github.com/NVIDIA/aicr/pkg/errors"
+)
+
 // GOOD - idiomatic, works through wrap chains
-if errors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
     // ...
 }
 ```
@@ -364,6 +372,7 @@ resp, err := client.Do(req)
 ```
 
 **Bound response bodies before `io.ReadAll`.** Outbound `io.ReadAll(resp.Body)` is unbounded by default; a hostile or buggy server can exhaust memory. Wrap with `io.LimitReader` against a `pkg/defaults` cap and reject anything that exceeds it:
+
 ```go
 // GOOD
 limited := io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit+1)
@@ -397,7 +406,7 @@ slog.Info(scanner.Text())
 
 **CLI user-facing output goes to `cmd.Root().Writer`, not stdout.** CLI commands write success messages and query results via `fmt.Fprint*(cmd.Root().Writer, ...)` (or `io.Writer` parameter) so output is testable and redirectable. `fmt.Println`/`fmt.Printf` directly to stdout breaks the test pattern in `pkg/cli` (root_test captures via `cmd.Writer`).
 
-**Log level env var:** `AICR_LOG_LEVEL` (legacy `LOG_LEVEL` is honored as a fallback). The CLI logger also honors `NO_COLOR` (de-facto standard) and TTY detection — color is suppressed when stderr is not a terminal or `NO_COLOR` is set.
+**Log level env var:** `AICR_LOG_LEVEL` (only the prefixed name is honored; an unprefixed `LOG_LEVEL` was briefly documented as a legacy fallback but removed because it collides with system tooling). The CLI logger also honors `NO_COLOR` (de-facto standard, see <https://no-color.org/>) and TTY detection — color is suppressed when stderr is not a terminal or `NO_COLOR` is set.
 
 ## Constants Rules
 
@@ -571,7 +580,7 @@ net. When renaming or removing a heading:
 | Hardcode resource names from templates | Extract to named constants to keep code and templates in sync |
 | Unbounded `io.ReadAll(resp.Body)` on outbound HTTP | Wrap with `io.LimitReader` against `defaults.HTTPResponseBodyLimit` |
 | Embed `Cause.Error()` in 5xx response details | Use `server.WriteErrorFromErr` (4xx-only cause leak) |
-| Use `LOG_LEVEL` directly | Use `AICR_LOG_LEVEL` (legacy `LOG_LEVEL` is honored as fallback) |
+| Use unprefixed `LOG_LEVEL` | Use `AICR_LOG_LEVEL` (only the prefixed name is read) |
 | `fmt.Println`/`fmt.Printf` to stdout in CLI commands | Write to `cmd.Root().Writer` (or `io.Writer` parameter) |
 
 ## Pull Request Requirements

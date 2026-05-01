@@ -199,11 +199,15 @@ func writeQueryResult(w io.Writer, val any, format serializer.Format) error {
 
 	switch v := val.(type) {
 	case string:
-		_, err := fmt.Fprintln(w, v)
-		return err
+		if _, err := fmt.Fprintln(w, v); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write query result", err)
+		}
+		return nil
 	case bool, int, int64, float64:
-		_, err := fmt.Fprintln(w, v)
-		return err
+		if _, err := fmt.Fprintln(w, v); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write query result", err)
+		}
+		return nil
 	default:
 		return writeComplexValue(w, val, format)
 	}
@@ -215,14 +219,18 @@ func writeComplexValue(w io.Writer, val any, format serializer.Format) error {
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to marshal JSON", err)
 		}
-		_, err = fmt.Fprintln(w, string(data))
-		return err
+		if _, err := fmt.Fprintln(w, string(data)); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write JSON output", err)
+		}
+		return nil
 	}
 
 	data, err := yaml.Marshal(val)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal YAML", err)
 	}
-	_, err = fmt.Fprint(w, string(data))
-	return err
+	if _, err := fmt.Fprint(w, string(data)); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write YAML output", err)
+	}
+	return nil
 }

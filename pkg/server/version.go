@@ -46,11 +46,13 @@ func negotiateAPIVersion(r *http.Request) string {
 		if i := strings.Index(mediaType, ";"); i >= 0 {
 			mediaType = strings.TrimSpace(mediaType[:i])
 		}
-		if !strings.HasPrefix(mediaType, vendorMediaTypePrefix) {
+		// RFC 7231 §3.1.1.1: media types are case-insensitive.
+		lower := strings.ToLower(mediaType)
+		if !strings.HasPrefix(lower, vendorMediaTypePrefix) {
 			continue
 		}
 		// "application/vnd.nvidia.aicr.v2+json" → "v2+json" → "v2"
-		rest := strings.TrimPrefix(mediaType, vendorMediaTypePrefix)
+		rest := strings.TrimPrefix(lower, vendorMediaTypePrefix)
 		version := rest
 		if i := strings.Index(rest, "+"); i >= 0 {
 			version = rest[:i]

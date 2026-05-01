@@ -44,16 +44,42 @@ package trust
 
 import (
 	"context"
+	stderrors "errors"
 	"log/slog"
 
 	prototrustroot "github.com/sigstore/protobuf-specs/gen/pb-go/trustroot/v1"
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/tuf"
+	tufmd "github.com/theupdateframework/go-tuf/v2/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
+
+// classifyTUFError maps a go-tuf error to the appropriate pkg/errors code.
+// Transport/download failures (network errors, HTTP non-2xx, length-mismatch
+// during fetch) → ErrCodeUnavailable; signature/structure verification
+// failures (bad signature, expired metadata, hash mismatch on a verified
+// blob) → ErrCodeUnauthorized.
+func classifyTUFError(err error) errors.ErrorCode {
+	var (
+		dlErr    *tufmd.ErrDownload
+		dlHTTP   *tufmd.ErrDownloadHTTP
+		dlLen    *tufmd.ErrDownloadLengthMismatch
+		unsigned *tufmd.ErrUnsignedMetadata
+		hashMis  *tufmd.ErrLengthOrHashMismatch
+		expired  *tufmd.ErrExpiredMetadata
+	)
+	switch {
+	case stderrors.As(err, &dlErr), stderrors.As(err, &dlHTTP), stderrors.As(err, &dlLen):
+		return errors.ErrCodeUnavailable
+	case stderrors.As(err, &unsigned), stderrors.As(err, &hashMis), stderrors.As(err, &expired):
+		return errors.ErrCodeUnauthorized
+	default:
+		return errors.ErrCodeUnauthorized
+	}
+}
 
 // GetTrustedMaterial returns Sigstore trusted material for offline verification.
 // Uses the sigstore-go TUF client with ForceCache to avoid network calls.
@@ -103,12 +129,17 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 		}
 
 		if refreshErr := client.Refresh(); refreshErr != nil {
-			// Refresh failures are usually transport (Unavailable) but can
-			// also be signature/chain verification failures (Unauthorized).
-			// sigstore-go does not distinguish these in its error type, so
-			// classify as Unauthorized — operators are likeliest to see this
-			// when the embedded root is too old and verification breaks.
-			ch <- updateResult{err: errors.Wrap(errors.ErrCodeUnauthorized, "TUF refresh failed (signature or transport error)", refreshErr)}
+			// Distinguish transport errors (server unreachable, HTTP failure)
+			// from verification errors (signature, hash, expiry) using
+			// go-tuf's typed error sentinels. Operators get a more
+			// actionable code: Unavailable for "try again later",
+			// Unauthorized for "trust chain broke; root may need update".
+			code := classifyTUFError(refreshErr)
+			msg := "TUF refresh failed (transport error)"
+			if code == errors.ErrCodeUnauthorized {
+				msg = "TUF refresh failed (signature or expiry verification)"
+			}
+			ch <- updateResult{err: errors.Wrap(code, msg, refreshErr)}
 			return
 		}
 

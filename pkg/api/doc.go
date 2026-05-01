@@ -101,7 +101,6 @@
 // The server is configured via environment variables:
 //   - PORT: HTTP server port (default: 8080)
 //   - AICR_LOG_LEVEL: Logging level (debug, info, warn, error)
-//   - LOG_LEVEL: Legacy fallback for AICR_LOG_LEVEL
 //
 // Request handling middleware enforces:
 //   - Per-request context timeout (defaults.ServerHandlerTimeout, 30s)
