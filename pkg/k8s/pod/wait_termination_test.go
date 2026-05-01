@@ -104,7 +104,8 @@ func TestWaitForTermination_DeletedEvent(t *testing.T) {
 	client.PrependWatchReactor("pods", fakeWatchReactor(w))
 
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Unbuffered FakeWatcher channel: Delete blocks until the consumer
+		// reads, so synchronization is automatic.
 		w.Delete(p)
 	}()
 
@@ -124,7 +125,7 @@ func TestWaitForTermination_ModifiedToSucceeded(t *testing.T) {
 	client.PrependWatchReactor("pods", fakeWatchReactor(w))
 
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Unbuffered FakeWatcher channel: Modify blocks until consumed.
 		modified := p.DeepCopy()
 		modified.ResourceVersion = "2"
 		modified.Status.Phase = corev1.PodSucceeded
@@ -324,7 +325,8 @@ func TestWaitForJobTerminal(t *testing.T) {
 				w := watch.NewFake()
 				client.PrependWatchReactor("jobs", fakeWatchReactor(w))
 				go func() {
-					time.Sleep(10 * time.Millisecond)
+					// FakeWatcher channel is unbuffered; the emit call blocks
+					// until the consumer reads, providing automatic order.
 					switch tt.watchType { //nolint:exhaustive // only Modified/Deleted exercised here; other event types fall through to the default Action path
 					case watch.Modified:
 						w.Modify(tt.watchEvent)
@@ -389,7 +391,7 @@ func TestWaitForJobTerminal_WatchError(t *testing.T) {
 	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
 
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Unbuffered FakeWatcher channel: Error blocks until consumed.
 		watcher.Error(&metav1.Status{
 			Status:  metav1.StatusFailure,
 			Reason:  metav1.StatusReasonInternalError,

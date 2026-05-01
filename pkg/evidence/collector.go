@@ -19,16 +19,23 @@ import (
 	"context"
 	"embed"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
+
+// validSectionName limits section names to lowercase alphanumeric with
+// hyphens. Defense-in-depth check before passing to bash; the upstream
+// catalog already validates against an enum.
+var validSectionName = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 
 //go:embed scripts/collect-evidence.sh
 var collectScript []byte
@@ -327,6 +334,14 @@ func (c *Collector) resolveFeatures() []string {
 // defaults.EvidenceMaxOutputBytes) and surfaced via slog instead of
 // streaming to the parent process's stdio.
 func (c *Collector) runSection(ctx context.Context, scriptPath, scriptDir, section string) error {
+	// Defense in depth: although `section` is enum-validated upstream against
+	// the catalog, validate again here so a future caller cannot accidentally
+	// pass shell metacharacters into a process arg list.
+	if !validSectionName.MatchString(section) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid section name %q: must match %s", section, validSectionName.String()))
+	}
+
 	subCtx, cancel := context.WithTimeout(ctx, defaults.EvidenceSectionTimeout)
 	defer cancel()
 

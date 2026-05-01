@@ -113,8 +113,10 @@ func TestWaitForJobCompletion(t *testing.T) {
 				watcher := watch.NewFake()
 				client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
 
+				// FakeWatcher uses an unbuffered channel; Modify blocks until
+				// WaitForJobCompletion's select reads, providing the
+				// synchronization a fixed sleep was previously approximating.
 				go func() {
-					time.Sleep(10 * time.Millisecond)
 					watcher.Modify(tt.watchEvent)
 				}()
 			}
@@ -144,7 +146,8 @@ func TestWaitForJobCompletion_WatchError(t *testing.T) {
 	client.PrependWatchReactor("jobs", k8stesting.DefaultWatchReactor(watcher, nil))
 
 	go func() {
-		time.Sleep(10 * time.Millisecond)
+		// Unbuffered FakeWatcher channel: Error blocks until the consumer
+		// reads, giving deterministic ordering without a wall-clock sleep.
 		watcher.Error(&metav1.Status{
 			Status:  metav1.StatusFailure,
 			Reason:  metav1.StatusReasonInternalError,

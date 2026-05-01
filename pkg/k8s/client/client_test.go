@@ -25,15 +25,9 @@ import (
 // TestBuildKubeClient_PathResolution tests the kubeconfig path resolution logic
 // without attempting to connect to a cluster.
 func TestBuildKubeClient_PathResolution(t *testing.T) {
-	// Save original env and restore after test
-	originalKubeconfig := os.Getenv("KUBECONFIG")
-	defer func() {
-		if originalKubeconfig != "" {
-			os.Setenv("KUBECONFIG", originalKubeconfig)
-		} else {
-			os.Unsetenv("KUBECONFIG")
-		}
-	}()
+	// t.Setenv automatically restores prior value via t.Cleanup; safer than
+	// a manual save/restore that leaks env state if a subtest panics.
+	t.Setenv("KUBECONFIG", os.Getenv("KUBECONFIG"))
 
 	tests := []struct {
 		name          string
@@ -59,11 +53,11 @@ func TestBuildKubeClient_PathResolution(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set up environment
-			if tt.kubeconfigEnv != "" {
-				os.Setenv("KUBECONFIG", tt.kubeconfigEnv)
-			} else {
-				os.Unsetenv("KUBECONFIG")
+			// t.Setenv handles unset by passing empty string and restores
+			// the value via t.Cleanup at subtest end.
+			t.Setenv("KUBECONFIG", tt.kubeconfigEnv)
+			if tt.kubeconfigEnv == "" {
+				_ = os.Unsetenv("KUBECONFIG")
 			}
 
 			_, _, err := BuildKubeClient(tt.kubeconfigArg)
@@ -86,18 +80,13 @@ func TestBuildKubeClient_PathResolution(t *testing.T) {
 // This test doesn't assert success/failure since it depends on the environment
 // (presence of ~/.kube/config, in-cluster config, etc.)
 func TestBuildKubeClient_AutoDiscovery(t *testing.T) {
-	// Save and restore KUBECONFIG env
-	originalKubeconfig := os.Getenv("KUBECONFIG")
-	defer func() {
-		if originalKubeconfig != "" {
-			os.Setenv("KUBECONFIG", originalKubeconfig)
-		} else {
-			os.Unsetenv("KUBECONFIG")
-		}
-	}()
-
-	// Unset KUBECONFIG to test auto-discovery
-	os.Unsetenv("KUBECONFIG")
+	// t.Setenv restores prior value via t.Cleanup. Setting to empty does
+	// not unset, so explicitly unset for the auto-discovery scenario; the
+	// prior value is captured for restoration via t.Setenv.
+	t.Setenv("KUBECONFIG", os.Getenv("KUBECONFIG"))
+	if err := os.Unsetenv("KUBECONFIG"); err != nil {
+		t.Fatalf("unset KUBECONFIG: %v", err)
+	}
 
 	_, _, err := BuildKubeClient("")
 

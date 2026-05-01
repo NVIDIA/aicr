@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -55,7 +56,15 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 		bounded := http.MaxBytesReader(w, r.Body, defaults.MaxRecipePOSTBytes)
 		defer func() {
 			if r.Body != nil {
-				r.Body.Close()
+				// Drain remaining bytes so the connection can be reused, then
+				// close. Errors here would only matter for connection-leak
+				// diagnostics; log at debug.
+				if _, drainErr := io.Copy(io.Discard, r.Body); drainErr != nil {
+					logger.Debug("request body drain failed", "error", drainErr)
+				}
+				if closeErr := r.Body.Close(); closeErr != nil {
+					logger.Debug("request body close failed", "error", closeErr)
+				}
 			}
 		}()
 		criteria, err = ParseCriteriaFromBody(bounded, r.Header.Get("Content-Type"))
