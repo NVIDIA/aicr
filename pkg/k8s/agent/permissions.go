@@ -116,7 +116,7 @@ func (d *Deployer) checkPermission(ctx context.Context, resource, verb, namespac
 
 	result, err := d.clientset.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
 	if err != nil {
-		return false, "", err
+		return false, "", errors.Wrap(errors.ErrCodeInternal, "failed to create SelfSubjectAccessReview", err)
 	}
 
 	return result.Status.Allowed, result.Status.Reason, nil

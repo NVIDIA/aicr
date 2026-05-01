@@ -19,12 +19,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
@@ -208,33 +206,64 @@ func isPodTerminal(p *corev1.Pod) bool {
 
 // WaitForPodReady waits for a pod to become ready within the specified timeout.
 // Returns nil if pod becomes ready, error if timeout or pod fails.
+// Uses the watch API for efficient monitoring with a fast-path Get for
+// pods that are already ready or failed.
 func WaitForPodReady(ctx context.Context, client kubernetes.Interface, namespace, name string, timeout time.Duration) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	return wait.PollUntilContextCancel(timeoutCtx, defaults.PodPollInterval, true, func(ctx context.Context) (bool, error) {
-		pod, err := client.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return false, errors.Wrap(errors.ErrCodeInternal, "failed to get pod", err)
-		}
+	// Fast path: pod may already be ready or failed.
+	current, err := client.CoreV1().Pods(namespace).Get(timeoutCtx, name, metav1.GetOptions{})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to get pod", err)
+	}
+	if done, checkErr := checkPodReady(current); done {
+		return checkErr
+	}
 
-		// Check if pod is ready
-		for _, condition := range pod.Status.Conditions {
-			if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
-				return true, nil
+	watcher, err := client.CoreV1().Pods(namespace).Watch(timeoutCtx, metav1.ListOptions{
+		FieldSelector:   "metadata.name=" + name,
+		ResourceVersion: current.ResourceVersion,
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to watch pod", err)
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return errors.Wrap(errors.ErrCodeTimeout, "pod ready wait timeout", timeoutCtx.Err())
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return errors.New(errors.ErrCodeUnavailable, "pod watch channel closed before ready")
+			}
+			watchedPod, isPod := event.Object.(*corev1.Pod)
+			if !isPod {
+				continue
+			}
+			if done, checkErr := checkPodReady(watchedPod); done {
+				return checkErr
 			}
 		}
+	}
+}
 
-		// Check for failed state
-		if pod.Status.Phase == corev1.PodFailed {
-			return false, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]interface{}{
-				"namespace": namespace,
-				"name":      name,
-				"reason":    pod.Status.Reason,
-				"message":   pod.Status.Message,
-			})
+// checkPodReady returns (true, nil) when the pod is Ready, (true, error) when
+// the pod has Failed, and (false, nil) otherwise.
+func checkPodReady(p *corev1.Pod) (bool, error) {
+	for _, condition := range p.Status.Conditions {
+		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
+			return true, nil
 		}
-
-		return false, nil
-	})
+	}
+	if p.Status.Phase == corev1.PodFailed {
+		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]interface{}{
+			"namespace": p.Namespace,
+			"name":      p.Name,
+			"reason":    p.Status.Reason,
+			"message":   p.Status.Message,
+		})
+	}
+	return false, nil
 }

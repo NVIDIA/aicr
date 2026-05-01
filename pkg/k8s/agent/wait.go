@@ -20,11 +20,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // waitForJobCompletion waits for the Job to complete successfully or fail.
@@ -91,26 +90,12 @@ func (d *Deployer) WaitForPodReady(ctx context.Context, timeout time.Duration) e
 	watchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Discover pod name by polling with K8s standard utility
-	var podName string
-	err := wait.PollUntilContextCancel(watchCtx, defaults.PodPollInterval, true, func(ctx context.Context) (bool, error) {
-		pods, listErr := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "app.kubernetes.io/name=aicr",
-		})
-		if listErr != nil {
-			return false, errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", listErr)
-		}
-		if len(pods.Items) > 0 {
-			podName = pods.Items[0].Name
-			return true, nil
-		}
-		return false, nil
-	})
+	// Discover pod name via watch (or fast-path List for existing pods).
+	podName, err := d.findOrWatchPodName(watchCtx)
 	if err != nil {
-		return errors.New(errors.ErrCodeTimeout, fmt.Sprintf("timeout waiting for Pod creation after %v", timeout))
+		return err
 	}
 
-	// Calculate remaining timeout
 	deadline, ok := watchCtx.Deadline()
 	if !ok {
 		return errors.New(errors.ErrCodeInternal, "context deadline not set")
@@ -120,14 +105,14 @@ func (d *Deployer) WaitForPodReady(ctx context.Context, timeout time.Duration) e
 		return errors.New(errors.ErrCodeTimeout, fmt.Sprintf("timeout waiting for Pod ready after %v", timeout))
 	}
 
-	// Wait for pod to be ready using shared function
 	return pod.WaitForPodReady(ctx, d.clientset, d.config.Namespace, podName, remainingTimeout)
 }
 
 // findPodName finds the pod name by label selector for this Job.
+// One-shot: returns ErrCodeNotFound if no pod is currently labeled.
 func (d *Deployer) findPodName(ctx context.Context) (string, error) {
 	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: "app.kubernetes.io/name=aicr",
+		LabelSelector: agentLabelSelector,
 	})
 	if err != nil {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
@@ -138,6 +123,46 @@ func (d *Deployer) findPodName(ctx context.Context) (string, error) {
 	}
 
 	return pods.Items[0].Name, nil
+}
+
+// findOrWatchPodName returns the agent pod's name. If the pod already exists
+// (List), return immediately; otherwise watch for an Added event until ctx is
+// canceled.
+func (d *Deployer) findOrWatchPodName(ctx context.Context) (string, error) {
+	pods, err := d.clientset.CoreV1().Pods(d.config.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: agentLabelSelector,
+	})
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to list Pods", err)
+	}
+	if len(pods.Items) > 0 {
+		return pods.Items[0].Name, nil
+	}
+
+	watcher, err := d.clientset.CoreV1().Pods(d.config.Namespace).Watch(ctx, metav1.ListOptions{
+		LabelSelector:   agentLabelSelector,
+		ResourceVersion: pods.ResourceVersion,
+	})
+	if err != nil {
+		return "", errors.Wrap(errors.ErrCodeInternal, "failed to watch Pods", err)
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return "", errors.Wrap(errors.ErrCodeTimeout, "timeout waiting for Pod creation", ctx.Err())
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return "", errors.New(errors.ErrCodeUnavailable, "Pod watch channel closed before pod observed")
+			}
+			p, isPod := event.Object.(*corev1.Pod)
+			if !isPod {
+				continue
+			}
+			return p.Name, nil
+		}
+	}
 }
 
 // prefixWriter wraps an io.Writer to add a prefix to each line.

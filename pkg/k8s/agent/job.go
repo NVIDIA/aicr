@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/utils/ptr"
 )
 
@@ -81,7 +81,7 @@ func (d *Deployer) buildJob() *batchv1.Job {
 			Name:      d.config.JobName,
 			Namespace: d.config.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name": "aicr",
+				labelAppName: appName,
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -94,7 +94,7 @@ func (d *Deployer) buildJob() *batchv1.Job {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app.kubernetes.io/name": "aicr",
+						labelAppName: appName,
 					},
 				},
 				Spec: podSpec,
@@ -337,21 +337,52 @@ func (d *Deployer) deleteJob(ctx context.Context) error {
 	return k8s.IgnoreNotFound(err)
 }
 
-// waitForJobDeletion waits for the Job to be fully deleted.
+// waitForJobDeletion waits for the Job to be fully deleted using the watch API.
+// Returns nil when the Job is observed deleted (Get returns NotFound, or a
+// watch.Deleted event is received). Returns ErrCodeTimeout if the cleanup
+// deadline elapses before deletion is observed.
 func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
-	return wait.PollUntilContextTimeout(ctx, defaults.PodPollInterval, defaults.K8sCleanupTimeout, true,
-		func(ctx context.Context) (bool, error) {
-			_, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
-				Get(ctx, d.config.JobName, metav1.GetOptions{})
-			if k8s.IgnoreNotFound(err) == nil {
-				return true, nil // Job deleted successfully
+	timeoutCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
+	defer cancel()
+
+	// Fast path: already deleted.
+	current, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
+		Get(timeoutCtx, d.config.JobName, metav1.GetOptions{})
+	if k8s.IgnoreNotFound(err) == nil {
+		return nil
+	}
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to get Job", err)
+	}
+
+	watcher, err := d.clientset.BatchV1().Jobs(d.config.Namespace).Watch(timeoutCtx, metav1.ListOptions{
+		FieldSelector:   "metadata.name=" + d.config.JobName,
+		ResourceVersion: current.ResourceVersion,
+	})
+	if err != nil {
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to watch Job", err)
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "Job deletion wait timeout", timeoutCtx.Err())
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				// Channel closed; verify with a Get to handle missed events.
+				_, getErr := d.clientset.BatchV1().Jobs(d.config.Namespace).
+					Get(timeoutCtx, d.config.JobName, metav1.GetOptions{})
+				if k8s.IgnoreNotFound(getErr) == nil {
+					return nil
+				}
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job watch channel closed", getErr)
 			}
-			if err != nil {
-				return false, err
+			if event.Type == watch.Deleted {
+				return nil
 			}
-			return false, nil // Job still exists, keep waiting
-		},
-	)
+		}
+	}
 }
 
 // mustParseQuantity parses a resource quantity or panics.

@@ -22,6 +22,15 @@ import (
 // clusterRoleName is the name used for the ClusterRole and ClusterRoleBinding.
 const clusterRoleName = "aicr-node-reader"
 
+// Standard Kubernetes recommended labels applied to all agent-managed
+// resources. Centralized here so selectors and resource templates stay in sync.
+const (
+	labelAppName       = "app.kubernetes.io/name"
+	labelAppManagedBy  = "app.kubernetes.io/managed-by"
+	appName            = "aicr"
+	agentLabelSelector = labelAppName + "=" + appName
+)
+
 // Config holds the configuration for deploying the agent.
 type Config struct {
 	Namespace          string
