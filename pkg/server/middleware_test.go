@@ -15,10 +15,16 @@
 package server
 
 import (
+	"bytes"
+	"context"
+	stderrors "errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
@@ -374,5 +380,148 @@ func TestMiddlewareChain_SetsAllHeaders(t *testing.T) {
 		if rec.Header().Get(header) == "" {
 			t.Errorf("expected header %s to be set", header)
 		}
+	}
+}
+
+func TestTimeoutMiddleware_AppliesDeadline(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: parseConfig(), rateLimiter: rate.NewLimiter(100, 200)}
+
+	var observedDeadlineSet bool
+	handler := s.timeoutMiddleware(func(_ http.ResponseWriter, r *http.Request) {
+		_, observedDeadlineSet = r.Context().Deadline()
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if !observedDeadlineSet {
+		t.Fatal("timeoutMiddleware should attach a context deadline")
+	}
+}
+
+func TestTimeoutMiddleware_DeadlineMatchesDefault(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: parseConfig(), rateLimiter: rate.NewLimiter(100, 200)}
+
+	var remaining time.Duration
+	handler := s.timeoutMiddleware(func(_ http.ResponseWriter, r *http.Request) {
+		if dl, ok := r.Context().Deadline(); ok {
+			remaining = time.Until(dl)
+		}
+	})
+
+	handler(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
+
+	// Deadline should be near ServerHandlerTimeout (allow modest slack for test runtime).
+	if remaining <= 0 || remaining > defaults.ServerHandlerTimeout {
+		t.Errorf("deadline remaining %v out of expected (0, %v]", remaining, defaults.ServerHandlerTimeout)
+	}
+	if defaults.ServerHandlerTimeout-remaining > 5*time.Second {
+		t.Errorf("deadline drift %v exceeds 5s — middleware not using ServerHandlerTimeout?",
+			defaults.ServerHandlerTimeout-remaining)
+	}
+}
+
+func TestTimeoutMiddleware_PropagatesCancellation(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: parseConfig(), rateLimiter: rate.NewLimiter(100, 200)}
+
+	var ctxErr error
+	handler := s.timeoutMiddleware(func(_ http.ResponseWriter, r *http.Request) {
+		// Caller's context is canceled before the handler runs;
+		// the middleware-derived context inherits cancellation.
+		ctxErr = r.Context().Err()
+	})
+
+	parentCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(parentCtx)
+	handler(httptest.NewRecorder(), req)
+
+	if ctxErr == nil {
+		t.Fatal("expected canceled context to propagate through timeoutMiddleware")
+	}
+}
+
+func TestBodyLimitMiddleware_AcceptsSmallBody(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: parseConfig(), rateLimiter: rate.NewLimiter(100, 200)}
+
+	const sentinel = "small-body-ok"
+	body := bytes.NewBufferString(sentinel)
+
+	var read string
+	handler := s.bodyLimitMiddleware(func(_ http.ResponseWriter, r *http.Request) {
+		buf := make([]byte, len(sentinel)+1)
+		n, _ := r.Body.Read(buf)
+		read = string(buf[:n])
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if read != sentinel {
+		t.Errorf("expected to read %q, got %q", sentinel, read)
+	}
+}
+
+func TestBodyLimitMiddleware_RejectsOversizedBody(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: parseConfig(), rateLimiter: rate.NewLimiter(100, 200)}
+
+	// 1 byte over the cap so the read fails on the very last byte.
+	body := strings.NewReader(strings.Repeat("x", int(defaults.ServerMaxBodyBytes)+1))
+
+	var readErr error
+	handler := s.bodyLimitMiddleware(func(_ http.ResponseWriter, r *http.Request) {
+		// Drain — http.MaxBytesReader returns *http.MaxBytesError once cap is exceeded.
+		buf := make([]byte, 4096)
+		for {
+			_, err := r.Body.Read(buf)
+			if err != nil {
+				readErr = err
+				return
+			}
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/", body)
+	rec := httptest.NewRecorder()
+	handler(rec, req)
+
+	if readErr == nil {
+		t.Fatal("expected read error for oversized body")
+	}
+	var maxBytesErr *http.MaxBytesError
+	if !stderrors.As(readErr, &maxBytesErr) {
+		t.Errorf("expected *http.MaxBytesError, got %T: %v", readErr, readErr)
+	}
+}
+
+func TestBodyLimitMiddleware_NilBodyIsHandled(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: parseConfig(), rateLimiter: rate.NewLimiter(100, 200)}
+
+	called := false
+	handler := s.bodyLimitMiddleware(func(_ http.ResponseWriter, _ *http.Request) {
+		called = true
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Body = nil
+	handler(httptest.NewRecorder(), req)
+
+	if !called {
+		t.Fatal("handler should be invoked even when Body is nil")
 	}
 }

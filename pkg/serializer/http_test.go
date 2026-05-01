@@ -26,6 +26,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 type testData struct {
@@ -638,5 +641,47 @@ func TestHTTPReader_Read_MultipleRequests(t *testing.T) {
 
 	if requestCount != 3 {
 		t.Errorf("expected 3 requests, got %d", requestCount)
+	}
+}
+
+func TestHTTPReader_Read_BodyExceedsLimit(t *testing.T) {
+	// Server returns a body 1 byte larger than the limit so io.LimitReader
+	// observes the over-cap byte and the wrapper returns an error.
+	body := strings.Repeat("x", int(defaults.HTTPResponseBodyLimit)+1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	reader := NewHTTPReader()
+	_, err := reader.ReadWithContext(context.Background(), server.URL)
+	if err == nil {
+		t.Fatal("expected error when response body exceeds HTTPResponseBodyLimit")
+	}
+
+	var sErr *aicrerrors.StructuredError
+	if !errors.As(err, &sErr) {
+		t.Fatalf("expected *StructuredError, got %T: %v", err, err)
+	}
+	if sErr.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest for over-cap body, got %v", sErr.Code)
+	}
+}
+
+func TestHTTPReader_Read_BodyAtLimit(t *testing.T) {
+	// Body exactly at the limit must succeed.
+	body := strings.Repeat("y", int(defaults.HTTPResponseBodyLimit))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	reader := NewHTTPReader()
+	got, err := reader.ReadWithContext(context.Background(), server.URL)
+	if err != nil {
+		t.Fatalf("expected success at the limit, got error: %v", err)
+	}
+	if int64(len(got)) != defaults.HTTPResponseBodyLimit {
+		t.Errorf("expected %d bytes, got %d", defaults.HTTPResponseBodyLimit, len(got))
 	}
 }

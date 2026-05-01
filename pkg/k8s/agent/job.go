@@ -345,10 +345,12 @@ func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
 	defer cancel()
 
-	// Fast path: already deleted.
+	// Fast path: already deleted. Note: IgnoreNotFound(nil) returns nil,
+	// so check NotFound explicitly — otherwise a successful Get (Job still
+	// exists) would incorrectly short-circuit as "deleted".
 	current, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 		Get(timeoutCtx, d.config.JobName, metav1.GetOptions{})
-	if k8s.IgnoreNotFound(err) == nil {
+	if errors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -371,12 +373,18 @@ func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				// Channel closed; verify with a Get to handle missed events.
+				// Use explicit NotFound check (IgnoreNotFound(nil) returns nil
+				// and would falsely report success when the Job still exists).
 				_, getErr := d.clientset.BatchV1().Jobs(d.config.Namespace).
 					Get(timeoutCtx, d.config.JobName, metav1.GetOptions{})
-				if k8s.IgnoreNotFound(getErr) == nil {
+				if errors.IsNotFound(getErr) {
 					return nil
 				}
-				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job watch channel closed", getErr)
+				if getErr != nil {
+					return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job watch channel closed", getErr)
+				}
+				return aicrerrors.Wrap(aicrerrors.ErrCodeUnavailable,
+					"Job watch channel closed before deletion observed", nil)
 			}
 			if event.Type == watch.Deleted {
 				return nil
