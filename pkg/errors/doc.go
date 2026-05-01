@@ -33,6 +33,9 @@
 //   - ErrCodeRateLimitExceeded: Rate limit exceeded (HTTP 429)
 //   - ErrCodeMethodNotAllowed: HTTP method not allowed (HTTP 405)
 //   - ErrCodeUnavailable: Service temporarily unavailable (HTTP 503)
+//   - ErrCodeConflict: Resource state conflict, e.g., already exists or
+//     version mismatch (HTTP 409). Distinct from ErrCodeInvalidRequest
+//     because the request itself is well-formed.
 //
 // # Usage
 //
