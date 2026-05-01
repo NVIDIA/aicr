@@ -203,9 +203,9 @@ func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult
 		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create file store", err)
 	}
 	defer func() {
-		closeErr := fs.Close()
-		if retErr == nil {
-			retErr = closeErr
+		// File store close may flush state; surface as a wrapped error.
+		if closeErr := fs.Close(); closeErr != nil && retErr == nil {
+			retErr = apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close file store", closeErr)
 		}
 	}()
 

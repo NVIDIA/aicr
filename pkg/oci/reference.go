@@ -186,7 +186,9 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 		}
 	}
 
-	// Package locally first
+	// Package locally first. Package returns properly coded errors
+	// (ErrCodeInvalidRequest, ErrCodeInternal, ErrCodeUnavailable); preserve
+	// the inner code rather than re-wrapping with ErrCodeInternal.
 	packageResult, err := Package(ctx, PackageOptions{
 		SourceDir:   absSourceDir,
 		OutputDir:   absOutputDir,
@@ -196,7 +198,7 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 		Annotations: annotations,
 	})
 	if err != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to package OCI artifact", err)
+		return nil, err
 	}
 
 	slog.Info("OCI artifact packaged locally",
@@ -212,6 +214,8 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 		"tag", cfg.Reference.Tag,
 	)
 
+	// PushFromStore returns properly coded errors (ErrCodeUnavailable for
+	// transient/canceled, ErrCodeInternal otherwise); preserve the code.
 	pushResult, pushErr := PushFromStore(ctx, packageResult.StorePath, PushOptions{
 		Registry:    cfg.Reference.Registry,
 		Repository:  cfg.Reference.Repository,
@@ -220,7 +224,7 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 		InsecureTLS: cfg.InsecureTLS,
 	})
 	if pushErr != nil {
-		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to push OCI artifact to registry", pushErr)
+		return nil, pushErr
 	}
 
 	slog.Info("OCI artifact pushed successfully",
