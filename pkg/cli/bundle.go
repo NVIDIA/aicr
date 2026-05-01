@@ -17,6 +17,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -496,7 +497,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 
 	// Print deployment instructions (only for dir output)
 	if opts.ociRef == nil && out.Deployment != nil {
-		printDeploymentInstructions(out)
+		printDeploymentInstructions(cmd.Root().Writer, out)
 	}
 
 	// Package and push as OCI artifact when output is oci://
@@ -569,23 +570,23 @@ func pushOCIBundle(ctx context.Context, opts *bundleCmdOptions, out *result.Outp
 	return nil
 }
 
-// printDeploymentInstructions prints user-friendly deployment instructions from the deployer.
-func printDeploymentInstructions(out *result.Output) {
-	fmt.Printf("\n%s generated successfully!\n", out.Deployment.Type)
-	fmt.Printf("Output directory: %s\n", out.OutputDir)
-	fmt.Printf("Files generated: %d\n", out.TotalFiles)
+// printDeploymentInstructions writes user-friendly deployment instructions to w.
+func printDeploymentInstructions(w io.Writer, out *result.Output) {
+	fmt.Fprintf(w, "\n%s generated successfully!\n", out.Deployment.Type)
+	fmt.Fprintf(w, "Output directory: %s\n", out.OutputDir)
+	fmt.Fprintf(w, "Files generated: %d\n", out.TotalFiles)
 
 	if len(out.Deployment.Notes) > 0 {
-		fmt.Println("\nNote:")
+		fmt.Fprintln(w, "\nNote:")
 		for _, note := range out.Deployment.Notes {
-			fmt.Printf("  ⚠ %s\n", note)
+			fmt.Fprintf(w, "  ⚠ %s\n", note)
 		}
 	}
 
 	if len(out.Deployment.Steps) > 0 {
-		fmt.Println("\nTo deploy:")
+		fmt.Fprintln(w, "\nTo deploy:")
 		for i, step := range out.Deployment.Steps {
-			fmt.Printf("  %d. %s\n", i+1, step)
+			fmt.Fprintf(w, "  %d. %s\n", i+1, step)
 		}
 	}
 }

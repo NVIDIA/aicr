@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/trust"
 	"github.com/urfave/cli/v3"
 )
@@ -48,15 +47,19 @@ without contacting Sigstore infrastructure.
 Example:
   aicr trust update
 `,
-		Action: func(ctx context.Context, _ *cli.Command) error {
+		Action: func(ctx context.Context, cmd *cli.Command) error {
 			material, err := trust.Update(ctx)
 			if err != nil {
-				return errors.Wrap(errors.ErrCodeUnavailable, "failed to update trusted root", err)
+				// trust.Update returns coded errors (Unauthorized for sig
+				// failures, Timeout for ctx, Unavailable for transport);
+				// preserve the inner code rather than re-wrapping.
+				return err
 			}
 
-			fmt.Printf("  ✓ Trusted root updated\n")
-			fmt.Printf("  CAs: %d certificate authorities\n", len(material.FulcioCertificateAuthorities()))
-			fmt.Printf("  Logs: %d transparency logs\n", len(material.RekorLogs()))
+			w := cmd.Root().Writer
+			fmt.Fprintf(w, "  ✓ Trusted root updated\n")
+			fmt.Fprintf(w, "  CAs: %d certificate authorities\n", len(material.FulcioCertificateAuthorities()))
+			fmt.Fprintf(w, "  Logs: %d transparency logs\n", len(material.RekorLogs()))
 
 			return nil
 		},

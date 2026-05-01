@@ -15,7 +15,7 @@
 package cli
 
 import (
-	"os"
+	"bytes"
 	"strings"
 	"testing"
 
@@ -99,26 +99,12 @@ func TestWriteQueryResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Capture stdout
-			old := os.Stdout
-			r, w, err := os.Pipe()
-			if err != nil {
-				t.Fatal(err)
-			}
-			os.Stdout = w
-
-			writeErr := writeQueryResult(tt.val, tt.format)
-
-			w.Close()
-			os.Stdout = old
-
-			if writeErr != nil {
+			var buf bytes.Buffer
+			if writeErr := writeQueryResult(&buf, tt.val, tt.format); writeErr != nil {
 				t.Fatalf("writeQueryResult returned error: %v", writeErr)
 			}
 
-			buf := make([]byte, 4096)
-			n, _ := r.Read(buf)
-			output := string(buf[:n])
+			output := buf.String()
 
 			if !strings.Contains(output, tt.contains) {
 				t.Errorf("output %q does not contain %q", output, tt.contains)

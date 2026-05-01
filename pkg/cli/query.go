@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
@@ -123,7 +124,7 @@ Use in shell scripts:
 				return err
 			}
 
-			return writeQueryResult(selected, outFormat)
+			return writeQueryResult(cmd.Root().Writer, selected, outFormat)
 		},
 	}
 }
@@ -190,38 +191,38 @@ func buildRecipeFromCmd(ctx context.Context, cmd *cli.Command) (*recipe.RecipeRe
 	return builder.BuildFromCriteria(ctx, criteria)
 }
 
-// writeQueryResult formats and prints the selected value to stdout.
-func writeQueryResult(val any, format serializer.Format) error {
+// writeQueryResult formats and writes the selected value to w.
+func writeQueryResult(w io.Writer, val any, format serializer.Format) error {
 	if format == serializer.FormatJSON {
-		return writeComplexValue(val, format)
+		return writeComplexValue(w, val, format)
 	}
 
 	switch v := val.(type) {
 	case string:
-		fmt.Println(v)
-		return nil
+		_, err := fmt.Fprintln(w, v)
+		return err
 	case bool, int, int64, float64:
-		fmt.Println(v)
-		return nil
+		_, err := fmt.Fprintln(w, v)
+		return err
 	default:
-		return writeComplexValue(val, format)
+		return writeComplexValue(w, val, format)
 	}
 }
 
-func writeComplexValue(val any, format serializer.Format) error {
+func writeComplexValue(w io.Writer, val any, format serializer.Format) error {
 	if format == serializer.FormatJSON {
 		data, err := json.MarshalIndent(val, "", "  ")
 		if err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to marshal JSON", err)
 		}
-		fmt.Println(string(data))
-		return nil
+		_, err = fmt.Fprintln(w, string(data))
+		return err
 	}
 
 	data, err := yaml.Marshal(val)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal YAML", err)
 	}
-	fmt.Print(string(data))
-	return nil
+	_, err = fmt.Fprint(w, string(data))
+	return err
 }
