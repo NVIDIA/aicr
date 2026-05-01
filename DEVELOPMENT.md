@@ -649,7 +649,7 @@ go tool cover -html=coverage.out
 
 ```bash
 # Start with debug logging
-LOG_LEVEL=debug go run cmd/aicrd/main.go
+AICR_LOG_LEVEL=debug go run cmd/aicrd/main.go
 
 # Or use make target
 make server

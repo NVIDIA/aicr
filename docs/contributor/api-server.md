@@ -1442,7 +1442,7 @@ spec:
         env:
         - name: PORT
           value: "8080"
-        - name: LOG_LEVEL
+        - name: AICR_LOG_LEVEL
           value: "info"
         # Criteria allowlists (optional - omit to allow all values)
         - name: AICR_ALLOWED_ACCELERATORS

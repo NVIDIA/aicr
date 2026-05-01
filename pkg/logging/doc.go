@@ -24,10 +24,12 @@
 // # Features
 //
 //   - Three logging modes: JSON, Text, CLI
-//   - CLI mode: Minimal output with ANSI color support (red for errors)
+//   - CLI mode: Minimal output with ANSI color support (red for errors),
+//     gated on NO_COLOR (https://no-color.org/) and TTY detection
 //   - Structured JSON logging to stderr
 //   - Text logging with full metadata for debugging
-//   - Environment-based log level configuration (LOG_LEVEL)
+//   - Environment-based log level configuration (AICR_LOG_LEVEL,
+//     with LOG_LEVEL honored as a fallback for backwards compatibility)
 //   - Automatic module and version context
 //   - Source location tracking for debug logs
 //   - Flexible log level parsing
@@ -91,12 +93,17 @@
 //
 // # Environment Configuration
 //
-// The LOG_LEVEL environment variable controls logging verbosity:
+// The AICR_LOG_LEVEL environment variable controls logging verbosity:
 //
-//	LOG_LEVEL=debug aicr snapshot
-//	LOG_LEVEL=error aicrd
+//	AICR_LOG_LEVEL=debug aicr snapshot
+//	AICR_LOG_LEVEL=error aicrd
 //
-// If LOG_LEVEL is not set, defaults to INFO level.
+// If AICR_LOG_LEVEL is not set, the legacy LOG_LEVEL is honored as a
+// fallback. If neither is set, defaults to INFO level.
+//
+// CLI color output is suppressed when:
+//   - The NO_COLOR environment variable is set (any value), or
+//   - The destination writer is not a terminal (e.g., redirected to a file).
 //
 // # Output Format
 //

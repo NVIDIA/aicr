@@ -100,7 +100,18 @@
 //
 // The server is configured via environment variables:
 //   - PORT: HTTP server port (default: 8080)
-//   - LOG_LEVEL: Logging level (debug, info, warn, error)
+//   - AICR_LOG_LEVEL: Logging level (debug, info, warn, error)
+//   - LOG_LEVEL: Legacy fallback for AICR_LOG_LEVEL
+//
+// Request handling middleware enforces:
+//   - Per-request context timeout (defaults.ServerHandlerTimeout, 30s)
+//   - Request body cap (defaults.ServerMaxBodyBytes, 8 MiB) via
+//     http.MaxBytesReader; per-handler caps may apply tighter limits.
+//   - Per-process rate limiting (token bucket, see pkg/server config).
+//
+// Graceful shutdown is wired at the entrypoint via signal.NotifyContext
+// for SIGINT/SIGTERM, so pre-Run setup (allowlist parsing, bundler
+// creation) is also cancelable.
 //
 // Version information is set at build time using ldflags:
 //

@@ -139,7 +139,15 @@ return errors.WrapWithContext(errors.ErrCodeTimeout, "operation timed out", ctx.
     map[string]interface{}{"component": "gpu-collector", "timeout": "10s"})
 ```
 
-**Error Codes:** `ErrCodeNotFound`, `ErrCodeUnauthorized`, `ErrCodeTimeout`, `ErrCodeInternal`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`
+**Error Codes:** `ErrCodeNotFound`, `ErrCodeUnauthorized`, `ErrCodeTimeout`, `ErrCodeInternal`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`, `ErrCodeMethodNotAllowed`, `ErrCodeRateLimitExceeded`, `ErrCodeConflict` (resource state conflict, e.g., already exists / version mismatch — distinct from `ErrCodeInvalidRequest` because the request itself is well-formed; maps to HTTP 409).
+
+**Code-based matching with `errors.Is`:** `*StructuredError.Is` reports a match when the target is a `*StructuredError` with the same `Code`. Prefer this over `errors.As` + manual code comparison:
+```go
+// GOOD - idiomatic, works through wrap chains
+if errors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+    // ...
+}
+```
 
 **Context with timeout (always):**
 ```go
@@ -355,6 +363,25 @@ client := &http.Client{Timeout: defaults.HTTPClientTimeout}
 resp, err := client.Do(req)
 ```
 
+**Bound response bodies before `io.ReadAll`.** Outbound `io.ReadAll(resp.Body)` is unbounded by default; a hostile or buggy server can exhaust memory. Wrap with `io.LimitReader` against a `pkg/defaults` cap and reject anything that exceeds it:
+```go
+// GOOD
+limited := io.LimitReader(resp.Body, defaults.HTTPResponseBodyLimit+1)
+data, err := io.ReadAll(limited)
+if int64(len(data)) > defaults.HTTPResponseBodyLimit {
+    return nil, errors.New(errors.ErrCodeInvalidRequest, "response body exceeds limit")
+}
+```
+
+## HTTP Server Rules
+
+**Inbound HTTP servers must use the standard middleware chain in `pkg/server`.** It already wires:
+- `timeoutMiddleware` — per-request `context.WithTimeout(r.Context(), defaults.ServerHandlerTimeout)`. Required so a slow upstream cannot outlive `WriteTimeout`, which only kills the connection (not the goroutine).
+- `bodyLimitMiddleware` — `http.MaxBytesReader(w, r.Body, defaults.ServerMaxBodyBytes)`. Handlers may install a tighter cap (`MaxRecipePOSTBytes`, `MaxBundlePOSTBytes`).
+- `panicRecoveryMiddleware`, `requestIDMiddleware`, `rateLimitMiddleware`, `loggingMiddleware`, `metricsMiddleware`, `versionMiddleware`.
+
+**Do not leak internal error causes on 5xx responses.** Use `server.WriteErrorFromErr` — it embeds the underlying `Cause.Error()` in `details["error"]` only for 4xx (where it is typically validator feedback the client needs); 5xx responses log the cause server-side and withhold it from the response.
+
 ## Logging Rules
 
 **Always use `slog` for output in production code.** Never use `fmt.Println`, `fmt.Printf`, or `fmt.Fprintln` for logging or streaming output:
@@ -367,6 +394,10 @@ slog.Info(scanner.Text())
 ```
 
 **Exception:** `fmt.Fprintln(logWriter(), ...)` for agent log output to stderr is acceptable when structured logging would add noise to raw log streaming.
+
+**CLI user-facing output goes to `cmd.Root().Writer`, not stdout.** CLI commands write success messages and query results via `fmt.Fprint*(cmd.Root().Writer, ...)` (or `io.Writer` parameter) so output is testable and redirectable. `fmt.Println`/`fmt.Printf` directly to stdout breaks the test pattern in `pkg/cli` (root_test captures via `cmd.Writer`).
+
+**Log level env var:** `AICR_LOG_LEVEL` (legacy `LOG_LEVEL` is honored as a fallback). The CLI logger also honors `NO_COLOR` (de-facto standard) and TTY detection — color is suppressed when stderr is not a terminal or `NO_COLOR` is set.
 
 ## Constants Rules
 
@@ -538,6 +569,10 @@ net. When renaming or removing a heading:
 | Use `IgnoreAlreadyExists` for mutable K8s resources | Use create-or-update semantics (Create, then Update if exists) |
 | Ignore `Close()` error on writable file handles | Capture and check `closeErr := f.Close()` |
 | Hardcode resource names from templates | Extract to named constants to keep code and templates in sync |
+| Unbounded `io.ReadAll(resp.Body)` on outbound HTTP | Wrap with `io.LimitReader` against `defaults.HTTPResponseBodyLimit` |
+| Embed `Cause.Error()` in 5xx response details | Use `server.WriteErrorFromErr` (4xx-only cause leak) |
+| Use `LOG_LEVEL` directly | Use `AICR_LOG_LEVEL` (legacy `LOG_LEVEL` is honored as fallback) |
+| `fmt.Println`/`fmt.Printf` to stdout in CLI commands | Write to `cmd.Root().Writer` (or `io.Writer` parameter) |
 
 ## Pull Request Requirements
 

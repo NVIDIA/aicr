@@ -22,8 +22,17 @@ management, and snapshot retrieval.
 # Deployment Strategy
 
 RBAC resources (ServiceAccount, Role, RoleBinding, ClusterRole, ClusterRoleBinding)
-are created idempotently - if they exist, they are reused. The Job is deleted and
-recreated for each snapshot to ensure clean state.
+are created idempotently - if they exist, they are reused. Mutable resources
+(Role, RoleBinding, ClusterRole, ClusterRoleBinding) use create-or-update
+semantics so stale rules from a previous run cannot persist.
+
+The agent Namespace is created with an "app.kubernetes.io/managed-by=aicr"
+label; if the namespace pre-existed without that label, ensureNamespace
+patches the label rather than silently dropping intent.
+
+The Job is deleted and recreated for each snapshot to ensure clean state.
+Job and Pod lifecycle waits use the Kubernetes watch API (not polling)
+for efficiency.
 
 # Usage Example
 
@@ -81,8 +90,12 @@ recreated for each snapshot to ensure clean state.
 # Reconciliation
 
 The deployer ensures idempotent operation:
-  - RBAC resources: Created if missing, reused if exist
-  - Job: Deleted and recreated for clean state each run
+  - Namespace: Created with managed-by label, or patched if pre-existing
+  - Immutable RBAC (ServiceAccount): Created if missing, reused if exists
+  - Mutable RBAC (Role/RoleBinding/ClusterRole/ClusterRoleBinding):
+    create-or-update semantics so stale rules cannot persist
+  - Job: Deleted and recreated for clean state each run; deletion is
+    observed via watch (watch.Deleted event), not polling
   - ConfigMap: Created or updated with latest snapshot
 
 # Testing

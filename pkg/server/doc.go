@@ -22,10 +22,16 @@
 // The server implements a stateless HTTP API with the following key components:
 //
 //   - Request validation using regex patterns from OpenAPI spec
+//   - Per-request context timeout (defaults.ServerHandlerTimeout, 30s)
+//     applied by timeoutMiddleware so slow upstream calls cannot outlive
+//     the WriteTimeout.
+//   - Per-request body cap (defaults.ServerMaxBodyBytes, 8 MiB) applied
+//     by bodyLimitMiddleware via http.MaxBytesReader; handlers may
+//     install a tighter cap (e.g., MaxRecipePOSTBytes for /v1/recipe).
 //   - Rate limiting using token bucket algorithm (golang.org/x/time/rate)
 //   - Request ID tracking for distributed tracing
 //   - Panic recovery for resilience
-//   - Graceful shutdown handling
+//   - Graceful shutdown handling (signal.NotifyContext on SIGINT/SIGTERM)
 //   - Health and readiness probes for Kubernetes
 //
 // # Usage
@@ -35,25 +41,25 @@
 //	package main
 //
 //	import (
+//	    "context"
 //	    "github.com/NVIDIA/aicr/pkg/server"
 //	)
 //
 //	func main() {
-//	    if err := server.Run(); err != nil {
+//	    s := server.New(
+//	        server.WithName("aicrd"),
+//	        server.WithVersion("v1.0.0"),
+//	        server.WithHandler(map[string]http.HandlerFunc{
+//	            "/v1/recipe": myRecipeHandler,
+//	        }),
+//	    )
+//	    if err := s.Run(context.Background()); err != nil {
 //	        panic(err)
 //	    }
 //	}
 //
-// Custom configuration:
-//
-//	config := server.DefaultConfig()
-//	config.Port = 9090
-//	config.RateLimit = 200  // 200 requests/sec
-//	config.RateLimitBurst = 400
-//
-//	if err := server.RunWithConfig(config); err != nil {
-//	    panic(err)
-//	}
+// Configuration is read from environment variables (PORT, server timeouts,
+// rate-limit settings). Functional options override individual fields.
 //
 // # API Endpoints
 //
@@ -108,20 +114,29 @@
 // All errors return a consistent JSON structure:
 //
 //	{
-//	  "code": "INVALID_PARAMETER",
+//	  "code": "INVALID_REQUEST",
 //	  "message": "invalid osFamily: must be one of Ubuntu, RHEL, ALL",
-//	  "details": {"request": {...}},
+//	  "details": {"error": "..."},
 //	  "requestId": "550e8400-e29b-41d4-a716-446655440000",
 //	  "timestamp": "2025-12-22T12:00:00Z",
 //	  "retryable": false
 //	}
 //
-// Error codes:
-//   - INVALID_PARAMETER: Invalid request parameter (400)
-//   - INVALID_JSON: Malformed JSON payload (400)
-//   - NO_MATCHING_RULE: No recommendation found (404)
+// Error codes (canonical, defined in pkg/errors):
+//   - INVALID_REQUEST: Invalid input or malformed payload (400)
+//   - UNAUTHORIZED: Authentication or authorization failure (401)
+//   - NOT_FOUND: Resource not found (404)
+//   - METHOD_NOT_ALLOWED: HTTP method not allowed (405)
+//   - CONFLICT: Resource state conflict (409)
 //   - RATE_LIMIT_EXCEEDED: Too many requests (429)
-//   - INTERNAL_ERROR: Server error (500)
+//   - INTERNAL: Internal server error (500)
+//   - TIMEOUT: Upstream or handler deadline exceeded (504)
+//   - SERVICE_UNAVAILABLE: Service temporarily unavailable (503)
+//
+// 5xx responses do NOT leak the underlying error cause to clients
+// (the cause is logged server-side); 4xx responses include the cause
+// in details["error"] because it is typically validator feedback the
+// client needs.
 //
 // # Deployment
 //
