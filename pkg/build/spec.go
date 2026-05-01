@@ -110,9 +110,8 @@ func LoadSpec(ctx context.Context, path string) (*BuildSpec, error) {
 			fmt.Sprintf("failed to read spec file %q", path), err)
 	}
 	if len(data) > defaults.MaxSpecFileBytes {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("spec file exceeds maximum size of %d bytes: %q", defaults.MaxSpecFileBytes, path),
-			fmt.Errorf("read more than %d bytes", defaults.MaxSpecFileBytes))
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("spec file exceeds maximum size of %d bytes: %q", defaults.MaxSpecFileBytes, path))
 	}
 
 	var spec BuildSpec
@@ -224,14 +223,20 @@ func (s *BuildSpec) WriteBack(ctx context.Context, path string) error {
 func syncDir(dir string) error {
 	d, err := os.Open(dir) //nolint:gosec // opening a directory for fsync is intentional
 	if err != nil {
-		return err
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to open directory for sync %q", dir), err)
 	}
 	syncErr := d.Sync()
 	closeErr := d.Close()
 	if syncErr != nil {
-		return syncErr
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to sync directory %q", dir), syncErr)
 	}
-	return closeErr
+	if closeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to close directory %q", dir), closeErr)
+	}
+	return nil
 }
 
 // SetImageStatus sets the status for a named image (e.g., "charts", "apps", "app-of-apps").

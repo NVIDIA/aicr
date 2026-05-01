@@ -19,11 +19,13 @@ package manifest
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 	"text/template"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -60,8 +62,15 @@ type chartData struct {
 
 // Render renders manifest content as a Go template with Helm-compatible data
 // and functions. Templates can use .Values, .Release, .Chart, and functions
-// like toYaml, nindent, toString, and default.
+// like toYaml, nindent, toString, and default. Bounded to MaxSpecFileBytes
+// as a defense-in-depth check; callers reading from disk/network should
+// already enforce the same limit at the source.
 func Render(content []byte, input RenderInput) ([]byte, error) {
+	if int64(len(content)) > defaults.MaxSpecFileBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("manifest content exceeds limit of %d bytes", defaults.MaxSpecFileBytes))
+	}
+
 	tmpl, err := template.New("manifest").Funcs(helmFuncMap()).Parse(string(content))
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse manifest template", err)
@@ -92,6 +101,10 @@ func helmFuncMap() template.FuncMap {
 		"toYaml": func(v any) string {
 			out, err := yaml.Marshal(v)
 			if err != nil {
+				// Surface marshal failures to operators; silently returning
+				// "" produces a blank manifest field that is hard to debug.
+				slog.Error("toYaml marshal failed in manifest template",
+					"error", err)
 				return ""
 			}
 			return strings.TrimSuffix(string(out), "\n")

@@ -188,7 +188,7 @@ func (v *Validator) ValidatePhases(
 	for _, phase := range phases {
 		select {
 		case <-ctx.Done():
-			return results, ctx.Err()
+			return results, errors.Wrap(errors.ErrCodeTimeout, "context canceled during phase iteration", ctx.Err())
 		default:
 		}
 
@@ -315,7 +315,7 @@ func (v *Validator) runPhase(
 	for _, entry := range entries {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context canceled during entry evaluation", ctx.Err())
 		default:
 		}
 
