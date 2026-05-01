@@ -70,9 +70,19 @@ func GetTrustedMaterial() (root.TrustedMaterial, error) {
 }
 
 // Update fetches the latest Sigstore trusted root via TUF CDN
-// and updates the local cache.
+// and updates the local cache. Bounded by defaults.TUFUpdateTimeout
+// (longer than a single-request HTTPClientTimeout because TUF refreshes
+// download multiple metadata files from a CDN).
+//
+// Known limitation: the underlying tuf.New / client.Refresh calls do not
+// accept context, so on ctx.Done() we return an error but the goroutine
+// continues running in the background until the network operation
+// completes naturally. This is acceptable for the CLI-only call sites
+// today (the goroutine is reaped on process exit). If callers from a
+// long-running daemon are added, switch to a TUF client that supports
+// context cancellation.
 func Update(ctx context.Context) (root.TrustedMaterial, error) {
-	ctx, cancel := context.WithTimeout(ctx, defaults.HTTPClientTimeout)
+	ctx, cancel := context.WithTimeout(ctx, defaults.TUFUpdateTimeout)
 	defer cancel()
 
 	slog.Info("fetching latest Sigstore trusted root via TUF...")
@@ -82,8 +92,6 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 		err      error
 	}
 
-	// Channel + select because tuf.New and client.Refresh do not accept
-	// context — errgroup.Wait would block until they return even after ctx expires.
 	ch := make(chan updateResult, 1)
 	go func() {
 		opts := tuf.DefaultOptions()
@@ -95,7 +103,12 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 		}
 
 		if refreshErr := client.Refresh(); refreshErr != nil {
-			ch <- updateResult{err: errors.Wrap(errors.ErrCodeUnavailable, "TUF refresh failed", refreshErr)}
+			// Refresh failures are usually transport (Unavailable) but can
+			// also be signature/chain verification failures (Unauthorized).
+			// sigstore-go does not distinguish these in its error type, so
+			// classify as Unauthorized — operators are likeliest to see this
+			// when the embedded root is too old and verification breaks.
+			ch <- updateResult{err: errors.Wrap(errors.ErrCodeUnauthorized, "TUF refresh failed (signature or transport error)", refreshErr)}
 			return
 		}
 
@@ -125,19 +138,24 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 
 // trustedMaterialFromClient loads the trusted root from a TUF client.
 func trustedMaterialFromClient(client *tuf.Client) (root.TrustedMaterial, error) {
+	// GetTarget verifies the target's signature against the TUF metadata;
+	// failure here is most likely a verification problem. Classify as
+	// Unauthorized rather than Internal so operators see the trust angle.
 	trustedRootJSON, err := client.GetTarget("trusted_root.json")
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to get trusted root from TUF", err)
+		return nil, errors.Wrap(errors.ErrCodeUnauthorized, "failed to get trusted root from TUF (signature or fetch error)", err)
 	}
 
 	var trustedRootPB prototrustroot.TrustedRoot
 	if unmarshalErr := protojson.Unmarshal(trustedRootJSON, &trustedRootPB); unmarshalErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse trusted root", unmarshalErr)
+		// Malformed JSON in a verified target → InvalidRequest (corrupt blob).
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse trusted root", unmarshalErr)
 	}
 
 	trustedRoot, err := root.NewTrustedRootFromProtobuf(&trustedRootPB)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "invalid trusted root", err)
+		// Structural validation failure → InvalidRequest.
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid trusted root", err)
 	}
 
 	return trustedRoot, nil
