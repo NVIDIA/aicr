@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -162,10 +163,20 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// Stream logs in background while waiting for Job completion.
 	// If the pod completes before becoming "ready" (fast Jobs), log streaming
 	// is skipped — WaitForCompletion will still capture the result.
+	//
+	// The WaitGroup ensures the goroutine has fully exited before this
+	// function returns, so log writes cannot interleave with the caller's
+	// output after the snapshot has been returned.
 	logCtx, cancelLogs := context.WithCancel(ctx)
-	defer cancelLogs()
+	var logWG sync.WaitGroup
+	defer func() {
+		cancelLogs()
+		logWG.Wait()
+	}()
 
+	logWG.Add(1)
 	go func() {
+		defer logWG.Done()
 		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
 			return
 		}
