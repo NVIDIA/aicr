@@ -50,14 +50,37 @@ func getLogPrefix() string {
 type CLIHandler struct {
 	writer io.Writer
 	level  slog.Level
+	color  bool
+	attrs  []slog.Attr
+	groups []string
 }
 
 // newCLIHandler creates a new CLI handler that writes to the given writer.
+// Color output is enabled when the writer is a terminal and NO_COLOR is unset
+// (https://no-color.org/).
 func newCLIHandler(w io.Writer, level slog.Level) *CLIHandler {
 	return &CLIHandler{
 		writer: w,
 		level:  level,
+		color:  shouldUseColor(w),
 	}
+}
+
+// shouldUseColor returns true when the writer is a terminal and NO_COLOR is
+// not set. Honors the de-facto NO_COLOR convention regardless of TTY status.
+func shouldUseColor(w io.Writer) bool {
+	if _, ok := os.LookupEnv("NO_COLOR"); ok {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
 }
 
 // Enabled returns true if the handler handles records at the given level.
@@ -69,23 +92,27 @@ func (h *CLIHandler) Enabled(_ context.Context, level slog.Level) bool {
 func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 	msg := "[" + getLogPrefix() + "] " + r.Message
 
-	// Append attributes as key=value pairs
-	if r.NumAttrs() > 0 {
-		var attrs []string
-		r.Attrs(func(a slog.Attr) bool {
-			attrs = append(attrs, fmt.Sprintf("%s=%v", a.Key, a.Value))
-			return true
-		})
-		if len(attrs) > 0 {
-			msg = msg + ": " + strings.Join(attrs, " ")
-		}
+	// Collect attributes: handler-bound attrs first, then record attrs.
+	var attrs []string
+	groupPrefix := strings.Join(h.groups, ".")
+	for _, a := range h.attrs {
+		attrs = append(attrs, formatAttr(groupPrefix, a))
+	}
+	r.Attrs(func(a slog.Attr) bool {
+		attrs = append(attrs, formatAttr(groupPrefix, a))
+		return true
+	})
+	if len(attrs) > 0 {
+		msg = msg + ": " + strings.Join(attrs, " ")
 	}
 
-	// Add color for error messages and success messages
-	if r.Level >= slog.LevelError {
-		msg = colorRed + msg + colorReset
-	} else {
-		msg = colorGreen + msg + colorReset
+	// Add color for error messages and success messages when supported.
+	if h.color {
+		if r.Level >= slog.LevelError {
+			msg = colorRed + msg + colorReset
+		} else {
+			msg = colorGreen + msg + colorReset
+		}
 	}
 
 	if _, err := fmt.Fprintln(h.writer, msg); err != nil {
@@ -94,16 +121,41 @@ func (h *CLIHandler) Handle(_ context.Context, r slog.Record) error {
 	return nil
 }
 
-// WithAttrs returns a new handler with the given attributes.
-// For CLI handler, we ignore attributes for simplicity.
-func (h *CLIHandler) WithAttrs(_ []slog.Attr) slog.Handler {
-	return h
+// formatAttr renders a slog.Attr as "key=value", prefixing key with the
+// group path when present.
+func formatAttr(groupPrefix string, a slog.Attr) string {
+	key := a.Key
+	if groupPrefix != "" {
+		key = groupPrefix + "." + key
+	}
+	return fmt.Sprintf("%s=%v", key, a.Value)
 }
 
-// WithGroup returns a new handler with the given group.
-// For CLI handler, we ignore groups for simplicity.
-func (h *CLIHandler) WithGroup(_ string) slog.Handler {
-	return h
+// WithAttrs returns a new handler with the given attributes appended.
+func (h *CLIHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
+	merged := make([]slog.Attr, 0, len(h.attrs)+len(attrs))
+	merged = append(merged, h.attrs...)
+	merged = append(merged, attrs...)
+	clone := *h
+	clone.attrs = merged
+	return &clone
+}
+
+// WithGroup returns a new handler that prefixes subsequent attribute keys
+// with the given group name (joined with ".").
+func (h *CLIHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
+	groups := make([]string, 0, len(h.groups)+1)
+	groups = append(groups, h.groups...)
+	groups = append(groups, name)
+	clone := *h
+	clone.groups = groups
+	return &clone
 }
 
 func newCLILogger(level string) *slog.Logger {

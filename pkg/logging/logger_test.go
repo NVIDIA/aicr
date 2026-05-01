@@ -273,8 +273,33 @@ func TestSetDefaultStructuredLoggerWithLevel(t *testing.T) {
 }
 
 func TestEnvVarLogLevelConstant(t *testing.T) {
-	if envVarLogLevel != "LOG_LEVEL" {
-		t.Errorf("envVarLogLevel = %q, want %q", envVarLogLevel, "LOG_LEVEL")
+	if envVarLogLevel != "AICR_LOG_LEVEL" {
+		t.Errorf("envVarLogLevel = %q, want %q", envVarLogLevel, "AICR_LOG_LEVEL")
+	}
+	if envVarLogLevelLegacy != "LOG_LEVEL" {
+		t.Errorf("envVarLogLevelLegacy = %q, want %q", envVarLogLevelLegacy, "LOG_LEVEL")
+	}
+}
+
+func TestResolveLogLevel(t *testing.T) {
+	tests := []struct {
+		name      string
+		aicrEnv   string
+		legacyEnv string
+		want      string
+	}{
+		{"prefers AICR_LOG_LEVEL", "debug", "warn", "debug"},
+		{"falls back to LOG_LEVEL", "", "warn", "warn"},
+		{"both unset returns empty", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envVarLogLevel, tt.aicrEnv)
+			t.Setenv(envVarLogLevelLegacy, tt.legacyEnv)
+			if got := resolveLogLevel(); got != tt.want {
+				t.Errorf("resolveLogLevel() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

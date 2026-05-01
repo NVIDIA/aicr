@@ -17,6 +17,7 @@ package logging
 import (
 	"bytes"
 	"log/slog"
+	"os"
 	"strings"
 	"testing"
 )
@@ -68,6 +69,8 @@ func TestCLIHandler_InfoMessage(t *testing.T) {
 func TestCLIHandler_ErrorMessage(t *testing.T) {
 	var buf bytes.Buffer
 	handler := newCLIHandler(&buf, slog.LevelInfo)
+	// Force color on for this test even though the writer is a buffer.
+	handler.color = true
 	logger := slog.New(handler)
 
 	logger.Error("test error message")
@@ -87,6 +90,27 @@ func TestCLIHandler_ErrorMessage(t *testing.T) {
 	// Should contain reset code
 	if !strings.Contains(output, colorReset) {
 		t.Errorf("error message should reset color, got: %q", output)
+	}
+}
+
+func TestCLIHandler_NoColorWhenNotTTY(t *testing.T) {
+	var buf bytes.Buffer
+	handler := newCLIHandler(&buf, slog.LevelInfo)
+	logger := slog.New(handler)
+
+	logger.Error("test error message")
+	logger.Info("test info message")
+
+	output := buf.String()
+	if strings.Contains(output, colorRed) || strings.Contains(output, colorGreen) {
+		t.Errorf("non-TTY writer should not produce color codes, got: %q", output)
+	}
+}
+
+func TestShouldUseColor_NoColorEnv(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	if shouldUseColor(os.Stderr) {
+		t.Error("NO_COLOR set should disable color")
 	}
 }
 
@@ -195,35 +219,45 @@ func TestGetLogPrefix(t *testing.T) {
 
 func TestCLIHandler_WithAttrs(t *testing.T) {
 	var buf bytes.Buffer
-	handler := newCLIHandler(&buf, slog.LevelInfo)
+	base := newCLIHandler(&buf, slog.LevelInfo)
 
-	// WithAttrs should return the same handler (no-op implementation)
-	result := handler.WithAttrs([]slog.Attr{slog.String("key", "value")})
-	if result != handler {
-		t.Error("WithAttrs should return the same handler")
+	// nil/empty attrs → same handler (no-op fast path).
+	if got := base.WithAttrs(nil); got != base {
+		t.Error("WithAttrs(nil) should return the same handler")
 	}
 
-	// nil attrs
-	result = handler.WithAttrs(nil)
-	if result != handler {
-		t.Error("WithAttrs(nil) should return the same handler")
+	// Non-empty attrs return a distinct handler that emits the bound attrs.
+	derived := base.WithAttrs([]slog.Attr{slog.String("requestID", "abc")})
+	if derived == base {
+		t.Fatal("WithAttrs(non-empty) should return a distinct handler")
+	}
+	logger := slog.New(derived)
+	logger.Info("hello")
+	out := buf.String()
+	if !strings.Contains(out, "requestID=abc") {
+		t.Errorf("expected bound attr in output, got: %q", out)
 	}
 }
 
 func TestCLIHandler_WithGroup(t *testing.T) {
 	var buf bytes.Buffer
-	handler := newCLIHandler(&buf, slog.LevelInfo)
+	base := newCLIHandler(&buf, slog.LevelInfo)
 
-	// WithGroup should return the same handler (no-op implementation)
-	result := handler.WithGroup("test-group")
-	if result != handler {
-		t.Error("WithGroup should return the same handler")
+	// Empty name → same handler.
+	if got := base.WithGroup(""); got != base {
+		t.Error("WithGroup(\"\") should return the same handler")
 	}
 
-	// empty group
-	result = handler.WithGroup("")
-	if result != handler {
-		t.Error("WithGroup(\"\") should return the same handler")
+	// Non-empty group → distinct handler that prefixes attribute keys.
+	derived := base.WithGroup("req")
+	if derived == base {
+		t.Fatal("WithGroup(non-empty) should return a distinct handler")
+	}
+	logger := slog.New(derived)
+	logger.Info("hello", "id", "abc")
+	out := buf.String()
+	if !strings.Contains(out, "req.id=abc") {
+		t.Errorf("expected group-prefixed attr in output, got: %q", out)
 	}
 }
 
