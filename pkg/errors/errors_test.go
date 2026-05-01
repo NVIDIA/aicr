@@ -101,6 +101,50 @@ func TestError(t *testing.T) {
 	}
 }
 
+func TestIs_CodeMatching(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		err    error
+		target error
+		want   bool
+	}{
+		{
+			name:   "same code matches",
+			err:    New(ErrCodeNotFound, "x"),
+			target: New(ErrCodeNotFound, ""),
+			want:   true,
+		},
+		{
+			name:   "different code does not match",
+			err:    New(ErrCodeNotFound, "x"),
+			target: New(ErrCodeInternal, ""),
+			want:   false,
+		},
+		{
+			name:   "wrapped error matches by code via errors.Is",
+			err:    Wrap(ErrCodeTimeout, "wrapped", errors.New("inner")),
+			target: New(ErrCodeTimeout, ""),
+			want:   true,
+		},
+		{
+			name:   "non-structured target does not match",
+			err:    New(ErrCodeNotFound, "x"),
+			target: errors.New("plain"),
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := errors.Is(tt.err, tt.target)
+			if got != tt.want {
+				t.Errorf("errors.Is = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestUnwrap(t *testing.T) {
 	t.Parallel()
 	cause := errors.New("root cause")
@@ -158,6 +202,7 @@ func TestErrorCodes(t *testing.T) {
 		ErrCodeRateLimitExceeded,
 		ErrCodeMethodNotAllowed,
 		ErrCodeUnavailable,
+		ErrCodeConflict,
 	}
 
 	for _, code := range codes {

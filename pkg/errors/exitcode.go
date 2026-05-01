@@ -79,7 +79,7 @@ func ExitCodeFromError(err error) int {
 // exitCodeFromErrorCode maps an ErrorCode to its corresponding exit code.
 func exitCodeFromErrorCode(code ErrorCode) int {
 	switch code {
-	case ErrCodeInvalidRequest, ErrCodeMethodNotAllowed:
+	case ErrCodeInvalidRequest, ErrCodeMethodNotAllowed, ErrCodeConflict:
 		return ExitInvalidInput
 	case ErrCodeNotFound:
 		return ExitNotFound

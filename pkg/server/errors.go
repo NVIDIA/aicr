@@ -74,6 +74,8 @@ func httpStatusFromCode(code aicrerrors.ErrorCode) int {
 	case aicrerrors.ErrCodeTimeout:
 		// Prefer 504 for upstream timeouts and internal deadline exceeded.
 		return http.StatusGatewayTimeout
+	case aicrerrors.ErrCodeConflict:
+		return http.StatusConflict
 	case aicrerrors.ErrCodeInternal:
 		fallthrough
 	default:
@@ -86,7 +88,8 @@ func retryableFromCode(code aicrerrors.ErrorCode) bool {
 	case aicrerrors.ErrCodeInvalidRequest,
 		aicrerrors.ErrCodeUnauthorized,
 		aicrerrors.ErrCodeNotFound,
-		aicrerrors.ErrCodeMethodNotAllowed:
+		aicrerrors.ErrCodeMethodNotAllowed,
+		aicrerrors.ErrCodeConflict:
 		return false
 	case aicrerrors.ErrCodeTimeout,
 		aicrerrors.ErrCodeUnavailable,

@@ -129,6 +129,14 @@ const (
 	HTTPExpectContinueTimeout = 1 * time.Second
 )
 
+// Trust / TUF timeouts for Sigstore trust-root refresh.
+const (
+	// TUFUpdateTimeout bounds the total time for Sigstore TUF metadata refresh.
+	// TUF downloads several metadata files (root, timestamp, snapshot, targets)
+	// from a CDN; allow more headroom than a single HTTP request.
+	TUFUpdateTimeout = 2 * time.Minute
+)
+
 // ConfigMap timeouts for Kubernetes ConfigMap operations.
 const (
 	// ConfigMapWriteTimeout is the timeout for writing to ConfigMaps.

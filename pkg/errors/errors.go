@@ -38,6 +38,10 @@ const (
 	//
 	// Note: this value is aligned with the public API error contract.
 	ErrCodeUnavailable ErrorCode = "SERVICE_UNAVAILABLE"
+	// ErrCodeConflict indicates a resource state conflict (e.g., already exists,
+	// version mismatch). Distinct from ErrCodeInvalidRequest because the request
+	// itself is well-formed; the conflict is with current resource state.
+	ErrCodeConflict ErrorCode = "CONFLICT"
 )
 
 // StructuredError provides structured error information for better observability.
@@ -61,6 +65,17 @@ func (e *StructuredError) Error() string {
 // Unwrap returns the underlying cause for errors.Is and errors.As support.
 func (e *StructuredError) Unwrap() error {
 	return e.Cause
+}
+
+// Is reports whether target is a *StructuredError with the same Code, enabling
+// idiomatic code-based matching via errors.Is. The Message and Cause are not
+// compared; callers wanting cause-chain matching should rely on Unwrap.
+func (e *StructuredError) Is(target error) bool {
+	t, ok := target.(*StructuredError)
+	if !ok {
+		return false
+	}
+	return e.Code == t.Code
 }
 
 // New creates a new StructuredError with the given code and message.
