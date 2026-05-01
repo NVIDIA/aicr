@@ -18,6 +18,9 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -43,7 +46,11 @@ var (
 // It configures logging, sets up routes, and handles graceful shutdown.
 // Returns an error if the server fails to start or encounters a fatal error.
 func Serve() error {
-	ctx := context.Background()
+	// Install signal handling at the entrypoint so SIGTERM/SIGINT cancels
+	// the context throughout pre-Run setup (allowlist parsing, bundler
+	// creation) as well as during request handling.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	logging.SetDefaultStructuredLogger(name, version)
 	slog.Debug("starting",

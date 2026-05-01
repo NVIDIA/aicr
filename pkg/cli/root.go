@@ -131,7 +131,10 @@ func newRootCmd() *cli.Command {
 				logLevel = "debug"
 			}
 
-			// Configure logger based on flags
+			// Configure logger based on flags. Precedence: log-json > debug >
+			// default CLI logger. When both --log-json and --debug are set,
+			// log-json wins (machine-readable output is the explicit ask) but
+			// the debug log level is still applied via the shared logLevel.
 			switch {
 			case c.Bool("log-json"):
 				logging.SetDefaultStructuredLoggerWithLevel(name, version, logLevel)
@@ -297,13 +300,13 @@ func Execute() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 
-	if err := cmd.Run(ctx, sanitizeCompletionArgs(os.Args)); err != nil {
-		cancel()
+	err := cmd.Run(ctx, sanitizeCompletionArgs(os.Args))
+	cancel()
+	if err != nil {
 		exitCode := errors.ExitCodeFromError(err)
 		slog.Error("command failed", "error", err, "exitCode", exitCode)
-		os.Exit(exitCode)
+		os.Exit(exitCode) //nolint:gocritic // cancel() above; os.Exit skips defers intentionally
 	}
-	cancel()
 }
 
 // sanitizeCompletionArgs works around a urfave/cli v3 limitation where "--"
