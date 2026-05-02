@@ -130,7 +130,10 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 
 		client, err := tuf.New(opts)
 		if err != nil {
-			ch <- updateResult{err: errors.Wrap(errors.ErrCodeUnavailable, "failed to initialize TUF client for update", err)}
+			// tuf.New only performs local config setup (parses the embedded
+			// root, computes cache paths). Failures here are configuration
+			// or filesystem problems, not network — Internal, not Unavailable.
+			ch <- updateResult{err: errors.Wrap(errors.ErrCodeInternal, "failed to initialize TUF client for update", err)}
 			return
 		}
 
