@@ -426,7 +426,7 @@ func TestNewFileReader(t *testing.T) {
 		}
 	})
 
-	t.Run("nonexistent file returns error", func(t *testing.T) {
+	t.Run("nonexistent file returns NotFound", func(t *testing.T) {
 		reader, err := NewFileReader(FormatJSON, "/nonexistent/file.json")
 		if err == nil {
 			t.Fatal("Expected error for nonexistent file")
@@ -434,8 +434,11 @@ func TestNewFileReader(t *testing.T) {
 		if reader != nil {
 			t.Error("Expected nil reader for nonexistent file")
 		}
-		if !strings.Contains(err.Error(), "failed to open file") {
-			t.Errorf("Expected open file error, got: %v", err)
+		// ENOENT is now classified as ErrCodeNotFound (HTTP 404 / Exit
+		// NotFound) rather than ErrCodeInternal so callers can distinguish
+		// "file missing" from other I/O failures.
+		if !strings.Contains(err.Error(), "file not found") {
+			t.Errorf("Expected NotFound error, got: %v", err)
 		}
 	})
 
@@ -483,7 +486,7 @@ func TestNewFileReader_ErrorPaths(t *testing.T) {
 			name:      "nested in nonexistent directory",
 			format:    FormatJSON,
 			filePath:  "/no/such/dir/file.json",
-			wantErrSS: "failed to open file",
+			wantErrSS: "file not found",
 		},
 		{
 			name:      "path with null byte",

@@ -685,3 +685,34 @@ func TestHTTPReader_Read_BodyAtLimit(t *testing.T) {
 		t.Errorf("expected %d bytes, got %d", defaults.HTTPResponseBodyLimit, len(got))
 	}
 }
+
+func TestHTTPReader_Download_BodyExceedsLimit_PreservesCode(t *testing.T) {
+	// DownloadWithContext should propagate ReadWithContext's
+	// ErrCodeInvalidRequest for oversized bodies, NOT overwrite it with
+	// ErrCodeUnavailable.
+	body := strings.Repeat("z", int(defaults.HTTPResponseBodyLimit)+1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	tmpDir := t.TempDir()
+	dest := filepath.Join(tmpDir, "out.bin")
+
+	reader := NewHTTPReader()
+	err := reader.DownloadWithContext(context.Background(), server.URL, dest)
+	if err == nil {
+		t.Fatal("expected error when response body exceeds HTTPResponseBodyLimit")
+	}
+	var sErr *aicrerrors.StructuredError
+	if !errors.As(err, &sErr) {
+		t.Fatalf("expected *StructuredError, got %T: %v", err, err)
+	}
+	if sErr.Code != aicrerrors.ErrCodeInvalidRequest {
+		t.Errorf("expected ErrCodeInvalidRequest preserved from ReadWithContext, got %v", sErr.Code)
+	}
+	// Destination file must NOT be written when the read errors out.
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Errorf("destination file should not exist on read failure, got err=%v", err)
+	}
+}

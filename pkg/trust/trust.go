@@ -169,12 +169,18 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 
 // trustedMaterialFromClient loads the trusted root from a TUF client.
 func trustedMaterialFromClient(client *tuf.Client) (root.TrustedMaterial, error) {
-	// GetTarget verifies the target's signature against the TUF metadata;
-	// failure here is most likely a verification problem. Classify as
-	// Unauthorized rather than Internal so operators see the trust angle.
+	// GetTarget can fail with transport, download, or verification errors.
+	// Classify with the same helper used by the refresh path so operators
+	// see the right code (Unavailable for retryable transport, Unauthorized
+	// for signature/expiry).
 	trustedRootJSON, err := client.GetTarget("trusted_root.json")
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeUnauthorized, "failed to get trusted root from TUF (signature or fetch error)", err)
+		code := classifyTUFError(err)
+		msg := "failed to get trusted root from TUF (transport error)"
+		if code == errors.ErrCodeUnauthorized {
+			msg = "failed to get trusted root from TUF (signature or verification error)"
+		}
+		return nil, errors.Wrap(code, msg, err)
 	}
 
 	var trustedRootPB prototrustroot.TrustedRoot

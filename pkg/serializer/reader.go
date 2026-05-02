@@ -178,8 +178,13 @@ func NewFileReaderWithContext(ctx context.Context, format Format, filePath strin
 		file, err = os.Open(filepath.Clean(filePath)) //nolint:gosec // G703 -- path from CLI arg or config
 	}
 
-	// Handle file open error
+	// Handle file open error. Distinguish ENOENT (NotFound) from other I/O
+	// failures so callers can map "file missing" to a 4xx and other failures
+	// to a 5xx.
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.Wrap(errors.ErrCodeNotFound, "file not found", err)
+		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open file", err)
 	}
 
