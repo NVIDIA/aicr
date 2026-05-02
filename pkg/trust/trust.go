@@ -58,10 +58,16 @@ import (
 )
 
 // classifyTUFError maps a go-tuf error to the appropriate pkg/errors code.
-// Transport/download failures (network errors, HTTP non-2xx, length-mismatch
-// during fetch) → ErrCodeUnavailable; signature/structure verification
-// failures (bad signature, expired metadata, hash mismatch on a verified
-// blob) → ErrCodeUnauthorized.
+//
+//   - Transport/download failures (network, HTTP non-2xx, length-mismatch
+//     during fetch) → ErrCodeUnavailable.
+//   - Signature/structure verification failures (bad signature, expired
+//     metadata, hash mismatch on a verified blob) → ErrCodeUnauthorized.
+//   - Everything else (ErrRepository, ErrBadVersionNumber, ErrValue,
+//     ErrType, ErrRuntime, …) → ErrCodeInternal. The default is NOT
+//     Unauthorized: a repository or runtime fault should not be reported
+//     as a trust-chain failure, and the human-readable messages downstream
+//     switch on the returned code.
 func classifyTUFError(err error) errors.ErrorCode {
 	var (
 		dlErr    *tufmd.ErrDownload
@@ -77,7 +83,7 @@ func classifyTUFError(err error) errors.ErrorCode {
 	case stderrors.As(err, &unsigned), stderrors.As(err, &hashMis), stderrors.As(err, &expired):
 		return errors.ErrCodeUnauthorized
 	default:
-		return errors.ErrCodeUnauthorized
+		return errors.ErrCodeInternal
 	}
 }
 
@@ -133,10 +139,14 @@ func Update(ctx context.Context) (root.TrustedMaterial, error) {
 			// from verification errors (signature, hash, expiry) using
 			// go-tuf's typed error sentinels. Operators get a more
 			// actionable code: Unavailable for "try again later",
-			// Unauthorized for "trust chain broke; root may need update".
+			// Unauthorized for "trust chain broke; root may need update",
+			// Internal for repository/runtime faults that aren't either.
 			code := classifyTUFError(refreshErr)
-			msg := "TUF refresh failed (transport error)"
-			if code == errors.ErrCodeUnauthorized {
+			msg := "TUF refresh failed"
+			switch code { //nolint:exhaustive // only the three codes classifyTUFError can return are interesting
+			case errors.ErrCodeUnavailable:
+				msg = "TUF refresh failed (transport error)"
+			case errors.ErrCodeUnauthorized:
 				msg = "TUF refresh failed (signature or expiry verification)"
 			}
 			ch <- updateResult{err: errors.Wrap(code, msg, refreshErr)}
@@ -172,12 +182,15 @@ func trustedMaterialFromClient(client *tuf.Client) (root.TrustedMaterial, error)
 	// GetTarget can fail with transport, download, or verification errors.
 	// Classify with the same helper used by the refresh path so operators
 	// see the right code (Unavailable for retryable transport, Unauthorized
-	// for signature/expiry).
+	// for signature/expiry, Internal for repository/runtime faults).
 	trustedRootJSON, err := client.GetTarget("trusted_root.json")
 	if err != nil {
 		code := classifyTUFError(err)
-		msg := "failed to get trusted root from TUF (transport error)"
-		if code == errors.ErrCodeUnauthorized {
+		msg := "failed to get trusted root from TUF"
+		switch code { //nolint:exhaustive // only the three codes classifyTUFError can return are interesting
+		case errors.ErrCodeUnavailable:
+			msg = "failed to get trusted root from TUF (transport error)"
+		case errors.ErrCodeUnauthorized:
 			msg = "failed to get trusted root from TUF (signature or verification error)"
 		}
 		return nil, errors.Wrap(code, msg, err)
