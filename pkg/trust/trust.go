@@ -185,14 +185,18 @@ func trustedMaterialFromClient(client *tuf.Client) (root.TrustedMaterial, error)
 
 	var trustedRootPB prototrustroot.TrustedRoot
 	if unmarshalErr := protojson.Unmarshal(trustedRootJSON, &trustedRootPB); unmarshalErr != nil {
-		// Malformed JSON in a verified target → InvalidRequest (corrupt blob).
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse trusted root", unmarshalErr)
+		// The bytes came from the TUF target / local cache, not from user
+		// input — a parse failure here means the cache is corrupt or the
+		// upstream payload changed shape. Classify as Internal (5xx),
+		// not InvalidRequest (4xx).
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse trusted root", unmarshalErr)
 	}
 
 	trustedRoot, err := root.NewTrustedRootFromProtobuf(&trustedRootPB)
 	if err != nil {
-		// Structural validation failure → InvalidRequest.
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid trusted root", err)
+		// Same reasoning: structural validation failure on bytes the user
+		// did not supply is a server-side problem.
+		return nil, errors.Wrap(errors.ErrCodeInternal, "invalid trusted root", err)
 	}
 
 	return trustedRoot, nil
