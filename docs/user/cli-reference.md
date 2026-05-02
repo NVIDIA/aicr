@@ -847,6 +847,7 @@ aicr bundle [flags]
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
+| `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file |
 | `--insecure-tls` | | bool | Skip TLS verification for OCI registry connections |
 | `--plain-http` | | bool | Use plain HTTP for OCI registry connections |
@@ -895,6 +896,28 @@ This results in:
 - All components from the recipe are bundled automatically
 - Each component creates a subdirectory in the output directory
 - Components are deployed in the order specified by `deploymentOrder` in the recipe
+
+#### Storage Class (`--storage-class`)
+
+The `--storage-class` flag injects a Kubernetes StorageClass name into components at bundle time. StorageClass is a cluster infrastructure detail — the right value depends on what the target cluster has provisioned, not on the recipe.
+
+When provided, the value is written to all Helm value paths declared in the component registry under `storageClassPaths`, overriding any `storageClassName` set in recipe overlays. If a per-component `--set <component>:<path>=<value>` explicitly targets the same path, that value takes precedence over `--storage-class`.
+
+**Example:**
+
+```bash
+# Use EBS gp3 instead of the overlay default gp2 on EKS
+aicr bundle --recipe recipe.yaml \
+  --storage-class gp3 \
+  --output bundle
+
+# Use a custom storage class on an on-prem cluster
+aicr bundle --recipe recipe.yaml \
+  --storage-class local-path \
+  --output bundle
+```
+
+When `--storage-class` is not set, any `storageClassName` values already defined in the recipe overlays are preserved as defaults. When it is set, `--set <component>:<path>=<value>` on the same path still wins — `--storage-class` only fills in paths that were not explicitly overridden.
 
 #### Deployment Methods (`--deployer`)
 

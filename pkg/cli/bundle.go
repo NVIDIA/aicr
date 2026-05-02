@@ -53,6 +53,7 @@ type bundleCmdOptions struct {
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
+	storageClass               string
 	targetRevision             string
 
 	// dynamicValues declares value paths provided at install time.
@@ -219,6 +220,14 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 	}
 	opts.estimatedNodeCount = n
 
+	if cmd.IsSet("storage-class") {
+		sc := strings.TrimSpace(cmd.String("storage-class"))
+		if sc == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, "--storage-class cannot be blank when specified")
+		}
+		opts.storageClass = sc
+	}
+
 	return opts, nil
 }
 
@@ -339,6 +348,11 @@ Package with explicit tag (overrides CLI version):
 				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
 				Category: "Scheduling",
 			},
+			&cli.StringFlag{
+				Name:     "storage-class",
+				Usage:    "Kubernetes StorageClass name to inject into components at bundle time (written to registry-declared storageClassPaths). Overrides any storageClassName set in recipe overlays.",
+				Category: "Scheduling",
+			},
 			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
@@ -402,7 +416,7 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo", "storage-class"); err != nil {
 		return err
 	}
 
@@ -463,6 +477,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithWorkloadGateTaint(opts.workloadGateTaint),
 		config.WithWorkloadSelector(opts.workloadSelector),
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
+		config.WithStorageClass(opts.storageClass),
 	)
 
 	// Note: binary attestation pre-flight check is handled by bundler.New().

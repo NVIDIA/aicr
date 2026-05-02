@@ -58,6 +58,10 @@ type ComponentConfig struct {
 
 	PodScheduling PodSchedulingConfig `yaml:"podScheduling,omitempty"`
 
+	// StorageClassPaths are Helm value paths where the storage class name is injected.
+	// When --storage-class is provided at bundle time, the value is written to each path.
+	StorageClassPaths []string `yaml:"storageClassPaths,omitempty"`
+
 	// Validations defines component-specific validation checks.
 	Validations []ComponentValidationConfig `yaml:"validations,omitempty"`
 
@@ -365,6 +369,14 @@ func (c *ComponentConfig) GetNodeCountPaths() []string {
 		return nil
 	}
 	return c.NodeScheduling.NodeCountPaths
+}
+
+// GetStorageClassPaths returns Helm value paths where the storage class name is injected.
+func (c *ComponentConfig) GetStorageClassPaths() []string {
+	if c == nil {
+		return nil
+	}
+	return c.StorageClassPaths
 }
 
 // GetValidations returns all validation configurations for a component.

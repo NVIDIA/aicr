@@ -58,6 +58,29 @@ func TestConfigAttest(t *testing.T) {
 	}
 }
 
+func TestConfigStorageClass(t *testing.T) {
+	t.Run("default is empty", func(t *testing.T) {
+		cfg := NewConfig()
+		if cfg.StorageClass() != "" {
+			t.Errorf("StorageClass() = %q, want empty string", cfg.StorageClass())
+		}
+	})
+
+	t.Run("set via WithStorageClass", func(t *testing.T) {
+		cfg := NewConfig(WithStorageClass("gp2"))
+		if cfg.StorageClass() != "gp2" {
+			t.Errorf("StorageClass() = %q, want %q", cfg.StorageClass(), "gp2")
+		}
+	})
+
+	t.Run("empty string is a no-op", func(t *testing.T) {
+		cfg := NewConfig(WithStorageClass(""))
+		if cfg.StorageClass() != "" {
+			t.Errorf("StorageClass() = %q, want empty string", cfg.StorageClass())
+		}
+	})
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

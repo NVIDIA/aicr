@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -894,6 +895,84 @@ func TestApplyNodeSchedulingOverrides_EstimatedNodeCount(t *testing.T) {
 		}
 	default:
 		t.Errorf("estimatedNodeCount type = %T, value = %v (want int/int64)", got, got)
+	}
+}
+
+// TestApplyNodeSchedulingOverrides_StorageClass covers all storage-class injection scenarios
+// as a table-driven test: global injection, no-op when flag is unset, and explicit --set
+// per-component override winning over the global default.
+func TestApplyNodeSchedulingOverrides_StorageClass(t *testing.T) {
+	registry, err := recipe.GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry() error = %v", err)
+	}
+	comp := registry.Get("kube-prometheus-stack")
+	if comp == nil || len(comp.GetStorageClassPaths()) == 0 {
+		t.Fatalf("registry missing kube-prometheus-stack or storageClassPaths: cannot run storage class path test")
+	}
+
+	const scPath = "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName"
+
+	tests := []struct {
+		name          string
+		cfgOpts       []config.Option
+		initialValues map[string]string // applied to values map before the call (simulates earlier --set application)
+		wantValue     string
+		wantPresent   bool
+	}{
+		{
+			name:        "global storageClass injected into empty values",
+			cfgOpts:     []config.Option{config.WithStorageClass("my-storage-class")},
+			wantValue:   "my-storage-class",
+			wantPresent: true,
+		},
+		{
+			name:          "no injection when --storage-class is not set",
+			cfgOpts:       []config.Option{},
+			initialValues: map[string]string{scPath: "gp2"},
+			wantValue:     "gp2",
+			wantPresent:   true,
+		},
+		{
+			name: "explicit --set per-component wins over global --storage-class",
+			cfgOpts: []config.Option{
+				config.WithStorageClass("my-storage-class"),
+				config.WithValueOverrides(map[string]map[string]string{
+					// "prometheus" is the valueOverrideKey for kube-prometheus-stack.
+					"prometheus": {scPath: "explicit-gp2"},
+				}),
+			},
+			initialValues: map[string]string{scPath: "explicit-gp2"},
+			wantValue:     "explicit-gp2",
+			wantPresent:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(tt.cfgOpts...)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			values := map[string]any{}
+			if len(tt.initialValues) > 0 {
+				if applyErr := component.ApplyMapOverrides(values, tt.initialValues); applyErr != nil {
+					t.Fatalf("ApplyMapOverrides() setup error = %v", applyErr)
+				}
+			}
+
+			b.applyNodeSchedulingOverrides("kube-prometheus-stack", values)
+
+			got, ok := component.GetValueByPath(values, scPath)
+			if ok != tt.wantPresent {
+				t.Fatalf("storageClassName present = %v, want %v", ok, tt.wantPresent)
+			}
+			if tt.wantPresent && got != tt.wantValue {
+				t.Errorf("storageClassName = %v, want %q", got, tt.wantValue)
+			}
+		})
 	}
 }
 
