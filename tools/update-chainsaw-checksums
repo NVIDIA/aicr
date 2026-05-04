@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Refresh the per-arch SHA256 checksums in .settings.yaml after a chainsaw
+# version bump. Invoked by Renovate via postUpgradeTasks (.github/renovate.json5)
+# whenever testing_tools.chainsaw is updated.
+#
+# Usage: tools/update-chainsaw-checksums <chainsaw-version>
+#   e.g. tools/update-chainsaw-checksums v0.2.15
+#
+# Idempotent: re-running with the currently-pinned version produces no diff.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <chainsaw-version>" >&2
+  exit 64
+fi
+
+VERSION="$1"
+# Accept both "v0.2.15" and "0.2.15".
+VERSION_NO_V="${VERSION#v}"
+VERSION_WITH_V="v${VERSION_NO_V}"
+
+SETTINGS_FILE=".settings.yaml"
+if [[ ! -f "${SETTINGS_FILE}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} not found (run from repo root)" >&2
+  exit 1
+fi
+
+# Upstream release asset is named checksums.txt.
+CHECKSUMS_URL="https://github.com/kyverno/chainsaw/releases/download/${VERSION_WITH_V}/checksums.txt"
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "${TMPDIR}"' EXIT
+
+echo "Fetching ${CHECKSUMS_URL}"
+# Retry on transient failures (5xx, 408/429, connection refused, network
+# blips). Up to 5 attempts; --retry-delay 0 means curl picks an exponential
+# backoff. Total retry window capped at 180s.
+if ! curl --fail --silent --show-error --location \
+      --connect-timeout 10 --max-time 60 \
+      --retry 5 --retry-delay 0 --retry-max-time 180 \
+      --retry-connrefused \
+      --output "${TMPDIR}/checksums.txt" \
+      "${CHECKSUMS_URL}"; then
+  echo "ERROR: failed to download ${CHECKSUMS_URL} after retries" >&2
+  exit 1
+fi
+
+# Each line in the upstream file is "<sha256>  chainsaw_<os>_<arch>.tar.gz".
+# Map (os, arch) → SHA256 for the four platforms .settings.yaml tracks.
+extract_sha() {
+  local os="$1" arch="$2"
+  local pattern="chainsaw_${os}_${arch}\\.tar\\.gz"
+  local line
+  line=$(grep -E "  ${pattern}\$" "${TMPDIR}/checksums.txt" || true)
+  if [[ -z "${line}" ]]; then
+    echo "ERROR: no checksum entry matching ${pattern} in ${CHECKSUMS_URL}" >&2
+    exit 1
+  fi
+  echo "${line%% *}"
+}
+
+LINUX_AMD64=$(extract_sha linux amd64)
+LINUX_ARM64=$(extract_sha linux arm64)
+DARWIN_AMD64=$(extract_sha darwin amd64)
+DARWIN_ARM64=$(extract_sha darwin arm64)
+
+echo "  linux_amd64:  ${LINUX_AMD64}"
+echo "  linux_arm64:  ${LINUX_ARM64}"
+echo "  darwin_amd64: ${DARWIN_AMD64}"
+echo "  darwin_arm64: ${DARWIN_ARM64}"
+
+# Rewrite the four checksum lines in-place via a surgical sed edit.
+# mikefarah/yq drops blank lines between top-level mappings, which would
+# reformat the entire file on every Renovate PR — see the failure-modes note
+# in .github/RENOVATE.md. Targeted sed preserves blank lines and comments.
+# Each line is anchored to its arch key, indentation, and SHA256 hex value.
+sed_inplace() {
+  if sed --version >/dev/null 2>&1; then
+    sed -E -i "$@"          # GNU sed (Linux / Renovate runner)
+  else
+    sed -E -i '' "$@"       # BSD sed (macOS)
+  fi
+}
+
+replace_sha() {
+  local key="$1" sha="$2"
+
+  # Pre-check: the key must exist with the expected shape, otherwise the
+  # sed below silently no-ops and we ship stale checksums.
+  if ! grep -Eq "^[[:space:]]+${key}:[[:space:]]*'[0-9a-f]{64}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
+    echo "ERROR: replace_sha: key '${key}' not found (or wrong shape) in ${SETTINGS_FILE}" >&2
+    exit 1
+  fi
+
+  sed_inplace \
+    -e "s|^([[:space:]]+${key}:[[:space:]]*)'[0-9a-f]{64}'\$|\1'${sha}'|" \
+    "${SETTINGS_FILE}"
+
+  # Post-check: confirm the new value is now in place. Catches sed
+  # alternative-engine quirks and unanticipated input shapes.
+  if ! grep -Eq "^[[:space:]]+${key}:[[:space:]]*'${sha}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
+    echo "ERROR: replace_sha: ${key} did not update to '${sha}' in ${SETTINGS_FILE}" >&2
+    exit 1
+  fi
+}
+
+replace_sha linux_amd64  "${LINUX_AMD64}"
+replace_sha linux_arm64  "${LINUX_ARM64}"
+replace_sha darwin_amd64 "${DARWIN_AMD64}"
+replace_sha darwin_arm64 "${DARWIN_ARM64}"
+
+echo "Updated ${SETTINGS_FILE} for chainsaw ${VERSION_WITH_V}"

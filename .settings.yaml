@@ -14,44 +14,68 @@
 
 # Language Versions
 languages:
+  # renovate: datasource=golang-version depName=go depType=languages
   go: '1.26.2'
 
 # Build Tools
 build_tools:
+  # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
   goreleaser: 'v2.15.3'
+  # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.18.0'
+  # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
   crane: 'v0.21.0'
+  # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
   git_cliff: '2.12.0'
 
 # Linting
 linting:
+  # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.10.1'
+  # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
+  # renovate: datasource=github-releases depName=google/addlicense depType=linting
   addlicense: 'v1.1.1'
+  # renovate: datasource=github-releases depName=google/go-licenses depType=linting
   go_licenses: 'v1.6.0'
 
 # Security Tools
 security_tools:
+  # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
   grype: 'v0.107.0'
+  # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.0.4'
+  # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.42.2'
 
 # E2E Testing Tools
 testing_tools:
+  # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
   kubectl: 'v1.35.0'
+  # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.31.0'
+  # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
   nvkind: '78a0a514c41c3e77ac0d935f38d971d3b4455138'
+  # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.0'
+  # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.0'
+  # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.1.1'
+  # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.7.0'
+  # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
   chainsaw: 'v0.2.14'
+  # chainsaw_checksums are refreshed automatically by tools/update-chainsaw-checksums
+  # via Renovate postUpgradeTasks whenever the chainsaw version above is bumped.
   chainsaw_checksums:
     linux_amd64: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
     linux_arm64: 'b6494b71e490ab825890fc12cc575de7f59bfa637d5cfe73c66987e4454e397c'
     darwin_amd64: '983ce0e4ff32a2112481833d7be4e0a0f0530fadba630fa93d3a635539bc1db0'
     darwin_arm64: 'ff806554a15e12faca08b54d373a61e27808f40c34208248924f7b71a301f786'
+  # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
   yq: 'v4.52.4'
+  # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
   karpenter: 'v1.8.0'
 
 # Quality Thresholds
@@ -66,16 +90,22 @@ build:
 
 # Documentation Tools
 docs_tools:
+  # renovate: datasource=github-releases depName=gohugoio/hugo depType=docs_tools
   hugo: '0.155.3'
+  # renovate: datasource=node-version depName=node depType=docs_tools
   node: '22'
 
 # Testing Configuration
 testing:
+  # renovate: datasource=docker depName=kindest/node depType=testing
   kind_node_image: 'kindest/node:v1.32.0'
+  # renovate: datasource=docker depName=kindest/node depType=testing
   h100_kind_node_image: 'kindest/node:v1.35.0'
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
+  # renovate: datasource=helm depName=gpu-operator depType=testing
   gpu_operator_chart_version: 'v25.10.1'
+  # renovate: datasource=docker depName=nvcr.io/nvidia/cuda depType=testing
   snapshot_agent_cuda_image: 'nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04'
 
   # Component test harness configuration

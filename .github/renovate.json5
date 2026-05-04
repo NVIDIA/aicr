@@ -1,0 +1,319 @@
+{
+  // Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+  // SPDX-License-Identifier: Apache-2.0
+  //
+  // Renovate configuration for NVIDIA/aicr.
+  // Runs alongside .github/dependabot.yml during the soft-launch phase; will
+  // replace it after rollout. Extends dependency coverage to .settings.yaml.
+  // Workflow: .github/workflows/renovate.yaml (self-hosted via renovatebot/github-action).
+  // Schema: https://docs.renovatebot.com/renovate-schema.json
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  extends: [
+    "config:recommended",
+    ":dependencyDashboard",
+    "helpers:pinGitHubActionDigests",
+    ":semanticCommitTypeAll(chore)",
+    ":semanticCommitScope(deps)",
+  ],
+
+  // Scheduling is owned by the workflow cron in .github/workflows/renovate.yaml,
+  // not by a Renovate-side `schedule:` field. Self-hosted Renovate runs only
+  // when the workflow fires, so a second-layer schedule is redundant and
+  // creates an alignment trap — the two must overlap or every PR is held in
+  // "Awaiting Schedule". The cron is the single source of truth for cadence.
+  // Self-hosted Renovate cannot consume GitHub vulnerability alerts (that's a
+  // Mend-hosted feature), so the workflow cron is set to weekday mornings to
+  // keep the CVE-to-PR window tight; patch auto-merge drains low-risk PRs
+  // without human attention.
+
+  // `prConcurrentLimit` caps how many Renovate PRs are open at once;
+  // `prHourlyLimit` caps how many *new* PRs Renovate can create in a
+  // rolling hour. Renovate's default for the hourly limit (2) is tuned
+  // for Mend-hosted runs with hundreds of repos sharing upstream
+  // package-index courtesy budgets. For self-hosted in a single repo
+  // the constraint is just "don't flood reviewers"; the concurrent
+  // limit handles that on its own. Match the two so the hourly cap
+  // never holds back updates the concurrent cap would let through.
+  prConcurrentLimit: 10,
+  prHourlyLimit: 10,
+  labels: ["dependencies", "renovate"],
+  rebaseWhen: "behind-base-branch",
+
+  // Supply-chain cooldown. Releases must be ≥3 days old before Renovate
+  // will propose them. Defends against malicious-publish ratchet attacks
+  // where a poisoned version is live for hours and then yanked
+  // (event-stream, colors.js, node-ipc, ...). Trade-off: legitimate CVE
+  // patches land 3 days later than they otherwise would; for a project
+  // whose security-relevant deps come entirely from upstream tooling we
+  // don't write ourselves, that's an acceptable cost. Auto-merge rules
+  // below raise this to 7 days for items that bypass human review.
+  minimumReleaseAge: "3 days",
+  // "strict" excludes too-young releases entirely rather than parking
+  // them in the Dependency Dashboard as "pending". Keeps the dashboard
+  // signal clean — it shows what *will* land next, not what's blocked.
+  internalChecksFilter: "strict",
+
+  // Match the conventional-commit prefix dependabot used so the changelog stays consistent.
+  commitMessagePrefix: "chore(deps):",
+
+  postUpdateOptions: ["gomodTidy", "gomodUpdateImportPaths"],
+
+  // .settings.yaml is the project's single source of truth for tool versions.
+  // Two customManagers cooperate on it:
+  //
+  //   1. The broad "regex" manager handles the common shapes —
+  //      `key: 'vX.Y.Z'`, `key: 'image:tag'`, and YAML list items
+  //      (`- 'vX.Y.Z'`). Annotations look like:
+  //        # renovate: datasource=<DS> depName=<DN> depType=<section> [optional metadata]
+  //
+  //   2. The "git-refs digest" manager handles entries where the value is a
+  //      40-char commit SHA tracked against a branch (e.g. nvkind). These
+  //      use a distinct `# renovate-digest:` prefix so the broad regex
+  //      won't double-extract them. Annotation shape:
+  //        # renovate-digest: datasource=git-refs depName=<DN> packageName=<URL> branch=<branch> depType=<section>
+  //
+  // The `depType=<section>` field names the top-level YAML key the entry
+  // sits under (e.g., `build_tools`, `testing_tools`). It's used by the
+  // packageRules below to bundle PRs by section. depType MUST come
+  // immediately after depName so the optional capture is greedy.
+  //
+  // Optional metadata (extractVersion, versioning, packageNames, registryUrls)
+  // for the broad manager goes in `packageRules` keyed off `matchDepNames`,
+  // not in the annotation comment — keeps the regex simple.
+  customManagers: [
+    {
+      // Broad regex: scalar values + list items in .settings.yaml.
+      customType: "regex",
+      managerFilePatterns: ["/^\\.settings\\.yaml$/"],
+      matchStrings: [
+        // A) Quoted docker image with embedded tag — captures only the tag.
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?:\\s+depType=(?<depType>\\S+))?(?:[^\\n]*)\\n\\s*\\S+:\\s*['\"][^:'\"]+:(?<currentValue>[^'\"]+)['\"]",
+        // B) Plain quoted scalar (key: 'vX.Y.Z'); value contains no ':'.
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?:\\s+depType=(?<depType>\\S+))?(?:[^\\n]*)\\n\\s*\\S+:\\s*['\"](?<currentValue>[^'\":]+)['\"]",
+        // C) Quoted scalar in a YAML list item (`- 'vX.Y.Z'`).
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?:\\s+depType=(?<depType>\\S+))?(?:[^\\n]*)\\n\\s*-\\s*['\"](?<currentValue>[^'\":]+)['\"]",
+      ],
+    },
+    {
+      // git-refs digest tracker — uses a distinct annotation prefix.
+      // Captures the current SHA from the value into `currentDigest`; the
+      // branch named in the annotation is used as the upstream ref to follow.
+      customType: "regex",
+      managerFilePatterns: ["/^\\.settings\\.yaml$/"],
+      matchStrings: [
+        "# renovate-digest: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) packageName=(?<packageName>\\S+) branch=(?<currentValue>\\S+)(?:\\s+depType=(?<depType>\\S+))?\\s*\\n\\s*\\S+:\\s*['\"](?<currentDigest>[a-f0-9]{40})['\"]",
+      ],
+    },
+  ],
+
+  packageRules: [
+    // ---- Auto-merge: workflow digests, Go module patches, npm site deps ----
+    // Low-blast-radius managers where patch / digest bumps almost never break.
+    // minimumReleaseAge raised from the 3-day global default to 7 days because
+    // these bumps skip human review — the cooldown is the only line of defense
+    // against a malicious release sneaking through.
+    {
+      matchUpdateTypes: ["patch", "pin", "digest"],
+      matchManagers: ["github-actions", "gomod", "npm"],
+      minimumReleaseAge: "7 days",
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: true,
+    },
+
+    // ---- Auto-merge: build/lint/security tooling pinned in .settings.yaml ----
+    // Positive-list rather than exclude-list — anything cluster-impacting
+    // (helm, kubectl, kind, kwok, chainsaw, karpenter, gpu-operator,
+    // kindest/node, CUDA, Go toolchain, node, hugo, nvkind) requires a
+    // human eye on the PR even for patch bumps. Same 7-day cooldown as the
+    // managers rule above; auto-merged items get the longer runway.
+    {
+      matchUpdateTypes: ["patch", "pin", "digest"],
+      matchManagers: ["custom.regex"],
+      matchDepNames: [
+        "goreleaser/goreleaser",
+        "ko-build/ko",
+        "google/go-containerregistry",
+        "orhun/git-cliff",
+        "golangci/golangci-lint",
+        "yamllint",
+        "google/addlicense",
+        "google/go-licenses",
+        "anchore/grype",
+        "anchore/syft",
+        "sigstore/cosign",
+        "mikefarah/yq",
+      ],
+      minimumReleaseAge: "7 days",
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: true,
+    },
+
+    // ---- Grouping: bundle related bumps into single PRs ----
+    // Preserve dependabot's gomod groups verbatim.
+    {
+      groupName: "kubernetes",
+      matchManagers: ["gomod"],
+      matchPackageNames: ["k8s.io/**", "sigs.k8s.io/**", "!k8s.io/klog/v2"],
+    },
+    {
+      groupName: "golang-x",
+      matchManagers: ["gomod"],
+      matchPackageNames: ["golang.org/x/**"],
+    },
+    {
+      groupName: "opencontainers",
+      matchManagers: ["gomod"],
+      matchPackageNames: ["github.com/opencontainers/**"],
+    },
+    // Bundle every github-actions digest bump into one PR per cycle —
+    // otherwise the volume across 55 workflows / composite actions is large.
+    {
+      groupName: "github-actions",
+      matchManagers: ["github-actions"],
+    },
+    // Terraform providers and modules typically release in lockstep.
+    {
+      groupName: "terraform",
+      matchManagers: ["terraform"],
+    },
+    // Docs build chain — bundles `.settings.yaml` docs_tools (hugo + the
+    // node runtime used for versioned-site builds) with everything in
+    // site/package.json (vitepress + vue + mermaid + esbuild + vite).
+    // Both halves are part of one docs pipeline and tend to be reviewed
+    // together. See the matching section group rule below for the regex
+    // manager half — both rules share groupName so deps from either
+    // manager land in the same `renovate/docs` PR.
+    {
+      groupName: "docs",
+      matchManagers: ["npm"],
+    },
+    // .settings.yaml updates grouped by top-level YAML section (depType).
+    // Each annotation declares `depType=<section>` so PRs bundle by section.
+    // The `groupName` is the slug used in branch names — kept short and
+    // hyphen-separated so branches read cleanly (`renovate/build-tools`,
+    // not `renovate/.settings.yaml:-build_tools`). The .settings.yaml
+    // `testing` section is mapped to `test-images` — those entries pin
+    // images consumed by the *project's own CI* (kind node images, the
+    // gpu-operator chart we test against, CUDA base images). Calling that
+    // group `gpu-runtime` would confuse it with the GPU runtimes the
+    // project itself produces.
+    {
+      groupName: "build-tools",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["build_tools"],
+    },
+    {
+      groupName: "linting",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["linting"],
+    },
+    {
+      groupName: "security-tools",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["security_tools"],
+    },
+    {
+      groupName: "testing-tools",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["testing_tools"],
+    },
+    // docs_tools section bundles into the same `docs` group as site/package.json
+    // above — hugo, the docs node runtime, and the vitepress site live together.
+    {
+      groupName: "docs",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["docs_tools"],
+    },
+    {
+      groupName: "test-images",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["testing"],
+    },
+    // languages section has only `go` today — single-entry sections still get
+    // their own group so the section→PR mapping is uniform.
+    {
+      groupName: "languages",
+      matchManagers: ["custom.regex"],
+      matchDepTypes: ["languages"],
+    },
+    // Supply-chain hardening tools — Anchore (grype/syft/sbom-action/
+    // scan-action) and Sigstore (cosign/cosign-installer). Both orgs ship
+    // related but independent tools; bundling them lets one reviewer see
+    // every supply-chain bump in a single PR. The matchPackageNames glob
+    // spans both .settings.yaml entries (regex manager) and GitHub Actions
+    // entries (anchore/sbom-action, anchore/scan-action,
+    // sigstore/cosign-installer) — cross-manager grouping by org prefix.
+    // Applied AFTER the section groups so it wins for anchore/* (which
+    // sit in .settings.yaml security_tools); Renovate's last-rule-wins
+    // semantics apply here.
+    {
+      groupName: "supply-chain",
+      matchPackageNames: ["anchore/**", "sigstore/**"],
+    },
+
+    // ---- The Go toolchain version is owned by .settings.yaml.languages.go, not go.mod ----
+    // gomod manager will still update module deps; this rule prevents bumping the `go` directive
+    // out of band. The .settings.yaml custom manager remains responsible for Go version bumps.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["golang"],
+      enabled: false,
+    },
+
+    // ---- .settings.yaml metadata that the simple regex cannot encode inline ----
+    // git-cliff publishes tags without a v-prefix in the binary version (matches '2.12.0' literal).
+    {
+      matchDepNames: ["orhun/git-cliff", "kubernetes-sigs/kind", "tilt-dev/ctlptl", "tilt-dev/tilt", "gohugoio/hugo"],
+      extractVersion: "^v(?<version>.+)$",
+    },
+    // Node.js LTS major-version channel.
+    {
+      matchDepNames: ["node"],
+      versioning: "node",
+    },
+    // gpu-operator Helm chart lives in NVIDIA's NGC Helm registry.
+    {
+      matchDepNames: ["gpu-operator"],
+      registryUrls: ["https://helm.ngc.nvidia.com/nvidia"],
+    },
+
+    // ---- chainsaw bumps refresh per-arch SHA256 checksums via post-upgrade script ----
+    {
+      matchDepNames: ["kyverno/chainsaw"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-chainsaw-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+  ],
+
+  // The AWS EFA device-plugin image lives in AWS's authenticated public ECR
+  // (602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/...) — that is the
+  // canonical distribution path AWS publishes for EKS add-ons. Renovate
+  // can't query it without AWS credentials and there is no public.ecr.aws
+  // mirror, so suppress the lookup-failure warning. Bumping this image is
+  // gated on AWS releasing a new EKS add-on version anyway.
+  ignoreDeps: [
+    "602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin",
+  ],
+
+  // Paths Renovate should not scan.
+  // - vendor/ contains pre-resolved Go modules (managed by `go mod vendor`).
+  // - **/node_modules/**, **/dist/** are build artifacts.
+  // - examples/ holds illustrative recipe YAMLs without `# renovate:`
+  //   annotations; Renovate would not extract anything from them today
+  //   anyway, but excluding speeds up extraction and signals intent.
+  // - **/testdata/** is unit-test fixture data; bumping tags inside
+  //   fixtures would break tests that assert exact rendered output.
+  ignorePaths: [
+    "vendor/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "examples/**",
+    "**/testdata/**",
+  ],
+}
