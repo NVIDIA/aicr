@@ -37,6 +37,13 @@ type Metadata struct {
 	Supplier    string // organization name; defaults to "NVIDIA Corporation"
 	ToolName    string // tool that generated the BOM; defaults to "aicr"
 	ToolVersion string // version of the generating tool
+
+	// Deterministic suppresses run-specific metadata in human-readable
+	// outputs so the artifact can be diffed across runs. Today this only
+	// affects WriteMarkdown (the "_Generated <timestamp> for <name>
+	// <version>_" line is omitted). Use for committed doc artifacts and
+	// any other bit-for-bit reproducible output path.
+	Deterministic bool
 }
 
 // ComponentResult is the per-component image survey input to BuildBOM.

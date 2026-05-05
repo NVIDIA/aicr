@@ -73,6 +73,7 @@ export default withMermaid(
               { text: 'Agent Deployment', link: '/docs/user/agent-deployment' },
               { text: 'Validation', link: '/docs/user/validation' },
               { text: 'Component Catalog', link: '/docs/user/component-catalog' },
+              { text: 'Container Images', link: '/docs/user/container-images' },
             ],
           },
           {
