@@ -47,6 +47,18 @@ type Config struct {
 	RuntimeClassName   string // If set, use this runtimeClassName on the pod and inject NVIDIA_VISIBLE_DEVICES=all (alternative to RequireGPU)
 	MaxNodesPerEntry   int    // Max node names per topology entry (0 = unlimited)
 	OS                 string // Recipe OS criteria value. When set to oskind.Talos, systemd hostPath mounts are skipped and the in-pod agent uses the Talos service backend.
+
+	// Requests overrides the per-resource container requests on the agent pod.
+	// When nil, the privileged/restricted defaults in job.go are used. Keys
+	// must match standard Kubernetes resource names (cpu, memory,
+	// ephemeral-storage); unknown keys are passed through unchanged.
+	Requests corev1.ResourceList
+
+	// Limits overrides the per-resource container limits on the agent pod.
+	// When nil, the privileged/restricted defaults in job.go are used. The
+	// nvidia.com/gpu limit added by RequireGPU is preserved on top of any
+	// override the caller supplies.
+	Limits corev1.ResourceList
 }
 
 // Deployer manages the deployment and lifecycle of the agent Job.

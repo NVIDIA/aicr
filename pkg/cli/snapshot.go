@@ -16,10 +16,14 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -36,7 +40,49 @@ type snapshotTemplateOptions struct {
 	format       serializer.Format
 }
 
-// parseSnapshotTemplateOptions parses and validates template-related flags.
+// parseResourceList converts a comma-separated "name=quantity" list
+// (e.g. "cpu=500m,memory=1Gi,ephemeral-storage=1Gi") into a
+// corev1.ResourceList for use as a per-container request or limit
+// override. An empty string returns a nil ResourceList so the caller
+// can distinguish "no override supplied" (defaults apply) from
+// "override supplied" (replace per-key); a sentinel error would force
+// every call site to special-case the empty-flag path. Each quantity
+// is parsed via resource.ParseQuantity, so the same suffixes accepted
+// everywhere else in Kubernetes work here (m, Ki, Mi, Gi, Ti, ...).
+//
+//nolint:nilnil // (nil, nil) on empty input is the intended contract.
+func parseResourceList(spec string) (corev1.ResourceList, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil, nil
+	}
+	result := corev1.ResourceList{}
+	for _, raw := range strings.Split(spec, ",") {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			return nil, fmt.Errorf("entry %q is not in name=quantity form", entry)
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			return nil, fmt.Errorf("entry %q has empty name or quantity", entry)
+		}
+		q, err := resource.ParseQuantity(value)
+		if err != nil {
+			return nil, fmt.Errorf("entry %q: %w", entry, err)
+		}
+		result[corev1.ResourceName(key)] = q
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
 func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format) (*snapshotTemplateOptions, error) {
 	templatePath := cmd.String("template")
 	outputPath := cmd.String("output")
@@ -162,6 +208,18 @@ func snapshotCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_OS"),
 			Category: "Agent Deployment",
 		},
+		&cli.StringFlag{
+			Name:     "requests",
+			Usage:    "Override agent container resource requests as a comma-separated list of name=quantity pairs (e.g. 'cpu=500m,memory=1Gi,ephemeral-storage=1Gi'). Unspecified resources keep their built-in defaults.",
+			Sources:  cli.EnvVars("AICR_REQUESTS"),
+			Category: "Agent Deployment",
+		},
+		&cli.StringFlag{
+			Name:     "limits",
+			Usage:    "Override agent container resource limits as a comma-separated list of name=quantity pairs (e.g. 'cpu=1,memory=2Gi,ephemeral-storage=2Gi'). Unspecified resources keep their built-in defaults; the nvidia.com/gpu limit added by --require-gpu is preserved.",
+			Sources:  cli.EnvVars("AICR_LIMITS"),
+			Category: "Agent Deployment",
+		},
 		outputFlag(),
 		formatFlag(),
 		kubeconfigFlag(),
@@ -240,7 +298,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "os"); err != nil {
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "os", "requests", "limits"); err != nil {
 				return err
 			}
 
@@ -314,6 +372,17 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 			}
 
+			// Parse resource overrides (CLI takes the same comma-separated
+			// 'name=quantity' shape as kubectl run --requests / --limits).
+			resourceRequests, err := parseResourceList(cmd.String("requests"))
+			if err != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --requests", err)
+			}
+			resourceLimits, err := parseResourceList(cmd.String("limits"))
+			if err != nil {
+				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --limits", err)
+			}
+
 			// When running inside an agent Job, collect locally instead of
 			// deploying another agent (prevents infinite nesting).
 			// Clear pre-created factory so measure() rebuilds it from env vars
@@ -343,6 +412,8 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				TemplatePath:       tmplOpts.templatePath,
 				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
 				OS:                 osVal,
+				Requests:           resourceRequests,
+				Limits:             resourceLimits,
 			}
 
 			return ns.Measure(ctx)

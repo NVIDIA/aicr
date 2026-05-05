@@ -92,6 +92,8 @@ aicr snapshot [flags]
 | `--template` | | string | | Path to Go template file for custom output formatting (requires YAML format) |
 | `--max-nodes-per-entry` | | int | 0 | Maximum node names per taint/label entry in topology collection (0 = unlimited) |
 | `--os` | | string | | Node OS family (`ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`). Selects the per-OS pod configuration and in-pod service collector backend. `talos` skips the `/run/systemd` and `/etc/os-release` hostPath mounts and uses the Kubernetes-API service backend. Reads `AICR_OS` env when unset. |
+| `--requests` | | string | | Override agent container resource requests as a comma-separated list of `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. Reads `AICR_REQUESTS` env when unset. |
+| `--limits` | | string | | Override agent container resource limits as a comma-separated list of `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults; the `nvidia.com/gpu` limit added by `--require-gpu` is preserved on top of any override. Reads `AICR_LIMITS` env when unset. |
 
 **Output Destinations:**
 - **stdout**: Default when no `-o` flag specified

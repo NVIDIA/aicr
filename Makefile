@@ -709,6 +709,35 @@ kwok-test-all: build ## Run all KWOK recipe tests in a shared cluster
 	@bash kwok/scripts/run-all-recipes.sh
 
 # =============================================================================
+# Talos local test harness
+# =============================================================================
+TALOS_CLUSTER_NAME ?= aicr-talos
+TALOS_KUBECONFIG   ?= $(HOME)/.kube/aicr-talos
+TALOS_VERSION      ?= v1.9.0
+
+.PHONY: talos-dev-env
+talos-dev-env: ## Spin up a local Talos cluster (Docker provisioner) for snapshot testing.
+	@TALOS_CLUSTER_NAME=$(TALOS_CLUSTER_NAME) \
+	 TALOS_VERSION=$(TALOS_VERSION) \
+	 KUBECONFIG_OUT=$(TALOS_KUBECONFIG) \
+	 ./tools/talos-test/up.sh
+
+.PHONY: talos-dev-env-clean
+talos-dev-env-clean: ## Destroy the local Talos cluster.
+	@TALOS_CLUSTER_NAME=$(TALOS_CLUSTER_NAME) \
+	 ./tools/talos-test/down.sh
+
+.PHONY: talos-snapshot-test
+talos-snapshot-test: build ## Run the Talos snapshot chainsaw test against an already-running cluster.
+	@DIST_DIR=$$(find dist -maxdepth 1 -type d -name 'aicr_*' 2>/dev/null | head -1); \
+	 if [ -z "$$DIST_DIR" ] || [ ! -x "$$DIST_DIR/aicr" ]; then \
+	    echo "error: aicr binary not found under dist/; run 'make build' first" >&2; exit 1; \
+	 fi; \
+	 KUBECONFIG=$(TALOS_KUBECONFIG) \
+	 PATH=$$DIST_DIR:$$PATH \
+	 chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent-talos
+
+# =============================================================================
 # Component Testing
 # =============================================================================
 

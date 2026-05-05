@@ -1,0 +1,56 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Structural assertion for the Talos snapshot YAML content.
+#
+# Used with: chainsaw assert --resource /tmp/snapshot.yaml --file assert-snapshot-content.yaml
+#
+# Chainsaw's positional-list matching is too brittle here: collector
+# completion order is non-deterministic (errgroup), and adding a new
+# collector would silently break unrelated tests. We use JMESPath
+# expressions instead so the assertion is order-independent at both
+# the measurement-type level and the per-type subtype level.
+#
+# Pinned:
+#   - exactly 5 measurements
+#   - the set of measurement types (sorted)
+#   - per-type, the set of subtype names (sorted)
+#
+# Per-subtype `data` is intentionally not pinned. Chainsaw partial-
+# matches map keys, so omitting `data` insulates the test from
+# unrelated value changes (Talos version bumps, kernel version drift,
+# default label additions). The subtype names alone verify that every
+# collector ran.
+#
+# Deliberately not asserted:
+#   - metadata.source-node    -- talosctl naming-convention drift risk
+#   - OS / extensions         -- absent on a vanilla `talosctl cluster
+#                                 create` (no extensions.talos.dev/*
+#                                 labels). OS therefore has only the
+#                                 `release` subtype.
+#   - GPU subtype data        -- on a Docker-Talos cluster the GPU
+#                                 collector emits hardware + smi with
+#                                 gpu-count=0 (no nvidia-smi, no
+#                                 NFD-detected hardware). We pin the
+#                                 subtype names, not the values.
+kind: Snapshot
+apiVersion: aicr.nvidia.com/v1alpha1
+measurements:
+  (length(@)): 5
+  (sort([*].type)): [GPU, K8s, NodeTopology, OS, SystemD]
+  (@[?type == 'GPU'] | [0].subtypes | sort([*].subtype)): [hardware, smi]
+  (@[?type == 'OS'] | [0].subtypes | sort([*].subtype)): [release]
+  (@[?type == 'NodeTopology'] | [0].subtypes | sort([*].subtype)): [label, summary, taint]
+  (@[?type == 'SystemD'] | [0].subtypes | sort([*].subtype)): [containerd.service, kubelet.service]
+  (@[?type == 'K8s'] | [0].subtypes | sort([*].subtype)): [image, node, policy, server]
