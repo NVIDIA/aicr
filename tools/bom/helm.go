@@ -79,14 +79,14 @@ func lastPath(s string) string {
 	return s
 }
 
-// componentValuesPath returns the canonical values.yaml path for a component
-// or "" if it doesn't exist.
+// componentValuesPath returns the canonical values.yaml path for a component.
+// The caller is responsible for stat-checking; this is purely a path joiner.
 func componentValuesPath(repoRoot, name string) string {
 	return filepath.Join(repoRoot, "recipes", "components", name, "values.yaml")
 }
 
-// componentManifestsDir returns the embedded-manifests directory for a
-// component, or "" if it doesn't exist.
+// componentManifestsDir returns the embedded-manifests directory path for a
+// component. The caller is responsible for stat-checking.
 func componentManifestsDir(repoRoot, name string) string {
 	return filepath.Join(repoRoot, "recipes", "components", name, "manifests")
 }

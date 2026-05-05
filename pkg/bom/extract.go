@@ -17,12 +17,12 @@ package bom
 import (
 	"bytes"
 	stderrors "errors"
-	"fmt"
 	"io"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
 )
 
@@ -75,7 +75,7 @@ func ExtractImagesFromYAML(data []byte) ([]string, error) {
 			if stderrors.Is(err, io.EOF) {
 				break
 			}
-			return nil, fmt.Errorf("decode yaml: %w", err)
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "decode yaml", err)
 		}
 		walkForImages(&node, seen)
 	}
@@ -173,9 +173,23 @@ func isRegistryHost(s string) bool {
 }
 
 // PURL returns the Package URL for the image reference using the OCI type.
-// Format: pkg:oci/<name>@<version>?repository_url=<registry>/<namespace>
-// where <name> is the last path segment, <namespace> is the prefix, and
-// <version> is the digest if available else the tag.
+//
+// Per the purl-spec OCI definition
+// (https://github.com/package-url/purl-spec/blob/main/types-doc/oci-definition.md),
+// the canonical form is:
+//
+//	pkg:oci/<name>@<digest>?repository_url=<registry>/<namespace>/<name>&tag=<tag>
+//
+// where <name> is the last path segment of the image repository, the
+// repository_url is the FULL artifact path (including the name), and the
+// digest is the canonical version. Tags are mutable and live in qualifiers.
+//
+// When a digest is not available (the common case for our reference BOM
+// today, since most chart defaults pin only by tag), this function falls back
+// to using the tag in the @<version> position. That deviates from strict
+// spec conformance but preserves the version information consumers need.
+// As soon as we adopt digest pinning end-to-end, the output becomes
+// fully spec-conformant with no callsite changes.
 func (r ImageRef) PURL() string {
 	name := r.Repository
 	namespace := ""
@@ -183,18 +197,28 @@ func (r ImageRef) PURL() string {
 		namespace = r.Repository[:i]
 		name = r.Repository[i+1:]
 	}
-	version := r.Digest
-	if version == "" {
-		version = r.Tag
-	}
 
 	repoURL := r.Registry
 	if namespace != "" {
-		repoURL = repoURL + "/" + namespace
+		repoURL += "/" + namespace
+	}
+	repoURL += "/" + name
+
+	var version string
+	switch {
+	case r.Digest != "":
+		version = r.Digest
+	case r.Tag != "":
+		version = r.Tag
 	}
 
+	out := "pkg:oci/" + name
 	if version != "" {
-		return fmt.Sprintf("pkg:oci/%s@%s?repository_url=%s", name, version, repoURL)
+		out += "@" + version
 	}
-	return fmt.Sprintf("pkg:oci/%s?repository_url=%s", name, repoURL)
+	out += "?repository_url=" + repoURL
+	if r.Digest != "" && r.Tag != "" {
+		out += "&tag=" + r.Tag
+	}
+	return out
 }

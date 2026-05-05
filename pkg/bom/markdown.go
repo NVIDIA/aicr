@@ -25,9 +25,12 @@ import (
 // WriteMarkdown emits a human-readable summary of a component-level BOM
 // suitable for embedding in docs.
 func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error {
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Name < results[j].Name
+	// Copy before sorting so callers don't observe their input reordered.
+	sorted := append([]ComponentResult(nil), results...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
 	})
+	results = sorted
 
 	var (
 		totalImages     int

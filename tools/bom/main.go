@@ -36,6 +36,7 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/NVIDIA/aicr/pkg/bom"
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 const (
@@ -68,11 +69,11 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict bool) error {
 	registryPath := filepath.Join(repoRoot, "recipes", "registry.yaml")
 	reg, err := loadRegistry(registryPath)
 	if err != nil {
-		return fmt.Errorf("load registry: %w", err)
+		return errors.Wrap(errors.ErrCodeInternal, "load registry", err)
 	}
 
 	if mkErr := os.MkdirAll(outDir, 0o755); mkErr != nil {
-		return fmt.Errorf("mkdir out-dir: %w", mkErr)
+		return errors.Wrap(errors.ErrCodeInternal, "mkdir out-dir", mkErr)
 	}
 
 	results := make([]bom.ComponentResult, 0, len(reg.Components))
@@ -95,7 +96,8 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict bool) error {
 			for _, e := range hardErrs {
 				fmt.Fprintln(os.Stderr, "strict:", e)
 			}
-			return fmt.Errorf("strict mode: %d issues", len(hardErrs))
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("strict mode: %d issues", len(hardErrs)))
 		}
 	}
 
@@ -110,23 +112,23 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict bool) error {
 	jsonPath := filepath.Join(outDir, "bom.cdx.json")
 	jf, err := os.Create(jsonPath) //nolint:gosec // outDir is operator-supplied
 	if err != nil {
-		return fmt.Errorf("create %s: %w", jsonPath, err)
+		return errors.Wrap(errors.ErrCodeInternal, "create "+jsonPath, err)
 	}
 	enc := cdx.NewBOMEncoder(jf, cdx.BOMFileFormatJSON)
 	enc.SetPretty(true)
 	encErr := enc.EncodeVersion(doc, cdx.SpecVersion1_6)
 	closeErr := jf.Close()
 	if encErr != nil {
-		return fmt.Errorf("encode cyclonedx: %w", encErr)
+		return errors.Wrap(errors.ErrCodeInternal, "encode cyclonedx", encErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close %s: %w", jsonPath, closeErr)
+		return errors.Wrap(errors.ErrCodeInternal, "close "+jsonPath, closeErr)
 	}
 
 	mdPath := filepath.Join(outDir, "bom.md")
 	mf, err := os.Create(mdPath) //nolint:gosec // outDir is operator-supplied
 	if err != nil {
-		return fmt.Errorf("create %s: %w", mdPath, err)
+		return errors.Wrap(errors.ErrCodeInternal, "create "+mdPath, err)
 	}
 	mdErr := bom.WriteMarkdown(mf, bom.Metadata{
 		Name:        "aicr",
@@ -135,10 +137,10 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict bool) error {
 	}, results)
 	closeErr = mf.Close()
 	if mdErr != nil {
-		return fmt.Errorf("render markdown: %w", mdErr)
+		return errors.Wrap(errors.ErrCodeInternal, "render markdown", mdErr)
 	}
 	if closeErr != nil {
-		return fmt.Errorf("close %s: %w", mdPath, closeErr)
+		return errors.Wrap(errors.ErrCodeInternal, "close "+mdPath, closeErr)
 	}
 
 	totalImages := 0
@@ -148,6 +150,26 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict bool) error {
 	fmt.Printf("bom: wrote %s and %s (%d components, %d image refs)\n",
 		jsonPath, mdPath, len(results), totalImages)
 	return nil
+}
+
+// renderHelmComponent shells out to `helm template` for c. The timeout
+// context is scoped to this call so its associated timer is canceled before
+// the manifests walk begins, regardless of how many components are surveyed.
+func renderHelmComponent(repoRoot string, c component) ([]byte, []string) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultHelmTimeout)
+	defer cancel()
+
+	valuesPath := componentValuesPath(repoRoot, c.Name)
+	if _, err := os.Stat(valuesPath); err != nil {
+		valuesPath = ""
+	}
+
+	var warnings []string
+	out, err := renderChart(ctx, c, valuesPath)
+	if err != nil {
+		warnings = append(warnings, err.Error())
+	}
+	return out, warnings
 }
 
 // surveyComponent renders the component's chart (if any) and walks its
@@ -167,18 +189,8 @@ func surveyComponent(repoRoot string, c component, skipHelm bool) bom.ComponentR
 	images := map[string]struct{}{}
 
 	if c.kind() == kindHelm && !skipHelm {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultHelmTimeout)
-		defer cancel()
-
-		valuesPath := componentValuesPath(repoRoot, c.Name)
-		if _, err := os.Stat(valuesPath); err != nil {
-			valuesPath = ""
-		}
-
-		out, err := renderChart(ctx, c, valuesPath)
-		if err != nil {
-			res.Warnings = append(res.Warnings, err.Error())
-		}
+		out, warnings := renderHelmComponent(repoRoot, c)
+		res.Warnings = append(res.Warnings, warnings...)
 		if len(out) > 0 {
 			imgs, parseErr := bom.ExtractImagesFromYAML(out)
 			if parseErr != nil {

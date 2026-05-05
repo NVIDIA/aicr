@@ -208,16 +208,30 @@ func TestPURL(t *testing.T) {
 		want string
 	}{
 		{
+			// Tag-only (current common case): tag stands in for digest in
+			// the version slot; repository_url includes the full artifact path.
 			in:   "nvcr.io/nvidia/gpu-operator:v25.3.0",
-			want: "pkg:oci/gpu-operator@v25.3.0?repository_url=nvcr.io/nvidia",
+			want: "pkg:oci/gpu-operator@v25.3.0?repository_url=nvcr.io/nvidia/gpu-operator",
 		},
 		{
 			in:   "docker.io/library/busybox:1.36",
-			want: "pkg:oci/busybox@1.36?repository_url=docker.io/library",
+			want: "pkg:oci/busybox@1.36?repository_url=docker.io/library/busybox",
 		},
 		{
 			in:   "ghcr.io/foo/bar:v1",
-			want: "pkg:oci/bar@v1?repository_url=ghcr.io/foo",
+			want: "pkg:oci/bar@v1?repository_url=ghcr.io/foo/bar",
+		},
+		{
+			// Single-segment image (no namespace): repository_url is
+			// registry/name.
+			in:   "nginx",
+			want: "pkg:oci/nginx?repository_url=docker.io/nginx",
+		},
+		{
+			// Digest + tag: digest is the canonical version, tag goes in
+			// qualifiers per the purl-spec.
+			in:   "gke.gcr.io/pause:3.8@sha256:abc123",
+			want: "pkg:oci/pause@sha256:abc123?repository_url=gke.gcr.io/pause&tag=3.8",
 		},
 	}
 	for _, tt := range tests {

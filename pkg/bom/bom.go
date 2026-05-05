@@ -15,13 +15,17 @@
 package bom
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"sort"
+	"strconv"
 	"time"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
+	"github.com/google/uuid"
+)
+
+const (
+	defaultRootName = "aicr"
+	defaultSupplier = "NVIDIA Corporation"
 )
 
 // Metadata identifies the artifact the BOM describes (e.g., the AICR repo
@@ -61,17 +65,17 @@ type ComponentResult struct {
 // Image entries are de-duplicated across components.
 func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 	if meta.Name == "" {
-		meta.Name = "aicr"
+		meta.Name = defaultRootName
 	}
 	if meta.Supplier == "" {
-		meta.Supplier = "NVIDIA Corporation"
+		meta.Supplier = defaultSupplier
 	}
 	if meta.ToolName == "" {
-		meta.ToolName = "aicr"
+		meta.ToolName = defaultRootName
 	}
 
 	bom := cdx.NewBOM()
-	bom.SerialNumber = "urn:uuid:" + newUUIDv4()
+	bom.SerialNumber = "urn:uuid:" + uuid.NewString()
 	bom.Metadata = &cdx.Metadata{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Tools: &cdx.ToolsChoice{
@@ -93,8 +97,11 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 		},
 	}
 
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Name < results[j].Name
+	// Copy before sorting so callers (e.g., pkg/bundler when it consumes
+	// this) don't observe their input slice reordered.
+	sorted := append([]ComponentResult(nil), results...)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
 	})
 
 	var (
@@ -102,9 +109,9 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 		deps  []cdx.Dependency
 		seen  = map[string]struct{}{}
 	)
-	rootChildren := make([]string, 0, len(results))
+	rootChildren := make([]string, 0, len(sorted))
 
-	for _, r := range results {
+	for _, r := range sorted {
 		compRef := meta.Name + "/" + r.Name
 		rootChildren = append(rootChildren, compRef)
 
@@ -123,7 +130,7 @@ func BuildBOM(meta Metadata, results []ComponentResult) *cdx.BOM {
 		if r.Namespace != "" {
 			props = append(props, cdx.Property{Name: "aicr:helm:namespace", Value: r.Namespace})
 		}
-		props = append(props, cdx.Property{Name: "aicr:version:pinned", Value: boolStr(r.Pinned)})
+		props = append(props, cdx.Property{Name: "aicr:version:pinned", Value: strconv.FormatBool(r.Pinned)})
 		for _, w := range r.Warnings {
 			props = append(props, cdx.Property{Name: "aicr:render:warning", Value: w})
 		}
@@ -183,33 +190,8 @@ func versionOrTag(r ImageRef) string {
 	return r.Tag
 }
 
-func boolStr(b bool) string {
-	if b {
-		return "true"
-	}
-	return "false"
-}
-
 func refList(refs []string) *[]string {
 	out := append([]string{}, refs...)
 	sort.Strings(out)
 	return &out
-}
-
-// newUUIDv4 returns a random UUID v4 without depending on github.com/google/uuid.
-func newUUIDv4() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// Fall back to a timestamped pseudo-UUID; non-fatal for BOM identity.
-		ts := time.Now().UnixNano()
-		return fmt.Sprintf("00000000-0000-4000-8000-%012x", ts&0xffffffffffff)
-	}
-	b[6] = (b[6] & 0x0f) | 0x40
-	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%s-%s-%s-%s-%s",
-		hex.EncodeToString(b[0:4]),
-		hex.EncodeToString(b[4:6]),
-		hex.EncodeToString(b[6:8]),
-		hex.EncodeToString(b[8:10]),
-		hex.EncodeToString(b[10:16]))
 }
