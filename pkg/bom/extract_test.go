@@ -122,6 +122,22 @@ spec:
 			want: []string{"pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime"},
 		},
 		{
+			name: "image referenced via yaml anchor and alias",
+			in: `defaults: &defaults
+  image: ghcr.io/example/sidecar:v1
+spec:
+  containers:
+    - name: app
+      image: nvcr.io/nvidia/gpu-operator:v25.3.0
+    - <<: *defaults
+      name: sidecar
+`,
+			want: []string{
+				"ghcr.io/example/sidecar:v1",
+				"nvcr.io/nvidia/gpu-operator:v25.3.0",
+			},
+		},
+		{
 			name: "image inside deeply nested CR",
 			in: `apiVersion: nvidia.com/v1
 kind: ClusterPolicy

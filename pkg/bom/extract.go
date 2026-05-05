@@ -107,8 +107,12 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 		for _, c := range n.Content {
 			walkForImages(c, seen)
 		}
-	case yaml.ScalarNode, yaml.AliasNode:
-		// Leaf nodes carry no nested image references.
+	case yaml.AliasNode:
+		// Follow the anchor target so an `image:` value reached via *alias
+		// is still surveyed. Rare in K8s manifests but cheap to handle.
+		walkForImages(n.Alias, seen)
+	case yaml.ScalarNode:
+		// Scalar leaf — no nested image references.
 	}
 }
 
