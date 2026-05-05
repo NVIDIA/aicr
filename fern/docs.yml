@@ -14,8 +14,12 @@
 
 instances:
   - url: https://aicr.docs.buildwithfern.com/aicr
+    custom-domain: docs.nvidia.com/aicr
 
 title: NVIDIA AI Cluster Runtime
+
+metadata:
+  canonical-host: "docs.nvidia.com/aicr"
 
 footer: ./components/CustomFooter.tsx
 

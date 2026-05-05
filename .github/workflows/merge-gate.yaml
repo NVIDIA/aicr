@@ -52,6 +52,7 @@ jobs:
       code: ${{ steps.code.outputs.code }}
       actions: ${{ steps.changes.outputs.actions }}
       deps: ${{ steps.changes.outputs.deps }}
+      renovate: ${{ steps.changes.outputs.renovate }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
@@ -70,6 +71,12 @@ jobs:
               - 'go.sum'
               - 'vendor/**'
               - '.github/workflows/verify-licenses.yaml'
+            renovate:
+              # Watch every input the verify-renovate job consumes — including
+              # the Makefile target that runs the validator — so changes to the
+              # Make target or its pinned image trigger the gate.
+              - '.github/renovate.json5'
+              - 'Makefile'
 
       # Detect docs-only PRs: true only when EVERY changed file is docs/md
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d  # v4.0.1
@@ -261,6 +268,30 @@ jobs:
       - run: echo "No dependency changes — license check not required"
 
   # ---------------------------------------------------------------------------
+  # Renovate config validation
+  # ---------------------------------------------------------------------------
+
+  verify-renovate:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.renovate == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate .github/renovate.json5
+        run: make lint-renovate
+
+  verify-renovate-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.renovate != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No Renovate config changes — validation not required"
+
+  # ---------------------------------------------------------------------------
   # Aggregate gate — the single required status check
   # ---------------------------------------------------------------------------
 
@@ -278,6 +309,8 @@ jobs:
       - actionlint-skip
       - verify-licenses
       - verify-licenses-skip
+      - verify-renovate
+      - verify-renovate-skip
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
