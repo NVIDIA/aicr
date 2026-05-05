@@ -93,22 +93,43 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 	}
 	switch n.Kind {
 	case yaml.MappingNode:
+		// First pass: collect sibling scalars for `image`, `repository`, and
+		// `version` so we can recognize the CRD-style triplet pattern used
+		// by NicClusterPolicy, Skyhook, and similar operators where these
+		// three fields are siblings (not concatenated into a single
+		// `image:` value). Without this, the bare `image: doca-driver` part
+		// looks like an untagged image when in fact `repository` and
+		// `version` siblings carry the registry and tag.
+		var imgScalar, repoScalar, verScalar string
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
-			// Resolve `image: *anchor` so a scalar reached through an alias
-			// is captured. Without this the alias falls through to recursion
-			// and the AliasNode → ScalarNode hop drops the value.
 			target := v
 			if v.Kind == yaml.AliasNode && v.Alias != nil {
 				target = v.Alias
 			}
-			if k.Value == "image" && target.Kind == yaml.ScalarNode {
-				img := strings.TrimSpace(target.Value)
-				if isLikelyImage(img) {
-					seen[img] = struct{}{}
-				}
+			if target.Kind != yaml.ScalarNode {
+				continue
 			}
-			walkForImages(v, seen)
+			switch k.Value {
+			case "image":
+				imgScalar = strings.TrimSpace(target.Value)
+			case "repository":
+				repoScalar = strings.TrimSpace(target.Value)
+			case "version":
+				verScalar = strings.TrimSpace(target.Value)
+			}
+		}
+		if imgScalar != "" {
+			combined := combineCRDTriplet(imgScalar, repoScalar, verScalar)
+			if isLikelyImage(combined) {
+				seen[combined] = struct{}{}
+			}
+		}
+
+		// Second pass: recurse into every value to catch image references
+		// nested deeper in the document.
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			walkForImages(n.Content[i+1], seen)
 		}
 	case yaml.SequenceNode, yaml.DocumentNode:
 		for _, c := range n.Content {
@@ -121,6 +142,39 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 	case yaml.ScalarNode:
 		// Scalar leaf — no nested image references.
 	}
+}
+
+// combineCRDTriplet builds a fully-qualified image reference from
+// sibling `image`, `repository`, and `version` scalars in a CRD-style
+// mapping (e.g., NicClusterPolicy, Skyhook Package). Behavior:
+//
+//   - If `image` already starts with a registry host (its first path
+//     segment contains "." or ":" or is "localhost"), it is treated as
+//     fully qualified and `repository` is ignored.
+//   - Otherwise `repository` is prepended — even when `image` itself
+//     contains slashes (e.g., `image: nvidia/mellanox/doca-driver` with
+//     `repository: nvcr.io`) — so the registry information is preserved.
+//   - `version` is appended as a tag when the result does not already
+//     carry one.
+//
+// Returns the combined ref, or the original `image` value if no
+// combination is applicable.
+func combineCRDTriplet(image, repository, version string) string {
+	out := image
+	if repository != "" {
+		first, _, hasSlash := strings.Cut(image, "/")
+		if !hasSlash || !isRegistryHost(first) {
+			out = strings.TrimRight(repository, "/") + "/" + strings.TrimLeft(image, "/")
+		}
+	}
+	hasTag := false
+	if i := strings.LastIndex(out, ":"); i >= 0 && !strings.Contains(out[i+1:], "/") {
+		hasTag = true
+	}
+	if version != "" && !hasTag && !strings.Contains(out, "@") {
+		out = out + ":" + version
+	}
+	return out
 }
 
 func isLikelyImage(v string) bool {

@@ -50,6 +50,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
+      defaultVersion: "0.18.3"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
       system:
@@ -356,6 +357,7 @@ components:
     helm:
       defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
+      defaultVersion: "1.19.2"
       defaultNamespace: monitoring
     nodeScheduling:
       system:

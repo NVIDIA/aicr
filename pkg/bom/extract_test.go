@@ -153,7 +153,70 @@ spec:
 			},
 		},
 		{
-			name: "image inside deeply nested CR",
+			name: "CRD-style triplet with repository, image, and version siblings",
+			in: `apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io/nvidia/mellanox
+    image: doca-driver
+    version: doca3.2.0-25.10
+  rdmaSharedDevicePlugin:
+    repository: nvcr.io/nvidia/mellanox
+    image: k8s-rdma-shared-dev-plugin
+    version: network-operator-v26.1.0
+`,
+			want: []string{
+				"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10",
+				"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.1.0",
+			},
+		},
+		{
+			name: "CRD-style pair with image and version siblings (no repository)",
+			in: `spec:
+  packages:
+    nvidia-setup-kernel:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
+      version: "0.2.2"
+    nvidia-tuned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.3.0"
+`,
+			want: []string{
+				"ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.2.2",
+				"ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.0",
+			},
+		},
+		{
+			// Regression: previously the function bailed out of the
+			// repository prepend whenever `image` contained any slash,
+			// which silently dropped the registry when `image` was a
+			// multi-segment path under `repository`.
+			name: "CRD triplet prepends repository even when image has slashes",
+			in: `apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io
+    image: nvidia/mellanox/doca-driver
+    version: doca3.2.0-25.10
+`,
+			want: []string{
+				"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10",
+			},
+		},
+		{
+			name: "CRD triplet does not override an already-qualified image",
+			in: `spec:
+  containers:
+    - image: docker.io/library/busybox:1.36
+      repository: someother/registry
+      version: 9.9.9
+`,
+			want: []string{"docker.io/library/busybox:1.36"},
+		},
+		{
+			name: "image inside deeply nested CR with CRD triplet at top level",
 			in: `apiVersion: nvidia.com/v1
 kind: ClusterPolicy
 spec:
@@ -169,7 +232,7 @@ spec:
             - image: nvcr.io/nvidia/k8s/container-toolkit:v1.18.0
 `,
 			want: []string{
-				"driver",
+				"nvcr.io/nvidia/driver:580.105.08",
 				"nvcr.io/nvidia/k8s/container-toolkit:v1.18.0",
 			},
 		},
