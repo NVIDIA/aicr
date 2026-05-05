@@ -106,6 +106,27 @@ generate: ## Runs go generate for code generation
 lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar ## Lints the entire project (Go, YAML, and license headers)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
+# Standalone target — NOT part of `make lint` because it requires Docker
+# (the validator runs in the same image renovatebot/github-action wraps).
+# Invoked from CI via .github/workflows/merge-gate.yaml when
+# .github/renovate.json5 changes; run locally before merging changes to
+# the Renovate config.
+#
+# Image is digest-pinned for supply-chain consistency with the GitHub
+# Actions pinning policy. Keep the digest in lockstep with the
+# `renovate-version` input in .github/workflows/renovate.yaml — both
+# point at the same image and should be bumped together.
+RENOVATE_VALIDATOR_IMAGE := ghcr.io/renovatebot/renovate:43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104
+
+.PHONY: lint-renovate
+lint-renovate: ## Validates .github/renovate.json5 with the official Renovate config validator (requires Docker)
+	@echo "Validating .github/renovate.json5..."
+	@docker run --rm \
+		-v $(PWD)/.github/renovate.json5:/repo/.github/renovate.json5:ro \
+		-w /repo \
+		$(RENOVATE_VALIDATOR_IMAGE) \
+		renovate-config-validator .github/renovate.json5
+
 .PHONY: check-agents-sync
 check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 	@./tools/check-agents-sync
@@ -213,6 +234,20 @@ scan: ## Scans for vulnerabilities with grype
 .PHONY: qualify
 qualify: test-coverage lint e2e scan license-check ## Qualifies the codebase (test-coverage, lint, e2e, scan)
 	@echo "Codebase qualification completed"
+
+.PHONY: bom
+bom: ## Generates container image BOM (CycloneDX 1.6 + Markdown) at $(BOM_OUT_DIR)
+	@set -e; \
+	BOM_OUT_DIR="$${BOM_OUT_DIR:-dist/bom}"; \
+	AICR_VERSION="$${AICR_VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"; \
+	mkdir -p "$${BOM_OUT_DIR}"; \
+	echo "Generating BOM into $${BOM_OUT_DIR}..."; \
+	GOFLAGS="-mod=vendor" go run ./tools/bom \
+	  -repo-root "$(CURDIR)" \
+	  -out-dir "$(CURDIR)/$${BOM_OUT_DIR}" \
+	  -aicr-version "$${AICR_VERSION}" \
+	  $${BOM_SKIP_HELM:+-skip-helm} \
+	  $${BOM_STRICT:+-strict}
 
 .PHONY: server
 server: ## Starts a local development server with debug logging

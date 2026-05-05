@@ -24,11 +24,6 @@ name: Publish Fern Docs
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - 'docs/**'
-      - 'fern/**'
     tags:
       - 'docs/v*'
   workflow_dispatch: {}
@@ -60,9 +55,9 @@ jobs:
           FERN_TOKEN: ${{ secrets.DOCS_FERN_TOKEN }}
         working-directory: ./fern
         run: |
-          OUTPUT=$(fern generate --docs 2>&1)
-          echo "$OUTPUT"
-          URL=$(echo "$OUTPUT" | grep -oP 'Published docs to \K.*(?= \()')
+          set -o pipefail
+          fern generate --docs 2>&1 | tee /tmp/fern-output.log
+          URL=$(grep -oP 'Published docs to \K.*(?= \()' /tmp/fern-output.log || true)
           if [ -n "$URL" ]; then
             echo "### Published: [$URL]($URL)" >> "$GITHUB_STEP_SUMMARY"
           fi
