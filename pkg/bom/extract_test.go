@@ -188,6 +188,24 @@ spec:
 			},
 		},
 		{
+			// Regression: previously the function bailed out of the
+			// repository prepend whenever `image` contained any slash,
+			// which silently dropped the registry when `image` was a
+			// multi-segment path under `repository`.
+			name: "CRD triplet prepends repository even when image has slashes",
+			in: `apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+spec:
+  ofedDriver:
+    repository: nvcr.io
+    image: nvidia/mellanox/doca-driver
+    version: doca3.2.0-25.10
+`,
+			want: []string{
+				"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10",
+			},
+		},
+		{
 			name: "CRD triplet does not override an already-qualified image",
 			in: `spec:
   containers:

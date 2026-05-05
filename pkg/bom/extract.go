@@ -148,17 +148,24 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 // sibling `image`, `repository`, and `version` scalars in a CRD-style
 // mapping (e.g., NicClusterPolicy, Skyhook Package). Behavior:
 //
-//   - If `image` already looks fully qualified (contains "/" or ":" past the
-//     first segment), it is used as-is regardless of siblings.
-//   - Otherwise `repository` is prepended when present, and `version` is
-//     appended as a tag when `image` does not already carry one.
+//   - If `image` already starts with a registry host (its first path
+//     segment contains "." or ":" or is "localhost"), it is treated as
+//     fully qualified and `repository` is ignored.
+//   - Otherwise `repository` is prepended — even when `image` itself
+//     contains slashes (e.g., `image: nvidia/mellanox/doca-driver` with
+//     `repository: nvcr.io`) — so the registry information is preserved.
+//   - `version` is appended as a tag when the result does not already
+//     carry one.
 //
 // Returns the combined ref, or the original `image` value if no
 // combination is applicable.
 func combineCRDTriplet(image, repository, version string) string {
 	out := image
-	if repository != "" && !strings.Contains(image, "/") {
-		out = strings.TrimRight(repository, "/") + "/" + image
+	if repository != "" {
+		first, _, hasSlash := strings.Cut(image, "/")
+		if !hasSlash || !isRegistryHost(first) {
+			out = strings.TrimRight(repository, "/") + "/" + strings.TrimLeft(image, "/")
+		}
 	}
 	hasTag := false
 	if i := strings.LastIndex(out, ":"); i >= 0 && !strings.Contains(out[i+1:], "/") {
