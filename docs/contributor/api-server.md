@@ -795,7 +795,7 @@ spec:
 
 - **Rate Limit**: 100 requests/second per instance (configurable)
 - **Burst**: 200 requests (configurable)
-- **Target Latency**: p50 <10ms, p99 <50ms
+- **Target Latency**: p50 &lt;10ms, p99 &lt;50ms
 - **Max Concurrent**: Limited by rate limiter
 
 ### Resource Usage
