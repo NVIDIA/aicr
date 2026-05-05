@@ -187,6 +187,18 @@ spec:
 	}
 }
 
+func TestExtractImagesFromYAML_MalformedInput(t *testing.T) {
+	_, err := ExtractImagesFromYAML([]byte(`apiVersion: v1
+kind: Pod
+spec:
+  containers:
+    - image: [unclosed
+`))
+	if err == nil {
+		t.Fatal("expected decode error for malformed YAML")
+	}
+}
+
 func TestParseImageRef(t *testing.T) {
 	tests := []struct {
 		in       string
