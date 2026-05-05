@@ -153,6 +153,26 @@ func TestWriteMarkdown(t *testing.T) {
 	}
 }
 
+func TestWriteMarkdown_DeterministicSuppressesGenerationLine(t *testing.T) {
+	var buf bytes.Buffer
+	err := WriteMarkdown(&buf, Metadata{
+		Name:          "aicr",
+		Version:       "v0.13.0",
+		Description:   "AICR",
+		Deterministic: true,
+	}, sampleResults())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "_Generated ") {
+		t.Errorf("deterministic output should omit the _Generated ..._ line, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Components: **2**") {
+		t.Errorf("deterministic output should still contain the table content")
+	}
+}
+
 func TestWriteMarkdown_EmptyComponentNoImages(t *testing.T) {
 	var buf bytes.Buffer
 	err := WriteMarkdown(&buf, Metadata{Name: "aicr"}, []ComponentResult{
