@@ -95,8 +95,15 @@ func walkForImages(n *yaml.Node, seen map[string]struct{}) {
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			k, v := n.Content[i], n.Content[i+1]
-			if k.Value == "image" && v.Kind == yaml.ScalarNode {
-				img := strings.TrimSpace(v.Value)
+			// Resolve `image: *anchor` so a scalar reached through an alias
+			// is captured. Without this the alias falls through to recursion
+			// and the AliasNode → ScalarNode hop drops the value.
+			target := v
+			if v.Kind == yaml.AliasNode && v.Alias != nil {
+				target = v.Alias
+			}
+			if k.Value == "image" && target.Kind == yaml.ScalarNode {
+				img := strings.TrimSpace(target.Value)
 				if isLikelyImage(img) {
 					seen[img] = struct{}{}
 				}
@@ -164,6 +171,13 @@ func ParseImageRef(s string) ImageRef {
 	if i := strings.LastIndex(rest, ":"); i >= 0 && !strings.Contains(rest[i+1:], "/") {
 		ref.Tag = rest[i+1:]
 		rest = rest[:i]
+	}
+	// Docker Hub canonicalization: a single-segment name like "nginx" or
+	// "busybox" lives under the implicit "library/" namespace. Normalizing
+	// here means `nginx` and `docker.io/library/nginx` produce the same
+	// PURL and de-dupe correctly in the BOM.
+	if ref.Registry == "docker.io" && !strings.Contains(rest, "/") {
+		rest = "library/" + rest
 	}
 	ref.Repository = rest
 	return ref

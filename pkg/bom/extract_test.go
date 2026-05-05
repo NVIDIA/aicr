@@ -138,6 +138,21 @@ spec:
 			},
 		},
 		{
+			name: "image value is a direct scalar alias",
+			in: `commonImage: &img ghcr.io/example/shared:v2
+spec:
+  containers:
+    - name: app
+      image: *img
+    - name: other
+      image: nvcr.io/nvidia/gpu-operator:v25.3.0
+`,
+			want: []string{
+				"ghcr.io/example/shared:v2",
+				"nvcr.io/nvidia/gpu-operator:v25.3.0",
+			},
+		},
+		{
 			name: "image inside deeply nested CR",
 			in: `apiVersion: nvidia.com/v1
 kind: ClusterPolicy
@@ -182,8 +197,11 @@ func TestParseImageRef(t *testing.T) {
 	}{
 		{"nvcr.io/nvidia/gpu-operator:v25.3.0", "nvcr.io", "nvidia/gpu-operator", "v25.3.0", ""},
 		{"docker.io/library/busybox:1.36", "docker.io", "library/busybox", "1.36", ""},
-		{"busybox:1.36", "docker.io", "busybox", "1.36", ""},
-		{"nginx", "docker.io", "nginx", "", ""},
+		// Single-segment Docker Hub refs canonicalize to library/<name>
+		// so they de-dupe with their fully-qualified docker.io/library/...
+		// counterparts.
+		{"busybox:1.36", "docker.io", "library/busybox", "1.36", ""},
+		{"nginx", "docker.io", "library/nginx", "", ""},
 		{"localhost:5000/myimg:dev", "localhost:5000", "myimg", "dev", ""},
 		{
 			in:       "gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830",
@@ -234,14 +252,18 @@ func TestPURL(t *testing.T) {
 			want: "pkg:oci/busybox@1.36?repository_url=docker.io/library/busybox",
 		},
 		{
+			// Single-segment Docker Hub ref canonicalizes to library/<name>
+			// so it produces the same PURL as docker.io/library/busybox:1.36.
+			in:   "busybox:1.36",
+			want: "pkg:oci/busybox@1.36?repository_url=docker.io/library/busybox",
+		},
+		{
 			in:   "ghcr.io/foo/bar:v1",
 			want: "pkg:oci/bar@v1?repository_url=ghcr.io/foo/bar",
 		},
 		{
-			// Single-segment image (no namespace): repository_url is
-			// registry/name.
 			in:   "nginx",
-			want: "pkg:oci/nginx?repository_url=docker.io/nginx",
+			want: "pkg:oci/nginx?repository_url=docker.io/library/nginx",
 		},
 		{
 			// Digest + tag: digest is the canonical version, tag goes in
