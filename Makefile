@@ -214,6 +214,20 @@ scan: ## Scans for vulnerabilities with grype
 qualify: test-coverage lint e2e scan license-check ## Qualifies the codebase (test-coverage, lint, e2e, scan)
 	@echo "Codebase qualification completed"
 
+.PHONY: bom
+bom: ## Generates container image BOM (CycloneDX 1.6 + Markdown) at $(BOM_OUT_DIR)
+	@set -e; \
+	BOM_OUT_DIR="$${BOM_OUT_DIR:-dist/bom}"; \
+	AICR_VERSION="$${AICR_VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"; \
+	mkdir -p "$${BOM_OUT_DIR}"; \
+	echo "Generating BOM into $${BOM_OUT_DIR}..."; \
+	GOFLAGS="-mod=vendor" go run ./tools/bom \
+	  -repo-root "$(CURDIR)" \
+	  -out-dir "$(CURDIR)/$${BOM_OUT_DIR}" \
+	  -aicr-version "$${AICR_VERSION}" \
+	  $${BOM_SKIP_HELM:+-skip-helm} \
+	  $${BOM_STRICT:+-strict}
+
 .PHONY: server
 server: ## Starts a local development server with debug logging
 	@set -e; \

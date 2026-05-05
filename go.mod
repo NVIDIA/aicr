@@ -3,6 +3,7 @@ module github.com/NVIDIA/aicr
 go 1.26.2
 
 require (
+	github.com/CycloneDX/cyclonedx-go v0.10.0
 	github.com/Masterminds/sprig/v3 v3.3.0
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/distribution/reference v0.6.0
