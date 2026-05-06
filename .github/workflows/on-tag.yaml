@@ -173,6 +173,11 @@ jobs:
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
+      - name: Read Go version
+        id: go
+        shell: bash
+        run: echo "version=$(cat .go-version)" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7.1.0
         with:
@@ -180,6 +185,8 @@ jobs:
           file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
           platforms: ${{ matrix.platform }}
           push: true
+          build-args: |
+            GO_VERSION=${{ steps.go.outputs.version }}
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ github.ref_name }}-${{ matrix.arch }}
           provenance: false
           cache-from: type=gha

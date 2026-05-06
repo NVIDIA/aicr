@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Load Versions'
-description: 'Loads tool versions from .settings.yaml (single source of truth)'
+description: 'Loads tool versions from .settings.yaml and Go version from .go-version'
 
 outputs:
   go:
@@ -113,8 +113,8 @@ runs:
       run: |
         set -euo pipefail
 
-        # Languages
-        echo "go=$(yq eval '.languages.go' .settings.yaml)" >> $GITHUB_OUTPUT
+        # Languages — Go version is owned by .go-version (single source of truth)
+        echo "go=$(cat .go-version)" >> $GITHUB_OUTPUT
 
         # Build tools
         echo "goreleaser=$(yq eval '.build_tools.goreleaser' .settings.yaml)" >> $GITHUB_OUTPUT

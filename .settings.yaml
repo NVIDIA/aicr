@@ -13,9 +13,8 @@
 # limitations under the License.
 
 # Language Versions
-languages:
-  # renovate: datasource=golang-version depName=go depType=languages
-  go: '1.26.2'
+# Go toolchain version is owned by .go-version (single source of truth).
+# Makefile, CI workflows, and validator Dockerfiles all read from there.
 
 # Build Tools
 build_tools:

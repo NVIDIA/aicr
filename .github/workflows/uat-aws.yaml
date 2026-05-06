@@ -75,9 +75,11 @@ jobs:
 
       - name: Build and push validator images
         run: |
+          GO_VERSION="$(cat .go-version)"
           for phase in deployment performance conformance; do
             IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
             docker build -f "validators/${phase}/Dockerfile" \
+              --build-arg "GO_VERSION=${GO_VERSION}" \
               -t "${IMAGE}" .
             docker push "${IMAGE}"
           done

@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.26.2-bookworm AS builder
+ARG GO_VERSION=1.26.2
+FROM golang:${GO_VERSION}-bookworm AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./

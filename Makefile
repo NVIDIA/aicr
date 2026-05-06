@@ -11,7 +11,8 @@ IMAGE_TAG          ?= latest
 YAML_FILES         := $(shell find . -type f \( -iname "*.yml" -o -iname "*.yaml" \) ! -path "./examples/*" ! -path "./bundle/*" ! -path "./bundles/*" ! -path "*/testdata/*")
 COMMIT             := $(shell git rev-parse HEAD)
 BRANCH             := $(shell git rev-parse --abbrev-ref HEAD)
-GO_VERSION         := $(shell go env GOVERSION 2>/dev/null | sed 's/go//')
+GO_VERSION         := $(shell cat .go-version 2>/dev/null)
+export GOTOOLCHAIN  = go$(GO_VERSION)
 GOLINT_VERSION      = $(shell golangci-lint --version 2>/dev/null | awk '{print $$4}' | sed 's/golangci-lint version //' || echo "not installed")
 KO_VERSION          = $(shell ko version 2>/dev/null || echo "not installed")
 GORELEASER_VERSION  = $(shell goreleaser --version 2>/dev/null | sed -n 's/^GitVersion:[[:space:]]*//p' || echo "not installed")
@@ -359,6 +360,7 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 		docker build -f validators/$${phase}/Dockerfile \
+			--build-arg GO_VERSION=$(GO_VERSION) \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \

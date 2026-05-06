@@ -18,5 +18,5 @@ set -euo pipefail
 {
   echo "karpenter=$(yq eval '.testing_tools.karpenter' .settings.yaml)"
   echo "ko=$(yq eval '.build_tools.ko' .settings.yaml)"
-  echo "go=go$(yq eval '.languages.go' .settings.yaml)"
+  echo "go=go$(cat .go-version)"
 } >> "$GITHUB_OUTPUT"

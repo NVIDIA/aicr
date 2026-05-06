@@ -83,6 +83,17 @@
   // not in the annotation comment — keeps the regex simple.
   customManagers: [
     {
+      // Go toolchain version: .go-version is the single source of truth.
+      // Makefile (GOTOOLCHAIN), load-versions action, install-karpenter-kwok,
+      // and validator Dockerfiles (--build-arg GO_VERSION) all read this file.
+      customType: "regex",
+      managerFilePatterns: ["/^\\.go-version$/"],
+      matchStrings: ["^(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*$"],
+      datasourceTemplate: "golang-version",
+      depNameTemplate: "go",
+      versioningTemplate: "semver",
+    },
+    {
       // Broad regex: scalar values + list items in .settings.yaml.
       customType: "regex",
       managerFilePatterns: ["/^\\.settings\\.yaml$/"],
@@ -245,12 +256,13 @@
       matchManagers: ["custom.regex"],
       matchDepTypes: ["testing"],
     },
-    // languages section has only `go` today — single-entry sections still get
-    // their own group so the section→PR mapping is uniform.
+    // Go toolchain bumps land in their own PR — `.go-version` is matched by a
+    // dedicated customManager, not the section-keyed `.settings.yaml` regex.
     {
-      groupName: "languages",
+      groupName: "go-toolchain",
       matchManagers: ["custom.regex"],
-      matchDepTypes: ["languages"],
+      matchDepNames: ["go"],
+      matchFileNames: [".go-version"],
     },
     // Supply-chain hardening tools — Anchore (grype/syft/sbom-action/
     // scan-action) and Sigstore (cosign/cosign-installer). Both orgs ship
@@ -267,9 +279,10 @@
       matchPackageNames: ["anchore/**", "sigstore/**"],
     },
 
-    // ---- The Go toolchain version is owned by .settings.yaml.languages.go, not go.mod ----
+    // ---- The Go toolchain version is owned by .go-version, not go.mod ----
     // gomod manager will still update module deps; this rule prevents bumping the `go` directive
-    // out of band. The .settings.yaml custom manager remains responsible for Go version bumps.
+    // out of band. The .go-version custom manager (above) is the source of truth and the
+    // sole driver for Go version bumps; Makefile / load-versions / Dockerfiles all read from it.
     {
       matchManagers: ["gomod"],
       matchDepTypes: ["golang"],

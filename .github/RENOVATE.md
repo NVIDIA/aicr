@@ -26,8 +26,9 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
+| `.go-version` (Go toolchain) | dedicated `golang-version` customManager (`go-toolchain` group) |
 
-The `go` directive in `go.mod` is intentionally not bumped — the Go toolchain version is owned by `.settings.yaml.languages.go`.
+The `go` directive in `go.mod` is intentionally not bumped — the Go toolchain version is owned by `.go-version`. Makefile (`GOTOOLCHAIN`), the `load-versions` composite action, `install-karpenter-kwok`, and validator Dockerfiles (`--build-arg GO_VERSION`) all read from that single file.
 
 ## Adding a new pin to `.settings.yaml`
 
