@@ -14,6 +14,28 @@
 
 # AWS EFA Device Plugin Helm values
 # Base configuration for EFA-enabled EKS clusters
+#
+# Regional ECR. AWS publishes EKS add-ons (EFA plugin, VPC CNI, kube-proxy)
+# to per-region private ECR repositories that EKS nodes are auto-authorized
+# to pull from. The default below points at us-west-2; deploying in any other
+# region requires overriding the registry's region segment.
+#
+# Account ID 602401143452 is stable across all standard AWS partitions.
+# GovCloud and China use different account IDs and URI suffixes:
+#   aws-us-gov: 013241004608.dkr.ecr.<region>.amazonaws.com
+#   aws-cn:     961992271922.dkr.ecr.<region>.amazonaws.com.cn
+#
+# Override the registry at bundle time:
+#   aicr bundle ... \
+#     --set awsefa:image.repository=602401143452.dkr.ecr.<region>.amazonaws.com/eks/aws-efa-k8s-device-plugin
+#
+# Or defer the choice to install time so a single bundle deploys to multiple
+# regions:
+#   aicr bundle ... --dynamic awsefa:image.repository
+#   helm install ... --set image.repository=...
+#
+# See docs/integrator/recipe-development.md (Regional registry overrides) for
+# the full pattern and partition-aware variants. Tracked under #764 / #739.
 
 image:
   repository: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin

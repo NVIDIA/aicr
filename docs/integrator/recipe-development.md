@@ -488,6 +488,44 @@ aicr --debug recipe --service eks --data ./my-data --dry-run
 aicr recipe --service eks --data ./my-data --output /dev/stdout
 ```
 
+### Regional registry overrides
+
+A handful of components ship images from regional, account-scoped container registries rather than a single public URI. The clearest example today is the AWS EFA device plugin, whose canonical home is `<account>.dkr.ecr.<region>.amazonaws.com/eks/aws-efa-k8s-device-plugin` — a per-region private ECR that every EKS node is auto-authorized to pull from. AWS publishes these add-ons regionally for three reasons: pulls go over the AWS internal backbone (no NAT egress), no Docker Hub / public-registry rate limits, and the image stays available even when the public internet or another region is degraded.
+
+AICR ships a sensible default for each such image (e.g., us-west-2 for `aws-efa`), but customers deploying in a different region need to override the registry's region segment. Two override paths cover the common cases:
+
+**Bundle-time override (single region per bundle).** Use `--set` to bake a specific region into the bundle:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --set awsefa:image.repository=602401143452.dkr.ecr.us-east-1.amazonaws.com/eks/aws-efa-k8s-device-plugin \
+  -o ./bundle
+```
+
+**Install-time override (one bundle, many regions).** Use `--dynamic` to declare the path as install-time-fillable, then provide the value via `helm install --set` (or your GitOps tool):
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --dynamic awsefa:image.repository \
+  --deployer helm \
+  -o ./bundle
+
+# Per-cluster install
+helm install ... --set image.repository=602401143452.dkr.ecr.eu-west-1.amazonaws.com/eks/aws-efa-k8s-device-plugin
+```
+
+`--dynamic` is supported with `helm` and `argocd-helm` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
+
+**Partition-aware variants.** Standard AWS uses account ID `602401143452`. GovCloud and China use different accounts and URI suffixes:
+
+| Partition | Account ID | URI shape |
+|-----------|------------|-----------|
+| `aws` (standard) | `602401143452` | `<account>.dkr.ecr.<region>.amazonaws.com` |
+| `aws-us-gov` (GovCloud) | `013241004608` | `<account>.dkr.ecr.<region>.amazonaws.com` |
+| `aws-cn` (China) | `961992271922` | `<account>.dkr.ecr.<region>.amazonaws.com.cn` |
+
+Substitute the appropriate account and suffix in the `--set` / install-time value.
+
 ## Troubleshooting
 
 **Debug overlay matching:**
