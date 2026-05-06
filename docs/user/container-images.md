@@ -1,5 +1,22 @@
-# NVIDIA AI Cluster Runtime — Container Image Inventory
+<!--
+Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+-->
+
+# Container Image Inventory
+
+This page lists every container image AICR can deploy across all registered components. It is the canonical reference for security review, air-gap planning, and any other workflow that needs to know "what does AICR pull onto my cluster."
+
+The image set below is regenerated from the live Helm chart catalog and the embedded manifests under `recipes/components/*/manifests/`. The auto-generated section is refreshed weekly by the [`bom-refresh`](https://github.com/NVIDIA/aicr/actions/workflows/bom-refresh.yaml) GitHub Action, which opens a chore PR whenever upstream chart rerenders cause drift. Contributors changing recipes are expected to regenerate locally with `make bom-docs` and commit the result alongside their change.
+
+A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by `make bom` and published as a release asset. Tooling that consumes SBOMs (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; this Markdown is the human-readable view.
+
+<!-- BEGIN AICR-BOM -->
 ## Summary
 
 - Components: **22**
@@ -174,3 +191,55 @@ _No images extracted._
 
 - `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
 
+<!-- END AICR-BOM -->
+
+## How to read this list
+
+### Explicit vs. implicit images
+
+AICR pins some images directly in this repository — in `recipes/components/<name>/values.yaml` or in embedded Kubernetes manifests under `recipes/components/<name>/manifests/`. Those are the **explicit** images. Everything else comes from upstream Helm charts that AICR consumes without overriding their image references; those are the **implicit** images. The per-component image counts in the table above reflect the union of both.
+
+The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
+
+### Registries spanned
+
+AICR pulls from a deliberately diverse set of registries:
+
+- **`nvcr.io`** — NVIDIA's primary container registry; GPU Operator, Network Operator, DRA driver, NIM Operator, Dynamo Platform.
+- **`ghcr.io`** — GitHub Container Registry; nvsentinel, nodewright, kai-scheduler, grove, kubeflow-trainer, k8s-ephemeral-storage-metrics.
+- **`quay.io`** — cert-manager and Prometheus components.
+- **`registry.k8s.io`** — Kubernetes SIG components (NFD, prometheus-adapter, kueue, csi-sidecars).
+- **`public.ecr.aws`** — AWS public artifacts (aws-ebs-csi-driver).
+- **Regional ECR** (`*.dkr.ecr.<region>.amazonaws.com`) — EKS-internal add-ons (aws-efa).
+- **`gcr.io`, `gke.gcr.io`, `us-docker.pkg.dev`** — GCP/GKE add-ons (gke-nccl-tcpxo).
+- **`cr.kgateway.dev`** — kgateway.
+- **`docker.io`** — assorted upstream images (`busybox`, `pytorch`, etc.).
+
+Customers running in air-gapped or private-registry environments need to mirror every registry above. A dedicated mirroring guide is tracked under [#743](https://github.com/NVIDIA/aicr/issues/743).
+
+### Reproducibility
+
+Two recipes rendered at the same chart version against the same registry should produce the same image set. Where charts are not yet pinned to a specific version, the upstream default determines the deployed images and the set can drift between renders — that's the drift the weekly refresh action surfaces. Tracking fully-deterministic deployments (chart-version pins, then digest pins for explicit refs) is the second stage of the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739); progress is tracked under issues [#740](https://github.com/NVIDIA/aicr/issues/740), [#748](https://github.com/NVIDIA/aicr/issues/748), and [#749](https://github.com/NVIDIA/aicr/issues/749).
+
+For chart-default sub-images that AICR cannot pin in-tree (e.g., the GPU Operator's ~15 sub-images, where the chart does not expose digest fields), the right answer is admission-time digest verification rather than per-image overrides — see [#745](https://github.com/NVIDIA/aicr/issues/745).
+
+## Regenerating locally
+
+```bash
+# Full BOM (CycloneDX JSON + Markdown) into dist/bom/
+make bom
+
+# Just regenerate this doc page from the live registry
+make bom-docs
+
+# Verify the committed page is in sync with the live registry
+make bom-check
+```
+
+Both targets shell out to `helm template` for every chart, so an internet connection is required.
+
+## Related
+
+- [Component Catalog](component-catalog.md) — what each component does and its scheduling characteristics.
+- [Supply chain epic](https://github.com/NVIDIA/aicr/issues/739) — visibility, reproducibility, and provenance roadmap.
+- [Air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) — planned follow-up.

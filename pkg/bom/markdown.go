@@ -47,8 +47,10 @@ func WriteMarkdown(w io.Writer, meta Metadata, results []ComponentResult) error 
 		}
 	}
 
-	if _, err := fmt.Fprintf(w, "# %s — Container Image Inventory\n\n", titleFor(meta)); err != nil {
-		return err
+	if !meta.NoTitle {
+		if _, err := fmt.Fprintf(w, "# %s — Container Image Inventory\n\n", titleFor(meta)); err != nil {
+			return err
+		}
 	}
 	if !meta.Deterministic {
 		if _, err := fmt.Fprintf(w, "_Generated %s for %s %s._\n\n",

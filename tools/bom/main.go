@@ -52,6 +52,7 @@ func main() {
 		skipHelm      bool
 		strict        bool
 		deterministic bool
+		noTitle       bool
 	)
 	flag.StringVar(&repoRoot, "repo-root", ".", "path to the AICR repository root")
 	flag.StringVar(&outDir, "out-dir", "dist/bom", "directory to write bom.cdx.json and bom.md")
@@ -59,15 +60,16 @@ func main() {
 	flag.BoolVar(&skipHelm, "skip-helm", false, "skip helm template rendering (only walk embedded manifests)")
 	flag.BoolVar(&strict, "strict", false, "fail if any component fails to render or is missing a pinned chart version")
 	flag.BoolVar(&deterministic, "deterministic", false, "suppress per-run metadata (timestamps, version churn) in the Markdown output for committable artifacts")
+	flag.BoolVar(&noTitle, "no-title", false, "omit the H1 title in the Markdown output so the body can be embedded as a section of a larger document")
 	flag.Parse()
 
-	if err := run(repoRoot, outDir, aicrVersion, skipHelm, strict, deterministic); err != nil {
+	if err := run(repoRoot, outDir, aicrVersion, skipHelm, strict, deterministic, noTitle); err != nil {
 		fmt.Fprintln(os.Stderr, "bom:", err)
 		os.Exit(1)
 	}
 }
 
-func run(repoRoot, outDir, aicrVersion string, skipHelm, strict, deterministic bool) error {
+func run(repoRoot, outDir, aicrVersion string, skipHelm, strict, deterministic, noTitle bool) error {
 	registryPath := filepath.Join(repoRoot, "recipes", "registry.yaml")
 	reg, err := loadRegistry(registryPath)
 	if err != nil {
@@ -137,6 +139,7 @@ func run(repoRoot, outDir, aicrVersion string, skipHelm, strict, deterministic b
 		Version:       aicrVersion,
 		Description:   "NVIDIA AI Cluster Runtime",
 		Deterministic: deterministic,
+		NoTitle:       noTitle,
 	}, results)
 	closeErr = mf.Close()
 	if mdErr != nil {

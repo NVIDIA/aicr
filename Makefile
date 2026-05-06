@@ -255,19 +255,31 @@ bom: ## Generates container image BOM (CycloneDX 1.6 + Markdown) at $(BOM_OUT_DI
 BOM_DOC_PATH := docs/user/container-images.md
 
 .PHONY: bom-docs
-bom-docs: ## Regenerates $(BOM_DOC_PATH) from the live registry (renders all helm charts; needs network)
+bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the live registry
 	@set -e; \
+	if [ ! -f $(BOM_DOC_PATH) ]; then \
+	   echo "ERROR: $(BOM_DOC_PATH) does not exist; cannot splice." >&2; exit 1; \
+	fi; \
+	if ! grep -q '<!-- BEGIN AICR-BOM -->' $(BOM_DOC_PATH) || \
+	   ! grep -q '<!-- END AICR-BOM -->' $(BOM_DOC_PATH); then \
+	   echo "ERROR: $(BOM_DOC_PATH) is missing AICR-BOM markers." >&2; exit 1; \
+	fi; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
-	echo "Regenerating $(BOM_DOC_PATH) (helm rendering, this can take ~30s)..."; \
+	echo "Regenerating auto-generated section of $(BOM_DOC_PATH) (helm rendering, ~30s)..."; \
 	GOFLAGS="-mod=vendor" go run ./tools/bom \
 	  -repo-root "$(CURDIR)" \
 	  -out-dir "$$TMP" \
 	  -aicr-version "main" \
-	  -deterministic; \
-	mkdir -p "$$(dirname $(BOM_DOC_PATH))"; \
-	mv "$$TMP/bom.md" $(BOM_DOC_PATH); \
-	echo "Wrote $(BOM_DOC_PATH)"
+	  -deterministic \
+	  -no-title; \
+	awk -v body="$$TMP/bom.md" ' \
+	  /<!-- BEGIN AICR-BOM -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
+	  /<!-- END AICR-BOM -->/   { skip = 0 } \
+	  !skip                     { print } \
+	' $(BOM_DOC_PATH) > "$$TMP/merged.md"; \
+	mv "$$TMP/merged.md" $(BOM_DOC_PATH); \
+	echo "Updated $(BOM_DOC_PATH) (prose preserved, auto-generated section refreshed)"
 
 .PHONY: bom-check
 bom-check: ## Verifies $(BOM_DOC_PATH) is up to date with the live registry (CI gate, opt-in locally)

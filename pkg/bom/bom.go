@@ -44,6 +44,12 @@ type Metadata struct {
 	// <version>_" line is omitted). Use for committed doc artifacts and
 	// any other bit-for-bit reproducible output path.
 	Deterministic bool
+
+	// NoTitle suppresses the H1 title line in WriteMarkdown so the body
+	// can be embedded as a section of a larger document (e.g., the
+	// auto-generated middle of docs/user/container-images.md, where the
+	// title and surrounding prose are hand-edited).
+	NoTitle bool
 }
 
 // ComponentResult is the per-component image survey input to BuildBOM.

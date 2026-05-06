@@ -153,6 +153,25 @@ func TestWriteMarkdown(t *testing.T) {
 	}
 }
 
+func TestWriteMarkdown_NoTitleSuppressesH1(t *testing.T) {
+	var buf bytes.Buffer
+	err := WriteMarkdown(&buf, Metadata{
+		Name:    "aicr",
+		Version: "v0.13.0",
+		NoTitle: true,
+	}, sampleResults())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	if strings.HasPrefix(out, "# ") {
+		t.Errorf("NoTitle output should not start with H1, got:\n%s", out[:80])
+	}
+	if !strings.Contains(out, "## Summary") {
+		t.Errorf("NoTitle output should still contain the body sections")
+	}
+}
+
 func TestWriteMarkdown_DeterministicSuppressesGenerationLine(t *testing.T) {
 	var buf bytes.Buffer
 	err := WriteMarkdown(&buf, Metadata{
