@@ -376,7 +376,13 @@ func TestIsLikelyImage(t *testing.T) {
 		// These appear when the BOM extractor lifts a chart-default
 		// placeholder from a disabled CRD-style block (e.g.,
 		// vgpuManager.image=vgpu-manager with vgpuManager.enabled=false).
+		// `nvidia/cuda` covers the two-segment case: even a
+		// `<namespace>/<name>` shape is rejected when there's no tag,
+		// digest, or registry host — Docker Hub's `library/` fallback
+		// is applied later by ParseImageRef and only to true
+		// single-segment refs.
 		"plain-name":   false,
+		"nvidia/cuda":  false,
 		"vgpu-manager": false,
 		"driver":       false,
 	}
