@@ -192,10 +192,12 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	}
 
 	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", bs.SystemNodeSelector()); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid system node selector", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"invalid "+sourceLabel(cmd, "system-node-selector", "spec.bundle.scheduling.systemNodeSelector"), err)
 	}
 	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", bs.AcceleratedNodeSelector()); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerated node selector", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"invalid "+sourceLabel(cmd, "accelerated-node-selector", "spec.bundle.scheduling.acceleratedNodeSelector"), err)
 	}
 
 	if opts.systemNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "system-node-toleration", bs.SystemNodeTolerations())); err != nil {
@@ -213,7 +215,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	}
 
 	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", bs.WorkloadSelector()); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid workload selector", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"invalid "+sourceLabel(cmd, "workload-selector", "spec.bundle.scheduling.workloadSelector"), err)
 	}
 
 	// Estimated node count for bundle; 0 = unset.

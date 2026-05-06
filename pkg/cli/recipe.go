@@ -212,10 +212,10 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 //
 // Override events are logged at INFO so the resolved value is auditable.
 func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig) error {
-	if cfg == nil || cfg.Spec.Recipe == nil || cfg.Spec.Recipe.Criteria == nil {
+	c := cfg.Recipe().CriteriaFields()
+	if c == nil {
 		return nil
 	}
-	c := cfg.Spec.Recipe.Criteria
 
 	if c.Service != "" {
 		parsed, err := recipe.ParseCriteriaServiceType(c.Service)
