@@ -178,23 +178,10 @@ Override snapshot-detected criteria:
 	}
 }
 
-// configRecipeSnapshot returns the snapshot path from spec.recipe.input.snapshot
-// (or empty string when cfg or any intermediate path is nil).
-func configRecipeSnapshot(cfg *appcfg.AICRConfig) string {
-	if cfg == nil || cfg.Spec.Recipe == nil || cfg.Spec.Recipe.Input == nil {
-		return ""
-	}
-	return cfg.Spec.Recipe.Input.Snapshot
-}
-
 // recipeOutputPath returns the recipe output destination, with the CLI flag
 // overriding spec.recipe.output.path.
 func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
-	fallback := ""
-	if cfg != nil && cfg.Spec.Recipe != nil && cfg.Spec.Recipe.Output != nil {
-		fallback = cfg.Spec.Recipe.Output.Path
-	}
-	return stringFlagOrConfig(cmd, "output", fallback)
+	return stringFlagOrConfig(cmd, "output", cfg.Recipe().OutputPath())
 }
 
 // parseRecipeOutputFormat reads --format with a fallback to spec.recipe.output.format
@@ -205,11 +192,7 @@ func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
 // config-supplied value. stringFlagOrConfig uses cmd.IsSet so a missing
 // flag still falls through to the config fallback.
 func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
-	fallback := ""
-	if cfg != nil && cfg.Spec.Recipe != nil && cfg.Spec.Recipe.Output != nil {
-		fallback = cfg.Spec.Recipe.Output.Format
-	}
-	raw := stringFlagOrConfig(cmd, "format", fallback)
+	raw := stringFlagOrConfig(cmd, "format", cfg.Recipe().OutputFormat())
 	if raw == "" {
 		raw = string(serializer.FormatYAML)
 	}

@@ -37,6 +37,11 @@ import (
 // a tailored error pointing users at `kubectl`.
 const configMapURIScheme = "cm://"
 
+// fileURIScheme is rejected explicitly because os.ReadFile would otherwise
+// produce a confusing "file not found: 'file:///abs/path'" error. Users
+// should pass the bare path.
+const fileURIScheme = "file://"
+
 // Load reads and parses an AICRConfig from a local file path or
 // HTTP(S) URL. ConfigMap (cm://) URIs are rejected.
 //
@@ -55,6 +60,10 @@ func Load(ctx context.Context, source string) (*AICRConfig, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"ConfigMap (cm://) sources are not supported by --config; "+
 				"export the ConfigMap data with `kubectl get cm <name> -o yaml` and pass the resulting file")
+	}
+	if strings.HasPrefix(source, fileURIScheme) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"file:// URIs are not supported by --config; pass the path directly (e.g. /etc/aicr/config.yaml)")
 	}
 
 	data, format, err := readSource(ctx, source)

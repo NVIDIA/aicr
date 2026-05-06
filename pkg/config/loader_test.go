@@ -128,6 +128,16 @@ func TestLoad_RejectsConfigMapURI(t *testing.T) {
 	}
 }
 
+func TestLoad_RejectsFileURI(t *testing.T) {
+	_, err := config.Load(context.Background(), "file:///etc/aicr/config.yaml")
+	if err == nil {
+		t.Fatal("expected error for file:// URI, got nil")
+	}
+	if !strings.Contains(err.Error(), "file://") {
+		t.Errorf("error %q should mention file://", err.Error())
+	}
+}
+
 func TestLoad_EmptySource(t *testing.T) {
 	_, err := config.Load(context.Background(), "")
 	if err == nil {

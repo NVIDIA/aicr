@@ -149,7 +149,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		recipe.WithVersion(version),
 	)
 
-	snapFilePath := stringFlagOrConfig(cmd, "snapshot", configRecipeSnapshot(cfg))
+	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)

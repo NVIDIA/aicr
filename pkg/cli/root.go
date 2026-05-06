@@ -370,8 +370,8 @@ func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
 	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
 
 	dataDir := cmd.String("data")
-	if dataDir == "" && cfg != nil && cfg.Spec.Recipe != nil {
-		dataDir = cfg.Spec.Recipe.Data
+	if dataDir == "" {
+		dataDir = cfg.Recipe().DataDir()
 	}
 	if dataDir == "" {
 		// Reset to embedded so prior --data state does not leak across runs.
@@ -433,13 +433,16 @@ func stringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
 }
 
 // intFlagOrConfig returns the CLI flag value when explicitly set; otherwise
-// the fallback.
+// the fallback. Logs an INFO line whenever the resolved value differs from
+// the fallback (matching stringFlagOrConfig's symmetric guard so a config
+// value of 0 — or any value the user explicitly set — is not silently
+// overridden).
 func intFlagOrConfig(cmd *cli.Command, flagName string, fallback int) int {
 	if !cmd.IsSet(flagName) {
 		return fallback
 	}
 	v := cmd.Int(flagName)
-	if fallback > 0 && fallback != v {
+	if fallback != v {
 		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
 	}
 	return v

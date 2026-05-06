@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -63,6 +64,11 @@ func (c *AICRConfig) Validate() error {
 // recipe` and consumed by `aicr bundle`). Mismatched paths almost always
 // indicate a typo rather than a deliberate two-recipe workflow, so reject
 // them up-front. Setting only one side is fine.
+//
+// Comparison uses filepath.Clean on both sides so equivalent forms like
+// "./recipe.yaml" and "recipe.yaml", or "dir//file" and "dir/file", do not
+// trigger a false rejection. Mixing absolute and relative paths still
+// fails — they are not equivalent without a known base directory.
 func (s Spec) validateRecipeBundleHandoff() error {
 	if s.Recipe == nil || s.Recipe.Output == nil || s.Recipe.Output.Path == "" {
 		return nil
@@ -70,9 +76,9 @@ func (s Spec) validateRecipeBundleHandoff() error {
 	if s.Bundle == nil || s.Bundle.Input == nil || s.Bundle.Input.Recipe == "" {
 		return nil
 	}
-	if s.Recipe.Output.Path != s.Bundle.Input.Recipe {
+	if filepath.Clean(s.Recipe.Output.Path) != filepath.Clean(s.Bundle.Input.Recipe) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("spec.recipe.output.path (%q) and spec.bundle.input.recipe (%q) must match when both are set",
+			fmt.Sprintf("spec.recipe.output.path (%q) and spec.bundle.input.recipe (%q) must reference the same file when both are set",
 				s.Recipe.Output.Path, s.Bundle.Input.Recipe))
 	}
 	return nil

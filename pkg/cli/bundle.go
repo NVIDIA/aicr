@@ -87,19 +87,19 @@ type bundleCmdOptions struct {
 //
 //nolint:gocyclo // option resolution is inherently long but linear
 func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmdOptions, error) {
-	bs := bundleSpec(cfg)
+	bs := cfg.Bundle()
 
 	opts := &bundleCmdOptions{
-		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", bundleRecipeInput(bs)),
+		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", bs.RecipeInput()),
 		kubeconfig:                cmd.String("kubeconfig"),
-		repoURL:                   stringFlagOrConfig(cmd, "repo", bundleDeploymentRepo(bs)),
-		attest:                    boolFlagOrConfig(cmd, "attest", bundleAttestEnabled(bs)),
-		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bundleCertIDRegexp(bs)),
+		repoURL:                   stringFlagOrConfig(cmd, "repo", bs.DeploymentRepo()),
+		attest:                    boolFlagOrConfig(cmd, "attest", bs.AttestEnabled()),
+		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bs.CertIDRegexp()),
 		identityToken:             cmd.String("identity-token"),
-		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", bundleOIDCDeviceFlow(bs)),
-		insecureTLS:               boolFlagOrConfig(cmd, "insecure-tls", bundleRegistryInsecureTLS(bs)),
-		plainHTTP:                 boolFlagOrConfig(cmd, "plain-http", bundleRegistryPlainHTTP(bs)),
-		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", bundleOutputImageRefs(bs)),
+		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", bs.OIDCDeviceFlow()),
+		insecureTLS:               boolFlagOrConfig(cmd, "insecure-tls", bs.RegistryInsecureTLS()),
+		plainHTTP:                 boolFlagOrConfig(cmd, "plain-http", bs.RegistryPlainHTTP()),
+		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", bs.OutputImageRefs()),
 	}
 
 	if opts.recipeFilePath == "" {
@@ -129,7 +129,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	}
 
 	// Parse and validate deployer flag using strongly-typed parser
-	deployerStr := stringFlagOrConfig(cmd, "deployer", bundleDeploymentDeployer(bs))
+	deployerStr := stringFlagOrConfig(cmd, "deployer", bs.DeploymentDeployer())
 	if deployerStr == "" {
 		opts.deployer = config.DeployerHelm
 	} else {
@@ -141,7 +141,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	}
 
 	// Parse output target (detects oci:// URI or local directory)
-	outputTarget := stringFlagOrConfig(cmd, "output", bundleOutputTarget(bs))
+	outputTarget := stringFlagOrConfig(cmd, "output", bs.OutputTarget())
 	if outputTarget == "" {
 		outputTarget = "."
 	}
@@ -180,44 +180,44 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.targetRevision = opts.ociRef.Tag
 	}
 
-	// Parse value overrides from --set flags (config replaced by CLI when set)
-	opts.valueOverrides, err = config.ParseValueOverrides(stringSliceFlagOrConfig(cmd, "set", bundleDeploymentSet(bs)))
+	// Parse value overrides from --set / spec.bundle.deployment.set
+	opts.valueOverrides, err = config.ParseValueOverrides(stringSliceFlagOrConfig(cmd, "set", bs.DeploymentSet()))
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --set flag", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "set", "spec.bundle.deployment.set"), err)
 	}
 
-	opts.dynamicValues, err = config.ParseDynamicValues(stringSliceFlagOrConfig(cmd, "dynamic", bundleDeploymentDynamic(bs)))
+	opts.dynamicValues, err = config.ParseDynamicValues(stringSliceFlagOrConfig(cmd, "dynamic", bs.DeploymentDynamic()))
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --dynamic flag", err)
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "dynamic", "spec.bundle.deployment.dynamic"), err)
 	}
 
-	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", bundleSystemNodeSelector(bs)); err != nil {
+	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", bs.SystemNodeSelector()); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid system node selector", err)
 	}
-	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", bundleAcceleratedNodeSelector(bs)); err != nil {
+	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", bs.AcceleratedNodeSelector()); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid accelerated node selector", err)
 	}
 
-	if opts.systemNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "system-node-toleration", bundleSystemNodeTolerations(bs))); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --system-node-toleration", err)
+	if opts.systemNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "system-node-toleration", bs.SystemNodeTolerations())); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "system-node-toleration", "spec.bundle.scheduling.systemNodeTolerations"), err)
 	}
-	if opts.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "accelerated-node-toleration", bundleAcceleratedNodeTolerations(bs))); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --accelerated-node-toleration", err)
+	if opts.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "accelerated-node-toleration", bs.AcceleratedNodeTolerations())); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "accelerated-node-toleration", "spec.bundle.scheduling.acceleratedNodeTolerations"), err)
 	}
 
-	if workloadGateStr := stringFlagOrConfig(cmd, "workload-gate", bundleWorkloadGate(bs)); workloadGateStr != "" {
+	if workloadGateStr := stringFlagOrConfig(cmd, "workload-gate", bs.WorkloadGate()); workloadGateStr != "" {
 		opts.workloadGateTaint, err = snapshotter.ParseTaint(workloadGateStr)
 		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-gate", err)
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "workload-gate", "spec.bundle.scheduling.workloadGate"), err)
 		}
 	}
 
-	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", bundleWorkloadSelector(bs)); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-selector", err)
+	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", bs.WorkloadSelector()); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid workload selector", err)
 	}
 
 	// Estimated node count for bundle; 0 = unset.
-	n := intFlagOrConfig(cmd, "nodes", bundleSchedulingNodes(bs))
+	n := intFlagOrConfig(cmd, "nodes", bs.SchedulingNodes())
 	if n < 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
 	}
@@ -229,11 +229,21 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 			return nil, errors.New(errors.ErrCodeInvalidRequest, "--storage-class cannot be blank when specified")
 		}
 		opts.storageClass = sc
-	} else if v := bundleSchedulingStorageClass(bs); v != "" {
+	} else if v := bs.SchedulingStorageClass(); v != "" {
 		opts.storageClass = v
 	}
 
 	return opts, nil
+}
+
+// sourceLabel returns the user-facing label of whichever input contributed
+// the value being parsed: the CLI flag if it was explicitly set, otherwise
+// the config-spec path. Used to keep parse errors pointed at the right place.
+func sourceLabel(cmd *cli.Command, flagName, configPath string) string {
+	if cmd.IsSet(flagName) {
+		return "--" + flagName
+	}
+	return configPath
 }
 
 //nolint:funlen // bundle command is inherently large (flags + description + action)

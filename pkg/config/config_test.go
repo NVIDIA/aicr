@@ -210,7 +210,9 @@ func TestValidate_RecipeBundleHandoff(t *testing.T) {
 		{"only recipe.output set is fine", "out.yaml", "", ""},
 		{"only bundle.input set is fine", "", "in.yaml", ""},
 		{"matching paths is fine", "shared.yaml", "shared.yaml", ""},
-		{"mismatched paths rejected", "out.yaml", "different.yaml", "must match"},
+		{"mismatched paths rejected", "out.yaml", "different.yaml", "must reference the same file"},
+		{"equivalent relative forms accepted", "./recipe.yaml", "recipe.yaml", ""},
+		{"redundant separators accepted", "dir//file.yaml", "dir/file.yaml", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
