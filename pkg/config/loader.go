@@ -128,7 +128,8 @@ func readHTTP(ctx context.Context, url string) ([]byte, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid config URL %q", url), err)
 	}
 	client := &http.Client{Timeout: defaults.HTTPClientTimeout}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G107: --config URL is the user's explicit choice; scheme is gated to http(s) by readSource and body is bounded by HTTPResponseBodyLimit
+
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, fmt.Sprintf("failed to fetch config from %q", url), err)
 	}
