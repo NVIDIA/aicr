@@ -164,7 +164,7 @@ func decodeStrict(data []byte, format sourceFormat, target any) error {
 		}
 		// Reject trailing garbage after the document.
 		if dec.More() {
-			return fmt.Errorf("unexpected trailing data after JSON document")
+			return errors.New(errors.ErrCodeInvalidRequest, "unexpected trailing data after JSON document")
 		}
 		return nil
 	case formatYAML:
@@ -175,6 +175,6 @@ func decodeStrict(data []byte, format sourceFormat, target any) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("unsupported config format")
+		return errors.New(errors.ErrCodeInternal, "unsupported config format")
 	}
 }

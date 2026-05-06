@@ -120,46 +120,68 @@ func bundleDeploymentRepo(b *appcfg.BundleSpec) string {
 	return b.Deployment.Repo
 }
 
+// copyStrings returns a defensive copy of s (or nil for empty input) so
+// callers cannot mutate the loaded config's backing slice.
+func copyStrings(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return append([]string(nil), s...)
+}
+
+// copyStringMap returns a defensive copy of m (or nil for empty input) so
+// callers cannot mutate the loaded config's backing map.
+func copyStringMap(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
 func bundleDeploymentSet(b *appcfg.BundleSpec) []string {
 	if b == nil || b.Deployment == nil {
 		return nil
 	}
-	return b.Deployment.Set
+	return copyStrings(b.Deployment.Set)
 }
 
 func bundleDeploymentDynamic(b *appcfg.BundleSpec) []string {
 	if b == nil || b.Deployment == nil {
 		return nil
 	}
-	return b.Deployment.Dynamic
+	return copyStrings(b.Deployment.Dynamic)
 }
 
 func bundleSystemNodeSelector(b *appcfg.BundleSpec) map[string]string {
 	if b == nil || b.Scheduling == nil {
 		return nil
 	}
-	return b.Scheduling.SystemNodeSelector
+	return copyStringMap(b.Scheduling.SystemNodeSelector)
 }
 
 func bundleSystemNodeTolerations(b *appcfg.BundleSpec) []string {
 	if b == nil || b.Scheduling == nil {
 		return nil
 	}
-	return b.Scheduling.SystemNodeTolerations
+	return copyStrings(b.Scheduling.SystemNodeTolerations)
 }
 
 func bundleAcceleratedNodeSelector(b *appcfg.BundleSpec) map[string]string {
 	if b == nil || b.Scheduling == nil {
 		return nil
 	}
-	return b.Scheduling.AcceleratedNodeSelector
+	return copyStringMap(b.Scheduling.AcceleratedNodeSelector)
 }
 
 func bundleAcceleratedNodeTolerations(b *appcfg.BundleSpec) []string {
 	if b == nil || b.Scheduling == nil {
 		return nil
 	}
-	return b.Scheduling.AcceleratedNodeTolerations
+	return copyStrings(b.Scheduling.AcceleratedNodeTolerations)
 }
 
 func bundleWorkloadGate(b *appcfg.BundleSpec) string {
@@ -173,7 +195,7 @@ func bundleWorkloadSelector(b *appcfg.BundleSpec) map[string]string {
 	if b == nil || b.Scheduling == nil {
 		return nil
 	}
-	return b.Scheduling.WorkloadSelector
+	return copyStringMap(b.Scheduling.WorkloadSelector)
 }
 
 func bundleSchedulingNodes(b *appcfg.BundleSpec) int {
