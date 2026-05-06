@@ -34,7 +34,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | dynamo-platform | helm | dynamo-platform | 1.0.2 | 1 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | — | 14 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.3.1 | 14 |
 | grove | helm | grove-charts | v0.1.0-alpha.6 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -44,11 +44,11 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.17.1 | 1 |
-| network-operator | helm | nvidia/network-operator | — | 5 |
+| network-operator | helm | nvidia/network-operator | 26.1.1 | 5 |
 | nfd | helm | node-feature-discovery | 0.18.3 | 1 |
 | nodewright-customizations | manifest | — | — | 4 |
-| nodewright-operator | helm | skyhook-operator | — | 3 |
-| nvidia-dra-driver-gpu | helm | nvidia/nvidia-dra-driver-gpu | — | 1 |
+| nodewright-operator | helm | skyhook-operator | v0.15.1 | 3 |
+| nvidia-dra-driver-gpu | helm | nvidia/nvidia-dra-driver-gpu | 25.12.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.3.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 

@@ -103,7 +103,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar ## Lints the entire project (Go, YAML, and license headers)
+lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -291,6 +291,19 @@ bom-check: ## Verifies $(BOM_DOC_PATH) is up to date with the live registry (CI 
 	   exit 1; \
 	fi; \
 	echo "$(BOM_DOC_PATH) is up to date"
+
+.PHONY: bom-pinning-check
+bom-pinning-check: ## Verifies every Helm component in the registry has a pinned chart version (per ADR-006)
+	@set -e; \
+	echo "Verifying chart-version pins (ADR-006)..."; \
+	TMP="$$(mktemp -d)"; \
+	trap 'rm -rf "$$TMP"' EXIT; \
+	GOFLAGS="-mod=vendor" go run ./tools/bom \
+	  -repo-root "$(CURDIR)" \
+	  -out-dir "$$TMP" \
+	  -aicr-version "qualify" \
+	  -strict \
+	  -skip-helm
 
 .PHONY: server
 server: ## Starts a local development server with debug logging
