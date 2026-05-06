@@ -113,9 +113,10 @@ type AgentConfig struct {
 	Requests corev1.ResourceList
 
 	// Limits overrides the agent container's per-resource limits. When
-	// nil, the privileged/restricted defaults are used. The
-	// nvidia.com/gpu limit added by RequireGPU is preserved on top of
-	// any override the caller supplies.
+	// nil, the privileged/restricted defaults are used. RequireGPU
+	// defaults nvidia.com/gpu=1 only when the caller has not supplied
+	// that key in Limits — e.g. --require-gpu --limits nvidia.com/gpu=4
+	// keeps 4, not 1.
 	Limits corev1.ResourceList
 }
 

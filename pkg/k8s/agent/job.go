@@ -174,8 +174,16 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 		corev1.ResourceMemory:           mustParseQuantity("8Gi"),
 		corev1.ResourceEphemeralStorage: mustParseQuantity("4Gi"),
 	}, d.config.Limits)
+	// RequireGPU defaults the nvidia.com/gpu limit to 1 only when the
+	// caller has not supplied an explicit value via --limits. Caller
+	// override wins so a user can request multiple GPUs (e.g.
+	// --require-gpu --limits nvidia.com/gpu=4) without the default
+	// silently truncating it back to 1.
 	if d.config.RequireGPU {
-		limits[corev1.ResourceName("nvidia.com/gpu")] = mustParseQuantity("1")
+		gpuKey := corev1.ResourceName("nvidia.com/gpu")
+		if _, ok := limits[gpuKey]; !ok {
+			limits[gpuKey] = mustParseQuantity("1")
+		}
 	}
 	container.Resources = corev1.ResourceRequirements{
 		Requests: requests,

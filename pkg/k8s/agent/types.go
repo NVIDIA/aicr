@@ -55,9 +55,10 @@ type Config struct {
 	Requests corev1.ResourceList
 
 	// Limits overrides the per-resource container limits on the agent pod.
-	// When nil, the privileged/restricted defaults in job.go are used. The
-	// nvidia.com/gpu limit added by RequireGPU is preserved on top of any
-	// override the caller supplies.
+	// When nil, the privileged/restricted defaults in job.go are used.
+	// RequireGPU adds nvidia.com/gpu=1 to the merged limits ONLY when the
+	// caller did not already supply that key — so a caller can request
+	// e.g. nvidia.com/gpu=4 alongside RequireGPU and keep their value.
 	Limits corev1.ResourceList
 }
 

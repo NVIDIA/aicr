@@ -216,7 +216,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "limits",
-			Usage:    "Override agent container resource limits as a comma-separated list of name=quantity pairs (e.g. 'cpu=1,memory=2Gi,ephemeral-storage=2Gi'). Unspecified resources keep their built-in defaults; the nvidia.com/gpu limit added by --require-gpu is preserved.",
+			Usage:    "Override agent container resource limits as a comma-separated list of name=quantity pairs (e.g. 'cpu=1,memory=2Gi,ephemeral-storage=2Gi'). Unspecified resources keep their built-in defaults. With --require-gpu, the default nvidia.com/gpu=1 is applied only when --limits does not already contain that key; an explicit --limits nvidia.com/gpu=N wins.",
 			Sources:  cli.EnvVars("AICR_LIMITS"),
 			Category: "Agent Deployment",
 		},

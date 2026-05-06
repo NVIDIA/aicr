@@ -411,7 +411,7 @@ func TestApplyPrivilegedSettings_ResourceOverrides(t *testing.T) {
 			},
 		},
 		{
-			name: "RequireGPU adds nvidia.com/gpu limit on top of overrides",
+			name: "RequireGPU adds default nvidia.com/gpu=1 when caller did not supply one",
 			overrideLim: corev1.ResourceList{
 				corev1.ResourceMemory: resource.MustParse("1Gi"),
 			},
@@ -424,6 +424,22 @@ func TestApplyPrivilegedSettings_ResourceOverrides(t *testing.T) {
 				corev1.ResourceMemory:                 "1Gi",
 				corev1.ResourceEphemeralStorage:       "4Gi",
 				corev1.ResourceName("nvidia.com/gpu"): "1",
+			},
+		},
+		{
+			name: "RequireGPU does not overwrite caller-supplied nvidia.com/gpu limit",
+			overrideLim: corev1.ResourceList{
+				corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("4"),
+			},
+			requireGPU: true,
+			wantRequests: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "1", corev1.ResourceMemory: "4Gi", corev1.ResourceEphemeralStorage: "2Gi",
+			},
+			wantLimits: map[corev1.ResourceName]string{
+				corev1.ResourceCPU:                    "2",
+				corev1.ResourceMemory:                 "8Gi",
+				corev1.ResourceEphemeralStorage:       "4Gi",
+				corev1.ResourceName("nvidia.com/gpu"): "4",
 			},
 		},
 	}
