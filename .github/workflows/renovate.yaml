@@ -100,7 +100,7 @@ jobs:
       # Keep this digest in lockstep with RENOVATE_VALIDATOR_IMAGE in
       # the Makefile.
       - name: Run Renovate
-        uses: renovatebot/github-action@f66d8679fcfcfa051abde6e7a623007173bf5164  # v46.1.12
+        uses: renovatebot/github-action@79dc0ba74dc3de28db0a7aeb1d0b95d5bf5fde2a  # v46.1.13
         with:
           renovate-version: '43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104'
         env:
