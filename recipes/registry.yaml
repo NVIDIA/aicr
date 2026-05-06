@@ -84,6 +84,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
+      defaultVersion: v26.3.1
       defaultNamespace: gpu-operator
     nodeScheduling:
       system:
@@ -113,6 +114,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
+      defaultVersion: "26.1.1"
       defaultNamespace: nvidia-network-operator
     nodeScheduling:
       system:
@@ -183,6 +185,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/skyhook
       defaultChart: skyhook-operator
+      defaultVersion: v0.15.1
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:
@@ -259,6 +262,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/nvidia-dra-driver-gpu
+      defaultVersion: "25.12.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:

@@ -32,6 +32,53 @@ AICR (AICR) provides supply chain security artifacts for all container images:
 - **SBOM Attestation**: Complete inventory of packages, libraries, and components in SPDX format
 - **SLSA Build Provenance**: Verifiable build information (how and where images were created)
 
+### Deployed Image Inventory and Pinning Policy
+
+Beyond AICR's own runtime images, every cluster deployed by AICR pulls a set
+of upstream container images selected by the recipe and the Helm charts it
+references. The complete list — chart-by-chart and image-by-image — is
+published as a versioned doc artifact and refreshed weekly as upstream
+charts evolve:
+
+- [`docs/user/container-images.md`](docs/user/container-images.md) — human
+  readable summary of every component, chart, and image AICR can deploy.
+- A machine-readable [CycloneDX 1.6][cyclonedx] BOM is produced by `make
+  bom` and published as a release asset. Tooling that consumes SBOMs
+  (Trivy, Grype, Cosign attestation, in-toto) should prefer the JSON; the
+  Markdown is its companion.
+
+**Pinning policy** ([ADR-006][adr-006]) defines AICR's three-layer
+contract:
+
+1. **Chart versions** are pinned for every Helm component, with no
+   exceptions. `recipes/registry.yaml` MUST declare `defaultVersion`;
+   `make bom BOM_STRICT=1` enforces this in CI.
+2. **Explicit image overrides** that AICR pins in-tree (in
+   `recipes/components/<name>/values.yaml` or embedded manifests) carry
+   `@sha256:` digests in addition to tags. Renovate handles digest
+   rotation as upstream rebuilds the same tag.
+3. **Chart-default sub-images** (the ones the upstream chart pulls
+   without AICR overriding) ship at whatever the chart resolves at the
+   pinned chart version. Reproducibility for these images is delivered by
+   admission-time digest verification rather than per-sub-image overrides
+   (see the [supply-chain epic][epic-739] for the roadmap).
+
+**Upstream attestation coverage.** AICR's own runtime images and the
+[NVSentinel][nvsentinel] images deployed by AICR ship with full
+keyless cosign signatures, SLSA build provenance, and SBOM attestations
+verifiable from the public Sigstore Rekor transparency log. Other
+NVIDIA-owned images that AICR deploys today (gpu-operator,
+network-operator, k8s-dra-driver-gpu, nodewright/skyhook) ship legacy
+key-based cosign signatures but do not yet ship keyless signatures,
+SLSA provenance, or SBOM attestations. Issues requesting parity have
+been filed with each upstream and are tracked under the
+[supply-chain epic][epic-739] (Stage 3).
+
+[cyclonedx]: https://cyclonedx.org/specification/overview/
+[adr-006]: docs/design/006-image-pinning-policy.md
+[epic-739]: https://github.com/NVIDIA/aicr/issues/739
+[nvsentinel]: https://github.com/NVIDIA/nvsentinel
+
 ### Container Image Attestations
 
 All container images published from tagged releases include **multiple layers of attestations**, providing comprehensive supply chain security:

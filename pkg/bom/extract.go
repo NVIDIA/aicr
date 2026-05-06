@@ -190,7 +190,38 @@ func isLikelyImage(v string) bool {
 	if strings.HasPrefix(v, "/") || strings.HasPrefix(v, "./") {
 		return false
 	}
+	// A real container image reference carries at least one of:
+	//   - a registry host as the first path segment (contains "." or ":"
+	//     or equals "localhost"),
+	//   - a ":tag" after the last "/",
+	//   - an "@<digest>" suffix.
+	// Bare scalars like "vgpu-manager" or "driver" that the extractor
+	// sometimes lifts from disabled CRD-style placeholders (chart-default
+	// sub-images whose enclosing section sets `enabled: false`) don't
+	// represent real deployments and dilute the published BOM. Reject
+	// them here rather than chase per-chart enable flags.
+	if !hasTagOrDigest(v) && !hasRegistryFirstSegment(v) {
+		return false
+	}
 	return true
+}
+
+// hasTagOrDigest reports whether v carries a `:tag` after its last `/`
+// or an `@digest` suffix.
+func hasTagOrDigest(v string) bool {
+	if strings.Contains(v, "@") {
+		return true
+	}
+	lastSlash := strings.LastIndex(v, "/")
+	lastColon := strings.LastIndex(v, ":")
+	return lastColon > lastSlash
+}
+
+// hasRegistryFirstSegment reports whether v's first path segment looks
+// like a registry host (contains "." or ":" or equals "localhost").
+func hasRegistryFirstSegment(v string) bool {
+	first, _, _ := strings.Cut(v, "/")
+	return isRegistryHost(first)
 }
 
 // ImageRef is a parsed container image reference.
