@@ -75,6 +75,13 @@ func parseResourceList(spec string) (corev1.ResourceList, error) {
 		if err != nil {
 			return nil, fmt.Errorf("entry %q: %w", entry, err)
 		}
+		// Reject duplicate keys explicitly. Last-write-wins is too easy
+		// to misuse silently from a shell-templated invocation
+		// (e.g. accidentally appending the same key from two
+		// AICR_REQUESTS sources).
+		if _, dup := result[corev1.ResourceName(key)]; dup {
+			return nil, fmt.Errorf("duplicate key %q", key)
+		}
 		result[corev1.ResourceName(key)] = q
 	}
 	if len(result) == 0 {
