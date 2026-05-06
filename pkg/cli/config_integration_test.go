@@ -22,6 +22,9 @@ import (
 	"testing"
 
 	"github.com/urfave/cli/v3"
+
+	appcfg "github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 // writeYAML writes content to a temp file in the test's temp dir and returns its path.
@@ -33,6 +36,67 @@ func writeYAML(t *testing.T, name, content string) string {
 		t.Fatalf("write temp file: %v", err)
 	}
 	return path
+}
+
+// TestApplyCriteriaFromConfig_OverridesSnapshot locks in the documented
+// precedence: when both a snapshot and a config supply the same criteria
+// field, the config wins. CLI flags subsequently override either.
+func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
+	criteria := recipe.NewCriteria()
+	criteria.Service = recipe.CriteriaServiceType("eks")
+	criteria.Accelerator = recipe.CriteriaAcceleratorType("h100")
+	criteria.Intent = recipe.CriteriaIntentType("training")
+	criteria.OS = recipe.CriteriaOSType("ubuntu")
+
+	cfg := &appcfg.AICRConfig{
+		Spec: appcfg.Spec{
+			Recipe: &appcfg.RecipeSpec{
+				Criteria: &appcfg.CriteriaSpec{
+					Service: "gke",       // overrides snapshot eks
+					Intent:  "inference", // overrides snapshot training
+					// accelerator + os intentionally unset; snapshot values must persist
+				},
+			},
+		},
+	}
+
+	if err := applyCriteriaFromConfig(criteria, cfg); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if string(criteria.Service) != "gke" {
+		t.Errorf("service = %q, want gke (config overrides snapshot)", criteria.Service)
+	}
+	if string(criteria.Intent) != "inference" {
+		t.Errorf("intent = %q, want inference (config overrides snapshot)", criteria.Intent)
+	}
+	if string(criteria.Accelerator) != "h100" {
+		t.Errorf("accelerator = %q, want h100 (snapshot preserved when config silent)", criteria.Accelerator)
+	}
+	if string(criteria.OS) != "ubuntu" {
+		t.Errorf("os = %q, want ubuntu (snapshot preserved when config silent)", criteria.OS)
+	}
+}
+
+// TestApplyCriteriaFromConfig_FillsEmptyCriteria covers the no-snapshot path:
+// the criteria starts as NewCriteria (all "any") and config populates it.
+func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
+	criteria := recipe.NewCriteria()
+	cfg := &appcfg.AICRConfig{
+		Spec: appcfg.Spec{
+			Recipe: &appcfg.RecipeSpec{
+				Criteria: &appcfg.CriteriaSpec{
+					Service: "eks",
+				},
+			},
+		},
+	}
+	if err := applyCriteriaFromConfig(criteria, cfg); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if string(criteria.Service) != "eks" {
+		t.Errorf("service = %q, want eks", criteria.Service)
+	}
 }
 
 const testRecipeConfig = `kind: AICRConfig

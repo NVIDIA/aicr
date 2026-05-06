@@ -397,20 +397,21 @@ func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
 // fully validated; callers can rely on enum fields parsing without
 // re-checking.
 //
-// sentinel error would force every caller into a useless error-check branch.
+// Errors from config.Load are propagated unchanged so their pkg/errors
+// codes survive (ErrCodeNotFound for missing files, ErrCodeInvalidRequest
+// for malformed input or strict-decode rejections, ErrCodeUnavailable for
+// HTTP failures). Wrapping here would clobber those codes.
 //
-//nolint:nilnil // (nil, nil) is the documented "flag not set" signal; a
+// (nil, nil) is the deliberate "config flag not set" signal — a sentinel
+// error would force every caller into a useless error-check branch.
+//
+//nolint:nilnil
 func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, error) {
 	src := cmd.String("config")
 	if src == "" {
 		return nil, nil
 	}
-	cfg, err := config.Load(ctx, src)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("failed to load --config %q", src), err)
-	}
-	return cfg, nil
+	return config.Load(ctx, src)
 }
 
 // stringFlagOrConfig returns the CLI flag value when explicitly set on the

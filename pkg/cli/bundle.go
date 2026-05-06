@@ -295,11 +295,11 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name:    "output",
 				Aliases: []string{"o"},
-				Value:   ".",
-				Usage: `Output target: local directory path or OCI registry URI.
+				Usage: `Output target: local directory path or OCI registry URI (default: current dir).
 	For local output: ./my-bundle or /tmp/bundle
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
-	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)`,
+	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)
+	May also be supplied via spec.bundle.output.target in --config.`,
 				Category: "Output",
 			},
 			&cli.StringSliceFlag{
@@ -362,8 +362,7 @@ Package with explicit tag (overrides CLI version):
 			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
-				Value:    string(config.DeployerHelm),
-				Usage:    fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
+				Usage:    fmt.Sprintf("Deployment method (default: helm; e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
 				Category: "Deployment",
 			}, config.GetDeployerTypes),
 			&cli.StringFlag{

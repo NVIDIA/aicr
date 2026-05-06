@@ -387,6 +387,10 @@ spec:
 	}
 }
 
+// Precedence (CLI > config > snapshot) is locked in by the unit tests in
+// config_integration_test.go: TestApplyCriteriaFromConfig_OverridesSnapshot
+// and TestApplyCriteriaFromConfig_FillsEmptyCriteria.
+
 // === Validation surfaces ===
 
 // TestRecipeCmd_ConfigBadEnumRejected ensures invalid enum values in --config

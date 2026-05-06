@@ -171,3 +171,84 @@ func TestLoad_CanceledContext(t *testing.T) {
 		t.Fatal("expected error for canceled context, got nil")
 	}
 }
+
+func TestLoad_RejectsUnknownYAMLField(t *testing.T) {
+	bad := `kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+spec:
+  recipe:
+    criteria:
+      service: eks
+      bogusFieldThatDoesNotExist: oops
+`
+	path := writeTempFile(t, "config.yaml", bad)
+	_, err := config.Load(context.Background(), path)
+	if err == nil {
+		t.Fatal("expected error for unknown YAML field, got nil")
+	}
+	if !strings.Contains(err.Error(), "bogusFieldThatDoesNotExist") {
+		t.Errorf("error should reference unknown field, got %q", err.Error())
+	}
+}
+
+func TestLoad_RejectsUnknownJSONField(t *testing.T) {
+	bad := `{"kind":"AICRConfig","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"recipe":{"criteria":{"service":"eks","bogusFieldThatDoesNotExist":"oops"}}}}`
+	path := writeTempFile(t, "config.json", bad)
+	_, err := config.Load(context.Background(), path)
+	if err == nil {
+		t.Fatal("expected error for unknown JSON field, got nil")
+	}
+	if !strings.Contains(err.Error(), "bogusFieldThatDoesNotExist") {
+		t.Errorf("error should reference unknown field, got %q", err.Error())
+	}
+}
+
+// TestLoad_HTTPBodyLimit verifies the HTTP fetch path bounds response size
+// against defaults.HTTPResponseBodyLimit.
+func TestLoad_HTTPBodyLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Write more than the body limit (1 MiB by default; emit 2 MiB).
+		w.Header().Set("Content-Type", "application/yaml")
+		// Valid prefix then padding so YAML parsing isn't the failure mode.
+		_, _ = w.Write([]byte(validYAML))
+		pad := make([]byte, 2*1024*1024)
+		_, _ = w.Write(pad)
+	}))
+	t.Cleanup(srv.Close)
+	_, err := config.Load(context.Background(), srv.URL+"/big.yaml")
+	if err == nil {
+		t.Fatal("expected error for oversized response, got nil")
+	}
+	if !strings.Contains(err.Error(), "limit") {
+		t.Errorf("error should mention size limit, got %q", err.Error())
+	}
+}
+
+func TestLoad_HTTPNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+	_, err := config.Load(context.Background(), srv.URL+"/missing.yaml")
+	if err == nil {
+		t.Fatal("expected error for HTTP 404, got nil")
+	}
+}
+
+// TestLoad_HTTPCanceledMidFetch verifies context cancellation propagates
+// through the HTTP fetch (regression for the earlier ctx-not-threaded bug).
+func TestLoad_HTTPCanceledMidFetch(t *testing.T) {
+	// Server that hangs forever (until client disconnects).
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately so the request never completes.
+	cancel()
+	_, err := config.Load(ctx, srv.URL+"/hangs.yaml")
+	if err == nil {
+		t.Fatal("expected error for canceled HTTP fetch, got nil")
+	}
+}

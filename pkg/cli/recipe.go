@@ -216,54 +216,77 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 }
 
 // applyCriteriaFromConfig merges spec.recipe.criteria values into an existing
-// Criteria. Non-empty config fields fill in fields that are unset (empty or
-// the "any" wildcard) on the criteria, without overwriting values already
-// populated from a snapshot.
+// Criteria. Config values override snapshot-extracted values when both are
+// present and differ; when criteria is empty (no snapshot), config simply
+// populates it. CLI flags subsequently override both via applyCriteriaOverrides,
+// yielding precedence: CLI > config > snapshot.
+//
+// Override events are logged at INFO so the resolved value is auditable.
 func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig) error {
 	if cfg == nil || cfg.Spec.Recipe == nil || cfg.Spec.Recipe.Criteria == nil {
 		return nil
 	}
 	c := cfg.Spec.Recipe.Criteria
 
-	if c.Service != "" && (criteria.Service == "" || criteria.Service == recipe.CriteriaServiceAny) {
+	if c.Service != "" {
 		parsed, err := recipe.ParseCriteriaServiceType(c.Service)
 		if err != nil {
 			return err
 		}
+		logCriteriaOverride("service", string(criteria.Service), string(parsed))
 		criteria.Service = parsed
 	}
-	if c.Accelerator != "" && (criteria.Accelerator == "" || criteria.Accelerator == recipe.CriteriaAcceleratorAny) {
+	if c.Accelerator != "" {
 		parsed, err := recipe.ParseCriteriaAcceleratorType(c.Accelerator)
 		if err != nil {
 			return err
 		}
+		logCriteriaOverride("accelerator", string(criteria.Accelerator), string(parsed))
 		criteria.Accelerator = parsed
 	}
-	if c.Intent != "" && (criteria.Intent == "" || criteria.Intent == recipe.CriteriaIntentAny) {
+	if c.Intent != "" {
 		parsed, err := recipe.ParseCriteriaIntentType(c.Intent)
 		if err != nil {
 			return err
 		}
+		logCriteriaOverride("intent", string(criteria.Intent), string(parsed))
 		criteria.Intent = parsed
 	}
-	if c.OS != "" && (criteria.OS == "" || criteria.OS == recipe.CriteriaOSAny) {
+	if c.OS != "" {
 		parsed, err := recipe.ParseCriteriaOSType(c.OS)
 		if err != nil {
 			return err
 		}
+		logCriteriaOverride("os", string(criteria.OS), string(parsed))
 		criteria.OS = parsed
 	}
-	if c.Platform != "" && (criteria.Platform == "" || criteria.Platform == recipe.CriteriaPlatformAny) {
+	if c.Platform != "" {
 		parsed, err := recipe.ParseCriteriaPlatformType(c.Platform)
 		if err != nil {
 			return err
 		}
+		logCriteriaOverride("platform", string(criteria.Platform), string(parsed))
 		criteria.Platform = parsed
 	}
-	if c.Nodes > 0 && criteria.Nodes == 0 {
+	if c.Nodes > 0 {
+		if criteria.Nodes > 0 && criteria.Nodes != c.Nodes {
+			slog.Info("config overriding snapshot-detected value",
+				"field", "nodes", "snapshot", criteria.Nodes, "config", c.Nodes)
+		}
 		criteria.Nodes = c.Nodes
 	}
 	return nil
+}
+
+// logCriteriaOverride logs an INFO line when config replaces a non-default
+// snapshot-extracted value with a different one. Empty/wildcard prior values
+// are not interesting (the field was effectively unset).
+func logCriteriaOverride(field, prior, override string) {
+	if prior == "" || prior == "any" || prior == override {
+		return
+	}
+	slog.Info("config overriding snapshot-detected value",
+		"field", field, "snapshot", prior, "config", override)
 }
 
 // mergeCriteriaFromCmdAndConfig builds a Criteria starting from spec.recipe.criteria
