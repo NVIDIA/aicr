@@ -729,9 +729,10 @@ talos-dev-env-clean: ## Destroy the local Talos cluster.
 
 .PHONY: talos-snapshot-test
 talos-snapshot-test: build ## Run the Talos snapshot chainsaw test against an already-running cluster.
-	@DIST_DIR=$$(find dist -maxdepth 1 -type d -name 'aicr_*' 2>/dev/null | head -1); \
+	@HOST_GOOS=$$(go env GOOS); HOST_GOARCH=$$(go env GOARCH); \
+	 DIST_DIR=$$(find dist -maxdepth 1 -type d -name "aicr_$${HOST_GOOS}_$${HOST_GOARCH}*" 2>/dev/null | head -1); \
 	 if [ -z "$$DIST_DIR" ] || [ ! -x "$$DIST_DIR/aicr" ]; then \
-	    echo "error: aicr binary not found under dist/; run 'make build' first" >&2; exit 1; \
+	    echo "error: aicr binary not found under dist/aicr_$${HOST_GOOS}_$${HOST_GOARCH}*; run 'make build' first" >&2; exit 1; \
 	 fi; \
 	 KUBECONFIG=$(TALOS_KUBECONFIG) \
 	 PATH=$$DIST_DIR:$$PATH \
