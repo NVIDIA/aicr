@@ -359,14 +359,26 @@ func TestPURL(t *testing.T) {
 
 func TestIsLikelyImage(t *testing.T) {
 	cases := map[string]bool{
+		// Real refs: registry-host first segment, or a tag, or a digest.
 		"nvcr.io/nvidia/gpu-operator:v1": true,
-		"":                               false,
-		"null":                           false,
-		"true":                           false,
-		"{{ .Values.image }}":            false,
-		"/etc/foo":                       false,
-		"./local":                        false,
-		"plain-name":                     true,
+		"nvcr.io/nvidia/driver":          true, // registry host, no tag yet
+		"busybox:1.36":                   true, // tag-only, single segment
+		"localhost:5000/myimg":           true, // localhost registry
+		"foo@sha256:abc":                 true, // digest only
+		// Rejected: empty, sentinel, templated, paths.
+		"":                    false,
+		"null":                false,
+		"true":                false,
+		"{{ .Values.image }}": false,
+		"/etc/foo":            false,
+		"./local":             false,
+		// Rejected: bare scalars with no tag, digest, or registry host.
+		// These appear when the BOM extractor lifts a chart-default
+		// placeholder from a disabled CRD-style block (e.g.,
+		// vgpuManager.image=vgpu-manager with vgpuManager.enabled=false).
+		"plain-name":   false,
+		"vgpu-manager": false,
+		"driver":       false,
 	}
 	for in, want := range cases {
 		if got := isLikelyImage(in); got != want {

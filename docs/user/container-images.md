@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **22**
-- Unique images: **70**
+- Unique images: **69**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -34,7 +34,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | dynamo-platform | helm | dynamo-platform | 1.0.2 | 1 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | — | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | — | 14 |
 | grove | helm | grove-charts | v0.1.0-alpha.6 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -101,7 +101,6 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.19.0`
 - `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.1-4.8.0-distroless`
 - `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
-- `vgpu-manager`
 
 ### grove
 
