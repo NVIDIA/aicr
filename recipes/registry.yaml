@@ -304,6 +304,8 @@ components:
           - kube-state-metrics.tolerations
           - prometheus-node-exporter.tolerations
           - thanosRuler.thanosRulerSpec.tolerations
+    storageClassPaths:
+      - prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName
 
   - name: prometheus-adapter
     displayName: prometheus-adapter

@@ -647,6 +647,29 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			}
 		}
 	}
+
+	// Apply storage class to all registry-declared storageClassPaths, but only when the path
+	// was not explicitly set via a per-component --set override. Overlay/default values in the
+	// values map must not block injection; only CLI --set inputs take precedence.
+	if sc := b.Config.StorageClass(); sc != "" {
+		if paths := comp.GetStorageClassPaths(); len(paths) > 0 {
+			explicitOverrides := b.getValueOverridesForComponent(componentName)
+			overrides := make(map[string]string, len(paths))
+			for _, path := range paths {
+				if _, isExplicit := explicitOverrides[path]; !isExplicit {
+					overrides[path] = sc
+				}
+			}
+			if len(overrides) > 0 {
+				if err := component.ApplyMapOverrides(values, overrides); err != nil {
+					slog.Warn("failed to apply storage class",
+						"component", componentName,
+						"error", err,
+					)
+				}
+			}
+		}
+	}
 }
 
 // runComponentValidations executes all component-specific validations registered in the registry.

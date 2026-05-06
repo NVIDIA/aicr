@@ -130,6 +130,10 @@ type Config struct {
 	// dynamicValues declares value paths that should be provided at install time.
 	// Map structure: component_key -> [path1, path2, ...]
 	dynamicValues map[string][]string
+
+	// storageClass is the Kubernetes StorageClass name to inject into components at bundle time.
+	// When non-empty, it overrides the storageClassName at all registry-declared storageClassPaths.
+	storageClass string
 }
 
 // Getter methods for read-only access
@@ -283,6 +287,11 @@ func (c *Config) DynamicValues() map[string][]string {
 // HasDynamicValues returns true if any dynamic value declarations exist.
 func (c *Config) HasDynamicValues() bool {
 	return len(c.dynamicValues) > 0
+}
+
+// StorageClass returns the Kubernetes StorageClass name to inject at bundle time, or empty string if unset.
+func (c *Config) StorageClass() string {
+	return c.storageClass
 }
 
 // Validate checks if the Config has valid settings.
@@ -469,6 +478,14 @@ func WithDynamicValues(dynamicValues map[string][]string) Option {
 		for component, paths := range dynamicValues {
 			c.dynamicValues[component] = append(c.dynamicValues[component], paths...)
 		}
+	}
+}
+
+// WithStorageClass sets the Kubernetes StorageClass name to inject into components at bundle time.
+// When non-empty, it is written to all registry-declared storageClassPaths for each component.
+func WithStorageClass(storageClass string) Option {
+	return func(c *Config) {
+		c.storageClass = storageClass
 	}
 }
 

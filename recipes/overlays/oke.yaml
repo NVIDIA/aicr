@@ -43,7 +43,7 @@ spec:
       version: v26.3.0
       valuesFile: components/gpu-operator/values-oke.yaml
 
-    # Prometheus persistent storage — OCI Block Volume
+    # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
     - name: kube-prometheus-stack
       type: Helm
       overrides:
@@ -53,7 +53,6 @@ spec:
               emptyDir: null
               volumeClaimTemplate:
                 spec:
-                  storageClassName: oci-bv
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:

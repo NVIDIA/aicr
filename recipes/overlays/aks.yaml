@@ -70,7 +70,7 @@ spec:
         - nfd
         - cert-manager
 
-    # Prometheus persistent storage — Azure Disk Standard SSD
+    # Prometheus persistent storage (provide --storage-class at bundle time, e.g. managed-csi)
     - name: kube-prometheus-stack
       type: Helm
       version: "83.7.0"
@@ -81,7 +81,6 @@ spec:
               emptyDir: null
               volumeClaimTemplate:
                 spec:
-                  storageClassName: managed-csi
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:
