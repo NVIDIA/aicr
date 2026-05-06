@@ -51,6 +51,30 @@ func (c *AICRConfig) Validate() error {
 	if err := c.Spec.Bundle.validate(); err != nil {
 		return err
 	}
+	if err := c.Spec.validateRecipeBundleHandoff(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRecipeBundleHandoff catches a silent footgun in workflow files:
+// when both spec.recipe.output.path and spec.bundle.input.recipe are set,
+// they typically describe the same artifact (the recipe written by `aicr
+// recipe` and consumed by `aicr bundle`). Mismatched paths almost always
+// indicate a typo rather than a deliberate two-recipe workflow, so reject
+// them up-front. Setting only one side is fine.
+func (s Spec) validateRecipeBundleHandoff() error {
+	if s.Recipe == nil || s.Recipe.Output == nil || s.Recipe.Output.Path == "" {
+		return nil
+	}
+	if s.Bundle == nil || s.Bundle.Input == nil || s.Bundle.Input.Recipe == "" {
+		return nil
+	}
+	if s.Recipe.Output.Path != s.Bundle.Input.Recipe {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("spec.recipe.output.path (%q) and spec.bundle.input.recipe (%q) must match when both are set",
+				s.Recipe.Output.Path, s.Bundle.Input.Recipe))
+	}
 	return nil
 }
 

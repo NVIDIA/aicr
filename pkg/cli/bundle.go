@@ -437,7 +437,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 
 	opts, err := parseBundleCmdOptions(cmd, cfg)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid bundle command options", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid bundle command options")
 	}
 
 	outputType := "Helm per-component bundle"

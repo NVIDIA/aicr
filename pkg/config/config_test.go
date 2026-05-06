@@ -198,3 +198,53 @@ func TestValidate_NilReceiver(t *testing.T) {
 		t.Errorf("expected error from nil receiver, got nil")
 	}
 }
+
+func TestValidate_RecipeBundleHandoff(t *testing.T) {
+	tests := []struct {
+		name        string
+		recipePath  string
+		bundleInput string
+		wantErrSub  string
+	}{
+		{"both empty is fine", "", "", ""},
+		{"only recipe.output set is fine", "out.yaml", "", ""},
+		{"only bundle.input set is fine", "", "in.yaml", ""},
+		{"matching paths is fine", "shared.yaml", "shared.yaml", ""},
+		{"mismatched paths rejected", "out.yaml", "different.yaml", "must match"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &config.AICRConfig{
+				Kind:       config.Kind,
+				APIVersion: config.APIVersion,
+				Spec: config.Spec{
+					Recipe: &config.RecipeSpec{
+						Criteria: &config.CriteriaSpec{Service: "eks"},
+					},
+					Bundle: &config.BundleSpec{
+						Deployment: &config.DeploymentSpec{Deployer: "helm"},
+					},
+				},
+			}
+			if tt.recipePath != "" {
+				cfg.Spec.Recipe.Output = &config.RecipeOutputSpec{Path: tt.recipePath}
+			}
+			if tt.bundleInput != "" {
+				cfg.Spec.Bundle.Input = &config.BundleInputSpec{Recipe: tt.bundleInput}
+			}
+			err := cfg.Validate()
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Errorf("error %q should contain %q", err.Error(), tt.wantErrSub)
+			}
+		})
+	}
+}

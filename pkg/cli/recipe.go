@@ -136,7 +136,7 @@ Override snapshot-detected criteria:
 
 			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
 			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "error building recipe", err)
+				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
 			}
 
 			// Log constraint warnings for visibility
@@ -199,11 +199,17 @@ func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
 
 // parseRecipeOutputFormat reads --format with a fallback to spec.recipe.output.format
 // and validates the result.
+//
+// The flag has a "yaml" Value default; cmd.String("format") returns it even
+// when the user did not pass --format, which would otherwise mask any
+// config-supplied value. stringFlagOrConfig uses cmd.IsSet so a missing
+// flag still falls through to the config fallback.
 func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
-	raw := cmd.String("format")
-	if raw == "" && cfg != nil && cfg.Spec.Recipe != nil && cfg.Spec.Recipe.Output != nil {
-		raw = cfg.Spec.Recipe.Output.Format
+	fallback := ""
+	if cfg != nil && cfg.Spec.Recipe != nil && cfg.Spec.Recipe.Output != nil {
+		fallback = cfg.Spec.Recipe.Output.Format
 	}
+	raw := stringFlagOrConfig(cmd, "format", fallback)
 	if raw == "" {
 		raw = string(serializer.FormatYAML)
 	}

@@ -274,14 +274,16 @@ aicr recipe [flags]
 Generate recipes using an `AICRConfig` document. The same file format also drives the `bundle` command, so a single file can describe an end-to-end recipe-to-bundle workflow.
 
 **Flags:**
+
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--config` | | string | Path or HTTPS URL to an AICRConfig file (YAML/JSON) |
+| `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-f` | string | Format: json, yaml (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 
 The config file uses a Kubernetes-style envelope:
+
 ```yaml
 kind: AICRConfig
 apiVersion: aicr.nvidia.com/v1alpha1
@@ -845,7 +847,7 @@ aicr bundle [flags]
 | Flag | Short | Type | Description |
 |---------------------------------|-------|------|-------------|
 | `--recipe` | `-r` | string | Path to recipe file (required, or via `spec.bundle.input.recipe` in `--config`) |
-| `--config` | | string | Path or HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Config File Mode](#config-file-mode-1). |
+| `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, or `argocd-helm` |
 | `--repo` | | string | Git repository URL for Argo CD applications (used with `--deployer argocd` and `--deployer argocd-helm`) |
@@ -869,9 +871,11 @@ aicr bundle [flags]
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
 | `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
 
-#### Config File Mode
+#### Bundle Config File Mode
 
 The bundle command accepts the same `AICRConfig` format used by `aicr recipe`. A single file can populate both `spec.recipe` and `spec.bundle`, capturing an end-to-end workflow that can be committed to git, fetched from CI, or shared across environments.
+
+When both `spec.recipe.output.path` and `spec.bundle.input.recipe` are set, they must reference the same path; otherwise loading fails fast.
 
 ```yaml
 kind: AICRConfig

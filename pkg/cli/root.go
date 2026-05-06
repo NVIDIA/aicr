@@ -112,9 +112,9 @@ var (
 	configFlag = func() cli.Flag {
 		return &cli.StringFlag{
 			Name: "config",
-			Usage: `Path or HTTPS URL to an AICRConfig file (YAML or JSON) populating defaults
-	for this command. Individual CLI flags always override config file values.
-	See docs/user/cli-reference.md for the file schema.`,
+			Usage: `Path or HTTP(S) URL to an AICRConfig file (YAML or JSON) populating
+	defaults for this command. Individual CLI flags always override config file
+	values. See docs/user/cli-reference.md for the file schema.`,
 			Category: "Input",
 		}
 	}
@@ -360,23 +360,27 @@ func sanitizeCompletionArgs(args []string) []string {
 
 // initDataProvider initializes the data provider from the --data flag,
 // falling back to spec.recipe.data on the supplied AICRConfig when the flag
-// is not set. cfg may be nil; if so, only the flag is consulted. When neither
-// is set the embedded data is used (no provider override).
+// is not set. cfg may be nil; if so, only the flag is consulted.
+//
+// The data provider is a process-global. When neither input is set the
+// provider is reset to the embedded one so a long-lived process (or a
+// successive Run within tests) does not silently keep a layered provider
+// installed by a previous invocation.
 func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+
 	dataDir := cmd.String("data")
 	if dataDir == "" && cfg != nil && cfg.Spec.Recipe != nil {
 		dataDir = cfg.Spec.Recipe.Data
 	}
 	if dataDir == "" {
+		// Reset to embedded so prior --data state does not leak across runs.
+		recipe.SetDataProvider(embedded)
 		return nil
 	}
 
 	slog.Info("initializing external data provider", "directory", dataDir)
 
-	// Create embedded provider
-	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
-
-	// Create layered provider
 	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{
 		ExternalDir:   dataDir,
 		AllowSymlinks: false,
@@ -385,7 +389,6 @@ func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize external data", err)
 	}
 
-	// Set as global data provider
 	recipe.SetDataProvider(layered)
 
 	slog.Info("external data provider initialized successfully", "directory", dataDir)

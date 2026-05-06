@@ -39,20 +39,26 @@ func boolFlagOrConfig(cmd *cli.Command, flagName string, fallback bool) bool {
 
 // stringSliceFlagOrConfig returns the CLI slice value when explicitly set,
 // otherwise the fallback slice. Per the agreed design, CLI replaces config
-// rather than appending.
+// rather than appending. Returns a defensive copy so callers cannot mutate
+// the loaded config's backing slice.
 func stringSliceFlagOrConfig(cmd *cli.Command, flagName string, fallback []string) []string {
 	if cmd.IsSet(flagName) {
 		v := cmd.StringSlice(flagName)
 		if len(fallback) > 0 {
 			slog.Info("CLI flag replacing config value", "flag", flagName, "configCount", len(fallback), "overrideCount", len(v))
 		}
-		return v
+		return append([]string(nil), v...)
 	}
-	return fallback
+	if len(fallback) == 0 {
+		return nil
+	}
+	return append([]string(nil), fallback...)
 }
 
 // resolveNodeSelector returns the parsed map for a CLI selector flag,
-// preferring CLI input over the supplied fallback map.
+// preferring CLI input over the supplied fallback map. Returns a defensive
+// copy in either path so callers cannot mutate the loaded config's map.
+// An empty fallback yields an empty (non-nil) map for caller convenience.
 func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]string) (map[string]string, error) {
 	if cmd.IsSet(flagName) {
 		parsed, err := snapshotter.ParseNodeSelectors(cmd.StringSlice(flagName))
@@ -64,10 +70,6 @@ func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]
 		}
 		return parsed, nil
 	}
-	if fallback == nil {
-		return map[string]string{}, nil
-	}
-	// Return a defensive copy so callers cannot mutate the cached config map.
 	out := make(map[string]string, len(fallback))
 	for k, v := range fallback {
 		out[k] = v
