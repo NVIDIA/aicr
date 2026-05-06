@@ -35,6 +35,7 @@ package recipe
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -433,7 +434,7 @@ func TestMergeComponentRef_AdvancedFields(t *testing.T) {
 		}
 	})
 
-	t.Run("dependencyRefs replaced by overlay", func(t *testing.T) {
+	t.Run("dependencyRefs additive dedup merge", func(t *testing.T) {
 		base := ComponentRef{
 			Name:           "test",
 			DependencyRefs: []string{"dep-a"},
@@ -443,8 +444,41 @@ func TestMergeComponentRef_AdvancedFields(t *testing.T) {
 			DependencyRefs: []string{"dep-b", "dep-c"},
 		}
 		result := mergeComponentRef(base, overlay)
-		if len(result.DependencyRefs) != 2 {
-			t.Errorf("dependencyRefs len = %d, want 2", len(result.DependencyRefs))
+		want := []string{"dep-a", "dep-b", "dep-c"}
+		if !reflect.DeepEqual(result.DependencyRefs, want) {
+			t.Errorf("dependencyRefs = %v, want %v", result.DependencyRefs, want)
+		}
+	})
+
+	t.Run("dependencyRefs dedup on merge", func(t *testing.T) {
+		base := ComponentRef{
+			Name:           "test",
+			DependencyRefs: []string{"dep-a", "dep-b"},
+		}
+		overlay := ComponentRef{
+			Name:           "test",
+			DependencyRefs: []string{"dep-b", "dep-c"},
+		}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"dep-a", "dep-b", "dep-c"}
+		if !reflect.DeepEqual(result.DependencyRefs, want) {
+			t.Errorf("dependencyRefs = %v, want %v", result.DependencyRefs, want)
+		}
+	})
+
+	t.Run("dependencyRefs dedup within overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name:           "test",
+			DependencyRefs: []string{"dep-a"},
+		}
+		overlay := ComponentRef{
+			Name:           "test",
+			DependencyRefs: []string{"dep-b", "dep-b"},
+		}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"dep-a", "dep-b"}
+		if !reflect.DeepEqual(result.DependencyRefs, want) {
+			t.Errorf("dependencyRefs = %v, want %v", result.DependencyRefs, want)
 		}
 	})
 
@@ -460,6 +494,22 @@ func TestMergeComponentRef_AdvancedFields(t *testing.T) {
 		result := mergeComponentRef(base, overlay)
 		if len(result.ManifestFiles) != 3 {
 			t.Errorf("manifestFiles = %v, want 3 items (a, b, c)", result.ManifestFiles)
+		}
+	})
+
+	t.Run("manifestFiles dedup within overlay", func(t *testing.T) {
+		base := ComponentRef{
+			Name:          "test",
+			ManifestFiles: []string{"a.yaml"},
+		}
+		overlay := ComponentRef{
+			Name:          "test",
+			ManifestFiles: []string{"b.yaml", "b.yaml"},
+		}
+		result := mergeComponentRef(base, overlay)
+		want := []string{"a.yaml", "b.yaml"}
+		if !reflect.DeepEqual(result.ManifestFiles, want) {
+			t.Errorf("manifestFiles = %v, want %v", result.ManifestFiles, want)
 		}
 	})
 

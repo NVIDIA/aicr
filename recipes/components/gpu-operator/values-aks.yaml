@@ -15,29 +15,12 @@
 # GPU Operator Helm values
 # AKS base configuration overrides
 #
-# AKS pre-installs NVIDIA container toolkit on GPU VMs.
-# Disable toolkit installation to avoid conflicts.
-#
 # By default, GPU Operator manages the NVIDIA driver. Create nodepools
 # with `--gpu-driver none` to prevent AKS from also installing drivers.
 # To use the AKS-managed driver instead, set driver.enabled to false.
 # See https://learn.microsoft.com/en-us/azure/aks/nvidia-gpu-operator
 #
 # Reference: https://github.com/Azure/aks-rdma-infiniband/blob/main/configs/values/gpu-operator/values.yaml
-# TODO: Evaluate full alignment with aks-rdma-infiniband setup scripts
-#       (tests/setup-infra/deploy-aks.sh) and fold remaining automation into recipe.
-
-# AKS pre-installs NVIDIA container toolkit; disable to avoid conflicts.
-toolkit:
-  enabled: false
-
-driver:
-  rdma:
-    # Use MOFED installed by network-operator instead of building nvidia-peermem
-    # from source. Required for GPUDirect RDMA on AKS ND-series.
-    # Set to false when disabling network-operator (no host MOFED present):
-    #   --set gpuoperator:driver.rdma.useHostMofed=false
-    useHostMofed: true
 
 # NFD is deployed as a standalone shared component from the base recipe.
 # Both network-operator and gpu-operator disable their sub-chart copies

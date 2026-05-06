@@ -580,9 +580,18 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 		result.Patches = overlay.Patches
 	}
 
-	// DependencyRefs: overlay replaces if set
+	// DependencyRefs: additive merge (base + overlay, deduplicated)
 	if len(overlay.DependencyRefs) > 0 {
-		result.DependencyRefs = overlay.DependencyRefs
+		seen := make(map[string]bool)
+		for _, d := range result.DependencyRefs {
+			seen[d] = true
+		}
+		for _, d := range overlay.DependencyRefs {
+			if !seen[d] {
+				result.DependencyRefs = append(result.DependencyRefs, d)
+				seen[d] = true
+			}
+		}
 	}
 
 	// ManifestFiles: additive merge (base + overlay, deduplicated)
@@ -594,6 +603,7 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 		for _, f := range overlay.ManifestFiles {
 			if !seen[f] {
 				result.ManifestFiles = append(result.ManifestFiles, f)
+				seen[f] = true
 			}
 		}
 	}
