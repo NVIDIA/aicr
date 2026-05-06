@@ -63,6 +63,29 @@ targets:
 | `TALOS_KUBECONFIG` | `${HOME}/.kube/aicr-talos` | Where the cluster's kubeconfig is written |
 | `TALOS_REGISTRY_MIRROR_HOST` | auto (Darwin: `host.docker.internal`; Linux: `172.17.0.1`) | Hostname the Talos node containers use to reach the host's `localhost:5001` registry |
 
+## Side effects
+
+`make talos-dev-env` makes two cluster-wide changes you should be aware
+of before scheduling other workloads on this cluster:
+
+- **`default` namespace is relabeled to `pod-security.kubernetes.io/enforce=privileged`**
+  (also `audit=privileged` and `warn=privileged`). Talos enforces
+  `restricted` cluster-wide by default; the snapshot agent's privileged
+  pod cannot be scheduled there without this relabel. The label persists
+  for the lifetime of the cluster — anything else you `kubectl apply` to
+  `default` afterward also runs at the privileged baseline. For
+  unrelated workloads, prefer creating a separate namespace whose PSS
+  enforcement label you control.
+- **`br_netfilter` is loaded on the host VM** via a one-shot privileged
+  Alpine container so flannel CNI works. The module persists for the
+  life of the host runtime VM (Docker Desktop / Podman Machine), not
+  just this cluster. No-op on Linux hosts where the module is normally
+  already loaded.
+
+`make talos-dev-env-clean` destroys the Talos containers but does not
+revert either change. Restart the host runtime VM to drop
+`br_netfilter`; recreate the namespace to drop the PSS labels.
+
 ## Troubleshooting
 
 `talosctl: command not found`
