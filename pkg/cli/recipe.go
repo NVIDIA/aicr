@@ -22,6 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -68,17 +69,11 @@ func recipeCmdFlags() []cli.Flag {
 	If provided, criteria are extracted from the snapshot.`,
 			Category: "Input",
 		},
-		&cli.StringFlag{
-			Name:    "criteria",
-			Aliases: []string{"c"},
-			Usage: `Path to criteria file (YAML/JSON), alternative to individual flags.
-	Criteria file fields can be overridden by individual flags.`,
-			Category: "Input",
-		},
-		dataFlag,
-		outputFlag,
+		configFlag(),
+		dataFlag(),
+		outputFlag(),
 		formatFlag(),
-		kubeconfigFlag,
+		kubeconfigFlag(),
 	}
 }
 
@@ -102,8 +97,8 @@ Examples:
 Generate recipe from explicit criteria:
   aicr recipe --service eks --accelerator h100 --os ubuntu --intent training
 
-Generate recipe from a criteria file:
-  aicr recipe --criteria criteria.yaml
+Generate recipe from a config file:
+  aicr recipe --config config.yaml
 
 Generate recipe from a snapshot file:
   aicr recipe --snapshot snapshot.yaml
@@ -114,27 +109,32 @@ Generate recipe from a ConfigMap snapshot:
 Save recipe to a file:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot -o recipe.yaml
 
-Override criteria file values with flags:
-  aicr recipe --criteria criteria.yaml --service gke
+Override config file values with flags:
+  aicr recipe --config config.yaml --service gke
 
 Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "config", "output", "format"); err != nil {
 				return err
 			}
 
-			if err := initDataProvider(cmd); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
-			}
-
-			outFormat, err := parseOutputFormat(cmd)
+			cfg, err := loadCmdConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
 
-			result, err := buildRecipeFromCmd(ctx, cmd)
+			if err = initDataProvider(cmd, cfg); err != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			}
+
+			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
+			if err != nil {
+				return err
+			}
+
+			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "error building recipe", err)
 			}
@@ -151,7 +151,7 @@ Override snapshot-detected criteria:
 				}
 			}
 
-			output := cmd.String("output")
+			output := recipeOutputPath(cmd, cfg)
 			ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
@@ -176,6 +176,107 @@ Override snapshot-detected criteria:
 			return nil
 		},
 	}
+}
+
+// configRecipeSnapshot returns the snapshot path from spec.recipe.input.snapshot
+// (or empty string when cfg or any intermediate path is nil).
+func configRecipeSnapshot(cfg *appcfg.AICRConfig) string {
+	if cfg == nil || cfg.Spec.Recipe == nil || cfg.Spec.Recipe.Input == nil {
+		return ""
+	}
+	return cfg.Spec.Recipe.Input.Snapshot
+}
+
+// recipeOutputPath returns the recipe output destination, with the CLI flag
+// overriding spec.recipe.output.path.
+func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
+	fallback := ""
+	if cfg != nil && cfg.Spec.Recipe != nil && cfg.Spec.Recipe.Output != nil {
+		fallback = cfg.Spec.Recipe.Output.Path
+	}
+	return stringFlagOrConfig(cmd, "output", fallback)
+}
+
+// parseRecipeOutputFormat reads --format with a fallback to spec.recipe.output.format
+// and validates the result.
+func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
+	raw := cmd.String("format")
+	if raw == "" && cfg != nil && cfg.Spec.Recipe != nil && cfg.Spec.Recipe.Output != nil {
+		raw = cfg.Spec.Recipe.Output.Format
+	}
+	if raw == "" {
+		raw = string(serializer.FormatYAML)
+	}
+	out := serializer.Format(raw)
+	if out.IsUnknown() {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("unknown output format: %q, valid formats are: yaml, json, table", raw))
+	}
+	return out, nil
+}
+
+// applyCriteriaFromConfig merges spec.recipe.criteria values into an existing
+// Criteria. Non-empty config fields fill in fields that are unset (empty or
+// the "any" wildcard) on the criteria, without overwriting values already
+// populated from a snapshot.
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig) error {
+	if cfg == nil || cfg.Spec.Recipe == nil || cfg.Spec.Recipe.Criteria == nil {
+		return nil
+	}
+	c := cfg.Spec.Recipe.Criteria
+
+	if c.Service != "" && (criteria.Service == "" || criteria.Service == recipe.CriteriaServiceAny) {
+		parsed, err := recipe.ParseCriteriaServiceType(c.Service)
+		if err != nil {
+			return err
+		}
+		criteria.Service = parsed
+	}
+	if c.Accelerator != "" && (criteria.Accelerator == "" || criteria.Accelerator == recipe.CriteriaAcceleratorAny) {
+		parsed, err := recipe.ParseCriteriaAcceleratorType(c.Accelerator)
+		if err != nil {
+			return err
+		}
+		criteria.Accelerator = parsed
+	}
+	if c.Intent != "" && (criteria.Intent == "" || criteria.Intent == recipe.CriteriaIntentAny) {
+		parsed, err := recipe.ParseCriteriaIntentType(c.Intent)
+		if err != nil {
+			return err
+		}
+		criteria.Intent = parsed
+	}
+	if c.OS != "" && (criteria.OS == "" || criteria.OS == recipe.CriteriaOSAny) {
+		parsed, err := recipe.ParseCriteriaOSType(c.OS)
+		if err != nil {
+			return err
+		}
+		criteria.OS = parsed
+	}
+	if c.Platform != "" && (criteria.Platform == "" || criteria.Platform == recipe.CriteriaPlatformAny) {
+		parsed, err := recipe.ParseCriteriaPlatformType(c.Platform)
+		if err != nil {
+			return err
+		}
+		criteria.Platform = parsed
+	}
+	if c.Nodes > 0 && criteria.Nodes == 0 {
+		criteria.Nodes = c.Nodes
+	}
+	return nil
+}
+
+// mergeCriteriaFromCmdAndConfig builds a Criteria starting from spec.recipe.criteria
+// (when cfg is non-nil) and overlays CLI flag values on top.
+func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.Criteria, error) {
+	criteria := recipe.NewCriteria()
+	if err := applyCriteriaFromConfig(criteria, cfg); err != nil {
+		return nil, err
+	}
+	if err := applyCriteriaOverrides(cmd, criteria); err != nil {
+		return nil, err
+	}
+	return criteria, nil
 }
 
 // buildCriteriaFromCmd constructs a recipe.Criteria from CLI command flags.

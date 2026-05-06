@@ -25,6 +25,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -58,15 +59,21 @@ var (
 	commit  = "unknown"
 	date    = "unknown"
 
-	outputFlag = &cli.StringFlag{
-		Name:     "output",
-		Aliases:  []string{"o"},
-		Usage:    fmt.Sprintf("output destination: file path, ConfigMap URI (%snamespace/name), or stdout (default)", serializer.ConfigMapURIScheme),
-		Category: "Output",
+	// Shared flags are functions (not vars) so each Command gets its own
+	// instance. urfave/cli mutates parsed-state on the Flag value, so a
+	// shared instance leaks Count and parsed values across successive Run
+	// invocations — particularly visible in tests that build multiple
+	// command trees.
+
+	outputFlag = func() cli.Flag {
+		return &cli.StringFlag{
+			Name:     "output",
+			Aliases:  []string{"o"},
+			Usage:    fmt.Sprintf("output destination: file path, ConfigMap URI (%snamespace/name), or stdout (default)", serializer.ConfigMapURIScheme),
+			Category: "Output",
+		}
 	}
 
-	// formatFlag is a function to avoid sharing a single flag instance across
-	// commands, which causes urfave/cli internal state conflicts in parallel tests.
 	formatFlag = func() cli.Flag {
 		return withCompletions(&cli.StringFlag{
 			Name:     "format",
@@ -77,21 +84,39 @@ var (
 		}, serializer.SupportedFormats)
 	}
 
-	kubeconfigFlag = &cli.StringFlag{
-		Name:     "kubeconfig",
-		Aliases:  []string{"k"},
-		Usage:    "Path to kubeconfig file (overrides KUBECONFIG env and default ~/.kube/config)",
-		Category: "Input",
+	kubeconfigFlag = func() cli.Flag {
+		return &cli.StringFlag{
+			Name:     "kubeconfig",
+			Aliases:  []string{"k"},
+			Usage:    "Path to kubeconfig file (overrides KUBECONFIG env and default ~/.kube/config)",
+			Category: "Input",
+		}
 	}
 
-	dataFlag = &cli.StringFlag{
-		Name: "data",
-		Usage: `Path to external data directory to overlay on embedded recipe data.
+	dataFlag = func() cli.Flag {
+		return &cli.StringFlag{
+			Name: "data",
+			Usage: `Path to external data directory to overlay on embedded recipe data.
 	The directory must contain registry.yaml (required). Registry components and
 	validator catalog entries are merged with embedded (external takes precedence
 	by name). All other files (base.yaml, overlays, component values) fully
 	replace embedded files or add new ones.`,
-		Category: "Input",
+			Category: "Input",
+		}
+	}
+
+	// configFlag is a function (not a var) to avoid sharing a single flag
+	// instance across commands and successive test runs, which causes
+	// urfave/cli internal state (Count, parsed value) to leak between Runs.
+	// Mirrors the pattern used by formatFlag.
+	configFlag = func() cli.Flag {
+		return &cli.StringFlag{
+			Name: "config",
+			Usage: `Path or HTTPS URL to an AICRConfig file (YAML or JSON) populating defaults
+	for this command. Individual CLI flags always override config file values.
+	See docs/user/cli-reference.md for the file schema.`,
+			Category: "Input",
+		}
 	}
 )
 
@@ -333,12 +358,15 @@ func sanitizeCompletionArgs(args []string) []string {
 	return out
 }
 
-// initDataProvider initializes the data provider from the --data flag.
-// If the flag is not set, returns nil (uses embedded data).
-// If the flag is set, creates a layered provider that overlays the external
-// directory on top of embedded data.
-func initDataProvider(cmd *cli.Command) error {
+// initDataProvider initializes the data provider from the --data flag,
+// falling back to spec.recipe.data on the supplied AICRConfig when the flag
+// is not set. cfg may be nil; if so, only the flag is consulted. When neither
+// is set the embedded data is used (no provider override).
+func initDataProvider(cmd *cli.Command, cfg *config.AICRConfig) error {
 	dataDir := cmd.String("data")
+	if dataDir == "" && cfg != nil && cfg.Spec.Recipe != nil {
+		dataDir = cfg.Spec.Recipe.Data
+	}
 	if dataDir == "" {
 		return nil
 	}
@@ -362,4 +390,53 @@ func initDataProvider(cmd *cli.Command) error {
 
 	slog.Info("external data provider initialized successfully", "directory", dataDir)
 	return nil
+}
+
+// loadCmdConfig reads --config from the command and returns a parsed
+// *AICRConfig (or nil when the flag is not set). The returned config is
+// fully validated; callers can rely on enum fields parsing without
+// re-checking.
+//
+// sentinel error would force every caller into a useless error-check branch.
+//
+//nolint:nilnil // (nil, nil) is the documented "flag not set" signal; a
+func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, error) {
+	src := cmd.String("config")
+	if src == "" {
+		return nil, nil
+	}
+	cfg, err := config.Load(ctx, src)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("failed to load --config %q", src), err)
+	}
+	return cfg, nil
+}
+
+// stringFlagOrConfig returns the CLI flag value when explicitly set on the
+// command line (or via env-var Source binding); otherwise the fallback.
+// Default flag values do NOT count as "set" and yield the fallback.
+// Logs an INFO line when the CLI value differs from a non-empty fallback.
+func stringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
+	if !cmd.IsSet(flagName) {
+		return fallback
+	}
+	v := cmd.String(flagName)
+	if fallback != "" && fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
+}
+
+// intFlagOrConfig returns the CLI flag value when explicitly set; otherwise
+// the fallback.
+func intFlagOrConfig(cmd *cli.Command, flagName string, fallback int) int {
+	if !cmd.IsSet(flagName) {
+		return fallback
+	}
+	v := cmd.Int(flagName)
+	if fallback > 0 && fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
 }

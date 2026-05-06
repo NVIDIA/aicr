@@ -147,7 +147,7 @@ func writeFlagEntry(buf *bytes.Buffer, f flagMeta) {
 	}
 
 	// Flag Usage strings can carry embedded newlines/tabs (e.g. recipe's
-	// --snapshot/--criteria multi-line descriptions); collapse whitespace
+	// --snapshot/--config multi-line descriptions); collapse whitespace
 	// so the markdown bullet renders as a single line.
 	if usage := normalizeMarkdownText(f.Usage); usage != "" {
 		line += " — " + usage
