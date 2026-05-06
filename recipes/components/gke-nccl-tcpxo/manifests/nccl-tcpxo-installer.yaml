@@ -98,7 +98,7 @@ spec:
                   chmod a+rw /dev/aperture_devices/*/resource*
               fi
         - name: nccl-tcpxo-installer
-          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
+          image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4
           resources:
             requests:
               cpu: 150m
