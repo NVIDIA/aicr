@@ -184,14 +184,29 @@ func TestResolveNodeSelector(t *testing.T) {
 		})
 	})
 
-	t.Run("unset with nil fallback returns empty map", func(t *testing.T) {
+	t.Run("unset with nil fallback returns nil (preserves unset)", func(t *testing.T) {
 		runWith(t, []cli.Flag{flag}, nil, func(c *cli.Command) {
 			got, err := resolveNodeSelector(c, "sel", nil)
 			if err != nil {
 				t.Fatalf("err: %v", err)
 			}
+			if got != nil {
+				t.Errorf("got %v, want nil (nil fallback must propagate)", got)
+			}
+		})
+	})
+
+	t.Run("unset with explicitly empty fallback returns non-nil empty map", func(t *testing.T) {
+		runWith(t, []cli.Flag{flag}, nil, func(c *cli.Command) {
+			got, err := resolveNodeSelector(c, "sel", map[string]string{})
+			if err != nil {
+				t.Fatalf("err: %v", err)
+			}
 			if got == nil {
-				t.Errorf("got nil, want empty map")
+				t.Errorf("got nil, want empty (non-nil) map (explicit-empty preserved)")
+			}
+			if len(got) != 0 {
+				t.Errorf("got %v, want empty map", got)
 			}
 		})
 	})

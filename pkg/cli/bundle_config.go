@@ -15,11 +15,13 @@
 package cli
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/urfave/cli/v3"
 
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -41,40 +43,40 @@ func boolFlagOrConfig(cmd *cli.Command, flagName string, fallback bool) bool {
 // otherwise the fallback slice. Per the agreed design, CLI replaces config
 // rather than appending. Returns a defensive copy so callers cannot mutate
 // the loaded config's backing slice.
+//
+// nil input yields a nil result; an explicitly empty slice (e.g. `set: []`
+// in config) yields an empty (non-nil) slice — preserving the user's
+// intent to clear a list.
 func stringSliceFlagOrConfig(cmd *cli.Command, flagName string, fallback []string) []string {
 	if cmd.IsSet(flagName) {
 		v := cmd.StringSlice(flagName)
 		if len(fallback) > 0 {
 			slog.Info("CLI flag replacing config value", "flag", flagName, "configCount", len(fallback), "overrideCount", len(v))
 		}
-		return append([]string(nil), v...)
+		return copyStrings(v)
 	}
-	if len(fallback) == 0 {
-		return nil
-	}
-	return append([]string(nil), fallback...)
+	return copyStrings(fallback)
 }
 
 // resolveNodeSelector returns the parsed map for a CLI selector flag,
 // preferring CLI input over the supplied fallback map. Returns a defensive
 // copy in either path so callers cannot mutate the loaded config's map.
-// An empty fallback yields an empty (non-nil) map for caller convenience.
+//
+// nil fallback yields nil; an explicitly empty config map yields an empty
+// (non-nil) map — preserving the user's intent to clear a default selector.
 func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]string) (map[string]string, error) {
 	if cmd.IsSet(flagName) {
 		parsed, err := snapshotter.ParseNodeSelectors(cmd.StringSlice(flagName))
 		if err != nil {
-			return nil, err
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s", flagName))
 		}
 		if len(fallback) > 0 {
 			slog.Info("CLI flag replacing config selector", "flag", flagName)
 		}
 		return parsed, nil
 	}
-	out := make(map[string]string, len(fallback))
-	for k, v := range fallback {
-		out[k] = v
-	}
-	return out, nil
+	return copyStringMap(fallback), nil
 }
 
 // bundleSpec returns cfg.Spec.Bundle if cfg is non-nil, else nil.
@@ -120,19 +122,22 @@ func bundleDeploymentRepo(b *appcfg.BundleSpec) string {
 	return b.Deployment.Repo
 }
 
-// copyStrings returns a defensive copy of s (or nil for empty input) so
-// callers cannot mutate the loaded config's backing slice.
+// copyStrings returns a defensive copy of s. nil input yields nil; an
+// explicitly empty slice yields an empty (non-nil) slice — preserving the
+// caller's distinction between "unset" and "explicitly cleared".
 func copyStrings(s []string) []string {
-	if len(s) == 0 {
+	if s == nil {
 		return nil
 	}
-	return append([]string(nil), s...)
+	out := make([]string, len(s))
+	copy(out, s)
+	return out
 }
 
-// copyStringMap returns a defensive copy of m (or nil for empty input) so
-// callers cannot mutate the loaded config's backing map.
+// copyStringMap returns a defensive copy of m. nil input yields nil; an
+// explicitly empty map yields an empty (non-nil) map.
 func copyStringMap(m map[string]string) map[string]string {
-	if len(m) == 0 {
+	if m == nil {
 		return nil
 	}
 	out := make(map[string]string, len(m))

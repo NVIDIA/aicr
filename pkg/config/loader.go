@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -153,7 +154,12 @@ func readHTTP(ctx context.Context, url string) ([]byte, error) {
 }
 
 // decodeStrict parses raw bytes into target using strict semantics: unknown
-// fields cause an error. Both YAML and JSON inputs are supported.
+// fields cause an error and only a single document is accepted. Both YAML
+// and JSON inputs are supported.
+//
+// The trailing-data check uses a second Decode + io.EOF rather than
+// json.Decoder.More() — More() returns false for some malformed trailing
+// tokens (e.g. a stray "]"), letting garbage through.
 func decodeStrict(data []byte, format sourceFormat, target any) error {
 	switch format {
 	case formatJSON:
@@ -162,9 +168,12 @@ func decodeStrict(data []byte, format sourceFormat, target any) error {
 		if err := dec.Decode(target); err != nil {
 			return err
 		}
-		// Reject trailing garbage after the document.
-		if dec.More() {
-			return errors.New(errors.ErrCodeInvalidRequest, "unexpected trailing data after JSON document")
+		var extra any
+		if err := dec.Decode(&extra); !stderrors.Is(err, io.EOF) {
+			if err == nil {
+				return errors.New(errors.ErrCodeInvalidRequest, "unexpected trailing data after JSON document")
+			}
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "trailing JSON data is not valid", err)
 		}
 		return nil
 	case formatYAML:
@@ -172,6 +181,13 @@ func decodeStrict(data []byte, format sourceFormat, target any) error {
 		dec.KnownFields(true)
 		if err := dec.Decode(target); err != nil {
 			return err
+		}
+		var extra any
+		if err := dec.Decode(&extra); !stderrors.Is(err, io.EOF) {
+			if err == nil {
+				return errors.New(errors.ErrCodeInvalidRequest, "unexpected trailing YAML document; AICRConfig accepts a single document")
+			}
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "trailing YAML data is not valid", err)
 		}
 		return nil
 	default:
