@@ -107,6 +107,19 @@
     },
   ],
 
+  // Kubernetes manager: scan AICR's component manifests for Pod-spec
+  // image references. The manager's default fileMatch is empty (YAML is
+  // ambiguous), so we explicitly point it at recipes/components/*/manifests/
+  // where AICR ships digest-pinned image refs that should be rotated as
+  // upstream rebuilds the same tag. ADR-006 is the policy basis (#749).
+  // helm-values manager is already active for recipes/components/*/values.yaml
+  // via its default fileMatch.
+  kubernetes: {
+    managerFilePatterns: [
+      "/^recipes/components/[^/]+/manifests/[^/]+\\.ya?ml$/",
+    ],
+  },
+
   packageRules: [
     // ---- Auto-merge: workflow digests, Go module patches, npm site deps ----
     // Low-blast-radius managers where patch / digest bumps almost never break.

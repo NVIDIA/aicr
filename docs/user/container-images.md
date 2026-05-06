@@ -83,7 +83,7 @@ Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.kgateway.dev`, `
 - `gcr.io/gke-release/nri-device-injector@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
 - `ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b`
-- `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15`
+- `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
 
@@ -141,7 +141,7 @@ _No images extracted._
 ### kubeflow-trainer
 
 - `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.0`
-- `pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime`
+- `pytorch/pytorch:2.9.1-cuda12.8-cudnn9-runtime@sha256:7b324d212a4450795b49edba9949b7cdc72429148a64e974334bfe5774d51385`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
 
 ### kueue
@@ -150,7 +150,7 @@ _No images extracted._
 
 ### network-operator
 
-- `busybox:1.36`
+- `busybox:1.36@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.1.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
