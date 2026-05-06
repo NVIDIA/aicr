@@ -138,7 +138,11 @@ func TestComponentManifestImagesAreDigestPinned(t *testing.T) {
 		for _, img := range images {
 			checked++
 			ref := bom.ParseImageRef(img)
+			if strings.HasPrefix(ref.Digest, "sha256:") {
+				continue
+			}
 			if ref.Digest != "" {
+				t.Errorf("%s: image %q uses non-sha256 digest %q; ADR-006 requires @sha256:<digest>", p, img, ref.Digest)
 				continue
 			}
 			if reason, ok := imageDigestExemptions[img]; ok {
