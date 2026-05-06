@@ -1,0 +1,6 @@
+apiVersion: v1
+data:
+  key: value
+kind: ConfigMap
+metadata:
+  name: example

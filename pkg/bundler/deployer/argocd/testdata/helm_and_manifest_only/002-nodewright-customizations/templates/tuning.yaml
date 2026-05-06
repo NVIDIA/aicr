@@ -1,0 +1,8 @@
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  name: tuning
+  namespace: skyhook
+spec:
+  packages:
+    - tuning

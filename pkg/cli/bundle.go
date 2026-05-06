@@ -385,9 +385,11 @@ Package with explicit tag (overrides CLI version):
 				Category: "Deployment",
 			}, config.GetDeployerTypes),
 			&cli.StringFlag{
-				Name:     "repo",
-				Value:    "",
-				Usage:    "Git repository URL for Argo CD applications (only used with --deployer argocd)",
+				Name:  "repo",
+				Value: "",
+				Usage: "Git repository URL for Argo CD Applications (only used with --deployer argocd). " +
+					"Ignored by --deployer argocd-helm: that bundle is URL-portable and the publish " +
+					"location is supplied at install time via `helm install --set repoURL=...`.",
 				Category: "Deployment",
 			},
 			&cli.BoolFlag{

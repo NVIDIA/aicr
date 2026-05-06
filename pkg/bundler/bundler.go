@@ -293,15 +293,34 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 
 	switch b.Config.Deployer() {
 	case config.DeployerArgoCDHelm:
+		// --repo is meaningful for --deployer argocd (baked into child
+		// Application sources) but a no-op here: the argocd-helm bundle
+		// is URL-portable and the publish location is supplied at
+		// `helm install` time via `--set repoURL=...`. Warn loudly so
+		// users don't think their flag value is taking effect.
+		if b.Config.RepoURL() != "" {
+			slog.Warn("--repo is ignored with --deployer argocd-helm; supply the URL at install time via `helm install --set repoURL=...`",
+				"repo", b.Config.RepoURL())
+		}
+		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
+		if manifestErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(manifestErr, &se) {
+				return nil, manifestErr
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", manifestErr)
+		}
 		return &argocdhelm.Generator{
-			RecipeResult:     recipeResult,
-			ComponentValues:  componentValues,
-			Version:          b.Config.Version(),
-			RepoURL:          b.Config.RepoURL(),
-			TargetRevision:   b.Config.TargetRevision(),
-			IncludeChecksums: b.Config.IncludeChecksums(),
-			DynamicValues:    dynamicValues,
-			DataFiles:        dataFiles,
+			RecipeResult:       recipeResult,
+			ComponentValues:    componentValues,
+			Version:            b.Config.Version(),
+			RepoURL:            b.Config.RepoURL(),
+			TargetRevision:     b.Config.TargetRevision(),
+			IncludeChecksums:   b.Config.IncludeChecksums(),
+			DynamicValues:      dynamicValues,
+			DataFiles:          dataFiles,
+			ComponentManifests: componentManifests,
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -309,14 +328,24 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
 		}
+		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
+		if manifestErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(manifestErr, &se) {
+				return nil, manifestErr
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", manifestErr)
+		}
 		return &argocd.Generator{
-			RecipeResult:     recipeResult,
-			ComponentValues:  componentValues,
-			Version:          b.Config.Version(),
-			RepoURL:          b.Config.RepoURL(),
-			TargetRevision:   b.Config.TargetRevision(),
-			IncludeChecksums: b.Config.IncludeChecksums(),
-			DataFiles:        dataFiles,
+			RecipeResult:       recipeResult,
+			ComponentValues:    componentValues,
+			Version:            b.Config.Version(),
+			RepoURL:            b.Config.RepoURL(),
+			TargetRevision:     b.Config.TargetRevision(),
+			IncludeChecksums:   b.Config.IncludeChecksums(),
+			DataFiles:          dataFiles,
+			ComponentManifests: componentManifests,
 		}, nil
 
 	case config.DeployerHelm:

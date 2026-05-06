@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "0"
+    name: cert-manager
+    namespace: argocd
+spec:
+    destination:
+        namespace: cert-manager
+        server: https://kubernetes.default.svc
+    project: default
+    source:
+        chart: cert-manager
+        helm:
+            values: |-
+                {{- $static := (.Files.Get "static/cert-manager.yaml") | fromYaml | default dict -}}
+                {{- $dynamic := index .Values "certmanager" | default dict -}}
+                {{- mustMergeOverwrite $static $dynamic | toYaml | nindent 16 }}
+        repoURL: https://charts.jetstack.io
+        targetRevision: 1.20.2
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+        syncOptions:
+            - CreateNamespace=true
+            - ServerSideApply=true
