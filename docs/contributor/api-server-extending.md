@@ -18,7 +18,7 @@ implemented endpoints, current observability, security model), see
 
 ## Future Enhancements
 
-### Short-Term (< 3 months)
+### Near-Term Ideas
 
 1. **Authentication & Authorization**  
    **Rationale**: Protect API from unauthorized access, enable usage tracking  
@@ -105,9 +105,9 @@ implemented endpoints, current observability, security model), see
    ```
    **Reference**: [API Versioning Best Practices](https://cloud.google.com/apis/design/versioning)
 
-### Mid-Term (3-6 months)
+### Mid-Term Ideas
 
-6. **OpenTelemetry Integration**  
+1. **OpenTelemetry Integration**  
    **Use Case**: Distributed tracing across services  
    **Implementation**: OTLP exporter with automatic instrumentation  
    ```go
@@ -136,7 +136,7 @@ implemented endpoints, current observability, security model), see
    ```
    **Reference**: [OpenTelemetry Go](https://opentelemetry.io/docs/languages/go/)
 
-7. **Recipe Caching**  
+2. **Recipe Caching**  
    **Benefit**: 95%+ cache hit rate for repeated queries  
    **Implementation**: Redis with TTL, fallback to recipe builder  
    ```go
@@ -166,7 +166,7 @@ implemented endpoints, current observability, security model), see
    ```
    **Reference**: [go-redis](https://redis.uptrace.dev/)
 
-8. **GraphQL API**  
+3. **GraphQL API**  
    **Rationale**: Enable clients to request only needed fields  
    **Implementation**: `graphql-go` with recipe schema  
    ```graphql
@@ -188,9 +188,9 @@ implemented endpoints, current observability, security model), see
    **Trade-off**: Added complexity vs flexible querying  
    **Reference**: [GraphQL Go](https://graphql.org/code/#go)
 
-### Long-Term (6-12 months)
+### Longer-Term Ideas
 
-9. **gRPC Support**  
+1. **gRPC Support**  
    **Benefit**: 5-10x better performance, smaller payloads  
    **Implementation**: Protobuf definition with streaming support  
    ```protobuf
@@ -210,7 +210,7 @@ implemented endpoints, current observability, security model), see
    **Deployment**: Run HTTP/2 and gRPC on same port with `cmux`  
    **Reference**: [gRPC Go](https://grpc.io/docs/languages/go/quickstart/)
 
-10. **Multi-Tenancy**  
+2. **Multi-Tenancy**  
     **Use Case**: SaaS deployment with per-customer isolation  
     **Implementation**: Tenant ID from API key, separate rate limits  
     ```go
@@ -236,7 +236,7 @@ implemented endpoints, current observability, security model), see
     ```
     **Database**: Separate recipe stores per tenant
 
-11. **Admin API**  
+3. **Admin API**  
     **Use Case**: Runtime configuration updates without restart  
     **Endpoints**:
     - `POST /admin/config/rate-limit` - Update rate limits
@@ -245,7 +245,7 @@ implemented endpoints, current observability, security model), see
     - `POST /admin/cache/flush` - Clear recipe cache
     **Security**: Separate admin API key with IP allowlist
 
-12. **Feature Flags**  
+4. **Feature Flags**  
     **Rationale**: A/B testing, gradual rollouts, instant rollback  
     **Implementation**: LaunchDarkly or custom flag service  
     ```go
