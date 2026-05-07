@@ -20,7 +20,7 @@
 # to roll forward. Consumers pin to a specific aiperf-bench:<semver> tag or
 # let :latest track the CLI version via catalog.Load rewriting.
 
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 ARG AIPERF_VERSION=0.7.0
 
@@ -30,7 +30,11 @@ ARG AIPERF_VERSION=0.7.0
 # endpoint, no filesystem writes outside /tmp, and no privileged ops —
 # running as a dedicated non-root user hardens the image for air-gap /
 # multi-tenant deployments.
-RUN pip install --no-cache-dir "aiperf==${AIPERF_VERSION}" \
+#
+# Upgrade pip first so the install uses a pip with current CVE fixes
+# (the base image ships an older pip pinned to its release date).
+RUN pip install --no-cache-dir --upgrade pip \
+ && pip install --no-cache-dir "aiperf==${AIPERF_VERSION}" \
  && useradd --create-home --shell /usr/sbin/nologin --uid 10001 aiperf
 
 USER aiperf
