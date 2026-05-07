@@ -19,18 +19,18 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.15.3'
+  goreleaser: 'v2.15.4'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
-  ko: 'v0.18.0'
+  ko: 'v0.18.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
-  crane: 'v0.21.0'
+  crane: 'v0.21.5'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
-  git_cliff: '2.12.0'
+  git_cliff: '2.13.1'
 
 # Linting
 linting:
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.10.1'
+  golangci_lint: 'v2.11.3'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
@@ -45,7 +45,7 @@ security_tools:
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.0.4'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.42.2'
+  syft: 'v1.44.0'
 
 # E2E Testing Tools
 testing_tools:
@@ -58,7 +58,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
   ctlptl: '0.9.0'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
-  tilt: '0.37.0'
+  tilt: '0.37.3'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.1.1'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
@@ -79,7 +79,7 @@ testing_tools:
 
 # Quality Thresholds
 quality:
-  coverage_threshold: '70'
+  coverage_threshold: '75'
   lint_timeout: '10m'
   test_timeout: '10m'
 

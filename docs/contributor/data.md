@@ -1200,7 +1200,7 @@ jobs:
       - uses: ./.github/actions/go-ci
         with:
           go_version: '1.26'
-          golangci_lint_version: 'v2.10.1'
+          golangci_lint_version: 'v2.11.3'
 ```
 
 ### Adding New Tests
