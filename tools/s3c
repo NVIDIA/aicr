@@ -158,9 +158,15 @@ probe_image() {
   echo "$out" | grep -q "SBOMs for an image tag:" && sbom="Y"
 
   # Attestation presence alone is broader than SLSA; filter the predicateType
-  # of each in-toto statement for slsa.dev / provenance.
-  local att att_rc=0
-  att=$(cosign download attestation "$image" 2>/dev/null) || att_rc=$?
+  # of each in-toto statement for slsa.dev / provenance. Capture stderr in a
+  # separate file so the stdout JSON stays parseable by jq while still letting
+  # us distinguish "no attestations attached" from a real probe failure.
+  local att att_rc=0 att_err errfile
+  errfile=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/s3c-att.$$.err")
+  att=$(cosign download attestation "$image" 2>"$errfile") || att_rc=$?
+  att_err=$(cat "$errfile" 2>/dev/null || true)
+  rm -f "$errfile"
+
   if [[ $att_rc -eq 0 && -n "$att" ]]; then
     if echo "$att" \
          | jq -r 'select(.payload != null) | .payload' 2>/dev/null \
@@ -171,6 +177,15 @@ probe_image() {
            done \
          | grep -qiE "slsa|provenance"; then
       prov="Y"
+    fi
+  elif [[ $att_rc -ne 0 ]]; then
+    # cosign exits non-zero both when no attestations exist (legitimate
+    # absent) and when the registry call itself failed (unreachable).
+    # Only the latter should flip prov to "?" so we don't mis-mark every
+    # unattested image as unreachable. Treat unrecognized stderr as absent.
+    if echo "$att_err" | grep -qiE "no such host|i/o timeout|connection refused|TLS handshake|x509|UNAUTHORIZED|denied|401|403"; then
+      prov="?"
+      [[ -z "$note" ]] && note="prov probe unreachable"
     fi
   fi
 

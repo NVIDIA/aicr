@@ -284,7 +284,7 @@ tools/s3c gpu-operator
 
 Example output:
 
-```
+```text
 Component: nvidia-dra-driver-gpu (1 images)
 
 Presence-only check: does NOT verify publisher trust/identity.
