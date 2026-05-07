@@ -256,7 +256,7 @@ aicr/
 
 Business logic lives in `pkg/*` packages. The `pkg/cli` and `pkg/api` packages handle user interaction only, delegating to functional packages so both CLI and API can share the same logic.
 
-For detailed architecture documentation, see [docs/contributor/README.md](docs/contributor/README.md).
+For detailed architecture documentation, see [docs/contributor/index.md](docs/contributor/index.md).
 
 ## Development Workflow
 
@@ -861,7 +861,7 @@ This comprehensive guide covers:
 ## Additional Resources
 
 ### Project Documentation
-- [Architecture Overview](docs/contributor/README.md) - System design and components
+- [Architecture Overview](docs/contributor/index.md) - System design and components
 - [CLI Architecture](docs/contributor/cli.md) - CLI command structure
 - [Data Architecture](docs/contributor/data.md) - Recipe data model
 - [Bundler Development](docs/contributor/component.md) - Creating new bundlers

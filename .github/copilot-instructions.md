@@ -382,7 +382,7 @@ aicr bundle -r recipe.yaml \
 - **[Contributing Guide](../CONTRIBUTING.md)** – Design principles, development setup, PR process
 - **[Development Guide](../DEVELOPMENT.md)** – Local development, Make targets, Tilt/Kind setup
 - **[Release Process](../RELEASING.md)** – Maintainer guide for releases, verification, hotfixes
-- **[Architecture Overview](../docs/contributor/README.md)** – System design
+- **[Architecture Overview](../docs/contributor/index.md)** – System design
 - **[Bundler Development](../docs/contributor/component.md)** – Create new bundlers
 - **[API Reference](../docs/user/api-reference.md)** – REST API endpoints
 - **[GitHub Actions README](actions/README.md)** – CI/CD architecture

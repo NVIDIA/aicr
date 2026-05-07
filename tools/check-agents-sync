@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Verify AGENTS.md stays in sync with .claude/CLAUDE.md (canonical source).
