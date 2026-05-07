@@ -929,7 +929,11 @@ func handleRecipeWithCache(w http.ResponseWriter, r *http.Request) {
     }
     
     // Serialize and cache
-    data, _ := json.Marshal(recipe)
+    data, err := json.Marshal(recipe)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
     responseCache.Set(key, data, cache.DefaultExpiration)
     
     w.Header().Set("X-Cache", "miss")
@@ -1062,7 +1066,13 @@ func getClientIP(r *http.Request) string {
     }
     
     // Fall back to RemoteAddr
-    ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+    ip, _, err := net.SplitHostPort(r.RemoteAddr)
+    if err != nil {
+        // RemoteAddr might not include a port (e.g., some test setups);
+        // returning RemoteAddr keeps a unique key per peer and avoids
+        // collapsing every unparseable address into one rate-limit bucket.
+        return r.RemoteAddr
+    }
     return ip
 }
 ```
