@@ -1840,6 +1840,8 @@ AICR respects standard environment variables:
 | `KUBECONFIG` | Path to Kubernetes config file | `~/.kube/config` |
 | `AICR_LOG_LEVEL` | Logging level: debug, info, warn, error | info |
 | `AICR_LOG_PREFIX` | Override the CLI logger prefix | `cli` |
+| `AICR_REQUESTS` | Default for `aicr snapshot --requests`. Comma-separated `name=quantity` pairs (e.g. `cpu=500m,memory=1Gi,ephemeral-storage=1Gi`). Unspecified resources keep the built-in privileged or restricted defaults. | unset |
+| `AICR_LIMITS` | Default for `aicr snapshot --limits`. Comma-separated `name=quantity` pairs (e.g. `cpu=1,memory=2Gi,ephemeral-storage=2Gi`). Unspecified resources keep the built-in defaults. With `--require-gpu`, the default `nvidia.com/gpu=1` is applied only when this list does not already contain that key — explicit `nvidia.com/gpu=N` wins. | unset |
 | `NO_COLOR` | Suppress ANSI color codes in CLI logger output (de-facto standard, see [no-color.org](https://no-color.org/)) | unset |
 
 ## Exit Codes
