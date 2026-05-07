@@ -9,7 +9,7 @@ require (
 	github.com/distribution/reference v0.6.0
 	github.com/google/uuid v1.6.0
 	github.com/in-toto/attestation v1.2.0
-	github.com/kyverno/chainsaw v0.2.14
+	github.com/kyverno/chainsaw v0.2.15
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sigstore/protobuf-specs v0.5.1
