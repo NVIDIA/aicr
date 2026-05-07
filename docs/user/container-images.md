@@ -222,6 +222,123 @@ Two recipes rendered at the same chart version against the same registry should 
 
 For chart-default sub-images that AICR cannot pin in-tree (e.g., the GPU Operator's ~15 sub-images, where the chart does not expose digest fields), the right answer is admission-time digest verification rather than per-image overrides — see [#745](https://github.com/NVIDIA/aicr/issues/745).
 
+## Verifying supply-chain provenance
+
+> **Presence is not trust.** The commands below check whether *any*
+> signature, SBOM, or in-toto attestation is *attached* to an image in its
+> registry. They do **not** verify that the artifact was produced by the
+> claimed publisher; that requires the publisher's public key or Sigstore
+> certificate identity, which differs per upstream and is out of scope
+> here. Treat a `Y` as "something is attached" — the strongest signal
+> attainable without per-publisher trust roots.
+
+The three checks are independent: an image may be signed without an SBOM,
+or carry an SBOM without an attestation, in any combination. Each
+subsection below shows the raw `cosign` invocation and how to interpret
+its output. The [`tools/s3c`](#automated-check) helper runs all three
+across every image in a component and prints a summary report.
+
+### Is it signed?
+
+```bash
+cosign tree <image>
+```
+
+A `Signatures for an image tag:` line in the output indicates a cosign
+signature is attached. Empty output (or no such line) means none is
+attached — the image is unsigned.
+
+### Does it have an SBOM?
+
+```bash
+cosign tree <image>
+```
+
+The same `cosign tree` output also reports SBOMs. An `SBOMs for an image
+tag:` line means an SBOM artifact is attached at the registry. Many
+publishers attach SBOMs as registry referrers rather than the legacy
+`.sbom` tag, but `cosign tree` surfaces both.
+
+### Does it have build provenance?
+
+```bash
+cosign download attestation <image> \
+  | jq -r 'select(.payload != null) | .payload' \
+  | base64 -d \
+  | jq -r '.predicateType'
+```
+
+Any output line containing `slsa` or `provenance` (e.g.,
+`https://slsa.dev/provenance/v0.2`) indicates an in-toto SLSA-style build
+provenance attestation is attached. A non-zero exit from the first
+`cosign download attestation` call means no attestation is attached.
+
+### Automated check
+
+[`tools/s3c`](https://github.com/NVIDIA/aicr/blob/main/tools/s3c) wraps
+the three commands above and emits a per-component report:
+
+```bash
+tools/s3c gpu-operator
+```
+
+Example output:
+
+```text
+Component: nvidia-dra-driver-gpu (1 images)
+
+Presence-only check: does NOT verify publisher trust/identity.
+Y = artifact attached, - = artifact absent, ? = could not probe.
+
+  Image                                       Sig  SBOM  Prov  Notes
+  ------------------------------------------  ---  ----  ----  -----
+  nvcr.io/nvidia/k8s-dra-driver-gpu:v25.12.0  Y    -     -
+
+Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
+```
+
+The script reads the per-component image list from this page, so the BOM
+inventory above is the source of truth — keep it in sync with `make
+bom-docs` before running. Requires `cosign`, `jq`, and `awk` on `PATH`.
+
+#### Authentication and rate limits
+
+`cosign` performs unauthenticated registry pulls by default. Both
+`nvcr.io` and `ghcr.io` rate-limit anonymous traffic and may return 429
+when many images are probed in quick succession. cosign authenticates
+through the Docker credential chain (`~/.docker/config.json`), so a
+single `docker login` per registry raises the limits for every
+subsequent run:
+
+```bash
+# nvcr.io — use an NGC API key as the password.
+echo "$NGC_API_KEY" | docker login nvcr.io -u '$oauthtoken' --password-stdin
+
+# ghcr.io — use a personal access token with `read:packages` scope.
+echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_USER" --password-stdin
+```
+
+#### Unreachable registries
+
+Some registries cannot be probed from arbitrary networks; the script
+reports those images as `?` and labels the reason in the **Notes**
+column rather than reporting them as absent. The most common cases:
+
+- **Regional ECR** (e.g.,
+  `<account>.dkr.ecr.<region>.amazonaws.com`) requires AWS credentials
+  for that account/region. Reported as `auth required`. The `aws-efa`
+  entry above is the canonical example; deployments override the
+  registry per region at install time.
+- **Authenticated mirrors** (private mirrors fronting a public
+  registry) require credentials that the local environment may not
+  carry. Reported as `auth required`.
+- **Transient network errors** (DNS, TLS, timeouts) are reported as
+  `network unreachable` and are typically resolved by re-running.
+
+Distinguishing `?` (could not probe) from `-` (probed and absent) keeps
+the report honest: an image that we could not reach is not the same as
+an image we know to be unsigned.
+
 ## Regenerating locally
 
 ```bash
@@ -240,5 +357,6 @@ Both targets shell out to `helm template` for every chart, so an internet connec
 ## Related
 
 - [Component Catalog](component-catalog.md) — what each component does and its scheduling characteristics.
+- [`tools/s3c`](https://github.com/NVIDIA/aicr/blob/main/tools/s3c) — on-demand cosign presence check for a component's images.
 - [Supply chain epic](https://github.com/NVIDIA/aicr/issues/739) — visibility, reproducibility, and provenance roadmap.
 - [Air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) — planned follow-up.
