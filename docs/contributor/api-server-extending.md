@@ -24,6 +24,7 @@ implemented endpoints, current observability, security model), see
    **Rationale**: Protect API from unauthorized access, enable usage tracking  
    **Implementation**: API key middleware with HMAC-SHA256 verification  
    **Example**:
+
    ```go
    func APIKeyMiddleware(validKeys map[string]string) func(http.Handler) http.Handler {
        return func(next http.Handler) http.Handler {
@@ -38,12 +39,14 @@ implemented endpoints, current observability, security model), see
        }
    }
    ```
+
    **Reference**: [HTTP Authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication)
 
 2. **CORS Support**  
    **Use Case**: Enable browser-based clients (web dashboards)  
    **Implementation**: `rs/cors` middleware with configurable origins  
    **Configuration**:
+
    ```go
    c := cors.New(cors.Options{
        AllowedOrigins:   []string{"https://dashboard.example.com"},
@@ -54,23 +57,27 @@ implemented endpoints, current observability, security model), see
    })
    handler := c.Handler(mux)
    ```
+
    **Reference**: [CORS Specification](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS)
 
 3. **Response Compression**  
    **Benefit**: Reduce bandwidth by 70-80% for JSON responses  
    **Implementation**: `gziphandler` middleware with quality threshold  
+
    ```go
    import "github.com/NYTimes/gziphandler"
    
    handler := gziphandler.GzipHandler(mux)
    // Only compresses responses > 1KB
    ```
+
    **Trade-off**: CPU usage (+5-10%) vs bandwidth savings  
    **Reference**: [gziphandler](https://github.com/NYTimes/gziphandler)
 
 4. **Native TLS Support**  
    **Rationale**: Eliminate need for reverse proxy in simple deployments  
    **Implementation**: `http.ListenAndServeTLS` with Let's Encrypt integration  
+
    ```go
    import "golang.org/x/crypto/acme/autocert"
    
@@ -87,11 +94,13 @@ implemented endpoints, current observability, security model), see
    }
    srv.ListenAndServeTLS("", "")
    ```
+
    **Reference**: [autocert Package](https://pkg.go.dev/golang.org/x/crypto/acme/autocert)
 
 5. **API Versioning**  
    **Use Case**: Support /v2 API with breaking changes while maintaining /v1  
    **Pattern**: URL-based versioning with version-specific handlers  
+
    ```go
    v1 := http.NewServeMux()
    v1.HandleFunc("/recipe", handleRecipeV1)
@@ -103,6 +112,7 @@ implemented endpoints, current observability, security model), see
    mux.Handle("/v1/", http.StripPrefix("/v1", v1))
    mux.Handle("/v2/", http.StripPrefix("/v2", v2))
    ```
+
    **Reference**: [API Versioning Best Practices](https://cloud.google.com/apis/design/versioning)
 
 ### Mid-Term Ideas
@@ -110,6 +120,7 @@ implemented endpoints, current observability, security model), see
 1. **OpenTelemetry Integration**  
    **Use Case**: Distributed tracing across services  
    **Implementation**: OTLP exporter with automatic instrumentation  
+
    ```go
    import (
        "go.opentelemetry.io/otel"
@@ -134,11 +145,13 @@ implemented endpoints, current observability, security model), see
        return tp, nil
    }
    ```
+
    **Reference**: [OpenTelemetry Go](https://opentelemetry.io/docs/languages/go/)
 
 2. **Recipe Caching**  
    **Benefit**: 95%+ cache hit rate for repeated queries  
    **Implementation**: Redis with TTL, fallback to recipe builder  
+
    ```go
    import "github.com/redis/go-redis/v9"
    
@@ -147,28 +160,35 @@ implemented endpoints, current observability, security model), see
        cached, err := rdb.Get(ctx, key).Result()
        if err == nil {
            var r recipe.Recipe
-           json.Unmarshal([]byte(cached), &r)
+           if err := json.Unmarshal([]byte(cached), &r); err != nil {
+               return nil, errors.Wrap(errors.ErrCodeInternal, "unmarshal cached recipe", err)
+           }
            return &r, nil
        }
-       
+
        // Cache miss - build recipe
        r, err := builder.BuildRecipe(ctx, params)
        if err != nil {
            return nil, err
        }
-       
+
        // Cache with 1 hour TTL
-       json, _ := json.Marshal(r)
-       rdb.Set(ctx, key, json, time.Hour)
-       
+       data, err := json.Marshal(r)
+       if err != nil {
+           return nil, errors.Wrap(errors.ErrCodeInternal, "marshal recipe", err)
+       }
+       rdb.Set(ctx, key, data, time.Hour)
+
        return r, nil
    }
    ```
+
    **Reference**: [go-redis](https://redis.uptrace.dev/)
 
 3. **GraphQL API**  
    **Rationale**: Enable clients to request only needed fields  
    **Implementation**: `graphql-go` with recipe schema  
+
    ```graphql
    type Query {
      recipe(
@@ -185,6 +205,7 @@ implemented endpoints, current observability, security model), see
      context: RecipeContext
    }
    ```
+
    **Trade-off**: Added complexity vs flexible querying  
    **Reference**: [GraphQL Go](https://graphql.org/code/#go)
 
@@ -193,6 +214,7 @@ implemented endpoints, current observability, security model), see
 1. **gRPC Support**  
    **Benefit**: 5-10x better performance, smaller payloads  
    **Implementation**: Protobuf definition with streaming support  
+
    ```protobuf
    service RecipeService {
      rpc GetRecipe(RecipeRequest) returns (Recipe);
@@ -207,12 +229,14 @@ implemented endpoints, current observability, security model), see
      string service = 4;
    }
    ```
+
    **Deployment**: Run HTTP/2 and gRPC on same port with `cmux`  
    **Reference**: [gRPC Go](https://grpc.io/docs/languages/go/quickstart/)
 
 2. **Multi-Tenancy**  
     **Use Case**: SaaS deployment with per-customer isolation  
     **Implementation**: Tenant ID from API key, separate rate limits  
+
     ```go
     type TenantRateLimiter struct {
         limiters map[string]*rate.Limiter
@@ -234,6 +258,7 @@ implemented endpoints, current observability, security model), see
         return limiter.Allow()
     }
     ```
+
     **Database**: Separate recipe stores per tenant
 
 3. **Admin API**  
@@ -248,6 +273,7 @@ implemented endpoints, current observability, security model), see
 4. **Feature Flags**  
     **Rationale**: A/B testing, gradual rollouts, instant rollback  
     **Implementation**: LaunchDarkly or custom flag service  
+
     ```go
     import "github.com/launchdarkly/go-server-sdk/v7"
     
@@ -264,6 +290,7 @@ implemented endpoints, current observability, security model), see
         }
     }
     ```
+
     **Reference**: [LaunchDarkly Go SDK](https://docs.launchdarkly.com/sdk/server-side/go)
 
 ## Production Deployment Patterns
@@ -273,6 +300,7 @@ implemented endpoints, current observability, security model), see
 **Use Case**: Auto-scale API servers based on request rate
 
 **Deployment Manifest**:
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -421,6 +449,7 @@ spec:
 ```
 
 **Ingress with TLS**:
+
 ```yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -456,6 +485,7 @@ spec:
 **Use Case**: Zero-trust security with automatic mTLS encryption
 
 **Istio VirtualService**:
+
 ```yaml
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
@@ -549,6 +579,7 @@ spec:
 **Use Case**: Bare-metal deployment with HAProxy
 
 **HAProxy Configuration**:
+
 ```cfg
 global
     log /dev/log local0
@@ -599,6 +630,7 @@ backend aicr_api_backend
 **Use Case**: Zero-downtime updates with instant rollback
 
 **Kubernetes Service Switching**:
+
 ```bash
 #!/bin/bash
 # Blue-green deployment script
@@ -661,6 +693,7 @@ echo "Rollback: kubectl patch service ${APP} -n ${NAMESPACE} -p '{\"spec\":{\"se
 **Use Case**: Prevent cascading failures when recipe store is slow
 
 **Implementation**:
+
 ```go
 import "github.com/sony/gobreaker"
 
@@ -716,6 +749,7 @@ func handleRecipe(w http.ResponseWriter, r *http.Request) {
 **Use Case**: Isolate resources for different endpoints
 
 **Implementation**:
+
 ```go
 import "golang.org/x/sync/semaphore"
 
@@ -756,6 +790,7 @@ func handleSnapshotWithBulkhead(w http.ResponseWriter, r *http.Request) {
 **Use Case**: Resilient calls to external APIs (recipe store, etc.)
 
 **Implementation**:
+
 ```go
 import "github.com/cenkalti/backoff/v4"
 
@@ -792,6 +827,7 @@ func fetchRecipeWithRetry(ctx context.Context, key string) (*recipe.Recipe, erro
 **Use Case**: Serve stale/cached data when primary source fails
 
 **Implementation**:
+
 ```go
 var (
     recipeCacheTTL = 1 * time.Hour
@@ -846,6 +882,7 @@ func handleRecipeWithFallback(w http.ResponseWriter, r *http.Request) {
 ### Connection Pooling
 
 **HTTP Client with Keep-Alive**:
+
 ```go
 var httpClient = &http.Client{
     Transport: &http.Transport{
@@ -865,6 +902,7 @@ resp, err := httpClient.Get("https://recipe-store.example.com/recipes")
 ### Response Caching
 
 **In-Memory Cache with TTL**:
+
 ```go
 import "github.com/patrickmn/go-cache"
 
@@ -903,6 +941,7 @@ func handleRecipeWithCache(w http.ResponseWriter, r *http.Request) {
 ### Request Coalescing
 
 **Deduplicate Concurrent Identical Requests**:
+
 ```go
 import "golang.org/x/sync/singleflight"
 
@@ -987,7 +1026,10 @@ func (i *ipRateLimiter) getLimiter(ip string) *rate.Limiter {
         limiter = rate.NewLimiter(i.rate, i.burst)
         i.limiters[ip] = limiter
         
-        // Cleanup old limiters (simple implementation)
+        // Illustrative cleanup: clears the entire map past a threshold.
+        // Production implementations should use LRU or TTL eviction
+        // (e.g., github.com/hashicorp/golang-lru) so in-flight limiters
+        // are preserved and a request-burst cliff is avoided.
         if len(i.limiters) > 10000 {
             i.limiters = make(map[string]*rate.Limiter)
         }
@@ -1193,6 +1235,7 @@ func handleRecipe(w http.ResponseWriter, r *http.Request) {
 import (
     "go.opentelemetry.io/otel"
     "go.opentelemetry.io/otel/attribute"
+    "go.opentelemetry.io/otel/codes"
     "go.opentelemetry.io/otel/trace"
 )
 
