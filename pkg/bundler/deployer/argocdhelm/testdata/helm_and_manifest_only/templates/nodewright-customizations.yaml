@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "1"
+    name: nodewright-customizations
+    namespace: argocd
+spec:
+    destination:
+        namespace: skyhook
+        server: https://kubernetes.default.svc
+    project: default
+    source:
+        helm:
+            values: |-
+                {{- $dynamic := index .Values "nodewrightcustomizations" | default dict -}}
+                {{- toYaml $dynamic | nindent 16 }}
+        path: 002-nodewright-customizations
+        repoURL: '{{ required "repoURL is required: pass --set repoURL=<published bundle URL> (e.g., oci://<registry>/<path>/aicr-bundle)" .Values.repoURL }}'
+        targetRevision: '{{ .Values.targetRevision | default .Chart.Version }}'
+    syncPolicy:
+        automated:
+            prune: true
+            selfHeal: true
+        syncOptions:
+            - CreateNamespace=true
+            - ServerSideApply=true

@@ -1,32 +1,19 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .Name }}
+  name: my-kustomize-app
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "{{ .SyncWave }}"
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   project: default
-{{- if .IsLocalChart }}
   source:
-    repoURL: '{{ .RepoURL }}'
-    targetRevision: {{ .TargetRevision }}
-    path: {{ .BundleDir }}
-{{- else }}
-  sources:
-    - repoURL: {{ .Repository }}
-      chart: {{ .Chart }}
-      targetRevision: {{ .Version }}
-      helm:
-        valueFiles:
-          - $values/{{ .BundleDir }}/values.yaml
-    - repoURL: '{{ .RepoURL }}'
-      targetRevision: {{ .TargetRevision }}
-      ref: values
-{{- end }}
+    repoURL: 'https://github.com/example/aicr-bundles.git'
+    targetRevision: main
+    path: 001-my-kustomize-app
   destination:
     server: https://kubernetes.default.svc
-    namespace: {{ .Namespace }}
+    namespace: my-app
   syncPolicy:
     automated:
       prune: true

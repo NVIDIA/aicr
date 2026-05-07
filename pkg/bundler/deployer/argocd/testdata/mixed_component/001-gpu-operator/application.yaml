@@ -1,32 +1,25 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .Name }}
+  name: gpu-operator
   namespace: argocd
   annotations:
-    argocd.argoproj.io/sync-wave: "{{ .SyncWave }}"
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   project: default
-{{- if .IsLocalChart }}
-  source:
-    repoURL: '{{ .RepoURL }}'
-    targetRevision: {{ .TargetRevision }}
-    path: {{ .BundleDir }}
-{{- else }}
   sources:
-    - repoURL: {{ .Repository }}
-      chart: {{ .Chart }}
-      targetRevision: {{ .Version }}
+    - repoURL: https://helm.ngc.nvidia.com/nvidia
+      chart: gpu-operator
+      targetRevision: 25.3.3
       helm:
         valueFiles:
-          - $values/{{ .BundleDir }}/values.yaml
-    - repoURL: '{{ .RepoURL }}'
-      targetRevision: {{ .TargetRevision }}
+          - $values/001-gpu-operator/values.yaml
+    - repoURL: 'https://github.com/example/aicr-bundles.git'
+      targetRevision: main
       ref: values
-{{- end }}
   destination:
     server: https://kubernetes.default.svc
-    namespace: {{ .Namespace }}
+    namespace: gpu-operator
   syncPolicy:
     automated:
       prune: true

@@ -16,6 +16,7 @@ package argocd
 
 import (
 	"context"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +25,15 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
 const testVersion = "v1.0.0"
+
+// update regenerates goldens under testdata/ when set via `go test -update`.
+// Same convention as helm and localformat deployer test suites.
+var update = flag.Bool("update", false, "update golden files")
 
 func TestGenerate_Success(t *testing.T) {
 	ctx := context.Background()
@@ -94,10 +100,10 @@ func TestGenerate_Success(t *testing.T) {
 
 	// Verify expected files exist
 	expectedFiles := []string{
-		"cert-manager/application.yaml",
-		"cert-manager/values.yaml",
-		"gpu-operator/application.yaml",
-		"gpu-operator/values.yaml",
+		"001-cert-manager/application.yaml",
+		"001-cert-manager/values.yaml",
+		"002-gpu-operator/application.yaml",
+		"002-gpu-operator/values.yaml",
 		"app-of-apps.yaml",
 		"README.md",
 	}
@@ -109,33 +115,17 @@ func TestGenerate_Success(t *testing.T) {
 		}
 	}
 
-	// Verify generated application.yaml files are valid YAML
-	assertValidYAML(t, filepath.Join(outputDir, "cert-manager", "application.yaml"))
-	assertValidYAML(t, filepath.Join(outputDir, "gpu-operator", "application.yaml"))
+	// Verify generated application.yaml files are valid YAML. (Sync-wave
+	// content and full Application shape are frozen by TestBundleGolden_*;
+	// what's left here is the basic "files-exist + parseable" sanity check.)
+	assertValidYAML(t, filepath.Join(outputDir, "001-cert-manager", "application.yaml"))
+	assertValidYAML(t, filepath.Join(outputDir, "002-gpu-operator", "application.yaml"))
 
-	// Verify cert-manager application has sync-wave 0
-	certManagerApp := filepath.Join(outputDir, "cert-manager", "application.yaml")
-	content, err := os.ReadFile(certManagerApp)
-	if err != nil {
-		t.Fatalf("Failed to read cert-manager application: %v", err)
-	}
-	if !strings.Contains(string(content), "sync-wave: \"0\"") {
-		t.Error("cert-manager application should have sync-wave 0")
-	}
-
-	// Verify gpu-operator application has sync-wave 1
-	gpuOperatorApp := filepath.Join(outputDir, "gpu-operator", "application.yaml")
-	content, err = os.ReadFile(gpuOperatorApp)
-	if err != nil {
-		t.Fatalf("Failed to read gpu-operator application: %v", err)
-	}
-	if !strings.Contains(string(content), "sync-wave: \"1\"") {
-		t.Error("gpu-operator application should have sync-wave 1")
-	}
-
-	// Verify README contains component information
+	// Verify README contains component information. README is not golden-
+	// tested because it carries operator guidance with absolute paths
+	// (TempDir-dependent) that wouldn't survive byte-comparison.
 	readmePath := filepath.Join(outputDir, "README.md")
-	content, err = os.ReadFile(readmePath)
+	content, err := os.ReadFile(readmePath)
 	if err != nil {
 		t.Fatalf("Failed to read README: %v", err)
 	}
@@ -238,7 +228,7 @@ func TestGenerate_WithRepoURL(t *testing.T) {
 	}
 
 	// Verify child application.yaml contains custom repo URL in values source
-	gpuOperatorApp := filepath.Join(outputDir, "gpu-operator", "application.yaml")
+	gpuOperatorApp := filepath.Join(outputDir, "001-gpu-operator", "application.yaml")
 	appContent, err := os.ReadFile(gpuOperatorApp)
 	if err != nil {
 		t.Fatalf("Failed to read gpu-operator application.yaml: %v", err)
@@ -294,7 +284,7 @@ func TestGenerate_WithOCIRepoURL(t *testing.T) {
 	}
 
 	// Verify child application uses OCI repo URL and tag
-	gpuApp, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "application.yaml"))
+	gpuApp, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
 	if err != nil {
 		t.Fatalf("Failed to read gpu-operator application.yaml: %v", err)
 	}
@@ -338,7 +328,7 @@ func TestGenerate_DefaultRepoURL_InChildApplications(t *testing.T) {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	gpuApp, err := os.ReadFile(filepath.Join(outputDir, "gpu-operator", "application.yaml"))
+	gpuApp, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
 	if err != nil {
 		t.Fatalf("Failed to read application.yaml: %v", err)
 	}
@@ -673,7 +663,7 @@ func TestApplicationData_NamespaceFromComponentRef(t *testing.T) {
 	}
 
 	// Verify namespace is used in application.yaml
-	appPath := filepath.Join(outputDir, "gpu-operator", "application.yaml")
+	appPath := filepath.Join(outputDir, "001-gpu-operator", "application.yaml")
 	content, readErr := os.ReadFile(appPath)
 	if readErr != nil {
 		t.Fatalf("Failed to read application.yaml: %v", readErr)
@@ -730,9 +720,20 @@ func TestNormalizeVersion(t *testing.T) {
 	}
 }
 
+// TestGenerate_KustomizeOnly freezes the bundle output for a kustomize-only
+// component. localformat wraps the kustomize build output as a local Helm
+// chart (Chart.yaml + templates/manifest.yaml), and the argocd deployer
+// emits a path-based single-source Application against that wrapped chart.
+// Driven from a committed kustomize input under testdata/kustomize_input/
+// so the kustomize build is hermetic (no git fetch).
 func TestGenerate_KustomizeOnly(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
+
+	kustomizePath, err := filepath.Abs("testdata/kustomize_input")
+	if err != nil {
+		t.Fatalf("resolve kustomize input path: %v", err)
+	}
 
 	recipeResult := &recipe.RecipeResult{}
 	recipeResult.Metadata.Version = testVersion
@@ -741,9 +742,9 @@ func TestGenerate_KustomizeOnly(t *testing.T) {
 			Name:      "my-kustomize-app",
 			Namespace: "my-app",
 			Type:      recipe.ComponentTypeKustomize,
-			Source:    "https://github.com/example/repo",
-			Tag:       "v2.0.0",
-			Path:      "deploy/production",
+			// Repository empty: buildKustomize uses Path as a local
+			// filesystem path so the test does not hit the network.
+			Path: kustomizePath,
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"my-kustomize-app"}
@@ -751,66 +752,48 @@ func TestGenerate_KustomizeOnly(t *testing.T) {
 	g := &Generator{
 		RecipeResult:    recipeResult,
 		ComponentValues: map[string]map[string]any{},
-		Version:         "v0.9.0",
+		Version:         "v0.0.0-golden",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
 	}
 
-	output, err := g.Generate(ctx, outputDir)
-	if err != nil {
+	if _, err := g.Generate(ctx, outputDir); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// Verify generated application.yaml is valid YAML
-	assertValidYAML(t, filepath.Join(outputDir, "my-kustomize-app", "application.yaml"))
-
-	// Verify application.yaml uses source (not sources) with path
-	appPath := filepath.Join(outputDir, "my-kustomize-app", "application.yaml")
-	content, err := os.ReadFile(appPath)
-	if err != nil {
-		t.Fatalf("failed to read application.yaml: %v", err)
-	}
-	appContent := string(content)
-
-	if !strings.Contains(appContent, "path: deploy/production") {
-		t.Error("application.yaml should contain kustomize path")
-	}
-	if !strings.Contains(appContent, "targetRevision: v2.0.0") {
-		t.Error("application.yaml should contain kustomize tag as targetRevision")
-	}
-	if strings.Contains(appContent, "chart:") {
-		t.Error("application.yaml should not contain chart for kustomize component")
-	}
-	if strings.Contains(appContent, "helm:") {
-		t.Error("application.yaml should not contain helm section for kustomize component")
-	}
-	// Kustomize uses single source, not multi-source
-	if strings.Contains(appContent, "sources:") {
-		t.Error("application.yaml should use source (singular) for kustomize, not sources")
-	}
-	if !strings.Contains(appContent, "source:") {
-		t.Error("application.yaml should contain source for kustomize component")
+	// Freeze the wrapped local-chart layout and the path-based Application
+	// shape. Skip Chart.yaml and README — they carry no behavior beyond
+	// the templates already covered elsewhere.
+	for _, rel := range []string{
+		"001-my-kustomize-app/application.yaml",
+		"001-my-kustomize-app/values.yaml",
+		"001-my-kustomize-app/templates/manifest.yaml",
+		"app-of-apps.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/kustomize_only", rel)
 	}
 
-	// values.yaml should NOT exist for kustomize components
-	valuesPath := filepath.Join(outputDir, "my-kustomize-app", "values.yaml")
-	if _, statErr := os.Stat(valuesPath); !os.IsNotExist(statErr) {
-		t.Error("values.yaml should not exist for kustomize component")
-	}
-
-	// app-of-apps.yaml and README should still exist
-	for _, f := range []string{"app-of-apps.yaml", "README.md"} {
-		if _, statErr := os.Stat(filepath.Join(outputDir, f)); os.IsNotExist(statErr) {
-			t.Errorf("expected %s to exist", f)
-		}
-	}
-
-	if len(output.Files) == 0 {
-		t.Error("Generate() returned no files")
+	// values.yaml exists but is empty for kustomize components (no Helm
+	// values to merge) — assertGolden covers content, but verify that
+	// the wrapped chart kind is local-helm by confirming Chart.yaml exists.
+	if _, statErr := os.Stat(filepath.Join(outputDir, "001-my-kustomize-app", "Chart.yaml")); statErr != nil {
+		t.Errorf("expected Chart.yaml in wrapped kustomize folder: %v", statErr)
 	}
 }
 
+// TestGenerate_MixedHelmAndKustomize freezes the bundle output for a
+// recipe that mixes a pure-Helm component with a kustomize component.
+// The Helm component yields a multi-source Application; the kustomize
+// component yields a path-based single-source Application against its
+// wrapped local chart.
 func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
+
+	kustomizePath, err := filepath.Abs("testdata/kustomize_input")
+	if err != nil {
+		t.Fatalf("resolve kustomize input path: %v", err)
+	}
 
 	recipeResult := &recipe.RecipeResult{}
 	recipeResult.Metadata.Version = testVersion
@@ -819,7 +802,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 			Name:      "cert-manager",
 			Namespace: "cert-manager",
 			Chart:     "cert-manager",
-			Version:   "v1.17.2",
+			Version:   "v1.20.2",
 			Type:      recipe.ComponentTypeHelm,
 			Source:    "https://charts.jetstack.io",
 		},
@@ -827,9 +810,7 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 			Name:      "my-kustomize-app",
 			Namespace: "my-app",
 			Type:      recipe.ComponentTypeKustomize,
-			Source:    "https://github.com/example/repo",
-			Tag:       "v2.0.0",
-			Path:      "deploy/production",
+			Path:      kustomizePath,
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "my-kustomize-app"}
@@ -837,57 +818,27 @@ func TestGenerate_MixedHelmAndKustomize(t *testing.T) {
 	g := &Generator{
 		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{
-			"cert-manager":     {"crds": map[string]any{"enabled": true}},
+			"cert-manager":     {"replicaCount": 1},
 			"my-kustomize-app": {},
 		},
-		Version: "v0.9.0",
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
 	}
 
-	_, err := g.Generate(ctx, outputDir)
-	if err != nil {
+	if _, err := g.Generate(ctx, outputDir); err != nil {
 		t.Fatalf("Generate() error = %v", err)
 	}
 
-	// Verify generated application.yaml files are valid YAML
-	assertValidYAML(t, filepath.Join(outputDir, "cert-manager", "application.yaml"))
-	assertValidYAML(t, filepath.Join(outputDir, "my-kustomize-app", "application.yaml"))
-
-	// Helm component should have chart-based application.yaml
-	certApp, err := os.ReadFile(filepath.Join(outputDir, "cert-manager", "application.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read cert-manager application.yaml: %v", err)
-	}
-	certAppStr := string(certApp)
-	if !strings.Contains(certAppStr, "chart:") {
-		t.Error("cert-manager application.yaml should contain chart")
-	}
-	if !strings.Contains(certAppStr, "helm:") {
-		t.Error("cert-manager application.yaml should contain helm section")
-	}
-
-	// Helm component should have values.yaml
-	certValues := filepath.Join(outputDir, "cert-manager", "values.yaml")
-	if _, statErr := os.Stat(certValues); os.IsNotExist(statErr) {
-		t.Error("cert-manager should have values.yaml")
-	}
-
-	// Kustomize component should have path-based application.yaml
-	kustApp, err := os.ReadFile(filepath.Join(outputDir, "my-kustomize-app", "application.yaml"))
-	if err != nil {
-		t.Fatalf("failed to read my-kustomize-app application.yaml: %v", err)
-	}
-	kustAppStr := string(kustApp)
-	if !strings.Contains(kustAppStr, "path: deploy/production") {
-		t.Error("kustomize application.yaml should contain path")
-	}
-	if strings.Contains(kustAppStr, "chart:") {
-		t.Error("kustomize application.yaml should not contain chart")
-	}
-
-	// Kustomize component should NOT have values.yaml
-	kustValues := filepath.Join(outputDir, "my-kustomize-app", "values.yaml")
-	if _, statErr := os.Stat(kustValues); !os.IsNotExist(statErr) {
-		t.Error("kustomize component should not have values.yaml")
+	for _, rel := range []string{
+		"001-cert-manager/application.yaml",
+		"001-cert-manager/values.yaml",
+		"002-my-kustomize-app/application.yaml",
+		"002-my-kustomize-app/values.yaml",
+		"002-my-kustomize-app/templates/manifest.yaml",
+		"app-of-apps.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/helm_and_kustomize", rel)
 	}
 }
 
@@ -1042,40 +993,10 @@ func TestGenerate_ApplicationYAMLStructure(t *testing.T) {
 				}
 			},
 		},
-		{
-			name: "kustomize component has spec.source with path",
-			refs: []recipe.ComponentRef{
-				{
-					Name:      "my-kustomize-app",
-					Namespace: "my-app",
-					Type:      recipe.ComponentTypeKustomize,
-					Source:    "https://github.com/example/repo",
-					Tag:       "v2.0.0",
-					Path:      "deploy/production",
-				},
-			},
-			assertFunc: func(t *testing.T, doc map[string]any) {
-				t.Helper()
-				spec, ok := doc["spec"].(map[string]any)
-				if !ok {
-					t.Fatal("spec is not a map")
-				}
-				source, sourceOK := spec["source"].(map[string]any)
-				if !sourceOK {
-					t.Fatal("spec.source is not a map for kustomize component")
-				}
-				if source["path"] != "deploy/production" {
-					t.Errorf("unexpected source path: %v", source["path"])
-				}
-				dest, destOK := spec["destination"].(map[string]any)
-				if !destOK {
-					t.Fatal("spec.destination is not a map")
-				}
-				if dest["server"] != "https://kubernetes.default.svc" {
-					t.Errorf("unexpected destination server: %v", dest["server"])
-				}
-			},
-		},
+		// kustomize subtest pending rewrite for #664: kustomize is now wrapped
+		// as a local Helm chart. spec.source.path becomes the NNN-<name>
+		// directory inside the bundle, not the upstream Path. Needs new
+		// fixtures and assertions; tracked under TestGenerate_KustomizeOnly.
 	}
 
 	for _, tt := range tests {
@@ -1099,7 +1020,7 @@ func TestGenerate_ApplicationYAMLStructure(t *testing.T) {
 				t.Fatalf("Generate() error = %v", err)
 			}
 
-			appPath := filepath.Join(outputDir, tt.refs[0].Name, "application.yaml")
+			appPath := filepath.Join(outputDir, "001-"+tt.refs[0].Name, "application.yaml")
 			assertValidYAML(t, appPath)
 
 			content, err := os.ReadFile(appPath)
@@ -1181,5 +1102,266 @@ func TestGenerate_NoTimestampInOutput(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("failed to walk directory: %v", err)
+	}
+}
+
+// TestBuildApplicationData_OCIHandling exercises two OCI-specific
+// concerns that diverge from HTTPS Helm-repo conventions:
+//
+//  1. The chart-name segment is appended to repoURL for OCI sources.
+//     Recipes carry source = registry+namespace (no chart name) by
+//     convention, mirroring how localformat's writeUpstreamHelmFolder
+//     constructs the install URL. Argo CD's Helm pull treats repoURL
+//     as the full chart path and ignores the separate chart field, so
+//     we must bake the chart name in.
+//
+//  2. The `v` prefix is preserved on OCI versions. OCI tags are literal
+//     strings — `ghcr.io/.../nvsentinel:v1.3.0` is a distinct tag from
+//     `:1.3.0` (only the prefixed one exists in the registry). HTTPS
+//     Helm chart repos use index.yaml where versions are conventionally
+//     non-prefixed, so stripping there is correct.
+//
+// Without these, Argo's repo-server reports
+// "manifests/<wrong-path-or-tag>: not found".
+func TestBuildApplicationData_OCIHandling(t *testing.T) {
+	tests := []struct {
+		name           string
+		source         string
+		chart          string
+		recipeVer      string
+		wantRepository string
+		wantVersion    string
+	}{
+		{
+			name:           "OCI source: chart appended, v preserved (nvsentinel pattern)",
+			source:         "oci://ghcr.io/nvidia",
+			chart:          "nvsentinel",
+			recipeVer:      "v1.3.0",
+			wantRepository: "oci://ghcr.io/nvidia/nvsentinel",
+			wantVersion:    "v1.3.0",
+		},
+		{
+			name:           "OCI source: chart appended even when org name == chart name (kai-scheduler pattern)",
+			source:         "oci://ghcr.io/kai-scheduler/kai-scheduler",
+			chart:          "kai-scheduler",
+			recipeVer:      "v0.14.1",
+			wantRepository: "oci://ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler",
+			wantVersion:    "v0.14.1",
+		},
+		{
+			name:           "OCI source with trailing slash: no double slash",
+			source:         "oci://ghcr.io/nvidia/",
+			chart:          "nvsentinel",
+			recipeVer:      "v1.3.0",
+			wantRepository: "oci://ghcr.io/nvidia/nvsentinel",
+			wantVersion:    "v1.3.0",
+		},
+		{
+			name:           "HTTPS source: repoURL untouched, v stripped (Helm repo convention)",
+			source:         "https://charts.jetstack.io",
+			chart:          "cert-manager",
+			recipeVer:      "v1.20.2",
+			wantRepository: "https://charts.jetstack.io",
+			wantVersion:    "1.20.2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := recipe.ComponentRef{
+				Name:    "test-component",
+				Source:  tt.source,
+				Chart:   tt.chart,
+				Version: tt.recipeVer,
+			}
+			folder := localformat.Folder{
+				Name:   "001-test-component",
+				Dir:    "001-test-component",
+				Kind:   localformat.KindUpstreamHelm,
+				Parent: "test-component",
+			}
+			data := buildApplicationData(comp, folder, 0, "https://github.com/example/repo.git", "main")
+			if data.Repository != tt.wantRepository {
+				t.Errorf("Repository: got %q, want %q (source=%q chart=%q)",
+					data.Repository, tt.wantRepository, tt.source, tt.chart)
+			}
+			if data.Version != tt.wantVersion {
+				t.Errorf("Version: got %q, want %q", data.Version, tt.wantVersion)
+			}
+		})
+	}
+}
+
+// TestBundleGolden_HelmAndManifestOnly freezes the bundle output for a recipe
+// containing both component shapes that this deployer must handle:
+//
+//   - cert-manager: pure Helm → KindUpstreamHelm folder, multi-source
+//     Application
+//   - nodewright-customizations: manifest-only → KindLocalHelm folder
+//     (Chart.yaml + templates/), path-based single-source Application
+//
+// To regenerate after intentional output changes:
+//
+//	go test ./pkg/bundler/deployer/argocd/... -run TestBundleGolden -args -update
+//
+// Substring assertions miss indentation drift, field reordering, and silent
+// template changes; byte-comparing against checked-in goldens catches them.
+func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.20.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nodewright-customizations",
+			Namespace: "skyhook",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "", // manifest-only
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nodewright-customizations"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager":              {"replicaCount": 1},
+			"nodewright-customizations": {"enabled": true},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentManifests: map[string]map[string][]byte{
+			"nodewright-customizations": {
+				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
+					"kind: Skyhook\n" +
+					"metadata:\n" +
+					"  name: tuning\n" +
+					"  namespace: {{ .Release.Namespace }}\n" +
+					"spec:\n" +
+					"  packages:\n" +
+					"    - tuning\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Freeze both Application shapes and a sample local-chart template body.
+	// Don't golden the README or Chart.yaml inside the wrapped chart — those
+	// carry no behavior beyond what the templates already commit to.
+	for _, rel := range []string{
+		"001-cert-manager/application.yaml",
+		"001-cert-manager/values.yaml",
+		"002-nodewright-customizations/application.yaml",
+		"002-nodewright-customizations/Chart.yaml",
+		"002-nodewright-customizations/values.yaml",
+		"002-nodewright-customizations/templates/tuning.yaml",
+		"app-of-apps.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/helm_and_manifest_only", rel)
+	}
+}
+
+// TestBundleGolden_MixedComponent freezes the bundle output for a mixed
+// component (Helm chart + raw manifests). localformat emits the primary
+// upstream-helm folder (NNN-<name>/) followed by an injected `-post`
+// wrapped chart ((NNN+1)-<name>-post/) so the manifests apply after the
+// chart's CRDs are registered. The argocd deployer must produce two
+// Applications — multi-source for the primary, path-based for the -post —
+// with sync waves preserving order.
+func TestBundleGolden_MixedComponent(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		// gpu-operator carries an additional rendered manifest — this turns
+		// it into a mixed component, triggering the primary + -post split.
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
+					"kind: ConfigMap\n" +
+					"metadata:\n" +
+					"  name: dcgm-exporter-config\n" +
+					"  namespace: {{ .Release.Namespace }}\n" +
+					"data:\n" +
+					"  config.yaml: |\n" +
+					"    metrics: enabled\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		// Primary: multi-source upstream-helm
+		"001-gpu-operator/application.yaml",
+		"001-gpu-operator/values.yaml",
+		// Injected -post: path-based single-source wrapping rendered manifests
+		"002-gpu-operator-post/application.yaml",
+		"002-gpu-operator-post/Chart.yaml",
+		"002-gpu-operator-post/values.yaml",
+		"002-gpu-operator-post/templates/dcgm-exporter.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/mixed_component", rel)
+	}
+}
+
+// assertGolden reads outDir/relPath and diffs it against goldenDir/relPath.
+// With -update, writes the actual content to the golden path.
+func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(outDir, relPath))
+	if err != nil {
+		t.Fatalf("read actual %s: %v", relPath, err)
+	}
+	goldenPath := filepath.Join(goldenDir, relPath)
+	if *update {
+		if err = os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("mkdir golden: %v", err)
+		}
+		if err = os.WriteFile(goldenPath, got, 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden %s: %v (run with -update to regenerate)", goldenPath, err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", relPath, got, want)
 	}
 }

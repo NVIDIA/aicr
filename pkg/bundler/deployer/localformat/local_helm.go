@@ -125,6 +125,17 @@ func writeLocalHelmFolder(
 			return Folder{}, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("render manifest %s for %s", p, c.Name), rerr)
 		}
+		// Strip helm.sh/hook* annotations: NNN-folder ordering at the
+		// bundle layer subsumes their role, and leaving them in causes
+		// Argo CD to treat the resource as a PostSync hook that never
+		// fires under syncPolicy.automated for path-based sources. See
+		// stripHelmHooks for the full rationale.
+		stripped, stripErr := stripHelmHooks(rendered)
+		if stripErr != nil {
+			return Folder{}, errors.PropagateOrWrap(stripErr, errors.ErrCodeInternal,
+				fmt.Sprintf("strip helm hooks from manifest %s for %s", p, c.Name))
+		}
+		rendered = stripped
 		// Skip writing if the rendered output has no YAML objects (only
 		// comments / blanks / separators) — typical for fully-conditional
 		// manifests when the relevant value was set false at bundle time.

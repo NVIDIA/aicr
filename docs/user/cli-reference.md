@@ -850,7 +850,7 @@ aicr bundle [flags]
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, or `argocd-helm` |
-| `--repo` | | string | Git repository URL for Argo CD applications (used with `--deployer argocd` and `--deployer argocd-helm`) |
+| `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
@@ -1188,15 +1188,63 @@ bundles/
 ```
 
 **Argo CD Helm chart structure with `--dynamic`:**
-```
+
+The `--deployer argocd-helm` bundle is itself a Helm chart whose `templates/` create per-component Argo Applications. Each application's `helm.values` block merges static values (loaded via `.Files.Get` for upstream-helm components, or read from the wrapped chart's own `values.yaml` for local-chart components) with dynamic overrides from the parent chart's `.Values`.
+
+The same uniform `NNN-<component>/` folder layout used by `--deployer argocd` is included at the bundle root so that path-based Argo Applications (manifest-only, kustomize-wrapped, mixed `-post`) can resolve their `path:` references against the OCI-published bundle.
+
+```text
 bundles/
-├── Chart.yaml                     # Helm chart metadata
-├── values.yaml                    # Dynamic values only (defaults from recipe, override per cluster)
+├── Chart.yaml                          # Parent chart metadata
+├── values.yaml                         # Dynamic stubs only (per-cluster surface)
 ├── templates/
-│   ├── alloy.yaml                 # Argo CD Application template with helm.values
+│   ├── aicr-stack.yaml                 # Parent Argo Application (renders all children)
+│   ├── cert-manager.yaml               # Argo App, multi-source (upstream-helm)
+│   ├── gpu-operator.yaml               # Argo App, multi-source
+│   ├── gpu-operator-post.yaml          # Argo App, path-based (mixed -post)
+│   └── nodewright-customizations.yaml  # Argo App, path-based (manifest-only)
+├── static/
+│   ├── cert-manager.yaml               # Static values for upstream-helm Applications
 │   └── gpu-operator.yaml
+├── 001-cert-manager/                   # NNN-folder content (KindUpstreamHelm)
+│   └── values.yaml
+├── 002-gpu-operator/                   # KindUpstreamHelm (mixed primary)
+│   └── values.yaml
+├── 003-gpu-operator-post/              # KindLocalHelm (mixed -post)
+│   ├── Chart.yaml
+│   ├── templates/
+│   └── values.yaml
+├── 004-nodewright-customizations/      # KindLocalHelm (manifest-only)
+│   ├── Chart.yaml
+│   ├── templates/
+│   └── values.yaml
 └── README.md
 ```
+
+Manifest-only components and mixed-component raw manifests are supported by `--deployer argocd-helm` via the path-based Application shape.
+
+**The bundle is URL-portable.** No `--repo` flag is needed (and is ignored if passed with `--deployer argocd-helm`). The same generated bundle bytes can be pushed to any chart-source backend the user chooses — Argo CD pulls from whichever URL the user supplies at install time via `helm install --set repoURL=...`. The publish location is *not* baked into the bundle artifact.
+
+**Recommended deploy flow:**
+
+```shell
+# 1. Generate the bundle (URL-agnostic)
+aicr bundle -r recipe.yaml --deployer argocd-helm --dynamic gpuoperator:driver.version -o ./bundle
+
+# 2. Publish to your chart registry (any HTTPS-capable OCI / Helm chart repo)
+helm package ./bundle -d /tmp/
+helm push /tmp/aicr-bundle-*.tgz oci://<your-registry>/<path>
+
+# 3. Install — the URL is supplied here, not at bundle time
+helm install aicr-bundle oci://<your-registry>/<path>/aicr-bundle --version <chart-version> \
+  -n argocd \
+  --set repoURL=oci://<your-registry>/<path>/aicr-bundle \
+  --set targetRevision=<chart-version>
+```
+
+The chart's `templates/aicr-stack.yaml` renders the parent Argo Application with `.Values.repoURL` and `.Values.targetRevision` substituted in. The parent Application then triggers Argo to render the chart again from the OCI source, creating the per-component child Applications with sync-wave ordering preserved. Child Applications whose source is path-based (manifest-only and mixed-component `-post` folders) inherit `.Values.repoURL` so they too pull from the same published location.
+
+**`helm install ./bundle` from a local directory** *also* works, but with a caveat: child Applications whose source is path-based require Argo's repo-server to fetch the bundle from a remote (git or OCI) — there is no local-filesystem source type for an Argo Application. Local `helm install` is therefore end-to-end only when the recipe contains pure-Helm components. For everything else, publish first.
 
 **Bundle structure** (with default Helm deployer):
 ```
@@ -1247,21 +1295,37 @@ Previous releases used a flat `<component>/` layout with `manifests/` siblings a
 - Tooling that parsed bundle paths by bare component name must account for the `NNN-` prefix.
 
 **Argo CD bundle structure** (with `--deployer argocd`):
-```
+
+The argocd deployer uses the same uniform `NNN-<component>/` folder layout as `--deployer helm`. Each folder carries an `application.yaml` whose Application shape is decided by the folder kind:
+
+- **`Chart.yaml` absent** (KindUpstreamHelm — pure Helm components): today's multi-source Application pointing at the upstream Helm repository plus a values $ref to the user's git repo. Unchanged for current users.
+- **`Chart.yaml` present** (KindLocalHelm — manifest-only, kustomize-wrapped, mixed `-post`): single-source path-based Application with `source.path: NNN-<name>` against the user's repo.
+
+The argocd deployer emits only what Argo CD's repo-server consumes: `application.yaml`, `values.yaml` (multi-source `helm.valueFiles` for upstream-helm, or local-chart Helm rendering for KindLocalHelm), and `Chart.yaml`/`templates/` for KindLocalHelm. The helm-deployer orchestration files (`install.sh`, `upstream.env`, `cluster-values.yaml`) are stripped — Argo doesn't run shell scripts or source shell env, and `--dynamic` is rejected with `--deployer argocd` (use `--deployer argocd-helm` for install-time values).
+
+```text
 bundles/
-├── app-of-apps.yaml               # Parent Application (bundle root)
-├── recipe.yaml                    # Recipe used to generate bundle
-├── gpu-operator/
-│   ├── values.yaml                # Helm values for GPU Operator
-│   ├── manifests/                 # Additional manifests (ClusterPolicy, etc.)
-│   └── argocd/
-│       └── application.yaml       # Argo CD Application (sync-wave: 0)
-├── network-operator/
-│   ├── values.yaml                # Helm values for Network Operator
-│   └── argocd/
-│       └── application.yaml       # Argo CD Application (sync-wave: 1)
-└── README.md                      # Argo CD deployment guide
+├── app-of-apps.yaml               # Parent Application (recurses *.application.yaml)
+├── 001-cert-manager/              # KindUpstreamHelm — no Chart.yaml
+│   ├── values.yaml                # Static Helm values (consumed via multi-source)
+│   └── application.yaml           # Multi-source Application (sync-wave 0)
+├── 002-gpu-operator/              # KindUpstreamHelm — primary of mixed
+│   ├── values.yaml
+│   └── application.yaml
+├── 003-gpu-operator-post/         # KindLocalHelm — injected mixed -post
+│   ├── Chart.yaml                 # Synthesized wrapper for raw manifests
+│   ├── templates/                 # Rendered manifests
+│   ├── values.yaml
+│   └── application.yaml           # Path-based Application (sync-wave 2)
+├── 004-nodewright-customizations/ # KindLocalHelm — manifest-only
+│   ├── Chart.yaml
+│   ├── templates/
+│   ├── values.yaml
+│   └── application.yaml
+└── README.md
 ```
+
+Manifest-only components (e.g., `nodewright-customizations`) and mixed-component raw manifests (the `-post` injection) are now deployed by `--deployer argocd`. Previously they were silently dropped. Set `--repo <user-git-or-oci>` to populate the `repoURL` on path-based Applications so Argo can resolve them.
 
 **Day 2 Options:**
 
