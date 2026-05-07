@@ -39,6 +39,7 @@ jobs:
 
   build-ko:
     name: Build Ko Images
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -100,6 +101,7 @@ jobs:
 
   build-docker:
     name: Docker Validator (${{ matrix.phase }}/${{ matrix.arch }})
+    if: github.repository == 'nvidia/aicr'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
