@@ -11,21 +11,23 @@
 
   extends: [
     "config:recommended",
-    ":dependencyDashboard",
-    "helpers:pinGitHubActionDigests",
     ":semanticCommitTypeAll(chore)",
     ":semanticCommitScope(deps)",
   ],
+
+  // Dependency dashboard disabled: with github-actions delegated to dependabot
+  // and the rest of the managers narrow enough to read at a glance, the
+  // dashboard issue was just churn. Re-enable by adding `:dependencyDashboard`
+  // back to extends and removing this flag if reviewers want the rollup view.
+  dependencyDashboard: false,
 
   // Scheduling is owned by the workflow cron in .github/workflows/renovate.yaml,
   // not by a Renovate-side `schedule:` field. Self-hosted Renovate runs only
   // when the workflow fires, so a second-layer schedule is redundant and
   // creates an alignment trap — the two must overlap or every PR is held in
   // "Awaiting Schedule". The cron is the single source of truth for cadence.
-  // Self-hosted Renovate cannot consume GitHub vulnerability alerts (that's a
-  // Mend-hosted feature), so the workflow cron is set to weekday mornings to
-  // keep the CVE-to-PR window tight; patch auto-merge drains low-risk PRs
-  // without human attention.
+  // Cron is set to weekday mornings to keep the CVE-to-PR window tight; patch
+  // auto-merge drains low-risk PRs between runs without human attention.
 
   // `prConcurrentLimit` caps how many Renovate PRs are open at once;
   // `prHourlyLimit` caps how many *new* PRs Renovate can create in a
@@ -139,7 +141,7 @@
     // against a malicious release sneaking through.
     {
       matchUpdateTypes: ["patch", "pin", "digest"],
-      matchManagers: ["github-actions", "gomod", "npm"],
+      matchManagers: ["gomod", "npm"],
       minimumReleaseAge: "7 days",
       automerge: true,
       automergeType: "pr",
@@ -192,11 +194,14 @@
       matchManagers: ["gomod"],
       matchPackageNames: ["github.com/opencontainers/**"],
     },
-    // Bundle every github-actions digest bump into one PR per cycle —
-    // otherwise the volume across 55 workflows / composite actions is large.
+    // Disable the github-actions manager — dependabot owns workflow/action
+    // bumps because GitHub's auto-issued GITHUB_TOKEN cannot push changes to
+    // `.github/workflows/*` regardless of `permissions:` set in the workflow.
+    // Renovate would need a GitHub App or PAT with `workflows` scope to push,
+    // which we explicitly don't run.
     {
-      groupName: "github-actions",
       matchManagers: ["github-actions"],
+      enabled: false,
     },
     // Terraform providers and modules typically release in lockstep.
     {

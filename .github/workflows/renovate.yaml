@@ -58,6 +58,11 @@ jobs:
       # internally to "repository-changed", aborting the whole run with
       # the misleading "Repository has changed during renovation" message.
       statuses: write
+      # Renovate calls GET /repos/{owner}/{repo}/dependabot/alerts on every
+      # run to surface vulnerability alerts in PR bodies and prioritize CVE
+      # patches. Without this scope the call 403s and Renovate logs
+      # "Cannot access vulnerability alerts" — functional but noisy.
+      security-events: read
     timeout-minutes: 30
     steps:
       # Mirrors NVIDIA/gpu-operator's known-working pattern. The action
