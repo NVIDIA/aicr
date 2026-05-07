@@ -116,7 +116,7 @@ Choose the path that matches how you'll use the project.
 
 - **[Contributing Guide](CONTRIBUTING.md)** — Development setup, testing, and PR process
 - **[Development Guide](DEVELOPMENT.md)** — Local development, Make targets, and tooling
-- **[Architecture Overview](docs/contributor/README.md)** — System design and components
+- **[Architecture Overview](docs/contributor/index.md)** — System design and components
 - **[Bundler Development](docs/contributor/component.md)** — How to create new bundlers
 - **[Data Architecture](docs/contributor/data.md)** — Recipe data model and query matching
 - **[Agent Instructions](AGENTS.md)** — Coding-agent guidance for Codex/Copilot

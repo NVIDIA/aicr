@@ -322,14 +322,27 @@
     },
   ],
 
-  // The AWS EFA device-plugin image lives in AWS's authenticated public ECR
-  // (602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/...) — that is the
-  // canonical distribution path AWS publishes for EKS add-ons. Renovate
-  // can't query it without AWS credentials and there is no public.ecr.aws
-  // mirror, so suppress the lookup-failure warning. Bumping this image is
-  // gated on AWS releasing a new EKS add-on version anyway.
+  // Vendor-curated GPU networking images that Renovate cannot crawl without
+  // cloud-provider credentials we don't ship to the runner. Each one returns
+  // 401/403 from the registry's tag-list endpoint and produces a recurring
+  // "Failed to look up docker package" warning. Suppressing the warning is
+  // honest about the gap; bumps for these images are coordinated with
+  // vendor-side stack releases (EKS add-on cadence, GKE TCPXO stack
+  // version-coupling) and should remain a deliberate, human-driven change
+  // rather than a Renovate-auto PR.
+  //
+  // - aws-efa-k8s-device-plugin: AWS authenticated public ECR
+  //   (602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/...). No
+  //   public.ecr.aws mirror; bumping is tied to EKS add-on releases.
+  // - nccl-plugin-gpudirecttcpx-dev: Google's auth-gated GAR
+  //   (us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/...) for the GKE
+  //   GPUDirect-TCPXO stack. The TCPXO installer (this image) and the
+  //   workload-side daemon (tcpgpudmarxd-dev) must move together; an
+  //   independent Renovate bump on this image alone would create
+  //   stack version skew. See docs/integrator/gke-tcpxo-networking.md.
   ignoreDeps: [
     "602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin",
+    "us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev",
   ],
 
   // Paths Renovate should not scan.
