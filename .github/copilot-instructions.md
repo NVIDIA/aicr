@@ -91,7 +91,7 @@ NVIDIA AICR provides validated GPU-accelerated Kubernetes configurations through
 - **Bundlers**: Plugin-based artifact generators — one per component in `recipes/registry.yaml`
 - **Deployers**: GitOps integration providers (helm, argocd) with deployment ordering
 
-**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10.1, Container images via Ko
+**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.11.3, Container images via Ko
 
 **Package Architecture (Critical Principle):**
 - **User Interaction Packages** (`pkg/cli`, `pkg/api`): Focus solely on capturing user intent, validating input, and formatting output. No business logic.

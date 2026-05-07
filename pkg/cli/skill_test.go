@@ -164,7 +164,7 @@ func assertNoFrameworkSubcommand(t *testing.T, c cmdMeta, path string) {
 }
 
 // TestWriteFlagEntryNormalizesUsage verifies that flag Usage strings carrying
-// embedded newlines or tabs (e.g. recipe's --snapshot/--criteria multi-line
+// embedded newlines or tabs (e.g. recipe's --snapshot/--config multi-line
 // descriptions) are collapsed onto a single markdown bullet so the generated
 // SKILL.md does not get its layout broken.
 func TestWriteFlagEntryNormalizesUsage(t *testing.T) {

@@ -58,7 +58,7 @@ No cluster needed. All tests receive `AICR_BIN` and `REPO_ROOT` from the environ
 | `cli/bundle-variants` | `run_bundle_tests()` in `tools/e2e` | All bundle flag combinations: node selectors, tolerations, value overrides, Argo CD deployer |
 | `cli/bundle-scheduling` | `test_cli_bundle()` scheduling in `tests/e2e/run.sh` | Scheduling injection at correct Helm value paths |
 | `cli/cuj1-training` | `test_cuj1()` in `tools/e2e` | Full CUJ1 journey: recipe with kubeflow, validate, bundle, multi-phase |
-| `cli/criteria-file` | `test_criteria_file_flag()` in `tools/e2e` | Valid YAML/JSON criteria, CLI overrides, invalid files, partial criteria |
+| `cli/config-file` | `test_criteria_file_flag()` in `tools/e2e` | Valid YAML/JSON AICRConfig, CLI overrides, invalid files, partial criteria |
 | `cli/validate-phases` | `test_validate_phases()` in `tools/e2e` | Individual phases, --phase all, invalid phase, multiple --phase flags |
 | `cli/duplicate-flags` | `test_duplicate_flag_validation()` in `tools/e2e` | Duplicate --recipe, --service flags rejected |
 | `cli/validate-agent-flags` | `test_validate_agent_flags()` in `tools/e2e` | Agent flags present in validate --help |
@@ -83,7 +83,7 @@ tests/chainsaw/
 ├── cli/
 │   ├── bundle-scheduling/                        # Scheduling injection at Helm paths
 │   ├── bundle-variants/                          # All bundle flag combinations
-│   ├── criteria-file/                            # --criteria flag validation
+│   ├── config-file/                              # --config flag validation
 │   ├── cuj1-training/                            # Full CUJ1 user journey
 │   ├── duplicate-flags/                          # Duplicate flag rejection
 │   ├── external-data/                            # --data flag for external registries

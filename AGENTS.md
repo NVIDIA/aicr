@@ -28,7 +28,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
  state         config         vs actual     manifests
 ```
 
-**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.10.1, Ko for images
+**Tech Stack:** Go 1.26, Kubernetes 1.33+, golangci-lint v2.11.3, Ko for images
 
 ## Commands
 

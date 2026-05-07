@@ -1111,7 +1111,7 @@ flowchart TD
 ```
 
 **Components**:
-- **go-ci** composite action: Go setup (1.26), tests with race detector, golangci-lint (v2.10.1), GitHub-native coverage
+- **go-ci** composite action: Go setup (1.26), tests with race detector, golangci-lint (v2.11.3), GitHub-native coverage
 - **integration** composite action: CLI integration tests via tools/e2e
 - **e2e** composite action: Full E2E tests with Kind cluster and fake GPU environment
 - **security-scan** composite action: Anchore/Grype vulnerability scanning (MEDIUM+), SARIF upload to Security tab

@@ -22,6 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -68,17 +69,11 @@ func recipeCmdFlags() []cli.Flag {
 	If provided, criteria are extracted from the snapshot.`,
 			Category: "Input",
 		},
-		&cli.StringFlag{
-			Name:    "criteria",
-			Aliases: []string{"c"},
-			Usage: `Path to criteria file (YAML/JSON), alternative to individual flags.
-	Criteria file fields can be overridden by individual flags.`,
-			Category: "Input",
-		},
-		dataFlag,
-		outputFlag,
+		configFlag(),
+		dataFlag(),
+		outputFlag(),
 		formatFlag(),
-		kubeconfigFlag,
+		kubeconfigFlag(),
 	}
 }
 
@@ -102,8 +97,8 @@ Examples:
 Generate recipe from explicit criteria:
   aicr recipe --service eks --accelerator h100 --os ubuntu --intent training
 
-Generate recipe from a criteria file:
-  aicr recipe --criteria criteria.yaml
+Generate recipe from a config file:
+  aicr recipe --config config.yaml
 
 Generate recipe from a snapshot file:
   aicr recipe --snapshot snapshot.yaml
@@ -114,29 +109,34 @@ Generate recipe from a ConfigMap snapshot:
 Save recipe to a file:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot -o recipe.yaml
 
-Override criteria file values with flags:
-  aicr recipe --criteria criteria.yaml --service gke
+Override config file values with flags:
+  aicr recipe --config config.yaml --service gke
 
 Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "output", "format"); err != nil {
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "config", "output", "format"); err != nil {
 				return err
 			}
 
-			if err := initDataProvider(cmd); err != nil {
+			cfg, err := loadCmdConfig(ctx, cmd)
+			if err != nil {
+				return err
+			}
+
+			if err = initDataProvider(cmd, cfg); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 			}
 
-			outFormat, err := parseOutputFormat(cmd)
+			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
 			if err != nil {
 				return err
 			}
 
-			result, err := buildRecipeFromCmd(ctx, cmd)
+			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
 			if err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "error building recipe", err)
+				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "error building recipe")
 			}
 
 			// Log constraint warnings for visibility
@@ -151,7 +151,7 @@ Override snapshot-detected criteria:
 				}
 			}
 
-			output := cmd.String("output")
+			output := recipeOutputPath(cmd, cfg)
 			ser, err := serializer.NewFileWriterOrStdout(outFormat, output)
 			if err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to create output writer", err)
@@ -176,6 +176,101 @@ Override snapshot-detected criteria:
 			return nil
 		},
 	}
+}
+
+// recipeOutputPath returns the recipe output destination, with the CLI flag
+// overriding spec.recipe.output.path.
+func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
+	return stringFlagOrConfig(cmd, "output", cfg.Recipe().OutputPath())
+}
+
+// parseRecipeOutputFormat reads --format with a fallback to spec.recipe.output.format
+// and validates the result.
+//
+// The flag has a "yaml" Value default; cmd.String("format") returns it even
+// when the user did not pass --format, which would otherwise mask any
+// config-supplied value. stringFlagOrConfig uses cmd.IsSet so a missing
+// flag still falls through to the config fallback.
+func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
+	raw := stringFlagOrConfig(cmd, "format", cfg.Recipe().OutputFormat())
+	if raw == "" {
+		raw = string(serializer.FormatYAML)
+	}
+	out := serializer.Format(raw)
+	if out.IsUnknown() {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("unknown output format: %q, valid formats are: yaml, json, table", raw))
+	}
+	return out, nil
+}
+
+// applyCriteriaFromConfig merges spec.recipe.criteria values into an existing
+// Criteria. Config values override snapshot-extracted values when both are
+// present and differ; when criteria is empty (no snapshot), config simply
+// populates it. CLI flags subsequently override both via applyCriteriaOverrides,
+// yielding precedence: CLI > config > snapshot.
+//
+// Conversion (string→typed enum) happens in (*config.RecipeSpec).ResolveCriteria
+// — this function only handles the merge-and-log concern.
+//
+// Override events are logged at INFO so the resolved value is auditable.
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig) error {
+	resolved, err := cfg.Recipe().ResolveCriteria()
+	if err != nil {
+		return err
+	}
+	if resolved.Service != "" {
+		logCriteriaOverride("service", string(criteria.Service), string(resolved.Service))
+		criteria.Service = resolved.Service
+	}
+	if resolved.Accelerator != "" {
+		logCriteriaOverride("accelerator", string(criteria.Accelerator), string(resolved.Accelerator))
+		criteria.Accelerator = resolved.Accelerator
+	}
+	if resolved.Intent != "" {
+		logCriteriaOverride("intent", string(criteria.Intent), string(resolved.Intent))
+		criteria.Intent = resolved.Intent
+	}
+	if resolved.OS != "" {
+		logCriteriaOverride("os", string(criteria.OS), string(resolved.OS))
+		criteria.OS = resolved.OS
+	}
+	if resolved.Platform != "" {
+		logCriteriaOverride("platform", string(criteria.Platform), string(resolved.Platform))
+		criteria.Platform = resolved.Platform
+	}
+	if resolved.Nodes > 0 {
+		if criteria.Nodes > 0 && criteria.Nodes != resolved.Nodes {
+			slog.Info("config overriding snapshot-detected value",
+				"field", "nodes", "snapshot", criteria.Nodes, "config", resolved.Nodes)
+		}
+		criteria.Nodes = resolved.Nodes
+	}
+	return nil
+}
+
+// logCriteriaOverride logs an INFO line when config replaces a non-default
+// snapshot-extracted value with a different one. Empty/wildcard prior values
+// are not interesting (the field was effectively unset).
+func logCriteriaOverride(field, prior, override string) {
+	if prior == "" || prior == "any" || prior == override {
+		return
+	}
+	slog.Info("config overriding snapshot-detected value",
+		"field", field, "snapshot", prior, "config", override)
+}
+
+// mergeCriteriaFromCmdAndConfig builds a Criteria starting from spec.recipe.criteria
+// (when cfg is non-nil) and overlays CLI flag values on top.
+func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.Criteria, error) {
+	criteria := recipe.NewCriteria()
+	if err := applyCriteriaFromConfig(criteria, cfg); err != nil {
+		return nil, err
+	}
+	if err := applyCriteriaOverrides(cmd, criteria); err != nil {
+		return nil, err
+	}
+	return criteria, nil
 }
 
 // buildCriteriaFromCmd constructs a recipe.Criteria from CLI command flags.

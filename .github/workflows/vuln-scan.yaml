@@ -24,6 +24,7 @@ permissions:
 
 jobs:
   vuln-scan:
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -43,6 +44,7 @@ jobs:
           category: 'anchore-fs'
 
   malware-scan:
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

@@ -37,7 +37,7 @@ jobs:
   # Without this, rebasing a pull-request/* branch includes merged changes
   # in the push diff, causing GPU tests to trigger for unrelated PRs.
   check-paths:
-    if: github.event_name == 'push'
+    if: github.repository == 'nvidia/aicr' && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
@@ -104,7 +104,7 @@ jobs:
   gpu-training-test:
     needs: [check-paths]
     if: >
-      always() && (
+      always() && github.repository == 'nvidia/aicr' && (
         github.event_name == 'schedule' ||
         github.event_name == 'workflow_dispatch' ||
         (github.event_name == 'push' && needs.check-paths.outputs.should-run == 'true')

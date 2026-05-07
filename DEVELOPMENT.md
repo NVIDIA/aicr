@@ -108,7 +108,7 @@ Example `make tools-check` output:
 Tool                 Expected        Installed       Status
 ----                 --------        ---------       ------
 go                   1.26            1.26            ✓
-golangci-lint        v2.10.1         2.10.1          ✓
+golangci-lint        v2.11.3         2.11.3          ✓
 grype                v0.107.0        0.107.0         ✓
 ko                   v0.18.0         0.18.0          ✓
 goreleaser           v2              2.13.3          ✓

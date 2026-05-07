@@ -437,9 +437,9 @@ func validateCmdFlags() []cli.Flag {
 				"Options: " + strings.Join(evidence.ValidFeatures, ", "),
 			Category: "Evidence",
 		},
-		dataFlag,
-		outputFlag,
-		kubeconfigFlag,
+		dataFlag(),
+		outputFlag(),
+		kubeconfigFlag(),
 	}
 }
 
@@ -482,7 +482,7 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
-			if err := initDataProvider(cmd); err != nil {
+			if err := initDataProvider(cmd, nil); err != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 			}
 

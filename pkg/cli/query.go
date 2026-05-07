@@ -24,6 +24,7 @@ import (
 	"github.com/urfave/cli/v3"
 	"gopkg.in/yaml.v3"
 
+	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -95,20 +96,25 @@ Use in shell scripts:
     --selector components.gpu-operator.values.driver.version)`,
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "criteria", "format", "selector"); err != nil {
+			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform", "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
-			if err := initDataProvider(cmd); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
-			}
-
-			outFormat, err := parseOutputFormat(cmd)
+			cfg, err := loadCmdConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
 
-			result, err := buildRecipeFromCmd(ctx, cmd)
+			if err = initDataProvider(cmd, cfg); err != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			}
+
+			outFormat, err := parseRecipeOutputFormat(cmd, cfg)
+			if err != nil {
+				return err
+			}
+
+			result, err := buildRecipeFromCmdWithConfig(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}
@@ -129,17 +135,22 @@ Use in shell scripts:
 	}
 }
 
-// buildRecipeFromCmd resolves a recipe from CLI criteria flags.
-// Shared logic extracted from the recipe command action.
-func buildRecipeFromCmd(ctx context.Context, cmd *cli.Command) (*recipe.RecipeResult, error) {
+// buildRecipeFromCmdWithConfig resolves a recipe from CLI flags layered on
+// top of an optional AICRConfig. Resolution order for each input is:
+//
+//  1. CLI flag (if explicitly set)
+//  2. spec.recipe.* field on cfg (if non-empty)
+//  3. zero value
+//
+// A snapshot path provided by either source takes precedence over the
+// criteria pathway, matching today's --snapshot behavior.
+func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig) (*recipe.RecipeResult, error) {
 	builder := recipe.NewBuilder(
 		recipe.WithVersion(version),
 	)
 
-	snapFilePath := cmd.String("snapshot")
-	criteriaFilePath := cmd.String("criteria")
+	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.Recipe().SnapshotPath())
 
-	//nolint:gocritic // if-else chain is appropriate for non-empty string conditions
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
 		snap, loadErr := serializer.FromFileWithKubeconfig[snapshotter.Snapshot](snapFilePath, cmd.String("kubeconfig"))
@@ -148,6 +159,9 @@ func buildRecipeFromCmd(ctx context.Context, cmd *cli.Command) (*recipe.RecipeRe
 		}
 
 		criteria := recipe.ExtractCriteriaFromSnapshot(snap)
+		if applyErr := applyCriteriaFromConfig(criteria, cfg); applyErr != nil {
+			return nil, applyErr
+		}
 		if applyErr := applyCriteriaOverrides(cmd, criteria); applyErr != nil {
 			return nil, applyErr
 		}
@@ -163,28 +177,16 @@ func buildRecipeFromCmd(ctx context.Context, cmd *cli.Command) (*recipe.RecipeRe
 
 		slog.Info("building recipe from snapshot", "criteria", criteria.String())
 		return builder.BuildFromCriteriaWithEvaluator(ctx, criteria, evaluator)
-	} else if criteriaFilePath != "" {
-		slog.Info("loading criteria from file", "path", criteriaFilePath)
-		criteria, loadErr := recipe.LoadCriteriaFromFileWithContext(ctx, criteriaFilePath)
-		if loadErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load criteria from %q", criteriaFilePath), loadErr)
-		}
-
-		if applyErr := applyCriteriaOverrides(cmd, criteria); applyErr != nil {
-			return nil, applyErr
-		}
-
-		slog.Info("building recipe from criteria file", "criteria", criteria.String())
-		return builder.BuildFromCriteria(ctx, criteria)
 	}
 
-	criteria, buildErr := buildCriteriaFromCmd(cmd)
-	if buildErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "error parsing criteria", buildErr)
+	criteria, err := mergeCriteriaFromCmdAndConfig(cmd, cfg)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "error parsing criteria", err)
 	}
 
 	if criteria.Specificity() == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --platform, --nodes, --criteria, or use --snapshot to load from a snapshot file")
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"no criteria provided: specify at least one of --service, --accelerator, --intent, --os, --platform, --nodes, --config, or use --snapshot to load from a snapshot file")
 	}
 
 	slog.Info("building recipe from criteria", "criteria", criteria.String())

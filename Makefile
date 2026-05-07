@@ -200,7 +200,7 @@ test: ## Runs unit tests with race detector and coverage (use -short to skip int
 	go tool cover -func=coverage.out | tail -1
 
 .PHONY: test-coverage
-test-coverage: test ## Runs tests and enforces coverage threshold (COVERAGE_THRESHOLD=70)
+test-coverage: test ## Runs tests and enforces coverage threshold (from .settings.yaml quality.coverage_threshold)
 	@coverage=$$(go tool cover -func=coverage.out | grep total | awk '{print $$3}' | sed 's/%//'); \
 	echo "Coverage: $$coverage% (threshold: $(COVERAGE_THRESHOLD)%)"; \
 	if [ $$(echo "$$coverage < $(COVERAGE_THRESHOLD)" | bc) -eq 1 ]; then \

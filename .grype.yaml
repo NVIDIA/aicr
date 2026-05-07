@@ -21,22 +21,24 @@ exclude:
   - './aicrd'
   - './dist/**'
 
-# CVE suppressions for aiperf-bench base image (python:3.12-slim).
-# All are either unfixed upstream, won't-fix in Debian, or require python 3.13+.
-# Reviewed: 2026-04-24
+# CVE suppressions for aiperf-bench base image (python:3.13-slim, Debian trixie).
+# All are either unfixed upstream or won't-fix in Debian.
+# Reviewed: 2026-05-06
 ignore:
-  # python 3.12.13 — no fix available for 3.12 branch
+  # python — no fix available
   - vulnerability: CVE-2026-6100   # Critical
-  - vulnerability: CVE-2025-13836  # High, fix in 3.13.11
   - vulnerability: CVE-2026-3298   # High
   - vulnerability: CVE-2026-4786   # High
-  # libc 2.41 — won't fix in Debian
+  # libc 2.41 — won't fix in Debian trixie
   - vulnerability: CVE-2026-5450   # Critical
   - vulnerability: CVE-2026-4437   # High
   - vulnerability: CVE-2026-4046   # High
+  - vulnerability: CVE-2026-5435   # High
   - vulnerability: CVE-2026-5928   # High
-  # ncurses 6.5 — won't fix in Debian
+  # libcap2 — won't fix in Debian trixie
+  - vulnerability: CVE-2026-4878   # High
+  # ncurses 6.5 — won't fix in Debian trixie
   - vulnerability: CVE-2025-69720  # High
   # aiperf pip dependencies
   - vulnerability: GHSA-whj4-6x5x-4v2j  # High, pillow (fix in 12.2.0, pinned by aiperf)
-  - vulnerability: CVE-2026-4519   # python binary
+  - vulnerability: GHSA-pwv6-vv43-88gr  # High, pillow (pinned by aiperf)

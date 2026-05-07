@@ -269,43 +269,56 @@ aicr recipe [flags]
 
 **Modes:**
 
-#### Criteria File Mode (Recommended)
+#### Config File Mode (Recommended)
 
-Generate recipes using a Kubernetes-style criteria file:
+Generate recipes using an `AICRConfig` document. The same file format also drives the `bundle` command, so a single file can describe an end-to-end recipe-to-bundle workflow.
 
 **Flags:**
+
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--criteria` | `-c` | string | Path to criteria file (YAML/JSON), alternative to individual flags |
+| `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON) |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-f` | string | Format: json, yaml (default: yaml) |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 
-The criteria file uses a Kubernetes-style format:
+The config file uses a Kubernetes-style envelope:
+
 ```yaml
-kind: RecipeCriteria
+kind: AICRConfig
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
-  service: eks
-  os: ubuntu
-  accelerator: gb200
-  intent: training
-  nodes: 8
+  recipe:
+    criteria:
+      service: eks
+      os: ubuntu
+      accelerator: gb200
+      intent: training
+      nodes: 8
+    output:
+      path: recipe.yaml
+      format: yaml
 ```
 
-Individual CLI flags can override criteria file values:
+Individual CLI flags always override config file values. For slice/map flags, presence on the CLI replaces the file's value (no append).
+
 ```shell
-# Load criteria from file
-aicr recipe --criteria criteria.yaml
+# Load criteria from config file
+aicr recipe --config config.yaml
 
 # Override service from file
-aicr recipe --criteria criteria.yaml --service gke
+aicr recipe --config config.yaml --service gke
 
 # Save output to file
-aicr recipe -c criteria.yaml -o recipe.yaml
+aicr recipe --config config.yaml -o recipe.yaml
+
+# Load config from a URL (e.g. CI shared template)
+aicr recipe --config https://team.example.com/configs/eks-h100-training.yaml
 ```
+
+`--config` accepts a local file path or an HTTP/HTTPS URL. ConfigMap (`cm://`) sources are not supported; export the data with `kubectl get cm <name> -o yaml` and pass the resulting file.
 
 #### Query Mode
 
@@ -833,7 +846,8 @@ aicr bundle [flags]
 **Flags:**
 | Flag | Short | Type | Description |
 |---------------------------------|-------|------|-------------|
-| `--recipe` | `-r` | string | Path to recipe file (required) |
+| `--recipe` | `-r` | string | Path to recipe file (required, or via `spec.bundle.input.recipe` in `--config`) |
+| `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
 | `--output` | `-o` | string | Output directory (default: current dir) |
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, or `argocd-helm` |
 | `--repo` | | string | Git repository URL for Argo CD applications (used with `--deployer argocd` and `--deployer argocd-helm`) |
@@ -856,6 +870,52 @@ aicr bundle [flags]
 | `--certificate-identity-regexp` | | string | Override the certificate identity pattern for binary attestation verification. Must contain `"NVIDIA/aicr"`. For testing only. |
 | `--identity-token` | | string | Pre-fetched OIDC identity token for `--attest` keyless signing. Skips ambient/browser/device-code flows. Prefer `COSIGN_IDENTITY_TOKEN` on shared hosts — flag values are visible in `ps` and `/proc/<pid>/cmdline`. |
 | `--oidc-device-flow` | | bool | Use the OAuth 2.0 device authorization grant for `--attest` instead of opening a browser callback. Useful on headless hosts that can still reach Sigstore (`--identity-token` and CI ambient OIDC are alternatives). Also reads `AICR_OIDC_DEVICE_FLOW`. |
+
+#### Bundle Config File Mode
+
+The bundle command accepts the same `AICRConfig` format used by `aicr recipe`. A single file can populate both `spec.recipe` and `spec.bundle`, capturing an end-to-end workflow that can be committed to git, fetched from CI, or shared across environments.
+
+When both `spec.recipe.output.path` and `spec.bundle.input.recipe` are set, they must reference the same path; otherwise loading fails fast.
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+spec:
+  bundle:
+    input:
+      recipe: ./recipe.yaml
+    output:
+      target: oci://ghcr.io/example/bundle:v1.0.0
+    deployment:
+      deployer: argocd
+      repo: https://example.git/charts
+      set:
+        - gpuoperator:driver.version=570.86.16
+    scheduling:
+      systemNodeSelector:
+        role: system
+      acceleratedNodeTolerations:
+        - "nvidia.com/gpu=present:NoSchedule"
+      nodes: 8
+      storageClass: gp3
+    attestation:
+      enabled: false
+    registry:
+      insecureTLS: false
+      plainHTTP: false
+```
+
+```shell
+# Drive the bundle entirely from a config file
+aicr bundle --config bundle.yaml
+
+# Override the deployer for a one-off run
+aicr bundle --config bundle.yaml --deployer helm
+```
+
+CLI flags always override values loaded from `--config`. For slice/map flags (`--set`, `--dynamic`, `--system-node-selector`, etc.), CLI presence replaces the config's value rather than appending. Override events are logged at INFO so users can see which input won.
+
+**Secrets:** the cosign identity token is never read from a config file; supply it via `--identity-token` or `COSIGN_IDENTITY_TOKEN`.
 
 #### Node Scheduling
 

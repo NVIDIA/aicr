@@ -37,36 +37,38 @@
 //	aicr recipe --os ubuntu --osv 24.04 --service eks --gpu h100 --intent training
 //	aicr recipe --snapshot system.yaml --intent inference --output recipe.yaml
 //	aicr recipe -s cm://namespace/snapshot -o cm://namespace/recipe  # ConfigMap I/O
-//	aicr recipe --criteria criteria.yaml --output recipe.yaml  # Criteria file mode
+//	aicr recipe --config config.yaml --output recipe.yaml  # Config file mode
 //
 // Generates optimized configuration recipes based on either:
 //   - Specified environment parameters (OS, service, GPU, intent)
 //   - Existing system snapshot (analyzes snapshot to extract parameters)
-//   - Criteria file (Kubernetes-style YAML/JSON with kind: RecipeCriteria)
+//   - AICRConfig file (Kubernetes-style YAML/JSON with kind: AICRConfig)
 //
-// # Criteria File Mode
+// # Config File Mode
 //
-// The --criteria/-c flag allows defining criteria in a Kubernetes-style
-// resource file instead of individual CLI flags:
+// The --config flag accepts a single AICRConfig document carrying defaults
+// for the recipe and/or bundle commands:
 //
-//	aicr recipe --criteria /path/to/criteria.yaml
+//	aicr recipe --config /path/to/config.yaml
 //
-// Criteria file format (YAML or JSON):
+// Config file format (YAML or JSON):
 //
-//	kind: RecipeCriteria
+//	kind: AICRConfig
 //	apiVersion: aicr.nvidia.com/v1alpha1
 //	metadata:
-//	  name: my-deployment-criteria
+//	  name: my-deployment
 //	spec:
-//	  service: eks
-//	  accelerator: gb200
-//	  os: ubuntu
-//	  intent: training
-//	  nodes: 8
+//	  recipe:
+//	    criteria:
+//	      service: eks
+//	      accelerator: gb200
+//	      os: ubuntu
+//	      intent: training
+//	      nodes: 8
 //
-// Individual CLI flags override criteria file values:
+// Individual CLI flags override config file values:
 //
-//	aicr recipe --criteria criteria.yaml --service gke  # service=gke overrides file
+//	aicr recipe --config config.yaml --service gke  # service=gke overrides file
 //
 // validate - Validate recipe constraints (Step 3):
 //

@@ -30,11 +30,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/verifier"
+	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/urfave/cli/v3"
 )
 
@@ -81,19 +81,36 @@ type bundleCmdOptions struct {
 	imageRefsPath string // Path to write published image references (like ko --image-refs)
 }
 
-// parseBundleCmdOptions parses and validates command options.
-func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
+// parseBundleCmdOptions parses and validates command options. The wire
+// config is converted to a typed *config.BundleResolved up-front via
+// (*config.BundleSpec).Resolve so this function only layers CLI flag
+// overrides onto already-typed values. All string→typed conversion of
+// config-supplied fields happens at the conversion boundary in Resolve;
+// errors from that boundary carry "spec.bundle.<path>" attribution.
+//
+//nolint:gocyclo // option resolution is inherently long but linear
+func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmdOptions, error) {
+	resolved, err := cfg.Bundle().Resolve()
+	if err != nil {
+		return nil, err
+	}
+
 	opts := &bundleCmdOptions{
-		recipeFilePath:            cmd.String("recipe"),
+		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", resolved.RecipeInput),
 		kubeconfig:                cmd.String("kubeconfig"),
-		repoURL:                   cmd.String("repo"),
-		attest:                    cmd.Bool("attest"),
-		certificateIdentityRegexp: cmd.String("certificate-identity-regexp"),
+		repoURL:                   stringFlagOrConfig(cmd, "repo", resolved.Repo),
+		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
+		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String("identity-token"),
-		oidcDeviceFlow:            cmd.Bool("oidc-device-flow"),
-		insecureTLS:               cmd.Bool("insecure-tls"),
-		plainHTTP:                 cmd.Bool("plain-http"),
-		imageRefsPath:             cmd.String("image-refs"),
+		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", resolved.OIDCDeviceFlow),
+		insecureTLS:               boolFlagOrConfig(cmd, "insecure-tls", resolved.InsecureTLS),
+		plainHTTP:                 boolFlagOrConfig(cmd, "plain-http", resolved.PlainHTTP),
+		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
+	}
+
+	if opts.recipeFilePath == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"--recipe is required (or set spec.bundle.input.recipe in --config)")
 	}
 
 	// Resolve recipe path to absolute and validate it exists early.
@@ -104,36 +121,26 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		!strings.HasPrefix(opts.recipeFilePath, "https://") &&
 		!strings.HasPrefix(opts.recipeFilePath, serializer.ConfigMapURIScheme) {
 
-		absPath, err := filepath.Abs(opts.recipeFilePath)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve recipe path", err)
+		absPath, absErr := filepath.Abs(opts.recipeFilePath)
+		if absErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve recipe path", absErr)
 		}
-		if _, err := os.Stat(absPath); err != nil {
-			if os.IsNotExist(err) {
+		if _, statErr := os.Stat(absPath); statErr != nil {
+			if os.IsNotExist(statErr) {
 				return nil, errors.New(errors.ErrCodeNotFound, "recipe file not found: "+absPath)
 			}
-			return nil, errors.Wrap(errors.ErrCodeInternal, "cannot access recipe file: "+absPath, err)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "cannot access recipe file: "+absPath, statErr)
 		}
 		opts.recipeFilePath = absPath
 	}
 
-	// Parse and validate deployer flag using strongly-typed parser
-	deployerStr := cmd.String("deployer")
-	if deployerStr == "" {
-		opts.deployer = config.DeployerHelm
-	} else {
-		deployer, err := config.ParseDeployerType(deployerStr)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --deployer value", err)
-		}
-		opts.deployer = deployer
+	if opts.deployer, err = resolveDeployer(cmd, resolved.Deployer); err != nil {
+		return nil, err
 	}
 
-	// Parse output target (detects oci:// URI or local directory)
-	outputTarget := cmd.String("output")
-	ref, err := oci.ParseOutputTarget(outputTarget)
+	ref, err := resolveOutputTarget(cmd, resolved)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --output value", err)
+		return nil, err
 	}
 
 	if ref.IsOCI {
@@ -166,55 +173,37 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 		opts.targetRevision = opts.ociRef.Tag
 	}
 
-	// Parse value overrides from --set flags
-	opts.valueOverrides, err = config.ParseValueOverrides(cmd.StringSlice("set"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --set flag", err)
+	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", resolved.ValueOverrides, config.ParseValueOverrides); err != nil {
+		return nil, err
+	}
+	if opts.dynamicValues, err = resolveComponentPaths(cmd, "dynamic", resolved.DynamicValues, config.ParseDynamicValues); err != nil {
+		return nil, err
 	}
 
-	// Parse dynamic value declarations from --dynamic flags
-	opts.dynamicValues, err = config.ParseDynamicValues(cmd.StringSlice("dynamic"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --dynamic flag", err)
+	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", resolved.SystemNodeSelector); err != nil {
+		return nil, err
+	}
+	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", resolved.AcceleratedNodeSelector); err != nil {
+		return nil, err
 	}
 
-	// Parse node selectors
-	opts.systemNodeSelector, err = snapshotter.ParseNodeSelectors(cmd.StringSlice("system-node-selector"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --system-node-selector", err)
+	if opts.systemNodeTolerations, err = resolveTolerations(cmd, "system-node-toleration", resolved.SystemNodeTolerations); err != nil {
+		return nil, err
 	}
-	opts.acceleratedNodeSelector, err = snapshotter.ParseNodeSelectors(cmd.StringSlice("accelerated-node-selector"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --accelerated-node-selector", err)
+	if opts.acceleratedNodeTolerations, err = resolveTolerations(cmd, "accelerated-node-toleration", resolved.AcceleratedNodeTolerations); err != nil {
+		return nil, err
 	}
 
-	// Parse tolerations
-	opts.systemNodeTolerations, err = snapshotter.ParseTolerations(cmd.StringSlice("system-node-toleration"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --system-node-toleration", err)
-	}
-	opts.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(cmd.StringSlice("accelerated-node-toleration"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --accelerated-node-toleration", err)
+	if opts.workloadGateTaint, err = resolveTaint(cmd, "workload-gate", resolved.WorkloadGate); err != nil {
+		return nil, err
 	}
 
-	// Parse workload-gate taint
-	workloadGateStr := cmd.String("workload-gate")
-	if workloadGateStr != "" {
-		opts.workloadGateTaint, err = snapshotter.ParseTaint(workloadGateStr)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-gate", err)
-		}
+	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", resolved.WorkloadSelector); err != nil {
+		return nil, err
 	}
 
-	// Parse workload-selector
-	opts.workloadSelector, err = snapshotter.ParseNodeSelectors(cmd.StringSlice("workload-selector"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --workload-selector", err)
-	}
-
-	// Parse --nodes (estimated node count for bundle; 0 = unset)
-	n := cmd.Int("nodes")
+	// Estimated node count for bundle; 0 = unset.
+	n := intFlagOrConfig(cmd, "nodes", resolved.Nodes)
 	if n < 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
 	}
@@ -226,9 +215,44 @@ func parseBundleCmdOptions(cmd *cli.Command) (*bundleCmdOptions, error) {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, "--storage-class cannot be blank when specified")
 		}
 		opts.storageClass = sc
+	} else if resolved.StorageClass != "" {
+		opts.storageClass = resolved.StorageClass
 	}
 
 	return opts, nil
+}
+
+// resolveOutputTarget returns the parsed *oci.Reference for --output,
+// preferring CLI input over the typed fallback in resolved. When the
+// CLI flag is set to an empty string OR neither source supplies a
+// value, defaults to the current directory ("."). The empty-CLI case
+// matches pre-refactor behavior where stringFlagOrConfig surfaced ""
+// and the caller substituted "." before parsing.
+func resolveOutputTarget(cmd *cli.Command, resolved *appcfg.BundleResolved) (*oci.Reference, error) {
+	const flagName = "output"
+	if cmd.IsSet(flagName) {
+		target := cmd.String(flagName)
+		if target == "" {
+			target = "."
+		}
+		if resolved.OutputTargetRaw != "" && resolved.OutputTargetRaw != target {
+			slog.Info("CLI flag overriding config value", "flag", flagName,
+				"config", resolved.OutputTargetRaw, "override", target)
+		}
+		ref, err := oci.ParseOutputTarget(target)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --"+flagName+" value", err)
+		}
+		return ref, nil
+	}
+	if resolved.OutputTarget != nil {
+		return resolved.OutputTarget, nil
+	}
+	ref, err := oci.ParseOutputTarget(".")
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve default output target", err)
+	}
+	return ref, nil
 }
 
 //nolint:funlen // bundle command is inherently large (flags + description + action)
@@ -279,21 +303,22 @@ Package with explicit tag (overrides CLI version):
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:     "recipe",
-				Aliases:  []string{"r"},
-				Required: true,
+				Name:    "recipe",
+				Aliases: []string{"r"},
 				Usage: `Path/URI to previously generated recipe from which to build the bundle.
-	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).`,
+	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
+	May also be supplied via spec.bundle.input.recipe in --config.`,
 				Category: "Input",
 			},
+			configFlag(),
 			&cli.StringFlag{
 				Name:    "output",
 				Aliases: []string{"o"},
-				Value:   ".",
-				Usage: `Output target: local directory path or OCI registry URI.
+				Usage: `Output target: local directory path or OCI registry URI (default: current dir).
 	For local output: ./my-bundle or /tmp/bundle
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
-	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)`,
+	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)
+	May also be supplied via spec.bundle.output.target in --config.`,
 				Category: "Output",
 			},
 			&cli.StringSliceFlag{
@@ -356,8 +381,7 @@ Package with explicit tag (overrides CLI version):
 			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
-				Value:    string(config.DeployerHelm),
-				Usage:    fmt.Sprintf("Deployment method (e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
+				Usage:    fmt.Sprintf("Deployment method (default: helm; e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
 				Category: "Deployment",
 			}, config.GetDeployerTypes),
 			&cli.StringFlag{
@@ -390,8 +414,8 @@ Package with explicit tag (overrides CLI version):
 				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
 				Category: "Deployment",
 			},
-			kubeconfigFlag,
-			dataFlag,
+			kubeconfigFlag(),
+			dataFlag(),
 			// OCI registry connection flags (used when --output is oci://...)
 			&cli.BoolFlag{
 				Name:     "insecure-tls",
@@ -416,18 +440,23 @@ Package with explicit tag (overrides CLI version):
 // runBundleCmd is the Action handler for the bundle command.
 func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "output", "deployer", "repo", "storage-class"); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class"); err != nil {
+		return err
+	}
+
+	cfg, err := loadCmdConfig(ctx, cmd)
+	if err != nil {
 		return err
 	}
 
 	// Initialize external data provider if --data flag is set
-	if err := initDataProvider(cmd); err != nil {
+	if err = initDataProvider(cmd, cfg); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
 	}
 
-	opts, err := parseBundleCmdOptions(cmd)
+	opts, err := parseBundleCmdOptions(cmd, cfg)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid bundle command options", err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid bundle command options")
 	}
 
 	outputType := "Helm per-component bundle"
@@ -461,7 +490,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Create bundler with config
-	cfg := config.NewConfig(
+	bcfg := config.NewConfig(
 		config.WithVersion(version),
 		config.WithDeployer(opts.deployer),
 		config.WithRepoURL(opts.repoURL),
@@ -487,7 +516,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	b, err := bundler.New(
-		bundler.WithConfig(cfg),
+		bundler.WithConfig(bcfg),
 		bundler.WithAttester(attester),
 	)
 	if err != nil {

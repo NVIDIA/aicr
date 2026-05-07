@@ -33,6 +33,7 @@ jobs:
 
   report:
     name: Issue Status Report
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

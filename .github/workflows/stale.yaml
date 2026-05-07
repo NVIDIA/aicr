@@ -42,6 +42,7 @@ permissions:
 jobs:
   stale:
     name: Mark stale issues and PRs
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     permissions:
       issues: write

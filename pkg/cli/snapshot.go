@@ -162,9 +162,9 @@ func snapshotCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_OS"),
 			Category: "Agent Deployment",
 		},
-		outputFlag,
+		outputFlag(),
 		formatFlag(),
-		kubeconfigFlag,
+		kubeconfigFlag(),
 	}
 }
 

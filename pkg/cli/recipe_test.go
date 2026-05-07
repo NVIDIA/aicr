@@ -686,7 +686,7 @@ func TestInitDataProvider_EmptyPath(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return initDataProvider(cmd)
+			return initDataProvider(cmd, nil)
 		},
 	}
 
@@ -704,7 +704,7 @@ func TestInitDataProvider_InvalidPath(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return initDataProvider(cmd)
+			return initDataProvider(cmd, nil)
 		},
 	}
 
@@ -725,7 +725,7 @@ func TestInitDataProvider_MissingRegistry(t *testing.T) {
 			&cli.StringFlag{Name: "data"},
 		},
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return initDataProvider(cmd)
+			return initDataProvider(cmd, nil)
 		},
 	}
 
