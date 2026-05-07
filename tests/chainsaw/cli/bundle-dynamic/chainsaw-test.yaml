@@ -183,14 +183,28 @@ spec:
               ($error == null): true
 
     - name: argocd-helm-template-roundtrip
-      description: Generated Argo CD Helm chart is valid — helm template renders without errors.
+      description: |
+        Generated Argo CD Helm chart is valid — helm template renders without
+        errors when the user supplies repoURL/targetRevision via --set. The
+        chart's templates/aicr-stack.yaml uses `required` on .Values.repoURL,
+        which makes the URL a mandatory install-time parameter (the bundle
+        is URL-portable; same artifact bytes work for any registry).
+
+        Requires the `helm` CLI on PATH (installed alongside chainsaw and
+        aicr by `make tools-setup`). The check below fails early with a
+        clear message instead of a cryptic "command not found".
       try:
         - script:
             content: |
+              command -v helm >/dev/null 2>&1 \
+                || { echo "ERROR: helm CLI not on PATH; run 'make tools-setup' or install helm before running chainsaw tests" >&2; exit 1; }
               WORK="/tmp/chainsaw-bundle-dynamic"
               # helm template validates Chart.yaml, values.yaml, and all templates
-              # are syntactically correct and renderable
-              output=$(helm template test-release "${WORK}/argocd-dynamic" 2>&1)
+              # are syntactically correct and renderable. repoURL/targetRevision
+              # are mandatory (consumed by the parent Application's source).
+              output=$(helm template test-release "${WORK}/argocd-dynamic" \
+                --set repoURL=oci://example/aicr-bundle \
+                --set targetRevision=v1 2>&1)
               if [ $? -ne 0 ]; then
                 echo "helm template failed:" >&2
                 echo "$output" >&2
@@ -202,6 +216,30 @@ spec:
               # Output should contain values: (proves template references resolve)
               echo "$output" | grep -q "values:" \
                 || { echo "rendered output should contain values:" >&2; exit 1; }
+              # The user-supplied repoURL must reach the parent Application's source.
+              echo "$output" | grep -q "oci://example/aicr-bundle" \
+                || { echo "rendered output should contain user-supplied repoURL" >&2; exit 1; }
+            check:
+              ($error == null): true
+
+    - name: argocd-helm-template-fails-without-repoURL
+      description: |
+        helm template MUST fail with a clear "repoURL is required" message when
+        the user omits --set repoURL. This guards against accidentally publishing
+        a chart whose Application would point at an empty URL.
+      try:
+        - script:
+            content: |
+              command -v helm >/dev/null 2>&1 \
+                || { echo "ERROR: helm CLI not on PATH; run 'make tools-setup' or install helm before running chainsaw tests" >&2; exit 1; }
+              WORK="/tmp/chainsaw-bundle-dynamic"
+              if output=$(helm template test-release "${WORK}/argocd-dynamic" 2>&1); then
+                echo "expected helm template to fail without --set repoURL, but it succeeded:" >&2
+                echo "$output" >&2
+                exit 1
+              fi
+              echo "$output" | grep -q "repoURL is required" \
+                || { echo "expected error to mention 'repoURL is required', got: $output" >&2; exit 1; }
             check:
               ($error == null): true
 

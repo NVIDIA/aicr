@@ -16,10 +16,16 @@ package argocdhelm
 
 import (
 	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -27,6 +33,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
+
+// update regenerates goldens under testdata/ when set via `go test -update`.
+// Same convention as helm and localformat deployer test suites.
+var update = flag.Bool("update", false, "update golden files")
 
 func newRecipeResult(version string, refs []recipe.ComponentRef) *recipe.RecipeResult {
 	r := &recipe.RecipeResult{
@@ -43,37 +53,10 @@ func TestGenerate(t *testing.T) {
 		assert  func(t *testing.T, outputDir string, output *deployer.Output)
 		wantErr bool
 	}{
-		{
-			name: "produces Chart.yaml and templates directory",
-			input: &Generator{
-				RecipeResult: newRecipeResult("1.0.0", []recipe.ComponentRef{
-					{Name: "gpu-operator", Namespace: "gpu-operator", Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "gpu-operator", Version: "v24.9.0"},
-				}),
-				ComponentValues: map[string]map[string]any{
-					"gpu-operator": {"driver": map[string]any{"version": "580"}},
-				},
-				Version: "test",
-				RepoURL: "https://github.com/example/repo.git",
-				DynamicValues: map[string][]string{
-					"gpu-operator": {"driver.version"},
-				},
-			},
-			assert: func(t *testing.T, outputDir string, _ *deployer.Output) {
-				t.Helper()
-				for _, f := range []string{"Chart.yaml", "values.yaml", "README.md"} {
-					if _, err := os.Stat(filepath.Join(outputDir, f)); os.IsNotExist(err) {
-						t.Errorf("%s should exist", f)
-					}
-				}
-				if _, err := os.Stat(filepath.Join(outputDir, "templates", "gpu-operator.yaml")); os.IsNotExist(err) {
-					t.Error("templates/gpu-operator.yaml should exist")
-				}
-				// Should NOT have flat Argo CD artifacts
-				if _, err := os.Stat(filepath.Join(outputDir, "app-of-apps.yaml")); !os.IsNotExist(err) {
-					t.Error("app-of-apps.yaml should NOT exist in Helm chart output")
-				}
-			},
-		},
+		// Coverage of "produces Chart.yaml + templates/ directory and does NOT
+		// emit a flat app-of-apps.yaml" lives in TestBundleGolden_*; that
+		// freezes the full bundle layout (file existence + content). A
+		// separate substring case here would be redundant.
 		{
 			name: "dynamic paths stubbed in root values.yaml",
 			input: &Generator{
@@ -547,6 +530,167 @@ func TestValuesBlockScalarMarshal(t *testing.T) {
 	if !strings.Contains(out, "mustMergeOverwrite") {
 		t.Error("marshaled output should contain mustMergeOverwrite")
 	}
+
+	// Regression: nindent inside the template must exceed the column of the
+	// `values:` key, otherwise Helm renders the merged values OUTSIDE the
+	// literal block as siblings of `helm:`, breaking Application schema
+	// validation. Locate the `values:` key and the nindent directive, parse
+	// both columns, and assert the nindent argument is greater.
+	valuesKeyCol, nindentArg := -1, -1
+	for line := range strings.SplitSeq(out, "\n") {
+		if valuesKeyCol == -1 && strings.Contains(line, "values:") {
+			valuesKeyCol = strings.Index(line, "values:")
+		}
+		if nindentArg == -1 {
+			if _, rest, ok := strings.Cut(line, "nindent "); ok {
+				_, _ = fmt.Sscanf(strings.TrimSpace(rest), "%d", &nindentArg)
+			}
+		}
+	}
+	if valuesKeyCol == -1 {
+		t.Fatal("could not locate `values:` column in marshaled output")
+	}
+	if nindentArg == -1 {
+		t.Fatal("could not locate `nindent <N>` directive in marshaled output")
+	}
+	if nindentArg <= valuesKeyCol {
+		t.Errorf("nindent argument %d must exceed values: column %d, otherwise merged "+
+			"content lands outside the literal block scalar", nindentArg, valuesKeyCol)
+	}
+}
+
+// injectValuesIntoSingleSource handles the path-based input shape produced
+// by argocd's KindLocalHelm folders (manifest-only, kustomize-wrapped, mixed
+// -post). It must add a helm.values block with dynamic stubs, leave the
+// existing source.path / source.repoURL intact, and emit a literal-block
+// scalar at indent that stays inside `values: |-`.
+func TestInjectValuesIntoSingleSource(t *testing.T) {
+	app := map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"spec": map[string]any{
+			"source": map[string]any{
+				"repoURL":        "https://github.com/myorg/myrepo.git",
+				"targetRevision": "main",
+				"path":           "003-nodewright-customizations",
+			},
+		},
+	}
+
+	if err := injectValuesIntoSingleSource(app, "nodewrightcustomizations"); err != nil {
+		t.Fatalf("injectValuesIntoSingleSource error: %v", err)
+	}
+
+	out, err := yaml.Marshal(app)
+	if err != nil {
+		t.Fatalf("yaml.Marshal error: %v", err)
+	}
+	str := string(out)
+	// Path and repo preserved.
+	if !strings.Contains(str, "path: 003-nodewright-customizations") {
+		t.Errorf("source.path should be preserved, got:\n%s", str)
+	}
+	// helm.values block scalar present.
+	if !strings.Contains(str, "values: |") {
+		t.Errorf("helm.values should be a block scalar, got:\n%s", str)
+	}
+	// Dynamic-only template (no .Files.Get static merge).
+	if !strings.Contains(str, `index .Values "nodewrightcustomizations"`) {
+		t.Errorf("template should reference dynamic .Values key, got:\n%s", str)
+	}
+	if strings.Contains(str, ".Files.Get") {
+		t.Errorf("path-based shape should NOT use .Files.Get static merge, got:\n%s", str)
+	}
+	// Same column-math regression as TestValuesBlockScalarMarshal.
+	valuesKeyCol, nindentArg := -1, -1
+	for line := range strings.SplitSeq(str, "\n") {
+		if valuesKeyCol == -1 && strings.Contains(line, "values:") {
+			valuesKeyCol = strings.Index(line, "values:")
+		}
+		if nindentArg == -1 {
+			if _, rest, ok := strings.Cut(line, "nindent "); ok {
+				_, _ = fmt.Sscanf(strings.TrimSpace(rest), "%d", &nindentArg)
+			}
+		}
+	}
+	if nindentArg <= valuesKeyCol {
+		t.Errorf("nindent %d must exceed values: column %d", nindentArg, valuesKeyCol)
+	}
+
+	// URL-portability invariants — the input source had baked-in URL/tag,
+	// the output should have rewritten them to Helm template directives so
+	// the rendered child App picks up .Values.repoURL/targetRevision at
+	// install time. The single-quoted YAML scalar form is required so the
+	// embedded `"..."` inside `required` survives intact (double-quoted
+	// YAML would force escape sequences that break Helm's parser).
+	if !strings.Contains(str, `repoURL: '{{ required `) {
+		t.Errorf("source.repoURL should be rewritten to single-quoted Helm directive, got:\n%s", str)
+	}
+	if !strings.Contains(str, `.Values.repoURL }}`) {
+		t.Errorf("source.repoURL Helm directive should reference .Values.repoURL, got:\n%s", str)
+	}
+	if !strings.Contains(str, `targetRevision: '{{ .Values.targetRevision | default .Chart.Version }}'`) {
+		t.Errorf("source.targetRevision should be rewritten to Helm directive with .Chart.Version fallback, got:\n%s", str)
+	}
+	// The original baked URL must be gone (otherwise the bundle remains
+	// non-portable).
+	if strings.Contains(str, "https://github.com/myorg/myrepo.git") {
+		t.Errorf("baked-in input repoURL leaked into output, got:\n%s", str)
+	}
+}
+
+// TestInjectValuesIntoSingleSource_MissingFields mirrors the multi-source
+// validation regression: if the upstream argocd template emits an empty path
+// or repoURL, argocdhelm should fail at bundle time with a clear message
+// rather than silently produce a broken Application.
+func TestInjectValuesIntoSingleSource_MissingFields(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  map[string]any
+		wantMsg string
+	}{
+		{
+			name: "empty repoURL",
+			source: map[string]any{
+				"repoURL":        "",
+				"targetRevision": "main",
+				"path":           "001-component",
+			},
+			wantMsg: "repoURL",
+		},
+		{
+			name: "empty path",
+			source: map[string]any{
+				"repoURL":        "https://github.com/example/repo.git",
+				"targetRevision": "main",
+				"path":           "",
+			},
+			wantMsg: "path",
+		},
+		{
+			name: "both empty",
+			source: map[string]any{
+				"repoURL":        "",
+				"targetRevision": "main",
+				"path":           "",
+			},
+			wantMsg: "repoURL, path",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := map[string]any{
+				"spec": map[string]any{"source": tt.source},
+			}
+			err := injectValuesIntoSingleSource(app, "anything")
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error %q should contain %q", err, tt.wantMsg)
+			}
+		})
+	}
 }
 
 func TestDeepCopyMap(t *testing.T) {
@@ -560,5 +704,371 @@ func TestDeepCopyMap(t *testing.T) {
 	}
 	if original["driver"].(map[string]any)["version"] != "580" {
 		t.Error("deepCopyMap should produce independent copy")
+	}
+}
+
+// (TestDeriveParentChartSource removed: the parent Application is now a
+// chart template that consumes .Values.repoURL at install time, so the
+// bundler no longer needs URL-splitting logic — the URL never enters the
+// generated chart bytes.)
+
+// TestBundleGolden_HelmAndManifestOnly freezes the argocd-helm bundle output
+// for a recipe containing both Application input shapes the transformation
+// must handle:
+//
+//   - cert-manager: pure Helm → multi-source input → flipped to single-source
+//     with helm.values that merges static (.Files.Get) and dynamic (.Values.<key>)
+//     via mustMergeOverwrite + nindent 16.
+//   - nodewright-customizations: manifest-only → path-based single-source
+//     input → helm.values injected with dynamic-only override (no .Files.Get).
+//
+// To regenerate after intentional output changes:
+//
+//	go test ./pkg/bundler/deployer/argocdhelm/... -run TestBundleGolden -args -update
+//
+// Substring assertions miss indentation drift (which Bug A was — nindent 8
+// silently rendered values OUTSIDE the literal block); byte-comparing against
+// checked-in goldens catches that class of regression.
+func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.20.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nodewright-customizations",
+			Namespace: "skyhook",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "", // manifest-only
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager", "nodewright-customizations"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager":              {"replicaCount": 1, "prometheus": map[string]any{"enabled": true}},
+			"nodewright-customizations": {"enabled": true},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		DynamicValues: map[string][]string{
+			"cert-manager": {"replicaCount"},
+		},
+		ComponentManifests: map[string]map[string][]byte{
+			"nodewright-customizations": {
+				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
+					"kind: Skyhook\n" +
+					"metadata:\n" +
+					"  name: tuning\n" +
+					"  namespace: {{ .Release.Namespace }}\n" +
+					"spec:\n" +
+					"  packages:\n" +
+					"    - tuning\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"Chart.yaml",
+		"values.yaml",
+		"templates/aicr-stack.yaml", // parent App, Helm-templated
+		"templates/cert-manager.yaml",
+		"templates/nodewright-customizations.yaml",
+		"static/cert-manager.yaml",
+		"001-cert-manager/values.yaml",
+		"002-nodewright-customizations/Chart.yaml",
+		"002-nodewright-customizations/templates/tuning.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/helm_and_manifest_only", rel)
+	}
+}
+
+// TestBundleGolden_MixedComponent freezes the argocd-helm bundle output for
+// a mixed component (Helm + raw manifests). The localformat layer emits a
+// primary 001-<name>/ folder plus an injected 002-<name>-post/ folder. The
+// argocdhelm transformation must:
+//
+//   - Generate templates/<name>.yaml (multi-source flip) for the primary.
+//   - Generate templates/<name>-post.yaml (path-based inject) for the -post.
+//   - Route -post override-key lookups through the parent component (relies
+//     on findComponentByName + the localformat collision check).
+func TestBundleGolden_MixedComponent(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580", "enabled": true}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version"},
+		},
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
+					"kind: ConfigMap\n" +
+					"metadata:\n" +
+					"  name: dcgm-exporter-config\n" +
+					"  namespace: {{ .Release.Namespace }}\n" +
+					"data:\n" +
+					"  config.yaml: |\n" +
+					"    metrics: enabled\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		"Chart.yaml",
+		"values.yaml",
+		"templates/aicr-stack.yaml",        // parent App, Helm-templated
+		"templates/gpu-operator.yaml",      // multi-source primary
+		"templates/gpu-operator-post.yaml", // path-based -post (parent override key)
+		"static/gpu-operator.yaml",
+		"002-gpu-operator-post/templates/dcgm-exporter.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/mixed_component", rel)
+	}
+}
+
+// TestHelmTemplate_RendersWithSetRepoURL is the live-render counterpart to
+// the golden tests: goldens freeze the pre-render template bytes, this
+// test verifies that running `helm template` against the generated bundle
+// with `--set repoURL=...` actually produces a valid Argo Application
+// manifest with the user-supplied URL substituted in.
+//
+// Catches regressions that goldens miss: a typo in the parent template's
+// `required`/`default` directives, a missing `}}`, or the wrong YAML
+// scalar style on the injected child source fields would all silently
+// freeze into goldens but blow up at install time. This test runs the
+// chart through Helm and asserts the rendered output is correct.
+//
+// Skipped when helm is not on PATH so unit-test environments without
+// helm aren't broken by it.
+func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	outputDir := t.TempDir()
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.20.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nodewright-customizations",
+			Namespace: "skyhook",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "", // manifest-only → path-based child
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager", "nodewright-customizations"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager":              {"replicaCount": 1},
+			"nodewright-customizations": {"enabled": true},
+		},
+		Version: "v0.0.0-test",
+		ComponentManifests: map[string]map[string][]byte{
+			"nodewright-customizations": {
+				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
+					"kind: Skyhook\n" +
+					"metadata:\n" +
+					"  name: tuning\n" +
+					"  namespace: skyhook\n" +
+					"spec:\n" +
+					"  packages:\n" +
+					"    - tuning\n"),
+			},
+		},
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	const wantRepoURL = "oci://example.test/myorg/aicr-bundle"
+	const wantTagName = "v9.9.9-render-test"
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir, //nolint:gosec // controlled args
+		"--set", "repoURL="+wantRepoURL,
+		"--set", "targetRevision="+wantTagName,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template failed: %v\noutput:\n%s", err, out)
+	}
+
+	// Walk the rendered multi-doc YAML, find the parent and a path-based
+	// child by name, assert their source.repoURL / source.targetRevision.
+	dec := yaml.NewDecoder(strings.NewReader(string(out)))
+	type appLite struct {
+		Metadata struct{ Name string } `yaml:"metadata"`
+		Spec     struct {
+			Source struct {
+				RepoURL        string `yaml:"repoURL"`
+				Chart          string `yaml:"chart"`
+				TargetRevision string `yaml:"targetRevision"`
+				Path           string `yaml:"path"`
+			} `yaml:"source"`
+		} `yaml:"spec"`
+	}
+	found := map[string]appLite{}
+	for {
+		var a appLite
+		decErr := dec.Decode(&a)
+		if errors.Is(decErr, io.EOF) {
+			break
+		}
+		if decErr != nil {
+			t.Fatalf("failed to decode rendered YAML: %v\noutput:\n%s", decErr, out)
+		}
+		if a.Metadata.Name != "" {
+			found[a.Metadata.Name] = a
+		}
+	}
+
+	parent, ok := found["aicr-stack"]
+	if !ok {
+		t.Fatalf("rendered output missing parent Application 'aicr-stack'\noutput:\n%s", out)
+	}
+	if parent.Spec.Source.RepoURL != wantRepoURL {
+		t.Errorf("parent App repoURL: got %q, want %q", parent.Spec.Source.RepoURL, wantRepoURL)
+	}
+	if parent.Spec.Source.Chart != "aicr-bundle" {
+		t.Errorf("parent App chart: got %q, want \"aicr-bundle\"", parent.Spec.Source.Chart)
+	}
+	if parent.Spec.Source.TargetRevision != wantTagName {
+		t.Errorf("parent App targetRevision: got %q, want %q", parent.Spec.Source.TargetRevision, wantTagName)
+	}
+
+	child, ok := found["nodewright-customizations"]
+	if !ok {
+		t.Fatalf("rendered output missing path-based child 'nodewright-customizations'")
+	}
+	if child.Spec.Source.RepoURL != wantRepoURL {
+		t.Errorf("child path-based repoURL: got %q, want %q", child.Spec.Source.RepoURL, wantRepoURL)
+	}
+	if child.Spec.Source.TargetRevision != wantTagName {
+		t.Errorf("child path-based targetRevision: got %q, want %q", child.Spec.Source.TargetRevision, wantTagName)
+	}
+	if child.Spec.Source.Path != "002-nodewright-customizations" {
+		t.Errorf("child path: got %q, want \"002-nodewright-customizations\" (NNN-folder name is structural, must not be templated)", child.Spec.Source.Path)
+	}
+
+	// And a multi-source upstream-helm child should NOT have its repoURL
+	// templated — its repoURL is the upstream chart registry, not the
+	// bundle URL.
+	upstream, ok := found["cert-manager"]
+	if !ok {
+		t.Fatalf("rendered output missing upstream-helm child 'cert-manager'")
+	}
+	if upstream.Spec.Source.RepoURL != "https://charts.jetstack.io" {
+		t.Errorf("upstream-helm child repoURL should be the upstream chart registry, got %q", upstream.Spec.Source.RepoURL)
+	}
+}
+
+// TestHelmTemplate_FailsWithoutRepoURL verifies the `required` directive
+// in the parent App template fires when the user omits --set repoURL. This
+// is the safety net that prevents users from accidentally publishing a
+// chart whose Application would point at an empty URL.
+func TestHelmTemplate_FailsWithoutRepoURL(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not available; skipping live-render test")
+	}
+
+	outputDir := t.TempDir()
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager",
+			Version: "v1.20.2", Type: recipe.ComponentTypeHelm,
+			Source: "https://charts.jetstack.io",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager"}
+	g := &Generator{
+		RecipeResult:    rr,
+		ComponentValues: map[string]map[string]any{"cert-manager": {}},
+		Version:         "v0.0.0-test",
+	}
+	if _, err := g.Generate(context.Background(), outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(cmdCtx, "helm", "template", "test-release", outputDir) //nolint:gosec // controlled args
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected helm template to fail without --set repoURL, but it succeeded:\n%s", out)
+	}
+	if !strings.Contains(string(out), "repoURL is required") {
+		t.Errorf("expected error message to mention 'repoURL is required', got:\n%s", out)
+	}
+}
+
+// assertGolden reads outDir/relPath and diffs it against goldenDir/relPath.
+// With -update, writes the actual content to the golden path.
+func assertGolden(t *testing.T, outDir, goldenDir, relPath string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(outDir, relPath))
+	if err != nil {
+		t.Fatalf("read actual %s: %v", relPath, err)
+	}
+	goldenPath := filepath.Join(goldenDir, relPath)
+	if *update {
+		if err = os.MkdirAll(filepath.Dir(goldenPath), 0o755); err != nil {
+			t.Fatalf("mkdir golden: %v", err)
+		}
+		if err = os.WriteFile(goldenPath, got, 0o644); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		return
+	}
+	want, err := os.ReadFile(goldenPath)
+	if err != nil {
+		t.Fatalf("read golden %s: %v (run with -update to regenerate)", goldenPath, err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("%s differs from golden:\n--- got ---\n%s\n--- want ---\n%s", relPath, got, want)
 	}
 }

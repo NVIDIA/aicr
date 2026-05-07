@@ -1,0 +1,27 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aicr-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: {{ required "repoURL is required: pass --set repoURL=<published bundle URL> (e.g., oci://<registry>/<path>/aicr-bundle)" .Values.repoURL | quote }}
+    chart: aicr-bundle
+    targetRevision: {{ .Values.targetRevision | default .Chart.Version | quote }}
+    helm:
+      valuesObject:
+{{ toYaml .Values | indent 8 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # ServerSideApply: required for charts whose CRDs exceed kubectl's
+      # 262144-byte client-side annotation cap. See application.yaml.tmpl
+      # in the upstream argocd deployer for the full rationale.
+      - ServerSideApply=true

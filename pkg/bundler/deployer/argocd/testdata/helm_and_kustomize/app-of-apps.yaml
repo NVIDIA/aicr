@@ -1,0 +1,21 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nvidia-stack
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example/aicr-bundles.git
+    targetRevision: main
+    path: .
+    directory:
+      recurse: true
+      include: '*/application.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

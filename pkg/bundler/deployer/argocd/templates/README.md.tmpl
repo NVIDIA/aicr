@@ -14,8 +14,8 @@ The following components are included in deployment order:
 | Component | Type | Version | Sync Wave | Namespace |
 |-----------|------|---------|-----------|-----------|
 {{- range .Components }}
-{{ if .IsKustomize -}}
-| {{ .Name }} | Kustomize | {{ .Tag }} | {{ .SyncWave }} | {{ .Namespace }} |
+{{ if .IsLocalChart -}}
+| {{ .Name }} | Local chart | - | {{ .SyncWave }} | {{ .Namespace }} |
 {{- else -}}
 | {{ .Name }} | Helm | {{ .Version }} | {{ .SyncWave }} | {{ .Namespace }} |
 {{- end }}
@@ -45,11 +45,22 @@ git push -u origin main
 
 ### 2. Update Repository URL
 
-Edit `app-of-apps.yaml` and replace the placeholder URL:
+`repoURL` is baked into both `app-of-apps.yaml` *and* every per-component
+`NNN-<component>/application.yaml` (path-based child Applications inherit
+the bundle's repo URL — Argo CD does not propagate the parent's `repoURL`
+to children). Update all of them in one pass:
 
 ```bash
-# Update the repoURL in app-of-apps.yaml
-sed -i 's|https://github.com/YOUR-ORG/YOUR-REPO.git|YOUR_ACTUAL_REPO_URL|g' app-of-apps.yaml
+# Update repoURL across the parent and every per-component application.yaml
+find . -name 'application.yaml' -o -name 'app-of-apps.yaml' \
+  | xargs sed -i 's|https://github.com/YOUR-ORG/YOUR-REPO.git|YOUR_ACTUAL_REPO_URL|g'
+```
+
+To avoid the rewrite, regenerate the bundle with `--repo` so the URL is
+populated at bundle time:
+
+```bash
+aicr bundle --deployer argocd --repo YOUR_ACTUAL_REPO_URL ...
 ```
 
 ### 3. Apply App of Apps
@@ -73,18 +84,35 @@ argocd app sync nvidia-stack --watch
 
 ## Directory Structure
 
-```
+Each `NNN-<component>/` folder is one of two kinds, distinguished by the
+presence of `Chart.yaml`. KindUpstreamHelm folders (no `Chart.yaml`) carry
+just `values.yaml` + `application.yaml` — the Application is multi-source
+(upstream Helm repo + your git repo for values). KindLocalHelm folders
+(`Chart.yaml` + `templates/`) carry the wrapped chart bytes plus a
+path-based single-source `application.yaml`.
+
+```text
 <bundle-directory>/
 ├── app-of-apps.yaml           # Parent application
 ├── README.md                  # This file
 {{- range .Components }}
-├── {{ .Name }}/
-│   ├── application.yaml       # Argo CD Application (sync-wave: {{ .SyncWave }})
-{{- if not .IsKustomize }}
-│   └── values.yaml            # Helm values
+├── {{ .BundleDir }}/
+{{- if .IsLocalChart }}
+│   ├── Chart.yaml             # Wrapped local chart
+│   ├── templates/             # Rendered manifests
+│   ├── values.yaml            # Static values
+│   └── application.yaml       # Path-based Application (sync-wave: {{ .SyncWave }})
+{{- else }}
+│   ├── values.yaml            # Static values (multi-source helm.valueFiles)
+│   └── application.yaml       # Multi-source Application (sync-wave: {{ .SyncWave }})
 {{- end }}
 {{- end }}
 ```
+
+`--dynamic` is not supported with `--deployer argocd` — use `--deployer
+argocd-helm` for install-time values. The helm-deployer files
+(`install.sh`, `upstream.env`, `cluster-values.yaml`) are intentionally
+omitted; Argo's repo-server never consumes them.
 
 ## Sync Waves
 
