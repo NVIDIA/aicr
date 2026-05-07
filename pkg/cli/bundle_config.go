@@ -20,8 +20,11 @@ import (
 	"maps"
 	"slices"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/urfave/cli/v3"
 
+	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -78,4 +81,111 @@ func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]
 		return parsed, nil
 	}
 	return maps.Clone(fallback), nil
+}
+
+// resolveTolerations returns the final tolerations slice for a flag,
+// preferring CLI input over the typed fallback (already parsed from
+// config). When neither source supplies a value, returns
+// snapshotter.DefaultTolerations() — matching the parser's
+// nil-input → DefaultTolerations behavior so callers never see a nil
+// toleration slice from this entry point.
+func resolveTolerations(cmd *cli.Command, flagName string, fallback []corev1.Toleration) ([]corev1.Toleration, error) {
+	if cmd.IsSet(flagName) {
+		raw := cmd.StringSlice(flagName)
+		if len(fallback) > 0 {
+			slog.Info("CLI flag replacing config value", "flag", flagName,
+				"configCount", len(fallback), "overrideCount", len(raw))
+		}
+		parsed, err := snapshotter.ParseTolerations(raw)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s", flagName), err)
+		}
+		return parsed, nil
+	}
+	if fallback == nil {
+		return snapshotter.DefaultTolerations(), nil
+	}
+	return fallback, nil
+}
+
+// resolveComponentPaths returns the final component-path slice for a
+// flag, preferring CLI input (parsed via parser) over the typed
+// fallback (already parsed from config in BundleSpec.Resolve).
+func resolveComponentPaths(cmd *cli.Command, flagName string,
+	fallback []bundlercfg.ComponentPath,
+	parser func([]string) ([]bundlercfg.ComponentPath, error),
+) ([]bundlercfg.ComponentPath, error) {
+
+	if cmd.IsSet(flagName) {
+		raw := cmd.StringSlice(flagName)
+		if len(fallback) > 0 {
+			slog.Info("CLI flag replacing config value", "flag", flagName,
+				"configCount", len(fallback), "overrideCount", len(raw))
+		}
+		parsed, err := parser(raw)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s", flagName), err)
+		}
+		return parsed, nil
+	}
+	return fallback, nil
+}
+
+// resolveTaint returns the final taint pointer for a flag, preferring
+// CLI input (parsed via snapshotter.ParseTaint) over the typed fallback
+// (already parsed from config in BundleSpec.Resolve). An explicitly
+// empty CLI value masks the fallback and yields nil — matching the
+// pre-refactor behavior where stringFlagOrConfig would surface "" to
+// the caller, the caller would skip parsing, and the taint would
+// remain unset.
+func resolveTaint(cmd *cli.Command, flagName string, fallback *corev1.Taint) (*corev1.Taint, error) {
+	if cmd.IsSet(flagName) {
+		raw := cmd.String(flagName)
+		if raw == "" {
+			//nolint:nilnil // a nil taint is the documented "no gate" state.
+			return nil, nil
+		}
+		t, err := snapshotter.ParseTaint(raw)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s", flagName), err)
+		}
+		if fallback != nil {
+			slog.Info("CLI flag overriding config value", "flag", flagName)
+		}
+		return t, nil
+	}
+	return fallback, nil
+}
+
+// resolveDeployer returns the final deployer for the --deployer flag,
+// preferring CLI input over the typed fallback. When the CLI flag is
+// set to an empty string OR neither source supplies a value, returns
+// bundlercfg.DeployerHelm — matching the pre-refactor behavior where
+// the empty deployer string fell through to the Helm default rather
+// than being passed to ParseDeployerType (which rejects "").
+func resolveDeployer(cmd *cli.Command, fallback bundlercfg.DeployerType) (bundlercfg.DeployerType, error) {
+	const flagName = "deployer"
+	if cmd.IsSet(flagName) {
+		raw := cmd.String(flagName)
+		if raw == "" {
+			return bundlercfg.DeployerHelm, nil
+		}
+		if fallback != "" && string(fallback) != raw {
+			slog.Info("CLI flag overriding config value", "flag", flagName,
+				"config", string(fallback), "override", raw)
+		}
+		d, err := bundlercfg.ParseDeployerType(raw)
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid --%s value", flagName), err)
+		}
+		return d, nil
+	}
+	if fallback != "" {
+		return fallback, nil
+	}
+	return bundlercfg.DeployerHelm, nil
 }

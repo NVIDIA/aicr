@@ -14,20 +14,14 @@
 
 package config
 
-import (
-	"maps"
-	"slices"
-)
-
 // Accessors here are nil-receiver tolerant so callers can write
-// `cfg.RecipeCriteria()` without nil-checking every intermediate pointer.
-// Slice and map returns are defensive copies (slices.Clone / maps.Clone)
-// so callers cannot mutate the loaded config; nil inputs preserve nil
-// outputs while explicitly-empty collections (e.g. `set: []` in YAML)
-// round-trip as non-nil empty values, preserving the user's intent to
-// clear an inherited default.
-
-// === Top-level ===
+// `cfg.Recipe().OutputPath()` without nil-checking every intermediate pointer.
+//
+// Bundle-section accessors that previously returned untyped strings are
+// gone — callers now consume (*BundleSpec).Resolve which performs the
+// wire→domain conversion exactly once. The recipe-section accessors
+// here remain because their fields are simple strings with no enum
+// parsing beyond Output.Format (handled inline at the call site).
 
 // Recipe returns the recipe section, or nil if cfg or the section is unset.
 func (c *AICRConfig) Recipe() *RecipeSpec {
@@ -43,16 +37,6 @@ func (c *AICRConfig) Bundle() *BundleSpec {
 		return nil
 	}
 	return c.Spec.Bundle
-}
-
-// === RecipeSpec accessors ===
-
-// CriteriaFields returns the criteria spec or nil.
-func (r *RecipeSpec) CriteriaFields() *CriteriaSpec {
-	if r == nil {
-		return nil
-	}
-	return r.Criteria
 }
 
 // SnapshotPath returns spec.recipe.input.snapshot, or "" when unset.
@@ -85,166 +69,4 @@ func (r *RecipeSpec) DataDir() string {
 		return ""
 	}
 	return r.Data
-}
-
-// === BundleSpec accessors ===
-
-// RecipeInput returns spec.bundle.input.recipe, or "" when unset.
-func (b *BundleSpec) RecipeInput() string {
-	if b == nil || b.Input == nil {
-		return ""
-	}
-	return b.Input.Recipe
-}
-
-// OutputTarget returns spec.bundle.output.target, or "" when unset.
-func (b *BundleSpec) OutputTarget() string {
-	if b == nil || b.Output == nil {
-		return ""
-	}
-	return b.Output.Target
-}
-
-// OutputImageRefs returns spec.bundle.output.imageRefs, or "" when unset.
-func (b *BundleSpec) OutputImageRefs() string {
-	if b == nil || b.Output == nil {
-		return ""
-	}
-	return b.Output.ImageRefs
-}
-
-// DeploymentDeployer returns spec.bundle.deployment.deployer, or "" when unset.
-func (b *BundleSpec) DeploymentDeployer() string {
-	if b == nil || b.Deployment == nil {
-		return ""
-	}
-	return b.Deployment.Deployer
-}
-
-// DeploymentRepo returns spec.bundle.deployment.repo, or "" when unset.
-func (b *BundleSpec) DeploymentRepo() string {
-	if b == nil || b.Deployment == nil {
-		return ""
-	}
-	return b.Deployment.Repo
-}
-
-// DeploymentSet returns a defensive copy of spec.bundle.deployment.set.
-func (b *BundleSpec) DeploymentSet() []string {
-	if b == nil || b.Deployment == nil {
-		return nil
-	}
-	return slices.Clone(b.Deployment.Set)
-}
-
-// DeploymentDynamic returns a defensive copy of spec.bundle.deployment.dynamic.
-func (b *BundleSpec) DeploymentDynamic() []string {
-	if b == nil || b.Deployment == nil {
-		return nil
-	}
-	return slices.Clone(b.Deployment.Dynamic)
-}
-
-// SystemNodeSelector returns a defensive copy of the system selector.
-func (b *BundleSpec) SystemNodeSelector() map[string]string {
-	if b == nil || b.Scheduling == nil {
-		return nil
-	}
-	return maps.Clone(b.Scheduling.SystemNodeSelector)
-}
-
-// SystemNodeTolerations returns a defensive copy of the system tolerations.
-func (b *BundleSpec) SystemNodeTolerations() []string {
-	if b == nil || b.Scheduling == nil {
-		return nil
-	}
-	return slices.Clone(b.Scheduling.SystemNodeTolerations)
-}
-
-// AcceleratedNodeSelector returns a defensive copy of the accelerated selector.
-func (b *BundleSpec) AcceleratedNodeSelector() map[string]string {
-	if b == nil || b.Scheduling == nil {
-		return nil
-	}
-	return maps.Clone(b.Scheduling.AcceleratedNodeSelector)
-}
-
-// AcceleratedNodeTolerations returns a defensive copy of accelerated tolerations.
-func (b *BundleSpec) AcceleratedNodeTolerations() []string {
-	if b == nil || b.Scheduling == nil {
-		return nil
-	}
-	return slices.Clone(b.Scheduling.AcceleratedNodeTolerations)
-}
-
-// WorkloadGate returns spec.bundle.scheduling.workloadGate, or "" when unset.
-func (b *BundleSpec) WorkloadGate() string {
-	if b == nil || b.Scheduling == nil {
-		return ""
-	}
-	return b.Scheduling.WorkloadGate
-}
-
-// WorkloadSelector returns a defensive copy of the workload selector.
-func (b *BundleSpec) WorkloadSelector() map[string]string {
-	if b == nil || b.Scheduling == nil {
-		return nil
-	}
-	return maps.Clone(b.Scheduling.WorkloadSelector)
-}
-
-// SchedulingNodes returns spec.bundle.scheduling.nodes, or 0 when unset.
-func (b *BundleSpec) SchedulingNodes() int {
-	if b == nil || b.Scheduling == nil {
-		return 0
-	}
-	return b.Scheduling.Nodes
-}
-
-// SchedulingStorageClass returns spec.bundle.scheduling.storageClass, or "" when unset.
-func (b *BundleSpec) SchedulingStorageClass() string {
-	if b == nil || b.Scheduling == nil {
-		return ""
-	}
-	return b.Scheduling.StorageClass
-}
-
-// AttestEnabled returns spec.bundle.attestation.enabled, or false when unset.
-func (b *BundleSpec) AttestEnabled() bool {
-	if b == nil || b.Attestation == nil {
-		return false
-	}
-	return b.Attestation.Enabled
-}
-
-// CertIDRegexp returns the certificateIdentityRegexp, or "" when unset.
-func (b *BundleSpec) CertIDRegexp() string {
-	if b == nil || b.Attestation == nil {
-		return ""
-	}
-	return b.Attestation.CertificateIdentityRegexp
-}
-
-// OIDCDeviceFlow returns spec.bundle.attestation.oidcDeviceFlow.
-func (b *BundleSpec) OIDCDeviceFlow() bool {
-	if b == nil || b.Attestation == nil {
-		return false
-	}
-	return b.Attestation.OIDCDeviceFlow
-}
-
-// RegistryInsecureTLS returns spec.bundle.registry.insecureTLS.
-func (b *BundleSpec) RegistryInsecureTLS() bool {
-	if b == nil || b.Registry == nil {
-		return false
-	}
-	return b.Registry.InsecureTLS
-}
-
-// RegistryPlainHTTP returns spec.bundle.registry.plainHTTP.
-func (b *BundleSpec) RegistryPlainHTTP() bool {
-	if b == nil || b.Registry == nil {
-		return false
-	}
-	return b.Registry.PlainHTTP
 }

@@ -18,9 +18,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -84,6 +82,11 @@ func (s Spec) validateRecipeBundleHandoff() error {
 	return nil
 }
 
+// Wire-type validation delegates to the same Resolve methods callers use
+// to consume the values. There is no parallel parser to maintain — if a
+// field parses cleanly here, it will parse cleanly when consumed, and
+// vice versa.
+
 func (r *RecipeSpec) validate() error {
 	if r == nil {
 		return nil
@@ -92,7 +95,7 @@ func (r *RecipeSpec) validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"spec.recipe.criteria and spec.recipe.input.snapshot are mutually exclusive")
 	}
-	if err := r.Criteria.validate(); err != nil {
+	if _, err := r.ResolveCriteria(); err != nil {
 		return err
 	}
 	if r.Output != nil && r.Output.Format != "" {
@@ -104,55 +107,12 @@ func (r *RecipeSpec) validate() error {
 	return nil
 }
 
-func (c *CriteriaSpec) validate() error {
-	if c == nil {
-		return nil
-	}
-	if c.Service != "" {
-		if _, err := recipe.ParseCriteriaServiceType(c.Service); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.recipe.criteria.service", err)
-		}
-	}
-	if c.Accelerator != "" {
-		if _, err := recipe.ParseCriteriaAcceleratorType(c.Accelerator); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.recipe.criteria.accelerator", err)
-		}
-	}
-	if c.Intent != "" {
-		if _, err := recipe.ParseCriteriaIntentType(c.Intent); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.recipe.criteria.intent", err)
-		}
-	}
-	if c.OS != "" {
-		if _, err := recipe.ParseCriteriaOSType(c.OS); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.recipe.criteria.os", err)
-		}
-	}
-	if c.Platform != "" {
-		if _, err := recipe.ParseCriteriaPlatformType(c.Platform); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.recipe.criteria.platform", err)
-		}
-	}
-	if c.Nodes < 0 {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("spec.recipe.criteria.nodes must be >= 0, got %d", c.Nodes))
-	}
-	return nil
-}
-
 func (b *BundleSpec) validate() error {
 	if b == nil {
 		return nil
 	}
-	if b.Deployment != nil && b.Deployment.Deployer != "" {
-		if _, err := bundlercfg.ParseDeployerType(b.Deployment.Deployer); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest,
-				"invalid spec.bundle.deployment.deployer", err)
-		}
-	}
-	if b.Scheduling != nil && b.Scheduling.Nodes < 0 {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("spec.bundle.scheduling.nodes must be >= 0, got %d", b.Scheduling.Nodes))
+	if _, err := b.Resolve(); err != nil {
+		return err
 	}
 	return nil
 }

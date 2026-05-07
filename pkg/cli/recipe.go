@@ -210,59 +210,41 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // populates it. CLI flags subsequently override both via applyCriteriaOverrides,
 // yielding precedence: CLI > config > snapshot.
 //
+// Conversion (string→typed enum) happens in (*config.RecipeSpec).ResolveCriteria
+// — this function only handles the merge-and-log concern.
+//
 // Override events are logged at INFO so the resolved value is auditable.
 func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig) error {
-	c := cfg.Recipe().CriteriaFields()
-	if c == nil {
-		return nil
+	resolved, err := cfg.Recipe().ResolveCriteria()
+	if err != nil {
+		return err
 	}
-
-	if c.Service != "" {
-		parsed, err := recipe.ParseCriteriaServiceType(c.Service)
-		if err != nil {
-			return err
-		}
-		logCriteriaOverride("service", string(criteria.Service), string(parsed))
-		criteria.Service = parsed
+	if resolved.Service != "" {
+		logCriteriaOverride("service", string(criteria.Service), string(resolved.Service))
+		criteria.Service = resolved.Service
 	}
-	if c.Accelerator != "" {
-		parsed, err := recipe.ParseCriteriaAcceleratorType(c.Accelerator)
-		if err != nil {
-			return err
-		}
-		logCriteriaOverride("accelerator", string(criteria.Accelerator), string(parsed))
-		criteria.Accelerator = parsed
+	if resolved.Accelerator != "" {
+		logCriteriaOverride("accelerator", string(criteria.Accelerator), string(resolved.Accelerator))
+		criteria.Accelerator = resolved.Accelerator
 	}
-	if c.Intent != "" {
-		parsed, err := recipe.ParseCriteriaIntentType(c.Intent)
-		if err != nil {
-			return err
-		}
-		logCriteriaOverride("intent", string(criteria.Intent), string(parsed))
-		criteria.Intent = parsed
+	if resolved.Intent != "" {
+		logCriteriaOverride("intent", string(criteria.Intent), string(resolved.Intent))
+		criteria.Intent = resolved.Intent
 	}
-	if c.OS != "" {
-		parsed, err := recipe.ParseCriteriaOSType(c.OS)
-		if err != nil {
-			return err
-		}
-		logCriteriaOverride("os", string(criteria.OS), string(parsed))
-		criteria.OS = parsed
+	if resolved.OS != "" {
+		logCriteriaOverride("os", string(criteria.OS), string(resolved.OS))
+		criteria.OS = resolved.OS
 	}
-	if c.Platform != "" {
-		parsed, err := recipe.ParseCriteriaPlatformType(c.Platform)
-		if err != nil {
-			return err
-		}
-		logCriteriaOverride("platform", string(criteria.Platform), string(parsed))
-		criteria.Platform = parsed
+	if resolved.Platform != "" {
+		logCriteriaOverride("platform", string(criteria.Platform), string(resolved.Platform))
+		criteria.Platform = resolved.Platform
 	}
-	if c.Nodes > 0 {
-		if criteria.Nodes > 0 && criteria.Nodes != c.Nodes {
+	if resolved.Nodes > 0 {
+		if criteria.Nodes > 0 && criteria.Nodes != resolved.Nodes {
 			slog.Info("config overriding snapshot-detected value",
-				"field", "nodes", "snapshot", criteria.Nodes, "config", c.Nodes)
+				"field", "nodes", "snapshot", criteria.Nodes, "config", resolved.Nodes)
 		}
-		criteria.Nodes = c.Nodes
+		criteria.Nodes = resolved.Nodes
 	}
 	return nil
 }

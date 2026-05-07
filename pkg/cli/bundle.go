@@ -35,7 +35,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/urfave/cli/v3"
 )
 
@@ -82,24 +81,31 @@ type bundleCmdOptions struct {
 	imageRefsPath string // Path to write published image references (like ko --image-refs)
 }
 
-// parseBundleCmdOptions parses and validates command options. When cfg is
-// non-nil, spec.bundle fields supply defaults; CLI flags always override.
+// parseBundleCmdOptions parses and validates command options. The wire
+// config is converted to a typed *config.BundleResolved up-front via
+// (*config.BundleSpec).Resolve so this function only layers CLI flag
+// overrides onto already-typed values. All string→typed conversion of
+// config-supplied fields happens at the conversion boundary in Resolve;
+// errors from that boundary carry "spec.bundle.<path>" attribution.
 //
 //nolint:gocyclo // option resolution is inherently long but linear
 func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmdOptions, error) {
-	bs := cfg.Bundle()
+	resolved, err := cfg.Bundle().Resolve()
+	if err != nil {
+		return nil, err
+	}
 
 	opts := &bundleCmdOptions{
-		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", bs.RecipeInput()),
+		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", resolved.RecipeInput),
 		kubeconfig:                cmd.String("kubeconfig"),
-		repoURL:                   stringFlagOrConfig(cmd, "repo", bs.DeploymentRepo()),
-		attest:                    boolFlagOrConfig(cmd, "attest", bs.AttestEnabled()),
-		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bs.CertIDRegexp()),
+		repoURL:                   stringFlagOrConfig(cmd, "repo", resolved.Repo),
+		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
+		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String("identity-token"),
-		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", bs.OIDCDeviceFlow()),
-		insecureTLS:               boolFlagOrConfig(cmd, "insecure-tls", bs.RegistryInsecureTLS()),
-		plainHTTP:                 boolFlagOrConfig(cmd, "plain-http", bs.RegistryPlainHTTP()),
-		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", bs.OutputImageRefs()),
+		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", resolved.OIDCDeviceFlow),
+		insecureTLS:               boolFlagOrConfig(cmd, "insecure-tls", resolved.InsecureTLS),
+		plainHTTP:                 boolFlagOrConfig(cmd, "plain-http", resolved.PlainHTTP),
+		imageRefsPath:             stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
 	}
 
 	if opts.recipeFilePath == "" {
@@ -115,39 +121,26 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		!strings.HasPrefix(opts.recipeFilePath, "https://") &&
 		!strings.HasPrefix(opts.recipeFilePath, serializer.ConfigMapURIScheme) {
 
-		absPath, err := filepath.Abs(opts.recipeFilePath)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve recipe path", err)
+		absPath, absErr := filepath.Abs(opts.recipeFilePath)
+		if absErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve recipe path", absErr)
 		}
-		if _, err := os.Stat(absPath); err != nil {
-			if os.IsNotExist(err) {
+		if _, statErr := os.Stat(absPath); statErr != nil {
+			if os.IsNotExist(statErr) {
 				return nil, errors.New(errors.ErrCodeNotFound, "recipe file not found: "+absPath)
 			}
-			return nil, errors.Wrap(errors.ErrCodeInternal, "cannot access recipe file: "+absPath, err)
+			return nil, errors.Wrap(errors.ErrCodeInternal, "cannot access recipe file: "+absPath, statErr)
 		}
 		opts.recipeFilePath = absPath
 	}
 
-	// Parse and validate deployer flag using strongly-typed parser
-	deployerStr := stringFlagOrConfig(cmd, "deployer", bs.DeploymentDeployer())
-	if deployerStr == "" {
-		opts.deployer = config.DeployerHelm
-	} else {
-		deployer, err := config.ParseDeployerType(deployerStr)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --deployer value", err)
-		}
-		opts.deployer = deployer
+	if opts.deployer, err = resolveDeployer(cmd, resolved.Deployer); err != nil {
+		return nil, err
 	}
 
-	// Parse output target (detects oci:// URI or local directory)
-	outputTarget := stringFlagOrConfig(cmd, "output", bs.OutputTarget())
-	if outputTarget == "" {
-		outputTarget = "."
-	}
-	ref, err := oci.ParseOutputTarget(outputTarget)
+	ref, err := resolveOutputTarget(cmd, resolved)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --output value", err)
+		return nil, err
 	}
 
 	if ref.IsOCI {
@@ -180,47 +173,37 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.targetRevision = opts.ociRef.Tag
 	}
 
-	// Parse value overrides from --set / spec.bundle.deployment.set
-	opts.valueOverrides, err = config.ParseValueOverrides(stringSliceFlagOrConfig(cmd, "set", bs.DeploymentSet()))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "set", "spec.bundle.deployment.set"), err)
+	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", resolved.ValueOverrides, config.ParseValueOverrides); err != nil {
+		return nil, err
+	}
+	if opts.dynamicValues, err = resolveComponentPaths(cmd, "dynamic", resolved.DynamicValues, config.ParseDynamicValues); err != nil {
+		return nil, err
 	}
 
-	opts.dynamicValues, err = config.ParseDynamicValues(stringSliceFlagOrConfig(cmd, "dynamic", bs.DeploymentDynamic()))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "dynamic", "spec.bundle.deployment.dynamic"), err)
+	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", resolved.SystemNodeSelector); err != nil {
+		return nil, err
+	}
+	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", resolved.AcceleratedNodeSelector); err != nil {
+		return nil, err
 	}
 
-	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", bs.SystemNodeSelector()); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"invalid "+sourceLabel(cmd, "system-node-selector", "spec.bundle.scheduling.systemNodeSelector"), err)
+	if opts.systemNodeTolerations, err = resolveTolerations(cmd, "system-node-toleration", resolved.SystemNodeTolerations); err != nil {
+		return nil, err
 	}
-	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", bs.AcceleratedNodeSelector()); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"invalid "+sourceLabel(cmd, "accelerated-node-selector", "spec.bundle.scheduling.acceleratedNodeSelector"), err)
+	if opts.acceleratedNodeTolerations, err = resolveTolerations(cmd, "accelerated-node-toleration", resolved.AcceleratedNodeTolerations); err != nil {
+		return nil, err
 	}
 
-	if opts.systemNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "system-node-toleration", bs.SystemNodeTolerations())); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "system-node-toleration", "spec.bundle.scheduling.systemNodeTolerations"), err)
-	}
-	if opts.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(stringSliceFlagOrConfig(cmd, "accelerated-node-toleration", bs.AcceleratedNodeTolerations())); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "accelerated-node-toleration", "spec.bundle.scheduling.acceleratedNodeTolerations"), err)
+	if opts.workloadGateTaint, err = resolveTaint(cmd, "workload-gate", resolved.WorkloadGate); err != nil {
+		return nil, err
 	}
 
-	if workloadGateStr := stringFlagOrConfig(cmd, "workload-gate", bs.WorkloadGate()); workloadGateStr != "" {
-		opts.workloadGateTaint, err = snapshotter.ParseTaint(workloadGateStr)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid "+sourceLabel(cmd, "workload-gate", "spec.bundle.scheduling.workloadGate"), err)
-		}
-	}
-
-	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", bs.WorkloadSelector()); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			"invalid "+sourceLabel(cmd, "workload-selector", "spec.bundle.scheduling.workloadSelector"), err)
+	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", resolved.WorkloadSelector); err != nil {
+		return nil, err
 	}
 
 	// Estimated node count for bundle; 0 = unset.
-	n := intFlagOrConfig(cmd, "nodes", bs.SchedulingNodes())
+	n := intFlagOrConfig(cmd, "nodes", resolved.Nodes)
 	if n < 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
 	}
@@ -232,21 +215,44 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 			return nil, errors.New(errors.ErrCodeInvalidRequest, "--storage-class cannot be blank when specified")
 		}
 		opts.storageClass = sc
-	} else if v := bs.SchedulingStorageClass(); v != "" {
-		opts.storageClass = v
+	} else if resolved.StorageClass != "" {
+		opts.storageClass = resolved.StorageClass
 	}
 
 	return opts, nil
 }
 
-// sourceLabel returns the user-facing label of whichever input contributed
-// the value being parsed: the CLI flag if it was explicitly set, otherwise
-// the config-spec path. Used to keep parse errors pointed at the right place.
-func sourceLabel(cmd *cli.Command, flagName, configPath string) string {
+// resolveOutputTarget returns the parsed *oci.Reference for --output,
+// preferring CLI input over the typed fallback in resolved. When the
+// CLI flag is set to an empty string OR neither source supplies a
+// value, defaults to the current directory ("."). The empty-CLI case
+// matches pre-refactor behavior where stringFlagOrConfig surfaced ""
+// and the caller substituted "." before parsing.
+func resolveOutputTarget(cmd *cli.Command, resolved *appcfg.BundleResolved) (*oci.Reference, error) {
+	const flagName = "output"
 	if cmd.IsSet(flagName) {
-		return "--" + flagName
+		target := cmd.String(flagName)
+		if target == "" {
+			target = "."
+		}
+		if resolved.OutputTargetRaw != "" && resolved.OutputTargetRaw != target {
+			slog.Info("CLI flag overriding config value", "flag", flagName,
+				"config", resolved.OutputTargetRaw, "override", target)
+		}
+		ref, err := oci.ParseOutputTarget(target)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --"+flagName+" value", err)
+		}
+		return ref, nil
 	}
-	return configPath
+	if resolved.OutputTarget != nil {
+		return resolved.OutputTarget, nil
+	}
+	ref, err := oci.ParseOutputTarget(".")
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve default output target", err)
+	}
+	return ref, nil
 }
 
 //nolint:funlen // bundle command is inherently large (flags + description + action)
