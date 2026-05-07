@@ -57,7 +57,7 @@ then create an HPA targeting `gpu_utilization` to demonstrate autoscaling.
 
 **Test manifest:** `pkg/evidence/scripts/manifests/hpa-gpu-test.yaml`
 ```yaml
-# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.

@@ -1,4 +1,4 @@
-// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1833,7 +1833,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 		ComponentValues: map[string]map[string]any{"skyhook-customizations": {}},
 		ComponentManifests: map[string]map[string][]byte{
 			"skyhook-customizations": {
-				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
 apiVersion: v1
 kind: ConfigMap
@@ -1861,7 +1861,7 @@ func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 		},
 		ComponentManifests: map[string]map[string][]byte{
 			"gpu-operator": {
-				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
 apiVersion: v1
 kind: Service

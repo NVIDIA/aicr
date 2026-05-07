@@ -1,4 +1,4 @@
-// Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,7 +89,7 @@ func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 			"skyhook-customizations": {
 				// Realistic input: project recipe manifests carry a license header
 				// (see recipes/components/gpu-operator/manifests/dcgm-exporter.yaml).
-				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -148,7 +148,7 @@ func TestWrite_Mixed(t *testing.T) {
 		ComponentManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				// Realistic: real project manifests carry a license header.
-				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -230,7 +230,7 @@ func TestWrite_Ordering(t *testing.T) {
 		},
 		ComponentManifests: map[string]map[string][]byte{
 			"b": {
-				"b/manifests/x.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+				"b/manifests/x.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
