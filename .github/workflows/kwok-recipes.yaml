@@ -54,6 +54,7 @@ concurrency:
 jobs:
   discover:
     name: Discover Recipes
+    if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -303,7 +304,7 @@ jobs:
       group: kwok-tier3-${{ github.sha }}
       cancel-in-progress: false
     if: >-
-      (github.event_name == 'push' || github.event_name == 'schedule') &&
+      (github.event_name == 'push' || (github.event_name == 'schedule' && github.repository == 'nvidia/aicr')) &&
       needs.discover.outputs.tier3 != '[]' &&
       needs.discover.outputs.tier3 != ''
     runs-on: ubuntu-latest

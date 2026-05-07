@@ -29,6 +29,7 @@ jobs:
 
   remind:
     name: Nudge Inactive PRs
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

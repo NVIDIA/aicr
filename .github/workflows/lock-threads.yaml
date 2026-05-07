@@ -29,6 +29,7 @@ jobs:
 
   lock:
     name: Lock Closed Threads
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     permissions:
       issues: write
