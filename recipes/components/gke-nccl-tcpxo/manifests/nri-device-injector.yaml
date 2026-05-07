@@ -64,7 +64,7 @@ spec:
       # root mount restrictions. If NRI is not enabled on your cluster,
       # configure it via node pool settings or manually patch containerd config.
       containers:
-        - image: "gcr.io/gke-release/nri-device-injector@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c"
+        - image: "gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c"
           name: device-injector
           resources:
             requests:
