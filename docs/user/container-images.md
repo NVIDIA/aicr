@@ -275,7 +275,7 @@ provenance attestation is attached. A non-zero exit from the first
 
 ### Automated check
 
-[`tools/s3c`](../../tools/s3c) wraps
+[`tools/s3c`](https://github.com/NVIDIA/aicr/blob/main/tools/s3c) wraps
 the three commands above and emits a per-component report:
 
 ```bash
@@ -357,6 +357,6 @@ Both targets shell out to `helm template` for every chart, so an internet connec
 ## Related
 
 - [Component Catalog](component-catalog.md) — what each component does and its scheduling characteristics.
-- [`tools/s3c`](../../tools/s3c) — on-demand cosign presence check for a component's images.
+- [`tools/s3c`](https://github.com/NVIDIA/aicr/blob/main/tools/s3c) — on-demand cosign presence check for a component's images.
 - [Supply chain epic](https://github.com/NVIDIA/aicr/issues/739) — visibility, reproducibility, and provenance roadmap.
 - [Air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) — planned follow-up.
