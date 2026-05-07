@@ -78,6 +78,13 @@ func parseResourceList(spec string) (corev1.ResourceList, error) {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("entry %q has invalid quantity", entry), err)
 		}
+		// Reject negative quantities at parse time so the user gets a
+		// clear CLI-layer error instead of an obscure failure when the
+		// Job is later created (Kubernetes resources cannot be negative).
+		if q.Sign() < 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has negative quantity", entry))
+		}
 		// Reject duplicate keys explicitly. Last-write-wins is too easy
 		// to misuse silently from a shell-templated invocation
 		// (e.g. accidentally appending the same key from two

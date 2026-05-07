@@ -269,6 +269,31 @@ func TestParseResourceList(t *testing.T) {
 			wantErrSubs: "memory=not-a-quantity",
 		},
 		{
+			name:        "negative quantity rejected (cpu)",
+			input:       "cpu=-1",
+			wantErr:     true,
+			wantErrSubs: "negative quantity",
+		},
+		{
+			name:        "negative quantity rejected (memory with suffix)",
+			input:       "memory=-1Gi",
+			wantErr:     true,
+			wantErrSubs: "negative quantity",
+		},
+		{
+			name:        "negative quantity in second entry rejected",
+			input:       "cpu=1,memory=-256Mi",
+			wantErr:     true,
+			wantErrSubs: "negative quantity",
+		},
+		{
+			name:  "zero quantity allowed",
+			input: "cpu=0",
+			wantKeys: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "0",
+			},
+		},
+		{
 			name:        "duplicate key rejected",
 			input:       "cpu=1,cpu=2",
 			wantErr:     true,
