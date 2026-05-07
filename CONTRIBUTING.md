@@ -1,6 +1,6 @@
 # Contributing to NVIDIA AI Cluster Runtime (AICR)
 
-Thank you for your interest in contributing to NVIDIA AICR! We welcome contributions from developers of all backgrounds and experience levels.
+We welcome contributions from developers of all backgrounds and experience levels.
 
 ## Table of Contents
 
@@ -373,5 +373,3 @@ Signed-off-by: Your Name <your@email.com>
 - [README.md](README.md) - Project overview and quick start
 - [docs/README.md](docs/README.md) - System overview and glossary
 - [docs/contributor/index.md](docs/contributor/index.md) - Architecture documentation
-
-Thank you for contributing to NVIDIA AICR! Your efforts help improve GPU-accelerated infrastructure for everyone.

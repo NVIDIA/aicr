@@ -22,7 +22,7 @@ brew install aicr
 
 ### Option 2: Automated Installation
 
-Install the latest version using the installation script:
+Install the latest version using the install script:
 
 ```shell
 curl -sfL https://raw.githubusercontent.com/NVIDIA/aicr/main/install | bash -s --

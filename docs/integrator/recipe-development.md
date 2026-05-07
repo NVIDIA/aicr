@@ -42,36 +42,6 @@ make qualify  # Includes end to end tests before submitting
 
 ---
 
-## Table of Contents
-
-- [Recipe Development Guide](#recipe-development-guide)
-  - [Quick Start: Contributing a Recipe](#quick-start-contributing-a-recipe)
-  - [Table of Contents](#table-of-contents)
-  - [Overview](#overview)
-  - [Recipe Structure](#recipe-structure)
-    - [Multi-Level Inheritance](#multi-level-inheritance)
-    - [Component Types](#component-types)
-  - [Component Configuration](#component-configuration)
-    - [Configuration Patterns](#configuration-patterns)
-    - [Value Merge Precedence](#value-merge-precedence)
-  - [File Naming Conventions](#file-naming-conventions)
-  - [Constraints and Validation](#constraints-and-validation)
-    - [Constraints](#constraints)
-    - [Validation Phases](#validation-phases)
-    - [Testing](#testing)
-  - [Working with Recipes](#working-with-recipes)
-    - [Adding a New Recipe](#adding-a-new-recipe)
-    - [Updating Recipes](#updating-recipes)
-  - [Best Practices](#best-practices)
-  - [Testing and Validation](#testing-and-validation)
-    - [Automated Tests](#automated-tests)
-    - [Running Tests](#running-tests)
-    - [Test Workflow](#test-workflow)
-  - [Advanced Topics](#advanced-topics)
-    - [External Data Sources](#external-data-sources)
-  - [Troubleshooting](#troubleshooting)
-  - [See Also](#see-also)
-
 ## Overview
 
 Recipe metadata files define component configurations for GPU-accelerated Kubernetes deployments using a **base-plus-overlay architecture** with three composition mechanisms — single-parent inheritance, explicit mixin composition, and criteria-wildcard matching:

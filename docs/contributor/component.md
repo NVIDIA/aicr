@@ -4,17 +4,9 @@ Learn how to add new components to AICR.
 
 ## Overview
 
-The bundler system converts RecipeInput objects into deployment artifacts. Artifacts include Helm values files, Kubernetes manifests, and optional custom manifests. Deployment documentation (READMEs) is generated at the deployer level, not by individual component bundlers.
+The bundler system converts RecipeInput objects into deployment artifacts (Helm values files, Kubernetes manifests, optional custom manifests). READMEs are generated at the deployer level, not by individual component bundlers.
 
-**Architecture:**
-
-- **Declarative Component Registry**: Component configuration is defined in `recipes/registry.yaml`
-- **No separate Go packages**: Adding a new component only requires a registry entry and values files
-- **DefaultBundler**: The `pkg/bundler` package generates Helm per-component bundles from recipes
-- **Recipe-driven**: Components are selected based on recipe's `componentRefs`
-- **Value overrides**: CLI `--set` flag allows runtime customization via `ApplyMapOverrides()`
-- **Node scheduling**: Registry defines paths for injecting node selectors and tolerations
-- **Structured errors**: Uses `pkg/errors` for error codes and wrapping
+**Architecture:** Component configuration is declarative in `recipes/registry.yaml` — adding a component requires only a registry entry and values files, no Go code. `pkg/bundler.DefaultBundler` generates Helm per-component bundles from recipes; components are selected by `componentRefs`. CLI `--set` overrides flow through `ApplyMapOverrides()`. The registry declares paths for injecting node selectors / tolerations. Errors use `pkg/errors` codes.
 
 ### Local Format (Shared Bundle Layout)
 
@@ -283,7 +275,7 @@ cd bundle
 chmod +x deploy.sh && ./deploy.sh
 ```
 
-**Step 6: Verify the deployment**
+**Step 5: Verify the deployment**
 
 Check that all pods are running:
 

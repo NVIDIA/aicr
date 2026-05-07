@@ -1,30 +1,19 @@
 # Bundle Template Tests
 
-Template rendering tests for AICR component manifests. These tests verify that
-Go template conditionals in manifest files produce correct output across
-different value combinations.
+Template rendering tests for AICR component manifests. Verifies that Go template conditionals (`if`/`else`, `default`, `toYaml`) in manifest files produce correct output across value combinations — catching wrong defaults, broken conditionals, or typos before live deployment.
 
 ## Why These Tests Matter
 
-Component manifests use Go templates with conditionals (`if`/`else`, `default`,
-`toYaml`) to support dynamic configuration. Without rendering tests, template
-bugs (wrong defaults, broken conditionals, typos in value keys) would only
-surface during live deployments.
+Without rendering tests, template bugs only surface during live deployments. These tests run `aicr bundle` and assert on the rendered output.
 
 ## Pattern
 
-Each component gets its own subdirectory with:
+Each component has its own subdirectory:
 
-1. **`chainsaw-test.yaml`** — Generates a recipe, runs `aicr bundle` with
-   different `--set` flags and scheduling options, then asserts on the rendered
-   manifest output.
-2. **`assert-*.yaml`** — Structural YAML assertions validated by
-   `chainsaw assert`. Since rendered manifests are valid K8s resources
-   (`apiVersion`/`kind`), chainsaw can parse them directly.
+1. **`chainsaw-test.yaml`** — Generates a recipe, runs `aicr bundle` with various `--set` flags and scheduling options, asserts on the rendered manifest at `${WORK}/bundle/<component>/manifests/<manifest>.yaml`.
+2. **`assert-*.yaml`** — Structural YAML assertions. Rendered manifests are valid K8s resources, so chainsaw parses them directly.
 
-This follows the same pattern used in the
-[nodewright project](https://github.com/NVIDIA/nodewright/blob/main/k8s-tests/chainsaw/helm/helm-template-test/chainsaw-test.yaml),
-adapted for AICR's `aicr bundle` rendering pipeline instead of `helm template`.
+Pattern modeled on [nodewright helm-template-test](https://github.com/NVIDIA/nodewright/blob/main/k8s-tests/chainsaw/helm/helm-template-test/chainsaw-test.yaml), adapted for `aicr bundle` instead of `helm template`.
 
 ## Running
 

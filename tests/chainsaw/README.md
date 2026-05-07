@@ -96,17 +96,8 @@ tests/chainsaw/
     └── deploy-agent/                             # K8s Job + ConfigMap assertions
 ```
 
-## Why Chainsaw?
-
-- **Declarative YAML assertions** -- validate document structure, not just string matching
-- **Partial map matching** -- specify only the fields you care about
-- **K8s-native** -- apply resources, assert state, cleanup with `cleanup` blocks
-- **Parallel execution** -- independent tests run concurrently
-- **JUnit reporting** -- CI-friendly test output
-- **Consistent with nodewright** -- same patterns used in [nodewright/k8s-tests/chainsaw](https://github.com/NVIDIA/nodewright/tree/main/k8s-tests/chainsaw)
-
 ## References
 
-- [Kyverno Chainsaw](https://github.com/kyverno/chainsaw)
+- [Kyverno Chainsaw](https://github.com/kyverno/chainsaw) — declarative K8s YAML assertions, partial map matching, JUnit output
 - [Chainsaw Documentation](https://kyverno.github.io/chainsaw/)
-- [Nodewright Chainsaw Tests](https://github.com/NVIDIA/nodewright/tree/main/k8s-tests/chainsaw)
+- [Nodewright Chainsaw Tests](https://github.com/NVIDIA/nodewright/tree/main/k8s-tests/chainsaw) — pattern reference

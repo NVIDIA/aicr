@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide covers project setup, architecture, development workflows, and tooling for contributors working on AI Cluster Runtime (AICR).
+Project setup, architecture, development workflows, and tooling for AI Cluster Runtime (AICR) contributors.
 
 ## Table of Contents
 
@@ -123,12 +123,12 @@ Legend: ✓ = installed, ⚠ = version mismatch, ✗ = missing
 
 ### Version Management
 
-All tool versions are centrally managed in `.settings.yaml`. This file is the single source of truth used by:
+All tool versions are centrally managed in `.settings.yaml`, the single source of truth used by:
 - `make tools-setup` - Local development setup
 - `make tools-check` - Version verification
 - GitHub Actions CI - Ensures CI uses identical versions
 
-When updating tool versions, edit `.settings.yaml` and the changes propagate everywhere automatically.
+Edit `.settings.yaml` to update versions; changes propagate everywhere automatically.
 
 ### Finalize Setup
 
@@ -549,7 +549,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 |--------|-------------|
 | `make build` | Build binaries for current OS/arch |
 | `make image` | Build and push aicr container image (Ko) |
-| `make image-validator` | Build and push validator image with Go toolchain (Docker) |
+| `make image-validators` | Build and push per-phase validator images (Docker) |
 | `make release` | Full release with goreleaser (includes all images) |
 | `make bump-major` | Bump major version (1.2.3 → 2.0.0) |
 | `make bump-minor` | Bump minor version (1.2.3 → 1.3.0) |

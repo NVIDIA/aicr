@@ -14,8 +14,7 @@ built by an authorized version of the AICR CLI.
 
 ## Trust Setup
 
-Bootstrap the Sigstore trusted root (the install script does this automatically,
-but for completeness):
+Bootstrap the Sigstore trusted root (the install script does this automatically):
 
 ```shell
 aicr trust update

@@ -4,7 +4,7 @@ This demo walks through the recipe metadata system, showing how multi-level inhe
 
 ## Intro 
 
-> Rule-based configuration engine over Metadata composes optimized REcipes for given set of criteria
+> Rule-based configuration engine over Metadata composes optimized Recipes for given set of criteria
 
 ![](images/data.png)
 
@@ -20,15 +20,13 @@ Demo:
 
 ## Recipe Data (Design time == files in git)
 
-View embedded recipe files structure:
-
 ```shell
 tree -L 2 recipes/
 ```
 
 ### Base
 
-Base recipe (foundation for all recipes):
+Foundation for all recipes:
 
 ```shell
 yq . recipes/overlays/base.yaml
@@ -53,7 +51,7 @@ Examples:
 
 ### Base Values
 
-GPU Operator 
+GPU Operator:
 
 ```shell
 cat recipes/components/gpu-operator/values.yaml | yq .
@@ -61,7 +59,7 @@ cat recipes/components/gpu-operator/values.yaml | yq .
 
 ### Multi-Level Inheritance
 
-EKS recipe (example of inheritance from base):
+EKS recipe (inherits from base):
 
 ```shell
 yq . recipes/overlays/eks.yaml
@@ -73,7 +71,7 @@ EKS training recipe (inherits from eks):
 yq . recipes/overlays/eks-training.yaml
 ```
 
-View GB200 EKS training recipe (inherits from eks-training):
+GB200 EKS training recipe (inherits from eks-training):
 
 ```shell
 yq . recipes/overlays/gb200-eks-training.yaml
@@ -93,7 +91,7 @@ Values are merged in order (later = higher priority):
 Base ValuesFile → Overlay ValuesFile → Overlay Overrides → CLI --set flags
 ```
 
-View leaf recipe (inherits from gb200-eks-training):
+Leaf recipe (inherits from gb200-eks-training):
 
 ```shell
 yq recipes/overlays/gb200-eks-ubuntu-training.yaml
@@ -173,7 +171,7 @@ Recipes define their own dependencies:
 yq . recipes/overlays/base.yaml
 ```
 
-View computed deployment order is computed at recipe composition time and sorted based on dependencies:
+Deployment order is computed at recipe composition time and sorted based on dependencies:
 
 ```shell
 aicr recipe \
@@ -190,7 +188,7 @@ Order in `dependencyRefs`:
 2. `gpu-operator` (depends on cert-manager)
 3. Other components...
 
-> Asymmetric rule matching based on [Kahn's algorithm](https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/) algorithm.
+> Asymmetric rule matching based on [Kahn's algorithm](https://www.geeksforgeeks.org/dsa/topological-sorting-indegree-based-solution/).
 
 ## API Access
 

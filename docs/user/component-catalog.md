@@ -1,6 +1,6 @@
 # Component Catalog
 
-AICR recipes are composed of components — the individual software packages that make up a GPU-accelerated Kubernetes runtime. This page lists every component that can appear in a recipe. 
+AICR recipes are composed of components — the individual software packages that make up a GPU-accelerated Kubernetes runtime. This page lists every component that can appear in a recipe.
 
 > ***Note:*** Components are included as appropriate in recipes. Not every component listed here will appear in a recipe.
 
@@ -29,6 +29,8 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with prefix-cache-aware routing and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **kgateway-crds** | Custom Resource Definitions for kgateway (Kubernetes Gateway API implementation). | [kgateway](https://github.com/kgateway-dev/kgateway) |
 | **kgateway** | Kubernetes Gateway API implementation. Provides model-aware ingress routing for inference workloads. | [kgateway](https://github.com/kgateway-dev/kgateway) |
+| **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
+| **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
 
 ## How Components Are Selected

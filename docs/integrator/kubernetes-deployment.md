@@ -34,8 +34,6 @@ Deploy the AICR API Server in your Kubernetes cluster for self-hosted recipe gen
 
 ## Quick Start
 
-### Deploy with Kustomize
-
 ```shell
 # Create namespace
 kubectl create namespace aicr
@@ -48,10 +46,7 @@ kubectl get pods -n aicr
 kubectl get svc -n aicr
 ```
 
-### Deploy with Helm
-
-**Status**: Helm chart not yet available. Use Kustomize or manual deployment.
-
+> **Helm chart**: Not yet available. Use the manual manifests below.
 
 ## Manual Deployment
 

@@ -7,6 +7,5 @@
 [params]
 exclude_path = [
     "(^|/)design(/|$)",
-    "(^|/)plans(/|$)",
     "(^|/)conformance(/|$)",
 ]

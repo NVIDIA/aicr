@@ -20,8 +20,6 @@ Every AICR recipe is:
 
 ## Quick Start
 
-Install and generate your first recipe in under two minutes:
-
 ```bash
 # Install the CLI (Homebrew)
 brew tap NVIDIA/aicr
@@ -98,8 +96,6 @@ This separation means the same validated configuration works whether you deploy 
 You bring your cluster and your tools. AI Cluster Runtime tells you what should be installed and how it should be configured.
 
 ## Documentation
-
-Choose the path that matches how you'll use the project.
 
 <details>
 <summary><strong>User</strong> — Platform and Infrastructure Operators</summary>

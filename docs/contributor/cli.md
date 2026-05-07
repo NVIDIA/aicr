@@ -2291,13 +2291,7 @@ The `bundle` command generates deployment-ready bundles from configuration recip
 - **Documentation**: Deployment instructions and verification steps
 - **Checksums**: SHA256 verification for all generated files
 
-**Key Features**:
-✅ Registry-based bundler framework - pluggable implementations  
-✅ Parallel generation - fast bundle creation with errgroup  
-✅ Template system - embedded templates with go:embed  
-✅ Functional options - flexible configuration  
-✅ Type safety - compile-time bundler type checking  
-✅ Metrics - Prometheus observability  
+**Key Features**: registry-based pluggable bundlers, parallel generation via `errgroup`, embedded templates (`go:embed`), functional options for configuration, compile-time bundler-type safety, and Prometheus metrics.
 
 ### Command Flow
 

@@ -1,15 +1,15 @@
 # AI Conformance Chainsaw Tests
 
-This directory contains the Chainsaw suites used to validate AI conformance flows across multiple environments:
+Chainsaw suites validating AI conformance flows across environments:
 
-- `offline/`: no-cluster recipe and bundle generation checks
-- `cluster/`: deployed inference-stack health checks for the external cluster flow
-- `common/`: cross-environment shared assertions used by the cluster suite and both Kind GPU suites
-- `kind-inference-dynamo/`: H100 Kind inference leaf-suite checks used by GPU CI
-- `kind-training-kubeflow/`: H100 Kind training leaf-suite checks used by GPU CI
-- `kind-common/`: shared Kind-only assertions consumed by both GPU CI leaf suites
+- `offline/` — no-cluster recipe and bundle generation
+- `cluster/` — deployed inference-stack health checks (external cluster flow)
+- `kind-inference-dynamo/` — H100 Kind inference leaf-suite (GPU CI)
+- `kind-training-kubeflow/` — H100 Kind training leaf-suite (GPU CI)
+- `common/` — assertions shared by `cluster/` and both Kind GPU suites
+- `kind-common/` — assertions shared only by Kind GPU suites
 
-The cluster suite validates the NVIDIA AI-conformance inference stack against a deployed cluster. That stack satisfies CNCF AI Conformance requirements for GPU scheduling (KAI Scheduler), inference routing (kgateway with Gateway API Inference Extension), and the NVIDIA Dynamo serving platform.
+The `cluster/` suite validates the NVIDIA AI-conformance inference stack: KAI Scheduler (GPU scheduling), kgateway with Gateway API Inference Extension (inference routing), and the NVIDIA Dynamo serving platform.
 
 ## Cluster Inference Recipe
 
@@ -105,36 +105,12 @@ tests/chainsaw/ai-conformance/
     └── assert-dynamo.yaml               # Dynamo platform healthy
 ```
 
-Ownership model:
-
-- `common/`: shared across the external cluster suite and both Kind GPU suites
-- `kind-common/`: shared only by the Kind GPU suites
-- `kind-inference-dynamo/`: inference-only Kind assertions
-- `kind-training-kubeflow/`: training-only Kind assertions
-- `cluster/`: external-cluster-only assertions
-
 ## Prerequisites
 
-### Offline tests
-
-- Built aicr binary (`go build -o dist/e2e/aicr ./cmd/aicr`)
-- Chainsaw installed (`brew install kyverno/tap/chainsaw`)
-- No cluster needed
-
-### Cluster tests
-
-- Chainsaw installed
-- `kubectl` configured with access to the target cluster
-- AI-conformance inference stack deployed (via `deploy.sh` from the bundle)
-- At least one GPU node with H100 GPUs (for DaemonSet health checks)
-
-### Kind H100 GPU workflow tests
-
-- Chainsaw installed
-- Kind cluster with the corresponding H100 leaf stack already deployed
-- For inference: `h100-kind-inference-dynamo`
-- For training: `h100-kind-training-kubeflow`
-- GPU passthrough available to the Kind cluster
+- Chainsaw installed (`make tools-setup`)
+- For offline: `aicr` binary at `dist/e2e/aicr` (`go build -o dist/e2e/aicr ./cmd/aicr`)
+- For cluster: `kubectl` configured, AI-conformance inference stack deployed (via bundle `deploy.sh`), at least one H100 GPU node
+- For Kind GPU suites: Kind cluster with corresponding leaf stack already deployed (`h100-kind-inference-dynamo` or `h100-kind-training-kubeflow`), GPU passthrough enabled
 
 ## Running
 
@@ -189,21 +165,18 @@ chainsaw test \
 
 ## Assertion Patterns
 
-- **Deployments**: Polls until `status.conditions[type=Available].status = "True"`
-- **DaemonSets**: Polls until `numberReady > 0` and `desiredNumberScheduled > 0`
-- **StatefulSets**: Polls until `readyReplicas > 0`
-- **ClusterPolicy**: Polls until `status.state = ready` (GPU operator umbrella check)
-- **CRDs**: Asserts existence by fully-qualified name
-- **Namespaces**: Asserts `status.phase = Active`
+| Resource | Condition |
+|----------|-----------|
+| Deployment | `status.conditions[type=Available].status = "True"` |
+| DaemonSet | `numberReady > 0` and `desiredNumberScheduled > 0` |
+| StatefulSet | `readyReplicas > 0` |
+| ClusterPolicy | `status.state = ready` (GPU operator umbrella) |
+| CRDs | Existence by fully-qualified name |
+| Namespaces | `status.phase = Active` |
 
-Chainsaw retries assertions continuously until the timeout expires. If a resource doesn't exist yet, it keeps polling until it appears or times out.
+Chainsaw retries assertions until the timeout expires.
 
 ## Cluster Suite Customization
 
-### Skipping disabled components
-
-The `aws-ebs-csi-driver` component is disabled by default on EKS (the CSI driver is a managed addon). It is excluded from cluster assertions. If you enabled it with `--set aws-ebs-csi-driver.enabled=true`, add an assertion step for it.
-
-### Adjusting resource names
-
-DaemonSet names for the GPU operator are created by the operator's ClusterPolicy, not the Helm chart directly. If your deployment uses non-default names, update `assert-gpu-operator.yaml`. The `ClusterPolicy` status assertion (`status.state: ready`) serves as a safety net — it validates the entire GPU stack regardless of individual DaemonSet names.
+- `aws-ebs-csi-driver` is disabled by default (EKS managed addon). If enabled via `--set aws-ebs-csi-driver.enabled=true`, add an assertion step.
+- GPU operator DaemonSet names come from the ClusterPolicy, not the chart. If non-default, update `assert-gpu-operator.yaml`. The `ClusterPolicy` `status.state: ready` assertion is a safety net.

@@ -1,6 +1,5 @@
 # Integrator Documentation
 
-
 Documentation for engineers integrating AI Cluster Runtime (AICR) into CI/CD pipelines, GitOps workflows, or larger platforms.
 
 ## Audience
@@ -19,6 +18,7 @@ This section is for integrators who:
 | [Data Flow](data-flow.md) | Understanding snapshots, recipes, validation, and bundles data transformations |
 | [Kubernetes Deployment](kubernetes-deployment.md) | Self-hosted API server deployment with Kubernetes manifests |
 | [EKS Dynamo Networking](eks-dynamo-networking.md) | Security group prerequisites for Dynamo overlays on EKS |
+| [GKE TCPXO Networking](gke-tcpxo-networking.md) | GPUDirect TCPXO prerequisites for GKE training overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
 | [Validator Extension](validator-extension.md) | Adding custom validators and overriding embedded ones via `--data` |
@@ -27,10 +27,9 @@ This section is for integrators who:
 
 ### API Server Deployment
 
-```shell
-# Deploy API server to Kubernetes
-kubectl apply -k https://github.com/NVIDIA/aicr/deploy/aicrd
+See [Kubernetes Deployment](kubernetes-deployment.md) for full manifests. After deployment:
 
+```shell
 # Generate recipe via API
 curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
 ```
@@ -54,5 +53,5 @@ curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
 
 ## Related Documentation
 
-- **Users**: See [User Documentation](../user/) for CLI usage and installation
-- **Contributors**: See [Contributor Documentation](../contributor/) for architecture and development guides
+- **Users**: See [User Documentation](../user/index.md) for CLI usage and installation
+- **Contributors**: See [Contributor Documentation](../contributor/index.md) for architecture and development guides

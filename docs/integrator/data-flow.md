@@ -1,6 +1,6 @@
 # Data Flow Architecture
 
-This document describes data transformations in the four-stage workflow.
+Data transformations in the four-stage workflow.
 
 ## Overview
 
@@ -147,7 +147,7 @@ type Reading interface {
 
 **Query Mode** - Direct generation from parameters:
 ```bash
-aicr recipe --os ubuntu --gpu h100 --service eks --intent training --platform kubeflow
+aicr recipe --os ubuntu --accelerator h100 --service eks --intent training --platform kubeflow
 ```
 
 **Snapshot Mode (File)** - Analyze captured snapshot:
@@ -188,7 +188,7 @@ K8s/config/*                → intent hints
 OS/release/ID               → os (family)
 OS/release/VERSION_ID       → osv (version)
 OS/grub/BOOT_IMAGE          → kernel (version)
-GPU/smi/model               → gpu (type)
+GPU/smi/model               → accelerator (type)
 ```
 
 ### Recipe Generation
@@ -274,14 +274,14 @@ When a query matches a leaf recipe that has a `spec.base` reference, the system 
 // Omitted fields act as wildcards
 
 overlay.key {
-    service: "eks"   // Must match
-    gpu: "gb200"     // Must match
-    os: <omitted>    // Wildcard (any OS)
+    service: "eks"        // Must match
+    accelerator: "gb200"  // Must match
+    os: <omitted>         // Wildcard (any OS)
 }
 
 query {
     service: "eks"
-    gpu: "gb200"
+    accelerator: "gb200"
     os: "ubuntu"
 }
 

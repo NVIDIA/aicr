@@ -4,7 +4,7 @@ The `aicrd` provides HTTP REST API access to AICR configuration recipe generatio
 
 ## Overview
 
-The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow** – recipe generation and bundle creation. It is a production-ready HTTP service built on Go's `net/http` with middleware for rate limiting, metrics, request tracking, and graceful shutdown.
+The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow** — recipe generation (`GET /v1/recipe`) and bundle creation (`POST /v1/bundle`). Built on Go's `net/http` with middleware for rate limiting, metrics, request tracking, and graceful shutdown.
 
 ### Four-Step Workflow Context
 
@@ -15,31 +15,18 @@ The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow
    CLI/Agent only       API Server           CLI only            API Server
 ```
 
-**API Server Capabilities:**
-- **Recipe generation** (Step 2) via `GET /v1/recipe` endpoint
-- **Bundle creation** (Step 4) via `POST /v1/bundle` endpoint
-- **Query mode only** – generates recipes from environment parameters
-- Health and metrics endpoints for Kubernetes deployment
-- Production-ready HTTP server with middleware stack
-- Supply chain security with SLSA Build Level 3 attestations
+**API Server scope:**
+- Recipe generation (Step 2, query mode only — no snapshot analysis) and bundle creation (Step 4)
+- Health, readiness, and Prometheus metrics endpoints
+- SLSA Build Level 3 attestations on released images
+- No snapshot capture, no validation, no ConfigMap I/O — use the CLI for those
 
-**API Server Limitations:**
-- **No snapshot capture** – Use CLI `aicr snapshot` or Kubernetes Agent
-- **No snapshot mode** – Cannot analyze captured snapshots (query mode only)
-- **No validation** – Use CLI `aicr validate` to check constraints against snapshots
-- **No ConfigMap integration** – API server doesn't read/write ConfigMaps
+**API Server configuration:**
+- Criteria allowlists for accelerator, service, intent, OS via `AICR_ALLOWED_*` env vars
+- Value overrides on `/v1/bundle` via `?set=bundler:path=value` and `?dynamic=component:path` (helm and argocd-helm deployers)
+- Node scheduling via `?system-node-selector` and `?accelerated-node-selector`
 
-**API Server Configuration:**
-- **Criteria allowlists** – Restrict allowed values for accelerator, service, intent, and OS via environment variables
-- **Value overrides** – Supported via `?set=bundler:path=value` query parameters on `/v1/bundle`
-- **Dynamic install-time values** – Supported via `?dynamic=component:path` query parameters on `/v1/bundle` (helm and argocd-helm deployers)
-- **Node scheduling** – Supported via `?system-node-selector` and `?accelerated-node-selector` query parameters
-
-**For complete workflow**, use the CLI which supports:
-- All four steps: snapshot → recipe → validate → bundle
-- ConfigMap I/O: `cm://namespace/name` URIs
-- Agent deployment: Kubernetes Job with RBAC
-- E2E testing: Chainsaw tests in `tests/chainsaw/cli/`
+For the complete workflow (snapshot → recipe → validate → bundle, ConfigMap I/O via `cm://namespace/name`, agent deployment, Chainsaw E2E in `tests/chainsaw/cli/`), use the CLI.
 
 ## Architecture Diagram
 
@@ -53,7 +40,7 @@ flowchart TD
     
     C --> C1["Server Config:<br/>Port: 8080, Rate: 100 req/s<br/>Timeouts, Max Header: 64KB"]
     C --> C2["Middleware Chain:<br/>1. Metrics<br/>2. Request ID<br/>3. Panic Recovery<br/>4. Rate Limiting<br/>5. Logging<br/>6. Handler"]
-    C --> C3["Routes:<br/>/health, /ready, /metrics<br/>/v1/recipe, /v1/bundle"]
+    C --> C3["Routes:<br/>/health, /ready, /metrics<br/>/v1/recipe, /v1/query, /v1/bundle"]
     
     C3 --> D["Application Handlers"]
     
@@ -118,103 +105,68 @@ func main() {
 
 ### API Package: `pkg/api/server.go`
 
-**Responsibilities:**
-- Initialize structured logging
-- Parse criteria allowlists from environment variables
-- Create recipe builder with allowlist configuration
-- Create bundle handler with allowlist configuration
-- Setup HTTP routes
-- Configure server with middleware
-- Handle graceful shutdown
+**Responsibilities:** initialize structured logging; parse criteria allowlists; create recipe builder, query handler, and bundle handler with allowlist configuration; install signal handling; run server with middleware; handle graceful shutdown.
 
-**Key Features:**
-- Version info injection via ldflags: `version`, `commit`, `date`
-- Routes: `/v1/recipe` → recipe handler, `/v1/bundle` → bundle handler
-- Criteria allowlists parsed from `AICR_ALLOWED_*` environment variables
-- Server configured with production defaults
-- Graceful shutdown on SIGINT/SIGTERM
+**Key Features:** version info injected via ldflags (`version`, `commit`, `date`); routes `/v1/recipe`, `/v1/query`, `/v1/bundle`; allowlists from `AICR_ALLOWED_*` env vars; production defaults; graceful shutdown on SIGINT/SIGTERM.
 
 #### Initialization Flow
 
 ```go
 func Serve() error {
-    // 1. Setup logging
+    // Signal handling spans pre-Run setup and request handling
+    ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+    defer stop()
+
     logging.SetDefaultStructuredLogger(name, version)
 
-    // 2. Parse allowlists from environment
     allowLists, err := recipe.ParseAllowListsFromEnv()
     if err != nil {
-        return fmt.Errorf("failed to parse allowlists: %w", err)
+        return errors.Wrap(errors.ErrCodeInternal, "failed to parse allowlists from environment", err)
     }
 
-    // 3. Create recipe handler with allowlists
-    rb := recipe.NewBuilder(
-        recipe.WithVersion(version),
-        recipe.WithAllowLists(allowLists),
-    )
+    rb := recipe.NewBuilder(recipe.WithVersion(version), recipe.WithAllowLists(allowLists))
+    bb, err := bundler.New(bundler.WithAllowLists(allowLists))
+    if err != nil {
+        return errors.Wrap(errors.ErrCodeInternal, "failed to create bundler", err)
+    }
 
-    // 4. Create bundle handler with allowlists
-    bb, err := bundler.New(
-        bundler.WithAllowLists(allowLists),
+    s := server.New(
+        server.WithName(name),
+        server.WithVersion(version),
+        server.WithHandler(map[string]http.HandlerFunc{
+            "/v1/recipe": rb.HandleRecipes,
+            "/v1/query":  rb.HandleQuery,
+            "/v1/bundle": bb.HandleBundles,
+        }),
     )
-
-    // 5. Setup routes and start server
-    // ...
+    return s.Run(ctx)
 }
 ```
 
 ### Server Infrastructure: `pkg/server/`
 
-Production-ready HTTP server implementation with 10 files:
+Production-ready HTTP server implementation. Core files:
 
-#### Core Components
+**server.go** — Server struct (config, HTTP server, rate limiter, ready state); functional options; graceful shutdown via `signal.NotifyContext` and `errgroup`; default root handler listing routes.
 
-**server.go** (217 lines)
-- Server struct with config, HTTP server, rate limiter, ready state
-- Functional options pattern for configuration
-- Graceful shutdown using `signal.NotifyContext` and `errgroup`
-- Default root handler listing available routes
+**config.go** — Configuration struct with defaults; `PORT` env var; read/write/idle/shutdown timeouts; rate-limit parameters.
 
-**config.go** (72 lines)
-- Configuration struct with sensible defaults
-- Environment variable support (PORT)
-- Timeout configuration (read, write, idle, shutdown)
-- Rate limiting parameters
+**middleware.go** — Middleware chain builder; request ID (UUID generation/validation), rate limiting (token bucket), panic recovery, structured logging.
 
-**middleware.go** (123 lines)
-- Middleware chain builder
-- Request ID middleware (UUID generation/validation)
-- Rate limiting middleware (token bucket)
-- Panic recovery middleware
-- Logging middleware (structured logs)
+**health.go** — `/health` (liveness, always 200) and `/ready` (readiness, 503 when not ready); JSON status + timestamp.
 
-**health.go** (60 lines)
-- `/health` - Liveness probe (always returns 200)
-- `/ready` - Readiness probe (returns 503 when not ready)
-- JSON response with status and timestamp
+**errors.go** — Standardized error response struct, error codes (`RATE_LIMIT_EXCEEDED`, `INTERNAL_ERROR`, …), `WriteError` helper with request ID.
 
-**errors.go** (49 lines)
-- Standardized error response structure
-- Error codes (RATE_LIMIT_EXCEEDED, INTERNAL_ERROR, etc.)
-- WriteError helper with request ID tracking
+**metrics.go** — Prometheus metrics:
+- `aicr_http_requests_total` (counter; method, path, status)
+- `aicr_http_request_duration_seconds` (histogram; method, path)
+- `aicr_http_requests_in_flight` (gauge)
+- `aicr_rate_limit_rejects_total` (counter)
+- `aicr_panic_recoveries_total` (counter)
 
-**metrics.go** (90 lines)
-- Prometheus metrics:
-  - `aicr_http_requests_total` - Counter by method, path, status
-  - `aicr_http_request_duration_seconds` - Histogram by method, path
-  - `aicr_http_requests_in_flight` - Gauge
-  - `aicr_rate_limit_rejects_total` - Counter
-  - `aicr_panic_recoveries_total` - Counter
+**context.go** — Context key type for request ID storage.
 
-**context.go** (8 lines)
-- Context key type for request ID storage
-
-**doc.go** (200 lines)
-- Comprehensive package documentation
-- Usage examples
-- API endpoint descriptions
-- Error handling documentation
-- Deployment examples
+**doc.go** — Package documentation: usage, endpoints, error handling, deployment.
 
 #### Request Processing Pipeline
 
@@ -324,36 +276,7 @@ Shared with CLI - same logic as described in CLI architecture.
 
 ### Recipe Generation
 
-**Endpoints**:
-- `GET /v1/recipe` - Generate recipe from query parameters
-- `POST /v1/recipe` - Generate recipe from criteria body
-
-#### GET Method
-
-**Query Parameters**:
-- `service` - Kubernetes service type (eks, gke, aks, oke, kind, lke)
-- `accelerator` - GPU/accelerator type (h100, gb200, b200, a100, l40, rtx-pro-6000)
-- `gpu` - Alias for accelerator (backwards compatibility)
-- `intent` - Workload intent (training, inference)
-- `os` - Operating system family (ubuntu, rhel, cos, amazonlinux, talos)
-- `nodes` - Number of GPU nodes (0 = any/unspecified)
-
-#### POST Method
-
-**Content Types**: `application/json`, `application/x-yaml`
-
-**Request Body**: `RecipeCriteria` resource with kind, apiVersion, metadata, and spec fields.
-
-```yaml
-kind: RecipeCriteria
-apiVersion: aicr.nvidia.com/v1alpha1
-metadata:
-  name: my-criteria
-spec:
-  service: eks
-  accelerator: h100
-  intent: training
-```
+Endpoints `GET /v1/recipe` (query parameters) and `POST /v1/recipe` (criteria body, `application/json` or `application/x-yaml`). See [Query Parameter Parsing](#query-parameter-parsing) above for the GET parameter table and [POST Request Body Format](#post-request-body-format) above for the body schema.
 
 **Response**: 200 OK
 
@@ -650,7 +573,7 @@ def get_recipe(os, gpu):
 
 # Usage
 recipe = get_recipe("ubuntu", "h100")
-print(f"Matched {len(recipe['matchedRuleId'])} rules")
+print(f"Applied overlays: {recipe['metadata']['appliedOverlays']}")
 ```
 
 ## Kubernetes Deployment

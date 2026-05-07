@@ -1,6 +1,5 @@
 # User Documentation
 
-
 Documentation for platform operators deploying and operating GPU-accelerated Kubernetes clusters using AI Cluster Runtime (AICR).
 
 ## Audience
@@ -21,6 +20,7 @@ This section is for users who:
 | [Agent Deployment](agent-deployment.md) | Deploy the Kubernetes agent for automated cluster snapshots |
 | [Validation](validation.md) | Task-oriented walkthrough: validate a cluster against a recipe, both training and inference performance phases |
 | [Component Catalog](component-catalog.md) | Every component that can appear in a recipe |
+| [Container Images](container-images.md) | Container image inventory across all components (BOM) |
 
 ## Quick Start
 

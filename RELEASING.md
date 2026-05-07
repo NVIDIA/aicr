@@ -72,6 +72,7 @@ make bump-rc                         # v1.3.0-rc1 → v1.3.0-rc2
 
 # 3b. When satisfied, promote the RC to stable (same SHA)
 make bump-promote TAG=v1.3.0-rc2    # → v1.3.0 on same commit
+```
 
 Pre-releases exercise the full build/test/attest pipeline but do not update:
 

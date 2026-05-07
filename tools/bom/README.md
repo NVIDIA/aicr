@@ -14,16 +14,7 @@ themselves — that belongs to a separate provenance audit.
 
 ## Architecture
 
-The reusable BOM logic lives in [`pkg/bom`](../../pkg/bom): YAML image
-extraction, image reference parsing, CycloneDX assembly, and Markdown
-rendering. This tool (`tools/bom`) is a thin CLI wrapper that adds:
-
-- Loading `recipes/registry.yaml`
-- Shelling out to `helm template` for each chart
-- Walking embedded manifest directories
-
-`pkg/bom` is also intended to be consumed by `pkg/bundler` to emit a
-per-bundle SBOM during `aicr bundle`.
+Reusable BOM logic lives in [`pkg/bom`](../../pkg/bom): YAML image extraction, image reference parsing, CycloneDX assembly, Markdown rendering. This tool is a thin CLI wrapper that loads `recipes/registry.yaml`, shells out to `helm template` per chart, and walks embedded manifest directories. `pkg/bom` is also intended for consumption by `pkg/bundler` to emit a per-bundle SBOM during `aicr bundle`.
 
 ## Usage
 

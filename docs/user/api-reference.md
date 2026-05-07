@@ -121,7 +121,7 @@ Generate an optimized configuration recipe based on environment parameters.
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `talos`, `any` |
-| `platform` | string | any | Platform/framework: `kubeflow`, `any` |
+| `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `any` |
 | `nodes` | integer | 0 | GPU node count (0 = any) |
 
 **Examples:**
@@ -211,10 +211,6 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
   -d '{"kind":"RecipeCriteria","apiVersion":"aicr.nvidia.com/v1alpha1","spec":{"service":"eks","accelerator":"h100"}}' \
   | jq '.'
 ```
-
-**Response:**
-
-Same as GET /v1/recipe - returns a recipe JSON response.
 
 **Error Responses:**
 - `400 Bad Request` - Invalid criteria format, missing required fields, or invalid enum values
@@ -364,6 +360,8 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `kgateway-crds` | Kubernetes Gateway API CRDs |
 | `kgateway` | Kubernetes Gateway API implementation |
+| `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
+| `kueue` | Kubernetes-native job queuing for batch and AI workloads |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 
 **Examples:**

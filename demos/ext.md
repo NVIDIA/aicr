@@ -2,8 +2,6 @@
 
 ## Embedded Data
 
-View embedded data files structure:
-
 ```shell
 tree -L 2 recipes/
 ```

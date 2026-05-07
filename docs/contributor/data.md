@@ -2,19 +2,6 @@
 
 This document describes the recipe metadata system used by the CLI and API to generate optimized system configuration recommendations (i.e. recipes) based on environment parameters.
 
-## Table of Contents
-
-- [Overview](#overview)
-- [Data Structure](#data-structure)
-- [Multi-Level Inheritance](#multi-level-inheritance)
-- [Component Configuration](#component-configuration)
-- [Criteria Matching Algorithm](#criteria-matching-algorithm)
-- [Recipe Generation Process](#recipe-generation-process)
-- [Usage Examples](#usage-examples)
-- [Maintenance Guide](#maintenance-guide)
-- [Automated Validation](#automated-validation)
-- [External Data Provider](#external-data-provider)
-
 ## Overview
 
 The recipe system is a rule-based configuration engine that generates tailored system configurations by:

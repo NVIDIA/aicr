@@ -10,7 +10,7 @@ You may obtain a copy of the License at
 
 # Container Image Inventory
 
-This page lists every container image AICR can deploy across all registered components. It is the canonical reference for security review, air-gap planning, and any other workflow that needs to know "what does AICR pull onto my cluster."
+This page lists every container image AICR can deploy across all registered components. It is the canonical reference for security review, air-gap planning, and any workflow that needs to know "what does AICR pull onto my cluster."
 
 The image set below is regenerated from the live Helm chart catalog and the embedded manifests under `recipes/components/*/manifests/`. The auto-generated section is refreshed weekly by the [`bom-refresh`](https://github.com/NVIDIA/aicr/actions/workflows/bom-refresh.yaml) GitHub Action, which opens a chore PR whenever upstream chart rerenders cause drift. Contributors changing recipes are expected to regenerate locally with `make bom-docs` and commit the result alongside their change.
 

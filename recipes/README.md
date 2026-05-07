@@ -1,12 +1,12 @@
 # Recipe Data Directory
 
-This directory contains recipe metadata and component configurations for the NVIDIA Cloud Native Stack bundler system.
+Recipe metadata and component configurations for the AICR bundler. Files in this directory are embedded into the CLI binary and API server at compile time.
 
 ## Quick Reference
 
 | Task | Documentation |
 |------|--------------|
-| Understand recipe architecture | [Data Architecture](../docs/contributor/data.md) |
+| Recipe architecture | [Data Architecture](../docs/contributor/data.md) |
 | Create/modify recipes | [Recipe Development Guide](../docs/integrator/recipe-development.md) |
 | Create new bundlers | [Bundler Development Guide](../docs/contributor/component.md) |
 | CLI commands | [CLI Reference](../docs/user/cli-reference.md) |
@@ -16,80 +16,46 @@ This directory contains recipe metadata and component configurations for the NVI
 ```
 recipes/
 ├── registry.yaml                  # Component registry (Helm & Kustomize configs)
-├── overlays/                      # Recipe overlays (including base)
-│   ├── base.yaml                  # Base recipe (universal defaults, root of inheritance)
-│   ├── eks.yaml                   # EKS overlay
-│   ├── eks-training.yaml          # EKS + training overlay
-│   ├── gb200-eks-training.yaml    # GB200 + EKS + training overlay
-│   ├── gb200-eks-ubuntu-training.yaml # Full criteria leaf recipe
-│   ├── h100-eks-ubuntu-training-kubeflow.yaml # H100 + EKS + Ubuntu + training + Kubeflow
-│   └── h100-ubuntu-inference.yaml # H100 inference overlay
+├── overlays/                      # Recipe overlays (including base.yaml as root)
 ├── mixins/                        # Composable mixin fragments
-│   ├── os-ubuntu.yaml             # Ubuntu OS constraints (shared by 12 leaf overlays)
-│   ├── platform-inference.yaml    # Inference gateway components (shared by 5 service-inference overlays)
-│   └── platform-kubeflow.yaml     # Kubeflow trainer component (shared by 4 leaf overlays)
-└── components/                    # Component value configurations
-    ├── cert-manager/
-    ├── nvidia-dra-driver-gpu/
-    ├── gpu-operator/
-    └── ...
+│   ├── os-ubuntu.yaml             # Ubuntu OS constraints
+│   ├── platform-inference.yaml    # Inference gateway components
+│   └── platform-kubeflow.yaml     # Kubeflow trainer component
+├── checks/                        # Component health checks
+├── validators/                    # Validator catalog (catalog.yaml)
+└── components/                    # Per-component Helm/Kustomize values
 ```
 
-**Recipe Naming Convention:**
-Recipe file names follow a specific ordering convention for consistency:
-`{accelerator}-{service}-{os}-{intent}-{platform}.yaml`
+**Recipe naming convention:** `{accelerator}-{service}-{os}-{intent}-{platform}.yaml` (each segment optional except where required by the base inheritance chain).
 
-Examples:
-- `h100-eks-training.yaml` (accelerator + service + intent)
-- `h100-eks-ubuntu-training.yaml` (accelerator + service + os + intent)
-- `h100-eks-ubuntu-training-kubeflow.yaml` (accelerator + service + os + intent + platform)
+Examples: `h100-eks-training.yaml`, `h100-eks-ubuntu-training.yaml`, `h100-eks-ubuntu-training-kubeflow.yaml`.
 
-## Overview
+## Architecture
 
 The recipe system uses a **base-plus-overlay architecture** with **mixin composition**:
 
-- **Base values** (`overlays/base.yaml`) provide default configurations
-- **Overlay values** (e.g., `eks-gb200-training.yaml`) provide environment-specific optimizations
-- **Mixins** (`mixins/*.yaml`) provide shared fragments (OS constraints, platform components) that leaf overlays compose via `spec.mixins` instead of duplicating content
-- **Inline overrides** allow per-recipe customization without creating new files
+- **Base** (`overlays/base.yaml`) provides default configurations
+- **Overlays** provide environment-specific optimizations and inherit from a parent via `spec.base`
+- **Mixins** (`mixins/*.yaml`) provide shared fragments composed via `spec.mixins` instead of duplication
+- **Inline overrides** allow per-recipe customization
 
-All files in this directory are embedded into the CLI binary and API server at compile time.
+## Validation
 
-### Run Validation Tests
+All recipe metadata and component values are validated as part of `make test`:
+
+- Schema conformance, criteria enums, valuesFile path resolution
+- Constraint syntax, no duplicate criteria across overlays, merge consistency
 
 ```bash
-# Run all recipe tests
 make test
-
-# Run specific validation
 go test -v ./pkg/recipe/... -run TestAllMetadataFilesConformToSchema
-
-# Check for duplicate criteria
 go test -v ./pkg/recipe/... -run TestNoDuplicateCriteriaAcrossOverlays
 ```
 
-## Automated Validation
-
-All recipe metadata and component values are automatically validated. Tests run as part of `make test` and check:
-
-- Schema conformance (YAML parses correctly)
-- Criteria validation (valid enum values)
-- Reference validation (valuesFile paths exist, dependencyRefs resolve)
-- Constraint syntax (valid measurement paths and operators)
-- Uniqueness (no duplicate criteria across overlays)
-- Merge consistency (base + overlay merges without data loss)
-
-```bash
-# Generate bundle from recipe with overrides
-aicr bundle -r recipes/overlays/your-recipe.yaml -o ./test-bundles
-
-# Verify merged values
-cat test-bundles/gpu-operator/values.yaml | grep -A5 "driver:"
-```
-For detailed test documentation, see [Automated Validation](../docs/contributor/data.md#automated-validation).
+For details, see [Automated Validation](../docs/contributor/data.md#automated-validation).
 
 ## See Also
 
-- [Data Architecture](../docs/contributor/data.md) - Recipe generation process, overlay system, query matching
-- [Recipe Development Guide](../docs/integrator/recipe-development.md) - How to create and modify recipes
-- [Bundler Development Guide](../docs/contributor/component.md) - How to create new bundlers
+- [Data Architecture](../docs/contributor/data.md)
+- [Recipe Development Guide](../docs/integrator/recipe-development.md)
+- [Bundler Development Guide](../docs/contributor/component.md)

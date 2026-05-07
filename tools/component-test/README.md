@@ -1,22 +1,15 @@
 # Component Test Harness
 
-Validate AICR components end-to-end with a single command. No GPU hardware
-required for most components.
+Validate AICR components end-to-end with a single command. No GPU hardware required for most components.
 
 ## Quick Start
 
 ```bash
-# 1. Build aicr
 make build
-
-# 2. Test your component
 make component-test COMPONENT=cert-manager
 ```
 
-That's it. The harness auto-detects the right test tier, creates a Kind cluster,
-deploys the component, and runs its health check. Components detected as
-`scheduling` tier are redirected to the KWOK infrastructure (`make kwok-e2e`)
-and exit with code 2 — no Kind cluster is created for those.
+Auto-detects the test tier, creates a Kind cluster, deploys the component, and runs its health check. Components detected as `scheduling` tier are redirected to the KWOK infrastructure (`make kwok-e2e`) and exit with code 2 — no Kind cluster is created for those.
 
 ## Test Tiers
 
@@ -153,12 +146,7 @@ make component-cleanup COMPONENT=cert-manager DELETE_CLUSTER=true
 
 ## Adding GPU-Aware Testing
 
-For components that require GPU resources:
-
-1. Ensure `.settings.yaml` has `component_test.nvml_mock_version` set
-2. The harness auto-detects GPU references in `values.yaml` or registry entry
-3. Override with `TIER=gpu-aware` or set `testTier: gpu-aware` in registry.yaml
-4. Customize GPU profile: `GPU_PROFILE=h100 GPU_COUNT=4 make component-test ...`
+For components requiring GPU resources: ensure `.settings.yaml` has `component_test.nvml_mock_version`. GPU references in `values.yaml` or registry entries auto-detect; override via `TIER=gpu-aware` or set `testTier: gpu-aware` in `registry.yaml`. Customize: `GPU_PROFILE=h100 GPU_COUNT=4 make component-test ...`.
 
 ## Troubleshooting
 

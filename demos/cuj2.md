@@ -16,7 +16,7 @@ aicr recipe \
 
 ## Validate Recipe Constraints
 
-> Setting additional `--namespace` or `--node-selector` flag to land the agent on on the right node is OK
+> Setting additional `--namespace` or `--node-selector` flag to land the agent on the right node is OK
 
 ```shell
 aicr validate \
@@ -26,7 +26,7 @@ aicr validate \
 
 ## Generate Bundle
 
-> Setting additional `--accelerated-node-selector`, `--accelerated-node-toleration`, or `--system-node-toleration` flags to land the agent on on the right node is OK
+> Setting additional `--accelerated-node-selector`, `--accelerated-node-toleration`, or `--system-node-toleration` flags to land the agent on the right node is OK
 
 ```shell
 aicr bundle \
@@ -37,7 +37,6 @@ aicr bundle \
 ```
 
 Replace the values for `--accelerated-node-selector` and `--accelerated-node-toleration` with the appropriate ones to match your gpu pool(s). You do not want optimizations and inference workloads to run across all nodes. Both options allow for comma delimination to supply multiple values. See the [aicr bundle](../docs/user/cli-reference.md#aicr-bundle) section for more information.
-```
 
 ## Install Bundle into the Cluster
 
@@ -45,7 +44,7 @@ Replace the values for `--accelerated-node-selector` and `--accelerated-node-tol
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
-## Validate Cluster 
+## Validate Cluster
 
 ```shell
 aicr validate \

@@ -3,7 +3,7 @@
 ## Assumptions
 
 * Assuming user is already authenticated to an EKS cluster with 2+ H100 node.
-* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`, in `--system-node-toleration` flags are only for example purposes. Assuming user will update these to match their cluster. 
+* Values used in `--accelerated-node-selector`, `--accelerated-node-toleration`, and `--system-node-toleration` flags are only for example purposes. Assuming user will update these to match their cluster.
 
 ## Snapshot
 
@@ -61,7 +61,7 @@ aicr bundle \
 cd ./bundle && chmod +x deploy.sh && ./deploy.sh
 ```
 
-## Validate Cluster 
+## Validate Cluster
 
 ```shell
 aicr validate \

@@ -4,7 +4,7 @@
 
 ## Setup
 
-Clean up prior state: 
+Clean up prior state:
 
 ```shell
 rm -rf ./bundle recipe.yaml /tmp/aicr-unpacked
@@ -90,7 +90,7 @@ Allowed list support in self-hosted API:
 curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
 ```
 
-# Snapshot
+## Snapshot
 
 > Requires auth'd cluster
 
@@ -122,7 +122,7 @@ Recipe Constraints:
 yq .constraints recipe.yaml
 ```
 
-Validate Recipe: 
+Validate Recipe:
 
 ```shell
 aicr validate \
@@ -144,7 +144,7 @@ aicr bundle \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule
 ```
 
-Bundle from Recipe using API: 
+Bundle from Recipe using API:
 
 ```shell
 curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=h100&intent=training" | \
@@ -160,19 +160,19 @@ cd ./bundle && tree .
 
 ![data flow](images/data.png)
 
-Review the checksums: 
+Review the checksums:
 
 ```shell
 cat checksums.txt
 ```
 
-Check the integrity of its content
+Verify content integrity:
 
 ```shell
 shasum -a 256 -c checksums.txt
 ```
 
-Prep the deployment: 
+Deploy:
 
 ```shell
 chmod +x deploy.sh && ./deploy.sh
@@ -188,13 +188,13 @@ aicr bundle \
   --image-refs .digest
 ```
 
-Review manifest: 
+Review manifest:
 
 ```shell
 crane manifest "ghcr.io/nvidia/aicr-bundle-example@$(cat .digest)" | jq .
 ```
 
-## Validate Cluster 
+## Validate Cluster
 
 ```shell
 aicr validate \
@@ -204,8 +204,6 @@ aicr validate \
 ```
 
 ## Embedded Data
-
-View embedded data files structure:
 
 ```shell
 cd ../ && tree -L 2 ./recipes/
@@ -263,7 +261,7 @@ aicr bundle \
   --image-refs .digest
 ```
 
-Unpack the image: 
+Unpack the image:
 
 ```shell
 skopeo copy "docker://ghcr.io/nvidia/aicr-bundle-example@$(cat .digest)" oci:image-oci
@@ -272,7 +270,7 @@ oras pull --oci-layout "image-oci@$(cat .digest)" -o /tmp/aicr-unpacked
 tree /tmp/aicr-unpacked
 ```
 
-## Summary 
+## Summary
 
 ![data flow](images/e2e.png)
 

@@ -286,7 +286,7 @@ go test -race -v ./pkg/collector/...
 aicr --debug snapshot
 
 # Run server with debug logs
-LOG_LEVEL=debug make server
+AICR_LOG_LEVEL=debug make server
 
 # Check race conditions
 go test -race -run TestSpecificTest ./pkg/...

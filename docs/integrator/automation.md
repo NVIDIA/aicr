@@ -1,6 +1,6 @@
 # Automation and CI/CD Integration
 
-This guide describes integration patterns for using AICR in automated pipelines.
+Integration patterns for using AICR in automated pipelines.
 
 ## Overview
 
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure kubectl
-        uses: azure/k8s-set-context@v1
+        uses: azure/k8s-set-context@v4
         with:
           kubeconfig: ${{ secrets.KUBECONFIG }}
       
@@ -63,7 +63,7 @@ jobs:
           fi
       
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: cluster-snapshots
           path: snapshot-*.yaml
@@ -152,11 +152,11 @@ jobs:
           command: |
             # Detect environment
             OS="ubuntu"
-            GPU="h100"
+            ACCELERATOR="h100"
             SERVICE="eks"
             
             # Generate recipe
-            curl -s "http://localhost:8080/v1/recipe?os=${OS}&gpu=${GPU}&service=${SERVICE}&intent=training" \
+            curl -s "http://localhost:8080/v1/recipe?os=${OS}&accelerator=${ACCELERATOR}&service=${SERVICE}&intent=training" \
               -o recipe.json
             
             # Validate
@@ -686,9 +686,9 @@ def get_recipe(params):
 
 # Generate recipes for multiple environments in parallel
 environments = [
-    {'os': 'ubuntu', 'gpu': 'h100', 'service': 'eks'},
-    {'os': 'ubuntu', 'gpu': 'gb200', 'service': 'gke'},
-    {'os': 'rhel', 'gpu': 'a100', 'service': 'aks'},
+    {'os': 'ubuntu', 'accelerator': 'h100', 'service': 'eks'},
+    {'os': 'ubuntu', 'accelerator': 'gb200', 'service': 'gke'},
+    {'os': 'rhel', 'accelerator': 'a100', 'service': 'aks'},
 ]
 
 with ThreadPoolExecutor(max_workers=3) as executor:
@@ -819,14 +819,14 @@ env:
 
 ```bash
 # Verbose curl
-curl -v "http://localhost:8080/v1/recipe?os=ubuntu&gpu=h100"
+curl -v "http://localhost:8080/v1/recipe?os=ubuntu&accelerator=h100"
 
 # With timing
 curl -w "\nTime: %{time_total}s\n" \
-  "http://localhost:8080/v1/recipe?os=ubuntu&gpu=h100"
+  "http://localhost:8080/v1/recipe?os=ubuntu&accelerator=h100"
 
 # Check headers
-curl -I "http://localhost:8080/v1/recipe?os=ubuntu&gpu=h100"
+curl -I "http://localhost:8080/v1/recipe?os=ubuntu&accelerator=h100"
 ```
 
 ### Validate Snapshots

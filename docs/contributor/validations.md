@@ -160,6 +160,10 @@ validations:
     message: "Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes."
 ```
 
+### CheckHostMofedWithoutNetworkOperator
+
+Flags components requesting host-mode MOFED when the `network-operator` component is not in the recipe (host MOFED requires the network operator to manage the kernel modules).
+
 ## Creating New Validation Functions
 
 To add a new validation function, follow these steps:
@@ -218,6 +222,7 @@ Add the function to the auto-registration in `pkg/bundler/validations/checks.go`
 func init() {
     registerCheck("CheckWorkloadSelectorMissing", CheckWorkloadSelectorMissing)
     registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
+    registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
     registerCheck("CheckMyNewValidation", CheckMyNewValidation)  // Add your new function
 }
 ```
@@ -319,19 +324,13 @@ This validation runs when:
 
 ### Warning (Non-Blocking)
 
-Warnings are displayed to the user but do not stop bundle generation:
+Warnings are displayed to the user but do not stop bundle generation. Use for missing optional configuration, best-practice recommendations, potential performance issues, or informational messages.
 
 ```yaml
 severity: warning
 ```
 
-**Use Cases:**
-- Missing optional configuration
-- Best practice recommendations
-- Potential performance issues
-- Informational messages
-
-**Output:**
+Output:
 ```
 Note:
   ⚠ Warning: Component is enabled but optional configuration is missing.
@@ -339,19 +338,13 @@ Note:
 
 ### Error (Blocking)
 
-Errors stop bundle generation and return an error:
+Errors stop bundle generation and return an error. Use for missing required configuration, incompatible settings, critical deployment issues, or security concerns.
 
 ```yaml
 severity: error
 ```
 
-**Use Cases:**
-- Missing required configuration
-- Incompatible settings
-- Critical deployment issues
-- Security concerns
-
-**Output:**
+Output:
 ```
 Error: Component validation failed: required configuration is missing
 ```
