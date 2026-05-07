@@ -77,8 +77,10 @@ spec:
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-snapshot-talos"
-              mkdir -p "${WORK}"
+              # Use mktemp -d so concurrent test runs (parallel CI shards
+              # sharing a runner) cannot collide on a fixed path.
+              WORK="$(mktemp -d -t chainsaw-snapshot-talos.XXXXXX)"
+              trap 'rm -rf "${WORK}"' EXIT
               kubectl get cm aicr-e2e-snapshot -n default \
                 -o jsonpath='{.data.snapshot\.yaml}' > "${WORK}/snapshot.yaml"
               chainsaw assert --resource "${WORK}/snapshot.yaml" \
@@ -88,4 +90,3 @@ spec:
         - script:
             content: |
               kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true
-              rm -rf /tmp/chainsaw-snapshot-talos

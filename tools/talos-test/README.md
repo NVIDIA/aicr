@@ -88,29 +88,29 @@ revert either change. Restart the host runtime VM to drop
 
 ## Troubleshooting
 
-`talosctl: command not found`
+**`talosctl: command not found`**
 Install `talosctl` (see Installing `talosctl` above).
 
-`localhost:5001 registry not reachable`
-The cluster spinup expects the same registry the kind dev-env uses.
-Bring it up with `make dev-env` (or run a `registry:2` container on
+**`localhost:5001 registry not reachable`**
+The cluster spinup expects the same registry the kind-based dev cluster uses.
+Start it with `make dev-env` (or run a `registry:2` container on
 port 5001 manually).
 
-Image pull fails inside the Talos node with a TLS error
+**Image pull fails inside the Talos node with a TLS error**
 The registry mirror uses plain HTTP. If your Docker engine requires
 HTTPS for the mirror host, add `localhost:5001` (or the bridge IP) to
 `insecure-registries` in your Docker daemon configuration. The Talos
 machine config already points the mirror at `http://...`, so the
 failure is host-side, not Talos-side.
 
-`localhost:5001/aicr:local` not found inside the cluster
+**`localhost:5001/aicr:local` not found inside the cluster**
 You haven't pushed the image yet. Run Quickstart step 1.
 
 ## Why a separate cluster?
 
 Talos has no systemd D-Bus and no `/etc/os-release` on the host
 filesystem, so the snapshot agent's privileged pod cannot use the
-hostPath mounts the kind path uses. PR #714 added a Talos collector
+hostPath mounts the kind-based dev cluster uses. PR #714 added a Talos collector
 backend (`pkg/collector/talos/`) and gated those hostPath mounts on
 `OS=talos` (`pkg/k8s/agent/job.go`). This tooling lets a developer
 exercise that path locally against a real Talos node, not a kind node.

@@ -46,9 +46,9 @@ fi
 echo "Ensuring br_netfilter is loaded in the host VM kernel..."
 if ! docker run --rm --privileged --net=host \
         -v /lib/modules:/lib/modules:ro \
-        alpine:3 sh -c 'modprobe br_netfilter && lsmod | grep -q br_netfilter' \
+        alpine:3.21 sh -c 'modprobe br_netfilter && lsmod | grep -q br_netfilter' \
         >/dev/null 2>&1; then
-    err "could not load br_netfilter; flannel CNI will fail. Try running 'docker run --rm --privileged --net=host -v /lib/modules:/lib/modules:ro alpine modprobe br_netfilter' manually, then 'lsmod | grep br_netfilter' to verify."
+    err "could not load br_netfilter; flannel CNI will fail. Try running 'docker run --rm --privileged --net=host -v /lib/modules:/lib/modules:ro alpine:3.21 modprobe br_netfilter' manually, then 'lsmod | grep br_netfilter' to verify."
 fi
 
 # 3. Cluster create. Newer talosctl (>= 1.x) splits provisioners into

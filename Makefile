@@ -717,6 +717,8 @@ TALOS_VERSION      ?= v1.9.0
 
 .PHONY: talos-dev-env
 talos-dev-env: ## Spin up a local Talos cluster (Docker provisioner) for snapshot testing.
+	@# TALOS_KUBECONFIG (user-facing var, documented in tools/talos-test/README.md)
+	@# is forwarded into up.sh as KUBECONFIG_OUT (script-internal var).
 	@TALOS_CLUSTER_NAME=$(TALOS_CLUSTER_NAME) \
 	 TALOS_VERSION=$(TALOS_VERSION) \
 	 KUBECONFIG_OUT=$(TALOS_KUBECONFIG) \
