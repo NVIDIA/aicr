@@ -152,7 +152,7 @@ paths:
           description: Platform/framework type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [kubeflow, any]
+            enum: [dynamo, kubeflow, nim, any]
             default: any
         - name: nodes
           in: query
@@ -519,7 +519,7 @@ paths:
           description: Platform/framework type. If omitted, treated as "any" (wildcard).
           schema:
             type: string
-            enum: [kubeflow, any]
+            enum: [dynamo, kubeflow, nim, any]
             default: any
         - name: nodes
           in: query
@@ -1238,6 +1238,11 @@ components:
           description: Operating system family
           enum: [ubuntu, rhel, cos, amazonlinux, talos, any]
           example: ubuntu
+        platform:
+          type: string
+          description: Platform/framework type
+          enum: [dynamo, kubeflow, nim, any]
+          example: kubeflow
         nodes:
           type: integer
           description: Number of GPU nodes (0 = any)
