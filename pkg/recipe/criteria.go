@@ -529,7 +529,7 @@ func BuildCriteria(opts ...CriteriaOption) (*Criteria, error) {
 
 // ParseCriteriaFromRequest parses recipe criteria from HTTP query parameters.
 // All parameters are optional and default to "any" if not specified.
-// Supported parameters: service, accelerator (alias: gpu), intent, os, nodes.
+// Supported parameters: service, accelerator (alias: gpu), intent, os, platform, nodes.
 func ParseCriteriaFromRequest(r *http.Request) (*Criteria, error) {
 	if r == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "request cannot be nil")
@@ -541,7 +541,7 @@ func ParseCriteriaFromRequest(r *http.Request) (*Criteria, error) {
 
 // ParseCriteriaFromValues parses recipe criteria from URL values.
 // All parameters are optional and default to "any" if not specified.
-// Supported parameters: service, accelerator (alias: gpu), intent, os, nodes.
+// Supported parameters: service, accelerator (alias: gpu), intent, os, platform, nodes.
 func ParseCriteriaFromValues(values url.Values) (*Criteria, error) {
 	c := NewCriteria()
 

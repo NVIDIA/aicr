@@ -64,16 +64,13 @@
 // # Query Parameters (GET /v1/recipe)
 //
 // The /v1/recipe endpoint accepts these query parameters for GET requests:
-//   - os: Operating system (ubuntu, rhel, cos, amazonlinux, talos, any)
-//   - osv: OS version (e.g., 24.04)
-//   - kernel: Kernel version (supports vendor suffixes)
 //   - service: Kubernetes service (eks, gke, aks, oke, kind, lke, any)
-//   - k8s: Kubernetes version (supports vendor suffixes)
 //   - accelerator: GPU type (h100, gb200, b200, a100, l40, rtx-pro-6000, any)
 //   - gpu: Alias for accelerator (back-compat)
 //   - intent: Workload intent (training, inference, any)
+//   - os: Operating system (ubuntu, rhel, cos, amazonlinux, talos, any)
 //   - platform: Platform/framework (dynamo, kubeflow, nim, any)
-//   - context: Include context metadata (true/false)
+//   - nodes: Number of GPU nodes (0 = any/unspecified)
 //
 // # Request Body (POST /v1/recipe)
 //
