@@ -143,6 +143,7 @@ For developers contributing code, extending functionality, or working on AICR in
 | [Architecture Overview](contributor/index.md) | System design, patterns, and deployment topologies |
 | [CLI Architecture](contributor/cli.md) | Detailed CLI implementation and workflow diagrams |
 | [API Server Architecture](contributor/api-server.md) | HTTP server design, middleware, and endpoints |
+| [API Server Extension Patterns](contributor/api-server-extending.md) | Forward-looking guidance: future enhancements, deployment patterns, reliability/perf/security extensions |
 | [Data Architecture](contributor/data.md) | Recipe metadata system, criteria matching, and inheritance |
 | [Bundler Development](contributor/component.md) | Guide for creating new bundlers |
 | [Validator Development](contributor/validator.md) | Writing upstream Go validator checks |
