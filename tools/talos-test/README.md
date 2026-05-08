@@ -9,6 +9,7 @@ this cluster lives at `tests/chainsaw/snapshot/deploy-agent-talos/`.
 - Docker (or compatible) running locally
 - `kubectl`
 - `chainsaw`
+- `curl` (used by the registry-reachability preflight in `up.sh`)
 - A `localhost:5001` image registry (the same one `make dev-env` brings up)
 - `talosctl`
 
@@ -65,8 +66,9 @@ targets:
 
 ## Side effects
 
-`make talos-dev-env` makes two cluster-wide changes you should be aware
-of before scheduling other workloads on this cluster:
+`make talos-dev-env` makes three changes outside the Talos containers
+you should be aware of before scheduling other workloads on this
+cluster — and before relying on `talosctl` for any other cluster:
 
 - **`default` namespace is relabeled to `pod-security.kubernetes.io/enforce=privileged`**
   (also `audit=privileged` and `warn=privileged`). Talos enforces
@@ -81,10 +83,24 @@ of before scheduling other workloads on this cluster:
   life of the host runtime VM (Docker Desktop / Podman Machine), not
   just this cluster. No-op on Linux hosts where the module is normally
   already loaded.
+- **Your default `talosctl` config (`~/.talos/config`) is updated**
+  with this cluster's apid endpoint and node IP via
+  `talosctl config endpoint` / `talosctl config node`. Subsequent
+  interactive `talosctl` commands without `--endpoints` / `--nodes`
+  will target this cluster — and after `make talos-dev-env-clean`
+  they will target a destroyed cluster (host port no longer
+  listens). To avoid affecting your default config, point
+  `talosctl` at a temporary file before running the script:
+  `TALOSCONFIG=$(mktemp -t talosctl.XXXXXX) make talos-dev-env`.
+  After teardown, `talosctl config contexts` will show the stale
+  context; remove it with `talosctl config remove-context aicr-talos`
+  or by deleting `~/.talos/config` entirely if you don't use other
+  Talos clusters.
 
 `make talos-dev-env-clean` destroys the Talos containers but does not
-revert either change. Restart the host runtime VM to drop
-`br_netfilter`; recreate the namespace to drop the PSS labels.
+revert any of the three changes above. Restart the host runtime VM to
+drop `br_netfilter`; recreate the namespace to drop the PSS labels;
+remove the talosctl context as documented above.
 
 ## Troubleshooting
 

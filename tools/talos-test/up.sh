@@ -23,8 +23,11 @@ MIRROR_HOST="${TALOS_REGISTRY_MIRROR_HOST:-${MIRROR_HOST_DEFAULT}}"
 
 err() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-# 1. Preflight: required tools on PATH.
-for tool in talosctl docker kubectl chainsaw; do
+# 1. Preflight: required tools on PATH. curl is included because the
+# registry-reachability check below uses it; without this guard, a host
+# without curl would fall through to the misleading
+# "registry not reachable" branch.
+for tool in talosctl docker kubectl chainsaw curl; do
     command -v "$tool" >/dev/null 2>&1 \
         || err "$tool not found on PATH; see tools/talos-test/README.md"
 done
