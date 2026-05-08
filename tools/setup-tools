@@ -786,7 +786,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     else
         log_info "Installing go-licenses ${GO_LICENSES_VERSION}..."
         if prompt_continue; then
-            go install github.com/google/go-licenses@"${GO_LICENSES_VERSION}"
+            go install github.com/google/go-licenses/v2@"${GO_LICENSES_VERSION}"
             log_success "go-licenses installed"
         fi
     fi
