@@ -1578,3 +1578,31 @@ func TestCriteriaValidate(t *testing.T) {
 func writeTestFile(path, content string) error {
 	return os.WriteFile(path, []byte(content), 0o644)
 }
+
+func TestCriteria_ToFingerprintInput(t *testing.T) {
+	t.Run("nil receiver returns zero value", func(t *testing.T) {
+		var c *Criteria
+		got := c.ToFingerprintInput()
+		nonZero := got.Service != "" || got.Accelerator != "" || got.Intent != "" ||
+			got.OS != "" || got.Platform != "" || got.Nodes != 0
+		if nonZero {
+			t.Errorf("expected zero-value CriteriaInput from nil receiver, got %+v", got)
+		}
+	})
+	t.Run("populated criteria copies every field", func(t *testing.T) {
+		c := &Criteria{
+			Service:     CriteriaServiceEKS,
+			Accelerator: CriteriaAcceleratorH100,
+			Intent:      CriteriaIntentTraining,
+			OS:          CriteriaOSUbuntu,
+			Platform:    CriteriaPlatformKubeflow,
+			Nodes:       12,
+		}
+		got := c.ToFingerprintInput()
+		mismatch := got.Service != "eks" || got.Accelerator != "h100" || got.Intent != "training" ||
+			got.OS != "ubuntu" || got.Platform != "kubeflow" || got.Nodes != 12
+		if mismatch {
+			t.Errorf("ToFingerprintInput() = %+v", got)
+		}
+	})
+}

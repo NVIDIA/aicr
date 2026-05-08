@@ -744,6 +744,106 @@ gb200-eks-training, gb200-eks-ubuntu-training].
 
 Note that multiple maximal leaves can coexist when their inheritance chains are independent — `gb200-any-training` (via wildcard `service: any`) and `gb200-eks-ubuntu-training` (via explicit criteria) are both kept because neither is an ancestor of the other. This is what enables the [criteria-wildcard overlay pattern](#criteria-wildcard-overlays).
 
+## Cluster Fingerprint
+
+`aicr snapshot` emits a structured `fingerprint:` block alongside the raw
+measurements. The fingerprint is a normalized, schema-stable view of the
+dimensions a recipe declares in its `criteria` block — service,
+accelerator, OS, Kubernetes server version, and node count — so an
+evidence bundle (per ADR-007 verifiable recipe test evidence) can prove
+the recipe was tested on hardware matching its declared criteria.
+
+The fingerprint is derived from the same collector outputs that populate
+`measurements:`; it is not a separate collection pass. Dimensions whose
+source signal is missing surface as zero-value entries — the verifier
+treats those as "unknown" rather than fabricating a match.
+
+### Fingerprint Schema
+
+```yaml
+fingerprint:
+  service:
+    value: eks                       # eks | gke | aks | oke | kind | lke
+    source: k8s.node.provider
+  accelerator:
+    value: h100                      # h100 | gb200 | b200 | a100 | l40 | rtx-pro-6000
+    source: gpu.smi.gpu.model
+  os:
+    value: ubuntu                    # ubuntu | rhel | cos | amazonlinux | talos
+    version: "22.04"                 # raw VERSION_ID for audit; not in criteria
+    source: os.release
+  k8sVersion:
+    value: "1.33.4"                  # leading "v" stripped
+    source: k8s.server.version
+  nodeCount:
+    value: 12
+    source: nodeTopology.summary.node-count
+```
+
+Every dimension carries a `value` (the resolved, normalized string the
+recipe `criteria` block can be compared against) and a `source` string
+identifying which collector signal produced it. ADR-007 reserves
+additional optional fields (`signals[]`, `confidence`) for a future
+multi-signal corroboration extension; V1 records `source` only.
+
+### Detection Sources
+
+| Dimension | Source | Normalization |
+|-----------|--------|---------------|
+| `service` | `k8s.node.provider` (parsed from `spec.providerID`) | `aws → eks`, `gce → gke`, `azure → aks`, `oci → oke`, else passthrough |
+| `accelerator` | `gpu.smi.gpu.model` (nvidia-smi `ProductName`) | Substring match against the recipe accelerator enum (`GB200` matched before `B200`) |
+| `os.value` | `/etc/os-release` `ID` | Mapped to the `oskind` enum; aliases like `redhat → rhel` and `al2 → amazonlinux` are recognized |
+| `os.version` | `/etc/os-release` `VERSION_ID` | Retained verbatim for audit |
+| `k8sVersion` | `k8s.server.version` | Leading `v` stripped |
+| `nodeCount` | `nodeTopology.summary.node-count` | Direct |
+
+A dimension whose source signal is missing keeps its zero value. The
+verifier reports it as `unknown` rather than mismatched.
+
+### Match Semantics
+
+`fingerprint.Fingerprint.Match` compares a fingerprint against a
+recipe's criteria and returns a per-dimension diff plus an overall
+`matched` flag. Each criteria dimension resolves to one of three
+outcomes:
+
+- **`matched`** — the recipe is generic (`any` / empty) for this
+  dimension, OR the fingerprint captured the same value the recipe
+  requires.
+- **`mismatched`** — the recipe requires a specific value and the
+  fingerprint captured a different specific value.
+- **`unknown`** — the recipe requires a specific value but the
+  fingerprint cannot prove or disprove it. Two cases produce
+  `unknown`: a dimension the cluster does not reveal (`intent`,
+  `platform` — recipe-author choices) and a dimension the
+  fingerprint failed to detect (e.g., no GPU collector output).
+
+The overall `matched` flag is `true` when no dimension is `mismatched`.
+Unknowns surface in the per-dimension diff for human review without
+flipping the overall outcome — the fingerprint cannot disprove a
+match it does not capture.
+
+### Worked Example
+
+Recipe criteria: `service=eks, accelerator=h100, intent=training, os=ubuntu, platform=kubeflow`
+plus the fingerprint above.
+
+```yaml
+matched: true
+perDimension:
+  service:     {recipeRequires: eks,      fingerprintProvides: eks,    match: matched}
+  accelerator: {recipeRequires: h100,     fingerprintProvides: h100,   match: matched}
+  os:          {recipeRequires: ubuntu,   fingerprintProvides: ubuntu, match: matched}
+  intent:      {recipeRequires: training,                              match: unknown}
+  platform:    {recipeRequires: kubeflow,                              match: unknown}
+  nodes:       {recipeRequires: 0,        fingerprintProvides: 12,     match: matched}
+```
+
+The bundle's predicate body (per ADR-007 PR-A / #754) records this diff
+as `criteriaMatch.perDimension`; the verifier (#753) renders it in a
+Markdown summary so the maintainer sees exactly which dimensions the
+fingerprint corroborated.
+
 ## Recipe Generation Process
 
 The recipe builder (`pkg/recipe/metadata_store.go`) generates recipes through the following steps:

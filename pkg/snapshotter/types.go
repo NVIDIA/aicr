@@ -15,6 +15,7 @@
 package snapshotter
 
 import (
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
@@ -31,6 +32,14 @@ func NewSnapshot() *Snapshot {
 // Kubernetes, GPU, OS configuration, and systemd services.
 type Snapshot struct {
 	header.Header `json:",inline" yaml:",inline"`
+
+	// Fingerprint is a structured cluster identity derived from the
+	// raw measurements: detected service, accelerator, OS,
+	// Kubernetes server version, and node count. Populated after all
+	// collectors finish so it reflects the final measurement set.
+	// Per ADR-007 it is the input the verifier uses to confirm a
+	// recipe's criteria matched the cluster on which validate ran.
+	Fingerprint *fingerprint.Fingerprint `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"`
 
 	// Measurements contains the collected measurements from various collectors.
 	Measurements []*measurement.Measurement `json:"measurements" yaml:"measurements"`

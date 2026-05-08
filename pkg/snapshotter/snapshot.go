@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
@@ -182,6 +183,11 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 			return err
 		}
 	}
+
+	// Derive cluster fingerprint from the assembled measurements.
+	// Populated after all collectors finish so missing signals
+	// surface as zero-value dimensions rather than partial state.
+	snap.Fingerprint = fingerprint.FromMeasurements(snap.Measurements)
 
 	snapshotCollectionTotal.WithLabelValues("success").Inc()
 	snapshotMeasurementCount.Set(float64(len(snap.Measurements)))
