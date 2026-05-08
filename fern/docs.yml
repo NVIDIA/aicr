@@ -69,14 +69,23 @@ products:
     slug: /
     path: ../docs/index.yml
     versions:
-      - display-name: dev
+      # display-name is stamped by publish-fern-docs.yml at publish time
+      - display-name: "Latest"
         path: ../docs/index.yml
+        slug: latest
+        availability: stable
+      - display-name: "v0.12.1"
+        path: versions/v0.12.1.yml
+        slug: v0.12.1
+        availability: stable
+      - display-name: "v0.12.0"
+        path: versions/v0.12.0.yml
+        slug: v0.12.0
+        availability: stable
 
 redirects:
   - source: "/aicr/index.html"
     destination: "/aicr/"
-  - source: "/aicr/dev/index.html"
-    destination: "/aicr/dev/"
 
 experimental:
   basepath-aware: true
