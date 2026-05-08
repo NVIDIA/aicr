@@ -48,12 +48,18 @@ func (f *Fingerprint) Match(c CriteriaInput) MatchResult {
 	}
 
 	diffs := make(map[string]DimensionDiff, 6)
-	diffs["service"] = matchString(c.Service, f.Service.Value)
-	diffs["accelerator"] = matchString(c.Accelerator, f.Accelerator.Value)
-	diffs["os"] = matchString(c.OS, f.OS.Value)
-	diffs["intent"] = matchUnknownDim(c.Intent)
-	diffs["platform"] = matchUnknownDim(c.Platform)
-	diffs["nodes"] = matchNodes(c.Nodes, f.NodeCount.Value)
+	diffs["service"] = matchDim(c.Service, f.Service.Value, !isAny(f.Service.Value))
+	diffs["accelerator"] = matchDim(c.Accelerator, f.Accelerator.Value, !isAny(f.Accelerator.Value))
+	diffs["os"] = matchDim(c.OS, f.OS.Value, !isAny(f.OS.Value))
+	diffs["intent"] = matchDim(c.Intent, "", false)
+	diffs["platform"] = matchDim(c.Platform, "", false)
+	// Nodes uses 0 as the "any" sentinel; remap to "" so isAny in
+	// matchDim treats it as a wildcard.
+	recipeNodes, fpNodes := strconv.Itoa(c.Nodes), strconv.Itoa(f.NodeCount.Value)
+	if c.Nodes == 0 {
+		recipeNodes = ""
+	}
+	diffs["nodes"] = matchDim(recipeNodes, fpNodes, f.NodeCount.Value != 0)
 
 	matched := true
 	for _, d := range diffs {
@@ -66,67 +72,27 @@ func (f *Fingerprint) Match(c CriteriaInput) MatchResult {
 	return MatchResult{Matched: matched, PerDimension: diffs}
 }
 
-// matchString implements the per-dimension three-way comparison for
-// string-valued dimensions.
-func matchString(recipeRequires, fingerprintProvides string) DimensionDiff {
+// matchDim is the shared three-way comparison. fingerprintCaptured is
+// false when the fingerprint did not detect this dimension (either by
+// design — intent and platform — or by signal absence).
+func matchDim(recipeRequires, fingerprintProvides string, fingerprintCaptured bool) DimensionDiff {
 	diff := DimensionDiff{
 		RecipeRequires:      recipeRequires,
 		FingerprintProvides: fingerprintProvides,
 	}
-	if isAny(recipeRequires) {
+	switch {
+	case isAny(recipeRequires):
 		diff.Match = DimensionMatched
-		return diff
-	}
-	if isAny(fingerprintProvides) {
+	case !fingerprintCaptured:
 		diff.Match = DimensionUnknown
-		return diff
-	}
-	if recipeRequires == fingerprintProvides {
+	case recipeRequires == fingerprintProvides:
 		diff.Match = DimensionMatched
-		return diff
+	default:
+		diff.Match = DimensionMismatched
 	}
-	diff.Match = DimensionMismatched
 	return diff
 }
 
-// matchUnknownDim handles criteria fields the fingerprint deliberately
-// does not capture (intent, platform). The recipe is matched when
-// generic; a specific value is unknown — the maintainer reviews it
-// without the fingerprint contradicting the bundle.
-func matchUnknownDim(recipeRequires string) DimensionDiff {
-	diff := DimensionDiff{RecipeRequires: recipeRequires}
-	if isAny(recipeRequires) {
-		diff.Match = DimensionMatched
-		return diff
-	}
-	diff.Match = DimensionUnknown
-	return diff
-}
-
-// matchNodes implements the per-dimension comparison for node count.
-// Zero on either side is treated as "any."
-func matchNodes(recipeRequires, fingerprintProvides int) DimensionDiff {
-	diff := DimensionDiff{
-		RecipeRequires:      strconv.Itoa(recipeRequires),
-		FingerprintProvides: strconv.Itoa(fingerprintProvides),
-	}
-	if recipeRequires == 0 {
-		diff.Match = DimensionMatched
-		return diff
-	}
-	if fingerprintProvides == 0 {
-		diff.Match = DimensionUnknown
-		return diff
-	}
-	if recipeRequires == fingerprintProvides {
-		diff.Match = DimensionMatched
-		return diff
-	}
-	diff.Match = DimensionMismatched
-	return diff
-}
-
-// isAny reports whether a string criteria field is unset or wildcarded.
 func isAny(v string) bool {
 	return v == "" || v == criteriaAnyValue
 }

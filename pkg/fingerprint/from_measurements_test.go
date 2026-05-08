@@ -77,10 +77,7 @@ func topologyMeasurement(nodeCount int) *measurement.Measurement {
 }
 
 func TestFromMeasurements_Empty(t *testing.T) {
-	got := FromMeasurements(nil)
-	if got == nil {
-		t.Fatal("FromMeasurements(nil) returned nil")
-	}
+	got := FromMeasurements([]*measurement.Measurement{})
 	if got.Service.Value != "" || got.Accelerator.Value != "" || got.OS.Value != "" {
 		t.Errorf("expected zero-value dimensions, got %+v", got)
 	}

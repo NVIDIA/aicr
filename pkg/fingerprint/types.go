@@ -89,7 +89,6 @@ type Fingerprint struct {
 // counting as a contradiction in the overall MatchResult.Matched flag.
 type DimensionMatch string
 
-// DimensionMatch enumerated values.
 const (
 	DimensionMatched    DimensionMatch = "matched"
 	DimensionMismatched DimensionMatch = "mismatched"

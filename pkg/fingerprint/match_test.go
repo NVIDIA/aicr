@@ -16,9 +16,6 @@ package fingerprint
 
 import "testing"
 
-// h100Fingerprint returns a fully-populated fingerprint matching the
-// canonical eks/h100/ubuntu/training cluster used as the happy path
-// across the match tests.
 func h100Fingerprint() *Fingerprint {
 	return &Fingerprint{
 		Service:     Dimension{Value: "eks", Source: "k8s.node.provider"},
