@@ -30,7 +30,7 @@ build_tools:
 # Linting
 linting:
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.12.1'
+  golangci_lint: 'v2.11.3'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
