@@ -69,9 +69,11 @@ jobs:
 
       - name: Stamp version in docs.yml
         run: |
-          VERSION=$(curl -sf https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name)
+          VERSION=$(curl -sf https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r .tag_name || true)
           if [ -n "$VERSION" ] && [ "$VERSION" != "null" ]; then
             sed -i 's/display-name: "Latest"/display-name: "Latest · '"${VERSION}"'"/' fern/docs.yml
+          else
+            echo "::warning::Could not resolve latest GitHub release tag; continuing without stamping"
           fi
           echo "--- docs.yml versions after stamp ---"
           grep "display-name:" fern/docs.yml
