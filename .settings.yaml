@@ -92,7 +92,7 @@ docs_tools:
   # renovate: datasource=github-releases depName=gohugoio/hugo depType=docs_tools
   hugo: '0.155.3'
   # renovate: datasource=node-version depName=node depType=docs_tools
-  node: '22'
+  node: '24'
 
 # Testing Configuration
 testing:
