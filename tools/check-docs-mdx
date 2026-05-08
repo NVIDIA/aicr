@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Enforce MDX-safe markdown in docs/.
+#
+# Fern renders markdown through an MDX parser, which rejects constructs that
+# are valid in plain markdown but invalid in JSX. This script catches the
+# common violations before they reach CI or break versioned doc snapshots.
+#
+# Scope: docs/user/ and docs/integrator/ (published to Fern).
+# Contributor and design docs are code-heavy and excluded from brace/comment
+# checks. container-images.md is auto-generated with HTML comment markers
+# that VitePress still needs; excluded until VitePress is removed.
+# Override with positional args for frozen version content.
+#
+# Checks:
+#   1. Non-self-closing void HTML elements (<br>, <hr>, <img>, etc.)
+#   2. Bare { } outside fenced code blocks (MDX interprets as JSX expressions)
+#   3. HTML comments (<!-- -->) outside fenced code blocks
+
+set -euo pipefail
+
+ERRORS=0
+SEARCH_DIRS=("docs/user/" "docs/integrator/")
+EXCLUDE="container-images.md"
+
+# Allow overriding the search path (e.g., for frozen version content)
+if [[ $# -gt 0 ]]; then
+  SEARCH_DIRS=("$@")
+fi
+
+# --- Check 1: non-self-closing void HTML elements (outside fenced code blocks) ---
+# These must use <tag /> in MDX, not <tag> or <tag attr>.
+VOID_ELEMENTS='img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr'
+for dir in "${SEARCH_DIRS[@]}"; do
+  while IFS= read -r file; do
+    [[ -z "${file}" ]] && continue
+    while IFS= read -r match; do
+      [[ -z "${match}" ]] && continue
+      echo "MDX: non-self-closing void element: ${file}:${match}"
+      ERRORS=$((ERRORS + 1))
+    done < <(awk '
+      /^```/ { in_fence = !in_fence; next }
+      in_fence { next }
+      { print NR": "$0 }
+    ' "$file" | grep -E "<(${VOID_ELEMENTS})([[:space:]][^>]*)?" | grep -Ev "<(${VOID_ELEMENTS})([[:space:]][^>]*)?[[:space:]]*/>" || true)
+  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) ! -name "${EXCLUDE}" 2>/dev/null)
+done
+
+# --- Check 2 & 3: bare braces and HTML comments outside fenced code blocks ---
+for dir in "${SEARCH_DIRS[@]}"; do
+  while IFS= read -r file; do
+    [[ -z "${file}" ]] && continue
+    # awk tracks fenced-block state and reports violations with line numbers
+    awk '
+      /^```/ { in_fence = !in_fence; next }
+      in_fence { next }
+      # Bare { not preceded by backslash escape
+      /[^\\]{/ {
+        # Skip lines that are pure inline code (single backtick-wrapped)
+        line = $0
+        # Strip all inline code spans before checking
+        gsub(/`[^`]*`/, "", line)
+        if (line ~ /[^\\]{/) {
+          printf "MDX: bare { outside code fence: %s:%d: %s\n", FILENAME, NR, $0
+          errors++
+        }
+      }
+      /<!--/ {
+        printf "MDX: HTML comment outside code fence: %s:%d: %s\n", FILENAME, NR, $0
+        errors++
+      }
+      END { exit (errors > 0) ? 1 : 0 }
+    ' "$file" 2>/dev/null
+    if [[ $? -ne 0 ]]; then
+      ERRORS=$((ERRORS + 1))
+    fi
+  done < <(find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) ! -name "${EXCLUDE}" 2>/dev/null)
+done
+
+if [[ ${ERRORS} -gt 0 ]]; then
+  echo ""
+  echo "ERROR: MDX safety violations found."
+  echo ""
+  echo "Common fixes:"
+  echo "  <br>  → <br />        <img src=...>  → <img src=... />"
+  echo "  {foo} → \\{foo\\}      <!-- ... -->   → remove or use {/* ... */}"
+  exit 1
+fi
+
+echo "OK: all doc files are MDX-safe"

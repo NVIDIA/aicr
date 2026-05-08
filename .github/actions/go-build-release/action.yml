@@ -66,7 +66,7 @@ runs:
         # with "cannot find module providing package". setup-go puts
         # $(go env GOPATH)/bin on PATH, so the binary is reachable from
         # later steps in this job.
-        GOFLAGS= go install "github.com/google/go-licenses@${GO_LICENSES_VERSION}"
+        GOFLAGS= go install "github.com/google/go-licenses/v2@${GO_LICENSES_VERSION}"
         go-licenses --help >/dev/null
         echo "go-licenses installed: ${GO_LICENSES_VERSION}"
 

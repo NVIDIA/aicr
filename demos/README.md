@@ -14,6 +14,7 @@ Runbooks for testing and demonstrating AICR end-to-end workflows on live cluster
 | [valid.md](valid.md) | Validation demo |
 | [data.md](data.md) | External data directory demo |
 | [ext.md](ext.md) | Extension demo |
+| [query.md](query.md) | Querying hydrated recipes with dot-path selectors |
 | [attestation.md](attestation.md) | Bundle attestation demo |
 | [s3c.md](s3c.md) | Supply chain security demo |
 

@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Enforce lowercase kebab-case filenames in docs/.
+#
+# Conventional uppercase files are excluded — GitHub boilerplate (README,
+# CONTRIBUTING, CHANGELOG, CODE_OF_CONDUCT, SECURITY, MAINTAINERS, etc.)
+# and similar project-level names (PRODUCT, OVERVIEW, THIRD_PARTY_NOTICES)
+# where the base name (without extension) is entirely uppercase letters,
+# digits, underscores, or hyphens.
+
+set -euo pipefail
+
+ERRORS=0
+
+while IFS= read -r file; do
+  base=$(basename "${file}")
+  name="${base%.*}"
+
+  # Skip conventional uppercase boilerplate (README.md, PRODUCT.yaml, etc.)
+  [[ "${name}" =~ ^[A-Z][A-Z0-9_-]*$ ]] && continue
+
+  # Check: remaining filenames must be lowercase kebab-case (no uppercase, no spaces, no underscores)
+  if [[ "${base}" =~ [A-Z] ]] || [[ "${base}" =~ [[:space:]] ]] || [[ "${name}" =~ _ ]]; then
+    echo "VIOLATION: ${file} (expected lowercase kebab-case)"
+    ERRORS=$((ERRORS + 1))
+  fi
+done < <(find docs/ -type f \( -name '*.md' -o -name '*.mdx' \))
+
+if [[ ${ERRORS} -gt 0 ]]; then
+  echo ""
+  echo "ERROR: ${ERRORS} filename(s) violate kebab-case convention."
+  echo "Fix: rename to lowercase-kebab-case (e.g., my-page.md)"
+  exit 1
+fi
+
+echo "OK: all doc filenames follow kebab-case convention"

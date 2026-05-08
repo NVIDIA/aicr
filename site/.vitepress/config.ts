@@ -96,6 +96,7 @@ export default withMermaid(
             items: [
               { text: 'CLI', link: '/docs/contributor/cli' },
               { text: 'API Server', link: '/docs/contributor/api-server' },
+              { text: 'API Server Extension Patterns', link: '/docs/contributor/api-server-extending' },
               { text: 'Data Architecture', link: '/docs/contributor/data' },
               { text: 'Component Development', link: '/docs/contributor/component' },
               { text: 'Validations', link: '/docs/contributor/validations' },

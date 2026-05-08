@@ -244,7 +244,7 @@ jobs:
             go.sum
             vendor/modules.txt
       - name: Install go-licenses
-        run: go install github.com/google/go-licenses@${{ steps.versions.outputs.go_licenses }}
+        run: go install github.com/google/go-licenses/v2@${{ steps.versions.outputs.go_licenses }}
       - name: Report licenses
         env:
           GOFLAGS: -mod=vendor
