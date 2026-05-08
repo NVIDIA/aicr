@@ -50,17 +50,17 @@ security_tools:
 # E2E Testing Tools
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
-  kubectl: 'v1.35.0'
+  kubectl: 'v1.36.0'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
   kind: '0.31.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
-  nvkind: '78a0a514c41c3e77ac0d935f38d971d3b4455138'
+  nvkind: '56db9be854036c2f5a0133e3ccb0990e13ea9e6c'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
-  ctlptl: '0.9.0'
+  ctlptl: '0.9.3'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.3'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.1.1'
+  helm: 'v4.1.4'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.7.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -73,9 +73,9 @@ testing_tools:
     darwin_amd64: '983ce0e4ff32a2112481833d7be4e0a0f0530fadba630fa93d3a635539bc1db0'
     darwin_arm64: 'ff806554a15e12faca08b54d373a61e27808f40c34208248924f7b71a301f786'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.52.4'
+  yq: 'v4.53.2'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
-  karpenter: 'v1.8.0'
+  karpenter: 'v1.12.0'
 
 # Quality Thresholds
 quality:
