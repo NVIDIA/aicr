@@ -20,7 +20,7 @@
 # to roll forward. Consumers pin to a specific aiperf-bench:<semver> tag or
 # let :latest track the CLI version via catalog.Load rewriting.
 
-FROM python:3.14-slim
+FROM python:3.13-slim
 
 ARG AIPERF_VERSION=0.7.0
 
