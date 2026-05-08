@@ -36,7 +36,7 @@ linting:
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
   addlicense: 'v1.1.1'
   # renovate: datasource=github-releases depName=google/go-licenses depType=linting
-  go_licenses: 'v1.6.0'
+  go_licenses: 'v2.0.1'
 
 # Security Tools
 security_tools:
