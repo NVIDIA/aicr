@@ -186,20 +186,30 @@ done
 
 ## Plain-English Queries via the AICR Agent Skill
 
-The `aicr` Claude Code skill wraps the same CLI behind a natural-language
-interface. Once installed, ask Claude things like:
+```shell
+aicr skill -h
+```
 
-> *"What driver version would deploy in EKS with H100 in Ubuntu for training?"*
->
-> *"Compare GPU operator driver versions between H100 and GB200 on EKS."*
->
-> *"List all components that ship in EKS H100 inference but not training."*
->
-> *"Show me the constraints on GKE H100 training. Are they tighter or looser
-> than EKS?"*
->
-> *"Does the Kubeflow platform overlay add any components to EKS H100 training?
-> Which ones?"*
+`aicr` Claude Code skill wraps the same CLI behind a natural-language interface. 
+Install Claude Code skill: 
+
+```shell
+aicr skill --agent claude-code
+```
+
+When you are in Claude: 
+
+```shell 
+claude
+```
+
+> What driver version would deploy in EKS with H100 in Ubuntu for training?
+
+> Compare GPU operator driver versions between H100 and GB200 on EKS
+
+> List all components that ship in EKS H100 inference but not training
+
+> Does the Kubeflow platform overlay add any components to EKS H100 training? Which ones?
 
 Claude resolves the question to one or more `aicr query --selector ...`
 invocations, parses the output, and answers in prose. The skill is
