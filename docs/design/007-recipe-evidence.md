@@ -1,5 +1,12 @@
 # ADR-007: Verifiable Recipe Test Evidence
 
+> **Status:** Proposed (design-only; not implemented). This ADR specifies
+> the V1 contract. Implementation lands as five follow-on PRs tracked
+> under [#750](https://github.com/NVIDIA/aicr/issues/750) and its children
+> ([#751](https://github.com/NVIDIA/aicr/issues/751)–[#754](https://github.com/NVIDIA/aicr/issues/754)).
+> Bundle formats, CLI flags, schema fields, and verifier behavior
+> described below are future intent, not current behavior.
+
 ## Problem
 
 AICR ships recipes for AWS, OCI, GCP, Azure, CoreWeave, Forge, and on-prem
@@ -90,7 +97,7 @@ cost-to-defer is high:
 
 **Ship V1 as five PRs, deferring the rest until pulled by demand.**
 
-### V1 surface
+### V1 surface (proposed)
 
 1. **Bundle format + pointer + `aicr validate --emit-evidence`.** Single
    in-toto Statement per recipe run, predicate type
@@ -102,7 +109,7 @@ cost-to-defer is high:
    `--emit-evidence`, not a separate command — generation, OCI push,
    signing, and pointer population happen in one invocation:
 
-   ```
+   ```bash
    aicr validate --recipe r.yaml --snapshot s.yaml --emit-evidence ./out
    # writes:
    #   ./out/summary-bundle/   (recipe, snapshot, BOM, CTRF, manifest, attestation)
@@ -112,7 +119,7 @@ cost-to-defer is high:
 
    With an optional `--push <oci-registry>` that closes the loop:
 
-   ```
+   ```bash
    aicr validate --recipe r.yaml --snapshot s.yaml \
      --emit-evidence ./out \
      --push ghcr.io/myorg/aicr-evidence \
@@ -132,7 +139,7 @@ cost-to-defer is high:
    cross-reference. Markdown + JSON output. Single positional argument
    accepts any of four input forms:
 
-   ```
+   ```bash
    aicr verify-evidence <input>
 
    # where <input> is auto-detected as:
@@ -158,11 +165,11 @@ cost-to-defer is high:
    a durable escalation contact (DL or shared mailbox). One-time backfill
    PR populates existing recipes via `git log` heuristics.
 
-### Bundle anatomy
+### Bundle anatomy (proposed)
 
 Summary bundle (always published):
 
-```
+```text
 oci://ghcr.io/<owner>/aicr-evidence:<digest>
 └── (OCI artifact whose layers contain:)
     ├── attestation.intoto.jsonl    # DSSE-wrapped, cosign keyless signed
@@ -178,7 +185,7 @@ oci://ghcr.io/<owner>/aicr-evidence:<digest>
 
 Optional logs bundle (contributor-controlled; absent when not published):
 
-```
+```text
 oci://ghcr.io/<owner>/aicr-evidence-logs:<digest>
 └── phases/
     ├── deployment/logs/*
@@ -250,7 +257,7 @@ would be cryptographically bound — adversaries could swap any other
 file undetected. The verifier's inventory check is what closes the
 chain.
 
-### Pointer schema (1.0)
+### Pointer schema (1.0) (proposed)
 
 ```yaml
 # recipes/evidence/<recipe>.yaml — schema 1.0, single-attestation list
@@ -294,7 +301,7 @@ directory, before push). Mismatches between pointer and bundle are
 **integrity-chain failures**, not clerical errors — the bundle is
 authoritative; the pointer is a denormalized cache.
 
-### Verifier steps
+### Verifier steps (proposed)
 
 `aicr verify-evidence recipes/evidence/<recipe>.yaml` (or any
 auto-detected input form — OCI ref, tarball, unpacked directory):
@@ -342,7 +349,7 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
     results, per-dimension fingerprint match, BOM disclosure, and
     sub-image count.
 
-Exit codes:
+Exit codes (proposed):
 
 - `0` — valid + passed (every check passed)
 - `1` — valid + failed checks (informational; signature and integrity
