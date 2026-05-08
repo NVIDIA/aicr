@@ -104,7 +104,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -135,6 +135,14 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 .PHONY: check-docs-sidebar
 check-docs-sidebar: ## Verifies all docs/ pages have sidebar entries in VitePress config
 	@./tools/check-docs-sidebar
+
+.PHONY: check-docs-filenames
+check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
+	@./tools/check-docs-filenames
+
+.PHONY: check-docs-mdx
+check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments)
+	@./tools/check-docs-mdx
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
