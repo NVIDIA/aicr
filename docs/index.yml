@@ -62,6 +62,8 @@ navigation:
         path: contributor/cli.md
       - page: API Server
         path: contributor/api-server.md
+      - page: API Server Extension Patterns
+        path: contributor/api-server-extending.md
       - page: Data Architecture
         path: contributor/data.md
       - page: Component Development
