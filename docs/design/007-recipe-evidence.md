@@ -91,7 +91,13 @@ cost-to-defer is high:
   `recipes/evidence/<recipe>.yaml` binds the repo to the bundle by
   content hash. Discoverability and audit trail (`git log` on the
   pointer) are worth the small added complexity over PR-attached
-  tarballs.
+  tarballs. **GHCR is shown as the example throughout this ADR; any
+  OCI-1.1-compliant registry is acceptable** (GHCR, GitLab Container
+  Registry, Harbor, JFrog Artifactory, AWS ECR, Google Artifact
+  Registry, Azure Container Registry). Contributors on corporate
+  registries push to whatever their organization permits; the verifier
+  reads the registry from the pointer file and uses standard ORAS
+  client paths.
 - **CycloneDX BOM in the summary bundle.** Per #754 and the hard
   dependency on [#739](https://github.com/NVIDIA/aicr/issues/739), the
   BOM ties the recipe to the exact image set deployed at validate
@@ -299,8 +305,23 @@ top-level CLI growth.
 
 4. **`maintainers:` block on `RecipeMetadataSpec`.** Required field on
    every recipe in `recipes/overlays/`, listing GitHub handle, org, and
-   a durable escalation contact (DL or shared mailbox). One-time backfill
-   PR populates existing recipes via `git log` heuristics.
+   a durable escalation contact (DL or shared mailbox). One-time
+   backfill PR populates existing recipes via `git log` heuristics.
+
+   **Why this lives under ADR-007 rather than as a separate schema PR.**
+   The `maintainers:` block is the durable contact surface this
+   evidence design generates work for: re-cert prompts when a
+   material-slice digest expires, advisory-revocation notifications
+   when a deployed image is flagged post-merge (deferred — see the
+   advisory-feed row in the deferred-features table), and
+   signer-identity disputes ("who signed `recipes/evidence/<recipe>.yaml`?
+   are they still the right routing target?"). Without a recipe-level
+   contact, every such event has to be triaged through `git log`
+   heuristics — which is exactly what the backfill PR does *once*, and
+   then ages out of usefulness as authors leave teams. PR-D is
+   schedule-independent of A/B/C (it can land first if convenient,
+   since the field is additive metadata) but its motivation is the
+   evidence lifecycle this ADR establishes.
 
 ### Material-slice canonicalization (proposed)
 
@@ -379,7 +400,7 @@ Summary bundle (always published):
 ```text
 oci://ghcr.io/<owner>/aicr-evidence:<digest>
 └── (OCI artifact whose layers contain:)
-    ├── attestation.intoto.jsonl    # DSSE-wrapped, cosign keyless signed
+    ├── attestation.intoto.json     # DSSE-wrapped, cosign keyless signed
     ├── recipe.yaml                 # post-resolution canonical YAML
     ├── snapshot.yaml               # cluster snapshot at validate-time
     ├── bom.cdx.json                # CycloneDX BOM (per #739)
@@ -917,10 +938,14 @@ commitments the demand event has not yet justified.
 4. **PR-C: CI gate workflow + PR template.** Required check on PRs
    touching `recipes/**`. Depends on PR-B.
 5. **PR-D: `maintainers:` block schema + CI presence gate + backfill
-   PR.** Independent of A/B/C; can land at any time.
+   PR.** Schedule-independent of A/B/C — the field is additive
+   metadata and can land first if convenient — but motivated by this
+   ADR's evidence lifecycle (durable contact for re-cert prompts,
+   advisory revocations, and signer-identity disputes).
 
 PR-A is the foundation. PR-B depends on PR-A. PR-C depends on PR-B.
-PR-D is fully independent and can land first if convenient.
+PR-D is schedule-independent and can land first if convenient; its
+motivation, not its dependencies, is the evidence lifecycle.
 
 When V1 ships and feedback lands, consult the deferred-features table
 under `## Decision`. **Each deferred feature has a documented
