@@ -1,11 +1,15 @@
 # ADR-007: Verifiable Recipe Test Evidence
 
-> **Status:** Proposed (design-only; not implemented). This ADR specifies
-> the V1 contract. Implementation lands as five follow-on PRs tracked
-> under [#750](https://github.com/NVIDIA/aicr/issues/750) and its children
-> ([#751](https://github.com/NVIDIA/aicr/issues/751)–[#754](https://github.com/NVIDIA/aicr/issues/754)).
-> Bundle formats, CLI flags, schema fields, and verifier behavior
-> described below are future intent, not current behavior.
+## Status
+
+**Proposed** — 2026-05-08 (design-only; not implemented).
+
+This ADR specifies the V1 contract. Implementation lands as five
+follow-on PRs tracked under
+[#750](https://github.com/NVIDIA/aicr/issues/750) and its children
+([#751](https://github.com/NVIDIA/aicr/issues/751)–[#754](https://github.com/NVIDIA/aicr/issues/754)).
+Bundle formats, CLI flags, schema fields, and verifier behavior
+described below are future intent, not current behavior.
 
 ## Problem
 
@@ -487,6 +491,85 @@ takes when its trigger fires.
   attestation overwrites the first; multi-cluster diversity isn't
   captured.
 
+## Alternatives Considered
+
+The V1 design space is wider than the chosen surface. The alternatives
+below were evaluated and rejected (or deferred) for the reasons given.
+
+### PR-attached tarball vs. OCI artifact (rejected)
+
+A bundle attached to the PR description as a release asset or a
+`*.tar.gz` checked into `recipes/evidence/`. Cheaper to ship — no
+registry dependency, no `oras` in the toolchain.
+
+Rejected because (1) tarballs in git balloon repo size and break
+content-addressed updates, (2) GitHub release assets have no audit
+trail and can be silently replaced, (3) cosign attestations naturally
+live next to OCI artifacts via Rekor — the in-tree-tarball path forces
+a parallel signing surface, and (4) the in-tree pointer file gives the
+same `git log` audit benefit a tarball would, without the size cost.
+
+### Sigstore bundle format vs. in-toto Statement (rejected)
+
+The sigstore "bundle" format (cert + sig + Rekor proof in one envelope)
+is increasingly the default for `cosign sign-blob`. It would let the
+verifier skip a Rekor round-trip.
+
+Rejected because in-toto Statements are the established industry
+standard for build/test attestations, third-party verifiers
+(`cosign verify-attestation`) consume them natively, and the predicate
+type discriminates V1 from future V2 cleanly. Sigstore-bundle remains
+an option for the cosign signing path *underneath* the in-toto
+envelope; this is not an either/or at the bundle layer.
+
+### Single combined bundle vs. split summary/logs (rejected)
+
+Keep summary and logs in one OCI artifact; sign once.
+
+Rejected because logs are large, contributor-controlled (some clusters
+generate GBs per validator phase), and frequently sensitive (cluster
+identifiers, internal endpoints). A single bundle forces every
+publication to ship logs, raises registry costs, and leaks operational
+detail into every public attestation. The split design lets logs stay
+local until the contributor opts in via `--push-logs`, while the
+manifest pre-commit binding still gives forensic recoverability.
+
+### KMS-backed signing vs. cosign keyless (deferred, not rejected)
+
+KMS-backed signing (AWS KMS / GCP KMS / Azure Key Vault / HSM-backed
+PKCS#11) gives a stable, organizationally-controlled signing identity
+that does not depend on OIDC token issuers.
+
+Deferred to V2 under the same predicate type — `predicateType` does
+not change, only the `signer.issuer` claim shape. V1 ships keyless
+because contributors targeting unreachable hardware do not have NVIDIA
+KMS access, and corporate OIDC (GitHub Actions OIDC, Azure AD) is
+already the friction-free path. KMS arrives when a partner relationship
+or NVIDIA-internal CI path requires it.
+
+### git-LFS vs. OCI for transport (rejected)
+
+Store bundle bytes in git-LFS at `recipes/evidence-bundles/<recipe>/`.
+Eliminates the OCI-registry dependency.
+
+Rejected because (1) LFS bytes still inflate clone size for every
+contributor who only needs the recipe text, (2) GitHub LFS has bandwidth
+quotas that incidents can blow through, (3) LFS objects are mutable on
+their backing store — content-addressed pulls don't transfer, and
+(4) cosign tooling has no LFS integration, so the signing surface would
+fragment.
+
+### Single attestation per recipe vs. list from day one (rejected)
+
+V1's `pointer.attestations` could be a single object instead of a list
+of one. Slightly simpler schema today.
+
+Rejected because the multi-instance schema 2.0 transition (one
+attestation per cluster) would then require a breaking schema-version
+bump and a migration shim. Shipping a list of one in V1 makes schema
+2.0 purely additive — new entries plus an optional `role:` field —
+and verifier readers do not have to discriminate by schema version.
+
 ## Future direction
 
 The features below are deferred from V1 by deliberate choice. Each
@@ -682,3 +765,60 @@ PR-D is fully independent and can land first if convenient.
 When V1 ships and feedback lands, consult the deferred-features table
 and "Future direction" above. **Each deferred feature has a documented
 pull-trigger; let demand decide what V2 brings in.** Don't pre-build.
+
+## References
+
+### Standards and specifications
+
+- [in-toto Attestation Framework](https://github.com/in-toto/attestation) —
+  predicate envelope and Statement shape used for the
+  `recipe-evidence/v1` predicate type.
+- [DSSE (Dead Simple Signing Envelope)](https://github.com/secure-systems-lab/dsse) —
+  signature envelope wrapping the in-toto Statement.
+- [Sigstore Cosign](https://docs.sigstore.dev/cosign/overview/) —
+  keyless signing path used in V1; reference for `cosign attest` and
+  `cosign verify-attestation`.
+- [Fulcio](https://github.com/sigstore/fulcio) — short-lived cert
+  authority that issues the OIDC-bound signing cert recorded in the
+  bundle's `signer.identity` and `signer.issuer` claims.
+- [Rekor](https://github.com/sigstore/rekor) — transparency log; the
+  verifier's default cross-check for `signer.rekorLogIndex`.
+- [CycloneDX 1.5](https://cyclonedx.org/specification/overview/) —
+  BOM format used for the `bom.cdx.json` artifact in every summary
+  bundle, per [#739](https://github.com/NVIDIA/aicr/issues/739).
+- [OCI Distribution Spec 1.1](https://github.com/opencontainers/distribution-spec) —
+  registry transport for the summary and (optional) logs bundles.
+- [OCI Image Spec 1.1 — Artifacts](https://github.com/opencontainers/image-spec/blob/main/manifest.md) —
+  artifact-type media field used for AICR evidence bundles.
+- [ORAS](https://oras.land/) — OCI artifact transport library
+  expected to back the `--push` and verifier `oras pull` paths.
+- [RFC 8785 — JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785) —
+  baseline for the (deferred) material-slice canonicalizer.
+- [CTRF](https://ctrf.io/) — common test-result format consumed from
+  the validator phases for `phaseSummary`.
+
+### Related ADRs
+
+- [ADR-002: Validator V2](002-validatorv2-adr.md) — the validator
+  pipeline that produces phase results consumed by this bundle.
+- [ADR-005: Overlay Refactoring](005-overlay-refactoring.md) — the
+  resolver chain (overlays → mixins → registry → component values)
+  whose determinism the bundle's subject digest depends on.
+- [ADR-006: Container Image Pinning Policy](006-image-pinning-policy.md) —
+  pinning surface this ADR scopes to (recipe + chart-pin + digest-pin);
+  per-component admission-time digest verification stays out of scope.
+
+### Tracking issues
+
+- [#739](https://github.com/NVIDIA/aicr/issues/739) — CycloneDX BOM
+  pipeline (hard dependency for V1).
+- [#745](https://github.com/NVIDIA/aicr/issues/745) — admission-time
+  image policy (out of scope for this ADR).
+- [#750](https://github.com/NVIDIA/aicr/issues/750) — epic; verifiable
+  recipe test evidence.
+- [#751](https://github.com/NVIDIA/aicr/issues/751) — contribution
+  workflow.
+- [#752](https://github.com/NVIDIA/aicr/issues/752) — fingerprint
+  match.
+- [#753](https://github.com/NVIDIA/aicr/issues/753) — verifier.
+- [#754](https://github.com/NVIDIA/aicr/issues/754) — bundle format.
