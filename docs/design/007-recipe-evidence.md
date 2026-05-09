@@ -51,8 +51,8 @@ already poses, so a maintainer can verify it without re-running.
 - **KMS-backed signing.** V1 uses cosign keyless OIDC. KMS is a
   future extension under the same predicate type and bundle format —
   no design change required.
-- **Re-running validators in `verify-evidence`.** Verification is an
-  offline cryptographic + schema operation; re-running validators
+- **Re-running validators in `aicr evidence verify`.** Verification is
+  an offline cryptographic + schema operation; re-running validators
   defeats the purpose and would require maintainers to have the
   hardware they don't have.
 - **Pre-building features without demand.** Tier policies, multi-instance
@@ -122,6 +122,35 @@ fingerprint provenance, not a cryptographic primitive V1 can bolt on. V1
 delivers the artifact and the verifier; tier classification arrives when
 contribution volume or partner relationships pull it in.
 
+### Evidence taxonomy
+
+AICR carries multiple kinds of evidence with different purposes and
+shapes; the V1 design treats *recipe-test attestation* as one kind in
+that family, not the only one. Two kinds exist today:
+
+- **`cncf-conformance`** (already shipped, in `pkg/evidence`).
+  Per-requirement Markdown documents rendered from validator results,
+  intended for CNCF conformance submission. Human-readable, not
+  cryptographically signed; trust comes from the submission process,
+  not the artifact itself.
+- **`recipe-test-attestation`** (this ADR, V1). Signed, OCI-distributed
+  in-toto Statement plus supporting bundle (recipe, snapshot, BOM,
+  CTRF, manifest); intended for maintainer review of contributions
+  from unreachable hardware. Cryptographically self-verifying; trust
+  comes from the signer-identity claims and the bundle's content
+  binding.
+
+The two kinds share consumption surface (see V1 surface item 2 below):
+`aicr evidence verify <input>` auto-detects and dispatches per kind.
+They do *not* share production surface — each is emitted by the
+command whose pipeline produced it. CNCF conformance evidence is
+emitted alongside `aicr validate` today; recipe-test attestation is
+emitted by `aicr validate --emit-evidence` (V1 surface item 1).
+Production lives at the origin, where the data is; consumption unifies
+under `aicr evidence` so future kinds (CycloneDX BOM-only attestation,
+SLSA provenance, license attestation) plug in without further
+top-level CLI growth.
+
 **Ship V1 as five PRs, deferring the rest until pulled by demand.**
 
 ### V1 surface (proposed)
@@ -134,7 +163,47 @@ contribution volume or partner relationships pull it in.
    contributor-controlled. The pointer file (schema 1.0, in-tree at
    `recipes/evidence/<recipe>.yaml`) is a *side effect* of
    `--emit-evidence`, not a separate command — generation, OCI push,
-   signing, and pointer population happen in one invocation:
+   signing, and pointer population happen in one invocation.
+
+   **Canonical invocation: `--config aicr.yaml`.** PR-A extends
+   `pkg/config.AICRConfig` with a `ValidateSpec` sibling of
+   `RecipeSpec`/`BundleSpec`, reusing `AttestationSpec` and
+   `RegistrySpec` so the cosign and OCI surfaces stay consistent
+   between `bundle` and `validate`:
+
+   ```yaml
+   apiVersion: aicr.nvidia.com/v1alpha1
+   kind: AICRConfig
+   metadata:
+     name: my-recipe
+   spec:
+     validate:
+       input:
+         recipe: r.yaml
+         snapshot: s.yaml
+       output:
+         target: ./out                        # or oci://ghcr.io/myorg/aicr-evidence
+       evidence:
+         emit: true
+         includeLogs: true
+         pushLogs: false
+       attestation:                            # reuses pkg/config.AttestationSpec
+         enabled: true
+         certificateIdentityRegexp: ^https://github\.com/myorg/.*$
+         oidcDeviceFlow: false
+       registry:                               # reuses pkg/config.RegistrySpec
+         insecureTLS: false
+         plainHTTP: false
+   ```
+
+   `aicr validate --config aicr.yaml` is the supported invocation;
+   the CLI flag form (`--recipe`, `--snapshot`, `--emit-evidence`,
+   `--push`, `--include-logs`, `--push-logs`) is the expanded
+   equivalent and overrides config values. `aicr.yaml` flows the same
+   contributor through `aicr recipe` → `aicr validate --emit-evidence`
+   → `aicr bundle` without re-typing inputs.
+
+   **Flag form (equivalent expansion):**
 
    ```bash
    aicr validate --recipe r.yaml --snapshot s.yaml --emit-evidence ./out
@@ -160,28 +229,49 @@ contribution volume or partner relationships pull it in.
    bundle are integrity-chain failures. Contributors copy
    `./out/pointer.yaml` to `recipes/evidence/<recipe>.yaml` and commit.
 
-2. **`aicr verify-evidence` CLI.** Full verification: signature, schema,
-   inventory (manifest hashes), recipe ↔ snapshot fingerprint match
-   (per-dimension diff), inline constraint replay, phase results, BOM
-   cross-reference. Markdown + JSON output. Single positional argument
-   accepts any of four input forms:
+2. **`aicr evidence` CLI family.** A typed verb group that consumes
+   the evidence kinds enumerated above (see "Evidence taxonomy") with
+   a single shared surface. V1 ships three subcommands:
 
-   ```bash
-   aicr verify-evidence <input>
+   - **`aicr evidence verify <input>`** — full verification of a
+     `recipe-test-attestation` bundle: signature, schema, inventory
+     (manifest hashes), recipe ↔ snapshot fingerprint match
+     (per-dimension diff), inline constraint replay, phase results,
+     BOM cross-reference. Markdown + JSON output. Auto-detects kind
+     from input shape and dispatches to the matching verifier (V1:
+     attestation only; CNCF conformance verification slots in here
+     when its trust posture is formalized).
 
-   # where <input> is auto-detected as:
-   #   recipes/evidence/<recipe>.yaml      → pointer file
-   #   ghcr.io/.../aicr-evidence:<digest>  → OCI reference
-   #   ./bundle.tar.gz                     → tarball
-   #   ./out/summary-bundle/               → unpacked directory
-   ```
+     ```bash
+     aicr evidence verify <input>
 
-   Detection is by URL prefix, file extension, and directory
-   existence. The four forms map to distinct workflows: pointer for
-   CI, OCI for canonical artifact verification, tarball for
-   air-gapped or email transport, unpacked directory for contributor
-   self-debug without a packaging step. Same verification logic runs
-   against any of the four.
+     # where <input> is auto-detected as:
+     #   recipes/evidence/<recipe>.yaml      → pointer file
+     #   ghcr.io/.../aicr-evidence:<digest>  → OCI reference
+     #   ./bundle.tar.gz                     → tarball
+     #   ./out/summary-bundle/               → unpacked directory
+     ```
+
+     Detection is by URL prefix, file extension, and directory
+     existence. The four forms map to distinct workflows: pointer for
+     CI, OCI for canonical artifact verification, tarball for
+     air-gapped or email transport, unpacked directory for contributor
+     self-debug without a packaging step. Same verification logic runs
+     against any of the four.
+
+   - **`aicr evidence list`** — enumerate evidence available locally
+     or in a target OCI repository. Useful for "which recipes have
+     attestations?" and "what bundles exist under
+     `ghcr.io/myorg/aicr-evidence`?" without fetching their contents.
+   - **`aicr evidence show <input>`** — read-only inspection of a
+     bundle's predicate body, manifest, and signer claims. No
+     verification; cheap to run during contributor debugging.
+
+   Production stays at the origin (V1 surface item 1 — `aicr validate
+   --emit-evidence` produces attestations; CNCF conformance evidence is
+   produced by the existing `pkg/evidence` pipeline as part of validate
+   today). `aicr evidence` is the *consumption* family; new evidence
+   kinds plug into it without further top-level CLI growth.
 
 3. **CI gate workflow + PR template.** Check on PRs touching
    `recipes/**` whose material slice (see "Material-slice
@@ -424,7 +514,7 @@ authoritative; the pointer is a denormalized cache.
 
 ### Verifier steps (proposed)
 
-`aicr verify-evidence recipes/evidence/<recipe>.yaml` (or any
+`aicr evidence verify recipes/evidence/<recipe>.yaml` (or any
 auto-detected input form — OCI ref, tarball, unpacked directory):
 
 1. **Schema-validate** the pointer file.
@@ -675,6 +765,34 @@ their backing store — content-addressed pulls don't transfer, and
 (4) cosign tooling has no LFS integration, so the signing surface would
 fragment.
 
+### `aicr verify-evidence` top-level verb vs. `aicr evidence verify` family (rejected)
+
+Earlier drafts of this ADR proposed a standalone `aicr verify-evidence`
+top-level command, paired with `aicr validate --emit-evidence` for
+production. Simpler to type; one-to-one mapping between produce and
+verify.
+
+Rejected because (1) AICR already groups verbs under nouns
+(`aicr snapshot`, `aicr recipe`, `aicr validate`, `aicr bundle`,
+`aicr query`); a standalone `verify-evidence` breaks that pattern,
+(2) AICR carries multiple kinds of evidence with different shapes
+(`pkg/evidence` ships CNCF conformance evidence today; this ADR adds
+`recipe-test-attestation`), and a standalone verb fixes the surface
+to one kind, and (3) future evidence kinds (CycloneDX BOM-only
+attestation, SLSA provenance, license attestation) would each need
+their own top-level verb. The `aicr evidence verify` / `list` /
+`show` family handles all kinds under one surface and leaves room
+for future read-only operations (`diff`, `push`, `archive`) without
+top-level pollution.
+
+Production stays at the origin (`aicr validate --emit-evidence`)
+because evidence is a side-effect of the pipeline that produced its
+inputs. Re-emitting via `aicr evidence emit` would either re-run
+validate (defeating the purpose of an offline verifier) or reach into
+validate's stored output (a hidden coupling). Keeping production at
+the origin keeps the data flow obvious; consumption unifying under
+`evidence` keeps the inspection surface coherent.
+
 ### Single attestation per recipe vs. list from day one (rejected)
 
 V1's `pointer.attestations` could be a single object instead of a list
@@ -712,11 +830,19 @@ commitments the demand event has not yet justified.
    alongside the bundle directories. Optional `--push <oci-registry>`
    handles the OCI upload, cosign attest, and pointer population in one
    command. Updates `pkg/bundler/attestation` with the new predicate
-   type. Pulls the BOM from the existing #739 pipeline.
-3. **PR-B: `aicr verify-evidence` CLI.** Single positional input
-   (pointer / OCI / tarball / directory, auto-detected), twelve
-   verification steps, three exit codes, Markdown + JSON output.
-   Depends on PR-A (predicate parsing + pointer parsing).
+   type. Pulls the BOM from the existing #739 pipeline. Extends
+   `pkg/config.AICRConfig` (apiVersion `aicr.nvidia.com/v1alpha1`,
+   additive) with a `ValidateSpec` sibling of `RecipeSpec`/`BundleSpec`,
+   reusing `AttestationSpec` and `RegistrySpec` so cosign and OCI
+   surfaces stay consistent across `bundle` and `validate`.
+3. **PR-B: `aicr evidence` CLI family.** Adds `aicr evidence verify`
+   (single positional input — pointer / OCI / tarball / directory,
+   auto-detected — twelve verification steps, three exit codes,
+   Markdown + JSON output), `aicr evidence list`, and `aicr evidence
+   show`. Depends on PR-A (predicate parsing + pointer parsing).
+   Future evidence kinds (CNCF conformance, BOM-only, SLSA provenance)
+   plug in as additional verifier dispatches under the same family
+   without further top-level CLI growth.
 4. **PR-C: CI gate workflow + PR template.** Required check on PRs
    touching `recipes/**`. Depends on PR-B.
 5. **PR-D: `maintainers:` block schema + CI presence gate + backfill
