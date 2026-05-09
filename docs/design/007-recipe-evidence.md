@@ -56,10 +56,11 @@ already poses, so a maintainer can verify it without re-running.
   defeats the purpose and would require maintainers to have the
   hardware they don't have.
 - **Pre-building features without demand.** Tier policies, multi-instance
-  pointers, signed layered predicate types, material-slice canonicalization,
-  re-cert automation, and an advisory feed are reasonable extensions of
-  the V1 design. None ship now. Each is sketched in "Future direction"
-  below with the pull-trigger that should bring it in.
+  pointers, signed layered predicate types, re-cert automation, and an
+  advisory feed are reasonable extensions of the V1 design. None ship
+  now. Each is listed in the deferred-features table under
+  `## Decision` → "What V1 does *not* ship," with the pull-trigger that
+  should bring it in.
 
 ## Context
 
@@ -108,8 +109,8 @@ this `(recipe, snapshot, validator results, BOM)` tuple at the recorded
 to that signature. It does not prove the cluster the snapshot describes
 physically existed — a contributor controlling their own cluster can lie to
 the snapshot collectors, and per-signal corroboration that would make those
-lies harder is deferred (see `Future direction`, "Fingerprint per-signal
-provenance").
+lies harder is deferred (see the deferred-features table under
+`## Decision` → "Fingerprint per-signal provenance").
 
 Concretely, this relocates the maintainer's trust judgment from "did this PR
 really run?" to "do I trust this signer's claim that it did?" — a richer
@@ -425,8 +426,8 @@ Three V1 choices preserve future evolution at near-zero cost:
 | Fingerprint per-signal provenance | First Tier-C-equivalent contribution gets pushback for "is this cluster real?" V1 records resolved `{value}` only; per-signal sources (`signals: [kubelet, dcgm, imds]`, `confidence: high`) are additive predicate fields. |
 
 Each row's pull-trigger is the demand signal that should bring the
-feature in; "Future direction" below sketches the shape each one
-takes when its trigger fires.
+feature in. Per-row design happens at the demand event, not now —
+see `## Future direction`.
 
 ## Consequences
 
@@ -459,8 +460,8 @@ takes when its trigger fires.
 - **Bounded scope.** Five PRs, ~2300 lines of code, no new external
   services. Implementation effort fits a sprint plus.
 - **Forward-compat seams visible.** Each deferred feature has a
-  documented pull-trigger and a sketch in "Future direction." No
-  surprise rewrites; expansion is additive.
+  documented pull-trigger in the deferred-features table. No surprise
+  rewrites; expansion is additive.
 
 ### Negative
 
@@ -572,170 +573,17 @@ and verifier readers do not have to discriminate by schema version.
 
 ## Future direction
 
-The features below are deferred from V1 by deliberate choice. Each
-carries its pull-trigger, the shape it takes when implemented, and
-compatibility notes. Don't pre-build — let demand decide which lands
-first.
-
-### Material-slice canonicalization (the highest-risk piece)
-
-A canonicalizer that distinguishes *material* recipe edits (chart
-version, criteria, constraints, manifest content, override values)
-from *non-material* ones (comments, whitespace, displayName,
-key-order). V1's `subject.digest` is "sort keys, strip comments,
-sha256 the bytes" — any edit invalidates the bundle. A real
-canonicalizer suppresses re-cert on cosmetic changes.
-
-The shape: an RFC 8785-derived canonical form (with NFC string
-normalization and type-preserving YAML load), a structured-diff
-classifier that walks overlays → mixins → registry → component
-values → manifest files transitively, and an append-only
-`materialSliceVersion` integer in the predicate so old bundles
-verify under their original algorithm even after bug fixes ship a
-v2. The classifier has to model the full recipe-resolution surface,
-including `componentRefs[].{type, source, version, valuesFile,
-manifestFiles, overrides}` and the registry's `nodeScheduling`
-paths.
-
-**Pull-trigger:** Renovate-driven re-cert flood becomes a real
-maintenance complaint (≥ 5 attested recipes under weekly bumps,
-contributors asking why every Renovate PR invalidates their
-attestation). **Compatibility:** the next predicate type is
-`recipe-evidence/v2` since subject digest semantics change; verifiers
-carry both parsers.
-
-### Tier model and trust policy file
-
-Tier A (first-party reusable workflow), Tier B (allowlisted
-partner), Tier C (community workload OIDC), Tier D (rejected).
-Identities live in a signed, freshness-bounded policy file at
-`.sigstore/recipe-evidence-policy.yaml`. The verifier resolves the
-cosign cert claims against the policy and labels the output.
-
-V1 records the cosign cert claims faithfully but does not classify.
-Maintainers eyeball the claims to tell first-party from community.
-This works at low contribution volume; tier classification matters
-when allowlists, partner relationships, or signer-identity-based
-exit codes show up.
-
-**Pull-trigger:** first partner relationship requests a non-community
-trust label, OR community volume creates review fatigue tier
-filtering would relieve. **Compatibility:** purely additive — the
-verifier consumes a new flag (`--policy <path>`) and extends Markdown
-output with a tier label.
-
-### Multi-instance pointer schema (2.0)
-
-V1's pointer carries `attestations: [...]` (a list of one). Schema 2.0
-adds:
-
-- A `role:` field per entry: `primary | supplementary | negative`
-- A `staleAfter:` annotation for entries superseded by material change
-- Pointer rotation (`<recipe>.archive.yaml`) for recipes with > 10
-  attestations or 24-month history
-
-This pays off when (a) a second contributor attests the same recipe
-from a different cluster (multi-instance), (b) a contributor wants
-to record "this didn't work for me on $configuration" without
-auto-failing the gate (negative role), or (c) Renovate-driven
-material change needs to mark old entries stale rather than delete
-them. None of those apply at zero attested recipes.
-
-**Pull-trigger:** any of (a)/(b)/(c). **Compatibility:** the V1
-schema 1.0 pointer's `attestations[]` field stays; schema 2.0 adds
-fields. V1 readers treat absent `role:` as `primary`. No structural
-break.
-
-### Signed layered predicate types
-
-Three additional predicate types
-(`recipe-evidence-logs/v1`, `recipe-evidence-redaction/v1`,
-`recipe-evidence-augmentation/v1`) carrying a back-reference field
-`evidenceFor: <summary-subject-digest>`. V1's logs bundle is
-unsigned but bound by manifest pre-commit hashes; signed layers
-enable:
-
-- **Logs republished after redaction.** Redaction predicate documents
-  scope (which fields scrubbed) and signer.
-- **Third-party augmentation.** Independent re-run by a different
-  signer, attached to the same OCI digest as the original summary.
-- **Signed logs with own attestation event.** Logs predicate signs
-  the logs bundle as a whole, in addition to the manifest pre-commit.
-
-**Pull-trigger:** first contributor asks to publish redacted logs,
-OR third party wants to add an independent re-run.
-**Compatibility:** purely additive predicate types attached to the
-same OCI digest as the V1 summary. V1 bundles never need rewriting.
-
-### Re-cert automation
-
-The full design defines four re-cert triggers: recipe content changed
-(handled by the material-slice classifier), validator catalog MAJOR
-bump, time decay (soft >12mo, hard >24mo with a scheduled bot opening
-re-cert PRs at month 23), and critical advisory match against a
-separate `NVIDIA/aicr-advisories` OSV-format repository.
-
-V1 has no aged bundles, no catalog SemVer contract (a follow-on to
-[#660](https://github.com/NVIDIA/aicr/issues/660)), and no merged
-bundles to revoke. All four mechanisms are documented as policy in
-CONTRIBUTING; none ship as automation.
-
-**Pull-triggers, in likely order:** (1) catalog SemVer contract filed
-+ #660 lands → catalog-MAJOR detection becomes meaningful; (2) first
-bundle ages past 12 months → age-decay bot becomes useful; (3) first
-post-merge incident requires revocation → OSV advisory feed gets
-stood up. **Compatibility:** the verifier reserves `--check-advisories`
-as a recognized but no-op flag in V1 so V2 integration is purely
-additive.
-
-### Reusable workflow and turnkey signing
-
-A `.github/workflows/recipe-evidence-reusable.yaml` consumed via
-`workflow_call` from contributor forks. The reusable workflow runs
-`aicr validate --emit-evidence`, signs with cosign keyless, pushes
-to OCI, and emits a pointer entry as a workflow output. The real
-obstacle: most operators run GB200 / H100 hardware under corporate
-GitHub Enterprise, where corporate policy commonly disallows
-public-fork runner registration outright. Local `cosign attest`
-against ambient OIDC remains the supported fallback.
-
-V1 documents only the local-signing path. **Pull-trigger:** multiple
-contributors ask for a turn-key path AND have hardware they can
-register against a public fork. **Compatibility:** purely additive;
-the verifier doesn't distinguish transport — the cert claims are what
-matter.
-
-### Mirror bot and archive registry
-
-A post-merge bot (GitHub Action triggered on `push` to main) that
-pulls each accepted bundle from the contributor's OCI registry and
-re-pushes to `ghcr.io/nvidia/aicr-evidence-archive:<digest>`,
-preserving content-addressed digests. The pointer carries an optional
-`mirror:` field so verifiers can fall back to the mirror when the
-contributor's registry becomes unavailable.
-
-V1 stores the bundle in the contributor's OCI registry; long-term
-durability is whatever their hosting provides plus the Rekor signing
-record. **Pull-trigger:** first contributor's OCI registry goes dark
-on an accepted bundle. **Compatibility:** additive — the verifier
-reads `mirror:` if present and ignores it otherwise.
-
-### Fingerprint per-signal provenance
-
-V1's `fingerprint` records resolved values
-(`accelerator: { value: h100 }`). The full design records, per
-dimension, which collector signal contributed
-(`accelerator: { value: h100, signals: [kubelet, dcgm, imds, dra],
-confidence: high }`) plus a "what the fingerprint cannot prove"
-disclosure surfaced in the verifier output. Multi-signal corroboration
-makes forged-collector attacks harder to mount unnoticed.
-
-**Pull-trigger:** first time a community contribution gets pushback
-for "is this cluster real?" Until then, the resolved values plus
-maintainer review are sufficient. **Compatibility:** the predicate's
-`fingerprint.<dim>` field grows from `{value}` to
-`{value, signals[], confidence}`; verifiers that parse the V1 shape
-continue to read the resolved value from `value`.
+The deferred-features table in `## Decision` → "What V1 does *not* ship"
+names every V2 candidate with its pull-trigger and compatibility note
+— that is the canonical list. Each row is a *placeholder*, not a
+design: when a row's trigger fires, the V2 work gets its own tracking
+issue under [#750](https://github.com/NVIDIA/aicr/issues/750) and the
+shape is decided then, against the demand event that pulled it in.
+This ADR deliberately does not pre-design that work. Earlier drafts
+sketched detailed V2 surfaces (canonicalizer internals, tier-policy
+file layout, schema 2.0 fields, four predicate types, OSV advisory
+feed shape, mirror bot trigger) — those sketches were removed because
+they implied commitments the demand event has not yet justified.
 
 ## Adoption plan
 
@@ -763,7 +611,7 @@ PR-A is the foundation. PR-B depends on PR-A. PR-C depends on PR-B.
 PR-D is fully independent and can land first if convenient.
 
 When V1 ships and feedback lands, consult the deferred-features table
-and "Future direction" above. **Each deferred feature has a documented
+under `## Decision`. **Each deferred feature has a documented
 pull-trigger; let demand decide what V2 brings in.** Don't pre-build.
 
 ## References
