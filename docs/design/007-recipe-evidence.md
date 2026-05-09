@@ -344,7 +344,12 @@ Unicode normalization on string scalars. The slice is built by
 walking the resolution chain (overlay → mixins → registry →
 component values → manifest files transitively) and emitting only
 the included paths above. Output is the SHA-256 of the JCS bytes;
-this is the value bound by the predicate's subject digest.
+this is the value bound by the in-toto Statement's
+`subject[0].digest.sha256` and the trigger for re-cert. The same walk
+records each consumed input's file-bytes SHA-256 into the predicate's
+`chainManifest` for forensic provenance (see "Predicate body" below
+for the envelope shape and the rationale for keeping the re-cert
+trigger and the forensic record separate).
 
 **`materialSliceVersion`.** The predicate carries an integer
 `materialSliceVersion` (V1 = `1`). Bundles attest under the algorithm
@@ -444,29 +449,55 @@ bom:
 manifest:
   digest: sha256:...
   fileCount: 9
+chainManifest:
+  leaf:
+    path: recipes/overlays/h100-eks-ubuntu-training.yaml
+    sha256: <hex>
+  inputs:
+    - { kind: mixin,    path: recipes/mixins/os-ubuntu.yaml,           sha256: <hex> }
+    - { kind: mixin,    path: recipes/mixins/platform-kubeflow.yaml,   sha256: <hex> }
+    - { kind: registry, path: recipes/registry.yaml,                   sha256: <hex> }
+    - { kind: values,   path: recipes/components/gpu-operator/values.yaml, sha256: <hex> }
+    - { kind: values,   path: recipes/components/network-operator/values.yaml, sha256: <hex> }
 ```
 
-`subject.digest` is `sha256(JCS(material-slice(post-resolution recipe)))`
-under the algorithm identified by the predicate's
-`materialSliceVersion` (see "Material-slice canonicalization" above).
-Non-material edits — comments, whitespace, `displayName`,
-`description`, key-order — produce the same digest as the original
-attestation and pass the verifier's subject-digest check without new
-evidence. Material edits (chart version, criteria, constraints,
-override values, manifest content) produce a different digest and
-require a fresh attestation.
+The in-toto Statement's `subject[0].digest.sha256` (outside the
+predicate body, in the wrapping Statement) is the **material digest**:
+`sha256(JCS(material-slice(post-resolution recipe)))` under the
+algorithm identified by `materialSliceVersion`. This is the value the
+verifier recomputes in step 6, and it is what determines whether a
+recipe edit needs new evidence:
 
-The predicate also carries the `materialSliceVersion` integer so the
-verifier loads the matching algorithm. V1 ships version `1`; future
-canonicalizer revisions append (`materialSliceVersion: 2`, …)
-without invalidating bundles signed under the previous version.
+- Non-material edits (comments, whitespace, `displayName`,
+  `description`, key-order) produce the same material digest and
+  pass without new evidence.
+- Material edits (chart version, criteria, constraints, override
+  values, manifest content) produce a different material digest and
+  require a fresh attestation.
+
+The predicate body's `chainManifest` is the **forensic provenance**:
+it records the unresolved leaf overlay plus every input the resolver
+consumed (mixins, registry entries, component values, manifest files),
+each with its own SHA-256 of the file bytes at attest-time. This is
+*not* what the signature binds to — the material digest is — but it
+lets the verifier (and post-incident investigators) tell *why* the
+material digest changed when one does. A registry edit, a shared
+mixin tweak, or a `recipes/components/<name>/values.yaml` change shows
+up as a specific input hash mismatch; an edit isolated to the leaf
+overlay shows up as a leaf hash mismatch with all inputs intact. This
+ergonomic separation costs nothing at sign-time (the resolver already
+walks every input) and pays off heavily at re-cert review.
+
+`materialSliceVersion` continues to govern algorithm evolution: V1
+ships version `1`; future canonicalizer revisions append
+(`materialSliceVersion: 2`, …) without invalidating bundles signed
+under the previous version. Verifiers carry both algorithm parsers.
 
 The `manifest.digest` field binds the manifest to the signature, which
 in turn binds every supporting file (snapshot, BOM, CTRF) by the
-hashes the manifest enumerates. Without this field, only `recipe.yaml`
-would be cryptographically bound — adversaries could swap any other
-file undetected. The verifier's inventory check is what closes the
-chain.
+hashes the manifest enumerates. Without this field, only the material
+digest would be bound — adversaries could swap any other file
+undetected. The verifier's inventory check is what closes the chain.
 
 ### Pointer schema (1.0) (proposed)
 
@@ -533,13 +564,29 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
 5. **Inventory check.** Verify every file in `manifest.json` exists
    in the bundle; recompute SHA-256 per file; confirm match. Confirm
    `manifest.digest` matches predicate.
-6. **Subject digest check.** Load the algorithm identified by the
-   predicate's `materialSliceVersion`; recompute
-   `sha256(JCS(material-slice(post-resolution recipe in repo at HEAD)))`;
-   confirm match against the in-toto Statement's `subject.digest`.
-   Material drift since attest-time is a hard fail. Non-material
-   edits (comments, formatting, `displayName`, `description`,
-   key-order) produce the same digest and pass.
+6. **Material digest + chain manifest check.** Two-part:
+
+   a. **Material digest (re-cert trigger).** Load the algorithm
+      identified by the predicate's `materialSliceVersion`; recompute
+      `sha256(JCS(material-slice(post-resolution recipe in repo at HEAD)))`;
+      confirm match against the in-toto Statement's
+      `subject[0].digest.sha256`. Mismatch is a hard fail (re-cert
+      required). Non-material edits (comments, formatting,
+      `displayName`, `description`, key-order) produce the same digest
+      and pass.
+
+   b. **Chain manifest (forensic check).** Walk the resolution chain
+      from the same HEAD; for each entry recorded in
+      `predicate.chainManifest.{leaf, inputs[]}`, recompute the
+      file's SHA-256 and compare. The check is *informational* in
+      V1: any mismatch is reported in the verifier's Markdown output
+      ("input X changed since attest-time") but does not by itself
+      fail verification — the material-digest check above is the
+      authoritative re-cert signal. The chain manifest's job is to
+      tell the maintainer *why* a re-cert is needed (leaf vs. shared
+      mixin vs. registry vs. component values), not to add a second
+      hard-fail surface. (V2 may promote individual chain mismatches
+      to hard-fail signals once the slice-set has stabilized.)
 7. **Per-dimension fingerprint match.** Run `Fingerprint.Match(recipe.criteria)`
    from #752; confirm `criteriaMatch.matched: true`; render per-dimension
    diff in Markdown so reviewers see exactly which dimensions matched.
@@ -570,8 +617,12 @@ Exit codes (proposed):
   intact, but recorded validator results show failures — known-issue
   documentation, work-in-progress, hardware-specific limitations)
 - `2` — invalid (signature mismatch, schema invalid, inventory
-  mismatch, subject digest mismatch, fingerprint not matched, BOM
-  mismatch, OR no pointer file present for a touched recipe)
+  mismatch, material-digest mismatch, fingerprint not matched, BOM
+  mismatch, OR no pointer file present for a touched recipe).
+  Chain-manifest mismatches alone do not produce exit `2` in V1 —
+  they surface as informational rows in the Markdown summary so the
+  maintainer can see which input drifted; only material-digest drift
+  is authoritative.
 
 The CI gate explicitly checks for pointer file presence: a PR that
 touches `recipes/overlays/<recipe>.yaml` without producing a fresh
@@ -793,6 +844,26 @@ validate's stored output (a hidden coupling). Keeping production at
 the origin keeps the data flow obvious; consumption unifying under
 `evidence` keeps the inspection surface coherent.
 
+### Post-resolution-only subject digest vs. material slice + chain manifest (rejected)
+
+Earlier drafts bound the subject digest to the *post-resolution recipe*
+as a single value: `sha256(canonicalize(post-resolution recipe YAML))`.
+Simpler — one hash to compute, one to verify.
+
+Rejected because (1) it couples bundle validity to resolver determinism
+across the entire overlay → mixin → registry → component-values chain
+(a change to ADR-005's resolver semantics would silently invalidate
+every prior bundle even when the leaf overlay is byte-identical), and
+(2) it gives the verifier no way to tell *which* input changed when
+the digest does change — registry-edit, mixin-tweak, and
+component-values-update all surface as a single opaque mismatch. The
+chosen design splits the two concerns: the in-toto subject is the
+material-slice digest (re-cert trigger; what the signature is bound
+to), and the predicate's `chainManifest` records the unresolved leaf
+plus per-input hashes (forensic provenance; tells the maintainer why
+re-cert is needed). This is additive in cost (the resolver already
+walks every input) and materially better in re-cert ergonomics.
+
 ### Single attestation per recipe vs. list from day one (rejected)
 
 V1's `pointer.attestations` could be a single object instead of a list
@@ -892,7 +963,11 @@ pull-trigger; let demand decide what V2 brings in.** Don't pre-build.
   pipeline that produces phase results consumed by this bundle.
 - [ADR-005: Overlay Refactoring](005-overlay-refactoring.md) — the
   resolver chain (overlays → mixins → registry → component values)
-  whose determinism the bundle's subject digest depends on.
+  enumerated in this ADR's `chainManifest` for forensic provenance.
+  The bundle's material digest is computed over the *post-resolution
+  material slice*, so resolver determinism still matters; the chain
+  manifest lets the verifier diagnose which input caused a digest
+  change without re-running the resolver.
 - [ADR-006: Container Image Pinning Policy](006-image-pinning-policy.md) —
   pinning surface this ADR scopes to (recipe + chart-pin + digest-pin);
   per-component admission-time digest verification stays out of scope.
