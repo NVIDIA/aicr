@@ -21,9 +21,9 @@ either blocked or accepted on faith. Three classes of friction follow:
   cluster nor the time to set one up. The PR stalls or merges on trust
   alone.
 - **No artifact for review.** `aicr validate` produces console output and
-  CTRF JSON locally, but nothing the maintainer can verify came from a
-  real run on real hardware. "Trust me, it passed" is the current
-  contract.
+  CTRF JSON locally, but nothing the maintainer can cryptographically
+  tie back to the contributor who ran it. "Trust me, it passed" is the
+  current contract.
 - **No signal lineage.** Even when a contribution lands, there is no
   durable record tying the recipe-as-merged to the validation result the
   reviewer relied on. A future re-cert or audit has nothing to consult.
@@ -94,6 +94,28 @@ cost-to-defer is high:
   rotation and offer no audit baseline.
 
 ## Decision
+
+### Trust model
+
+V1's trust handoff is **signer-identity-bound, not cluster-physicality-bound**.
+The bundle proves: an OIDC identity with the recorded cosign cert claims signed
+this `(recipe, snapshot, validator results, BOM)` tuple at the recorded
+`attestedAt` time, and every artifact in the bundle is cryptographically tied
+to that signature. It does not prove the cluster the snapshot describes
+physically existed — a contributor controlling their own cluster can lie to
+the snapshot collectors, and per-signal corroboration that would make those
+lies harder is deferred (see `Future direction`, "Fingerprint per-signal
+provenance").
+
+Concretely, this relocates the maintainer's trust judgment from "did this PR
+really run?" to "do I trust this signer's claim that it did?" — a richer
+artifact than today's "trust me, it passed" review surface, but the same
+underlying maintainer-judgment surface. The eventual closer for the
+cluster-physicality gap is the deferred Tier model (signed policy file
+labeling first-party / partner / community identities) plus per-signal
+fingerprint provenance, not a cryptographic primitive V1 can bolt on. V1
+delivers the artifact and the verifier; tier classification arrives when
+contribution volume or partner relationships pull it in.
 
 **Ship V1 as five PRs, deferring the rest until pulled by demand.**
 
@@ -438,12 +460,15 @@ takes when its trigger fires.
 
 ### Negative
 
-- **No defense against forged collector inputs.** A contributor
-  controlling their own cluster can lie to the snapshot collectors.
-  V1 records the resolved fingerprint values; per-signal provenance
-  (which collector signal contributed, with what confidence) is
-  deferred. Maintainer review compensates — same posture as today's
-  PR-only review.
+- **Trust is signer-identity-bound, not cluster-physicality-bound.**
+  See `## Decision` → "Trust model." A contributor controlling their
+  own cluster can lie to the snapshot collectors; V1 records the
+  resolved fingerprint values, and per-signal provenance (which
+  collector signal contributed, with what confidence) is deferred.
+  Maintainer review of the cosign cert claims compensates — same
+  judgment surface as today's PR-only review, with a richer artifact
+  attached. The Tier policy file (deferred) is what eventually closes
+  this gap; per-signal provenance alone does not.
 - **Any recipe edit triggers re-cert.** Without the material-slice
   canonicalizer, a comment-only edit invalidates the existing
   bundle. Until the project has multiple attested recipes under
