@@ -79,7 +79,7 @@ Two design tensions drive what's V1 vs deferred:
 | Tension | Full design choice | V1 choice |
 |---|---|---|
 | Identity model | Tier A/B/C/D with signed policy file, freshness-bounded | One bundle class; verifier records the OIDC identity, maintainer review classifies |
-| Re-cert on non-material edits | Material-slice canonicalizer (RFC 8785-derived, append-only versioned) suppresses re-cert on cosmetic changes | Any recipe edit triggers re-cert; the cost is acceptable until a real attested-recipe corpus exists |
+| Re-cert on non-material edits | Material-slice canonicalizer (RFC 8785-derived, append-only versioned) suppresses re-cert on cosmetic changes | Material-slice canonicalizer ships in V1; the CI gate rolls out soft-fail first (warning-only), then hardens to required after a concrete corpus trigger fires |
 | Multi-cluster attestation per recipe | Multi-instance pointer schema with primary / supplementary / negative roles | Pointer carries a list with one entry; second cluster attests via an additive PR. Schema bump (1.0 → 2.0) when roles arrive |
 | Logs handling | Three signed layered predicate types (logs / redaction / augmentation) attached to the same OCI digest | Optional unsigned logs bundle as separate OCI artifact; per-file content hashes pre-committed in summary's manifest binds them to the signature |
 
@@ -183,14 +183,99 @@ contribution volume or partner relationships pull it in.
    self-debug without a packaging step. Same verification logic runs
    against any of the four.
 
-3. **CI gate workflow + PR template.** Required check on PRs touching
-   `recipes/**`. Reads pointer, runs verify, posts Markdown comment.
-   PR without a pointer file for a touched recipe fails the gate.
+3. **CI gate workflow + PR template.** Check on PRs touching
+   `recipes/**` whose material slice (see "Material-slice
+   canonicalization" below) differs from the slice the current pointer
+   was attested against. Reads pointer, runs verify, posts Markdown
+   comment. **Two-phase rollout**:
+
+   - **Phase 1 — soft-fail (informational).** The check runs on every
+     qualifying PR but emits warning-only annotations; merge is not
+     blocked. Phase 1 starts when PR-C lands and stays in effect until
+     the corpus trigger fires (≥ 3 distinct accelerator classes have
+     at least one attested recipe with a valid pointer, OR 12 weeks
+     after PR-A merges, whichever comes first).
+   - **Phase 2 — hard-fail (required).** The check becomes a required
+     status. Maintainers can apply an `evidence/exempt` label to bypass
+     the gate for an individual PR; bypass requires a justification
+     line in the PR description and is recorded for audit. Pure
+     non-material edits (comments, whitespace, `displayName`,
+     `description`, key-order) never reach Phase 2 because the
+     canonicalizer collapses them to the same material-slice digest.
+
+   Promotion from Phase 1 to Phase 2 is a one-line config change in
+   the workflow, paired with a CONTRIBUTING update documenting the
+   `evidence/exempt` policy.
 
 4. **`maintainers:` block on `RecipeMetadataSpec`.** Required field on
    every recipe in `recipes/overlays/`, listing GitHub handle, org, and
    a durable escalation contact (DL or shared mailbox). One-time backfill
    PR populates existing recipes via `git log` heuristics.
+
+### Material-slice canonicalization (proposed)
+
+The material slice is the projection of the recipe-resolution surface
+that affects runtime behavior. Two recipe states with the same material
+slice produce the same deployed cluster; differences outside the slice
+(comments, formatting, descriptive metadata) cannot. The bundle's
+subject digest is computed over the canonical form of this slice, not
+over the raw post-resolution YAML — so non-material edits do not
+invalidate the bundle.
+
+**What the slice includes** (any change re-certs):
+
+- Leaf overlay's `criteria`, `componentRefs`, `constraints`,
+  `validation`, `nodeScheduling` paths.
+- Each `componentRef`'s resolved `{type, source, version, valuesFile,
+  manifestFiles, overrides}`, recursively into included
+  `valuesFile`/`manifestFiles` content.
+- Mixin contents pulled in by `spec.mixins`, scoped to their
+  `constraints` and `componentRefs` (mixins carry no other material
+  fields by construction — see ADR-005).
+- Registry entries (`recipes/registry.yaml`) referenced by the
+  resolution chain: `helm.{defaultRepository, defaultChart}`,
+  `kustomize.{defaultSource, defaultPath, defaultTag}`,
+  `valueOverrideKeys`, `nodeScheduling`.
+- `spec.maintainers` (PR-D) — a maintainer change is durable
+  signal-routing metadata, not cosmetic.
+
+**What the slice excludes** (changes pass without re-cert):
+
+- All YAML comments, leading/trailing whitespace, blank lines,
+  key-order, quoting style.
+- `metadata.{displayName, description, labels, annotations}` and
+  any registry `displayName`.
+- Top-level `# yaml-language-server: $schema=...` directives and
+  similar editor hints.
+
+**Algorithm.** RFC 8785 (JSON Canonicalization Scheme) over the
+filtered subtree, after a type-preserving YAML→JSON load and NFC
+Unicode normalization on string scalars. The slice is built by
+walking the resolution chain (overlay → mixins → registry →
+component values → manifest files transitively) and emitting only
+the included paths above. Output is the SHA-256 of the JCS bytes;
+this is the value bound by the predicate's subject digest.
+
+**`materialSliceVersion`.** The predicate carries an integer
+`materialSliceVersion` (V1 = `1`). Bundles attest under the algorithm
+in effect at sign-time; the verifier loads the matching algorithm by
+version. New versions append; old versions never get rewritten. This
+isolates canonicalizer bug fixes (and future slice-set changes) from
+historical bundles — a v2 algorithm does not invalidate v1
+attestations, and the verifier carries both parsers.
+
+**Verifier check.** The subject-digest step (verifier step 6) recomputes
+the slice from the repo at HEAD using the bundle's
+`materialSliceVersion` and confirms match against the predicate. A
+mismatch is a hard fail; a match means the recipe is materially
+unchanged since attest-time, regardless of cosmetic edits.
+
+The CI gate (V1 surface item 3) leans on the same canonicalizer:
+"PR touches `recipes/**`" is the broad trigger, but the gate only
+*fails* when the material-slice digest computed from the PR head
+differs from the slice the current pointer was attested against.
+Comment-only PRs, Renovate-driven `displayName` rewrites, and
+formatter changes pass without new evidence.
 
 ### Bundle anatomy (proposed)
 
@@ -233,6 +318,7 @@ arrive when demand justifies — see "Future direction."
 ```yaml
 # https://aicr.nvidia.com/recipe-evidence/v1
 schemaVersion: 1.0.0
+materialSliceVersion: 1
 attestedAt: 2026-05-08T10:23:11Z
 aicrVersion: v0.13.0
 validatorCatalogVersion: v2.4.0
@@ -270,12 +356,20 @@ manifest:
   fileCount: 9
 ```
 
-`subject.digest` is `sha256(canonicalize(post-resolution recipe YAML))`
-where canonicalize is "sort map keys, strip comments, normalize line
-endings, UTF-8 encode" — a small helper, not the RFC 8785-derived
-canonicalizer in the full design. Any recipe edit triggers re-cert;
-the canonicalizer that would suppress re-cert on non-material edits
-is deferred (see "Future direction").
+`subject.digest` is `sha256(JCS(material-slice(post-resolution recipe)))`
+under the algorithm identified by the predicate's
+`materialSliceVersion` (see "Material-slice canonicalization" above).
+Non-material edits — comments, whitespace, `displayName`,
+`description`, key-order — produce the same digest as the original
+attestation and pass the verifier's subject-digest check without new
+evidence. Material edits (chart version, criteria, constraints,
+override values, manifest content) produce a different digest and
+require a fresh attestation.
+
+The predicate also carries the `materialSliceVersion` integer so the
+verifier loads the matching algorithm. V1 ships version `1`; future
+canonicalizer revisions append (`materialSliceVersion: 2`, …)
+without invalidating bundles signed under the previous version.
 
 The `manifest.digest` field binds the manifest to the signature, which
 in turn binds every supporting file (snapshot, BOM, CTRF) by the
@@ -349,10 +443,13 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
 5. **Inventory check.** Verify every file in `manifest.json` exists
    in the bundle; recompute SHA-256 per file; confirm match. Confirm
    `manifest.digest` matches predicate.
-6. **Subject digest check.** Recompute
-   `sha256(canonicalize(post-resolution recipe in repo at HEAD))`;
+6. **Subject digest check.** Load the algorithm identified by the
+   predicate's `materialSliceVersion`; recompute
+   `sha256(JCS(material-slice(post-resolution recipe in repo at HEAD)))`;
    confirm match against the in-toto Statement's `subject.digest`.
-   Any recipe drift since attest-time is a hard fail.
+   Material drift since attest-time is a hard fail. Non-material
+   edits (comments, formatting, `displayName`, `description`,
+   key-order) produce the same digest and pass.
 7. **Per-dimension fingerprint match.** Run `Fingerprint.Match(recipe.criteria)`
    from #752; confirm `criteriaMatch.matched: true`; render per-dimension
    diff in Markdown so reviewers see exactly which dimensions matched.
@@ -396,10 +493,14 @@ message, satisfying #751 acceptance criterion 1.
 
 Three V1 choices preserve future evolution at near-zero cost:
 
-1. **Predicate type is `recipe-evidence/v1`.** When the material
-   classifier or other breaking-change V2 work ships, becomes a clean
-   `/v2` — no migration shim, no schema-version negotiation. Verifiers
-   carry both parsers (append-only).
+1. **Predicate type is `recipe-evidence/v1`; `materialSliceVersion`
+   handles canonicalizer revs without a predicate bump.** A breaking
+   change to the material-slice algorithm ships as
+   `materialSliceVersion: 2` under the same `/v1` predicate type;
+   verifiers carry both algorithm parsers (append-only). The predicate
+   type bumps to `/v2` only when other parts of the predicate body
+   (signer envelope, phase shape, fingerprint surface) change in a way
+   the algorithm version cannot express.
 2. **`pointer.attestations` is a list from day one.** Multi-instance
    in schema 2.0 is additive: more entries, plus a `role:` field
    defaulting to `primary`. No structural break for V1 pointers.
@@ -415,7 +516,6 @@ Three V1 choices preserve future evolution at near-zero cost:
 | Deferred | Pulled by |
 |---|---|
 | Tier A/B/C/D identity policy file | First partner relationship requests a non-community trust label, OR community contribution volume creates review fatigue that tier filtering would relieve. |
-| Material-slice canonicalization (RFC 8785-derived, append-only versioned) | Renovate-driven re-cert flood becomes a real complaint (≥ 5 attested recipes + weekly chart-version bumps). Until then, V1's "any edit triggers re-cert" is honest and cheap. |
 | Multi-instance pointer (schema 2.0) with primary / supplementary / negative roles | Two contributors attest the same recipe from different clusters, OR a "this didn't work for me" negative attestation needs to coexist with a passing primary. |
 | Signed layered predicate types (logs / redaction / augmentation) | Contributor asks to publish redacted logs, OR third party wants to add an independent re-run with its own signer. V1's manifest-pre-commit binding handles "publish logs later" already. |
 | Re-cert age cutoffs (24mo hard, 23mo bot) | First bundle ages past 12 months. Document the policy in CONTRIBUTING; defer the bot. |
@@ -474,10 +574,25 @@ see `## Future direction`.
   judgment surface as today's PR-only review, with a richer artifact
   attached. The Tier policy file (deferred) is what eventually closes
   this gap; per-signal provenance alone does not.
-- **Any recipe edit triggers re-cert.** Without the material-slice
-  canonicalizer, a comment-only edit invalidates the existing
-  bundle. Until the project has multiple attested recipes under
-  active Renovate maintenance, this is a non-issue.
+- **Material-slice changes trigger re-cert; the slice definition is
+  itself a maintenance surface.** Edits to the leaf overlay's
+  `criteria`/`componentRefs`/`constraints`/`validation`/`nodeScheduling`,
+  to `componentRefs`-resolved values/manifest files, to mixin
+  `constraints` or `componentRefs`, or to registry entries pulled
+  through the resolution chain re-cert every recipe whose slice
+  touches them. Comment-only and metadata-only edits pass without
+  re-cert. The slice-set (what's in vs. out of the material projection)
+  is part of the algorithm version: tightening or relaxing it requires
+  bumping `materialSliceVersion`. Initial slice-set is conservative
+  (errs toward "include" for safety); empirical pull-trigger to relax
+  is contributors flagging false positives.
+- **Soft-fail window can hide real evidence drift.** During Phase 1,
+  a PR that legitimately needs new evidence merges with a warning the
+  reviewer may overlook. This is the cost of not blocking on hardware
+  availability before the corpus exists; the trigger conditions
+  (≥ 3 accelerator classes attested, OR 12 weeks) are calibrated to
+  end Phase 1 before drift accumulates. If the trigger drags, the
+  corpus is too thin to enforce a gate against in the first place.
 - **No tier label distinguishes first-party from community evidence.**
   A bundle signed by NVIDIA's CI looks the same to the verifier as
   one signed by an unfamiliar fork. Maintainers eyeball the cosign
@@ -580,10 +695,10 @@ design: when a row's trigger fires, the V2 work gets its own tracking
 issue under [#750](https://github.com/NVIDIA/aicr/issues/750) and the
 shape is decided then, against the demand event that pulled it in.
 This ADR deliberately does not pre-design that work. Earlier drafts
-sketched detailed V2 surfaces (canonicalizer internals, tier-policy
-file layout, schema 2.0 fields, four predicate types, OSV advisory
-feed shape, mirror bot trigger) — those sketches were removed because
-they implied commitments the demand event has not yet justified.
+sketched detailed V2 surfaces (tier-policy file layout, schema 2.0
+fields, four predicate types, OSV advisory feed shape, mirror bot
+trigger) — those sketches were removed because they implied
+commitments the demand event has not yet justified.
 
 ## Adoption plan
 
@@ -641,7 +756,7 @@ pull-trigger; let demand decide what V2 brings in.** Don't pre-build.
 - [ORAS](https://oras.land/) — OCI artifact transport library
   expected to back the `--push` and verifier `oras pull` paths.
 - [RFC 8785 — JSON Canonicalization Scheme (JCS)](https://www.rfc-editor.org/rfc/rfc8785) —
-  baseline for the (deferred) material-slice canonicalizer.
+  canonical form for the material-slice subject digest.
 - [CTRF](https://ctrf.io/) — common test-result format consumed from
   the validator phases for `phaseSummary`.
 
