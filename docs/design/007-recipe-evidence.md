@@ -151,24 +151,48 @@ The two kinds share consumption surface (see V1 surface item 2 below):
 They do *not* share production surface — each is emitted by the
 command whose pipeline produced it. CNCF conformance evidence is
 emitted alongside `aicr validate` today; recipe-test attestation is
-emitted by `aicr validate --emit-evidence` (V1 surface item 1).
+emitted by `aicr validate --emit-attestation` (V1 surface item 1).
 Production lives at the origin, where the data is; consumption unifies
 under `aicr evidence` so future kinds (CycloneDX BOM-only attestation,
 SLSA provenance, license attestation) plug in without further
 top-level CLI growth.
 
+**CLI flag layout — kind-scoped flag names disambiguate.** The
+existing CNCF surface on `aicr validate` already uses
+`Category: "Evidence"` for its flags (`--evidence-dir`,
+`--cncf-submission`, `--feature`); adding the recipe-test-attestation
+surface to the same category creates flag-name overlap unless each
+kind is named for itself. V1 keeps the existing CNCF flags unchanged
+and introduces kind-scoped flag names for the new attestation kind:
+
+| Kind | Production flags on `aicr validate` |
+|---|---|
+| `cncf-conformance` | `--evidence-dir <path>` (existing), `--cncf-submission`, `--feature <name>` |
+| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--include-logs`, `--push <oci-ref>`, `--push-logs` |
+
+Both kinds may run from a single `aicr validate` invocation (each
+flag set produces its own output tree) — they are independent
+pipelines that happen to consume the same recipe and snapshot inputs.
+`aicr validate --help` groups both flag sets under `Evidence`; the
+flag *names* tell the user which kind each one targets.
+
+The AICRConfig structure mirrors this — `cncf` and `attestation` sit
+as siblings under `spec.validate.evidence`, so a single config file
+can drive either kind or both without flag-name ambiguity (see V1
+surface item 1 below for the full schema).
+
 **Ship V1 as five PRs, deferring the rest until pulled by demand.**
 
 ### V1 surface (proposed)
 
-1. **Bundle format + pointer + `aicr validate --emit-evidence`.** Single
+1. **Bundle format + pointer + `aicr validate --emit-attestation`.** Single
    in-toto Statement per recipe run, predicate type
    `https://aicr.nvidia.com/recipe-evidence/v1`, DSSE-wrapped, signed
    with cosign keyless OIDC. Summary bundle is an OCI artifact;
    optional logs bundle as a separate OCI artifact,
    contributor-controlled. The pointer file (schema 1.0, in-tree at
    `recipes/evidence/<recipe>.yaml`) is a *side effect* of
-   `--emit-evidence`, not a separate command — generation, OCI push,
+   `--emit-attestation`, not a separate command — generation, OCI push,
    signing, and pointer population happen in one invocation.
 
    **Canonical invocation: `--config aicr.yaml`.** PR-A extends
@@ -187,32 +211,51 @@ top-level CLI growth.
        input:
          recipe: r.yaml
          snapshot: s.yaml
-       output:
-         target: ./out                        # or oci://ghcr.io/myorg/aicr-evidence
        evidence:
-         emit: true
-         includeLogs: true
-         pushLogs: false
-       attestation:                            # reuses pkg/config.AttestationSpec
-         enabled: true
-         certificateIdentityRegexp: ^https://github\.com/myorg/.*$
-         oidcDeviceFlow: false
-       registry:                               # reuses pkg/config.RegistrySpec
-         insecureTLS: false
-         plainHTTP: false
+         # Sibling sections per evidence kind; either or both may be
+         # populated. Each block configures one kind end-to-end and is
+         # independent of the others. Signing and OCI-transport
+         # options nest inside the attestation block because only that
+         # kind signs and pushes; the CNCF block has no need for them.
+         cncf:                                 # cncf-conformance kind
+           out: ./cncf-evidence                # equivalent to --evidence-dir
+           cncfSubmission: false               # equivalent to --cncf-submission
+           features: []                        # equivalent to --feature (repeatable)
+         attestation:                          # recipe-test-attestation kind
+           out: ./out                          # equivalent to --emit-attestation
+           push: oci://ghcr.io/myorg/aicr-evidence  # optional; OCI push target
+           includeLogs: true                   # equivalent to --include-logs
+           pushLogs: false                     # equivalent to --push-logs
+           signing:                            # reuses pkg/config.AttestationSpec
+             enabled: true
+             certificateIdentityRegexp: ^https://github\.com/myorg/.*$
+             oidcDeviceFlow: false
+           registry:                           # reuses pkg/config.RegistrySpec
+             insecureTLS: false
+             plainHTTP: false
    ```
 
+   `signing` and `registry` reuse the existing Go types
+   `pkg/config.AttestationSpec` and `pkg/config.RegistrySpec` (already
+   exposed under `BundleSpec`), so cosign-identity inputs and OCI
+   transport options stay consistent between `aicr bundle` and
+   `aicr validate`. They nest under `evidence.attestation` rather than
+   sitting at `validate` top-level because they are only meaningful
+   when the attestation kind is being emitted.
+
    `aicr validate --config aicr.yaml` is the supported invocation;
-   the CLI flag form (`--recipe`, `--snapshot`, `--emit-evidence`,
-   `--push`, `--include-logs`, `--push-logs`) is the expanded
-   equivalent and overrides config values. `aicr.yaml` flows the same
-   contributor through `aicr recipe` → `aicr validate --emit-evidence`
-   → `aicr bundle` without re-typing inputs.
+   the CLI flag form (`--recipe`, `--snapshot`, `--emit-attestation`,
+   `--push`, `--include-logs`, `--push-logs`, plus existing
+   `--evidence-dir` / `--cncf-submission` / `--feature` for the CNCF
+   kind) is the expanded equivalent and overrides config values.
+   `aicr.yaml` flows the same contributor through `aicr recipe` →
+   `aicr validate --emit-attestation` → `aicr bundle` without re-typing
+   inputs.
 
    **Flag form (equivalent expansion):**
 
    ```bash
-   aicr validate --recipe r.yaml --snapshot s.yaml --emit-evidence ./out
+   aicr validate --recipe r.yaml --snapshot s.yaml --emit-attestation ./out
    # writes:
    #   ./out/summary-bundle/   (recipe, snapshot, BOM, CTRF, manifest, attestation)
    #   ./out/logs-bundle/      (optional; when --include-logs)
@@ -223,7 +266,7 @@ top-level CLI growth.
 
    ```bash
    aicr validate --recipe r.yaml --snapshot s.yaml \
-     --emit-evidence ./out \
+     --emit-attestation ./out \
      --push ghcr.io/myorg/aicr-evidence \
      [--push-logs]
    # pushes summary OCI artifact, runs cosign attest, populates
@@ -274,7 +317,7 @@ top-level CLI growth.
      verification; cheap to run during contributor debugging.
 
    Production stays at the origin (V1 surface item 1 — `aicr validate
-   --emit-evidence` produces attestations; CNCF conformance evidence is
+   --emit-attestation` produces attestations; CNCF conformance evidence is
    produced by the existing `pkg/evidence` pipeline as part of validate
    today). `aicr evidence` is the *consumption* family; new evidence
    kinds plug into it without further top-level CLI growth.
@@ -558,7 +601,7 @@ bump introduces a `role:` field and pointer rotation. V1 readers
 treat absent `role:` as `primary`. This avoids a breaking schema
 transition for multi-instance.
 
-The pointer is bundle-derived; `aicr validate --emit-evidence`
+The pointer is bundle-derived; `aicr validate --emit-attestation`
 regenerates it from the OCI artifact (or the locally-emitted bundle
 directory, before push). Mismatches between pointer and bundle are
 **integrity-chain failures**, not clerical errors — the bundle is
@@ -840,7 +883,7 @@ fragment.
 ### `aicr verify-evidence` top-level verb vs. `aicr evidence verify` family (rejected)
 
 Earlier drafts of this ADR proposed a standalone `aicr verify-evidence`
-top-level command, paired with `aicr validate --emit-evidence` for
+top-level command, paired with `aicr validate --emit-attestation` for
 production. Simpler to type; one-to-one mapping between produce and
 verify.
 
@@ -857,7 +900,7 @@ their own top-level verb. The `aicr evidence verify` / `list` /
 for future read-only operations (`diff`, `push`, `archive`) without
 top-level pollution.
 
-Production stays at the origin (`aicr validate --emit-evidence`)
+Production stays at the origin (`aicr validate --emit-attestation`)
 because evidence is a side-effect of the pipeline that produced its
 inputs. Re-emitting via `aicr evidence emit` would either re-run
 validate (defeating the purpose of an offline verifier) or reach into
@@ -913,12 +956,12 @@ commitments the demand event has not yet justified.
 ## Adoption plan
 
 1. **This ADR lands.** Sets policy, no code changes.
-2. **PR-A: bundle format + pointer + `aicr validate --emit-evidence`.**
+2. **PR-A: bundle format + pointer + `aicr validate --emit-attestation`.**
    Ships the `/v1` predicate; the OCI summary bundle layout (recipe +
    snapshot + BOM + CTRF + manifest); the optional logs bundle; the
    manifest pre-commit binding; the cosign keyless signing path; the
    pointer schema 1.0 (`docs/spec/recipe-evidence-pointer-v1.md` with
-   JSON Schema); and `--emit-evidence` writing the pointer file
+   JSON Schema); and `--emit-attestation` writing the pointer file
    alongside the bundle directories. Optional `--push <oci-registry>`
    handles the OCI upload, cosign attest, and pointer population in one
    command. Updates `pkg/bundler/attestation` with the new predicate
