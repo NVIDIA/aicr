@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -196,6 +198,151 @@ type validationError struct {
 
 func (e *validationError) Error() string {
 	return e.msg
+}
+
+// TestParseResourceList covers the --requests / --limits parser, including
+// the duplicate-key rejection added per PR #762 review.
+func TestParseResourceList(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantNil     bool
+		wantKeys    map[corev1.ResourceName]string
+		wantErr     bool
+		wantErrSubs string
+	}{
+		{
+			name:    "empty input -> nil ResourceList (no override)",
+			input:   "",
+			wantNil: true,
+		},
+		{
+			name:    "whitespace only -> nil",
+			input:   "   ",
+			wantNil: true,
+		},
+		{
+			name:  "single entry",
+			input: "memory=1Gi",
+			wantKeys: map[corev1.ResourceName]string{
+				corev1.ResourceMemory: "1Gi",
+			},
+		},
+		{
+			name:  "multiple entries with whitespace tolerated",
+			input: " cpu=500m , memory=1Gi , ephemeral-storage=2Gi ",
+			wantKeys: map[corev1.ResourceName]string{
+				corev1.ResourceCPU:              "500m",
+				corev1.ResourceMemory:           "1Gi",
+				corev1.ResourceEphemeralStorage: "2Gi",
+			},
+		},
+		{
+			name:  "extended resource (nvidia.com/gpu)",
+			input: "nvidia.com/gpu=4",
+			wantKeys: map[corev1.ResourceName]string{
+				corev1.ResourceName("nvidia.com/gpu"): "4",
+			},
+		},
+		{
+			name:        "missing equals -> error",
+			input:       "cpu",
+			wantErr:     true,
+			wantErrSubs: "name=quantity",
+		},
+		{
+			name:        "empty key -> error",
+			input:       "=1Gi",
+			wantErr:     true,
+			wantErrSubs: "empty",
+		},
+		{
+			name:        "empty value -> error",
+			input:       "memory=",
+			wantErr:     true,
+			wantErrSubs: "empty",
+		},
+		{
+			name:        "invalid quantity -> error",
+			input:       "memory=not-a-quantity",
+			wantErr:     true,
+			wantErrSubs: "memory=not-a-quantity",
+		},
+		{
+			name:        "negative quantity rejected (cpu)",
+			input:       "cpu=-1",
+			wantErr:     true,
+			wantErrSubs: "negative quantity",
+		},
+		{
+			name:        "negative quantity rejected (memory with suffix)",
+			input:       "memory=-1Gi",
+			wantErr:     true,
+			wantErrSubs: "negative quantity",
+		},
+		{
+			name:        "negative quantity in second entry rejected",
+			input:       "cpu=1,memory=-256Mi",
+			wantErr:     true,
+			wantErrSubs: "negative quantity",
+		},
+		{
+			name:  "zero quantity allowed",
+			input: "cpu=0",
+			wantKeys: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "0",
+			},
+		},
+		{
+			name:        "duplicate key rejected",
+			input:       "cpu=1,cpu=2",
+			wantErr:     true,
+			wantErrSubs: "duplicate key",
+		},
+		{
+			name:        "duplicate key after whitespace normalization rejected",
+			input:       "memory=1Gi, memory =2Gi",
+			wantErr:     true,
+			wantErrSubs: "duplicate key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseResourceList(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.wantErrSubs != "" && !strings.Contains(err.Error(), tt.wantErrSubs) {
+					t.Errorf("error %q does not contain %q", err.Error(), tt.wantErrSubs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("expected nil ResourceList, got %v", got)
+				}
+				return
+			}
+			if len(got) != len(tt.wantKeys) {
+				t.Fatalf("got %d keys, want %d (got=%v want=%v)", len(got), len(tt.wantKeys), got, tt.wantKeys)
+			}
+			for k, want := range tt.wantKeys {
+				v, ok := got[k]
+				if !ok {
+					t.Errorf("missing key %q", k)
+					continue
+				}
+				if v.String() != want {
+					t.Errorf("key %q: got %q, want %q", k, v.String(), want)
+				}
+			}
+		})
+	}
 }
 
 // TestOutputDestinationParsing tests parsing of various output destinations.

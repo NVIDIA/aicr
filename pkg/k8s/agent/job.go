@@ -164,21 +164,30 @@ func (d *Deployer) applyPrivilegedSettings(spec *corev1.PodSpec) {
 	}
 
 	container := &spec.Containers[0]
-	limits := corev1.ResourceList{
+	requests := mergeResourceList(corev1.ResourceList{
+		corev1.ResourceCPU:              mustParseQuantity("1"),
+		corev1.ResourceMemory:           mustParseQuantity("4Gi"),
+		corev1.ResourceEphemeralStorage: mustParseQuantity("2Gi"),
+	}, d.config.Requests)
+	limits := mergeResourceList(corev1.ResourceList{
 		corev1.ResourceCPU:              mustParseQuantity("2"),
 		corev1.ResourceMemory:           mustParseQuantity("8Gi"),
 		corev1.ResourceEphemeralStorage: mustParseQuantity("4Gi"),
-	}
+	}, d.config.Limits)
+	// RequireGPU defaults the nvidia.com/gpu limit to 1 only when the
+	// caller has not supplied an explicit value via --limits. Caller
+	// override wins so a user can request multiple GPUs (e.g.
+	// --require-gpu --limits nvidia.com/gpu=4) without the default
+	// silently truncating it back to 1.
 	if d.config.RequireGPU {
-		limits[corev1.ResourceName("nvidia.com/gpu")] = mustParseQuantity("1")
+		gpuKey := corev1.ResourceName("nvidia.com/gpu")
+		if _, ok := limits[gpuKey]; !ok {
+			limits[gpuKey] = mustParseQuantity("1")
+		}
 	}
 	container.Resources = corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
-			corev1.ResourceCPU:              mustParseQuantity("1"),
-			corev1.ResourceMemory:           mustParseQuantity("4Gi"),
-			corev1.ResourceEphemeralStorage: mustParseQuantity("2Gi"),
-		},
-		Limits: limits,
+		Requests: requests,
+		Limits:   limits,
 	}
 	container.SecurityContext = &corev1.SecurityContext{
 		Privileged:               ptr.To(true),
@@ -248,16 +257,16 @@ func (d *Deployer) applyRestrictedSettings(spec *corev1.PodSpec) {
 
 	container := &spec.Containers[0]
 	container.Resources = corev1.ResourceRequirements{
-		Requests: corev1.ResourceList{
+		Requests: mergeResourceList(corev1.ResourceList{
 			corev1.ResourceCPU:              mustParseQuantity("100m"),
 			corev1.ResourceMemory:           mustParseQuantity("256Mi"),
 			corev1.ResourceEphemeralStorage: mustParseQuantity("256Mi"),
-		},
-		Limits: corev1.ResourceList{
+		}, d.config.Requests),
+		Limits: mergeResourceList(corev1.ResourceList{
 			corev1.ResourceCPU:              mustParseQuantity("500m"),
 			corev1.ResourceMemory:           mustParseQuantity("512Mi"),
 			corev1.ResourceEphemeralStorage: mustParseQuantity("512Mi"),
-		},
+		}, d.config.Limits),
 	}
 	container.SecurityContext = &corev1.SecurityContext{
 		Privileged:               ptr.To(false),
@@ -397,6 +406,22 @@ func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
 func mustParseQuantity(s string) resource.Quantity {
 	q := resource.MustParse(s)
 	return q
+}
+
+// mergeResourceList returns a fresh ResourceList where every key in
+// override replaces the same key in defaults; keys present only in
+// defaults are preserved unchanged. Used by applyPrivilegedSettings
+// and applyRestrictedSettings to honor --requests / --limits CLI
+// overrides without forcing the caller to specify every resource.
+func mergeResourceList(defaults, override corev1.ResourceList) corev1.ResourceList {
+	merged := make(corev1.ResourceList, len(defaults))
+	for k, v := range defaults {
+		merged[k] = v
+	}
+	for k, v := range override {
+		merged[k] = v
+	}
+	return merged
 }
 
 // toLocalObjectReferences converts a slice of secret names to LocalObjectReferences.

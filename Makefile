@@ -104,7 +104,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-sidebar check-docs-filenames check-docs-mdx bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 # Standalone target — NOT part of `make lint` because it requires Docker
@@ -135,6 +135,14 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 .PHONY: check-docs-sidebar
 check-docs-sidebar: ## Verifies all docs/ pages have sidebar entries in VitePress config
 	@./tools/check-docs-sidebar
+
+.PHONY: check-docs-filenames
+check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
+	@./tools/check-docs-filenames
+
+.PHONY: check-docs-mdx
+check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments)
+	@./tools/check-docs-mdx
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -707,6 +715,38 @@ endif
 .PHONY: kwok-test-all
 kwok-test-all: build ## Run all KWOK recipe tests in a shared cluster
 	@bash kwok/scripts/run-all-recipes.sh
+
+# =============================================================================
+# Talos local test harness
+# =============================================================================
+TALOS_CLUSTER_NAME ?= aicr-talos
+TALOS_KUBECONFIG   ?= $(HOME)/.kube/aicr-talos
+TALOS_VERSION      ?= v1.9.0
+
+.PHONY: talos-dev-env
+talos-dev-env: ## Spin up a local Talos cluster (Docker provisioner) for snapshot testing.
+	@# TALOS_KUBECONFIG (user-facing var, documented in tools/talos-test/README.md)
+	@# is forwarded into up.sh as KUBECONFIG_OUT (script-internal var).
+	@TALOS_CLUSTER_NAME=$(TALOS_CLUSTER_NAME) \
+	 TALOS_VERSION=$(TALOS_VERSION) \
+	 KUBECONFIG_OUT=$(TALOS_KUBECONFIG) \
+	 ./tools/talos-test/up.sh
+
+.PHONY: talos-dev-env-clean
+talos-dev-env-clean: ## Destroy the local Talos cluster.
+	@TALOS_CLUSTER_NAME=$(TALOS_CLUSTER_NAME) \
+	 ./tools/talos-test/down.sh
+
+.PHONY: talos-snapshot-test
+talos-snapshot-test: build ## Run the Talos snapshot chainsaw test against an already-running cluster.
+	@HOST_GOOS=$$(go env GOOS); HOST_GOARCH=$$(go env GOARCH); \
+	 DIST_DIR=$$(find dist -maxdepth 1 -type d -name "aicr_$${HOST_GOOS}_$${HOST_GOARCH}*" 2>/dev/null | head -1); \
+	 if [ -z "$$DIST_DIR" ] || [ ! -x "$$DIST_DIR/aicr" ]; then \
+	    echo "error: aicr binary not found under dist/aicr_$${HOST_GOOS}_$${HOST_GOARCH}*; run 'make build' first" >&2; exit 1; \
+	 fi; \
+	 KUBECONFIG=$(TALOS_KUBECONFIG) \
+	 PATH=$$DIST_DIR:$$PATH \
+	 chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent-talos
 
 # =============================================================================
 # Component Testing
