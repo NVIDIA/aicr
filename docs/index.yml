@@ -31,6 +31,11 @@ navigation:
       - page: Component Catalog
         path: user/component-catalog.md
 
+  - section: Specifications
+    contents:
+      - page: Recipe Evidence Bundle v1
+        path: spec/recipe-evidence-v1.md
+
   - section: Integrator Guide
     contents:
       - page: Automation
