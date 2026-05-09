@@ -92,8 +92,14 @@ type Summary struct {
 }
 
 // HasDrift returns true if any field-level changes were detected.
+// Derives the answer from len(Changes) directly so a caller-constructed
+// Result (where Summary may not have been populated) reports correctly,
+// and a nil receiver safely returns false instead of panicking.
 func (r *Result) HasDrift() bool {
-	return r.Summary.Total > 0
+	if r == nil {
+		return false
+	}
+	return len(r.Changes) > 0
 }
 
 // Snapshots compares two snapshots and returns a structured diff result.

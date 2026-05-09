@@ -894,7 +894,7 @@ aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
 | `0` | Diff completed; no drift, or `--fail-on-drift` not set |
 | `2` | Invalid input (missing flags, bad format, ConfigMap output for `--format table`) **or** drift detected with `--fail-on-drift` (mapped from `ErrCodeConflict`) |
 
-> **Note on CI gating:** A non-zero exit identifies *that* drift was detected, but doesn't by itself distinguish drift from malformed input. CI scripts that need to differentiate should parse the structured error JSON or branch on the presence of the diff result file rather than on the exit code alone.
+> **Note on CI gating:** A non-zero exit identifies *that* drift was detected, but doesn't by itself distinguish drift from malformed input — both map to exit `2`. To differentiate without relying on stderr format (text by default; JSON only with `--log-json`), inspect the diff payload directly: write the result with `--output drift.json --format json` and branch on the presence of the file plus its `summary.total` field. That signal is format-stable regardless of logging mode.
 
 ---
 

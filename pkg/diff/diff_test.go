@@ -196,6 +196,46 @@ func TestSnapshots_EmptySnapshots(t *testing.T) {
 	}
 }
 
+// TestHasDrift_DerivedFromChanges verifies HasDrift derives from len(Changes)
+// rather than Summary.Total, so a caller-constructed Result whose Summary
+// hasn't been populated still reports drift correctly. Also verifies a nil
+// receiver returns false instead of panicking.
+func TestHasDrift_DerivedFromChanges(t *testing.T) {
+	tests := []struct {
+		name   string
+		result *Result
+		want   bool
+	}{
+		{"nil receiver", nil, false},
+		{"empty changes, zero summary", &Result{Changes: []Change{}}, false},
+		{
+			name: "changes present but summary zero (caller-constructed)",
+			result: &Result{
+				Changes: []Change{
+					{Kind: Modified, Severity: SeverityInfo, Path: "K8s.server.version", Baseline: strPtr("a"), Target: strPtr("b")},
+				},
+				// Summary.Total intentionally left at 0
+			},
+			want: true,
+		},
+		{
+			name: "summary populated, no changes (mismatched but Changes wins)",
+			result: &Result{
+				Changes: []Change{},
+				Summary: Summary{Total: 99},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.result.HasDrift(); got != tt.want {
+				t.Errorf("HasDrift() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSnapshots_NilInputs(t *testing.T) {
 	result := Snapshots(nil, nil)
 	if result.HasDrift() {
