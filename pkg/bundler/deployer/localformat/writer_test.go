@@ -86,7 +86,7 @@ func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 			Namespace:  "skyhook",
 			Repository: "", // empty: manifest-only
 		}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"skyhook-customizations": {
 				// Realistic input: project recipe manifests carry a license header
 				// (see recipes/components/gpu-operator/manifests/dcgm-exporter.yaml).
@@ -147,7 +147,7 @@ func TestWrite_Mixed(t *testing.T) {
 			ChartName:  "nvidia/gpu-operator",
 			Version:    "v24.9.1",
 		}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				// Realistic: real project manifests carry a license header.
 				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
@@ -231,7 +231,7 @@ func TestWrite_Ordering(t *testing.T) {
 			mk("b", "https://b.example"),
 			mk("c", "https://c.example"),
 		},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"b": {
 				"b/manifests/x.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 #
@@ -360,7 +360,7 @@ func TestWrite_Deterministic(t *testing.T) {
 				},
 			},
 			// b is mixed — exercise the -post injection path in the determinism check
-			ComponentManifests: map[string]map[string][]byte{
+			ComponentPostManifests: map[string]map[string][]byte{
 				"b": {
 					// Two manifests with distinct basenames to exercise sorted iteration
 					"b/manifests/m1.yaml": []byte("---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: m1\n"),
@@ -395,7 +395,7 @@ func TestWrite_KustomizeWithManifestsRejected(t *testing.T) {
 			Tag:       "v1.0.0",
 			Path:      kustomizePath,
 		}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"busted-component": {
 				"extra/m.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n"),
 			},

@@ -67,9 +67,20 @@ type WriteResult struct {
 
 // Options configures Write.
 type Options struct {
-	OutputDir          string
-	Components         []Component                  // ordered per DeploymentOrder
-	ComponentManifests map[string]map[string][]byte // name → path → rendered bytes
+	OutputDir  string
+	Components []Component // ordered per DeploymentOrder
+	// ComponentPreManifests maps component name → manifest path → rendered
+	// bytes for manifests that should apply BEFORE each component's primary
+	// chart. Populated from ComponentRef.PreManifestFiles. The writer does
+	// not yet emit pre-phase folders — Task 4 wires the pre-injection
+	// branch; for now the map is threaded through but unread.
+	ComponentPreManifests map[string]map[string][]byte
+	// ComponentPostManifests maps component name → manifest path → rendered
+	// bytes for manifests that should apply AFTER each component's primary
+	// chart. Populated from ComponentRef.ManifestFiles. Drives the existing
+	// -post injection for mixed components and the template contents for
+	// manifest-only wrapped charts.
+	ComponentPostManifests map[string]map[string][]byte
 
 	// VendorCharts pulls upstream Helm chart bytes into each Helm-typed
 	// component's folder at bundle time. When set, every Helm component
@@ -88,10 +99,11 @@ type Options struct {
 }
 
 // renderInputFor builds the per-component manifest.RenderInput. The Helm
-// templates inside ComponentManifests reference ".Values[componentName]" and
-// ".Release.Namespace" / ".Chart.{Name,Version}" — those all derive from the
-// Component itself, so we construct it here rather than asking callers to
-// pre-build N separate RenderInputs in lockstep with Components.
+// templates inside ComponentPreManifests/ComponentPostManifests reference
+// ".Values[componentName]" and ".Release.Namespace" / ".Chart.{Name,Version}"
+// — those all derive from the Component itself, so we construct it here
+// rather than asking callers to pre-build N separate RenderInputs in
+// lockstep with Components.
 func renderInputFor(c Component) manifest.RenderInput {
 	chart := c.ChartName
 	if chart == "" {
@@ -161,7 +173,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			declared[c.Name] = struct{}{}
 		}
 		for _, c := range opts.Components {
-			if len(opts.ComponentManifests[c.Name]) == 0 {
+			if len(opts.ComponentPostManifests[c.Name]) == 0 {
 				continue
 			}
 			if c.Repository == "" {
@@ -190,7 +202,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		// Reject kustomize + raw manifests: each recipe component must declare
 		// EITHER kustomize (Tag/Path) OR raw manifests, not both. The bundle
 		// shape can only wrap one primary source into the local chart.
-		if (c.Tag != "" || c.Path != "") && len(opts.ComponentManifests[c.Name]) > 0 {
+		if (c.Tag != "" || c.Path != "") && len(opts.ComponentPostManifests[c.Name]) > 0 {
 			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q has both kustomize (Tag/Path) and raw manifests; use one", c.Name))
 		}
@@ -204,7 +216,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		if opts.VendorCharts && shouldVendor(c) {
 			f, rec, err := writeVendoredHelmFolder(
 				ctx, opts.OutputDir, dir, idx, c,
-				opts.ComponentManifests[c.Name], puller,
+				opts.ComponentPostManifests[c.Name], puller,
 			)
 			if err != nil {
 				return WriteResult{}, err
@@ -218,7 +230,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			continue
 		}
 
-		kind := classify(c, opts.ComponentManifests[c.Name])
+		kind := classify(c, opts.ComponentPostManifests[c.Name])
 
 		switch kind {
 		case KindUpstreamHelm:
@@ -234,7 +246,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			// Emit an injected -post wrapped chart immediately after the primary so
 			// raw manifests apply post-install (after helm has registered the chart's CRDs).
 			// The "mixed" concept lives only here at the bundle layer — no recipe metadata involved.
-			if manifests := opts.ComponentManifests[c.Name]; len(manifests) > 0 {
+			if manifests := opts.ComponentPostManifests[c.Name]; len(manifests) > 0 {
 				postName := c.Name + "-post"
 				postDir := fmt.Sprintf("%03d-%s", idx, postName)
 				postFolder, postErr := writeLocalHelmFolder(
@@ -250,7 +262,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 				idx++
 			}
 		case KindLocalHelm:
-			manifests := opts.ComponentManifests[c.Name]
+			manifests := opts.ComponentPostManifests[c.Name]
 			if c.Tag != "" || c.Path != "" {
 				// Kustomize-typed: materialize the overlay output to a single
 				// templates/manifest.yaml inside the wrapped chart.

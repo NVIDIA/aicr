@@ -1238,7 +1238,7 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 		Version:        "v0.0.0-golden",
 		RepoURL:        "https://github.com/example/aicr-bundles.git",
 		TargetRevision: "main",
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"nodewright-customizations": {
 				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
 					"kind: Skyhook\n" +
@@ -1307,7 +1307,7 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 		TargetRevision: "main",
 		// gpu-operator carries an additional rendered manifest — this turns
 		// it into a mixed component, triggering the primary + -post split.
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
 					"kind: ConfigMap\n" +

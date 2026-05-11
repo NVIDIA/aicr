@@ -130,11 +130,20 @@ type Generator struct {
 	// in checksum generation. Used for external data files copied into the bundle.
 	DataFiles []string
 
-	// ComponentManifests maps component name → manifest path → rendered bytes.
+	// ComponentPreManifests maps component name → manifest path → rendered
+	// bytes for manifests that apply BEFORE each component's primary chart.
+	// Forwarded to localformat.Options.ComponentPreManifests. Wired by the
+	// bundler; populated from ComponentRef.PreManifestFiles. Components
+	// without pre-manifests do not appear in the map.
+	ComponentPreManifests map[string]map[string][]byte
+
+	// ComponentPostManifests maps component name → manifest path → rendered
+	// bytes for manifests that apply AFTER each component's primary chart.
 	// Drives wrapping of manifest-only and mixed components into local Helm
-	// charts via localformat.Write. Wired by the bundler. Components without
-	// manifests do not appear in the map.
-	ComponentManifests map[string]map[string][]byte
+	// charts via localformat.Write. Wired by the bundler; populated from
+	// ComponentRef.ManifestFiles. Components without manifests do not
+	// appear in the map.
+	ComponentPostManifests map[string]map[string][]byte
 
 	// DynamicValues maps component names to their dynamic value paths. The
 	// paths are removed from per-component values.yaml during the localformat
@@ -313,10 +322,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// inside each folder plus the top-level app-of-apps.yaml afterwards.
 	lfComponents := g.toLocalformatComponents(components)
 	writeResult, lfErr := localformat.Write(ctx, localformat.Options{
-		OutputDir:          outputDir,
-		Components:         lfComponents,
-		ComponentManifests: g.ComponentManifests,
-		VendorCharts:       g.VendorCharts,
+		OutputDir:              outputDir,
+		Components:             lfComponents,
+		ComponentPreManifests:  g.ComponentPreManifests,
+		ComponentPostManifests: g.ComponentPostManifests,
+		VendorCharts:           g.VendorCharts,
 	})
 	if lfErr != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.

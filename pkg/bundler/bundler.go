@@ -308,26 +308,36 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			slog.Warn("--repo is ignored with --deployer argocd-helm; supply the URL at install time via `helm install --set repoURL=...`",
 				"repo", b.Config.RepoURL())
 		}
-		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
-		if manifestErr != nil {
+		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
+		if preErr != nil {
 			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
+			if stderrors.As(preErr, &se) {
+				return nil, preErr
 			}
 			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+				"failed to collect component manifests", preErr)
+		}
+		componentPostManifests, postErr := b.collectComponentManifests(ctx, recipeResult)
+		if postErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(postErr, &se) {
+				return nil, postErr
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", postErr)
 		}
 		return &argocdhelm.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			RepoURL:            b.Config.RepoURL(),
-			TargetRevision:     b.Config.TargetRevision(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			DynamicValues:      dynamicValues,
-			DataFiles:          dataFiles,
-			ComponentManifests: componentManifests,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			RepoURL:                b.Config.RepoURL(),
+			TargetRevision:         b.Config.TargetRevision(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			DynamicValues:          dynamicValues,
+			DataFiles:              dataFiles,
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			VendorCharts:           b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -335,46 +345,66 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
 		}
-		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
-		if manifestErr != nil {
+		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
+		if preErr != nil {
 			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
+			if stderrors.As(preErr, &se) {
+				return nil, preErr
 			}
 			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+				"failed to collect component manifests", preErr)
+		}
+		componentPostManifests, postErr := b.collectComponentManifests(ctx, recipeResult)
+		if postErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(postErr, &se) {
+				return nil, postErr
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", postErr)
 		}
 		return &argocd.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			RepoURL:            b.Config.RepoURL(),
-			TargetRevision:     b.Config.TargetRevision(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			DataFiles:          dataFiles,
-			ComponentManifests: componentManifests,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			RepoURL:                b.Config.RepoURL(),
+			TargetRevision:         b.Config.TargetRevision(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			DataFiles:              dataFiles,
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			VendorCharts:           b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerHelm:
-		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
-		if manifestErr != nil {
+		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
+		if preErr != nil {
 			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
+			if stderrors.As(preErr, &se) {
+				return nil, preErr
 			}
 			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+				"failed to collect component manifests", preErr)
+		}
+		componentPostManifests, postErr := b.collectComponentManifests(ctx, recipeResult)
+		if postErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(postErr, &se) {
+				return nil, postErr
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", postErr)
 		}
 		return &helm.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			ComponentManifests: componentManifests,
-			DataFiles:          dataFiles,
-			DynamicValues:      dynamicValues,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			DataFiles:              dataFiles,
+			DynamicValues:          dynamicValues,
+			VendorCharts:           b.Config.VendorCharts(),
 		}, nil
 
 	default:
@@ -1046,11 +1076,15 @@ func removeHyphens(s string) string {
 // the collector reads. Pre- and post-phase share one collector body so
 // any future change to manifest loading (auth, caching, validation,
 // path normalization) lands in exactly one place.
+//
+// phasePostManifests is intentionally the iota zero value: a zero-value
+// or unspecified manifestPhase falls through to the legacy
+// post-manifests behavior, never the newer pre-manifests path.
 type manifestPhase int
 
 const (
-	phasePreManifests manifestPhase = iota
-	phasePostManifests
+	phasePostManifests manifestPhase = iota
+	phasePreManifests
 )
 
 // collectComponentManifestsByPhase gathers manifest file contents from
@@ -1078,6 +1112,9 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 			paths = ref.PreManifestFiles
 		case phasePostManifests:
 			paths = ref.ManifestFiles
+		default:
+			return nil, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("unknown manifest phase %d", phase))
 		}
 		if len(paths) == 0 {
 			continue
@@ -1107,10 +1144,8 @@ func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeRe
 
 // collectComponentPreManifests gathers the pre-phase manifests (those
 // the bundler will emit BEFORE each component's primary chart). Wired
-// into the bundler entry points in a follow-up commit; held dormant
-// here so the phase plumbing lands as a pure DRY refactor.
-//
-//nolint:unused // intentionally dormant; see comment above
+// into each deployer call site in buildDeployer alongside the
+// post-phase collector.
 func (b *DefaultBundler) collectComponentPreManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
 	return b.collectComponentManifestsByPhase(ctx, recipeResult, phasePreManifests)
 }

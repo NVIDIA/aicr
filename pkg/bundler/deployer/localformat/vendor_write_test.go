@@ -140,7 +140,7 @@ func TestWrite_VendorCharts_Mixed(t *testing.T) {
 			ChartName:  "alloy",
 			Version:    "1.2.3",
 		}},
-		ComponentManifests: manifests,
+		ComponentPostManifests: manifests,
 		VendorCharts:       true,
 		Puller:             &fakePuller{},
 	})

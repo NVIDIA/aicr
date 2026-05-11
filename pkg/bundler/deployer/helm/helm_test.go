@@ -1975,7 +1975,7 @@ func TestBundleGolden_ManifestOnly(t *testing.T) {
 			DeploymentOrder: []string{"skyhook-customizations"},
 		},
 		ComponentValues: map[string]map[string]any{"skyhook-customizations": {}},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"skyhook-customizations": {
 				"components/skyhook-customizations/manifests/customization.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
@@ -2003,7 +2003,7 @@ func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 		ComponentValues: map[string]map[string]any{
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},
 		},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 

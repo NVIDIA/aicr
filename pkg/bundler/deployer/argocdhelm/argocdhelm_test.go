@@ -763,7 +763,7 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 		DynamicValues: map[string][]string{
 			"cert-manager": {"replicaCount"},
 		},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"nodewright-customizations": {
 				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
 					"kind: Skyhook\n" +
@@ -832,7 +832,7 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 		DynamicValues: map[string][]string{
 			"gpu-operator": {"driver.version"},
 		},
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
 					"kind: ConfigMap\n" +
@@ -908,7 +908,7 @@ func TestHelmTemplate_RendersWithSetRepoURL(t *testing.T) {
 			"nodewright-customizations": {"enabled": true},
 		},
 		Version: "v0.0.0-test",
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"nodewright-customizations": {
 				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
 					"kind: Skyhook\n" +
