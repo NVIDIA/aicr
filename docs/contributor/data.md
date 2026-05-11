@@ -759,6 +759,18 @@ The fingerprint is derived from the same collector outputs that populate
 source signal is missing surface as zero-value entries — the verifier
 treats those as "unknown" rather than fabricating a match.
 
+> **The persisted `fingerprint:` block is advisory only.** It is a
+> convenience for humans reading the snapshot YAML, not a trust-bearing
+> claim. The snapshot file is not signed at this layer — an attacker
+> controlling it could swap the embedded fingerprint without touching
+> the measurements that back it. Trust-bearing consumers — the
+> evidence bundler ([#754](https://github.com/NVIDIA/aicr/issues/754)),
+> the verifier ([#753](https://github.com/NVIDIA/aicr/issues/753)),
+> and any downstream policy gate — MUST recompute via
+> `fingerprint.FromMeasurements(snap.Measurements)` before acting on
+> the result, and treat zero-value entries as "unknown" per the match
+> semantics below.
+
 ### Fingerprint Schema
 
 ```yaml
