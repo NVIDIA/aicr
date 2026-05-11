@@ -266,8 +266,9 @@ func bundleCmd() *cli.Command {
 		Name:     "bundle",
 		Category: functionalCategoryName,
 		Usage:    "Generate deployment bundle from a given recipe.",
-		Description: `Generates a deployment bundle from a given recipe. 
+		Description: `Generates a deployment bundle from a given recipe.
 Use --deployer argocd to generate Argo CD Applications.
+Use --deployer flux to generate Flux HelmRelease and Kustomization manifests.
 
 Helm:
   - README.md: Root deployment guide with ordered steps
@@ -284,6 +285,14 @@ Argo CD:
   - README.md: Deployment instructions
   - checksums.txt: SHA256 checksums of generated files
 
+Flux:
+  - kustomization.yaml: Root Kustomize orchestration
+  - namespaces/: Namespace manifests for component namespaces
+  - sources/: HelmRepository and GitRepository source CRs
+  - <component>/helmrelease.yaml: Flux HelmRelease with inline values
+  - README.md: Deployment instructions
+  - checksums.txt: SHA256 checksums of generated files
+
 Examples:
 
 Generate Helm per-component bundle (default):
@@ -291,6 +300,9 @@ Generate Helm per-component bundle (default):
 
 Generate Argo CD App of Apps:
   aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer argocd
+
+Generate Flux manifests:
+  aicr bundle --recipe recipe.yaml --output ./my-bundle --deployer flux
 
 Override values in generated bundle:
   aicr bundle --recipe recipe.yaml --set gpuoperator:driver.version=570.133.20
@@ -392,7 +404,7 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringFlag{
 				Name:  "repo",
 				Value: "",
-				Usage: "Git repository URL for Argo CD Applications (only used with --deployer argocd). " +
+				Usage: "Git repository URL for GitOps deployers (used with --deployer argocd and --deployer flux). " +
 					"Ignored by --deployer argocd-helm: that bundle is URL-portable and the publish " +
 					"location is supplied at install time via `helm install --set repoURL=...`.",
 				Category: catDeployment,
@@ -486,6 +498,8 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		outputType = "Argo CD applications"
 	case config.DeployerArgoCDHelm:
 		outputType = "Argo CD Helm chart app-of-apps"
+	case config.DeployerFlux:
+		outputType = "Flux manifests"
 	}
 	slog.Info("generating bundle",
 		slog.String("deployer", opts.deployer.String()),

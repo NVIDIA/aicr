@@ -12,10 +12,10 @@ AICR provides a four-step workflow for optimizing GPU infrastructure:
 └──────────────┘      └──────────────┘      └──────────────┘      └──────────────┘
 ```
 
-**Step 1**: Capture system configuration  
-**Step 2**: Generate optimization recipes  
-**Step 3**: Validate constraints against cluster  
-**Step 4**: Create deployment bundles  
+**Step 1**: Capture system configuration
+**Step 2**: Generate optimization recipes
+**Step 3**: Validate constraints against cluster
+**Step 4**: Create deployment bundles
 
 ## Global Flags
 
@@ -970,7 +970,7 @@ aicr bundle [flags]
 | `--recipe` | `-r` | string | Path to recipe file (required, or via `spec.bundle.input.recipe` in `--config`) |
 | `--config` | | string | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Bundle Config File Mode](#bundle-config-file-mode). |
 | `--output` | `-o` | string | Output directory (default: current dir) |
-| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, or `argocd-helm` |
+| `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, or `flux` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
@@ -1110,6 +1110,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
 | `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
+| `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Does **not** support `--dynamic`. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
@@ -1119,6 +1120,7 @@ All deployers respect the `deploymentOrder` field from the recipe, ensuring comp
 
 - **Helm**: Components listed in README in deployment order
 - **Argo CD**: Uses `argocd.argoproj.io/sync-wave` annotation (0 = first, 1 = second, etc.)
+- **Flux**: Uses `dependsOn` references in HelmRelease/Kustomization CRs (each component depends on its predecessor)
 
 #### Value Overrides (`--set`)
 
@@ -1551,14 +1553,14 @@ When generating bundles with nodewright-customizations enabled, validation warni
 1. **Workload Selector Warning**: When nodewright-customizations is enabled with training intent, if `--workload-selector` is not set, a warning will be displayed:
 
 ```
-Warning: nodewright-customizations is enabled but --workload-selector is not set. 
+Warning: nodewright-customizations is enabled but --workload-selector is not set.
 This may cause nodewright to evict running training jobs. Consider setting --workload-selector to prevent eviction.
 ```
 
 2. **Accelerated Selector Warning**: When nodewright-customizations is enabled with training or inference intent, if `--accelerated-node-selector` is not set, a warning will be displayed:
 
 ```
-Warning: nodewright-customizations is enabled but --accelerated-node-selector is not set. 
+Warning: nodewright-customizations is enabled but --accelerated-node-selector is not set.
 Without this selector, the customization will run on all nodes. Consider setting --accelerated-node-selector to target specific nodes.
 ```
 
@@ -1653,7 +1655,7 @@ order:
 
 Both interactive flows time out after 5 minutes.
 
-Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
+Attestation works with all deployers (`helm`, `argocd`, `argocd-helm`, `flux`). External `--data` files are included in `checksums.txt` and listed as resolved dependencies in the attestation.
 
 ##### Attestation Scope
 

@@ -33,6 +33,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
@@ -377,6 +378,31 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
+	case config.DeployerFlux:
+		if b.Config.HasDynamicValues() {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"dynamic declarations are not supported with deployer \"flux\"")
+		}
+		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
+		if manifestErr != nil {
+			var se *errors.StructuredError
+			if stderrors.As(manifestErr, &se) {
+				return nil, manifestErr
+			}
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to collect component manifests", manifestErr)
+		}
+		return &flux.Generator{
+			RecipeResult:       recipeResult,
+			ComponentValues:    componentValues,
+			Version:            b.Config.Version(),
+			RepoURL:            b.Config.RepoURL(),
+			TargetRevision:     b.Config.TargetRevision(),
+			IncludeChecksums:   b.Config.IncludeChecksums(),
+			DataFiles:          dataFiles,
+			ComponentManifests: componentManifests,
+		}, nil
+
 	default:
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("unsupported deployer type: %s", b.Config.Deployer()))
@@ -471,6 +497,8 @@ func deployerResultNames(dt config.DeployerType) (types.BundleType, string) {
 		return "argocd-applications", "Argo CD applications"
 	case config.DeployerArgoCDHelm:
 		return "argocd-helm-chart", "Argo CD Helm chart app-of-apps"
+	case config.DeployerFlux:
+		return "flux-manifests", "Flux manifests"
 	default:
 		return types.BundleType(dt), string(dt)
 	}
