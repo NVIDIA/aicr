@@ -229,20 +229,34 @@ spec:
             check:
               ($error == null): true
 
-    - name: dynamic-rejected
-      description: --dynamic flag is rejected with --deployer flux.
+    - name: dynamic-values-configmap
+      description: --dynamic flag generates ConfigMap and valuesFrom in HelmRelease.
       try:
         - script:
             content: |
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-flux"
-              if ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/dynamic-reject" \
-                --deployer flux --dynamic gpuoperator:driver.version 2>"${WORK}/dynamic-err.txt"; then
-                echo "expected --dynamic to be rejected with flux deployer" >&2
-                exit 1
-              fi
-              grep -qi "dynamic.*not supported\|not supported.*dynamic" "${WORK}/dynamic-err.txt" \
-                || { echo "expected error about dynamic not supported, got:"; cat "${WORK}/dynamic-err.txt" >&2; exit 1; }
+              rm -rf "${WORK}/dynamic-out"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/dynamic-out" \
+                --deployer flux --dynamic gpuoperator:driver.version
+
+              # Verify ConfigMap file exists for gpu-operator.
+              [ -f "${WORK}/dynamic-out/gpu-operator/configmap-values.yaml" ] \
+                || { echo "missing gpu-operator/configmap-values.yaml" >&2; exit 1; }
+
+              # Verify ConfigMap is valid YAML with correct kind.
+              grep -q "kind: ConfigMap" "${WORK}/dynamic-out/gpu-operator/configmap-values.yaml" \
+                || { echo "configmap-values.yaml missing 'kind: ConfigMap'" >&2; exit 1; }
+
+              # Verify HelmRelease references the ConfigMap via valuesFrom.
+              grep -q "valuesFrom" "${WORK}/dynamic-out/gpu-operator/helmrelease.yaml" \
+                || { echo "HelmRelease missing valuesFrom" >&2; exit 1; }
+              grep -q "gpu-operator-values" "${WORK}/dynamic-out/gpu-operator/helmrelease.yaml" \
+                || { echo "HelmRelease missing ConfigMap reference" >&2; exit 1; }
+
+              # Verify kustomization.yaml includes the ConfigMap resource.
+              grep -q "gpu-operator/configmap-values.yaml" "${WORK}/dynamic-out/kustomization.yaml" \
+                || { echo "kustomization.yaml missing configmap-values.yaml resource" >&2; exit 1; }
             check:
               ($error == null): true
 

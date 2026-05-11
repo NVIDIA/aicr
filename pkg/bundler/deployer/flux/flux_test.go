@@ -722,6 +722,257 @@ func TestGenerate_DisabledComponentsFiltered(t *testing.T) {
 	}
 }
 
+func TestGenerate_WithDynamicValues(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {
+				"driver": map[string]any{
+					"enabled": true,
+					"version": "570.86.16",
+				},
+				"toolkit": map[string]any{"enabled": true},
+			},
+		},
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version"},
+		},
+		Version: "v0.9.0",
+	}
+
+	output, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if output == nil {
+		t.Fatal("Generate() returned nil output")
+	}
+
+	// Verify ConfigMap file exists for gpu-operator.
+	cmPath := filepath.Join(outputDir, "gpu-operator", "configmap-values.yaml")
+	if _, statErr := os.Stat(cmPath); os.IsNotExist(statErr) {
+		t.Error("expected gpu-operator/configmap-values.yaml to exist")
+	}
+
+	// Verify ConfigMap contains dynamic value.
+	cmContent := readFile(t, cmPath)
+	if !strings.Contains(cmContent, "kind: ConfigMap") {
+		t.Error("configmap-values.yaml should contain 'kind: ConfigMap'")
+	}
+	if !strings.Contains(cmContent, "gpu-operator-values") {
+		t.Error("ConfigMap should be named gpu-operator-values")
+	}
+	if !strings.Contains(cmContent, "driver") {
+		t.Error("ConfigMap should contain driver key")
+	}
+	if !strings.Contains(cmContent, "version") {
+		t.Error("ConfigMap should contain version key")
+	}
+
+	// Verify HelmRelease has valuesFrom.
+	hrContent := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "valuesFrom") {
+		t.Error("gpu-operator HelmRelease should contain valuesFrom")
+	}
+	if !strings.Contains(hrContent, "gpu-operator-values") {
+		t.Error("gpu-operator HelmRelease should reference gpu-operator-values ConfigMap")
+	}
+
+	// Verify inline values do NOT contain driver.version (it was split out).
+	// The inline values should still contain driver.enabled and toolkit.
+	if strings.Contains(hrContent, "570.86.16") {
+		t.Error("inline values should NOT contain the dynamic driver.version value")
+	}
+	if !strings.Contains(hrContent, "toolkit") {
+		t.Error("inline values should still contain non-dynamic toolkit values")
+	}
+
+	// Verify cert-manager has NO ConfigMap (no dynamic values for it).
+	certCMPath := filepath.Join(outputDir, "cert-manager", "configmap-values.yaml")
+	if _, statErr := os.Stat(certCMPath); !os.IsNotExist(statErr) {
+		t.Error("cert-manager should NOT have configmap-values.yaml")
+	}
+	certHR := readFile(t, filepath.Join(outputDir, "cert-manager", "helmrelease.yaml"))
+	if strings.Contains(certHR, "valuesFrom") {
+		t.Error("cert-manager HelmRelease should NOT contain valuesFrom")
+	}
+
+	// Verify kustomization.yaml includes the ConfigMap resource.
+	kustomization := readFile(t, filepath.Join(outputDir, "kustomization.yaml"))
+	if !strings.Contains(kustomization, "gpu-operator/configmap-values.yaml") {
+		t.Error("kustomization.yaml should include gpu-operator/configmap-values.yaml")
+	}
+
+	// Verify deployment notes mention ConfigMaps.
+	foundNote := false
+	for _, note := range output.DeploymentNotes {
+		if strings.Contains(note, "ConfigMap") {
+			foundNote = true
+			break
+		}
+	}
+	if !foundNote {
+		t.Error("deployment notes should mention ConfigMaps when dynamic values are present")
+	}
+}
+
+func TestGenerate_WithDynamicValues_ManifestComponent(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {{ index .Values \"custom-manifests\" \"mykey\" }}"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		ComponentValues: map[string]map[string]any{
+			"custom-manifests": {"mykey": "default-value", "otherkey": "keep-me"},
+		},
+		DynamicValues: map[string][]string{
+			"custom-manifests": {"mykey"},
+		},
+		Version: "v0.9.0",
+		RepoURL: "https://github.com/my-org/gitops.git",
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify ConfigMap file exists.
+	cmPath := filepath.Join(outputDir, "custom-manifests", "configmap-values.yaml")
+	if _, statErr := os.Stat(cmPath); os.IsNotExist(statErr) {
+		t.Error("expected custom-manifests/configmap-values.yaml to exist")
+	}
+
+	// Verify ConfigMap wraps values under the component name key.
+	cmContent := readFile(t, cmPath)
+	if !strings.Contains(cmContent, "custom-manifests") {
+		t.Error("ConfigMap values should be wrapped under component name key")
+	}
+	if !strings.Contains(cmContent, "mykey") {
+		t.Error("ConfigMap should contain the dynamic key")
+	}
+
+	// Verify HelmRelease has valuesFrom.
+	hrContent := readFile(t, filepath.Join(outputDir, "custom-manifests", "helmrelease.yaml"))
+	if !strings.Contains(hrContent, "valuesFrom") {
+		t.Error("manifest HelmRelease should contain valuesFrom")
+	}
+
+	// Verify inline values still contain the non-dynamic key.
+	if !strings.Contains(hrContent, "otherkey") {
+		t.Error("inline values should contain non-dynamic otherkey")
+	}
+}
+
+func TestSplitDynamicPaths(t *testing.T) {
+	tests := []struct {
+		name         string
+		values       map[string]any
+		dynamicPaths []string
+		wantStatic   map[string]any
+		wantDynamic  map[string]any
+	}{
+		{
+			name: "split existing path",
+			values: map[string]any{
+				"driver": map[string]any{
+					"enabled": true,
+					"version": "570.86.16",
+				},
+				"toolkit": map[string]any{"enabled": true},
+			},
+			dynamicPaths: []string{"driver.version"},
+			wantStatic: map[string]any{
+				"driver":  map[string]any{"enabled": true},
+				"toolkit": map[string]any{"enabled": true},
+			},
+			wantDynamic: map[string]any{
+				"driver": map[string]any{"version": "570.86.16"},
+			},
+		},
+		{
+			name:         "missing path gets empty string",
+			values:       map[string]any{"foo": "bar"},
+			dynamicPaths: []string{"nonexistent.path"},
+			wantStatic:   map[string]any{"foo": "bar"},
+			wantDynamic: map[string]any{
+				"nonexistent": map[string]any{"path": ""},
+			},
+		},
+		{
+			name:         "no dynamic paths returns original",
+			values:       map[string]any{"foo": "bar"},
+			dynamicPaths: nil,
+			wantStatic:   map[string]any{"foo": "bar"},
+			wantDynamic:  map[string]any{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitDynamicPaths(tt.values, tt.dynamicPaths)
+
+			// Verify static values.
+			staticYAML, _ := yaml.Marshal(got.static)
+			wantStaticYAML, _ := yaml.Marshal(tt.wantStatic)
+			if string(staticYAML) != string(wantStaticYAML) {
+				t.Errorf("static values mismatch:\ngot:  %s\nwant: %s", staticYAML, wantStaticYAML)
+			}
+
+			// Verify dynamic values.
+			dynamicYAML, _ := yaml.Marshal(got.dynamic)
+			wantDynamicYAML, _ := yaml.Marshal(tt.wantDynamic)
+			if string(dynamicYAML) != string(wantDynamicYAML) {
+				t.Errorf("dynamic values mismatch:\ngot:  %s\nwant: %s", dynamicYAML, wantDynamicYAML)
+			}
+		})
+	}
+}
+
 func TestSanitizeSourceName(t *testing.T) {
 	tests := []struct {
 		name  string

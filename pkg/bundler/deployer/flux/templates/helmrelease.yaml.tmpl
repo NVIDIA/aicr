@@ -27,6 +27,13 @@ spec:
     - name: {{ .Name }}
 {{- end }}
 {{- end }}
+{{- if .ValuesFrom }}
+  valuesFrom:
+{{- range .ValuesFrom }}
+    - kind: ConfigMap
+      name: {{ .Name }}
+{{- end }}
+{{- end }}
 {{- if .ValuesYAML }}
   values:
 {{ .ValuesYAML }}

@@ -37,10 +37,14 @@ import (
 // Output file names used across generation.
 const (
 	fileChart         = "Chart.yaml"
+	fileConfigMap     = "configmap-values.yaml"
 	fileHelmRelease   = "helmrelease.yaml"
 	fileKustomization = "kustomization.yaml"
 	fileReadme        = "README.md"
 )
+
+//go:embed templates/configmap-values.yaml.tmpl
+var configMapTemplate string
 
 //go:embed templates/helmrelease.yaml.tmpl
 var helmReleaseTemplate string
@@ -119,6 +123,11 @@ type Generator struct {
 	// Drives generation of local Helm charts for manifest-only and mixed
 	// components. Components without manifests do not appear in the map.
 	ComponentManifests map[string]map[string][]byte
+
+	// DynamicValues maps component names to their dynamic value paths.
+	// When non-empty, dynamic paths are split from inline values into a
+	// ConfigMap and referenced via spec.valuesFrom in the HelmRelease.
+	DynamicValues map[string][]string
 }
 
 // resolveTargetRevision returns the effective target revision, defaulting to "main".
@@ -247,9 +256,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		"Create a Flux Kustomization pointing to the bundle path",
 		"Monitor reconciliation with: flux get helmreleases -A",
 	}
-	output.DeploymentNotes = []string{
+	notes := []string{
 		"Ensure Flux is installed on your cluster before applying",
 	}
+	if len(g.DynamicValues) > 0 {
+		notes = append(notes,
+			"ConfigMaps with dynamic values have been generated. Edit them before applying to customize per-cluster settings.")
+	}
+	output.DeploymentNotes = notes
 
 	slog.Debug("flux bundle generated",
 		"components", len(sortedRefs),
@@ -286,17 +300,26 @@ func (g *Generator) generateComponentResources(ref recipe.ComponentRef, index in
 		// Manifest-only Helm component: no chart or source, only manifests.
 		// Package as a local Helm chart so Flux renders the templates natively.
 		if ref.Chart == "" && ref.Source == "" && hasManifests {
-			if err := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
-				g.ComponentManifests[ref.Name], gitSources, dependsOn, output); err != nil {
-				return nil, err
+			wroteCM, genErr := g.generateManifestHelmChart(ref.Name, ref.Name, ref.Namespace, compDir,
+				g.ComponentManifests[ref.Name], gitSources, dependsOn, output)
+			if genErr != nil {
+				return nil, genErr
 			}
-			return []string{filepath.Join(ref.Name, fileHelmRelease)}, nil
+			res := []string{filepath.Join(ref.Name, fileHelmRelease)}
+			if wroteCM {
+				res = append(res, filepath.Join(ref.Name, fileConfigMap))
+			}
+			return res, nil
 		}
 
-		if err := g.generateHelmComponent(ref, compDir, dependsOn, helmSources, output); err != nil {
-			return nil, err
+		wroteCM, helmErr := g.generateHelmComponent(ref, compDir, dependsOn, helmSources, output)
+		if helmErr != nil {
+			return nil, helmErr
 		}
 		resources = append(resources, filepath.Join(ref.Name, fileHelmRelease))
+		if wroteCM {
+			resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
+		}
 
 		// Handle mixed components (Helm + manifests).
 		// Post-manifests are packaged as a local Helm chart with dependsOn
@@ -313,11 +336,15 @@ func (g *Generator) generateComponentResources(ref recipe.ComponentRef, index in
 			}
 
 			postDependsOn := []DependsOnRef{{Name: ref.Name}}
-			if err := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir,
-				g.ComponentManifests[ref.Name], gitSources, postDependsOn, output); err != nil {
-				return nil, err
+			postWroteCM, postGenErr := g.generateManifestHelmChart(ref.Name, postName, ref.Namespace, postDir,
+				g.ComponentManifests[ref.Name], gitSources, postDependsOn, output)
+			if postGenErr != nil {
+				return nil, postGenErr
 			}
 			resources = append(resources, filepath.Join(postName, fileHelmRelease))
+			if postWroteCM {
+				resources = append(resources, filepath.Join(postName, fileConfigMap))
+			}
 		}
 
 	default:

@@ -24,6 +24,7 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -37,7 +38,48 @@ type HelmReleaseData struct {
 	SourceKind      string // "HelmRepository" or "GitRepository"
 	SourceName      string
 	DependsOn       []DependsOnRef
-	ValuesYAML      string // Pre-rendered, indented YAML for spec.values
+	ValuesFrom      []ValuesFromRef // ConfigMap references for dynamic values
+	ValuesYAML      string          // Pre-rendered, indented YAML for spec.values
+}
+
+// ValuesFromRef is a Flux valuesFrom reference to a ConfigMap.
+type ValuesFromRef struct {
+	Name string
+}
+
+// ConfigMapData carries data for the configmap-values.yaml template.
+type ConfigMapData struct {
+	Name       string
+	ValuesYAML string // Indented YAML for the data.values.yaml field
+}
+
+// valueSplit carries the results of splitting component values into static
+// (inline spec.values) and dynamic (ConfigMap) maps.
+type valueSplit struct {
+	static  map[string]any
+	dynamic map[string]any
+}
+
+// splitDynamicPaths deep-copies values and moves the named dot-paths into a
+// separate dynamic map. Paths not present in values are still added to the
+// dynamic map with an empty-string value so the ConfigMap carries the full set
+// of dynamic keys for operators to fill in at install time.
+//
+// This is the same algorithm as localformat/writer.go's splitDynamicPaths,
+// duplicated here to avoid an import cycle (deployer → component → checksum → deployer).
+func splitDynamicPaths(values map[string]any, dynamicPaths []string) valueSplit {
+	static := component.DeepCopyMap(values)
+	dynamic := make(map[string]any)
+	for _, path := range dynamicPaths {
+		val, found := component.GetValueByPath(static, path)
+		if found {
+			component.RemoveValueByPath(static, path)
+		} else {
+			val = ""
+		}
+		component.SetValueByPath(dynamic, path, val)
+	}
+	return valueSplit{static: static, dynamic: dynamic}
 }
 
 // HelmRepoSourceData carries data for HelmRepository source CRs.
@@ -47,19 +89,39 @@ type HelmRepoSourceData struct {
 	IsOCI bool
 }
 
-// generateHelmComponent writes the HelmRelease with inline values for a Helm component.
+// generateHelmComponent writes the HelmRelease with inline values for a Helm
+// component. When dynamic paths are configured, it splits values into static
+// (inline) and dynamic (ConfigMap) and returns true to signal a ConfigMap was
+// written alongside the HelmRelease.
 func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir string,
-	dependsOn []DependsOnRef, helmSources map[string]*HelmRepoSourceData, output *deployer.Output) error {
+	dependsOn []DependsOnRef, helmSources map[string]*HelmRepoSourceData, output *deployer.Output) (bool, error) {
 
 	sName := helmSourceName(ref.Source, helmSources)
+	values := g.ComponentValues[ref.Name]
+	dynamicPaths := g.DynamicValues[ref.Name]
+
+	var valuesFrom []ValuesFromRef
+	var wroteConfigMap bool
+
+	// Split dynamic paths into a ConfigMap when configured.
+	if len(dynamicPaths) > 0 {
+		split := splitDynamicPaths(values, dynamicPaths)
+		values = split.static
+
+		cmName, cmErr := writeConfigMap(ref.Name, split.dynamic, compDir, output)
+		if cmErr != nil {
+			return false, cmErr
+		}
+		valuesFrom = []ValuesFromRef{{Name: cmName}}
+		wroteConfigMap = true
+	}
 
 	// Marshal values to YAML (2-space indent) and indent 4 spaces for embedding under spec.values.
 	var valuesYAML string
-	values := g.ComponentValues[ref.Name]
 	if len(values) > 0 {
 		yamlBytes, marshalErr := k8syaml.Marshal(values)
 		if marshalErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal values for %s", ref.Name), marshalErr)
 		}
 		valuesYAML = "    " + strings.ReplaceAll(strings.TrimRight(string(yamlBytes), "\n"), "\n", "\n    ")
@@ -82,11 +144,15 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 		SourceKind:      "HelmRepository",
 		SourceName:      sName,
 		DependsOn:       dependsOn,
+		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,
 	}
 
-	return writeTemplate(output, helmReleaseTemplate, data, compDir, fileHelmRelease,
-		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, ref.Name))
+	if err := writeTemplate(output, helmReleaseTemplate, data, compDir, fileHelmRelease,
+		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, ref.Name)); err != nil {
+		return false, err
+	}
+	return wroteConfigMap, nil
 }
 
 // ChartData carries data for generating a local Chart.yaml.
@@ -99,17 +165,18 @@ type ChartData struct {
 // in the Git repo and writes a HelmRelease CR pointing to it via GitRepository.
 // Manifest files are Helm templates (with {{ .Values }}, {{ .Release }}, etc.)
 // that Flux's Helm controller renders natively at deploy time.
+// Returns true when a ConfigMap was written for dynamic values.
 func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, compDir string,
 	manifests map[string][]byte, gitSources map[string]*GitRepoSourceData,
-	dependsOn []DependsOnRef, output *deployer.Output) error {
+	dependsOn []DependsOnRef, output *deployer.Output) (bool, error) {
 
 	// Create templates/ subdirectory for manifest files.
 	templatesDir, err := deployer.SafeJoin(compDir, "templates")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(templatesDir, 0750); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal,
+		return false, errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to create templates directory for %s", compName), err)
 	}
 
@@ -125,10 +192,10 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		safeName := filepath.Base(name)
 		filePath, joinErr := deployer.SafeJoin(templatesDir, safeName)
 		if joinErr != nil {
-			return joinErr
+			return false, joinErr
 		}
 		if err := os.WriteFile(filePath, content, 0600); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to write template %s for %s", safeName, compName), err)
 		}
 		output.Files = append(output.Files, filePath)
@@ -139,19 +206,41 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	if err := writeTemplate(output, chartTemplate, ChartData{Name: dirName, Version: "0.1.0"},
 		compDir, fileChart,
 		fmt.Sprintf("failed to write %s for %s", fileChart, compName)); err != nil {
-		return err
+		return false, err
 	}
 
 	// Marshal values for inline embedding in HelmRelease.
 	// Manifest templates access values via `index .Values "<compName>"`, so wrap
 	// the flat values map under the component name key to match that expectation.
-	var valuesYAML string
 	values := g.ComponentValues[compName]
+	dynamicPaths := g.DynamicValues[compName]
+
+	var valuesFrom []ValuesFromRef
+	var wroteConfigMap bool
+
+	// Split dynamic paths into a ConfigMap when configured.
+	// Dynamic paths are split before wrapping under the component name key,
+	// then both halves are wrapped to match the template expectation.
+	if len(dynamicPaths) > 0 {
+		split := splitDynamicPaths(values, dynamicPaths)
+		values = split.static
+
+		// Wrap dynamic values under the component name key for manifest template compatibility.
+		wrappedDynamic := map[string]any{compName: split.dynamic}
+		cmName, cmErr := writeConfigMap(dirName, wrappedDynamic, compDir, output)
+		if cmErr != nil {
+			return false, cmErr
+		}
+		valuesFrom = []ValuesFromRef{{Name: cmName}}
+		wroteConfigMap = true
+	}
+
+	var valuesYAML string
 	if len(values) > 0 {
 		wrapped := map[string]any{compName: values}
 		yamlBytes, marshalErr := k8syaml.Marshal(wrapped)
 		if marshalErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal,
+			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal values for %s", compName), marshalErr)
 		}
 		valuesYAML = "    " + strings.ReplaceAll(strings.TrimRight(string(yamlBytes), "\n"), "\n", "\n    ")
@@ -166,9 +255,41 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		SourceKind:      "GitRepository",
 		SourceName:      sName,
 		DependsOn:       dependsOn,
+		ValuesFrom:      valuesFrom,
 		ValuesYAML:      valuesYAML,
 	}
 
-	return writeTemplate(output, helmReleaseTemplate, data, compDir, fileHelmRelease,
-		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, compName))
+	if err := writeTemplate(output, helmReleaseTemplate, data, compDir, fileHelmRelease,
+		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, compName)); err != nil {
+		return false, err
+	}
+	return wroteConfigMap, nil
+}
+
+// writeConfigMap writes a ConfigMap YAML file containing the given dynamic
+// values into compDir and returns the ConfigMap name for valuesFrom wiring.
+func writeConfigMap(compName string, dynamicValues map[string]any, compDir string, output *deployer.Output) (string, error) {
+	cmName := compName + "-values"
+
+	var valuesYAML string
+	if len(dynamicValues) > 0 {
+		yamlBytes, err := k8syaml.Marshal(dynamicValues)
+		if err != nil {
+			return "", errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to marshal dynamic values for %s", compName), err)
+		}
+		valuesYAML = "    " + strings.ReplaceAll(strings.TrimRight(string(yamlBytes), "\n"), "\n", "\n    ")
+	}
+
+	data := ConfigMapData{
+		Name:       cmName,
+		ValuesYAML: valuesYAML,
+	}
+
+	if err := writeTemplate(output, configMapTemplate, data, compDir, fileConfigMap,
+		fmt.Sprintf("failed to write %s for %s", fileConfigMap, compName)); err != nil {
+		return "", err
+	}
+
+	return cmName, nil
 }

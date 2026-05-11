@@ -323,7 +323,7 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of bundler types to execute |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
-| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm` and `deployer=argocd-helm`. |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, and `deployer=flux`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |

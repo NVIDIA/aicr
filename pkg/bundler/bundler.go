@@ -379,10 +379,6 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		}, nil
 
 	case config.DeployerFlux:
-		if b.Config.HasDynamicValues() {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				"dynamic declarations are not supported with deployer \"flux\"")
-		}
 		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
 		if manifestErr != nil {
 			var se *errors.StructuredError
@@ -401,6 +397,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			IncludeChecksums:   b.Config.IncludeChecksums(),
 			DataFiles:          dataFiles,
 			ComponentManifests: componentManifests,
+			DynamicValues:      dynamicValues,
 		}, nil
 
 	default:

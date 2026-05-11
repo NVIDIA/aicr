@@ -973,7 +973,7 @@ aicr bundle [flags]
 | `--deployer` | `-d` | string | Deployment method: `helm` (default), `argocd`, `argocd-helm`, or `flux` |
 | `--repo` | | string | Git/OCI repository URL baked into Argo CD Application sources. Used with `--deployer argocd`. Ignored with `--deployer argocd-helm` (that bundle is URL-portable — the URL is supplied at `helm install` time via `--set repoURL=...`); a warning is logged if passed. |
 | `--set` | | string[] | Override values in bundle files (repeatable). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`) |
-| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm` and `argocd-helm` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, and `flux` deployers. See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
@@ -1110,7 +1110,7 @@ The `--deployer` flag controls how deployment artifacts are generated:
 | `helm` | (Default) Generates Helm charts with values for deployment. Supports `--dynamic`. |
 | `argocd` | Generates Argo CD Application manifests for GitOps deployment. Does **not** support `--dynamic`. |
 | `argocd-helm` | Generates a Helm chart app-of-apps for Argo CD. All values overridable at install time via `helm --set`. Use `--dynamic` to pre-populate specific paths. |
-| `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Does **not** support `--dynamic`. |
+| `flux` | Generates Flux HelmRelease manifests for GitOps deployment. Supports `--dynamic` via ConfigMap `valuesFrom`. |
 
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all values are overridable at install time.
 
@@ -1377,6 +1377,39 @@ bundles/
 │   └── values.yaml                # No dynamic values, no cluster-values.yaml
 ├── deploy.sh                      # Passes -f cluster-values.yaml when present
 └── ...
+```
+
+**Bundle structure with `--dynamic`** (Flux deployer):
+
+The `--deployer flux` bundle uses Flux's native `spec.valuesFrom` to reference ConfigMaps containing dynamic values. Dynamic paths are removed from the inline `spec.values` and placed into a ConfigMap per component. Flux merges `valuesFrom` first, then inline values on top — since dynamic paths are stripped from inline values, the ConfigMap values take effect without conflicts.
+
+```
+bundles/
+├── gpu-operator/
+│   ├── helmrelease.yaml            # HelmRelease with valuesFrom + inline values
+│   └── configmap-values.yaml       # Dynamic values ConfigMap (edit before applying)
+├── cert-manager/
+│   └── helmrelease.yaml            # No dynamic values, no ConfigMap
+├── sources/
+│   └── ...
+├── kustomization.yaml
+└── README.md
+```
+
+Before applying the bundle to your cluster, edit each `configmap-values.yaml` with the correct per-cluster values:
+
+```shell
+# 1. Generate the bundle
+aicr bundle -r recipe.yaml --deployer flux \
+  --dynamic gpuoperator:driver.version \
+  --repo https://github.com/my-org/gitops.git \
+  -o ./bundles
+
+# 2. Edit dynamic ConfigMaps
+vim bundles/gpu-operator/configmap-values.yaml
+
+# 3. Push to your Git repository and let Flux reconcile
+git add bundles/ && git commit -m "Add AICR bundle" && git push
 ```
 
 **Argo CD Helm chart structure with `--dynamic`:**
