@@ -20,10 +20,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// criteriaAnyValue mirrors the wildcard literal that pkg/recipe uses
-// for criteria fields.
-const criteriaAnyValue = "any"
-
 // Match compares the fingerprint against a recipe's criteria and
 // returns a per-dimension diff plus an overall Matched flag.
 //
@@ -110,5 +106,5 @@ func matchDim(name DimensionName, recipeRequires, fingerprintProvides string, fi
 }
 
 func isAny(v string) bool {
-	return v == "" || v == criteriaAnyValue
+	return v == "" || v == recipe.CriteriaAnyValue
 }
