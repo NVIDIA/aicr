@@ -387,3 +387,18 @@ func TestFromMeasurements_GPUMissingSubtype(t *testing.T) {
 		t.Errorf("expected empty Accelerator when smi subtype missing, got %q", got.Accelerator.Value)
 	}
 }
+
+// TestFromMeasurements_GPUUnknownModelFromTopology exercises the
+// topology-label backfill path: when smi did not run (e.g. agent
+// landed on a non-GPU node) but the GPU operator labels nodes, the
+// reconciliation pass parses the label's product string through the
+// same ParseGPUSKU registry — an unrecognized model must still yield
+// empty rather than fabricating a SKU.
+func TestFromMeasurements_GPUUnknownModelFromTopology(t *testing.T) {
+	got := FromMeasurements([]*measurement.Measurement{topologyMeasurement(1, map[string]string{
+		"nvidia.com/gpu.product": "NVIDIA-T4|node1",
+	})})
+	if got.Accelerator.Value != "" {
+		t.Errorf("expected empty Accelerator for unrecognized topology product, got %q", got.Accelerator.Value)
+	}
+}
