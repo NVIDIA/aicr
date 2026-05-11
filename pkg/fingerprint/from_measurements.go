@@ -56,6 +56,7 @@ const (
 // missing fingerprint values as "unknown" rather than "mismatched."
 func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 	fp := &Fingerprint{}
+	var topo *measurement.Measurement
 	for _, m := range measurements {
 		if m == nil {
 			continue
@@ -69,12 +70,15 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 			populateFromOS(fp, m)
 		case measurement.TypeNodeTopology:
 			populateFromTopology(fp, m)
+			topo = m
 		case measurement.TypeSystemD:
 			// systemd measurements do not contribute to the cluster
 			// fingerprint; intentionally skipped.
 		}
 	}
-	reconcileAccelerator(fp, measurements)
+	if topo != nil {
+		reconcileAccelerator(fp, topo)
+	}
 	return fp
 }
 
@@ -92,17 +96,7 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 //   - Topology shows one GPU SKU and smi was empty → backfill from
 //     topology so non-GPU snapshotter nodes still surface accelerator.
 //   - Otherwise → keep smi result.
-func reconcileAccelerator(fp *Fingerprint, measurements []*measurement.Measurement) {
-	var topo *measurement.Measurement
-	for _, m := range measurements {
-		if m != nil && m.Type == measurement.TypeNodeTopology {
-			topo = m
-			break
-		}
-	}
-	if topo == nil {
-		return
-	}
+func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 	st := topo.GetSubtype(subtypeTopologyLabel)
 	if st == nil {
 		return
@@ -119,13 +113,21 @@ func reconcileAccelerator(fp *Fingerprint, measurements []*measurement.Measureme
 	if err != nil || raw == "" {
 		return
 	}
-	product := raw
-	if i := strings.Index(raw, "|"); i >= 0 {
-		product = raw[:i]
-	}
+	product, _ := parseLabelEncoding(raw)
 	if sku := ParseGPUSKU(product); sku != "" {
 		fp.Accelerator = Dimension{Value: sku, Source: sourceTopologyGPU}
 	}
+}
+
+// parseLabelEncoding splits the topology collector's label value
+// encoding ("<value>|<node1,node2,...>") into its two halves. Returns
+// the entire input as value and an empty node list when no separator
+// is present.
+func parseLabelEncoding(raw string) (value, nodes string) {
+	if i := strings.Index(raw, "|"); i >= 0 {
+		return raw[:i], raw[i+1:]
+	}
+	return raw, ""
 }
 
 // hasMultiValueKeys reports whether the label subtype contains
@@ -231,12 +233,11 @@ func countGPUNodes(st *measurement.Subtype) int {
 		if k != labelKeyGPUProduct && !strings.HasPrefix(k, prefix) {
 			continue
 		}
-		raw := v.String()
-		i := strings.Index(raw, "|")
-		if i < 0 {
+		_, nodeList := parseLabelEncoding(v.String())
+		if nodeList == "" {
 			continue
 		}
-		for _, n := range strings.Split(raw[i+1:], ",") {
+		for _, n := range strings.Split(nodeList, ",") {
 			n = strings.TrimSpace(n)
 			if n != "" {
 				nodes[n] = struct{}{}
@@ -265,10 +266,8 @@ func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 	if err != nil || raw == "" {
 		return "", false
 	}
-	if i := strings.Index(raw, "|"); i >= 0 {
-		return raw[:i], false
-	}
-	return raw, false
+	value, _ := parseLabelEncoding(raw)
+	return value, false
 }
 
 // normalizeOSID maps an /etc/os-release ID value to the
