@@ -143,10 +143,13 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	}
 
 	// Marshal values for inline embedding in HelmRelease.
+	// Manifest templates access values via `index .Values "<compName>"`, so wrap
+	// the flat values map under the component name key to match that expectation.
 	var valuesYAML string
 	values := g.ComponentValues[compName]
 	if len(values) > 0 {
-		yamlBytes, marshalErr := k8syaml.Marshal(values)
+		wrapped := map[string]any{compName: values}
+		yamlBytes, marshalErr := k8syaml.Marshal(wrapped)
 		if marshalErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to marshal values for %s", compName), marshalErr)
