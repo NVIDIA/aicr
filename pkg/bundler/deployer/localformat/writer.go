@@ -124,6 +124,11 @@ func renderInputFor(c Component) manifest.RenderInput {
 // post folders apply after (sync-wave N+1 / step N+1). Both phases
 // share a single emission path so any future change to wrapped-chart
 // shape lands in one place.
+//
+// Typed as string (not int-iota like the sibling manifestPhase in
+// pkg/bundler/bundler.go) so the value embeds directly into the
+// "<name>-<phase>" folder/release name and into %q error messages
+// without a separate String() method.
 type injectionPhase string
 
 const (
