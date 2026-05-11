@@ -87,6 +87,7 @@ export default withMermaid(
               { text: 'EKS Dynamo Networking', link: '/docs/integrator/eks-dynamo-networking' },
               { text: 'GKE TCPXO Networking', link: '/docs/integrator/gke-tcpxo-networking' },
               { text: 'Recipe Development', link: '/docs/integrator/recipe-development' },
+              { text: 'Talos Integration', link: '/docs/integrator/talos-integration' },
               { text: 'Validator Extension', link: '/docs/integrator/validator-extension' },
             ],
           },
