@@ -118,6 +118,53 @@ func renderInputFor(c Component) manifest.RenderInput {
 	}
 }
 
+// injectionPhase selects whether injectAuxiliaryFolder reads pre- or
+// post-phase manifests from Options. Pre folders apply before the
+// primary chart (sync-wave N-1 in Argo CD / install step N-1 in Helm),
+// post folders apply after (sync-wave N+1 / step N+1). Both phases
+// share a single emission path so any future change to wrapped-chart
+// shape lands in one place.
+type injectionPhase string
+
+const (
+	phasePre  injectionPhase = "pre"
+	phasePost injectionPhase = "post"
+)
+
+// injectAuxiliaryFolder wraps the per-phase manifest list for component
+// c into a local-helm folder named "<name>-<phase>" at the given index.
+// Returns (nil, nil) when there are no manifests for the requested
+// phase — the caller treats that as a no-op (do not increment idx).
+// Both pre- and post-phase share this path so naming, render input,
+// error handling, and writeLocalHelmFolder invocation stay in one
+// place.
+func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injectionPhase) (*Folder, error) {
+	var manifests map[string][]byte
+	switch phase {
+	case phasePre:
+		manifests = opts.ComponentPreManifests[c.Name]
+	case phasePost:
+		manifests = opts.ComponentPostManifests[c.Name]
+	default:
+		return nil, errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("unknown injection phase %q", phase))
+	}
+	if len(manifests) == 0 {
+		return nil, nil //nolint:nilnil // (nil, nil) is the documented no-op contract: callers treat it as "no folder for this phase, do not increment idx".
+	}
+	auxName := c.Name + "-" + string(phase)
+	auxDir := fmt.Sprintf("%03d-%s", idx, auxName)
+	f, err := writeLocalHelmFolder(
+		opts.OutputDir, auxDir, idx, c,
+		manifests, renderInputFor(c),
+		auxName, c.Name,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
 // Write emits the numbered folder layout. Deterministic and idempotent.
 //
 // Removes any pre-existing NNN-* folders under OutputDir before writing, so
@@ -137,14 +184,14 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 	}
 	// Fail fast if the layout's three-digit prefix can't accommodate the
-	// component count. Non-vendored mixed components can inject a second
-	// folder per component (primary + injected -post wrapper); vendored
-	// mode collapses every component into a single folder.
-	maxFolders := len(opts.Components)
-	if !opts.VendorCharts {
-		maxFolders *= 2
-	}
-	if maxFolders > 999 {
+	// component count. Each non-vendored component may emit up to three
+	// folders (pre + primary + post), so the upper bound is
+	// 3*len(Components). Vendored mode collapses mixed into one folder
+	// per Helm component; we still budget for 3x because pre folders
+	// are independent of the primary path. The deploy/undeploy templates
+	// glob [0-9][0-9][0-9]-*/, so a 4-digit prefix would be silently
+	// skipped.
+	if 3*len(opts.Components) > 999 {
 		return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("too many components (%d): NNN- folder prefix supports at most 999 entries",
 				len(opts.Components)))
@@ -161,29 +208,43 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		puller = &CLIChartPuller{}
 	}
 
-	// Detect <name>-post collisions up front for the non-vendored path:
-	// if a recipe declares both a mixed component "foo" (Helm + manifests)
-	// and a separate component "foo-post", the injection rule would
-	// synthesize a second "foo-post" folder/release that collides with
-	// the explicitly-declared one. Vendored mode collapses mixed into
-	// one folder and never injects -post, so the check is skipped there.
-	if !opts.VendorCharts {
-		declared := make(map[string]struct{}, len(opts.Components))
-		for _, c := range opts.Components {
-			declared[c.Name] = struct{}{}
-		}
-		for _, c := range opts.Components {
-			if len(opts.ComponentPostManifests[c.Name]) == 0 {
-				continue
-			}
-			if c.Repository == "" {
-				continue // manifest-only doesn't inject; already a single local-helm folder
-			}
-			if _, clash := declared[c.Name+"-post"]; clash {
+	// Detect <name>-pre and <name>-post collisions up front: if a recipe
+	// declares both a component "foo" with pre/post manifests and a
+	// separate component "foo-pre" or "foo-post", the injection rule
+	// would synthesize a second folder/release that collides with the
+	// explicitly-declared one. The post check is skipped under
+	// VendorCharts because vendored mode collapses mixed components
+	// into a single folder and never injects -post; pre injection still
+	// runs in vendored mode (pre folders are independent of the chart).
+	declared := make(map[string]struct{}, len(opts.Components))
+	for _, c := range opts.Components {
+		declared[c.Name] = struct{}{}
+	}
+	for _, c := range opts.Components {
+		// <name>-pre collision: any component with preManifestFiles would
+		// inject a "<name>-pre" folder/release. Unlike the post check
+		// below, no Repository-guard: pre injection runs regardless of
+		// primary kind (upstream-helm, local-helm, or kustomize).
+		if len(opts.ComponentPreManifests[c.Name]) > 0 {
+			if _, clash := declared[c.Name+"-pre"]; clash {
 				return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+					fmt.Sprintf("component %q has preManifestFiles and would inject %q-pre, but a component named %q-pre is already declared in the recipe — rename one to avoid collision",
 						c.Name, c.Name, c.Name))
 			}
+		}
+		if opts.VendorCharts {
+			continue // post-injection skipped under VendorCharts
+		}
+		if len(opts.ComponentPostManifests[c.Name]) == 0 {
+			continue
+		}
+		if c.Repository == "" {
+			continue // manifest-only doesn't inject; already a single local-helm folder
+		}
+		if _, clash := declared[c.Name+"-post"]; clash {
+			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+					c.Name, c.Name, c.Name))
 		}
 	}
 
@@ -205,6 +266,21 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		if (c.Tag != "" || c.Path != "") && len(opts.ComponentPostManifests[c.Name]) > 0 {
 			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q has both kustomize (Tag/Path) and raw manifests; use one", c.Name))
+		}
+
+		// Pre-injection: applies before the primary chart so resources
+		// like a PSS-privileged Namespace exist by the time the chart's
+		// pods schedule. Runs regardless of vendored/non-vendored mode
+		// and regardless of primary kind (upstream-helm, local-helm, or
+		// kustomize).
+		if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePre); err != nil {
+			return WriteResult{}, err
+		} else if pf != nil {
+			folders = append(folders, *pf)
+			slog.Info("wrote local chart folder",
+				"index", idx, "dir", pf.Dir,
+				"kind", KindLocalHelm.String(), "parent", c.Name)
+			idx++
 		}
 
 		dir := fmt.Sprintf("%03d-%s", idx, c.Name)
@@ -242,23 +318,19 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			slog.Info("wrote local chart folder", "index", idx, "dir", dir, "kind", kind.String(), "parent", c.Name)
 			idx++
 
-			// Mixed component: upstream chart + raw manifests.
-			// Emit an injected -post wrapped chart immediately after the primary so
-			// raw manifests apply post-install (after helm has registered the chart's CRDs).
-			// The "mixed" concept lives only here at the bundle layer — no recipe metadata involved.
-			if manifests := opts.ComponentPostManifests[c.Name]; len(manifests) > 0 {
-				postName := c.Name + "-post"
-				postDir := fmt.Sprintf("%03d-%s", idx, postName)
-				postFolder, postErr := writeLocalHelmFolder(
-					opts.OutputDir, postDir, idx, c,
-					manifests, renderInputFor(c),
-					postName, c.Name,
-				)
-				if postErr != nil {
-					return WriteResult{}, postErr
-				}
-				folders = append(folders, postFolder)
-				slog.Info("wrote local chart folder", "index", idx, "dir", postDir, "kind", KindLocalHelm.String(), "parent", c.Name)
+			// Post-injection: wrapped manifests apply after the primary chart.
+			// Mixed component (upstream chart + raw manifests): emit an injected
+			// "-post" wrapped chart immediately after the primary so raw manifests
+			// apply post-install (after helm has registered the chart's CRDs).
+			// The "mixed" concept lives only here at the bundle layer — no recipe
+			// metadata involved.
+			if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePost); err != nil {
+				return WriteResult{}, err
+			} else if pf != nil {
+				folders = append(folders, *pf)
+				slog.Info("wrote local chart folder",
+					"index", idx, "dir", pf.Dir,
+					"kind", KindLocalHelm.String(), "parent", c.Name)
 				idx++
 			}
 		case KindLocalHelm:
