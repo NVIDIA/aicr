@@ -799,11 +799,34 @@ fingerprint:
     source: nodeTopology.label.nvidia.com/gpu.product
 ```
 
+#### Heterogeneous cluster dimensions
+
+When `accelerator` or `region` would resolve to multiple distinct
+values across nodes, the fingerprint refuses to collapse the cluster
+to a single answer and surfaces the disagreement via an optional
+`note:` field instead of fabricating a Value. The verifier renders
+this distinct from "value not captured" in its Markdown output:
+
+```yaml
+fingerprint:
+  accelerator:                       # nodes disagree on GPU SKU
+    value: ""
+    source: nodeTopology.label.nvidia.com/gpu.product
+    note: multi-gpu
+  region:                            # nodes disagree on region
+    value: ""
+    source: nodeTopology.label.topology.kubernetes.io/region
+    note: multi-region
+```
+
 Every dimension carries a `value` (the resolved, normalized string the
-recipe `criteria` block can be compared against) and a `source` string
-identifying which collector signal produced it. ADR-007 reserves
-additional optional fields (`signals[]`, `confidence`) for a future
-multi-signal corroboration extension; V1 records `source` only.
+recipe `criteria` block can be compared against), a `source` string
+identifying which collector signal produced it, and an optional `note`
+string carrying a short audit hint when Value is empty for a reason
+other than missing data (the two `multi-*` cases above). ADR-007
+reserves additional optional fields (`signals[]`, `confidence`) for a
+future multi-signal corroboration extension; V1 records `source` and
+`note` only.
 
 ### Detection Sources
 
