@@ -1994,6 +1994,11 @@ metadata:
 	assertBundleGolden(t, outDir, "testdata/manifest_only")
 }
 
+// TestBundleGolden_MixedGPUOperator exercises the full three-phase
+// emission: pre (Namespace manifest) + primary (upstream gpu-operator
+// chart) + post (dcgm-exporter manifest). Locks in the lexicographic
+// ordering 001-gpu-operator-pre/, 002-gpu-operator/, 003-gpu-operator-post/
+// the deploy.sh glob iterates in install order.
 func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 	outDir := t.TempDir()
 	g := &Generator{
@@ -2002,6 +2007,19 @@ func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 			"https://helm.ngc.nvidia.com/nvidia"),
 		ComponentValues: map[string]map[string]any{
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+		},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/talos/namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: privileged-gpu-operator
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+`),
+			},
 		},
 		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
