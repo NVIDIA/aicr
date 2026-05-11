@@ -654,7 +654,7 @@ func (s *MetadataStore) BuildRecipeResult(ctx context.Context, criteria *Criteri
 			aicrerrors.ErrCodeTimeout,
 			"build recipe result context cancelled during initialization",
 			ctx.Err(),
-			map[string]any{"stage": "initialization"},
+			map[string]any{keyStage: stageInitialization},
 		)
 	default:
 	}
@@ -702,7 +702,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluator(ctx context.Context, crit
 			aicrerrors.ErrCodeTimeout,
 			"build recipe result context cancelled during initialization",
 			ctx.Err(),
-			map[string]any{"stage": "initialization"},
+			map[string]any{keyStage: stageInitialization},
 		)
 	default:
 	}

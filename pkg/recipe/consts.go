@@ -12,25 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// performance is a validator container for all performance phase checks.
-// Each check is selected via the first argument.
-//
-// Usage:
-//
-//	performance nccl-all-reduce-bw
-//	performance nccl-all-reduce-bw-net
-//	performance nccl-all-reduce-bw-nvls
-package main
+package recipe
 
-import (
-	"github.com/NVIDIA/aicr/validators"
+// Shared map keys used in structured error contexts and hydrated recipe output.
+// Declared here so the same key literal is not repeated across files.
+const (
+	keyRequested = "requested"
+	keyAllowed   = "allowed"
+	keyValue     = "value"
+	keyError     = "error"
+	keyStage     = "stage"
 )
 
-func main() {
-	validators.Run(map[string]validators.CheckFunc{
-		checkNameNCCLAllReduceBW:  checkNCCLAllReduceBW,
-		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
-		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
-		"inference-perf":          checkInferencePerf,
-	})
-}
+// stageInitialization is the "stage" value used in error contexts emitted
+// during recipe builder/metadata-store initialization.
+const stageInitialization = "initialization"

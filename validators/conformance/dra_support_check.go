@@ -116,7 +116,7 @@ func CheckDRASupport(ctx *validators.Context) error {
 		return err
 	}
 	gvr := schema.GroupVersionResource{
-		Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices",
+		Group: apiGroupResourceK8sIO, Version: "v1", Resource: "resourceslices",
 	}
 	slices, err := dynClient.Resource(gvr).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {

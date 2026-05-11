@@ -19,6 +19,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -354,6 +355,170 @@ func TestBuildPodSpec_RuntimeClassName_With_NodeSelector(t *testing.T) {
 	if !nvidiaEnvFound {
 		t.Error("NVIDIA_VISIBLE_DEVICES=all not found when RuntimeClassName is set with NodeSelector")
 	}
+}
+
+// containerResources extracts the (Requests, Limits) from the first
+// container of the built Job's pod template, so tests can assert on
+// the merged-vs-default behavior without re-encoding the Pod struct.
+func containerResources(t *testing.T, d *Deployer) corev1.ResourceRequirements {
+	t.Helper()
+	job := d.buildJob()
+	if got := len(job.Spec.Template.Spec.Containers); got != 1 {
+		t.Fatalf("expected 1 container, got %d", got)
+	}
+	return job.Spec.Template.Spec.Containers[0].Resources
+}
+
+func quantityEq(t *testing.T, name string, got resource.Quantity, want string) {
+	t.Helper()
+	wantQ := resource.MustParse(want)
+	if got.Cmp(wantQ) != 0 {
+		t.Errorf("%s: got %s, want %s", name, got.String(), want)
+	}
+}
+
+func TestApplyPrivilegedSettings_ResourceOverrides(t *testing.T) {
+	tests := []struct {
+		name         string
+		overrideReq  corev1.ResourceList
+		overrideLim  corev1.ResourceList
+		requireGPU   bool
+		wantRequests map[corev1.ResourceName]string
+		wantLimits   map[corev1.ResourceName]string
+	}{
+		{
+			name: "no overrides preserves the privileged defaults",
+			wantRequests: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "1", corev1.ResourceMemory: "4Gi", corev1.ResourceEphemeralStorage: "2Gi",
+			},
+			wantLimits: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "2", corev1.ResourceMemory: "8Gi", corev1.ResourceEphemeralStorage: "4Gi",
+			},
+		},
+		{
+			name: "partial override only replaces specified keys",
+			overrideReq: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
+			overrideLim: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			},
+			wantRequests: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "1", corev1.ResourceMemory: "512Mi", corev1.ResourceEphemeralStorage: "2Gi",
+			},
+			wantLimits: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "2", corev1.ResourceMemory: "1Gi", corev1.ResourceEphemeralStorage: "4Gi",
+			},
+		},
+		{
+			name: "RequireGPU adds default nvidia.com/gpu=1 when caller did not supply one",
+			overrideLim: corev1.ResourceList{
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			},
+			requireGPU: true,
+			wantRequests: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "1", corev1.ResourceMemory: "4Gi", corev1.ResourceEphemeralStorage: "2Gi",
+			},
+			wantLimits: map[corev1.ResourceName]string{
+				corev1.ResourceCPU:                    "2",
+				corev1.ResourceMemory:                 "1Gi",
+				corev1.ResourceEphemeralStorage:       "4Gi",
+				corev1.ResourceName("nvidia.com/gpu"): "1",
+			},
+		},
+		{
+			name: "RequireGPU does not overwrite caller-supplied nvidia.com/gpu limit",
+			overrideLim: corev1.ResourceList{
+				corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("4"),
+			},
+			requireGPU: true,
+			wantRequests: map[corev1.ResourceName]string{
+				corev1.ResourceCPU: "1", corev1.ResourceMemory: "4Gi", corev1.ResourceEphemeralStorage: "2Gi",
+			},
+			wantLimits: map[corev1.ResourceName]string{
+				corev1.ResourceCPU:                    "2",
+				corev1.ResourceMemory:                 "8Gi",
+				corev1.ResourceEphemeralStorage:       "4Gi",
+				corev1.ResourceName("nvidia.com/gpu"): "4",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := NewDeployer(fake.NewClientset(), Config{
+				Namespace:          "default",
+				ServiceAccountName: "aicr",
+				JobName:            "aicr",
+				Image:              "test:latest",
+				Output:             "cm://default/aicr-snapshot",
+				Privileged:         true,
+				RequireGPU:         tt.requireGPU,
+				Requests:           tt.overrideReq,
+				Limits:             tt.overrideLim,
+			})
+			r := containerResources(t, d)
+			for name, want := range tt.wantRequests {
+				got, ok := r.Requests[name]
+				if !ok {
+					t.Errorf("missing request %q", name)
+					continue
+				}
+				quantityEq(t, "request "+string(name), got, want)
+			}
+			for name, want := range tt.wantLimits {
+				got, ok := r.Limits[name]
+				if !ok {
+					t.Errorf("missing limit %q", name)
+					continue
+				}
+				quantityEq(t, "limit "+string(name), got, want)
+			}
+		})
+	}
+}
+
+func TestApplyRestrictedSettings_ResourceOverrides(t *testing.T) {
+	d := NewDeployer(fake.NewClientset(), Config{
+		Namespace:          "default",
+		ServiceAccountName: "aicr",
+		JobName:            "aicr",
+		Image:              "test:latest",
+		Output:             "cm://default/aicr-snapshot",
+		Privileged:         false,
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU: resource.MustParse("50m"),
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceMemory: resource.MustParse("256Mi"),
+		},
+	})
+	r := containerResources(t, d)
+
+	// Overridden keys.
+	quantityEq(t, "request cpu", r.Requests[corev1.ResourceCPU], "50m")
+	quantityEq(t, "limit memory", r.Limits[corev1.ResourceMemory], "256Mi")
+	// Defaults preserved for unspecified keys.
+	quantityEq(t, "request memory", r.Requests[corev1.ResourceMemory], "256Mi")
+	quantityEq(t, "request ephemeral-storage", r.Requests[corev1.ResourceEphemeralStorage], "256Mi")
+	quantityEq(t, "limit cpu", r.Limits[corev1.ResourceCPU], "500m")
+	quantityEq(t, "limit ephemeral-storage", r.Limits[corev1.ResourceEphemeralStorage], "512Mi")
+}
+
+func TestMergeResourceList(t *testing.T) {
+	defaults := corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("100m"),
+		corev1.ResourceMemory: resource.MustParse("256Mi"),
+	}
+	override := corev1.ResourceList{
+		corev1.ResourceMemory: resource.MustParse("1Gi"),
+	}
+	got := mergeResourceList(defaults, override)
+	quantityEq(t, "cpu (default preserved)", got[corev1.ResourceCPU], "100m")
+	quantityEq(t, "memory (overridden)", got[corev1.ResourceMemory], "1Gi")
+
+	// mergeResourceList must not mutate its inputs.
+	quantityEq(t, "defaults.memory unchanged", defaults[corev1.ResourceMemory], "256Mi")
 }
 
 func TestMustParseQuantity(t *testing.T) {

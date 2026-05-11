@@ -114,7 +114,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		}
 		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid request body", false, map[string]any{
-				"error": err.Error(),
+				keyError: err.Error(),
 			})
 		return
 	}
@@ -170,7 +170,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
 			"Failed to create bundler", true, map[string]any{
-				"error": err.Error(),
+				keyError: err.Error(),
 			})
 		return
 	}
@@ -188,7 +188,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		for _, be := range output.Errors {
 			errorDetails = append(errorDetails, map[string]any{
 				"bundler": be.BundlerType,
-				"error":   be.Error,
+				keyError:  be.Error,
 			})
 		}
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,

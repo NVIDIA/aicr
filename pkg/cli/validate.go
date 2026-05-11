@@ -327,19 +327,19 @@ func runValidation(
 func validateCmdFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
-			Name:    "recipe",
+			Name:    cmdNameRecipe,
 			Aliases: []string{"r"},
 			Usage: `Path/URI to recipe file containing constraints to validate.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).`,
-			Category: "Input",
+			Category: catInput,
 		},
 		&cli.StringFlag{
-			Name:    "snapshot",
+			Name:    cmdNameSnapshot,
 			Aliases: []string{"s"},
 			Usage: `Path/URI to snapshot file containing actual system measurements.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
 	If not provided, an agent will be deployed to capture a fresh snapshot.`,
-			Category: "Input",
+			Category: catInput,
 		},
 		&cli.StringSliceFlag{
 			Name: "phase",
@@ -347,18 +347,18 @@ func validateCmdFlags() []cli.Flag {
 	Options: "deployment", "performance", "conformance", "all".
 	Default: all phases.
 	Example: --phase deployment --phase conformance`,
-			Category: "Validation Control",
+			Category: catValidationControl,
 		},
 		&cli.BoolFlag{
 			Name:     "fail-on-error",
 			Value:    true,
 			Usage:    "Exit with non-zero status if any check fails validation",
-			Category: "Validation Control",
+			Category: catValidationControl,
 		},
 		&cli.BoolFlag{
 			Name:     "no-cluster",
 			Usage:    "Run validation without cluster access (dry-run mode). Reports all checks as skipped.",
-			Category: "Validation Control",
+			Category: catValidationControl,
 		},
 		// Agent deployment flags (used when --snapshot is not provided)
 		&cli.StringFlag{
@@ -367,75 +367,75 @@ func validateCmdFlags() []cli.Flag {
 			Usage:    "Kubernetes namespace for snapshot agent and validation Jobs",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
 			Value:    "aicr-validation",
-			Category: "Deployment",
+			Category: catDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "image",
 			Usage:    "Container image for snapshot agent",
 			Sources:  cli.EnvVars("AICR_VALIDATOR_IMAGE"),
 			Value:    defaultAgentImage(),
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
 			Name:     "image-pull-secret",
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "job-name",
 			Usage:    "Override default Job name",
 			Value:    "aicr-validate",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
 			Usage:    "Override default ServiceAccount name",
-			Value:    "aicr",
-			Category: "Agent Deployment",
+			Value:    name,
+			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
 			Usage:    "Override GPU node selection for validation workloads (format: key=value, can be repeated). Replaces platform-specific selectors on inner workloads (e.g., NCCL benchmark pods). Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job.",
-			Category: "Scheduling",
+			Category: catScheduling,
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
 			Usage:    "Override tolerations for validation workloads (format: key=value:effect, can be repeated). Replaces the default tolerate-all policy on inner workloads. Does not affect the validator orchestrator Job.",
-			Category: "Scheduling",
+			Category: catScheduling,
 		},
 		&cli.DurationFlag{
 			Name:     "timeout",
 			Usage:    "Timeout for waiting for Job completion",
 			Value:    defaults.CLISnapshotTimeout,
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{
 			Name:     "no-cleanup",
 			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{
 			Name:     "require-gpu",
 			Sources:  cli.EnvVars("AICR_REQUIRE_GPU"),
 			Usage:    "Request nvidia.com/gpu resource for the agent pod.",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "evidence-dir",
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
-			Category: "Evidence",
+			Category: catEvidence,
 		},
 		&cli.BoolFlag{
 			Name:     "cncf-submission",
 			Usage:    "Collect detailed behavioral evidence for CNCF AI Conformance submission. Deploys GPU workloads, captures nvidia-smi output, Prometheus queries, and HPA scaling tests. Requires --evidence-dir. Takes ~15 minutes.",
-			Category: "Evidence",
+			Category: catEvidence,
 		},
 		&cli.StringSliceFlag{
 			Name:    "feature",
 			Aliases: []string{"f"},
 			Usage: "Evidence feature to collect (repeatable, default: all). Only used with --cncf-submission.\n" +
 				"Options: " + strings.Join(evidence.ValidFeatures, ", "),
-			Category: "Evidence",
+			Category: catEvidence,
 		},
 		dataFlag(),
 		outputFlag(),

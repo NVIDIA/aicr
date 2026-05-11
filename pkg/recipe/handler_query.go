@@ -83,7 +83,7 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 			}
 			server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 				"Invalid query request body", false, map[string]any{
-					"error": parseErr.Error(),
+					keyError: parseErr.Error(),
 				})
 			return
 		}
@@ -91,7 +91,7 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 			if validateErr := req.Criteria.Validate(); validateErr != nil {
 				server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 					"Invalid criteria in request body", false, map[string]any{
-						"error": validateErr.Error(),
+						keyError: validateErr.Error(),
 					})
 				return
 			}
@@ -102,8 +102,8 @@ func (b *Builder) HandleQuery(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
-				"method":  r.Method,
-				"allowed": []string{"GET", "POST"},
+				"method":   r.Method,
+				keyAllowed: []string{"GET", "POST"},
 			})
 		return
 	}

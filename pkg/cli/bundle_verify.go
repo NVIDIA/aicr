@@ -28,6 +28,12 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
+// verifyFormat values for the --format flag on `aicr verify`.
+const (
+	verifyFormatText = "text"
+	verifyFormatJSON = "json"
+)
+
 func bundleVerifyCmd() *cli.Command {
 	return &cli.Command{
 		Name:     "verify",
@@ -85,9 +91,9 @@ Output as JSON:
 			},
 			withCompletions(&cli.StringFlag{
 				Name:  "format",
-				Value: "text",
+				Value: verifyFormatText,
 				Usage: "Output format: text, json",
-			}, func() []string { return []string{"json", "text"} }),
+			}, func() []string { return []string{verifyFormatJSON, verifyFormatText} }),
 		},
 		Action: runBundleVerifyCmd,
 	}
@@ -106,7 +112,7 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	format := cmd.String("format")
-	if format != "text" && format != "json" {
+	if format != verifyFormatText && format != verifyFormatJSON {
 		return errors.New(errors.ErrCodeInvalidRequest, "invalid --format: must be text or json")
 	}
 
@@ -140,7 +146,7 @@ func runBundleVerifyCmd(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Output results with final verdict
-	if format == "json" {
+	if format == verifyFormatJSON {
 		if jsonErr := outputJSON(os.Stdout, result); jsonErr != nil {
 			return jsonErr
 		}

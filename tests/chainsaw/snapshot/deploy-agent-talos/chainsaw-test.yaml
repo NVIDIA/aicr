@@ -1,0 +1,92 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: snapshot-deploy-agent-talos
+spec:
+  description: |
+    Invokes `aicr snapshot --os talos -o cm://...` against a local Talos
+    cluster (provisioned by tools/talos-test/up.sh). The CLI deploys the
+    snapshot agent Job using pkg/k8s/agent.Deployer's OS=talos pod-shape
+    branch, waits for completion, writes the snapshot to a ConfigMap, and
+    cleans up the Job + RBAC. The test asserts only the surviving
+    ConfigMap's snapshot content; Job/RBAC creation are exercised by the
+    CLI exit code, not by separate apply/assert steps.
+
+    Requires:
+      - Talos cluster from `make talos-dev-env`
+      - aicr image pushed to localhost:5001/aicr:local
+      - aicr binary on PATH (`make build` writes it to dist/...)
+      - KUBECONFIG pointing at the Talos cluster
+    Run via: make talos-snapshot-test
+  timeouts:
+    apply: 30s
+    assert: 120s
+    delete: 30s
+    # `exec` covers `script:` step content (the `aicr snapshot` invocation
+    # below blocks for up to 5m waiting on the agent Job to complete; image
+    # pull + RBAC + Job runtime add overhead, especially on a cold cluster
+    # where the Talos worker is still pulling localhost:5001/aicr:local).
+    exec: 10m
+  steps:
+    - name: cleanup-previous
+      description: Remove any leftover ConfigMap from a prior run.
+      try:
+        - script:
+            content: |
+              kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true
+
+    - name: run-snapshot
+      description: |
+        Invoke the host aicr binary against the Talos cluster. The CLI
+        creates RBAC, deploys the agent Job with the OS=talos pod shape,
+        streams agent logs to stderr, waits for Job completion, writes
+        the snapshot to the named ConfigMap, and cleans up the Job +
+        RBAC (default --no-cleanup=false).
+      try:
+        - script:
+            content: |
+              # Right-sized resources for a single-worker Docker-Talos
+              # cluster on a developer laptop; the production defaults
+              # (4Gi/8Gi memory) won't schedule against the 2Gi worker
+              # the talosctl docker provisioner allocates by default.
+              aicr snapshot \
+                --kubeconfig "${KUBECONFIG}" \
+                --os talos \
+                --image localhost:5001/aicr:local \
+                --requests cpu=100m,memory=256Mi,ephemeral-storage=256Mi \
+                --limits cpu=1,memory=512Mi,ephemeral-storage=1Gi \
+                -o cm://default/aicr-e2e-snapshot
+
+    - name: assert-snapshot-content
+      description: Extract the snapshot YAML from the surviving ConfigMap and assert its structure.
+      try:
+        - script:
+            content: |
+              # Use mktemp -d so concurrent test runs (parallel CI shards
+              # sharing a runner) cannot collide on a fixed path.
+              WORK="$(mktemp -d -t chainsaw-snapshot-talos.XXXXXX)"
+              trap 'rm -rf "${WORK}"' EXIT
+              kubectl get cm aicr-e2e-snapshot -n default \
+                -o jsonpath='{.data.snapshot\.yaml}' > "${WORK}/snapshot.yaml"
+              chainsaw assert --resource "${WORK}/snapshot.yaml" \
+                --file ./assert-snapshot-content.yaml \
+                --no-color --timeout 5s
+      cleanup:
+        - script:
+            content: |
+              kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true

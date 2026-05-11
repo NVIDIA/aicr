@@ -89,10 +89,10 @@ func checkPodPhase(p *corev1.Pod) (bool, error) {
 		return true, nil
 	case corev1.PodFailed:
 		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]interface{}{
-			"namespace": p.Namespace,
-			"name":      p.Name,
-			"reason":    p.Status.Reason,
-			"message":   p.Status.Message,
+			keyNamespace: p.Namespace,
+			keyName:      p.Name,
+			keyReason:    p.Status.Reason,
+			keyMessage:   p.Status.Message,
 		})
 	case corev1.PodPending, corev1.PodRunning, corev1.PodUnknown:
 		return false, nil
@@ -259,10 +259,10 @@ func checkPodReady(p *corev1.Pod) (bool, error) {
 	}
 	if p.Status.Phase == corev1.PodFailed {
 		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]interface{}{
-			"namespace": p.Namespace,
-			"name":      p.Name,
-			"reason":    p.Status.Reason,
-			"message":   p.Status.Message,
+			keyNamespace: p.Namespace,
+			keyName:      p.Name,
+			keyReason:    p.Status.Reason,
+			keyMessage:   p.Status.Message,
 		})
 	}
 	return false, nil

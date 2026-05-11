@@ -23,6 +23,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
+// keyType is the structured-error context key naming a measurement type.
+const keyType = "type"
+
 // ConstraintPath represents a parsed fully qualified constraint path.
 // Format: {Type}.{Subtype}.{Key}
 // Example: "K8s.server.version" -> Type="K8s", Subtype="server", Key="version"
@@ -53,7 +56,7 @@ func ParseConstraintPath(path string) (*ConstraintPath, error) {
 	if !valid {
 		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"invalid measurement type in constraint path",
-			map[string]any{"type": parts[0], "path": path, "validTypes": measurement.Types})
+			map[string]any{keyType: parts[0], "path": path, "validTypes": measurement.Types})
 	}
 
 	return &ConstraintPath{
@@ -87,7 +90,7 @@ func (cp *ConstraintPath) ExtractValue(snap *snapshotter.Snapshot) (string, erro
 	if targetMeasurement == nil {
 		return "", errors.NewWithContext(errors.ErrCodeNotFound,
 			"measurement type not found in snapshot",
-			map[string]any{"type": cp.Type})
+			map[string]any{keyType: cp.Type})
 	}
 
 	// Find the subtype
@@ -102,7 +105,7 @@ func (cp *ConstraintPath) ExtractValue(snap *snapshotter.Snapshot) (string, erro
 	if targetSubtype == nil {
 		return "", errors.NewWithContext(errors.ErrCodeNotFound,
 			"subtype not found in measurement",
-			map[string]any{"subtype": cp.Subtype, "type": cp.Type})
+			map[string]any{"subtype": cp.Subtype, keyType: cp.Type})
 	}
 
 	// Find the key in data
@@ -110,7 +113,7 @@ func (cp *ConstraintPath) ExtractValue(snap *snapshotter.Snapshot) (string, erro
 	if !exists {
 		return "", errors.NewWithContext(errors.ErrCodeNotFound,
 			"key not found in subtype",
-			map[string]any{"key": cp.Key, "subtype": cp.Subtype, "type": cp.Type})
+			map[string]any{"key": cp.Key, "subtype": cp.Subtype, keyType: cp.Type})
 	}
 
 	// Convert reading to string

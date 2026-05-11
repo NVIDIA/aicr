@@ -12,25 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// performance is a validator container for all performance phase checks.
-// Each check is selected via the first argument.
-//
-// Usage:
-//
-//	performance nccl-all-reduce-bw
-//	performance nccl-all-reduce-bw-net
-//	performance nccl-all-reduce-bw-nvls
-package main
+package pod
 
-import (
-	"github.com/NVIDIA/aicr/validators"
+// Structured log/error field keys shared across pkg/k8s/pod files.
+const (
+	keyNamespace = "namespace"
+	keyName      = "name"
+	keyReason    = "reason"
+	keyMessage   = "message"
+	keyURI       = "uri"
 )
-
-func main() {
-	validators.Run(map[string]validators.CheckFunc{
-		checkNameNCCLAllReduceBW:  checkNCCLAllReduceBW,
-		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
-		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
-		"inference-perf":          checkInferencePerf,
-	})
-}

@@ -39,12 +39,12 @@ func GetPodForJob(ctx context.Context, client kubernetes.Interface, namespace, j
 	})
 	if err != nil {
 		return nil, errors.WrapWithContext(errors.ErrCodeInternal, "failed to list pods for Job", err,
-			map[string]any{"namespace": namespace, "job": jobName})
+			map[string]any{keyNamespace: namespace, "job": jobName})
 	}
 
 	if len(pods.Items) == 0 {
 		return nil, errors.NewWithContext(errors.ErrCodeNotFound, "pod for job not found",
-			map[string]any{"namespace": namespace, "job": jobName})
+			map[string]any{keyNamespace: namespace, "job": jobName})
 	}
 
 	return &pods.Items[0], nil

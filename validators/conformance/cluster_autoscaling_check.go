@@ -128,7 +128,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 		limits, found, _ := unstructured.NestedMap(np.Object, "spec", "limits")
 		limitGPU := "none"
 		if found {
-			if raw, hasGPU := limits["nvidia.com/gpu"]; hasGPU {
+			if raw, hasGPU := limits[resourceNVIDIAGPU]; hasGPU {
 				gpuNodePoolNames = append(gpuNodePoolNames, np.GetName())
 				limitGPU = fmt.Sprintf("%v", raw)
 			}
@@ -149,7 +149,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 	slog.Info("discovered GPU NodePools", "pools", gpuNodePoolNames)
 
 	gpuNodes, nodeErr := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
-		LabelSelector: "nvidia.com/gpu.present=true",
+		LabelSelector: labelNVIDIAGPUPresent,
 	})
 	if nodeErr != nil {
 		recordRawTextArtifact(ctx, "GPU nodes",
@@ -158,7 +158,7 @@ func CheckClusterAutoscaling(ctx *validators.Context) error {
 	} else {
 		var nodeSummary strings.Builder
 		for _, n := range gpuNodes.Items {
-			gpuCap := n.Status.Capacity["nvidia.com/gpu"]
+			gpuCap := n.Status.Capacity[resourceNVIDIAGPU]
 			instanceType := n.Labels["node.kubernetes.io/instance-type"]
 			fmt.Fprintf(&nodeSummary, "%-44s gpu=%s instance=%s\n",
 				n.Name, gpuCap.String(), valueOrUnknown(instanceType))
@@ -305,16 +305,16 @@ func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": name},
+				MatchLabels: map[string]string{labelApp: name},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"app": name},
+					Labels: map[string]string{labelApp: name},
 				},
 				Spec: corev1.PodSpec{
 					Tolerations: []corev1.Toleration{
 						{
-							Key:      "nvidia.com/gpu",
+							Key:      resourceNVIDIAGPU,
 							Operator: corev1.TolerationOpEqual,
 							Value:    "present",
 							Effect:   corev1.TaintEffectNoSchedule,
@@ -339,13 +339,13 @@ func buildClusterAutoTestDeployment(name, namespace, nodePoolName string) *appsv
 						{
 							Name:    "gpu-workload",
 							Image:   "ubuntu:22.04",
-							Command: []string{"sleep", "120"},
+							Command: []string{containerNameSleep, "120"},
 							Resources: corev1.ResourceRequirements{
 								Limits: corev1.ResourceList{
-									"nvidia.com/gpu": resource.MustParse("1"),
+									resourceNVIDIAGPU: resource.MustParse("1"),
 								},
 								Requests: corev1.ResourceList{
-									"nvidia.com/gpu": resource.MustParse("1"),
+									resourceNVIDIAGPU: resource.MustParse("1"),
 								},
 							},
 							SecurityContext: &corev1.SecurityContext{
@@ -500,7 +500,7 @@ func checkPlatformAutoscaling(ctx *validators.Context) error {
 func checkEKSAutoscaling(ctx *validators.Context) error {
 	// List GPU nodes.
 	gpuNodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
-		LabelSelector: "nvidia.com/gpu.present=true",
+		LabelSelector: labelNVIDIAGPUPresent,
 	})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list GPU nodes", err)
@@ -512,7 +512,7 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 	// Record GPU node summary.
 	var nodeSummary strings.Builder
 	for _, n := range gpuNodes.Items {
-		gpuCount := n.Status.Capacity["nvidia.com/gpu"]
+		gpuCount := n.Status.Capacity[resourceNVIDIAGPU]
 		instanceType := n.Labels["node.kubernetes.io/instance-type"]
 		nodeGroup := n.Labels["eks.amazonaws.com/nodegroup"]
 		if nodeGroup == "" {
@@ -554,8 +554,8 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 
 	// Check for Cluster Autoscaler deployment (optional — EKS may use Karpenter or managed scaling).
 	// Search common namespaces since Cluster Autoscaler can be deployed anywhere.
-	caNamespaces := []string{defaults.KubeSystemNamespace, "cluster-autoscaler", "system"}
-	caDeployNames := []string{"cluster-autoscaler", "cluster-autoscaler-aws-cluster-autoscaler"}
+	caNamespaces := []string{defaults.KubeSystemNamespace, deploymentClusterAutoscaler, "system"}
+	caDeployNames := []string{deploymentClusterAutoscaler, "cluster-autoscaler-aws-cluster-autoscaler"}
 	var caFound bool
 	for _, caNS := range caNamespaces {
 		for _, caName := range caDeployNames {
@@ -592,7 +592,7 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 func checkGKEAutoscaling(ctx *validators.Context) error {
 	// List GPU nodes.
 	gpuNodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
-		LabelSelector: "nvidia.com/gpu.present=true",
+		LabelSelector: labelNVIDIAGPUPresent,
 	})
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to list GPU nodes", err)
@@ -604,7 +604,7 @@ func checkGKEAutoscaling(ctx *validators.Context) error {
 	// Record GPU node summary.
 	var nodeSummary strings.Builder
 	for _, n := range gpuNodes.Items {
-		gpuCap := n.Status.Capacity["nvidia.com/gpu"]
+		gpuCap := n.Status.Capacity[resourceNVIDIAGPU]
 		instanceType := n.Labels["node.kubernetes.io/instance-type"]
 		accelerator := n.Labels["cloud.google.com/gke-accelerator"]
 		nodePool := n.Labels["cloud.google.com/gke-nodepool"]
@@ -631,7 +631,7 @@ func checkGKEAutoscaling(ctx *validators.Context) error {
 	// GKE always writes this to kube-system, but check common namespaces as a safeguard.
 	var caStatus *corev1.ConfigMap
 	var caErr error
-	for _, ns := range []string{"kube-system", "cluster-autoscaler", "system"} {
+	for _, ns := range []string{"kube-system", deploymentClusterAutoscaler, "system"} {
 		caStatus, caErr = ctx.Clientset.CoreV1().ConfigMaps(ns).Get(
 			ctx.Ctx, "cluster-autoscaler-status", metav1.GetOptions{})
 		if caErr == nil {

@@ -195,12 +195,12 @@ func firstContainerImage(containers []corev1.Container) string {
 	if len(containers) > 0 {
 		return containers[0].Image
 	}
-	return "unknown"
+	return statusUnknown
 }
 
 func valueOrUnknown(v string) string {
 	if strings.TrimSpace(v) == "" {
-		return "unknown"
+		return statusUnknown
 	}
 	return v
 }

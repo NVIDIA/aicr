@@ -146,7 +146,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		return err
 	}
 	crdGVR := schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 	requiredCRDs := []string{
 		"queues.scheduling.run.ai",
@@ -437,13 +437,13 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "scheduling.run.ai/v2alpha2",
-			"kind":       "PodGroup",
-			"metadata": map[string]interface{}{
-				"name":      run.groupName,
-				"namespace": gangTestNamespace,
+			keyAPIVersion: "scheduling.run.ai/v2alpha2",
+			keyKind:       "PodGroup",
+			keyMetadata: map[string]interface{}{
+				keyName:      run.groupName,
+				keyNamespace: gangTestNamespace,
 			},
-			"spec": map[string]interface{}{
+			keySpec: map[string]interface{}{
 				"minMember": int64(gangMinMembers),
 				"queue":     "default-queue",
 			},

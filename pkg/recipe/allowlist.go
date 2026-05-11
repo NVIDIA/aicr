@@ -123,8 +123,8 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				"accelerator type not allowed",
 				nil,
 				map[string]any{
-					"requested": string(c.Accelerator),
-					"allowed":   typesToStrings(a.Accelerators),
+					keyRequested: string(c.Accelerator),
+					keyAllowed:   typesToStrings(a.Accelerators),
 				},
 			)
 		}
@@ -138,8 +138,8 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				"service type not allowed",
 				nil,
 				map[string]any{
-					"requested": string(c.Service),
-					"allowed":   typesToStrings(a.Services),
+					keyRequested: string(c.Service),
+					keyAllowed:   typesToStrings(a.Services),
 				},
 			)
 		}
@@ -153,8 +153,8 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				"intent type not allowed",
 				nil,
 				map[string]any{
-					"requested": string(c.Intent),
-					"allowed":   typesToStrings(a.Intents),
+					keyRequested: string(c.Intent),
+					keyAllowed:   typesToStrings(a.Intents),
 				},
 			)
 		}
@@ -168,8 +168,8 @@ func (a *AllowLists) ValidateCriteria(c *Criteria) error {
 				"OS type not allowed",
 				nil,
 				map[string]any{
-					"requested": string(c.OS),
-					"allowed":   typesToStrings(a.OSTypes),
+					keyRequested: string(c.OS),
+					keyAllowed:   typesToStrings(a.OSTypes),
 				},
 			)
 		}
@@ -198,7 +198,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 				aicrerrors.ErrCodeInvalidRequest,
 				"invalid "+EnvAllowedAccelerators,
 				err,
-				map[string]any{"value": v},
+				map[string]any{keyValue: v},
 			)
 		}
 		al.Accelerators = accelerators
@@ -212,7 +212,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 				aicrerrors.ErrCodeInvalidRequest,
 				"invalid "+EnvAllowedServices,
 				err,
-				map[string]any{"value": v},
+				map[string]any{keyValue: v},
 			)
 		}
 		al.Services = services
@@ -226,7 +226,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 				aicrerrors.ErrCodeInvalidRequest,
 				"invalid "+EnvAllowedIntents,
 				err,
-				map[string]any{"value": v},
+				map[string]any{keyValue: v},
 			)
 		}
 		al.Intents = intents
@@ -240,7 +240,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 				aicrerrors.ErrCodeInvalidRequest,
 				"invalid "+EnvAllowedOSTypes,
 				err,
-				map[string]any{"value": v},
+				map[string]any{keyValue: v},
 			)
 		}
 		al.OSTypes = osTypes

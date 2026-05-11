@@ -12,25 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// performance is a validator container for all performance phase checks.
-// Each check is selected via the first argument.
-//
-// Usage:
-//
-//	performance nccl-all-reduce-bw
-//	performance nccl-all-reduce-bw-net
-//	performance nccl-all-reduce-bw-nvls
-package main
+package server
 
-import (
-	"github.com/NVIDIA/aicr/validators"
-)
-
-func main() {
-	validators.Run(map[string]validators.CheckFunc{
-		checkNameNCCLAllReduceBW:  checkNCCLAllReduceBW,
-		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
-		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
-		"inference-perf":          checkInferencePerf,
-	})
-}
+// keyMethod is the HTTP-method label used both as a structured-error
+// detail key (e.g. on 405 responses) and as a Prometheus metric label
+// dimension.
+const keyMethod = "method"

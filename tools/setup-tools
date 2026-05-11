@@ -363,7 +363,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     echo "════════════════════════════════════════════════════════"
 
     GRYPE_INSTALL_SHA256=${GRYPE_INSTALL_SHA256:-"8646f06a90b10ca64992c1809b4aa00c44e30b4f551f63c309b0b0ab66873556"}
-    GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"edfa587f31bde70db161d1e5b783e086a1627d7e2f7c91de5f7cca79bcdf8631"}
+    GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"d32d3534af96cfd59546a084d22b213e8a47541cada5013aa8a84c4fa2589905"}
 
     if command_exists helm && [[ "${UPGRADE}" != "true" ]]; then
         log_success "Helm already installed: $(helm version --short)"

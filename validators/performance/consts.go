@@ -12,25 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// performance is a validator container for all performance phase checks.
-// Each check is selected via the first argument.
-//
-// Usage:
-//
-//	performance nccl-all-reduce-bw
-//	performance nccl-all-reduce-bw-net
-//	performance nccl-all-reduce-bw-nvls
 package main
 
-import (
-	"github.com/NVIDIA/aicr/validators"
+// Cross-file string constants for the performance validator.
+const (
+	apiGroupAPIExtensions    = "apiextensions.k8s.io"
+	resourceCRDs             = "customresourcedefinitions"
+	versionV1alpha1          = "v1alpha1"
+	keyName                  = "name"
+	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
 )
-
-func main() {
-	validators.Run(map[string]validators.CheckFunc{
-		checkNameNCCLAllReduceBW:  checkNCCLAllReduceBW,
-		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
-		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
-		"inference-perf":          checkInferencePerf,
-	})
-}

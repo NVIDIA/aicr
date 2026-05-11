@@ -34,7 +34,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
-			"Method not allowed", false, map[string]any{"method": r.Method})
+			"Method not allowed", false, map[string]any{keyMethod: r.Method})
 		return
 	}
 
@@ -51,7 +51,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
-			"Method not allowed", false, map[string]any{"method": r.Method})
+			"Method not allowed", false, map[string]any{keyMethod: r.Method})
 		return
 	}
 

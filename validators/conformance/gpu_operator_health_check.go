@@ -50,7 +50,7 @@ func CheckGPUOperatorHealth(ctx *validators.Context) error {
 		return err
 	}
 	gvr := schema.GroupVersionResource{
-		Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies",
+		Group: apiGroupNVIDIA, Version: "v1", Resource: "clusterpolicies",
 	}
 	cp, err := dynClient.Resource(gvr).Get(ctx.Ctx, "cluster-policy", metav1.GetOptions{})
 	if err != nil {

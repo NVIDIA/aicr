@@ -57,8 +57,8 @@ func HydrateResult(result *RecipeResult) (map[string]any, error) {
 		constraintList := make([]map[string]any, 0, len(result.Constraints))
 		for _, c := range result.Constraints {
 			entry := map[string]any{
-				"name":  c.Name,
-				"value": c.Value,
+				"name":   c.Name,
+				keyValue: c.Value,
 			}
 			if c.Severity != "" {
 				entry["severity"] = c.Severity

@@ -48,16 +48,16 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, err
 	// Required permissions for deployment
 	requiredChecks := []permCheck{
 		// Namespace-scoped resources
-		{"serviceaccounts", "create", d.config.Namespace},
-		{"roles", "create", d.config.Namespace},
-		{"rolebindings", "create", d.config.Namespace},
-		{"jobs", "create", d.config.Namespace},
-		{"configmaps", "get", d.config.Namespace},
-		{"configmaps", "list", d.config.Namespace},
+		{"serviceaccounts", verbCreate, d.config.Namespace},
+		{"roles", verbCreate, d.config.Namespace},
+		{"rolebindings", verbCreate, d.config.Namespace},
+		{"jobs", verbCreate, d.config.Namespace},
+		{resourceCM, verbGet, d.config.Namespace},
+		{resourceCM, verbList, d.config.Namespace},
 
 		// Cluster-scoped resources
-		{"clusterroles", "create", ""},
-		{"clusterrolebindings", "create", ""},
+		{"clusterroles", verbCreate, ""},
+		{"clusterrolebindings", verbCreate, ""},
 
 		// Cleanup permissions
 		{"jobs", "delete", d.config.Namespace},

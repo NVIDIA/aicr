@@ -16,10 +16,14 @@ package cli
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/urfave/cli/v3"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/NVIDIA/aicr/pkg/collector"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -36,7 +40,67 @@ type snapshotTemplateOptions struct {
 	format       serializer.Format
 }
 
-// parseSnapshotTemplateOptions parses and validates template-related flags.
+// parseResourceList converts a comma-separated "name=quantity" list
+// (e.g. "cpu=500m,memory=1Gi,ephemeral-storage=1Gi") into a
+// corev1.ResourceList for use as a per-container request or limit
+// override. An empty string returns a nil ResourceList so the caller
+// can distinguish "no override supplied" (defaults apply) from
+// "override supplied" (replace per-key); a sentinel error would force
+// every call site to special-case the empty-flag path. Each quantity
+// is parsed via resource.ParseQuantity, so the same suffixes accepted
+// everywhere else in Kubernetes work here (m, Ki, Mi, Gi, Ti, ...).
+//
+//nolint:nilnil // (nil, nil) on empty input is the intended contract.
+func parseResourceList(spec string) (corev1.ResourceList, error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return nil, nil
+	}
+	result := corev1.ResourceList{}
+	for _, raw := range strings.Split(spec, ",") {
+		entry := strings.TrimSpace(raw)
+		if entry == "" {
+			continue
+		}
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q is not in name=quantity form", entry))
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has empty name or quantity", entry))
+		}
+		q, err := resource.ParseQuantity(value)
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has invalid quantity", entry), err)
+		}
+		// Reject negative quantities at parse time so the user gets a
+		// clear CLI-layer error instead of an obscure failure when the
+		// Job is later created (Kubernetes resources cannot be negative).
+		if q.Sign() < 0 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("entry %q has negative quantity", entry))
+		}
+		// Reject duplicate keys explicitly. Last-write-wins is too easy
+		// to misuse silently from a shell-templated invocation
+		// (e.g. accidentally appending the same key from two
+		// AICR_REQUESTS sources).
+		if _, dup := result[corev1.ResourceName(key)]; dup {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("duplicate key %q", key))
+		}
+		result[corev1.ResourceName(key)] = q
+	}
+	if len(result) == 0 {
+		return nil, nil
+	}
+	return result, nil
+}
+
 func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format) (*snapshotTemplateOptions, error) {
 	templatePath := cmd.String("template")
 	outputPath := cmd.String("output")
@@ -80,87 +144,99 @@ func snapshotCmdFlags() []cli.Flag {
 			Usage:    "Kubernetes namespace for agent deployment",
 			Sources:  cli.EnvVars("AICR_NAMESPACE"),
 			Value:    "default",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "image",
 			Usage:    "Container image for agent Job",
 			Sources:  cli.EnvVars("AICR_IMAGE"),
 			Value:    defaultAgentImage(),
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
 			Name:     "image-pull-secret",
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "job-name",
 			Usage:    "Override default Job name",
-			Value:    "aicr",
-			Category: "Agent Deployment",
+			Value:    name,
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
 			Usage:    "Override default ServiceAccount name",
-			Value:    "aicr",
-			Category: "Agent Deployment",
+			Value:    name,
+			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
 			Name:     "node-selector",
 			Usage:    "Node selector for Job scheduling (format: key=value, can be repeated). Recommended in heterogeneous clusters to target GPU nodes",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
 			Name:     "toleration",
 			Usage:    "Toleration for Job scheduling (format: key=value:effect). By default, all taints are tolerated. Specifying this flag overrides the defaults.",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.DurationFlag{
 			Name:     "timeout",
 			Usage:    "Timeout for waiting for Job completion",
 			Value:    defaults.CLISnapshotTimeout,
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{
 			Name:     "no-cleanup",
 			Usage:    "Skip removal of Job and RBAC resources on completion (leaves cluster-admin binding active)",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{
 			Name:     "privileged",
 			Value:    true,
 			Usage:    "Run agent in privileged mode (required for GPU/SystemD collectors). Set to false for PSS-restricted namespaces.",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.BoolFlag{
 			Name:     "require-gpu",
 			Sources:  cli.EnvVars("AICR_REQUIRE_GPU"),
 			Usage:    "Require GPU detection. Fails the snapshot if no GPU is found. In agent mode, also requests nvidia.com/gpu resource for the pod (required in CDI environments).",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "runtime-class",
 			Sources:  cli.EnvVars("AICR_RUNTIME_CLASS"),
 			Usage:    "Set runtimeClassName on the agent pod for nvidia-smi access without consuming a GPU. Use with --node-selector to target GPU nodes.",
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "template",
 			Usage:    "Path to Go template file for custom output formatting (requires YAML format)",
-			Category: "Output",
+			Category: catOutput,
 		},
 		&cli.IntFlag{
 			Name:     "max-nodes-per-entry",
 			Usage:    "Maximum node names per taint/label entry in topology collection (0 = unlimited)",
 			Value:    0,
-			Category: "Output",
+			Category: catOutput,
 		},
 		&cli.StringFlag{
 			Name:     "os",
 			Usage:    "Node OS family (ubuntu, rhel, cos, amazonlinux, talos). Selects the per-OS pod configuration and service collector backend. Talos skips systemd hostPath mounts and uses the Kubernetes-API service backend.",
 			Sources:  cli.EnvVars("AICR_OS"),
-			Category: "Agent Deployment",
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     "requests",
+			Usage:    "Override agent container resource requests as a comma-separated list of name=quantity pairs (e.g. 'cpu=500m,memory=1Gi,ephemeral-storage=1Gi'). Unspecified resources keep their built-in defaults.",
+			Sources:  cli.EnvVars("AICR_REQUESTS"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     "limits",
+			Usage:    "Override agent container resource limits as a comma-separated list of name=quantity pairs (e.g. 'cpu=1,memory=2Gi,ephemeral-storage=2Gi'). Unspecified resources keep their built-in defaults. With --require-gpu, the default nvidia.com/gpu=1 is applied only when --limits does not already contain that key; an explicit --limits nvidia.com/gpu=N wins.",
+			Sources:  cli.EnvVars("AICR_LIMITS"),
+			Category: catAgentDeployment,
 		},
 		outputFlag(),
 		formatFlag(),
@@ -170,7 +246,7 @@ func snapshotCmdFlags() []cli.Flag {
 
 func snapshotCmd() *cli.Command {
 	return &cli.Command{
-		Name:     "snapshot",
+		Name:     cmdNameSnapshot,
 		Category: functionalCategoryName,
 		Usage:    "Capture cluster configuration snapshot.",
 		Description: `Generate a comprehensive snapshot of cluster measurements including:
@@ -240,7 +316,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			// Validate single-value flags are not duplicated
-			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "os"); err != nil {
+			if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "os", "requests", "limits"); err != nil {
 				return err
 			}
 
@@ -314,6 +390,17 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 			}
 
+			// Parse resource overrides (CLI takes the same comma-separated
+			// 'name=quantity' shape as kubectl run --requests / --limits).
+			resourceRequests, err := parseResourceList(cmd.String("requests"))
+			if err != nil {
+				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --requests")
+			}
+			resourceLimits, err := parseResourceList(cmd.String("limits"))
+			if err != nil {
+				return errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
+			}
+
 			// When running inside an agent Job, collect locally instead of
 			// deploying another agent (prevents infinite nesting).
 			// Clear pre-created factory so measure() rebuilds it from env vars
@@ -343,6 +430,8 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				TemplatePath:       tmplOpts.templatePath,
 				MaxNodesPerEntry:   cmd.Int("max-nodes-per-entry"),
 				OS:                 osVal,
+				Requests:           resourceRequests,
+				Limits:             resourceLimits,
 			}
 
 			return ns.Measure(ctx)

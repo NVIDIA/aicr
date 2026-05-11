@@ -104,6 +104,20 @@ type AgentConfig struct {
 	// per-OS pod construction and in-pod collector backend selection. When
 	// empty, defaults preserve the systemd-based behavior.
 	OS string
+
+	// Requests overrides the agent container's per-resource requests.
+	// When nil, the privileged/restricted defaults baked into
+	// pkg/k8s/agent are used. Useful for right-sizing the agent on
+	// resource-constrained dev clusters (e.g. talosctl Docker
+	// provisioner workers).
+	Requests corev1.ResourceList
+
+	// Limits overrides the agent container's per-resource limits. When
+	// nil, the privileged/restricted defaults are used. RequireGPU
+	// defaults nvidia.com/gpu=1 only when the caller has not supplied
+	// that key in Limits — e.g. --require-gpu --limits nvidia.com/gpu=4
+	// keeps 4, not 1.
+	Limits corev1.ResourceList
 }
 
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
@@ -125,6 +139,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		RuntimeClassName:   config.RuntimeClassName,
 		MaxNodesPerEntry:   config.MaxNodesPerEntry,
 		OS:                 config.OS,
+		Requests:           config.Requests,
+		Limits:             config.Limits,
 	}
 
 	deployer := agent.NewDeployer(clientset, agentConfig)

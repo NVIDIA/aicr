@@ -20,9 +20,6 @@ import (
 	"strings"
 )
 
-// cmdNameRecipe is the urfave/cli command name for the recipe command.
-const cmdNameRecipe = "recipe"
-
 // Compile-time interface check.
 var _ skillGenerator = (*claudeCodeGenerator)(nil)
 
