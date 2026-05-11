@@ -64,14 +64,14 @@ testing_tools:
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.7.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
-  chainsaw: 'v0.2.14'
+  chainsaw: 'v0.2.15'
   # chainsaw_checksums are refreshed automatically by tools/update-chainsaw-checksums
   # via Renovate postUpgradeTasks whenever the chainsaw version above is bumped.
   chainsaw_checksums:
-    linux_amd64: 'f2f4a3f9a541d65db12f5c910950758f7d56fae20ad5b1272cdc271c9568443e'
-    linux_arm64: 'b6494b71e490ab825890fc12cc575de7f59bfa637d5cfe73c66987e4454e397c'
-    darwin_amd64: '983ce0e4ff32a2112481833d7be4e0a0f0530fadba630fa93d3a635539bc1db0'
-    darwin_arm64: 'ff806554a15e12faca08b54d373a61e27808f40c34208248924f7b71a301f786'
+    linux_amd64: '295d226c89f126c0a97775d364be149f47a810c8a3f9829ee410583d0c1abe3c'
+    linux_arm64: 'fecf5f3ea74d11da2cd5d95a4c016d5d2543cbc4844ce21adf5e727e7ffd9e44'
+    darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
+    darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
   yq: 'v4.53.2'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
