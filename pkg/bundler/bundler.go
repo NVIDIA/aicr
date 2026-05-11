@@ -1042,25 +1042,54 @@ func removeHyphens(s string) string {
 	return strings.ReplaceAll(s, "-", "")
 }
 
-// collectComponentManifests gathers manifest file contents from all components,
-// keyed by component name then manifest path.
-func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+// manifestPhase selects which slice of ComponentRef.{Pre,}ManifestFiles
+// the collector reads. Pre- and post-phase share one collector body so
+// any future change to manifest loading (auth, caching, validation,
+// path normalization) lands in exactly one place.
+type manifestPhase int
+
+const (
+	phasePreManifests manifestPhase = iota
+	phasePostManifests
+)
+
+// collectComponentManifestsByPhase gathers manifest file contents from
+// all components for the requested phase, keyed by component name then
+// manifest path. The body is shared between phases via the manifestPhase
+// switch; per-call-site behavior is identical except for which slice is
+// read off each ComponentRef.
+func (b *DefaultBundler) collectComponentManifestsByPhase(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	phase manifestPhase,
+) (map[string]map[string][]byte, error) {
+
 	result := make(map[string]map[string][]byte)
 
 	for _, ref := range recipeResult.ComponentRefs {
 		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled while collecting component manifests", err)
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"context cancelled while collecting component manifests", err)
 		}
 
-		if len(ref.ManifestFiles) == 0 {
+		var paths []string
+		switch phase {
+		case phasePreManifests:
+			paths = ref.PreManifestFiles
+		case phasePostManifests:
+			paths = ref.ManifestFiles
+		}
+		if len(paths) == 0 {
 			continue
 		}
 
-		componentManifests := make(map[string][]byte, len(ref.ManifestFiles))
-		for _, manifestPath := range ref.ManifestFiles {
+		componentManifests := make(map[string][]byte, len(paths))
+		for _, manifestPath := range paths {
 			content, err := recipe.GetManifestContent(manifestPath)
 			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load manifest %s for component %s", manifestPath, ref.Name), err)
+				return nil, errors.Wrap(errors.ErrCodeInternal,
+					fmt.Sprintf("failed to load manifest %s for component %s",
+						manifestPath, ref.Name), err)
 			}
 			componentManifests[manifestPath] = content
 		}
@@ -1068,4 +1097,20 @@ func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeRe
 	}
 
 	return result, nil
+}
+
+// collectComponentManifests preserves the original entry point used by
+// existing call sites — equivalent to the post-phase call.
+func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+	return b.collectComponentManifestsByPhase(ctx, recipeResult, phasePostManifests)
+}
+
+// collectComponentPreManifests gathers the pre-phase manifests (those
+// the bundler will emit BEFORE each component's primary chart). Wired
+// into the bundler entry points in a follow-up commit; held dormant
+// here so the phase plumbing lands as a pure DRY refactor.
+//
+//nolint:unused // intentionally dormant; see comment above
+func (b *DefaultBundler) collectComponentPreManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+	return b.collectComponentManifestsByPhase(ctx, recipeResult, phasePreManifests)
 }
