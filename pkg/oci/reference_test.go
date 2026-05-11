@@ -256,6 +256,8 @@ func TestEnsureScheme(t *testing.T) {
 		{"unprefixed with tag", "ghcr.io/x/y:v1", "oci://ghcr.io/x/y:v1"},
 		{"unprefixed with port", "localhost:5000/x/y", "oci://localhost:5000/x/y"},
 		{"empty string gets prefix", "", "oci://"},
+		{"https url left alone", "https://ghcr.io/v2/x/y", "https://ghcr.io/v2/x/y"},
+		{"http url left alone", "http://localhost:5000/x/y", "http://localhost:5000/x/y"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

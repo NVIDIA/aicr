@@ -36,8 +36,15 @@ const uriScheme = URIScheme
 
 // EnsureScheme returns ref with the oci:// prefix added when missing.
 // Used by callers that accept user input in either form.
+//
+// Refs that already carry a different URI scheme (e.g., "https://...")
+// are returned unchanged so callers don't accidentally build
+// "oci://https://..." when handed a non-oci URL by mistake.
 func EnsureScheme(ref string) string {
 	if strings.HasPrefix(ref, URIScheme) {
+		return ref
+	}
+	if strings.Contains(ref, "://") {
 		return ref
 	}
 	return URIScheme + ref
