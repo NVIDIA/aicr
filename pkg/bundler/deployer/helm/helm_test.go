@@ -1729,6 +1729,118 @@ esac
 	}
 }
 
+// TestUndeployScript_PostflightTerminatingCheckSuppressesKubectlPrompt
+// proves the post-flight terminating-namespaces check does not surface
+// kubectl's interactive "Please enter Username:" auth prompt in its WARNING
+// when kubeconfig auth is broken. kubectl writes that prompt to *stdout*
+// before detecting non-TTY stdin, so `2>/dev/null` does not suppress it;
+// the fix routes the check through capture_kubectl_json, which closes
+// kubectl's stdin and discards stdout on non-zero exit. See issue #684.
+func TestUndeployScript_PostflightTerminatingCheckSuppressesKubectlPrompt(t *testing.T) {
+	skipIfMissingBins(t, "bash", "sed", "jq")
+
+	ctx := context.Background()
+	outputDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {},
+			"gpu-operator": {},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	undeployPath := filepath.Join(outputDir, "undeploy.sh")
+
+	// Stub kubectl mimics broken-kubeconfig behavior: writes the interactive
+	// auth prompt to stdout, then exits non-zero on stdin EOF. capture_kubectl_json
+	// must close kubectl's stdin (via </dev/null) so kubectl gets EOF immediately
+	// and the function fails closed without propagating the stdout prompt.
+	stubDir := t.TempDir()
+	writeStub(t, stubDir, "kubectl", `#!/bin/sh
+case "$*" in
+  "get namespaces -o json")
+    printf 'Please enter Username: '
+    echo "error: EOF" >&2
+    exit 1
+    ;;
+  *)
+    exit 0
+    ;;
+esac
+`)
+
+	bashSnippet := `
+        snippet=$(sed -n "/^capture_kubectl_json()/,/^}/p" "$UNDEPLOY")
+        if [[ -z "${snippet}" ]]; then
+          echo "TEST_SETUP_ERROR: capture_kubectl_json helper not found in $UNDEPLOY" >&2
+          exit 1
+        fi
+        eval "$snippet"
+        snippet=$(sed -n '/^TERMINATING=""$/,/^kubectl get mutatingwebhookconfigurations/p' "$UNDEPLOY" | sed '$d')
+        if [[ -z "${snippet}" ]]; then
+          echo "TEST_SETUP_ERROR: post-flight terminating-check block not found in $UNDEPLOY; the fix from #684 may have been reverted to the bare 'TERMINATING=\$(kubectl ...)' form" >&2
+          exit 1
+        fi
+        postflight_issues=false
+        eval "$snippet"
+        # ${var+set} only expands when var is *set* (even to empty),
+        # distinguishing "initialized to empty" from "never assigned".
+        echo "FINAL_TERMINATING_SET=[${TERMINATING+set}]"
+        echo "FINAL_TERMINATING_VALUE=[${TERMINATING-unset}]"
+        echo "FINAL_POSTFLIGHT_ISSUES=[${postflight_issues}]"
+    `
+
+	subCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(subCtx, "bash", "-c", "set -uo pipefail\n"+bashSnippet)
+	cmd.Env = append(os.Environ(),
+		"PATH="+stubDir+":"+os.Getenv("PATH"),
+		"UNDEPLOY="+undeployPath,
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("snippet exited non-zero.\nerr: %v\nstdout: %s\nstderr: %s",
+			err, stdout.String(), stderr.String())
+	}
+
+	out := stdout.String()
+	errOut := stderr.String()
+
+	// Regression: the kubectl prompt must NEVER appear in stdout.
+	if strings.Contains(out, "Please enter Username") {
+		t.Errorf("regression: kubectl prompt leaked into post-flight stdout.\nstdout=%q stderr=%q",
+			out, errOut)
+	}
+	// TERMINATING must be initialized but empty (no stray captured string).
+	if !strings.Contains(out, "FINAL_TERMINATING_SET=[set]") {
+		t.Errorf("expected TERMINATING to be initialized; stdout=%q stderr=%q",
+			out, errOut)
+	}
+	if !strings.Contains(out, "FINAL_TERMINATING_VALUE=[]") {
+		t.Errorf("expected TERMINATING value to be empty after failure; stdout=%q stderr=%q",
+			out, errOut)
+	}
+	// WARNING line about terminating namespaces must not appear (it would
+	// have rendered the leaked prompt as the namespace list).
+	if strings.Contains(out, "WARNING: namespaces still terminating:") {
+		t.Errorf("regression: terminating WARNING fired despite kubectl failure.\nstdout=%q",
+			out)
+	}
+	// The failure should be surfaced to stderr as a sensible warning.
+	if !strings.Contains(errOut, "failed to list namespaces") {
+		t.Errorf("expected stderr to contain failure warning; stderr=%q", errOut)
+	}
+	// postflight_issues should be flipped to true so the caller sees the failure.
+	if !strings.Contains(out, "FINAL_POSTFLIGHT_ISSUES=[true]") {
+		t.Errorf("expected postflight_issues=true after kubectl failure; stdout=%q", out)
+	}
+}
+
 // TestUndeployScript_DynamoPlatformOwnsExplicitGroveCRDs verifies the
 // dynamo-platform release owns the Grove CRDs via extra_crds_for_release.
 func TestUndeployScript_DynamoPlatformOwnsExplicitGroveCRDs(t *testing.T) {
