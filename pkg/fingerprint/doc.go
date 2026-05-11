@@ -16,13 +16,14 @@
 // snapshot's collector measurements and compares it against a recipe's
 // criteria.
 //
-// A Fingerprint records the dimensions a recipe declares in its
-// criteria block — service (eks/gke/aks/oke/kind/lke), accelerator
-// (h100/gb200/b200/a100/l40/rtx-pro-6000), OS (ubuntu/rhel/cos/
-// amazonlinux/talos plus raw VERSION_ID), Kubernetes server version,
-// and node count. Each dimension records the resolved value plus an
-// optional source string identifying which collector signal produced
-// it (e.g., "k8s.node.provider", "gpu.smi.gpu.model").
+// A Fingerprint records the cluster-identity dimensions used to bind
+// a snapshot to a recipe — service (eks/gke/aks/oke/kind/lke),
+// accelerator (h100/gb200/b200/a100/l40/rtx-pro-6000), OS
+// (ubuntu/rhel/cos/amazonlinux/talos plus raw VERSION_ID), Kubernetes
+// server version, region, total node count, and GPU node count. Each
+// dimension records the resolved value plus an optional source string
+// identifying which collector signal produced it (e.g.,
+// "k8s.node.provider", "gpu.smi.gpu.model").
 //
 // FromMeasurements builds a Fingerprint from a snapshot's measurement
 // slice without taking a dependency on pkg/snapshotter, so the

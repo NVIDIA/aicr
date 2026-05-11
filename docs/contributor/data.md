@@ -748,10 +748,11 @@ Note that multiple maximal leaves can coexist when their inheritance chains are 
 
 `aicr snapshot` emits a structured `fingerprint:` block alongside the raw
 measurements. The fingerprint is a normalized, schema-stable view of the
-dimensions a recipe declares in its `criteria` block — service,
-accelerator, OS, Kubernetes server version, region, and node count — so
-an evidence bundle (per [ADR-007](../design/007-recipe-evidence.md)) can
-prove the recipe was tested on hardware matching its declared criteria.
+cluster-identity dimensions used to bind a snapshot to a recipe — service,
+accelerator, OS, Kubernetes server version, region, total node count, and
+GPU node count — so an evidence bundle (per
+[ADR-007](../design/007-recipe-evidence.md)) can prove the recipe was
+tested on hardware matching its declared criteria.
 
 The fingerprint is derived from the same collector outputs that populate
 `measurements:`; it is not a separate collection pass. Dimensions whose
