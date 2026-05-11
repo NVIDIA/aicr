@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
 // PredicateInputs is the data available to BuildPredicate at the
@@ -34,8 +35,8 @@ type PredicateInputs struct {
 	AICRVersion             string
 	ValidatorCatalogVersion string
 	ValidatorImages         []ValidatorImage
-	Fingerprint             FingerprintBlock
-	CriteriaMatch           CriteriaMatch
+	Fingerprint             fingerprint.Fingerprint
+	CriteriaMatch           fingerprint.MatchResult
 	Phases                  map[Phase]PhaseSummary
 	BOM                     BOMRef
 	Manifest                ManifestRef

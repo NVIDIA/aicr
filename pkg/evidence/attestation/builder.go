@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -244,14 +246,18 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 	if attestedAt.IsZero() {
 		attestedAt = time.Now().UTC()
 	}
-	fp := FingerprintFromSnapshot(opts.Snapshot)
-	cm := MatchCriteria(fp, criteriaOf(opts.Recipe))
+	var snapMeasurements []*measurement.Measurement
+	if opts.Snapshot != nil {
+		snapMeasurements = opts.Snapshot.Measurements
+	}
+	fp := fingerprint.FromMeasurements(snapMeasurements)
+	cm := fp.Match(criteriaOf(opts.Recipe))
 	pred := BuildPredicate(PredicateInputs{
 		AttestedAt:              attestedAt,
 		AICRVersion:             opts.AICRVersion,
 		ValidatorCatalogVersion: opts.ValidatorCatalogVersion,
 		ValidatorImages:         opts.ValidatorImages,
-		Fingerprint:             fp,
+		Fingerprint:             *fp,
 		CriteriaMatch:           cm,
 		Phases:                  phaseSummaries,
 		BOM: BOMRef{
@@ -318,6 +324,10 @@ func validateOpts(opts BuildOptions) error {
 // defaultRecipeName is the fallback name used when a RecipeResult has
 // no concrete (non-wildcard) criteria values to derive a name from.
 const defaultRecipeName = "recipe"
+
+// criteriaWildcard mirrors the wildcard literal pkg/recipe uses for
+// criteria fields.
+const criteriaWildcard = "any"
 
 func recipeNameFor(r *recipe.RecipeResult) string {
 	if r == nil || r.Criteria == nil {

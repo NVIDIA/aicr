@@ -14,7 +14,11 @@
 
 package attestation
 
-import "time"
+import (
+	"time"
+
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
+)
 
 // Public stability constants. These match docs/spec/recipe-evidence-v1.md
 // and are part of the V1 stability boundary.
@@ -106,17 +110,21 @@ var AllPhases = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 // Predicate is the body of the signed in-toto Statement. It serializes
 // to JSON for the on-the-wire predicate and to YAML for human-readable
 // embedding in spec docs.
+//
+// Fingerprint and CriteriaMatch are pkg/fingerprint types used
+// directly so the predicate-v1 schema stays exactly aligned with what
+// fingerprint.FromMeasurements and Fingerprint.Match produce.
 type Predicate struct {
-	SchemaVersion           string                 `json:"schemaVersion" yaml:"schemaVersion"`
-	AttestedAt              time.Time              `json:"attestedAt" yaml:"attestedAt"`
-	AICRVersion             string                 `json:"aicrVersion" yaml:"aicrVersion"`
-	ValidatorCatalogVersion string                 `json:"validatorCatalogVersion" yaml:"validatorCatalogVersion"`
-	ValidatorImages         []ValidatorImage       `json:"validatorImages" yaml:"validatorImages"`
-	Fingerprint             FingerprintBlock       `json:"fingerprint" yaml:"fingerprint"`
-	CriteriaMatch           CriteriaMatch          `json:"criteriaMatch" yaml:"criteriaMatch"`
-	Phases                  map[Phase]PhaseSummary `json:"phases" yaml:"phases"`
-	BOM                     BOMRef                 `json:"bom" yaml:"bom"`
-	Manifest                ManifestRef            `json:"manifest" yaml:"manifest"`
+	SchemaVersion           string                  `json:"schemaVersion" yaml:"schemaVersion"`
+	AttestedAt              time.Time               `json:"attestedAt" yaml:"attestedAt"`
+	AICRVersion             string                  `json:"aicrVersion" yaml:"aicrVersion"`
+	ValidatorCatalogVersion string                  `json:"validatorCatalogVersion" yaml:"validatorCatalogVersion"`
+	ValidatorImages         []ValidatorImage        `json:"validatorImages" yaml:"validatorImages"`
+	Fingerprint             fingerprint.Fingerprint `json:"fingerprint" yaml:"fingerprint"`
+	CriteriaMatch           fingerprint.MatchResult `json:"criteriaMatch" yaml:"criteriaMatch"`
+	Phases                  map[Phase]PhaseSummary  `json:"phases" yaml:"phases"`
+	BOM                     BOMRef                  `json:"bom" yaml:"bom"`
+	Manifest                ManifestRef             `json:"manifest" yaml:"manifest"`
 }
 
 // ValidatorImage records one validator image that ran during the
@@ -124,40 +132,6 @@ type Predicate struct {
 type ValidatorImage struct {
 	Image  string `json:"image" yaml:"image"`
 	Digest string `json:"digest" yaml:"digest"`
-}
-
-// FingerprintDimension records a single resolved cluster fingerprint
-// dimension. V1 carries Value only; V2 may add Signals and Confidence
-// fields without breaking V1 readers (see spec "Forward compatibility").
-type FingerprintDimension struct {
-	Value string `json:"value" yaml:"value"`
-}
-
-// FingerprintBlock is the resolved cluster fingerprint in the predicate.
-// Only dimensions the snapshot can populate are emitted; missing
-// dimensions are omitted rather than emitted as empty strings.
-type FingerprintBlock struct {
-	Service     *FingerprintDimension `json:"service,omitempty" yaml:"service,omitempty"`
-	Accelerator *FingerprintDimension `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
-	OS          *FingerprintDimension `json:"os,omitempty" yaml:"os,omitempty"`
-	K8sVersion  *FingerprintDimension `json:"k8sVersion,omitempty" yaml:"k8sVersion,omitempty"`
-	Intent      *FingerprintDimension `json:"intent,omitempty" yaml:"intent,omitempty"`
-	Platform    *FingerprintDimension `json:"platform,omitempty" yaml:"platform,omitempty"`
-}
-
-// CriteriaMatch records whether the recipe's criteria block is
-// satisfied by the snapshot fingerprint.
-type CriteriaMatch struct {
-	Matched      bool                              `json:"matched" yaml:"matched"`
-	PerDimension map[string]CriteriaDimensionMatch `json:"perDimension" yaml:"perDimension"`
-}
-
-// CriteriaDimensionMatch describes how a single criteria dimension
-// resolved during validate.
-type CriteriaDimensionMatch struct {
-	RecipeRequires      string `json:"recipeRequires" yaml:"recipeRequires"`
-	FingerprintProvides string `json:"fingerprintProvides" yaml:"fingerprintProvides"`
-	Match               bool   `json:"match" yaml:"match"`
 }
 
 // PhaseSummary is the per-phase outcome recorded in the predicate.
@@ -244,13 +218,15 @@ type PointerSigner struct {
 
 // PointerFingerprint is a denormalized fingerprint for fast pointer
 // reads. The bundle's predicate is authoritative; this is a cache.
+// Mirrors the dimensions fingerprint.Fingerprint captures (intent and
+// platform are recipe-author choices, not cluster facts; they surface
+// in CriteriaMatch instead).
 type PointerFingerprint struct {
 	Service     string `json:"service,omitempty" yaml:"service,omitempty"`
 	Accelerator string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 	OS          string `json:"os,omitempty" yaml:"os,omitempty"`
 	K8sVersion  string `json:"k8sVersion,omitempty" yaml:"k8sVersion,omitempty"`
-	Intent      string `json:"intent,omitempty" yaml:"intent,omitempty"`
-	Platform    string `json:"platform,omitempty" yaml:"platform,omitempty"`
+	Region      string `json:"region,omitempty" yaml:"region,omitempty"`
 }
 
 // PointerCriteriaMatch is the denormalized matched/unmatched flag for

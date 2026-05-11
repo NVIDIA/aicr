@@ -112,17 +112,23 @@ validatorImages:
     digest: sha256:...
   - image: ghcr.io/nvidia/aicr/validator-performance
     digest: sha256:...
-fingerprint:
-  service: { value: eks }
-  accelerator: { value: h100 }
-  os: { value: ubuntu }
-  k8sVersion: { value: "1.33.4" }
-criteriaMatch:
+fingerprint:                                # pkg/fingerprint.Fingerprint
+  service:      { value: eks,    source: k8s.node.provider }
+  accelerator:  { value: h100,   source: gpu.smi.gpu.model }
+  os:           { value: ubuntu, version: "22.04", source: os.release }
+  k8sVersion:   { value: "1.33.4", source: k8s.server.version }
+  region:       { value: us-west-2, source: nodeTopology.label.topology.kubernetes.io/region }
+  nodeCount:    { value: 4, source: nodeTopology.summary.node-count }
+  gpuNodeCount: { value: 4, source: nodeTopology.label.nvidia.com/gpu.product }
+criteriaMatch:                              # pkg/fingerprint.MatchResult
   matched: true
   perDimension:
-    service: { recipeRequires: eks, fingerprintProvides: eks, match: true }
-    accelerator: { recipeRequires: h100, fingerprintProvides: h100, match: true }
-    os: { recipeRequires: ubuntu, fingerprintProvides: ubuntu, match: true }
+    - { dimension: service,     recipeRequires: eks,      fingerprintProvides: eks,    match: matched }
+    - { dimension: accelerator, recipeRequires: h100,     fingerprintProvides: h100,   match: matched }
+    - { dimension: os,          recipeRequires: ubuntu,   fingerprintProvides: ubuntu, match: matched }
+    - { dimension: intent,      recipeRequires: training, match: unknown }
+    - { dimension: platform,    recipeRequires: kubeflow, match: unknown }
+    - { dimension: nodes,       recipeRequires: "4",      fingerprintProvides: "4",    match: matched }
 phases:
   deployment: { passed: 12, failed: 0, skipped: 0, ctrfDigest: sha256:... }
   performance: { passed: 3, failed: 0, skipped: 0, ctrfDigest: sha256:... }
@@ -146,9 +152,9 @@ manifest:
 | `aicrVersion` | string | yes | The `aicr` binary version that emitted the bundle. |
 | `validatorCatalogVersion` | string | yes | Catalog version (per validator catalog SemVer). May be empty until the catalog SemVer contract lands (#660). |
 | `validatorImages[]` | array | yes | List of `{image, digest}` for every validator container that ran. Order is sorted by `image`. |
-| `fingerprint` | object | yes | Per-dimension cluster fingerprint. V1 records resolved values only (`{value: <v>}`); per-signal provenance (`signals[]`, `confidence`) is reserved for V2. |
-| `criteriaMatch.matched` | bool | yes | Whether the recipe's `criteria` block is satisfied by the fingerprint. |
-| `criteriaMatch.perDimension` | object | yes | Map of dimension → `{recipeRequires, fingerprintProvides, match}`. Empty map allowed when the recipe has no `criteria`. |
+| `fingerprint` | object | yes | Per-dimension cluster fingerprint serialized from `pkg/fingerprint.Fingerprint`. Each dimension carries `{value, source, note?}`; OS additionally carries `version`; integer dimensions (`nodeCount`, `gpuNodeCount`) carry `{value, source}`. `note` surfaces audit hints like `"multi-region"` when the cluster has disagreeing labels. Intent and Platform are recipe-author choices, not cluster facts — they surface only in `criteriaMatch.perDimension`. Per-signal provenance (`signals[]`, `confidence`) is reserved for V2. |
+| `criteriaMatch.matched` | bool | yes | True unless any dimension is `mismatched`. Unknown dimensions (fingerprint didn't capture; intent/platform never captured) do not flip `matched` to false. |
+| `criteriaMatch.perDimension[]` | array | yes | Ordered list of `{dimension, recipeRequires, fingerprintProvides, match}` from `pkg/fingerprint.MatchResult`. `match` is one of `matched | mismatched | unknown`. Order: service, accelerator, os, intent, platform, nodes. Deterministic for stable serialization. |
 | `phases.<phase>` | object | yes when phase ran | `{passed, failed, skipped, ctrfDigest}`. `ctrfDigest` is the sha256 of the corresponding `ctrf/<phase>.json` file. |
 | `bom.format` | string | yes | Always `"CycloneDX"` in v1. |
 | `bom.version` | string | yes | CycloneDX spec version (e.g., `"1.5"`). |

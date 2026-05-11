@@ -22,6 +22,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
 // PointerInputs carries everything the pointer file needs that is not
@@ -96,27 +97,14 @@ func WritePointer(outputDir string, p *Pointer) (string, error) {
 	return out, nil
 }
 
-func pointerFingerprintFrom(fp FingerprintBlock) PointerFingerprint {
-	out := PointerFingerprint{}
-	if fp.Service != nil {
-		out.Service = fp.Service.Value
+func pointerFingerprintFrom(fp fingerprint.Fingerprint) PointerFingerprint {
+	return PointerFingerprint{
+		Service:     fp.Service.Value,
+		Accelerator: fp.Accelerator.Value,
+		OS:          fp.OS.Value,
+		K8sVersion:  fp.K8sVersion.Value,
+		Region:      fp.Region.Value,
 	}
-	if fp.Accelerator != nil {
-		out.Accelerator = fp.Accelerator.Value
-	}
-	if fp.OS != nil {
-		out.OS = fp.OS.Value
-	}
-	if fp.K8sVersion != nil {
-		out.K8sVersion = fp.K8sVersion.Value
-	}
-	if fp.Intent != nil {
-		out.Intent = fp.Intent.Value
-	}
-	if fp.Platform != nil {
-		out.Platform = fp.Platform.Value
-	}
-	return out
 }
 
 func pointerPhaseSummaryFrom(phases map[Phase]PhaseSummary) map[Phase]PointerPhaseStat {

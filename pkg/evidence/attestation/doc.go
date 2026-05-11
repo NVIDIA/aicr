@@ -28,12 +28,16 @@
 //   - types.go              Predicate, Pointer, Manifest, Bundle structs.
 //   - canonicalize.go       Recipe canonicalization for subject digest.
 //   - manifest.go           Per-file sha256 inventory; closes integrity chain.
-//   - fingerprint.go        Basic cluster fingerprint stub (replaced by #752).
 //   - predicate.go          Build the v1 predicate body from inputs.
 //   - builder.go            Build(ctx, opts) writes the bundle directories.
 //   - signer.go             Cosign keyless signing of the in-toto Statement.
 //   - oci.go                Push bundle as an OCI artifact via oras-go.
 //   - pointer.go            Generate the recipes/evidence/<recipe>.yaml pointer.
+//
+// Cluster fingerprint and criteria matching are delegated to
+// pkg/fingerprint (FromMeasurements + Fingerprint.Match), whose types
+// the Predicate uses directly so the on-the-wire schema stays in lock-
+// step with what fingerprint.Fingerprint and MatchResult serialize to.
 //
 // The verifier (`aicr verify-evidence`, #753) consumes the bundle but
 // is not implemented here — this package only emits.

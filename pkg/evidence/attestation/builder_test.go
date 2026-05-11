@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
@@ -123,12 +124,17 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 		t.Errorf("predicate manifest fileCount = %d, want %d", bundle.Predicate.Manifest.FileCount, len(m.Files))
 	}
 
-	// CriteriaMatch records the dimensions even when fingerprint is empty (mismatch).
-	if bundle.Predicate.CriteriaMatch.Matched {
-		t.Errorf("expected matched=false on empty fingerprint vs strict criteria")
+	// CriteriaMatch enumerates every dimension. An empty fingerprint
+	// against a strict criteria yields "unknown" per fingerprint.Match
+	// semantics — not mismatched — so the overall Matched flag stays true.
+	if !bundle.Predicate.CriteriaMatch.Matched {
+		t.Errorf("expected matched=true when fingerprint is empty (unknowns are tolerated)")
 	}
-	if _, ok := bundle.Predicate.CriteriaMatch.PerDimension["accelerator"]; !ok {
+	accel, ok := bundle.Predicate.CriteriaMatch.Find(fingerprint.DimensionAccelerator)
+	if !ok {
 		t.Errorf("expected accelerator entry in PerDimension")
+	} else if accel.Match != fingerprint.DimensionUnknown {
+		t.Errorf("accelerator without fingerprint should be unknown; got %v", accel.Match)
 	}
 
 	// Subject digest is sha256 of canonicalized recipe.

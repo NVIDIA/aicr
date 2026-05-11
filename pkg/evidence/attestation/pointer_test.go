@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
 func TestBuildPointer_RequiresBundle(t *testing.T) {
@@ -33,12 +35,12 @@ func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 		Predicate: &Predicate{
 			SchemaVersion: PredicateSchemaVersion,
 			AttestedAt:    time.Date(2026, 5, 8, 10, 23, 11, 0, time.UTC),
-			CriteriaMatch: CriteriaMatch{Matched: true},
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
 			Phases: map[Phase]PhaseSummary{
 				PhaseDeployment: {Passed: 5, Failed: 0},
 			},
-			Fingerprint: FingerprintBlock{
-				Accelerator: &FingerprintDimension{Value: "h100"},
+			Fingerprint: fingerprint.Fingerprint{
+				Accelerator: fingerprint.Dimension{Value: "h100"},
 			},
 		},
 	}
@@ -124,7 +126,7 @@ func TestPointer_PrePushBundleFieldsEmpty(t *testing.T) {
 		RecipeName: "x",
 		Predicate: &Predicate{
 			AttestedAt:    time.Now(),
-			CriteriaMatch: CriteriaMatch{Matched: true},
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
 		},
 	}
 	p, err := BuildPointer(PointerInputs{Bundle: bundle})
@@ -146,7 +148,7 @@ func TestWritePointer_WritesValidYAML(t *testing.T) {
 		RecipeName: "x",
 		Predicate: &Predicate{
 			AttestedAt:    time.Date(2026, 5, 8, 0, 0, 0, 0, time.UTC),
-			CriteriaMatch: CriteriaMatch{Matched: true},
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
 		},
 	}
 	p, err := BuildPointer(PointerInputs{Bundle: bundle})
@@ -171,7 +173,7 @@ func TestPointerLogsBundle_PopulatesWhenSet(t *testing.T) {
 		RecipeName: "x",
 		Predicate: &Predicate{
 			AttestedAt:    time.Now(),
-			CriteriaMatch: CriteriaMatch{Matched: true},
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
 		},
 	}
 	p, err := BuildPointer(PointerInputs{
@@ -195,14 +197,13 @@ func TestPointer_FullFingerprintRoundTrip(t *testing.T) {
 		RecipeName: "x",
 		Predicate: &Predicate{
 			AttestedAt:    time.Now(),
-			CriteriaMatch: CriteriaMatch{Matched: true},
-			Fingerprint: FingerprintBlock{
-				Service:     &FingerprintDimension{Value: "eks"},
-				Accelerator: &FingerprintDimension{Value: "h100"},
-				OS:          &FingerprintDimension{Value: "ubuntu"},
-				K8sVersion:  &FingerprintDimension{Value: "1.33.4"},
-				Intent:      &FingerprintDimension{Value: "training"},
-				Platform:    &FingerprintDimension{Value: "kubeflow"},
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
+			Fingerprint: fingerprint.Fingerprint{
+				Service:     fingerprint.Dimension{Value: "eks"},
+				Accelerator: fingerprint.Dimension{Value: "h100"},
+				OS:          fingerprint.OSDimension{Value: "ubuntu", Version: "22.04"},
+				K8sVersion:  fingerprint.Dimension{Value: "1.33.4"},
+				Region:      fingerprint.Dimension{Value: "us-west-2"},
 			},
 		},
 	}
@@ -212,7 +213,7 @@ func TestPointer_FullFingerprintRoundTrip(t *testing.T) {
 	}
 	fp := p.Attestations[0].Fingerprint
 	if fp.Service != "eks" || fp.Accelerator != "h100" || fp.OS != "ubuntu" ||
-		fp.K8sVersion != "1.33.4" || fp.Intent != "training" || fp.Platform != "kubeflow" {
+		fp.K8sVersion != "1.33.4" || fp.Region != "us-west-2" {
 
 		t.Errorf("fingerprint denormalization mismatch: %+v", fp)
 	}
