@@ -56,11 +56,16 @@ func (f *Fingerprint) Match(c *recipe.Criteria) MatchResult {
 		f = &Fingerprint{}
 	}
 
-	// Nodes uses 0 as the "any" sentinel; remap to "" so isAny in
-	// matchDim treats it as a wildcard.
+	// Nodes uses 0 as the "any"/"not captured" sentinel; remap to ""
+	// on both sides so isAny in matchDim sees a wildcard for the
+	// recipe and an uncaptured value isn't rendered as a literal "0"
+	// in the diff's FingerprintProvides.
 	recipeNodes, fpNodes := strconv.Itoa(c.Nodes), strconv.Itoa(f.NodeCount.Value)
 	if c.Nodes == 0 {
 		recipeNodes = ""
+	}
+	if f.NodeCount.Value == 0 {
+		fpNodes = ""
 	}
 	diffs := []DimensionDiff{
 		matchDim(DimensionService, string(c.Service), f.Service.Value, !isAny(f.Service.Value)),
