@@ -31,22 +31,23 @@ measurements:
       - subtype: sysctl
       - subtype: kmod
       - subtype: release
-  - type: SystemD
+  - type: NodeTopology
     subtypes:
-      - subtype: containerd.service
-      - subtype: docker.service
-      - subtype: kubelet.service
-  - type: GPU
-    subtypes:
-      - subtype: smi
-        data:
-          gpu.model: NVIDIA B200
-          driver: "560.35.03"
-          gpu-count: 8
-          gpu.product-architecture: Blackwell
+      - subtype: summary
+      - subtype: taint
+      - subtype: label
   - type: K8s
     subtypes:
       - subtype: server
       - subtype: image
       - subtype: policy
       - subtype: node
+  - type: GPU
+    subtypes:
+      - subtype: hardware
+      - subtype: smi
+  - type: SystemD
+    subtypes:
+      - subtype: containerd.service
+      - subtype: docker.service
+      - subtype: kubelet.service
