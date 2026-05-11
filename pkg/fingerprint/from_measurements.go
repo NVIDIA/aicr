@@ -30,16 +30,19 @@ const (
 	subtypeGPUSMI           = "smi"
 	subtypeOSRelease        = "release"
 	subtypeTopologySummary  = "summary"
+	subtypeTopologyLabel    = "label"
 	keyK8sNodeProvider      = "provider"
 	keyGPUSMIModel          = "gpu.model"
 	keyOSReleaseID          = "ID"
 	keyOSReleaseVersionID   = "VERSION_ID"
 	keyTopologyNodeCount    = "node-count"
+	labelKeyRegion          = "topology.kubernetes.io/region"
 	sourceServiceProvider   = "k8s.node.provider"
 	sourceAcceleratorSMI    = "gpu.smi.gpu.model"
 	sourceOSRelease         = "os.release"
 	sourceK8sServerVersion  = "k8s.server.version"
 	sourceTopologyNodeCount = "nodeTopology.summary.node-count"
+	sourceTopologyRegion    = "nodeTopology.label." + labelKeyRegion
 )
 
 // FromMeasurements builds a Fingerprint from a snapshot's measurement
@@ -119,18 +122,61 @@ func populateFromOS(fp *Fingerprint, m *measurement.Measurement) {
 }
 
 func populateFromTopology(fp *Fingerprint, m *measurement.Measurement) {
-	st := m.GetSubtype(subtypeTopologySummary)
+	if st := m.GetSubtype(subtypeTopologySummary); st != nil {
+		if count, err := st.GetInt64(keyTopologyNodeCount); err == nil {
+			fp.NodeCount = IntDimension{
+				Value:  int(count),
+				Source: sourceTopologyNodeCount,
+			}
+		}
+	}
+	if region := extractRegion(m); region != "" {
+		fp.Region = Dimension{Value: region, Source: sourceTopologyRegion}
+	}
+}
+
+// extractRegion reads the topology.kubernetes.io/region label value
+// from the topology measurement's "label" subtype. The topology
+// collector encodes single-valued labels under the plain key with
+// value "<region>|<node-list>"; when the cluster spans multiple
+// regions the collector disambiguates by appending ".<value>" to the
+// key, in which case extractRegion returns "" rather than picking one
+// region arbitrarily.
+func extractRegion(m *measurement.Measurement) string {
+	st := m.GetSubtype(subtypeTopologyLabel)
 	if st == nil {
-		return
+		return ""
 	}
-	count, err := st.GetInt64(keyTopologyNodeCount)
-	if err != nil {
-		return
+	if _, multi := hasMultiRegionKeys(st); multi {
+		return ""
 	}
-	fp.NodeCount = IntDimension{
-		Value:  int(count),
-		Source: sourceTopologyNodeCount,
+	raw, err := st.GetString(labelKeyRegion)
+	if err != nil || raw == "" {
+		return ""
 	}
+	if i := strings.Index(raw, "|"); i >= 0 {
+		return raw[:i]
+	}
+	return raw
+}
+
+// hasMultiRegionKeys reports whether the topology label subtype
+// contains disambiguated region keys (e.g., topology.kubernetes.io/
+// region.us-west-2 + topology.kubernetes.io/region.us-east-1), which
+// the topology collector emits when nodes have differing region
+// labels. Multi-region clusters surface region as empty rather than
+// arbitrarily picking one.
+func hasMultiRegionKeys(st *measurement.Subtype) (count int, multi bool) {
+	prefix := labelKeyRegion + "."
+	for k := range st.Data {
+		if strings.HasPrefix(k, prefix) {
+			count++
+			if count > 1 {
+				return count, true
+			}
+		}
+	}
+	return count, false
 }
 
 // normalizeOSID maps an /etc/os-release ID value to the

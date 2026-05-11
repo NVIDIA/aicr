@@ -66,14 +66,22 @@ func osMeasurement(id, versionID string) *measurement.Measurement {
 }
 
 // topologyMeasurement builds a TypeNodeTopology measurement with the
-// given node count.
-func topologyMeasurement(nodeCount int) *measurement.Measurement {
-	return measurement.NewMeasurement(measurement.TypeNodeTopology).
+// given node count and an optional set of label-subtype entries
+// encoded as the topology collector encodes them (value|node-list).
+func topologyMeasurement(nodeCount int, labels map[string]string) *measurement.Measurement {
+	b := measurement.NewMeasurement(measurement.TypeNodeTopology).
 		WithSubtypeBuilder(
 			measurement.NewSubtypeBuilder("summary").
 				Set("node-count", measurement.Int(nodeCount)),
-		).
-		Build()
+		)
+	if len(labels) > 0 {
+		labelSubtype := measurement.NewSubtypeBuilder("label")
+		for k, v := range labels {
+			labelSubtype = labelSubtype.Set(k, measurement.Str(v))
+		}
+		b = b.WithSubtypeBuilder(labelSubtype)
+	}
+	return b.Build()
 }
 
 func TestFromMeasurements_Empty(t *testing.T) {
@@ -91,7 +99,9 @@ func TestFromMeasurements_FullSnapshot(t *testing.T) {
 		k8sMeasurement("v1.33.4", "eks"),
 		gpuMeasurement("NVIDIA H100 80GB HBM3"),
 		osMeasurement("ubuntu", "22.04"),
-		topologyMeasurement(12),
+		topologyMeasurement(12, map[string]string{
+			"topology.kubernetes.io/region": "us-west-2|node1,node2",
+		}),
 	})
 
 	if got.Service.Value != "eks" {
@@ -114,6 +124,57 @@ func TestFromMeasurements_FullSnapshot(t *testing.T) {
 	}
 	if got.NodeCount.Value != 12 {
 		t.Errorf("NodeCount.Value = %d, want 12", got.NodeCount.Value)
+	}
+	if got.Region.Value != "us-west-2" {
+		t.Errorf("Region.Value = %q, want %q", got.Region.Value, "us-west-2")
+	}
+}
+
+func TestFromMeasurements_RegionDetection(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   string
+	}{
+		{
+			name:   "single region",
+			labels: map[string]string{"topology.kubernetes.io/region": "us-west-2|node1,node2"},
+			want:   "us-west-2",
+		},
+		{
+			name: "multi region disambiguated keys",
+			labels: map[string]string{
+				"topology.kubernetes.io/region.us-west-2": "us-west-2|node1",
+				"topology.kubernetes.io/region.us-east-1": "us-east-1|node2",
+			},
+			want: "",
+		},
+		{
+			name:   "no region label",
+			labels: map[string]string{"kubernetes.io/arch": "amd64|node1"},
+			want:   "",
+		},
+		{
+			name:   "no label subtype",
+			labels: nil,
+			want:   "",
+		},
+		{
+			name:   "single-node single-region without pipe is tolerated",
+			labels: map[string]string{"topology.kubernetes.io/region": "us-west-2"},
+			want:   "us-west-2",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FromMeasurements([]*measurement.Measurement{topologyMeasurement(1, tt.labels)})
+			if got.Region.Value != tt.want {
+				t.Errorf("Region.Value = %q, want %q", got.Region.Value, tt.want)
+			}
+			if tt.want != "" && got.Region.Source == "" {
+				t.Error("Region.Source should be populated when value is set")
+			}
+		})
 	}
 }
 

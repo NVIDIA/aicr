@@ -75,6 +75,12 @@ type Fingerprint struct {
 	// "v" stripped (e.g., "1.33.4"). Sourced from k8s.server.version.
 	K8sVersion Dimension `json:"k8sVersion" yaml:"k8sVersion"`
 
+	// Region is the cluster region (e.g., "us-west-2"). Sourced from
+	// the topology.kubernetes.io/region node label aggregated by the
+	// topology collector. Omitted when the cluster has no consistent
+	// region label or spans multiple regions.
+	Region Dimension `json:"region,omitempty" yaml:"region,omitempty"`
+
 	// NodeCount is the total number of cluster nodes. Sourced from
 	// nodeTopology.summary.node-count.
 	NodeCount IntDimension `json:"nodeCount" yaml:"nodeCount"`

@@ -749,9 +749,9 @@ Note that multiple maximal leaves can coexist when their inheritance chains are 
 `aicr snapshot` emits a structured `fingerprint:` block alongside the raw
 measurements. The fingerprint is a normalized, schema-stable view of the
 dimensions a recipe declares in its `criteria` block — service,
-accelerator, OS, Kubernetes server version, and node count — so an
-evidence bundle (per ADR-007 verifiable recipe test evidence) can prove
-the recipe was tested on hardware matching its declared criteria.
+accelerator, OS, Kubernetes server version, region, and node count — so
+an evidence bundle (per [ADR-007](../design/007-recipe-evidence.md)) can
+prove the recipe was tested on hardware matching its declared criteria.
 
 The fingerprint is derived from the same collector outputs that populate
 `measurements:`; it is not a separate collection pass. Dimensions whose
@@ -775,6 +775,9 @@ fingerprint:
   k8sVersion:
     value: "1.33.4"                  # leading "v" stripped
     source: k8s.server.version
+  region:                            # omitted when no single region detected
+    value: us-west-2
+    source: nodeTopology.label.topology.kubernetes.io/region
   nodeCount:
     value: 12
     source: nodeTopology.summary.node-count
@@ -795,6 +798,7 @@ multi-signal corroboration extension; V1 records `source` only.
 | `os.value` | `/etc/os-release` `ID` | Mapped to the `oskind` enum; aliases like `redhat → rhel` and `al2 → amazonlinux` are recognized |
 | `os.version` | `/etc/os-release` `VERSION_ID` | Retained verbatim for audit |
 | `k8sVersion` | `k8s.server.version` | Leading `v` stripped |
+| `region` | `nodeTopology.label.topology.kubernetes.io/region` | Single-region clusters surface the value; multi-region clusters omit the field rather than picking one arbitrarily |
 | `nodeCount` | `nodeTopology.summary.node-count` | Direct |
 
 A dimension whose source signal is missing keeps its zero value. The
@@ -839,10 +843,16 @@ perDimension:
   nodes:       {recipeRequires: 0,        fingerprintProvides: 12,     match: matched}
 ```
 
-The bundle's predicate body (per ADR-007 PR-A / #754) records this diff
-as `criteriaMatch.perDimension`; the verifier (#753) renders it in a
-Markdown summary so the maintainer sees exactly which dimensions the
-fingerprint corroborated.
+The bundle's predicate body (per [ADR-007](../design/007-recipe-evidence.md)
+PR-A / #754) records this diff as `criteriaMatch.perDimension`; the
+verifier (#753) renders it in a Markdown summary so the maintainer
+sees exactly which dimensions the fingerprint corroborated.
+
+The predicate body's `match:` field is a bool (`true` / `false`) per
+ADR-007's schema; the bundler maps the three-way Go state when
+serializing — `matched → true`, `mismatched → false`, `unknown` →
+omitted (and the dimension's `recipeRequires` is recorded so the
+verifier's Markdown summary can flag it for human review).
 
 ## Recipe Generation Process
 
