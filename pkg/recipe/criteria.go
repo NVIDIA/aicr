@@ -25,7 +25,6 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
@@ -414,24 +413,6 @@ func (c *Criteria) Specificity() int {
 		score++
 	}
 	return score
-}
-
-// ToFingerprintInput converts a recipe Criteria into the flat
-// CriteriaInput shape that fingerprint.Match consumes. nil receiver
-// returns a zero-value input (every field "any"), which Match treats
-// as a wildcard recipe.
-func (c *Criteria) ToFingerprintInput() fingerprint.CriteriaInput {
-	if c == nil {
-		return fingerprint.CriteriaInput{}
-	}
-	return fingerprint.CriteriaInput{
-		Service:     string(c.Service),
-		Accelerator: string(c.Accelerator),
-		Intent:      string(c.Intent),
-		OS:          string(c.OS),
-		Platform:    string(c.Platform),
-		Nodes:       c.Nodes,
-	}
 }
 
 // String returns a human-readable representation of the criteria.

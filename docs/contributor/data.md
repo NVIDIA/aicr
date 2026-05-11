@@ -775,12 +775,15 @@ fingerprint:
   k8sVersion:
     value: "1.33.4"                  # leading "v" stripped
     source: k8s.server.version
-  region:                            # omitted when no single region detected
+  region:                            # value empty when multi-region or no label
     value: us-west-2
     source: nodeTopology.label.topology.kubernetes.io/region
-  nodeCount:
+  nodeCount:                         # all nodes including control plane
     value: 12
     source: nodeTopology.summary.node-count
+  gpuNodeCount:                      # nodes carrying the GPU operator label
+    value: 8
+    source: nodeTopology.label.nvidia.com/gpu.product
 ```
 
 Every dimension carries a `value` (the resolved, normalized string the
@@ -798,8 +801,10 @@ multi-signal corroboration extension; V1 records `source` only.
 | `os.value` | `/etc/os-release` `ID` | Mapped to the `oskind` enum; aliases like `redhat → rhel` and `al2 → amazonlinux` are recognized |
 | `os.version` | `/etc/os-release` `VERSION_ID` | Retained verbatim for audit |
 | `k8sVersion` | `k8s.server.version` | Leading `v` stripped |
-| `region` | `nodeTopology.label.topology.kubernetes.io/region` | Single-region clusters surface the value; multi-region clusters omit the field rather than picking one arbitrarily |
-| `nodeCount` | `nodeTopology.summary.node-count` | Direct |
+| `region` | `nodeTopology.label.topology.kubernetes.io/region` | Single-region clusters surface the value; multi-region clusters surface `note: multi-region` with empty value |
+| `nodeCount` | `nodeTopology.summary.node-count` | All nodes, control plane included |
+| `gpuNodeCount` | `nodeTopology.label.nvidia.com/gpu.product` | Union of nodes across one or more GPU-product label entries (the canonical GPU-operator presence signal); zero when no GPU operator labels are present |
+| `accelerator` (cluster-wide override) | same as `gpuNodeCount` | When the topology label data shows multiple distinct GPU SKUs across nodes, accelerator surfaces `note: multi-gpu` with empty value — preferring honesty over the smi reading from a single node |
 
 A dimension whose source signal is missing keeps its zero value. The
 verifier reports it as `unknown` rather than mismatched.
@@ -835,24 +840,33 @@ plus the fingerprint above.
 ```yaml
 matched: true
 perDimension:
-  service:     {recipeRequires: eks,      fingerprintProvides: eks,    match: matched}
-  accelerator: {recipeRequires: h100,     fingerprintProvides: h100,   match: matched}
-  os:          {recipeRequires: ubuntu,   fingerprintProvides: ubuntu, match: matched}
-  intent:      {recipeRequires: training,                              match: unknown}
-  platform:    {recipeRequires: kubeflow,                              match: unknown}
-  nodes:       {recipeRequires: 0,        fingerprintProvides: 12,     match: matched}
+- {dimension: service,     recipeRequires: eks,      fingerprintProvides: eks,    match: matched}
+- {dimension: accelerator, recipeRequires: h100,     fingerprintProvides: h100,   match: matched}
+- {dimension: os,          recipeRequires: ubuntu,   fingerprintProvides: ubuntu, match: matched}
+- {dimension: intent,      recipeRequires: training,                              match: unknown}
+- {dimension: platform,    recipeRequires: kubeflow,                              match: unknown}
+- {dimension: nodes,                                 fingerprintProvides: 12,     match: matched}
 ```
+
+`perDimension` is an ordered list so iteration is deterministic and
+serialization is byte-stable; consumers needing lookup by name use
+`MatchResult.Find` rather than indexing.
 
 The bundle's predicate body (per [ADR-007](../design/007-recipe-evidence.md)
 PR-A / #754) records this diff as `criteriaMatch.perDimension`; the
 verifier (#753) renders it in a Markdown summary so the maintainer
 sees exactly which dimensions the fingerprint corroborated.
 
-The predicate body's `match:` field is a bool (`true` / `false`) per
-ADR-007's schema; the bundler maps the three-way Go state when
-serializing — `matched → true`, `mismatched → false`, `unknown` →
-omitted (and the dimension's `recipeRequires` is recorded so the
-verifier's Markdown summary can flag it for human review).
+The predicate body preserves the three-way `match:` state verbatim
+(`matched | mismatched | unknown`) rather than collapsing to a bool.
+The ADR-007 example shows `match: true` for the happy-path case where
+every dimension is matched, but the schema must keep `unknown`
+distinguishable from `matched` — a maintainer reviewing a bundle
+needs to see "intent and platform were not corroborated by the
+fingerprint" rather than "everything matched." A CI gate keyed on
+`criteriaMatch.matched: true` alone gives unknown dimensions a free
+pass; gates that need stronger guarantees should also assert that
+no per-dimension entry has `match: unknown`.
 
 ## Recipe Generation Process
 

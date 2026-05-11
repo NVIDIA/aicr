@@ -43,6 +43,10 @@ const (
 	sourceK8sServerVersion  = "k8s.server.version"
 	sourceTopologyNodeCount = "nodeTopology.summary.node-count"
 	sourceTopologyRegion    = "nodeTopology.label." + labelKeyRegion
+	sourceTopologyGPU       = "nodeTopology.label." + labelKeyGPUProduct
+	labelKeyGPUProduct      = "nvidia.com/gpu.product"
+	noteMultiRegion         = "multi-region"
+	noteMultiGPU            = "multi-gpu"
 )
 
 // FromMeasurements builds a Fingerprint from a snapshot's measurement
@@ -70,7 +74,76 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 			// fingerprint; intentionally skipped.
 		}
 	}
+	reconcileAccelerator(fp, measurements)
 	return fp
+}
+
+// reconcileAccelerator cross-references the per-node smi reading with
+// cluster-wide nvidia.com/gpu.product labels (when the GPU operator
+// labels nodes). The smi collector only inspects a single node's
+// nvidia-smi output, so a heterogeneous cluster (e.g. half H100, half
+// L40) would otherwise be claimed as homogeneous in whichever SKU the
+// snapshotter happened to land on. The topology label data lets us
+// detect disagreement and surface it as multi-gpu rather than lie.
+//
+// Resolution order:
+//   - Topology shows multiple GPU SKUs (disambiguated keys) → record
+//     multi-gpu note, clear Value.
+//   - Topology shows one GPU SKU and smi was empty → backfill from
+//     topology so non-GPU snapshotter nodes still surface accelerator.
+//   - Otherwise → keep smi result.
+func reconcileAccelerator(fp *Fingerprint, measurements []*measurement.Measurement) {
+	var topo *measurement.Measurement
+	for _, m := range measurements {
+		if m != nil && m.Type == measurement.TypeNodeTopology {
+			topo = m
+			break
+		}
+	}
+	if topo == nil {
+		return
+	}
+	st := topo.GetSubtype(subtypeTopologyLabel)
+	if st == nil {
+		return
+	}
+
+	if hasMultiValueKeys(st, labelKeyGPUProduct) {
+		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteMultiGPU}
+		return
+	}
+	if fp.Accelerator.Value != "" {
+		return
+	}
+	raw, err := st.GetString(labelKeyGPUProduct)
+	if err != nil || raw == "" {
+		return
+	}
+	product := raw
+	if i := strings.Index(raw, "|"); i >= 0 {
+		product = raw[:i]
+	}
+	if sku := ParseGPUSKU(product); sku != "" {
+		fp.Accelerator = Dimension{Value: sku, Source: sourceTopologyGPU}
+	}
+}
+
+// hasMultiValueKeys reports whether the label subtype contains
+// disambiguated keys (`<label>.<value>`) for the given label name,
+// which the topology collector emits when nodes carry the label with
+// differing values.
+func hasMultiValueKeys(st *measurement.Subtype, label string) bool {
+	prefix := label + "."
+	count := 0
+	for k := range st.Data {
+		if strings.HasPrefix(k, prefix) {
+			count++
+			if count > 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func populateFromK8s(fp *Fingerprint, m *measurement.Measurement) {
@@ -109,11 +182,14 @@ func populateFromOS(fp *Fingerprint, m *measurement.Measurement) {
 		return
 	}
 	id, _ := st.GetString(keyOSReleaseID)
-	version, _ := st.GetString(keyOSReleaseVersionID)
 	kind := normalizeOSID(id)
-	if kind == "" && version == "" {
+	if kind == "" {
+		// Avoid emitting a Version with no recognized Value — auditors
+		// reading "version: 9.4" with no kind have no actionable
+		// signal, and verifier Markdown would render confusingly.
 		return
 	}
+	version, _ := st.GetString(keyOSReleaseVersionID)
 	fp.OS = OSDimension{
 		Value:   kind,
 		Version: version,
@@ -130,9 +206,44 @@ func populateFromTopology(fp *Fingerprint, m *measurement.Measurement) {
 			}
 		}
 	}
-	if region := extractRegion(m); region != "" {
+	if region, multi := extractRegion(m); region != "" {
 		fp.Region = Dimension{Value: region, Source: sourceTopologyRegion}
+	} else if multi {
+		fp.Region = Dimension{Source: sourceTopologyRegion, Note: noteMultiRegion}
 	}
+	if st := m.GetSubtype(subtypeTopologyLabel); st != nil {
+		fp.GPUNodeCount = IntDimension{
+			Value:  countGPUNodes(st),
+			Source: sourceTopologyGPU,
+		}
+	}
+}
+
+// countGPUNodes returns the number of distinct nodes carrying the
+// nvidia.com/gpu.product label (either as a single aggregated key or
+// as disambiguated `.<value>` keys for heterogeneous clusters). The
+// label value is encoded as "<value>|<node1,node2,...>" so the node
+// list is parsed out and unioned across all matching keys.
+func countGPUNodes(st *measurement.Subtype) int {
+	nodes := make(map[string]struct{})
+	prefix := labelKeyGPUProduct + "."
+	for k, v := range st.Data {
+		if k != labelKeyGPUProduct && !strings.HasPrefix(k, prefix) {
+			continue
+		}
+		raw := v.String()
+		i := strings.Index(raw, "|")
+		if i < 0 {
+			continue
+		}
+		for _, n := range strings.Split(raw[i+1:], ",") {
+			n = strings.TrimSpace(n)
+			if n != "" {
+				nodes[n] = struct{}{}
+			}
+		}
+	}
+	return len(nodes)
 }
 
 // extractRegion reads the topology.kubernetes.io/region label value
@@ -140,43 +251,24 @@ func populateFromTopology(fp *Fingerprint, m *measurement.Measurement) {
 // collector encodes single-valued labels under the plain key with
 // value "<region>|<node-list>"; when the cluster spans multiple
 // regions the collector disambiguates by appending ".<value>" to the
-// key, in which case extractRegion returns "" rather than picking one
-// region arbitrarily.
-func extractRegion(m *measurement.Measurement) string {
+// key, in which case extractRegion returns ("", true) so the caller
+// can record the multi-region note without picking arbitrarily.
+func extractRegion(m *measurement.Measurement) (region string, multi bool) {
 	st := m.GetSubtype(subtypeTopologyLabel)
 	if st == nil {
-		return ""
+		return "", false
 	}
-	if _, multi := hasMultiRegionKeys(st); multi {
-		return ""
+	if hasMultiValueKeys(st, labelKeyRegion) {
+		return "", true
 	}
 	raw, err := st.GetString(labelKeyRegion)
 	if err != nil || raw == "" {
-		return ""
+		return "", false
 	}
 	if i := strings.Index(raw, "|"); i >= 0 {
-		return raw[:i]
+		return raw[:i], false
 	}
-	return raw
-}
-
-// hasMultiRegionKeys reports whether the topology label subtype
-// contains disambiguated region keys (e.g., topology.kubernetes.io/
-// region.us-west-2 + topology.kubernetes.io/region.us-east-1), which
-// the topology collector emits when nodes have differing region
-// labels. Multi-region clusters surface region as empty rather than
-// arbitrarily picking one.
-func hasMultiRegionKeys(st *measurement.Subtype) (count int, multi bool) {
-	prefix := labelKeyRegion + "."
-	for k := range st.Data {
-		if strings.HasPrefix(k, prefix) {
-			count++
-			if count > 1 {
-				return count, true
-			}
-		}
-	}
-	return count, false
+	return raw, false
 }
 
 // normalizeOSID maps an /etc/os-release ID value to the

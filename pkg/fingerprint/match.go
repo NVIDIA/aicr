@@ -14,11 +14,14 @@
 
 package fingerprint
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // criteriaAnyValue mirrors the wildcard literal that pkg/recipe uses
-// for criteria fields. Kept as a local constant so this package does
-// not depend on an unexported symbol from pkg/recipe.
+// for criteria fields.
 const criteriaAnyValue = "any"
 
 // Match compares the fingerprint against a recipe's criteria and
@@ -42,24 +45,31 @@ const criteriaAnyValue = "any"
 // Platform — are reported as unknown when the recipe declares a
 // specific value, and matched when the recipe is generic. The
 // fingerprint deliberately does not attempt to fabricate them.
-func (f *Fingerprint) Match(c CriteriaInput) MatchResult {
+//
+// A nil criteria pointer is treated as a fully-generic recipe: every
+// dimension is matched and the overall result is matched=true.
+func (f *Fingerprint) Match(c *recipe.Criteria) MatchResult {
+	if c == nil {
+		c = recipe.NewCriteria()
+	}
 	if f == nil {
 		f = &Fingerprint{}
 	}
 
-	diffs := make(map[string]DimensionDiff, 6)
-	diffs["service"] = matchDim(c.Service, f.Service.Value, !isAny(f.Service.Value))
-	diffs["accelerator"] = matchDim(c.Accelerator, f.Accelerator.Value, !isAny(f.Accelerator.Value))
-	diffs["os"] = matchDim(c.OS, f.OS.Value, !isAny(f.OS.Value))
-	diffs["intent"] = matchDim(c.Intent, "", false)
-	diffs["platform"] = matchDim(c.Platform, "", false)
 	// Nodes uses 0 as the "any" sentinel; remap to "" so isAny in
 	// matchDim treats it as a wildcard.
 	recipeNodes, fpNodes := strconv.Itoa(c.Nodes), strconv.Itoa(f.NodeCount.Value)
 	if c.Nodes == 0 {
 		recipeNodes = ""
 	}
-	diffs["nodes"] = matchDim(recipeNodes, fpNodes, f.NodeCount.Value != 0)
+	diffs := []DimensionDiff{
+		matchDim(DimensionService, string(c.Service), f.Service.Value, !isAny(f.Service.Value)),
+		matchDim(DimensionAccelerator, string(c.Accelerator), f.Accelerator.Value, !isAny(f.Accelerator.Value)),
+		matchDim(DimensionOS, string(c.OS), f.OS.Value, !isAny(f.OS.Value)),
+		matchDim(DimensionIntent, string(c.Intent), "", false),
+		matchDim(DimensionPlatform, string(c.Platform), "", false),
+		matchDim(DimensionNodes, recipeNodes, fpNodes, f.NodeCount.Value != 0),
+	}
 
 	matched := true
 	for _, d := range diffs {
@@ -75,8 +85,9 @@ func (f *Fingerprint) Match(c CriteriaInput) MatchResult {
 // matchDim is the shared three-way comparison. fingerprintCaptured is
 // false when the fingerprint did not detect this dimension (either by
 // design — intent and platform — or by signal absence).
-func matchDim(recipeRequires, fingerprintProvides string, fingerprintCaptured bool) DimensionDiff {
+func matchDim(name DimensionName, recipeRequires, fingerprintProvides string, fingerprintCaptured bool) DimensionDiff {
 	diff := DimensionDiff{
+		Dimension:           name,
 		RecipeRequires:      recipeRequires,
 		FingerprintProvides: fingerprintProvides,
 	}

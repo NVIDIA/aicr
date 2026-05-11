@@ -27,6 +27,7 @@ import (
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -158,7 +159,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load snapshot from %q", snapFilePath), loadErr)
 		}
 
-		criteria := recipe.ExtractCriteriaFromSnapshot(snap)
+		criteria := fingerprint.FromMeasurements(snap.Measurements).ToCriteria()
 		if applyErr := applyCriteriaFromConfig(criteria, cfg); applyErr != nil {
 			return nil, applyErr
 		}

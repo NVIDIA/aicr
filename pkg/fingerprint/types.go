@@ -29,6 +29,14 @@ type Dimension struct {
 	// audit and debugging (e.g. "k8s.node.provider"). Empty when the
 	// dimension was not captured.
 	Source string `json:"source,omitempty" yaml:"source,omitempty"`
+
+	// Note carries a short audit hint when Value is empty for a
+	// reason other than missing data — e.g. "multi-region" for a
+	// region dimension that detected disagreeing labels across
+	// nodes. The verifier surfaces this in its Markdown rendering so
+	// "value not captured" and "value deliberately not collapsed"
+	// stay distinguishable.
+	Note string `json:"note,omitempty" yaml:"note,omitempty"`
 }
 
 // IntDimension is a fingerprint dimension whose resolved value is an
@@ -81,9 +89,17 @@ type Fingerprint struct {
 	// region label or spans multiple regions.
 	Region Dimension `json:"region,omitempty" yaml:"region,omitempty"`
 
-	// NodeCount is the total number of cluster nodes. Sourced from
-	// nodeTopology.summary.node-count.
+	// NodeCount is the total number of cluster nodes including
+	// control-plane and worker nodes. Sourced from
+	// nodeTopology.summary.node-count. For "how many GPU workers"
+	// see GPUNodeCount.
 	NodeCount IntDimension `json:"nodeCount" yaml:"nodeCount"`
+
+	// GPUNodeCount is the number of nodes carrying the GPU operator's
+	// nvidia.com/gpu.product label (the canonical "this node has a
+	// GPU" signal). Zero on clusters without the GPU operator
+	// installed. Sourced from the topology label subtype.
+	GPUNodeCount IntDimension `json:"gpuNodeCount" yaml:"gpuNodeCount"`
 }
 
 // DimensionMatch is the three-way per-dimension outcome of Match.
@@ -101,8 +117,28 @@ const (
 	DimensionUnknown    DimensionMatch = "unknown"
 )
 
+// DimensionName is a typed criteria dimension key.
+type DimensionName string
+
+// DimensionName enumerated values — the criteria dimensions
+// Fingerprint.Match compares. Order here defines the order
+// MatchResult.PerDimension entries are emitted.
+const (
+	DimensionService     DimensionName = "service"
+	DimensionAccelerator DimensionName = "accelerator"
+	DimensionOS          DimensionName = "os"
+	DimensionIntent      DimensionName = "intent"
+	DimensionPlatform    DimensionName = "platform"
+	DimensionNodes       DimensionName = "nodes"
+)
+
 // DimensionDiff is a single criteria dimension's comparison outcome.
 type DimensionDiff struct {
+	// Dimension is the typed dimension name (service, accelerator,
+	// etc.). Lets consumers filter or look up by name without magic
+	// strings.
+	Dimension DimensionName `json:"dimension" yaml:"dimension"`
+
 	// RecipeRequires is the criteria value the recipe declares, or
 	// empty / "any" when the recipe is generic in this dimension.
 	RecipeRequires string `json:"recipeRequires,omitempty" yaml:"recipeRequires,omitempty"`
@@ -122,24 +158,22 @@ type DimensionDiff struct {
 // not capture them) do not flip Matched to false: they surface in
 // PerDimension for the maintainer to evaluate, but the fingerprint
 // itself cannot disprove a match it does not capture.
+//
+// PerDimension is an ordered slice so iteration is deterministic and
+// serialization is stable. Use Find for lookup by name.
 type MatchResult struct {
-	Matched      bool                     `json:"matched" yaml:"matched"`
-	PerDimension map[string]DimensionDiff `json:"perDimension" yaml:"perDimension"`
+	Matched      bool            `json:"matched" yaml:"matched"`
+	PerDimension []DimensionDiff `json:"perDimension" yaml:"perDimension"`
 }
 
-// CriteriaInput is the recipe-side input to Fingerprint.Match. It is a
-// flat string view of the criteria dimensions a recipe declares.
-//
-// This package intentionally does not import pkg/recipe.Criteria
-// directly: pkg/snapshotter holds a *Fingerprint field, and
-// pkg/recipe imports pkg/snapshotter for ExtractCriteriaFromSnapshot,
-// so importing pkg/recipe here would close an import cycle. Callers
-// adapt their *recipe.Criteria with recipe.ToFingerprintInput.
-type CriteriaInput struct {
-	Service     string
-	Accelerator string
-	Intent      string
-	OS          string
-	Platform    string
-	Nodes       int
+// Find returns the diff for the named dimension. The second return is
+// false when no entry exists for that dimension (impossible today;
+// future evolutions might add or omit dimensions).
+func (r MatchResult) Find(name DimensionName) (DimensionDiff, bool) {
+	for _, d := range r.PerDimension {
+		if d.Dimension == name {
+			return d, true
+		}
+	}
+	return DimensionDiff{}, false
 }
