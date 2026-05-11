@@ -308,23 +308,15 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			slog.Warn("--repo is ignored with --deployer argocd-helm; supply the URL at install time via `helm install --set repoURL=...`",
 				"repo", b.Config.RepoURL())
 		}
-		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
-		if preErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(preErr, &se) {
-				return nil, preErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", preErr)
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
 		}
-		componentPostManifests, postErr := b.collectComponentManifests(ctx, recipeResult)
-		if postErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(postErr, &se) {
-				return nil, postErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", postErr)
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
 		}
 		return &argocdhelm.Generator{
 			RecipeResult:           recipeResult,
@@ -345,23 +337,15 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
 		}
-		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
-		if preErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(preErr, &se) {
-				return nil, preErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", preErr)
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
 		}
-		componentPostManifests, postErr := b.collectComponentManifests(ctx, recipeResult)
-		if postErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(postErr, &se) {
-				return nil, postErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", postErr)
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
 		}
 		return &argocd.Generator{
 			RecipeResult:           recipeResult,
@@ -377,23 +361,15 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 		}, nil
 
 	case config.DeployerHelm:
-		componentPreManifests, preErr := b.collectComponentPreManifests(ctx, recipeResult)
-		if preErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(preErr, &se) {
-				return nil, preErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", preErr)
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
 		}
-		componentPostManifests, postErr := b.collectComponentManifests(ctx, recipeResult)
-		if postErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(postErr, &se) {
-				return nil, postErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", postErr)
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
 		}
 		return &helm.Generator{
 			RecipeResult:           recipeResult,
