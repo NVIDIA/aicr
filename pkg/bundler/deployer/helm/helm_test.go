@@ -2081,8 +2081,7 @@ func TestBundleGolden_NodewrightPresent(t *testing.T) {
 //	001-foo-pre/   (local-helm wrapping the namespace manifest)
 //	002-foo/       (upstream Helm primary)
 //
-// Sync-wave / install ordering: pre runs before primary, the opposite
-// of post.
+// Install ordering: pre runs before primary, the opposite of post.
 func TestBundleGolden_MixedWithPre(t *testing.T) {
 	outDir := t.TempDir()
 	g := &Generator{
