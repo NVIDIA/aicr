@@ -2074,6 +2074,43 @@ func TestBundleGolden_NodewrightPresent(t *testing.T) {
 	assertBundleGolden(t, outDir, "testdata/nodewright_present")
 }
 
+// TestBundleGolden_MixedWithPre exercises the pre-injection path:
+// a component with ComponentPreManifests (no post manifests) and an
+// upstream Helm chart emits exactly two folders in order:
+//
+//	001-foo-pre/   (local-helm wrapping the namespace manifest)
+//	002-foo/       (upstream Helm primary)
+//
+// Sync-wave / install ordering: pre runs before primary, the opposite
+// of post.
+func TestBundleGolden_MixedWithPre(t *testing.T) {
+	outDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: singleComponentRecipe(
+			"foo", "privileged-foo", "foo", "v1.0.0",
+			"https://example.com/charts"),
+		ComponentValues: map[string]map[string]any{"foo": {}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"components/foo/talos/namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: privileged-foo
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+`),
+			},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(context.Background(), outDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	assertBundleGolden(t, outDir, "testdata/mixed_with_pre")
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
