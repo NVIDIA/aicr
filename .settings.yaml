@@ -103,7 +103,7 @@ testing:
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
-  gpu_operator_chart_version: 'v25.10.1'
+  gpu_operator_chart_version: 'v26.3.1'
   # renovate: datasource=docker depName=nvcr.io/nvidia/cuda depType=testing
   snapshot_agent_cuda_image: 'nvcr.io/nvidia/cuda:13.1.0-base-ubuntu24.04'
 
