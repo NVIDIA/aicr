@@ -1755,14 +1755,22 @@ func TestUndeployScript_PostflightTerminatingCheckSuppressesKubectlPrompt(t *tes
 	undeployPath := filepath.Join(outputDir, "undeploy.sh")
 
 	// Stub kubectl mimics broken-kubeconfig behavior: writes the interactive
-	// auth prompt to stdout, then exits non-zero on stdin EOF. capture_kubectl_json
-	// must close kubectl's stdin (via </dev/null) so kubectl gets EOF immediately
-	// and the function fails closed without propagating the stdout prompt.
+	// auth prompt to stdout, then probes stdin to verify capture_kubectl_json
+	// closed it via </dev/null. The test wires an open pipe pre-loaded with a
+	// sentinel to bash's stdin; if </dev/null is NOT applied, kubectl inherits
+	// the pipe and reads the sentinel — at which point the stub exits 99 to
+	// flag the regression. With </dev/null applied, kubectl reads /dev/null
+	// and gets immediate EOF, exits 1, and capture_kubectl_json discards the
+	// stdout-leaked prompt via its exit-code check.
 	stubDir := t.TempDir()
 	writeStub(t, stubDir, "kubectl", `#!/bin/sh
 case "$*" in
   "get namespaces -o json")
     printf 'Please enter Username: '
+    if IFS= read -r leaked_stdin; then
+      echo "STDIN_LEAK: capture_kubectl_json did not close kubectl stdin; read='${leaked_stdin}'" >&2
+      exit 99
+    fi
     echo "error: EOF" >&2
     exit 1
     ;;
@@ -1771,6 +1779,22 @@ case "$*" in
     ;;
 esac
 `)
+
+	// Pre-load an open pipe with a sentinel. With </dev/null wired in
+	// capture_kubectl_json, kubectl never sees this byte stream. Without it,
+	// kubectl inherits bash's stdin and reads the sentinel, triggering the
+	// STDIN_LEAK branch in the stub.
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create stdin pipe: %v", err)
+	}
+	if _, err := stdinW.WriteString("SENTINEL_USERNAME_VALUE\n"); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	if err := stdinW.Close(); err != nil {
+		t.Fatalf("close stdin writer: %v", err)
+	}
+	defer func() { _ = stdinR.Close() }()
 
 	bashSnippet := `
         snippet=$(sed -n "/^capture_kubectl_json()/,/^}/p" "$UNDEPLOY")
@@ -1800,6 +1824,7 @@ esac
 		"PATH="+stubDir+":"+os.Getenv("PATH"),
 		"UNDEPLOY="+undeployPath,
 	)
+	cmd.Stdin = stdinR
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -1811,6 +1836,13 @@ esac
 	out := stdout.String()
 	errOut := stderr.String()
 
+	// Regression: capture_kubectl_json must close kubectl's stdin via </dev/null.
+	// If this fires, removing </dev/null from the helper would let kubectl
+	// inherit the caller's TTY and prompt indefinitely (or read bogus data).
+	if strings.Contains(errOut, "STDIN_LEAK") {
+		t.Errorf("regression: </dev/null missing from capture_kubectl_json — kubectl inherited test stdin.\nstderr=%q",
+			errOut)
+	}
 	// Regression: the kubectl prompt must NEVER appear in stdout.
 	if strings.Contains(out, "Please enter Username") {
 		t.Errorf("regression: kubectl prompt leaked into post-flight stdout.\nstdout=%q stderr=%q",
