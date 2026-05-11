@@ -47,6 +47,7 @@ const (
 	labelKeyGPUProduct      = "nvidia.com/gpu.product"
 	noteMultiRegion         = "multi-region"
 	noteMultiGPU            = "multi-gpu"
+	noteUnknownSKU          = "unknown-sku"
 )
 
 // FromMeasurements builds a Fingerprint from a snapshot's measurement
@@ -95,6 +96,8 @@ func FromMeasurements(measurements []*measurement.Measurement) *Fingerprint {
 //     multi-gpu note, clear Value.
 //   - Topology shows one GPU SKU and smi was empty → backfill from
 //     topology so non-GPU snapshotter nodes still surface accelerator.
+//   - Topology label present but unrecognized AND smi did not already
+//     mark unknown-sku → record unknown-sku via the topology source.
 //   - Otherwise → keep smi result.
 func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 	st := topo.GetSubtype(subtypeTopologyLabel)
@@ -116,6 +119,13 @@ func reconcileAccelerator(fp *Fingerprint, topo *measurement.Measurement) {
 	product, _ := parseLabelEncoding(raw)
 	if sku := ParseGPUSKU(product); sku != "" {
 		fp.Accelerator = Dimension{Value: sku, Source: sourceTopologyGPU}
+		return
+	}
+	// Topology label present but unrecognized — mark unknown-sku via
+	// the topology source unless smi already marked it (no point
+	// overwriting an identical signal from a less-specific source).
+	if fp.Accelerator.Note == "" {
+		fp.Accelerator = Dimension{Source: sourceTopologyGPU, Note: noteUnknownSKU}
 	}
 }
 
@@ -175,7 +185,13 @@ func populateFromGPU(fp *Fingerprint, m *measurement.Measurement) {
 	}
 	if sku := ParseGPUSKU(model); sku != "" {
 		fp.Accelerator = Dimension{Value: sku, Source: sourceAcceleratorSMI}
+		return
 	}
+	// nvidia-smi reported a product string we don't recognize. Surface
+	// the staleness via unknown-sku so a maintainer sees the registry
+	// gap rather than the snapshot reading as "no GPU." The raw model
+	// stays in the underlying measurement for forensics.
+	fp.Accelerator = Dimension{Source: sourceAcceleratorSMI, Note: noteUnknownSKU}
 }
 
 func populateFromOS(fp *Fingerprint, m *measurement.Measurement) {

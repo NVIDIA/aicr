@@ -378,6 +378,12 @@ func TestFromMeasurements_GPUUnknownModel(t *testing.T) {
 	if got.Accelerator.Value != "" {
 		t.Errorf("expected empty Accelerator for unrecognized model, got %q", got.Accelerator.Value)
 	}
+	if got.Accelerator.Note != "unknown-sku" {
+		t.Errorf("expected Accelerator.Note=unknown-sku for unrecognized model, got %q", got.Accelerator.Note)
+	}
+	if got.Accelerator.Source != "gpu.smi.gpu.model" {
+		t.Errorf("expected smi source, got %q", got.Accelerator.Source)
+	}
 }
 
 func TestFromMeasurements_GPUMissingSubtype(t *testing.T) {
@@ -386,19 +392,50 @@ func TestFromMeasurements_GPUMissingSubtype(t *testing.T) {
 	if got.Accelerator.Value != "" {
 		t.Errorf("expected empty Accelerator when smi subtype missing, got %q", got.Accelerator.Value)
 	}
+	if got.Accelerator.Note != "" {
+		t.Errorf("expected empty Accelerator.Note when no GPU signal exists, got %q", got.Accelerator.Note)
+	}
 }
 
 // TestFromMeasurements_GPUUnknownModelFromTopology exercises the
 // topology-label backfill path: when smi did not run (e.g. agent
 // landed on a non-GPU node) but the GPU operator labels nodes, the
 // reconciliation pass parses the label's product string through the
-// same ParseGPUSKU registry — an unrecognized model must still yield
-// empty rather than fabricating a SKU.
+// same ParseGPUSKU registry — an unrecognized model surfaces
+// unknown-sku via the topology source so registry staleness is
+// visible in the snapshot.
 func TestFromMeasurements_GPUUnknownModelFromTopology(t *testing.T) {
 	got := FromMeasurements([]*measurement.Measurement{topologyMeasurement(1, map[string]string{
 		"nvidia.com/gpu.product": "NVIDIA-T4|node1",
 	})})
 	if got.Accelerator.Value != "" {
 		t.Errorf("expected empty Accelerator for unrecognized topology product, got %q", got.Accelerator.Value)
+	}
+	if got.Accelerator.Note != "unknown-sku" {
+		t.Errorf("expected Accelerator.Note=unknown-sku for unrecognized topology product, got %q", got.Accelerator.Note)
+	}
+	if got.Accelerator.Source != "nodeTopology.label.nvidia.com/gpu.product" {
+		t.Errorf("expected topology source, got %q", got.Accelerator.Source)
+	}
+}
+
+// TestFromMeasurements_SMIUnknownPlusTopologyRecognized covers the
+// reconcile path where smi reported an unrecognized product (note:
+// unknown-sku, value empty) but the topology label resolves to a
+// known SKU. Topology is the more authoritative cluster-wide signal
+// and must win — Value gets backfilled and the unknown-sku note is
+// cleared so reviewers see the resolved SKU, not the stale signal.
+func TestFromMeasurements_SMIUnknownPlusTopologyRecognized(t *testing.T) {
+	got := FromMeasurements([]*measurement.Measurement{
+		gpuMeasurement("NVIDIA T4"), // smi: unrecognized
+		topologyMeasurement(1, map[string]string{
+			"nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3|node1",
+		}),
+	})
+	if got.Accelerator.Value != "h100" {
+		t.Errorf("expected topology to backfill h100, got %q", got.Accelerator.Value)
+	}
+	if got.Accelerator.Note != "" {
+		t.Errorf("expected unknown-sku note cleared after topology recognized SKU, got %q", got.Accelerator.Note)
 	}
 }

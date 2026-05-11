@@ -799,13 +799,20 @@ fingerprint:
     source: nodeTopology.label.nvidia.com/gpu.product
 ```
 
-#### Heterogeneous cluster dimensions
+#### Heterogeneous and stale-registry dimensions
 
-When `accelerator` or `region` would resolve to multiple distinct
-values across nodes, the fingerprint refuses to collapse the cluster
-to a single answer and surfaces the disagreement via an optional
-`note:` field instead of fabricating a Value. The verifier renders
-this distinct from "value not captured" in its Markdown output:
+When `accelerator` or `region` cannot be collapsed to a single Value,
+the fingerprint surfaces the reason via an optional `note:` field
+instead of fabricating one. The verifier renders this distinct from
+"value not captured" in its Markdown output. Three notes are emitted
+today:
+
+- `multi-region` — nodes carry different `topology.kubernetes.io/region` labels
+- `multi-gpu` — nodes carry different `nvidia.com/gpu.product` labels
+- `unknown-sku` — nvidia-smi or the GPU operator reported a product
+  string that is not in the recipe accelerator registry (likely
+  registry staleness; the raw model is still recoverable from the
+  underlying measurement)
 
 ```yaml
 fingerprint:
@@ -817,16 +824,20 @@ fingerprint:
     value: ""
     source: nodeTopology.label.topology.kubernetes.io/region
     note: multi-region
+  # Or, for an unrecognized SKU:
+  # accelerator:
+  #   value: ""
+  #   source: gpu.smi.gpu.model
+  #   note: unknown-sku
 ```
 
 Every dimension carries a `value` (the resolved, normalized string the
 recipe `criteria` block can be compared against), a `source` string
 identifying which collector signal produced it, and an optional `note`
 string carrying a short audit hint when Value is empty for a reason
-other than missing data (the two `multi-*` cases above). ADR-007
-reserves additional optional fields (`signals[]`, `confidence`) for a
-future multi-signal corroboration extension; V1 records `source` and
-`note` only.
+other than missing data (the cases above). ADR-007 reserves additional
+optional fields (`signals[]`, `confidence`) for a future multi-signal
+corroboration extension; V1 records `source` and `note` only.
 
 ### Detection Sources
 
