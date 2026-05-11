@@ -126,6 +126,63 @@ func TestNodeSnapshotter_Measure(t *testing.T) {
 	})
 }
 
+func TestNodeSnapshotter_PopulatesFingerprint(t *testing.T) {
+	ser := &mockSerializer{}
+	factory := &mockFactory{
+		k8sMeasurement: measurement.NewMeasurement(measurement.TypeK8s).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("server").
+				Set(measurement.KeyVersion, measurement.Str("v1.33.4"))).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("node").
+				Set("provider", measurement.Str("eks"))).
+			Build(),
+		gpuMeasurement: measurement.NewMeasurement(measurement.TypeGPU).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("smi").
+				Set("gpu.model", measurement.Str("NVIDIA H100 80GB HBM3"))).
+			Build(),
+		osMeasurement: measurement.NewMeasurement(measurement.TypeOS).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("release").
+				Set("ID", measurement.Str("ubuntu")).
+				Set("VERSION_ID", measurement.Str("22.04"))).
+			Build(),
+		topologyMeasurement: measurement.NewMeasurement(measurement.TypeNodeTopology).
+			WithSubtypeBuilder(measurement.NewSubtypeBuilder("summary").
+				Set("node-count", measurement.Int(12))).
+			Build(),
+	}
+	snapshotter := &NodeSnapshotter{
+		Version:    "1.0.0",
+		Factory:    factory,
+		Serializer: ser,
+	}
+
+	if err := snapshotter.Measure(context.Background()); err != nil {
+		t.Fatalf("Measure() error = %v, want nil", err)
+	}
+
+	snap, ok := ser.data.(*Snapshot)
+	if !ok {
+		t.Fatal("serialized data is not a *Snapshot")
+	}
+	if snap.Fingerprint == nil {
+		t.Fatal("Fingerprint should be populated after Measure")
+	}
+	if snap.Fingerprint.Service.Value != "eks" {
+		t.Errorf("Fingerprint.Service.Value = %q, want eks", snap.Fingerprint.Service.Value)
+	}
+	if snap.Fingerprint.Accelerator.Value != "h100" {
+		t.Errorf("Fingerprint.Accelerator.Value = %q, want h100", snap.Fingerprint.Accelerator.Value)
+	}
+	if snap.Fingerprint.OS.Value != "ubuntu" {
+		t.Errorf("Fingerprint.OS.Value = %q, want ubuntu", snap.Fingerprint.OS.Value)
+	}
+	if snap.Fingerprint.K8sVersion.Value != "1.33.4" {
+		t.Errorf("Fingerprint.K8sVersion.Value = %q, want 1.33.4", snap.Fingerprint.K8sVersion.Value)
+	}
+	if snap.Fingerprint.NodeCount.Value != 12 {
+		t.Errorf("Fingerprint.NodeCount.Value = %d, want 12", snap.Fingerprint.NodeCount.Value)
+	}
+}
+
 func TestNodeSnapshotter_RequireGPU(t *testing.T) {
 	t.Run("fails when require-gpu set and no GPU found", func(t *testing.T) {
 		// Mock GPU collector returns gpu-count=0
@@ -273,11 +330,17 @@ type mockFactory struct {
 
 	// gpuMeasurement overrides the default mock measurement for the GPU collector.
 	gpuMeasurement *measurement.Measurement
+
+	// Per-collector measurement overrides used by fingerprint tests
+	// to seed realistic data without spinning up real collectors.
+	k8sMeasurement      *measurement.Measurement
+	osMeasurement       *measurement.Measurement
+	topologyMeasurement *measurement.Measurement
 }
 
 func (m *mockFactory) CreateKubernetesCollector() collector.Collector {
 	m.k8sCalled = true
-	return &mockCollector{err: m.k8sError}
+	return &mockCollector{err: m.k8sError, result: m.k8sMeasurement}
 }
 
 func (m *mockFactory) CreateSystemDCollector() collector.Collector {
@@ -287,7 +350,7 @@ func (m *mockFactory) CreateSystemDCollector() collector.Collector {
 
 func (m *mockFactory) CreateOSCollector() collector.Collector {
 	m.osCalled = true
-	return &mockCollector{err: m.osError}
+	return &mockCollector{err: m.osError, result: m.osMeasurement}
 }
 
 func (m *mockFactory) CreateGPUCollector() collector.Collector {
@@ -297,7 +360,7 @@ func (m *mockFactory) CreateGPUCollector() collector.Collector {
 
 func (m *mockFactory) CreateNodeTopologyCollector() collector.Collector {
 	m.topologyCalled = true
-	return &mockCollector{err: m.topologyError}
+	return &mockCollector{err: m.topologyError, result: m.topologyMeasurement}
 }
 
 type mockCollector struct {

@@ -30,8 +30,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// criteriaAnyValue is the wildcard value for criteria matching.
-const criteriaAnyValue = "any"
+// CriteriaAnyValue is the wildcard string used across every criteria
+// dimension — recipes set a field to this literal (or leave it empty)
+// to mean "this dimension is unconstrained." Each typed enum
+// (CriteriaServiceAny, CriteriaAcceleratorAny, etc.) is the same
+// string in its typed form; CriteriaAnyValue is the bare-string
+// constant for matching logic that operates on stringified values
+// (e.g., pkg/fingerprint.matchDim's three-way comparison).
+const CriteriaAnyValue = "any"
 
 // CriteriaServiceType represents the Kubernetes service/platform type for criteria.
 type CriteriaServiceType string
@@ -50,7 +56,7 @@ const (
 // ParseCriteriaServiceType parses a string into a CriteriaServiceType.
 func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", criteriaAnyValue, "self-managed", "self", "vanilla":
+	case "", CriteriaAnyValue, "self-managed", "self", "vanilla":
 		return CriteriaServiceAny, nil
 	case string(CriteriaServiceEKS):
 		return CriteriaServiceEKS, nil
@@ -91,7 +97,7 @@ const (
 // ParseCriteriaAcceleratorType parses a string into a CriteriaAcceleratorType.
 func ParseCriteriaAcceleratorType(s string) (CriteriaAcceleratorType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", criteriaAnyValue:
+	case "", CriteriaAnyValue:
 		return CriteriaAcceleratorAny, nil
 	case "h100":
 		return CriteriaAcceleratorH100, nil
@@ -128,7 +134,7 @@ const (
 // ParseCriteriaIntentType parses a string into a CriteriaIntentType.
 func ParseCriteriaIntentType(s string) (CriteriaIntentType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", criteriaAnyValue:
+	case "", CriteriaAnyValue:
 		return CriteriaIntentAny, nil
 	case "training":
 		return CriteriaIntentTraining, nil
@@ -162,17 +168,17 @@ const (
 // ParseCriteriaOSType parses a string into a CriteriaOSType.
 func ParseCriteriaOSType(s string) (CriteriaOSType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", criteriaAnyValue:
+	case "", CriteriaAnyValue:
 		return CriteriaOSAny, nil
-	case "ubuntu":
+	case oskind.Ubuntu:
 		return CriteriaOSUbuntu, nil
-	case "rhel":
+	case oskind.RHEL:
 		return CriteriaOSRHEL, nil
-	case "cos":
+	case oskind.COS:
 		return CriteriaOSCOS, nil
-	case "amazonlinux", "al2", "al2023":
+	case oskind.AmazonLinux, "al2", "al2023":
 		return CriteriaOSAmazonLinux, nil
-	case "talos":
+	case oskind.Talos:
 		return CriteriaOSTalos, nil
 	default:
 		return CriteriaOSAny, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid os type: %s", s))
@@ -200,7 +206,7 @@ const (
 // ParseCriteriaPlatformType parses a string into a CriteriaPlatformType.
 func ParseCriteriaPlatformType(s string) (CriteriaPlatformType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", criteriaAnyValue:
+	case "", CriteriaAnyValue:
 		return CriteriaPlatformAny, nil
 	case "dynamo":
 		return CriteriaPlatformDynamo, nil
@@ -325,8 +331,8 @@ func (c *Criteria) Matches(other *Criteria) bool {
 //   - Recipe is "any"/empty → matches any query value (recipe is generic/wildcard)
 //   - Otherwise → must match exactly
 func MatchesCriteriaField(recipeValue, queryValue string) bool {
-	recipeIsAny := recipeValue == criteriaAnyValue || recipeValue == ""
-	queryIsAny := queryValue == criteriaAnyValue || queryValue == ""
+	recipeIsAny := recipeValue == CriteriaAnyValue || recipeValue == ""
+	queryIsAny := queryValue == CriteriaAnyValue || queryValue == ""
 
 	// If recipe is "any", it matches any query value (recipe is generic)
 	if recipeIsAny {
