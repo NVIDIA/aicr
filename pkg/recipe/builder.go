@@ -120,7 +120,7 @@ func (b *Builder) buildWithStore(ctx context.Context, c *Criteria, buildFn func(
 			"recipe build context cancelled during initialization",
 			err,
 			map[string]any{
-				"stage": "initialization",
+				keyStage: stageInitialization,
 			},
 		)
 	}

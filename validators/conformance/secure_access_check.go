@@ -83,11 +83,11 @@ func newDRATestRun() (*draTestRun, error) {
 }
 
 var claimGVR = schema.GroupVersionResource{
-	Group: "resource.k8s.io", Version: "v1", Resource: "resourceclaims",
+	Group: apiGroupResourceK8sIO, Version: "v1", Resource: "resourceclaims",
 }
 
 var resourceSliceGVR = schema.GroupVersionResource{
-	Group: "resource.k8s.io", Version: "v1", Resource: "resourceslices",
+	Group: apiGroupResourceK8sIO, Version: "v1", Resource: "resourceslices",
 }
 
 // CheckSecureAcceleratorAccess validates CNCF requirement #3: Secure Accelerator Access.
@@ -180,7 +180,7 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 func collectSecureAccessBaselineArtifacts(ctx *validators.Context, dynClient dynamic.Interface) {
 	// ClusterPolicy status.
 	clusterPolicyGVR := schema.GroupVersionResource{
-		Group: "nvidia.com", Version: "v1", Resource: "clusterpolicies",
+		Group: apiGroupNVIDIA, Version: "v1", Resource: "clusterpolicies",
 	}
 	cp, err := dynClient.Resource(clusterPolicyGVR).Get(ctx.Ctx, "cluster-policy", metav1.GetOptions{})
 	if err != nil {
@@ -525,7 +525,7 @@ func buildDRATestPod(run *draTestRun, tolerations []corev1.Toleration) *corev1.P
 			Tolerations:   tolerations,
 			ResourceClaims: []corev1.PodResourceClaim{
 				{
-					Name:              "gpu",
+					Name:              gpuClaimName,
 					ResourceClaimName: helper.StrPtr(run.claimName),
 				},
 			},
@@ -536,7 +536,7 @@ func buildDRATestPod(run *draTestRun, tolerations []corev1.Toleration) *corev1.P
 					Command: []string{"bash", "-c", "ls /dev/nvidia* && echo 'DRA GPU allocation successful'"},
 					Resources: corev1.ResourceRequirements{
 						Claims: []corev1.ResourceClaim{
-							{Name: "gpu"},
+							{Name: gpuClaimName},
 						},
 					},
 				},
@@ -581,17 +581,17 @@ func buildNoClaimTestPod(run *draTestRun, gpuNodeName string) *corev1.Pod {
 func buildResourceClaim(run *draTestRun) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "resource.k8s.io/v1",
-			"kind":       "ResourceClaim",
-			"metadata": map[string]interface{}{
-				"name":      run.claimName,
-				"namespace": draTestNamespace,
+			keyAPIVersion: "resource.k8s.io/v1",
+			keyKind:       "ResourceClaim",
+			keyMetadata: map[string]interface{}{
+				keyName:      run.claimName,
+				keyNamespace: draTestNamespace,
 			},
-			"spec": map[string]interface{}{
+			keySpec: map[string]interface{}{
 				"devices": map[string]interface{}{
 					"requests": []interface{}{
 						map[string]interface{}{
-							"name": "gpu",
+							keyName: gpuClaimName,
 							"exactly": map[string]interface{}{
 								"deviceClassName": "gpu.nvidia.com",
 								"allocationMode":  "ExactCount",

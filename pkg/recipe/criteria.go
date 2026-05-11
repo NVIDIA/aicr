@@ -60,7 +60,7 @@ func ParseCriteriaServiceType(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceAKS, nil
 	case "oke":
 		return CriteriaServiceOKE, nil
-	case "kind":
+	case string(CriteriaServiceKind):
 		return CriteriaServiceKind, nil
 	case "lke":
 		return CriteriaServiceLKE, nil

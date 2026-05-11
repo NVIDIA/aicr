@@ -111,6 +111,10 @@ linters:
     dupl:
       threshold: 200
 
+    goconst:
+      min-occurrences: 3
+      ignore-tests: true
+
     revive:
       rules:
         # Disable stuttering check - collector types intentionally include package name

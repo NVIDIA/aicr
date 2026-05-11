@@ -197,10 +197,10 @@ func checkJobStatus(job *batchv1.Job) (bool, error) {
 		}
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
 			return true, errors.NewWithContext(errors.ErrCodeInternal, "job failed", map[string]interface{}{
-				"namespace": job.Namespace,
-				"name":      job.Name,
-				"reason":    condition.Reason,
-				"message":   condition.Message,
+				keyNamespace: job.Namespace,
+				keyName:      job.Name,
+				keyReason:    condition.Reason,
+				keyMessage:   condition.Message,
 			})
 		}
 	}

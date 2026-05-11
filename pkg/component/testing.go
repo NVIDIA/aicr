@@ -27,6 +27,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+// testingKeyVersion is the measurement reading key for version values used
+// by the test fixture builder helpers in this file.
+const testingKeyVersion = "version"
+
 // BundlerInterface defines the interface that bundlers must implement for testing.
 type BundlerInterface interface {
 	Make(ctx context.Context, input recipe.RecipeInput, outputDir string) (*result.Result, error)
@@ -132,7 +136,7 @@ func (h *TestHarness) createDefaultRecipe() *recipe.Recipe {
 					{
 						Name: "config",
 						Data: map[string]measurement.Reading{
-							"version": measurement.Str("1.28.0"),
+							testingKeyVersion: measurement.Str("1.28.0"),
 						},
 					},
 				},
@@ -291,7 +295,7 @@ func TestValidateRecipe(t *testing.T, validateFunc func(*recipe.Recipe) error) {
 			name: "valid recipe",
 			recipe: NewRecipeBuilder().
 				WithK8sMeasurement(ConfigSubtype(map[string]any{
-					"version": "1.28.0",
+					testingKeyVersion: "1.28.0",
 				})).
 				Build(),
 			wantErr: false,
@@ -463,7 +467,7 @@ func createStandardTestRecipeResult(componentName string, overrides map[string]a
 	if overrides == nil {
 		overrides = map[string]any{
 			"operator": map[string]any{
-				"version": "v25.3.4",
+				testingKeyVersion: "v25.3.4",
 			},
 		}
 	}

@@ -33,43 +33,43 @@ type requirementMeta struct {
 // Only submission-required checks are included — diagnostic checks
 // (gpu-operator-health, platform-health) are excluded from evidence output.
 var requirements = map[string]requirementMeta{
-	"dra-support": {
+	featureDRASupport: {
 		RequirementID: "dra_support",
 		Title:         "DRA Support (Dynamic Resource Allocation)",
 		Description:   "Demonstrates that the cluster supports Dynamic Resource Allocation with a functioning DRA driver, kubelet plugin, and GPU ResourceSlices.",
 		File:          "dra-support.md",
 	},
-	"gang-scheduling": {
+	featureGangScheduling: {
 		RequirementID: "gang_scheduling",
 		Title:         "Gang Scheduling (KAI Scheduler)",
 		Description:   "Demonstrates that the cluster supports gang (all-or-nothing) scheduling using KAI scheduler with PodGroups.",
 		File:          "gang-scheduling.md",
 	},
-	"accelerator-metrics": {
+	featureAcceleratorMetrics: {
 		RequirementID: "accelerator_metrics",
 		Title:         "Accelerator Metrics (DCGM Exporter)",
 		Description:   "Demonstrates that the DCGM exporter exposes per-GPU metrics (utilization, memory, temperature, power) in Prometheus format.",
 		File:          "accelerator-metrics.md",
 	},
-	"ai-service-metrics": {
+	featureAIServiceMetrics: {
 		RequirementID: "ai_service_metrics",
 		Title:         "AI Service Metrics (Prometheus ServiceMonitor Discovery)",
 		Description:   "Demonstrates that Prometheus discovers and collects metrics from AI workloads exposing Prometheus exposition format via ServiceMonitors.",
 		File:          "ai-service-metrics.md",
 	},
-	"inference-gateway": {
+	featureInferenceGateway: {
 		RequirementID: "ai_inference",
 		Title:         "Inference API Gateway (kgateway)",
 		Description:   "Demonstrates that the cluster supports Kubernetes Gateway API for AI/ML inference routing with an operational GatewayClass and Gateway.",
 		File:          "inference-gateway.md",
 	},
-	"pod-autoscaling": {
+	featurePodAutoscaling: {
 		RequirementID: "pod_autoscaling",
 		Title:         "Pod Autoscaling (HPA)",
 		Description:   "Demonstrates that the custom and external metrics APIs expose GPU metrics for HPA-driven pod autoscaling.",
 		File:          "pod-autoscaling.md",
 	},
-	"cluster-autoscaling": {
+	featureClusterAutoscaling: {
 		RequirementID: "cluster_autoscaling",
 		Title:         "Cluster Autoscaling",
 		Description:   "Demonstrates that the cluster supports GPU-aware autoscaling with node groups configured for GPU instances.",

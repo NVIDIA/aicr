@@ -82,8 +82,8 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST")
 		server.WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
-				"method":  r.Method,
-				"allowed": []string{"GET", "POST"},
+				"method":   r.Method,
+				keyAllowed: []string{"GET", "POST"},
 			})
 		return
 	}
@@ -91,7 +91,7 @@ func (b *Builder) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid recipe criteria", false, map[string]any{
-				"error": err.Error(),
+				keyError: err.Error(),
 			})
 		return
 	}

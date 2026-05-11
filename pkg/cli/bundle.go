@@ -303,23 +303,23 @@ Package with explicit tag (overrides CLI version):
 `,
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    "recipe",
+				Name:    cmdNameRecipe,
 				Aliases: []string{"r"},
 				Usage: `Path/URI to previously generated recipe from which to build the bundle.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
 	May also be supplied via spec.bundle.input.recipe in --config.`,
-				Category: "Input",
+				Category: catInput,
 			},
 			configFlag(),
 			&cli.StringFlag{
-				Name:    "output",
+				Name:    flagOutput,
 				Aliases: []string{"o"},
 				Usage: `Output target: local directory path or OCI registry URI (default: current dir).
 	For local output: ./my-bundle or /tmp/bundle
 	For OCI registry: oci://ghcr.io/nvidia/bundle:v1.0.0
 	If no tag specified, CLI version is used (e.g., oci://ghcr.io/nvidia/bundle)
 	May also be supplied via spec.bundle.output.target in --config.`,
-				Category: "Output",
+				Category: catOutput,
 			},
 			&cli.StringSliceFlag{
 				Name: "set",
@@ -327,7 +327,7 @@ Package with explicit tag (overrides CLI version):
 	(format: component:path.to.field=value, e.g., --set gpuoperator:gds.enabled=true).
 	Use the special 'enabled' key to include/exclude components at bundle time
 	(e.g., --set awsebscsidriver:enabled=false to skip aws-ebs-csi-driver)`,
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			&cli.StringSliceFlag{
 				Name: "dynamic",
@@ -335,54 +335,54 @@ Package with explicit tag (overrides CLI version):
 	(format: component:path.to.field, e.g., --dynamic alloy:clusterName).
 	Dynamic paths are removed from values.yaml and placed in cluster-values.yaml
 	for the user to fill in at install time.`,
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			&cli.StringSliceFlag{
 				Name:     "system-node-selector",
 				Usage:    "Node selector for system components (format: key=value, can be repeated)",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.StringSliceFlag{
 				Name:     "system-node-toleration",
 				Usage:    "Toleration for system components (format: key=value:effect, can be repeated)",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.StringSliceFlag{
 				Name:     "accelerated-node-selector",
 				Usage:    "Node selector for accelerated/GPU nodes (format: key=value, can be repeated)",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.StringSliceFlag{
 				Name:     "accelerated-node-toleration",
 				Usage:    "Toleration for accelerated/GPU nodes (format: key=value:effect, can be repeated)",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.StringFlag{
 				Name:     "workload-gate",
 				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.StringSliceFlag{
 				Name:     "workload-selector",
 				Usage:    "Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, can be repeated). Required when nodewright-customizations is enabled with training intent.",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.IntFlag{
 				Name:     "nodes",
 				Value:    0,
 				Usage:    "Estimated number of GPU nodes (written to nodeScheduling.nodeCountPaths in registry). 0 = unset.",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			&cli.StringFlag{
 				Name:     "storage-class",
 				Usage:    "Kubernetes StorageClass name to inject into components at bundle time (written to registry-declared storageClassPaths). Overrides any storageClassName set in recipe overlays.",
-				Category: "Scheduling",
+				Category: catScheduling,
 			},
 			withCompletions(&cli.StringFlag{
 				Name:     "deployer",
 				Aliases:  []string{"d"},
 				Usage:    fmt.Sprintf("Deployment method (default: helm; e.g. %s)", strings.Join(config.GetDeployerTypes(), ", ")),
-				Category: "Deployment",
+				Category: catDeployment,
 			}, config.GetDeployerTypes),
 			&cli.StringFlag{
 				Name:  "repo",
@@ -390,31 +390,31 @@ Package with explicit tag (overrides CLI version):
 				Usage: "Git repository URL for Argo CD Applications (only used with --deployer argocd). " +
 					"Ignored by --deployer argocd-helm: that bundle is URL-portable and the publish " +
 					"location is supplied at install time via `helm install --set repoURL=...`.",
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			&cli.BoolFlag{
 				Name:     "attest",
 				Usage:    "Enable bundle attestation and binary provenance verification (requires binary installed via install script; uses OIDC authentication)",
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			&cli.StringFlag{
 				Name: "certificate-identity-regexp",
 				Usage: `Override the certificate identity pattern for binary attestation verification.
 	Must contain "NVIDIA/aicr". Use for testing with binaries attested by non-release
 	workflows (e.g., build-attested.yaml). Not intended for production use.`,
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			&cli.StringFlag{
 				Name:     "identity-token",
 				Usage:    "Pre-fetched OIDC identity token for --attest keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
 				Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			&cli.BoolFlag{
 				Name:     "oidc-device-flow",
 				Usage:    "Use the OAuth 2.0 device authorization grant for --attest OIDC instead of opening a browser callback. Useful on headless hosts (bastions, remote build boxes) when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
 				Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
-				Category: "Deployment",
+				Category: catDeployment,
 			},
 			kubeconfigFlag(),
 			dataFlag(),
@@ -422,17 +422,17 @@ Package with explicit tag (overrides CLI version):
 			&cli.BoolFlag{
 				Name:     "insecure-tls",
 				Usage:    "Skip TLS certificate verification for OCI registry",
-				Category: "OCI Registry",
+				Category: catOCIRegistry,
 			},
 			&cli.BoolFlag{
 				Name:     "plain-http",
 				Usage:    "Use HTTP instead of HTTPS for OCI registry (for local development)",
-				Category: "OCI Registry",
+				Category: catOCIRegistry,
 			},
 			&cli.StringFlag{
 				Name:     "image-refs",
 				Usage:    "Path to file where the published image reference will be written (only used with OCI output)",
-				Category: "OCI Registry",
+				Category: catOCIRegistry,
 			},
 		},
 		Action: runBundleCmd,

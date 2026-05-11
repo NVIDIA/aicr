@@ -33,41 +33,41 @@ func recipeCmdFlags() []cli.Flag {
 		withCompletions(&cli.StringFlag{
 			Name:     "service",
 			Usage:    fmt.Sprintf("Kubernetes service type (e.g. %s)", strings.Join(recipe.GetCriteriaServiceTypes(), ", ")),
-			Category: "Query Parameters",
+			Category: catQueryParameters,
 		}, recipe.GetCriteriaServiceTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "accelerator",
 			Aliases:  []string{"gpu"},
 			Usage:    fmt.Sprintf("Accelerator/GPU type (e.g. %s)", strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", ")),
-			Category: "Query Parameters",
+			Category: catQueryParameters,
 		}, recipe.GetCriteriaAcceleratorTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "intent",
 			Usage:    fmt.Sprintf("Workload intent (e.g. %s)", strings.Join(recipe.GetCriteriaIntentTypes(), ", ")),
-			Category: "Query Parameters",
+			Category: catQueryParameters,
 		}, recipe.GetCriteriaIntentTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "os",
 			Usage:    fmt.Sprintf("Operating system type of the GPU node (e.g. %s)", strings.Join(recipe.GetCriteriaOSTypes(), ", ")),
-			Category: "Query Parameters",
+			Category: catQueryParameters,
 		}, recipe.GetCriteriaOSTypes),
 		withCompletions(&cli.StringFlag{
 			Name:     "platform",
 			Usage:    fmt.Sprintf("Platform/framework type to include in the runtime (e.g. %s)", strings.Join(recipe.GetCriteriaPlatformTypes(), ", ")),
-			Category: "Query Parameters",
+			Category: catQueryParameters,
 		}, recipe.GetCriteriaPlatformTypes),
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
-			Category: "Query Parameters",
+			Category: catQueryParameters,
 		},
 		&cli.StringFlag{
-			Name:    "snapshot",
+			Name:    cmdNameSnapshot,
 			Aliases: []string{"s"},
 			Usage: `Path/URI to previously generated configuration snapshot.
 	Supports: file paths, HTTP/HTTPS URLs, or ConfigMap URIs (cm://namespace/name).
 	If provided, criteria are extracted from the snapshot.`,
-			Category: "Input",
+			Category: catInput,
 		},
 		configFlag(),
 		dataFlag(),
@@ -79,7 +79,7 @@ func recipeCmdFlags() []cli.Flag {
 
 func recipeCmd() *cli.Command {
 	return &cli.Command{
-		Name:     "recipe",
+		Name:     cmdNameRecipe,
 		Category: functionalCategoryName,
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
 		Description: `Generate configuration recipe based on specified environment parameters including:

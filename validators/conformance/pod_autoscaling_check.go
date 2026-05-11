@@ -101,7 +101,7 @@ func CheckPodAutoscaling(ctx *validators.Context) error {
 
 	// 2. GPU custom metrics have data (poll with retries — adapter relist is 30s)
 	metrics := []string{"gpu_utilization", "gpu_memory_used", "gpu_power_usage"}
-	namespaces := []string{defaults.GPUOperatorNamespace, "dynamo-system"}
+	namespaces := []string{defaults.GPUOperatorNamespace, namespaceDynamoSystem}
 
 	var found bool
 	var foundPath string
@@ -304,18 +304,18 @@ func buildHPATestDeployment(name, namespace string) *appsv1.Deployment {
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"app": name},
+				MatchLabels: map[string]string{labelApp: name},
 			},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{"app": name},
+					Labels: map[string]string{labelApp: name},
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:    "sleep",
+							Name:    containerNameSleep,
 							Image:   defaults.ProbeImage,
-							Command: []string{"sleep", "3600"},
+							Command: []string{containerNameSleep, "3600"},
 							Resources: corev1.ResourceRequirements{
 								Requests: corev1.ResourceList{
 									corev1.ResourceCPU:    resource.MustParse("10m"),

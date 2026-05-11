@@ -220,7 +220,7 @@ func (s *Server) configureRootHandler() {
 				w.Header().Set("Allow", http.MethodGet)
 				WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 					"Method not allowed", false, map[string]any{
-						"method": r.Method,
+						keyMethod: r.Method,
 					})
 				return
 			}
