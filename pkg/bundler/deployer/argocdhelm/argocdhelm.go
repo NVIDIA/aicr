@@ -122,6 +122,11 @@ type Generator struct {
 	// layout. Without this, the delegated argocd output would silently skip
 	// manifestFiles (today's broken behavior for manifest-only components).
 	ComponentManifests map[string]map[string][]byte
+
+	// VendorCharts pulls upstream Helm chart bytes into the bundle at
+	// bundle time so the resulting artifact is air-gap deployable.
+	// Forwarded to the delegated argocd.Generator. Off by default.
+	VendorCharts bool
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -166,6 +171,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// dynamic paths removed; argocdhelm surfaces those paths at the
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
+		VendorCharts:           g.VendorCharts,
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {

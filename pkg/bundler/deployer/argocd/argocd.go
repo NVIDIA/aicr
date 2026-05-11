@@ -152,6 +152,37 @@ type Generator struct {
 	// paths elsewhere in its own bundle (argocdhelm rebuilds them at the
 	// parent chart level). Standalone callers should leave this false.
 	AllowDynamicValueSplit bool
+
+	// VendorCharts pulls upstream Helm chart bytes into the bundle at
+	// bundle time. Off by default. With the flag set, every Helm-typed
+	// component emits a single wrapped chart folder (Chart.yaml +
+	// charts/<chart>-<ver>.tgz) and the generated Argo Application uses
+	// a path-based single source — registry egress at deploy time is no
+	// longer required. See pkg/bundler/deployer/localformat for the
+	// vendoring shape.
+	VendorCharts bool
+
+	// vendorRecords is populated by Generate when VendorCharts is on.
+	// Captured here so VendorRecords() can expose it to callers
+	// (currently argocdhelm) that need to write provenance.yaml without
+	// re-pulling the charts. Unset (nil) when VendorCharts is off.
+	vendorRecords []localformat.VendorRecord
+}
+
+// VendorRecords returns a copy of the audit records produced by the
+// most recent Generate call when VendorCharts was on. Returns nil
+// otherwise. Callers that compose argocd.Generator (argocdhelm) use
+// this to thread the records into their own provenance.yaml.
+//
+// A copy is returned so callers can sort/filter/append without
+// silently mutating the Generator's state for subsequent reads.
+func (g *Generator) VendorRecords() []localformat.VendorRecord {
+	if len(g.vendorRecords) == 0 {
+		return nil
+	}
+	out := make([]localformat.VendorRecord, len(g.vendorRecords))
+	copy(out, g.vendorRecords)
+	return out
 }
 
 // resolveRepoSettings returns the effective repoURL and targetRevision,
@@ -224,6 +255,8 @@ func resolveRepoSettings(g *Generator) (repoURL, targetRevision string) {
 // upstream.env, templates/) is delegated to localformat.Write, which emits
 // the uniform NNN-<name>/ folder layout. argocd then drops application.yaml
 // inside each NNN-<name>/ folder and writes the top-level app-of-apps.yaml.
+//
+//nolint:funlen // single-pass orchestration; further splitting just hides the linear flow.
 func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.Output, error) {
 	start := time.Now()
 
@@ -279,15 +312,18 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// install-related content. This deployer adds the Argo Application file
 	// inside each folder plus the top-level app-of-apps.yaml afterwards.
 	lfComponents := g.toLocalformatComponents(components)
-	folders, lfErr := localformat.Write(ctx, localformat.Options{
+	writeResult, lfErr := localformat.Write(ctx, localformat.Options{
 		OutputDir:          outputDir,
 		Components:         lfComponents,
 		ComponentManifests: g.ComponentManifests,
+		VendorCharts:       g.VendorCharts,
 	})
 	if lfErr != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.
 		return nil, lfErr
 	}
+	g.vendorRecords = writeResult.VendoredCharts
+	folders := writeResult.Folders
 
 	if err := stripUnusedHelmFiles(outputDir, folders); err != nil {
 		return nil, err
@@ -371,6 +407,20 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Include external data files in the file list (for checksums).
 	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
 		return nil, err
+	}
+
+	// Emit provenance.yaml for vendored bundles. Same audit file as the
+	// helm deployer — operators get the chart-yank lookup surface
+	// regardless of which deployer they choose. Written before
+	// checksums.txt so the audit file is itself checksummed.
+	if len(g.vendorRecords) > 0 {
+		provPath, provSize, provErr := localformat.WriteProvenance(ctx, outputDir, g.vendorRecords)
+		if provErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to generate provenance.yaml", provErr)
+		}
+		output.Files = append(output.Files, provPath)
+		output.TotalSize += provSize
 	}
 
 	if g.IncludeChecksums {

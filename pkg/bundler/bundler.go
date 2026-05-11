@@ -327,6 +327,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DynamicValues:      dynamicValues,
 			DataFiles:          dataFiles,
 			ComponentManifests: componentManifests,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -352,6 +353,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			IncludeChecksums:   b.Config.IncludeChecksums(),
 			DataFiles:          dataFiles,
 			ComponentManifests: componentManifests,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerHelm:
@@ -372,6 +374,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentManifests: componentManifests,
 			DataFiles:          dataFiles,
 			DynamicValues:      dynamicValues,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	default:
