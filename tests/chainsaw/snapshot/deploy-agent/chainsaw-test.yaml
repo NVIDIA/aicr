@@ -59,6 +59,19 @@ spec:
                 --image localhost:5001/aicr:local \
                 -o cm://default/aicr-e2e-snapshot
 
+    - name: assert-deployer-cleanup
+      description: Verify the deployer cleaned up its Job, RBAC, and ClusterRole resources.
+      try:
+        - script:
+            content: |
+              LEAKED=$(kubectl get job/aicr sa/aicr role/aicr rolebinding/aicr -n default -o name 2>/dev/null || true)
+              LEAKED="${LEAKED}$(kubectl get clusterrole/aicr-node-reader clusterrolebinding/aicr-node-reader -o name 2>/dev/null || true)"
+              if [ -n "$LEAKED" ]; then
+                echo "::error::Deployer resources not cleaned up:"
+                echo "$LEAKED"
+                exit 1
+              fi
+
     - name: assert-snapshot-content
       description: Extract the snapshot YAML from the surviving ConfigMap and assert its structure.
       try:
