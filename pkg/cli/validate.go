@@ -29,7 +29,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence"
+	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -310,7 +310,7 @@ func runValidation(
 		evidenceCtx, evidenceCancel := context.WithTimeout(ctx, defaults.EvidenceRenderTimeout)
 		defer evidenceCancel()
 
-		renderer := evidence.New(evidence.WithOutputDir(cfg.evidenceDir))
+		renderer := cncf.New(cncf.WithOutputDir(cfg.evidenceDir))
 		if renderErr := renderer.Render(evidenceCtx, combined); renderErr != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "evidence rendering failed", renderErr)
 		}
@@ -434,7 +434,7 @@ func validateCmdFlags() []cli.Flag {
 			Name:    "feature",
 			Aliases: []string{"f"},
 			Usage: "Evidence feature to collect (repeatable, default: all). Only used with --cncf-submission.\n" +
-				"Options: " + strings.Join(evidence.ValidFeatures, ", "),
+				"Options: " + strings.Join(cncf.ValidFeatures, ", "),
 			Category: catEvidence,
 		},
 		dataFlag(),
@@ -613,10 +613,10 @@ Run validation without failing on check errors (informational mode):
 func runCNCFSubmission(ctx context.Context, evidenceDir string, features []string, kubeconfig string) error {
 	// Validate feature names.
 	for _, f := range features {
-		if !evidence.IsValidFeature(f) {
+		if !cncf.IsValidFeature(f) {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("unknown feature %q; valid features: %s",
-					f, strings.Join(evidence.ValidFeatures, ", ")))
+					f, strings.Join(cncf.ValidFeatures, ", ")))
 		}
 	}
 
@@ -627,9 +627,9 @@ func runCNCFSubmission(ctx context.Context, evidenceDir string, features []strin
 	slog.Info("starting CNCF submission evidence collection",
 		"evidenceDir", evidenceDir, "features", features)
 
-	collector := evidence.NewCollector(evidenceDir,
-		evidence.WithFeatures(features),
-		evidence.WithKubeconfig(kubeconfig),
+	collector := cncf.NewCollector(evidenceDir,
+		cncf.WithFeatures(features),
+		cncf.WithKubeconfig(kubeconfig),
 	)
 	return collector.Run(ctx)
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package evidence
+package cncf
 
 // requirementMeta maps a validator name to its CNCF conformance requirement.
 type requirementMeta struct {

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package evidence renders CNCF AI Conformance evidence markdown from CTRF reports.
-package evidence
+package cncf
 
 import (
 	"context"
