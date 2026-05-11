@@ -59,6 +59,10 @@ type bundleCmdOptions struct {
 	// dynamicValues declares value paths provided at install time.
 	dynamicValues []config.ComponentPath
 
+	// vendorCharts pulls upstream Helm chart bytes into the bundle so
+	// the resulting artifact is self-contained and air-gap deployable.
+	vendorCharts bool
+
 	// attest enables bundle attestation and binary verification.
 	attest bool
 
@@ -100,6 +104,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		kubeconfig:                cmd.String("kubeconfig"),
 		repoURL:                   stringFlagOrConfig(cmd, "repo", resolved.Repo),
 		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
+		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", resolved.VendorCharts),
 		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
 		identityToken:             cmd.String("identity-token"),
 		oidcDeviceFlow:            boolFlagOrConfig(cmd, "oidc-device-flow", resolved.OIDCDeviceFlow),
@@ -393,6 +398,18 @@ Package with explicit tag (overrides CLI version):
 				Category: catDeployment,
 			},
 			&cli.BoolFlag{
+				Name: "vendor-charts",
+				Usage: `Pull upstream Helm chart bytes into the bundle at bundle time so the
+	resulting artifact eliminates Helm chart registry egress at deploy time.
+	Container-image pulls and other non-chart resources may still require
+	network access. Each vendored chart is recorded in provenance.yaml with
+	name, version, source URL, and SHA256. Trades the upstream CVE-yank
+	fail-loud signal for offline deployability — vendored bundles silently
+	install a frozen chart version even after upstream yank. Requires the
+	'helm' binary on PATH at bundle time.`,
+				Category: "Deployment",
+			},
+			&cli.BoolFlag{
 				Name:     "attest",
 				Usage:    "Enable bundle attestation and binary provenance verification (requires binary installed via install script; uses OIDC authentication)",
 				Category: catDeployment,
@@ -509,6 +526,7 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 		config.WithWorkloadSelector(opts.workloadSelector),
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),
 		config.WithStorageClass(opts.storageClass),
+		config.WithVendorCharts(opts.vendorCharts),
 	)
 
 	// Note: binary attestation pre-flight check is handled by bundler.New().

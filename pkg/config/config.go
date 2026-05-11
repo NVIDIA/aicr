@@ -103,10 +103,11 @@ type BundleOutputSpec struct {
 
 // DeploymentSpec captures deployer choice and value-override inputs.
 type DeploymentSpec struct {
-	Deployer string   `yaml:"deployer,omitempty" json:"deployer,omitempty"`
-	Repo     string   `yaml:"repo,omitempty" json:"repo,omitempty"`
-	Set      []string `yaml:"set,omitempty" json:"set,omitempty"`
-	Dynamic  []string `yaml:"dynamic,omitempty" json:"dynamic,omitempty"`
+	Deployer     string   `yaml:"deployer,omitempty" json:"deployer,omitempty"`
+	Repo         string   `yaml:"repo,omitempty" json:"repo,omitempty"`
+	Set          []string `yaml:"set,omitempty" json:"set,omitempty"`
+	Dynamic      []string `yaml:"dynamic,omitempty" json:"dynamic,omitempty"`
+	VendorCharts bool     `yaml:"vendorCharts,omitempty" json:"vendorCharts,omitempty"`
 }
 
 // SchedulingSpec captures node-placement inputs for system and accelerated workloads.

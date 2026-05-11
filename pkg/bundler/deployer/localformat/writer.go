@@ -46,11 +46,45 @@ type Component struct {
 	DynamicPaths []string // paths moved from values.yaml into cluster-values.yaml
 }
 
+// WriteResult is the typed return shape from Write. Callers consume
+// Folders for per-component bookkeeping (checksums, output files) and
+// VendoredCharts to emit provenance.yaml or other audit artifacts.
+//
+// Returned as a struct (rather than (slices..., error)) so future
+// additions — e.g., per-folder warnings, partial-failure detail — do
+// not break the call signature for every downstream consumer.
+type WriteResult struct {
+	// Folders is one entry per emitted NNN-<name>/ directory, in
+	// deployment order. Files within each Folder are relative to the
+	// Write call's OutputDir.
+	Folders []Folder
+
+	// VendoredCharts is non-empty only when Options.VendorCharts was
+	// set; one record per upstream chart pulled into the bundle. Pass
+	// directly to WriteProvenance to emit the audit log.
+	VendoredCharts []VendorRecord
+}
+
 // Options configures Write.
 type Options struct {
 	OutputDir          string
 	Components         []Component                  // ordered per DeploymentOrder
 	ComponentManifests map[string]map[string][]byte // name → path → rendered bytes
+
+	// VendorCharts pulls upstream Helm chart bytes into each Helm-typed
+	// component's folder at bundle time. When set, every Helm component
+	// emits a single wrapped folder with charts/<chart>-<version>.tgz +
+	// wrapper Chart.yaml + (for mixed components) post-install-hook
+	// templates. Mixed components no longer split into primary + -post.
+	// Off by default — non-vendored bundles preserve the upstream
+	// CVE-yank fail-loud signal.
+	VendorCharts bool
+
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// is allowed and resolves to a default *CLIChartPuller; tests can
+	// inject a stub here without touching package state. Ignored when
+	// VendorCharts is false.
+	Puller ChartPuller
 }
 
 // renderInputFor builds the per-component manifest.RenderInput. The Helm
@@ -79,59 +113,77 @@ func renderInputFor(c Component) manifest.RenderInput {
 // component folders that the deployer's loop would later install. Top-level
 // orchestration files (deploy.sh, undeploy.sh, README.md, attestation/) are
 // left intact; only files under [0-9][0-9][0-9]-* are removed.
-func Write(ctx context.Context, opts Options) ([]Folder, error) {
+//
+// Returns the list of emitted folders plus, when opts.VendorCharts is set,
+// one VendorRecord per pulled upstream chart for inclusion in the bundle's
+// provenance.yaml. The records slice is empty when VendorCharts is false.
+//
+//nolint:funlen // single-pass component loop; further extraction reduces locality of the index/branch logic.
+func Write(ctx context.Context, opts Options) (WriteResult, error) {
 	// Honor cancellation before any filesystem mutation.
 	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+		return WriteResult{}, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 	}
 	// Fail fast if the layout's three-digit prefix can't accommodate the
-	// component count. Mixed components inject a second folder per
-	// component, so the upper bound is 2*len(Components). The deploy/undeploy
-	// templates glob [0-9][0-9][0-9]-*/, so a 4-digit prefix would be
-	// silently skipped.
-	if 2*len(opts.Components) > 999 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
+	// component count. Non-vendored mixed components can inject a second
+	// folder per component (primary + injected -post wrapper); vendored
+	// mode collapses every component into a single folder.
+	maxFolders := len(opts.Components)
+	if !opts.VendorCharts {
+		maxFolders *= 2
+	}
+	if maxFolders > 999 {
+		return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("too many components (%d): NNN- folder prefix supports at most 999 entries",
 				len(opts.Components)))
 	}
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "create output dir", err)
+		return WriteResult{}, errors.Wrap(errors.ErrCodeInternal, "create output dir", err)
 	}
 	if err := pruneStaleFolders(opts.OutputDir); err != nil {
-		return nil, err
+		return WriteResult{}, err
 	}
 
-	// Detect <name>-post collisions up front: if a recipe declares both a
-	// mixed component "foo" (Helm + manifests) and a separate component
-	// "foo-post", the injection rule would synthesize a second "foo-post"
-	// folder/release that collides with the explicitly-declared one.
-	declared := make(map[string]struct{}, len(opts.Components))
-	for _, c := range opts.Components {
-		declared[c.Name] = struct{}{}
+	puller := opts.Puller
+	if opts.VendorCharts && puller == nil {
+		puller = &CLIChartPuller{}
 	}
-	for _, c := range opts.Components {
-		if len(opts.ComponentManifests[c.Name]) == 0 {
-			continue
+
+	// Detect <name>-post collisions up front for the non-vendored path:
+	// if a recipe declares both a mixed component "foo" (Helm + manifests)
+	// and a separate component "foo-post", the injection rule would
+	// synthesize a second "foo-post" folder/release that collides with
+	// the explicitly-declared one. Vendored mode collapses mixed into
+	// one folder and never injects -post, so the check is skipped there.
+	if !opts.VendorCharts {
+		declared := make(map[string]struct{}, len(opts.Components))
+		for _, c := range opts.Components {
+			declared[c.Name] = struct{}{}
 		}
-		// Mixed component (helm + manifests) → would inject "<name>-post".
-		if c.Repository == "" {
-			continue // manifest-only doesn't inject; already a single local-helm folder
-		}
-		if _, clash := declared[c.Name+"-post"]; clash {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
-					c.Name, c.Name, c.Name))
+		for _, c := range opts.Components {
+			if len(opts.ComponentManifests[c.Name]) == 0 {
+				continue
+			}
+			if c.Repository == "" {
+				continue // manifest-only doesn't inject; already a single local-helm folder
+			}
+			if _, clash := declared[c.Name+"-post"]; clash {
+				return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+						c.Name, c.Name, c.Name))
+			}
 		}
 	}
 
 	folders := make([]Folder, 0, len(opts.Components))
+	var vendorRecords []VendorRecord
 	idx := 1
 	for _, c := range opts.Components {
 		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+			return WriteResult{}, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 		}
 		if !deployer.IsSafePathComponent(c.Name) {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
+			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid component name %q", c.Name))
 		}
 
@@ -139,18 +191,40 @@ func Write(ctx context.Context, opts Options) ([]Folder, error) {
 		// EITHER kustomize (Tag/Path) OR raw manifests, not both. The bundle
 		// shape can only wrap one primary source into the local chart.
 		if (c.Tag != "" || c.Path != "") && len(opts.ComponentManifests[c.Name]) > 0 {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
+			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q has both kustomize (Tag/Path) and raw manifests; use one", c.Name))
 		}
 
-		kind := classify(c, opts.ComponentManifests[c.Name])
 		dir := fmt.Sprintf("%03d-%s", idx, c.Name)
+
+		// Vendored Helm path: one wrapped folder per Helm-typed component
+		// regardless of mixed/pure. Kustomize and manifest-only fall
+		// through to the existing classify() path even with VendorCharts
+		// on, because they are already local after #662.
+		if opts.VendorCharts && shouldVendor(c) {
+			f, rec, err := writeVendoredHelmFolder(
+				ctx, opts.OutputDir, dir, idx, c,
+				opts.ComponentManifests[c.Name], puller,
+			)
+			if err != nil {
+				return WriteResult{}, err
+			}
+			folders = append(folders, f)
+			vendorRecords = append(vendorRecords, rec)
+			slog.Info("wrote vendored chart folder",
+				"index", idx, "dir", dir, "parent", c.Name,
+				"chart", rec.Chart, "version", rec.Version, "sha256", rec.SHA256)
+			idx++
+			continue
+		}
+
+		kind := classify(c, opts.ComponentManifests[c.Name])
 
 		switch kind {
 		case KindUpstreamHelm:
 			f, err := writeUpstreamHelmFolder(opts.OutputDir, dir, idx, c)
 			if err != nil {
-				return nil, err
+				return WriteResult{}, err
 			}
 			folders = append(folders, f)
 			slog.Info("wrote local chart folder", "index", idx, "dir", dir, "kind", kind.String(), "parent", c.Name)
@@ -169,7 +243,7 @@ func Write(ctx context.Context, opts Options) ([]Folder, error) {
 					postName, c.Name,
 				)
 				if postErr != nil {
-					return nil, postErr
+					return WriteResult{}, postErr
 				}
 				folders = append(folders, postFolder)
 				slog.Info("wrote local chart folder", "index", idx, "dir", postDir, "kind", KindLocalHelm.String(), "parent", c.Name)
@@ -186,11 +260,11 @@ func Write(ctx context.Context, opts Options) ([]Folder, error) {
 				// incomplete combinations explicitly so a recipe author sees
 				// the misconfiguration rather than a silent empty build.
 				if c.Path == "" {
-					return nil, errors.New(errors.ErrCodeInvalidRequest,
+					return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 						fmt.Sprintf("kustomize component %q has Tag but no Path; Path is required", c.Name))
 				}
 				if c.Tag != "" && c.Repository == "" {
-					return nil, errors.New(errors.ErrCodeInvalidRequest,
+					return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 						fmt.Sprintf("kustomize component %q has Tag but no Repository; Tag is only meaningful with a git Repository", c.Name))
 				}
 				// Build target: git URL form for git-sourced kustomizations
@@ -207,7 +281,7 @@ func Write(ctx context.Context, opts Options) ([]Folder, error) {
 				}
 				rendered, kerr := buildKustomize(ctx, target)
 				if kerr != nil {
-					return nil, kerr
+					return WriteResult{}, kerr
 				}
 				manifests = map[string][]byte{"manifest.yaml": rendered}
 			}
@@ -215,14 +289,14 @@ func Write(ctx context.Context, opts Options) ([]Folder, error) {
 				manifests, renderInputFor(c),
 				c.Name, c.Name)
 			if err != nil {
-				return nil, err
+				return WriteResult{}, err
 			}
 			folders = append(folders, f)
 			slog.Info("wrote local chart folder", "index", idx, "dir", dir, "kind", kind.String(), "parent", c.Name)
 			idx++
 		}
 	}
-	return folders, nil
+	return WriteResult{Folders: folders, VendoredCharts: vendorRecords}, nil
 }
 
 // valueSplit carries the results of splitting component values into static

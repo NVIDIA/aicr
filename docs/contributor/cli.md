@@ -154,6 +154,10 @@ Flags:
 
 These flags apply selectors/tolerations to bundler-specific paths (e.g., GPU Operator uses `operator.nodeSelector` and `daemonsets.nodeSelector`). The `--nodes` value is applied to paths listed in the registry under `nodeScheduling.nodeCountPaths`.
 
+**Air-gap vendoring**:
+
+`--vendor-charts` pulls upstream Helm chart bytes into the bundle at bundle time, producing a self-contained artifact that eliminates Helm chart registry egress during deployment (container-image pulls and other resources may still require network access). Each vendored chart is recorded in `provenance.yaml` at the bundle root with name, version, source URL, and SHA256. Requires the `helm` binary on `$PATH` at bundle time; see the [CLI reference](../user/cli-reference.md#vendoring-charts-for-air-gap) for the full tradeoff (CVE-yank signal loss, bundle-size cost, auth surface).
+
 **Execution model**:
 
 - Bundlers run concurrently (parallel execution)

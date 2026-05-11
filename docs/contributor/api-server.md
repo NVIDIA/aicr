@@ -25,6 +25,7 @@ The API server provides HTTP REST access to **Steps 2 and 4 of the AICR workflow
 - Criteria allowlists for accelerator, service, intent, OS via `AICR_ALLOWED_*` env vars
 - Value overrides on `/v1/bundle` via `?set=bundler:path=value` and `?dynamic=component:path` (helm and argocd-helm deployers)
 - Node scheduling via `?system-node-selector` and `?accelerated-node-selector`
+- Air-gap vendoring via `?vendor-charts=true` — the API server container must have `helm` on `$PATH` and credentials for any private upstream registries (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` env vars for HTTP(S); docker config for OCI). The bundle's `provenance.yaml` (at the bundle root) records each vendored chart with name, version, source URL, and SHA256 for air-gap auditing and CVE-yank cross-referencing
 
 For the complete workflow (snapshot → recipe → validate → bundle, ConfigMap I/O via `cm://namespace/name`, agent deployment, Chainsaw E2E in `tests/chainsaw/cli/`), use the CLI.
 

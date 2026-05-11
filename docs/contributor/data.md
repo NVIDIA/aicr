@@ -744,6 +744,177 @@ gb200-eks-training, gb200-eks-ubuntu-training].
 
 Note that multiple maximal leaves can coexist when their inheritance chains are independent — `gb200-any-training` (via wildcard `service: any`) and `gb200-eks-ubuntu-training` (via explicit criteria) are both kept because neither is an ancestor of the other. This is what enables the [criteria-wildcard overlay pattern](#criteria-wildcard-overlays).
 
+## Cluster Fingerprint
+
+`aicr snapshot` emits a structured `fingerprint:` block alongside the raw
+measurements. The fingerprint is a normalized, schema-stable view of the
+cluster-identity dimensions used to bind a snapshot to a recipe — service,
+accelerator, OS, Kubernetes server version, region, total node count, and
+GPU node count — so an evidence bundle (per
+[ADR-007](../design/007-recipe-evidence.md)) can prove the recipe was
+tested on hardware matching its declared criteria.
+
+The fingerprint is derived from the same collector outputs that populate
+`measurements:`; it is not a separate collection pass. Dimensions whose
+source signal is missing surface as zero-value entries — the verifier
+treats those as "unknown" rather than fabricating a match.
+
+> **The persisted `fingerprint:` block is advisory only.** It is a
+> convenience for humans reading the snapshot YAML, not a trust-bearing
+> claim. The snapshot file is not signed at this layer — an attacker
+> controlling it could swap the embedded fingerprint without touching
+> the measurements that back it. Trust-bearing consumers — the
+> evidence bundler ([#754](https://github.com/NVIDIA/aicr/issues/754)),
+> the verifier ([#753](https://github.com/NVIDIA/aicr/issues/753)),
+> and any downstream policy gate — MUST recompute via
+> `fingerprint.FromMeasurements(snap.Measurements)` before acting on
+> the result, and treat zero-value entries as "unknown" per the match
+> semantics below.
+
+### Fingerprint Schema
+
+```yaml
+fingerprint:
+  service:
+    value: eks                       # eks | gke | aks | oke | kind | lke
+    source: k8s.node.provider
+  accelerator:
+    value: h100                      # h100 | gb200 | b200 | a100 | l40 | rtx-pro-6000
+    source: gpu.smi.gpu.model
+  os:
+    value: ubuntu                    # ubuntu | rhel | cos | amazonlinux | talos
+    version: "22.04"                 # raw VERSION_ID for audit; not in criteria
+    source: os.release
+  k8sVersion:
+    value: "1.33.4"                  # leading "v" stripped
+    source: k8s.server.version
+  region:                            # value empty when multi-region or no label
+    value: us-west-2
+    source: nodeTopology.label.topology.kubernetes.io/region
+  nodeCount:                         # all nodes including control plane
+    value: 12
+    source: nodeTopology.summary.node-count
+  gpuNodeCount:                      # nodes carrying the GPU operator label
+    value: 8
+    source: nodeTopology.label.nvidia.com/gpu.product
+```
+
+#### Heterogeneous and stale-registry dimensions
+
+When `accelerator` or `region` cannot be collapsed to a single Value,
+the fingerprint surfaces the reason via an optional `note:` field
+instead of fabricating one. The verifier renders this distinct from
+"value not captured" in its Markdown output. Three notes are emitted
+today:
+
+- `multi-region` — nodes carry different `topology.kubernetes.io/region` labels
+- `multi-gpu` — nodes carry different `nvidia.com/gpu.product` labels
+- `unknown-sku` — nvidia-smi or the GPU operator reported a product
+  string that is not in the recipe accelerator registry (likely
+  registry staleness; the raw model is still recoverable from the
+  underlying measurement)
+
+```yaml
+fingerprint:
+  accelerator:                       # nodes disagree on GPU SKU
+    value: ""
+    source: nodeTopology.label.nvidia.com/gpu.product
+    note: multi-gpu
+  region:                            # nodes disagree on region
+    value: ""
+    source: nodeTopology.label.topology.kubernetes.io/region
+    note: multi-region
+  # Or, for an unrecognized SKU:
+  # accelerator:
+  #   value: ""
+  #   source: gpu.smi.gpu.model
+  #   note: unknown-sku
+```
+
+Every dimension carries a `value` (the resolved, normalized string the
+recipe `criteria` block can be compared against), a `source` string
+identifying which collector signal produced it, and an optional `note`
+string carrying a short audit hint when Value is empty for a reason
+other than missing data (the cases above). ADR-007 reserves additional
+optional fields (`signals[]`, `confidence`) for a future multi-signal
+corroboration extension; V1 records `source` and `note` only.
+
+### Detection Sources
+
+| Dimension | Source | Normalization |
+|-----------|--------|---------------|
+| `service` | `k8s.node.provider` (parsed from `spec.providerID`) | `aws → eks`, `gce → gke`, `azure → aks`, `oci → oke`, else passthrough |
+| `accelerator` | `gpu.smi.gpu.model` (nvidia-smi `ProductName`) | Substring match against the recipe accelerator enum (`GB200` matched before `B200`) |
+| `os.value` | `/etc/os-release` `ID` | Mapped to the `oskind` enum; aliases like `redhat → rhel` and `al2 → amazonlinux` are recognized |
+| `os.version` | `/etc/os-release` `VERSION_ID` | Retained verbatim for audit |
+| `k8sVersion` | `k8s.server.version` | Leading `v` stripped |
+| `region` | `nodeTopology.label.topology.kubernetes.io/region` | Single-region clusters surface the value; multi-region clusters surface `note: multi-region` with empty value |
+| `nodeCount` | `nodeTopology.summary.node-count` | All nodes, control plane included |
+| `gpuNodeCount` | `nodeTopology.label.nvidia.com/gpu.product` | Union of nodes across one or more GPU-product label entries (the canonical GPU-operator presence signal); zero when no GPU operator labels are present |
+| `accelerator` (cluster-wide override) | same as `gpuNodeCount` | When the topology label data shows multiple distinct GPU SKUs across nodes, accelerator surfaces `note: multi-gpu` with empty value — preferring honesty over the smi reading from a single node |
+
+A dimension whose source signal is missing keeps its zero value. The
+verifier reports it as `unknown` rather than mismatched.
+
+### Match Semantics
+
+`fingerprint.Fingerprint.Match` compares a fingerprint against a
+recipe's criteria and returns a per-dimension diff plus an overall
+`matched` flag. Each criteria dimension resolves to one of three
+outcomes:
+
+- **`matched`** — the recipe is generic (`any` / empty) for this
+  dimension, OR the fingerprint captured the same value the recipe
+  requires.
+- **`mismatched`** — the recipe requires a specific value and the
+  fingerprint captured a different specific value.
+- **`unknown`** — the recipe requires a specific value but the
+  fingerprint cannot prove or disprove it. Two cases produce
+  `unknown`: a dimension the cluster does not reveal (`intent`,
+  `platform` — recipe-author choices) and a dimension the
+  fingerprint failed to detect (e.g., no GPU collector output).
+
+The overall `matched` flag is `true` when no dimension is `mismatched`.
+Unknowns surface in the per-dimension diff for human review without
+flipping the overall outcome — the fingerprint cannot disprove a
+match it does not capture.
+
+### Worked Example
+
+Recipe criteria: `service=eks, accelerator=h100, intent=training, os=ubuntu, platform=kubeflow`
+plus the fingerprint above.
+
+```yaml
+matched: true
+perDimension:
+- {dimension: service,     recipeRequires: eks,      fingerprintProvides: eks,    match: matched}
+- {dimension: accelerator, recipeRequires: h100,     fingerprintProvides: h100,   match: matched}
+- {dimension: os,          recipeRequires: ubuntu,   fingerprintProvides: ubuntu, match: matched}
+- {dimension: intent,      recipeRequires: training,                              match: unknown}
+- {dimension: platform,    recipeRequires: kubeflow,                              match: unknown}
+- {dimension: nodes,                                 fingerprintProvides: 12,     match: matched}
+```
+
+`perDimension` is an ordered list so iteration is deterministic and
+serialization is byte-stable; consumers needing lookup by name use
+`MatchResult.Find` rather than indexing.
+
+The bundle's predicate body (per [ADR-007](../design/007-recipe-evidence.md)
+PR-A / #754) records this diff as `criteriaMatch.perDimension`; the
+verifier (#753) renders it in a Markdown summary so the maintainer
+sees exactly which dimensions the fingerprint corroborated.
+
+The predicate body preserves the three-way `match:` state verbatim
+(`matched | mismatched | unknown`) rather than collapsing to a bool.
+The ADR-007 example shows `match: true` for the happy-path case where
+every dimension is matched, but the schema must keep `unknown`
+distinguishable from `matched` — a maintainer reviewing a bundle
+needs to see "intent and platform were not corroborated by the
+fingerprint" rather than "everything matched." A CI gate keyed on
+`criteriaMatch.matched: true` alone gives unknown dimensions a free
+pass; gates that need stronger guarantees should also assert that
+no per-dimension entry has `match: unknown`.
+
 ## Recipe Generation Process
 
 The recipe builder (`pkg/recipe/metadata_store.go`) generates recipes through the following steps:

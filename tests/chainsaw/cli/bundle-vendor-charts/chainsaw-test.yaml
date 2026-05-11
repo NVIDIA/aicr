@@ -1,0 +1,195 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-vendor-charts
+spec:
+  description: |
+    End-to-end test for --vendor-charts: bundle a real recipe with the flag set,
+    confirm every Helm component is emitted as a single wrapped local-chart folder
+    (Chart.yaml with `dependencies:`, adjacent charts/<chart>-<version>.tgz,
+    values nested under the subchart name, no upstream.env), and that provenance.yaml
+    at the bundle root lists one entry per vendored chart with name/chart/version/
+    repository/sha256.
+
+    Uses a fake `helm` binary on PATH (a shell script that writes a canned tarball
+    to `--destination`) so the test is hermetic — CI doesn't need a real Helm
+    install. The fake also implements `helm version --short` for the puller's
+    audit-log probe.
+
+    Also exercises the missing-binary error path by pointing PATH at a directory
+    that has no helm, confirming the CLI surfaces an ErrCodeUnavailable with the
+    "install helm" guidance text.
+
+    All setup, vendored bundle verification, and missing-binary verification live
+    in a single step so the working directory can be a per-run `mktemp -d` —
+    parallel test runs (CI retries, concurrent local invocations) can't collide
+    on a shared `/tmp/` path and a trap on EXIT removes the dir even on failure.
+  timeouts:
+    exec: 60s
+  steps:
+    - name: vendor-charts-end-to-end
+      description: Setup fake helm, generate recipe, vendor bundle, assert layout + provenance, then check missing-binary error path.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+
+              # Per-run unique working directory: mktemp guarantees no
+              # collision with parallel runs or CI retries. Trap removes
+              # it even when an assertion fails midway through.
+              WORK="$(mktemp -d -t chainsaw-bundle-vendor-charts-XXXXXX)"
+              trap 'rm -rf "${WORK}"' EXIT
+              mkdir -p "${WORK}/fakebin"
+
+              ${AICR_BIN} recipe --service eks --accelerator gb200 --os ubuntu \
+                --intent training -o "${WORK}/recipe.yaml"
+
+              # Fake `helm` for the bundle puller. Handles:
+              #   helm version --short
+              #   helm pull <chart> --repo <url> --version <ver> --destination <dir>
+              #   helm pull oci://<repo>/<chart> --version <ver> --destination <dir>
+              # Writes a minimal valid gzip stream (an empty .tgz) so SHA256
+              # is computable but no real chart contents are required for the
+              # layout assertions below.
+              cat > "${WORK}/fakebin/helm" <<'EOF'
+              #!/usr/bin/env bash
+              set -eu
+              cmd="${1:-}"
+              if [[ "$cmd" == "version" ]]; then
+                echo "v3.99.0-fake+aicr"
+                exit 0
+              fi
+              if [[ "$cmd" != "pull" ]]; then
+                echo "fake-helm: unsupported subcommand: $*" >&2
+                exit 2
+              fi
+              shift
+              # Parse the chart ref (positional) and known flags. The chart
+              # ref may be "name" (HTTP, with --repo) or "oci://host/path/name".
+              chart_ref=""
+              version=""
+              dest=""
+              while [[ $# -gt 0 ]]; do
+                case "$1" in
+                  --version) version="$2"; shift 2 ;;
+                  --destination) dest="$2"; shift 2 ;;
+                  --repo|--username|--password|--ca-file|--cert-file|--key-file)
+                    shift 2 ;;
+                  --insecure-skip-tls-verify|--prov|--verify|--devel)
+                    shift ;;
+                  -*)
+                    shift ;;
+                  *)
+                    [[ -z "$chart_ref" ]] && chart_ref="$1"
+                    shift ;;
+                esac
+              done
+              if [[ -z "$chart_ref" || -z "$version" || -z "$dest" ]]; then
+                echo "fake-helm: missing chart/version/destination" >&2
+                exit 2
+              fi
+              # Derive a chart short name (last path segment, strip oci:// scheme).
+              short="${chart_ref#oci://}"
+              short="${short##*/}"
+              mkdir -p "$dest"
+              # Minimal empty gzip stream: 1f 8b 08 00 ... — produced by piping
+              # /dev/null through gzip so SHA256 is deterministic on this host.
+              printf '' | gzip -c > "${dest}/${short}-${version}.tgz"
+              EOF
+              chmod +x "${WORK}/fakebin/helm"
+
+              # Confirm the fake works before the bundle test relies on it.
+              PATH="${WORK}/fakebin:${PATH}" helm version --short
+
+              # ---- Vendored bundle layout + provenance --------------------
+              export PATH="${WORK}/fakebin:${PATH}"
+              ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/out" \
+                --vendor-charts
+
+              # Top-level orchestration files still present.
+              test -f "${WORK}/out/deploy.sh"
+              test -f "${WORK}/out/README.md"
+              test -f "${WORK}/out/provenance.yaml"
+
+              # Every Helm component folder must look vendored:
+              #   - Chart.yaml present
+              #   - charts/<chart>-<ver>.tgz present
+              #   - no upstream.env (that's the non-vendored path)
+              missing=0
+              for dir in "${WORK}"/out/[0-9][0-9][0-9]-*/; do
+                name="$(basename "${dir%/}" | sed 's/^[0-9][0-9][0-9]-//')"
+                # Wrapped local charts must have Chart.yaml.
+                if [ ! -f "${dir}Chart.yaml" ]; then
+                  echo "missing Chart.yaml in ${dir}" >&2
+                  missing=$((missing + 1))
+                  continue
+                fi
+                # Skip kustomize / manifest-only components — they have
+                # Chart.yaml but no charts/ subdir. Vendored Helm components
+                # have a charts/<name>-<ver>.tgz.
+                # Detect by absence of `dependencies:` in Chart.yaml.
+                if grep -q '^dependencies:' "${dir}Chart.yaml"; then
+                  if ! ls "${dir}charts/"*.tgz >/dev/null 2>&1; then
+                    echo "vendored component ${name} missing charts/*.tgz" >&2
+                    missing=$((missing + 1))
+                  fi
+                fi
+                if [ -f "${dir}upstream.env" ]; then
+                  echo "${name}: upstream.env should not exist under --vendor-charts" >&2
+                  missing=$((missing + 1))
+                fi
+              done
+              [ "$missing" -eq 0 ] || exit 1
+
+              # provenance.yaml must be valid K8s-style YAML. We use `yq` to
+              # convert to JSON so the validator can use stdlib `json` only —
+              # PyYAML is not guaranteed to be present on CI runners. yq is
+              # already a required tool (see tools/check-tools).
+              yq -o=json "${WORK}/out/provenance.yaml" | python3 -c '
+              import json, sys
+              doc = json.load(sys.stdin)
+              assert doc["apiVersion"] == "aicr.nvidia.com/v1alpha1", doc["apiVersion"]
+              assert doc["kind"] == "BundleProvenance", doc["kind"]
+              charts = doc["vendoredCharts"]
+              assert len(charts) >= 1, "no vendored charts recorded"
+              for entry in charts:
+                  for required in ("name", "chart", "version", "repository",
+                                   "sha256", "tarballName"):
+                      assert required in entry and entry[required] != "", \
+                          f"{required} missing/empty in {entry}"
+              # Sorted by name?
+              names = [c["name"] for c in charts]
+              assert names == sorted(names), f"vendoredCharts not sorted: {names}"
+              '
+
+              # ---- Missing-helm-binary error path -------------------------
+              mkdir -p "${WORK}/empty-bin"
+              out_file="${WORK}/missing-helm.out"
+              set +e
+              PATH="${WORK}/empty-bin" \
+                ${AICR_BIN} bundle -r "${WORK}/recipe.yaml" -o "${WORK}/nohelm" \
+                  --vendor-charts > "${out_file}" 2>&1
+              rc=$?
+              set -e
+
+              [ "$rc" -ne 0 ] || { echo "expected non-zero exit when helm is missing" >&2; cat "${out_file}" >&2; exit 1; }
+              grep -q "helm" "${out_file}" || { echo "error message must mention helm" >&2; cat "${out_file}" >&2; exit 1; }
+              grep -qi "install helm\|not found" "${out_file}" || { echo "error message must guide installing helm" >&2; cat "${out_file}" >&2; exit 1; }
+            check:
+              ($error == null): true

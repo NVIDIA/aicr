@@ -22,6 +22,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -245,9 +246,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "K8s",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "server",
+								Name: "node",
 								Data: map[string]measurement.Reading{
-									"service": measurement.Str("eks"),
+									"provider": measurement.Str("eks"),
 								},
 							},
 						},
@@ -268,9 +269,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "GPU",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "device",
+								Name: "smi",
 								Data: map[string]measurement.Reading{
-									"model": measurement.Str("NVIDIA H100 80GB HBM3"),
+									"gpu.model": measurement.Str("NVIDIA H100 80GB HBM3"),
 								},
 							},
 						},
@@ -291,9 +292,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "GPU",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "device",
+								Name: "smi",
 								Data: map[string]measurement.Reading{
-									"model": measurement.Str("NVIDIA GB200"),
+									"gpu.model": measurement.Str("NVIDIA GB200"),
 								},
 							},
 						},
@@ -337,9 +338,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "K8s",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "server",
+								Name: "node",
 								Data: map[string]measurement.Reading{
-									"service": measurement.Str("gke"),
+									"provider": measurement.Str("gke"),
 								},
 							},
 						},
@@ -348,9 +349,9 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 						Type: "GPU",
 						Subtypes: []measurement.Subtype{
 							{
-								Name: "device",
+								Name: "smi",
 								Data: map[string]measurement.Reading{
-									"model": measurement.Str("A100-SXM4-80GB"),
+									"gpu.model": measurement.Str("NVIDIA A100-SXM4-80GB"),
 								},
 							},
 						},
@@ -384,7 +385,11 @@ func TestExtractCriteriaFromSnapshot(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			criteria := recipe.ExtractCriteriaFromSnapshot(tt.snapshot)
+			var measurements []*measurement.Measurement
+			if tt.snapshot != nil {
+				measurements = tt.snapshot.Measurements
+			}
+			criteria := fingerprint.FromMeasurements(measurements).ToCriteria()
 
 			if tt.validate != nil {
 				tt.validate(t, criteria)
