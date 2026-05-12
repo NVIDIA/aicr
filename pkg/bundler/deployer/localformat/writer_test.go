@@ -211,6 +211,141 @@ metadata:
 	}
 }
 
+// TestWrite_PreFolderInstallOmitsCreateNamespace asserts that a
+// pre-injection folder's install.sh does NOT pass --create-namespace
+// to helm, while the primary and post folders still do. Helm 3 refuses
+// to import a pre-existing namespace lacking
+// app.kubernetes.io/managed-by=Helm + meta.helm.sh/release-name
+// annotations, so pre folders (which carry the Namespace manifest by
+// design) must let the chart's own Namespace template create it. See
+// pkg/bundler/deployer/localformat/local_helm.go writeLocalHelmFolder
+// docstring for the full rationale.
+func TestWrite_PreFolderInstallOmitsCreateNamespace(t *testing.T) {
+	outDir := t.TempDir()
+	const licenseHeader = `# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+`
+
+	if _, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       "foo",
+			Namespace:  "privileged-foo",
+			Repository: "https://example.invalid/charts",
+			ChartName:  "example/foo",
+			Version:    "v1.0.0",
+		}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"foo/manifests/talos-namespace.yaml": []byte(licenseHeader +
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: privileged-foo\n"),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"foo": {
+				"foo/manifests/cm.yaml": []byte(licenseHeader +
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm\n"),
+			},
+		},
+	}); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	tests := []struct {
+		name                 string
+		installPath          string
+		wantCreateNamespace  bool
+		wantNamespaceLiteral string
+	}{
+		{
+			name:                 "pre folder omits --create-namespace",
+			installPath:          "001-foo-pre/install.sh",
+			wantCreateNamespace:  false,
+			wantNamespaceLiteral: "--namespace privileged-foo \\",
+		},
+		{
+			name:                 "primary folder keeps --create-namespace",
+			installPath:          "002-foo/install.sh",
+			wantCreateNamespace:  true,
+			wantNamespaceLiteral: "--namespace privileged-foo --create-namespace \\",
+		},
+		{
+			name:                 "post folder keeps --create-namespace",
+			installPath:          "003-foo-post/install.sh",
+			wantCreateNamespace:  true,
+			wantNamespaceLiteral: "--namespace privileged-foo --create-namespace \\",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := os.ReadFile(filepath.Join(outDir, tc.installPath))
+			if err != nil {
+				t.Fatalf("read install.sh: %v", err)
+			}
+			s := string(b)
+			if got := strings.Contains(s, "--create-namespace"); got != tc.wantCreateNamespace {
+				t.Errorf("--create-namespace present = %v, want %v\n%s", got, tc.wantCreateNamespace, s)
+			}
+			if !strings.Contains(s, tc.wantNamespaceLiteral) {
+				t.Errorf("install.sh missing literal %q; got:\n%s", tc.wantNamespaceLiteral, s)
+			}
+		})
+	}
+}
+
+// TestWrite_PreManifestNamespaceDrift asserts that the writer rejects
+// a pre-manifest whose Namespace metadata.name disagrees with the
+// component's release namespace. Without this guard, the bundle would
+// pass type checks but blow up at `helm install` time with an opaque
+// "namespace not found" error because the chart creates one namespace
+// while the release targets another.
+func TestWrite_PreManifestNamespaceDrift(t *testing.T) {
+	_, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: t.TempDir(),
+		Components: []localformat.Component{{
+			Name:       "foo",
+			Namespace:  "privileged-foo",
+			Repository: "https://example.invalid/charts",
+			ChartName:  "example/foo",
+			Version:    "v1.0.0",
+		}},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"foo": {
+				"foo/manifests/typo-namespace.yaml": []byte(
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: privileged-foobar\n",
+				),
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("Write must reject pre-manifest Namespace name that drifts from ComponentRef.Namespace")
+	}
+	var se *errors.StructuredError
+	if !stderrors.As(err, &se) {
+		t.Fatalf("error is %T, want *errors.StructuredError: %v", err, err)
+	}
+	if se.Code != errors.ErrCodeInvalidRequest {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", se.Code)
+	}
+	for _, want := range []string{"privileged-foo", "privileged-foobar", "typo-namespace.yaml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error message missing %q; got: %v", want, err)
+		}
+	}
+}
+
 func TestWrite_Ordering(t *testing.T) {
 	outDir := t.TempDir()
 	mk := func(name, repo string) localformat.Component {

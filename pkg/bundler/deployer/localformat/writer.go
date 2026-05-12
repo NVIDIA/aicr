@@ -18,9 +18,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"text/template"
+
+	stderrors "errors"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -159,10 +164,17 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 	}
 	auxName := c.Name + "-" + string(phase)
 	auxDir := fmt.Sprintf("%03d-%s", idx, auxName)
+	// Pre-phase folders carry a Namespace manifest by design (the
+	// privileged-namespace template), so install.sh must not pass
+	// --create-namespace: Helm 3 refuses to import a pre-existing
+	// namespace into the release. Post-phase folders never contain a
+	// Namespace template; --create-namespace is a no-op there since the
+	// primary release has already created it.
+	createNamespace := phase != phasePre
 	f, err := writeLocalHelmFolder(
 		opts.OutputDir, auxDir, idx, c,
 		manifests, renderInputFor(c),
-		auxName, c.Name,
+		auxName, c.Name, createNamespace,
 	)
 	if err != nil {
 		return nil, err
@@ -235,6 +247,19 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 				return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("component %q has preManifestFiles and would inject %q-pre, but a component named %q-pre is already declared in the recipe — rename one to avoid collision",
 						c.Name, c.Name, c.Name))
+			}
+			// Drift guard: any Namespace doc in a pre-manifest must
+			// target ComponentRef.Namespace. The pre folder's
+			// install.sh deliberately omits --create-namespace (the
+			// chart's Namespace template is what creates it); if the
+			// rendered Namespace metadata.name disagrees with the
+			// release's --namespace, helm creates one namespace and
+			// looks for the release in another, and install fails
+			// with an opaque "namespace not found" downstream.
+			// Catch the mismatch at bundle time with the offending
+			// path so a recipe author can fix the YAML directly.
+			if err := validatePreManifestNamespace(c.Name, c.Namespace, opts.ComponentPreManifests[c.Name]); err != nil {
+				return WriteResult{}, err
 			}
 		}
 		if opts.VendorCharts {
@@ -374,9 +399,14 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 				}
 				manifests = map[string][]byte{"manifest.yaml": rendered}
 			}
+			// Primary local-helm folders never contain a Namespace
+			// template (recipe convention: Namespace lives in the pre
+			// folder). Pass createNamespace=true so install.sh can spin
+			// up the namespace for manifest-only / kustomize components
+			// that aren't preceded by a pre folder.
 			f, err := writeLocalHelmFolder(opts.OutputDir, dir, idx, c,
 				manifests, renderInputFor(c),
-				c.Name, c.Name)
+				c.Name, c.Name, true)
 			if err != nil {
 				return WriteResult{}, err
 			}
@@ -530,6 +560,59 @@ func writeFile(path string, contents []byte, mode os.FileMode) error {
 	}
 	if closeErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("close %s", path), closeErr)
+	}
+	return nil
+}
+
+// validatePreManifestNamespace scans each pre-manifest doc for kind:
+// Namespace entries and requires metadata.name to equal expectedNS.
+// Pre-folder install.sh deliberately omits --create-namespace so the
+// chart's own Namespace template is the sole namespace-creator; if its
+// metadata.name drifts from ComponentRef.Namespace, helm creates one
+// namespace and looks for the release in another, and install fails
+// downstream with an opaque error. Catch the mismatch at bundle time
+// with the offending file path so a recipe author can fix the YAML
+// directly.
+//
+// Non-Namespace documents and documents whose kind/metadata.name are
+// templated (helm {{ }} placeholders that fail YAML parsing) are
+// skipped: a literal name vs c.Namespace comparison is meaningful
+// only for static manifests, which is the os-talos mixin's contract
+// and the only shape we want to guard against silent drift for.
+func validatePreManifestNamespace(componentName, expectedNS string, manifests map[string][]byte) error {
+	for path, body := range manifests {
+		dec := yaml.NewDecoder(bytes.NewReader(body))
+		for {
+			var doc map[string]any
+			err := dec.Decode(&doc)
+			if stderrors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				// Templated docs (e.g. metadata.name: {{ .Release.Namespace }})
+				// fail YAML parsing. Don't fail the bundle here — the chart's
+				// own renderer will reject genuinely malformed YAML; we're only
+				// guarding the static-mixin shape.
+				break
+			}
+			if len(doc) == 0 {
+				continue
+			}
+			kind, _ := doc["kind"].(string)
+			if kind != "Namespace" {
+				continue
+			}
+			meta, _ := doc["metadata"].(map[string]any)
+			name, _ := meta["name"].(string)
+			if name == "" {
+				continue
+			}
+			if name != expectedNS {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: pre-manifest %s declares Namespace/%q but componentRef.namespace is %q — the pre folder's chart creates the Namespace, so the release namespace (%q) and the chart's metadata.name (%q) must match",
+						componentName, path, name, expectedNS, expectedNS, name))
+			}
+		}
 	}
 	return nil
 }

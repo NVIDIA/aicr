@@ -1100,9 +1100,9 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 		for _, manifestPath := range paths {
 			content, err := recipe.GetManifestContent(manifestPath)
 			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInternal,
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 					fmt.Sprintf("failed to load manifest %s for component %s",
-						manifestPath, ref.Name), err)
+						manifestPath, ref.Name))
 			}
 			componentManifests[manifestPath] = content
 		}

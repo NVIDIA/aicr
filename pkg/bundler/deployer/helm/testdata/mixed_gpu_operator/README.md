@@ -18,7 +18,7 @@ via its own `install.sh`:
 
 | Component | Version | Namespace | Source |
 |-----------|---------|-----------|--------|
-| gpu-operator | v25.3.3 | gpu-operator | gpu-operator (https://helm.ngc.nvidia.com/nvidia) |
+| gpu-operator | v25.3.3 | privileged-gpu-operator | gpu-operator (https://helm.ngc.nvidia.com/nvidia) |
 
 
 
@@ -80,7 +80,7 @@ To remove components (reverse order):
 Or remove a single release manually:
 
 ```bash
-helm uninstall gpu-operator -n gpu-operator
+helm uninstall gpu-operator -n privileged-gpu-operator
 ```
 
 

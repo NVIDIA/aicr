@@ -161,7 +161,7 @@ echo "Running pre-flight checks..."
 preflight_failed=false
 
 # Bundle namespace list (deduplicated)
-BUNDLE_NAMESPACES=$(echo "gpu-operator " | tr ' ' '\n' | sort -u | tr '\n' ' ')
+BUNDLE_NAMESPACES=$(echo "privileged-gpu-operator " | tr ' ' '\n' | sort -u | tr '\n' ' ')
 
 # Check for terminating namespaces that overlap with our components
 for ns in ${BUNDLE_NAMESPACES}; do

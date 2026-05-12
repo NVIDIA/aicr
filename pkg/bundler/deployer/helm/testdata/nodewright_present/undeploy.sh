@@ -463,6 +463,10 @@ for dir in $(ls -1d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/ 2>/dev/null | sort -r); d
   if [[ "${name}" == "nodewright-operator" ]]; then ns="skyhook"; fi
   # Injected mixed-component "-post" folders share their parent's namespace.
   if [[ "${name}" == "nodewright-operator-post" ]]; then ns="skyhook"; fi
+  # Injected "-pre" folders (preManifestFiles) also share their parent's namespace.
+  # Without this mapping, ns remains empty for foo-pre and the release is
+  # silently skipped, leaving the privileged-namespace release orphaned.
+  if [[ "${name}" == "nodewright-operator-pre" ]]; then ns="skyhook"; fi
   if [[ -z "${ns}" ]]; then
     echo "Warning: no namespace known for ${name}; skipping uninstall" >&2
     continue

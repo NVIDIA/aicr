@@ -1,6 +1,3 @@
-<!-- Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved. -->
-<!-- SPDX-License-Identifier: Apache-2.0 -->
-
 # Talos integration
 
 Talos Linux enforces stricter pod-security defaults than most managed
@@ -99,7 +96,7 @@ Background:
 
 For each affected component the bundle contains:
 
-```
+```text
 NNN-<component>-pre/   # Namespace + PSA labels (sync-wave N-1 in Argo CD)
 (NNN+1)-<component>/    # the chart (sync-wave N in Argo CD)
 ```

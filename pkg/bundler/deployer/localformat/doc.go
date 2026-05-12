@@ -97,9 +97,11 @@
 //     charts. Populated from ComponentRef.ManifestFiles.
 //   - ComponentPreManifests carries manifests intended to apply BEFORE
 //     each component's primary chart (e.g. an OS-specific namespace).
-//     Populated from ComponentRef.PreManifestFiles; the writer threads
-//     the map through but does not yet emit pre-phase folders — that
-//     wiring lands in a follow-up commit.
+//     Populated from ComponentRef.PreManifestFiles. The writer emits a
+//     wrapped "<name>-pre" local-helm folder ahead of the primary
+//     folder when this map has entries for the component; install.sh
+//     in the pre folder omits --create-namespace because the chart's
+//     Namespace template owns namespace creation.
 //
 // Write returns a []Folder manifest so deployers can generate their own
 // orchestration files without re-classifying or re-reading disk.

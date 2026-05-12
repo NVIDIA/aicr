@@ -2003,7 +2003,7 @@ func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 	outDir := t.TempDir()
 	g := &Generator{
 		RecipeResult: singleComponentRecipe(
-			"gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+			"gpu-operator", "privileged-gpu-operator", "gpu-operator", "v25.3.3",
 			"https://helm.ngc.nvidia.com/nvidia"),
 		ComponentValues: map[string]map[string]any{
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},

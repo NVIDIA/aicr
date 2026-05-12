@@ -20,9 +20,14 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      # ServerSideApply: required for charts whose CRDs exceed kubectl's
-      # 262144-byte client-side annotation cap (e.g., kube-prometheus-stack,
-      # kai-scheduler). Without this, Argo's sync retries forever with
-      # "metadata.annotations: Too long". server-side apply uses the
-      # apiserver's structured-merge path and has no such cap.
+      # ServerSideApply: enabled uniformly across all generated
+      # Applications. Required for charts whose CRDs exceed kubectl's
+      # 262144-byte client-side annotation cap (e.g.,
+      # kube-prometheus-stack, kai-scheduler) — otherwise Argo's sync
+      # retries forever with "metadata.annotations: Too long". The
+      # apiserver's structured-merge path has no such cap. Benign on
+      # Applications that don't need it (pre-folder Namespaces,
+      # post-folder ConfigMaps) — keeping it on every Application avoids
+      # per-Application template branching and a confusing mix of sync
+      # strategies in a single bundle.
       - ServerSideApply=true

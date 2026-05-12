@@ -105,8 +105,12 @@ type ComponentRef struct {
 
 	// PreManifestFiles lists manifest files that must be bundled and applied
 	// BEFORE the component's primary chart. Paths are relative to the data
-	// directory. Used for resources the chart depends on (e.g. a Namespace
-	// with PSS labels that the chart's pods need to land in). Bundler emits
+	// directory; ".." segments are rejected at load time (external data
+	// directories enforce a path-traversal check during file registration,
+	// and embed.FS refuses any read that resolves outside its root), so a
+	// recipe cannot read arbitrary files outside the embedded/external data
+	// root. Used for resources the chart depends on (e.g. a Namespace with
+	// PSS labels that the chart's pods need to land in). Bundler emits
 	// these as a "<name>-pre" local-helm folder at sync-wave N-1 (Argo) or
 	// install step N-1 (Helm); the primary chart lands at wave N; existing
 	// ManifestFiles still land at wave N+1 as before.
