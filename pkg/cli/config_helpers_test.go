@@ -83,12 +83,13 @@ func TestStringFlagOrConfig(t *testing.T) {
 			want:     "",
 		},
 		{
-			// Regression: when config has no value for a field, the
-			// flag's compile-time default must surface — not the empty
-			// string. Found via PR-W e2e: --namespace (Value:
-			// "aicr-validation") collapsed to "" when --config wasn't
-			// passed, and validation crashed trying to create a
-			// namespace named "".
+			// Regression: when both the CLI flag and the config fallback
+			// are empty, the flag's compile-time Value: default must
+			// surface — not the empty string. Caught on `aicr validate`:
+			// --namespace declares Value: "aicr-validation" but collapsed
+			// to "" when --config did not set spec.validate.agent.namespace,
+			// which crashed downstream namespace creation with
+			// "name: Required value".
 			name:     "no fallback no flag returns flag default value",
 			args:     []string{},
 			flagDef:  &cli.StringFlag{Name: "x", Value: "default"},

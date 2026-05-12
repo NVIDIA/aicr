@@ -34,3 +34,36 @@ const (
 // Note: Readiness phase is NOT included. It remains in pkg/validator
 // and uses inline constraint evaluation (no containers).
 var PhaseOrder = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
+
+// PhaseAll is the wildcard string accepted by both the `aicr validate
+// --phase` CLI flag and the spec.validate.execution.phases config field
+// to mean "run every phase." It is not a Phase value — the CLI parser
+// collapses it into a nil selection that ValidatePhases interprets as
+// "run all phases."
+const PhaseAll = "all"
+
+// PhaseNames is the canonical user-facing vocabulary accepted by the
+// --phase flag and spec.validate.execution.phases. The typed Phase
+// constants in PhaseOrder plus the PhaseAll wildcard. Single source of
+// truth so the CLI parser and the config-load validator stay in sync
+// when a phase is added or removed.
+var PhaseNames = []string{
+	string(PhaseDeployment),
+	string(PhasePerformance),
+	string(PhaseConformance),
+	PhaseAll,
+}
+
+// ParsePhase converts a user-facing phase name to its typed Phase value.
+// Returns false for PhaseAll (the wildcard, which has no Phase value)
+// and for unrecognized inputs. Callers that want to accept the wildcard
+// handle it separately, typically by collapsing the whole selection to
+// nil (= run every phase).
+func ParsePhase(s string) (Phase, bool) {
+	for _, p := range PhaseOrder {
+		if string(p) == s {
+			return p, true
+		}
+	}
+	return "", false
+}

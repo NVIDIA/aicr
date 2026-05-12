@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 // BundleResolved is the typed-domain projection of BundleSpec produced by
@@ -293,17 +295,17 @@ type ValidateResolved struct {
 	Timeout *time.Duration
 }
 
-// validatePhases is the canonical set of phase strings accepted in
-// spec.validate.execution.phases. Kept local to pkg/config to avoid a
-// pkg/validator import for what is just a string-set check; the CLI
-// layer (parseValidationPhases) re-validates with the same vocabulary
-// when it converts strings to typed validator.Phase values.
-var validPhases = map[string]bool{
-	"deployment":  true,
-	"performance": true,
-	"conformance": true,
-	"all":         true,
-}
+// validPhasesSet derives the accepted spec.validate.execution.phases
+// vocabulary from validator.PhaseNames so it cannot drift from the CLI
+// parser when phases are added or removed. Recomputed once at package
+// init from the canonical slice.
+var validPhasesSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(validator.PhaseNames))
+	for _, p := range validator.PhaseNames {
+		m[p] = struct{}{}
+	}
+	return m
+}()
 
 // Resolve converts a ValidateSpec from the wire-string form to a typed
 // ValidateResolved. It is nil-receiver tolerant and never returns a nil
@@ -344,9 +346,10 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 
 	if v.Execution != nil {
 		for _, p := range v.Execution.Phases {
-			if !validPhases[p] {
+			if _, ok := validPhasesSet[p]; !ok {
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("invalid spec.validate.execution.phases entry %q: must be one of: deployment, performance, conformance, all", p))
+					fmt.Sprintf("invalid spec.validate.execution.phases entry %q: must be one of: %s",
+						p, strings.Join(validator.PhaseNames, ", ")))
 			}
 		}
 		out.Phases = slices.Clone(v.Execution.Phases)

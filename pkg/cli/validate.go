@@ -55,34 +55,44 @@ type validateAgentConfig struct {
 	requireGPU         bool
 }
 
-// parseValidateAgentConfig parses agent deployment flags from the command,
-// using the resolved AICRConfig validate section as the fallback when a
-// flag is not explicitly set on the command line.
-func parseValidateAgentConfig(cmd *cli.Command, resolved *config.ValidateResolved) (*validateAgentConfig, error) {
-	nodeSelector, err := resolveValidateNodeSelector(cmd, resolved)
-	if err != nil {
-		return nil, err
-	}
-
-	tolerations, err := resolveValidateTolerations(cmd, resolved)
-	if err != nil {
-		return nil, err
-	}
+// parseValidateAgentConfig builds the snapshot-capture agent's deployment
+// config. Shared inputs (nodeSelector, tolerations, imagePullSecrets,
+// namespace, cleanup) are resolved once by the caller and passed in; this
+// keeps any CLI-overrides-config slog.Info from firing twice when both
+// the agent and the downstream validator job want the same value.
+func parseValidateAgentConfig(
+	cmd *cli.Command,
+	resolved *config.ValidateResolved,
+	shared validateSharedResolved,
+) *validateAgentConfig {
 
 	return &validateAgentConfig{
 		kubeconfig:         cmd.String("kubeconfig"),
-		namespace:          stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
+		namespace:          shared.namespace,
 		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
-		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
+		imagePullSecrets:   shared.imagePullSecrets,
 		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
 		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
-		nodeSelector:       nodeSelector,
-		tolerations:        tolerations,
+		nodeSelector:       shared.nodeSelector,
+		tolerations:        shared.tolerations,
 		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
-		cleanup:            !boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
+		cleanup:            !shared.noCleanup,
 		debug:              cmd.Bool("debug"),
 		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU),
-	}, nil
+	}
+}
+
+// validateSharedResolved holds the validate-command fields that get
+// consumed by both the snapshot-capture agent path AND the validator Job
+// path. Resolving them once and threading through avoids duplicate
+// CLI-overrides-config log lines that would otherwise fire from
+// every helper call site.
+type validateSharedResolved struct {
+	namespace        string
+	imagePullSecrets []string
+	nodeSelector     map[string]string
+	tolerations      []corev1.Toleration
+	noCleanup        bool
 }
 
 // derefBoolOr returns *p when p is non-nil, otherwise fallback. Used to
@@ -139,31 +149,29 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 	return resolved.Tolerations, nil
 }
 
-// parseValidationPhases parses phase strings into Phase values.
+// parseValidationPhases parses phase strings into Phase values, accepting
+// the canonical vocabulary in validator.PhaseNames. The validator.PhaseAll
+// wildcard collapses the whole selection to nil (= run every phase),
+// matching the documented "Default: all phases" behavior.
 func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	if len(phaseStrs) == 0 {
 		return nil, nil // nil = all phases
 	}
 
 	for _, s := range phaseStrs {
-		if s == "all" {
+		if s == validator.PhaseAll {
 			return nil, nil
 		}
-	}
-
-	validPhases := map[string]validator.Phase{
-		"deployment":  validator.PhaseDeployment,
-		"performance": validator.PhasePerformance,
-		"conformance": validator.PhaseConformance,
 	}
 
 	seen := make(map[validator.Phase]bool)
 	var phases []validator.Phase
 	for _, s := range phaseStrs {
-		p, ok := validPhases[s]
+		p, ok := validator.ParsePhase(s)
 		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid phase %q: must be one of: deployment, performance, conformance, all", s))
+				fmt.Sprintf("invalid phase %q: must be one of: %s",
+					s, strings.Join(validator.PhaseNames, ", ")))
 		}
 		if !seen[p] {
 			phases = append(phases, p)
@@ -570,8 +578,6 @@ Run validation without failing on check errors (informational mode):
 			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", resolved.SnapshotPath)
 			kubeconfig := cmd.String("kubeconfig")
 
-			validationNamespace := stringFlagOrConfig(cmd, "namespace", resolved.Namespace)
-
 			if recipeFilePath == "" {
 				return errors.New(errors.ErrCodeInvalidRequest,
 					"--recipe is required (or set spec.validate.input.recipe in --config)")
@@ -579,6 +585,26 @@ Run validation without failing on check errors (informational mode):
 
 			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(resolved.FailOnError, true))
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
+
+			// Resolve shared fields once, before the snapshot/agent split, so
+			// CLI-overrides-config log lines fire exactly once per field even
+			// when both the agent-deploy path and the validator Job want the
+			// same value.
+			tolerations, err := resolveValidateTolerations(cmd, resolved)
+			if err != nil {
+				return err
+			}
+			nodeSelector, err := resolveValidateNodeSelector(cmd, resolved)
+			if err != nil {
+				return err
+			}
+			shared := validateSharedResolved{
+				namespace:        stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
+				imagePullSecrets: stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
+				nodeSelector:     nodeSelector,
+				tolerations:      tolerations,
+				noCleanup:        boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
+			}
 
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
@@ -596,7 +622,7 @@ Run validation without failing on check errors (informational mode):
 			// recipe kind-check and auto-hydration still run for CLI coverage.
 			if snapshotFilePath == "" && noCluster {
 				return errors.New(errors.ErrCodeInvalidRequest,
-					"--no-cluster requires --snapshot (cannot deploy the snapshot-capture agent without cluster access)")
+					"--no-cluster requires --snapshot (or set spec.validate.input.snapshot in --config); cannot deploy the snapshot-capture agent without cluster access")
 			}
 
 			if snapshotFilePath != "" {
@@ -608,10 +634,7 @@ Run validation without failing on check errors (informational mode):
 			} else {
 				slog.Info("deploying agent to capture snapshot")
 
-				agentCfg, cfgErr := parseValidateAgentConfig(cmd, resolved)
-				if cfgErr != nil {
-					return cfgErr
-				}
+				agentCfg := parseValidateAgentConfig(cmd, resolved, shared)
 
 				var deployErr error
 				snap, _, deployErr = deployAgentForValidation(ctx, agentCfg)
@@ -620,24 +643,14 @@ Run validation without failing on check errors (informational mode):
 				}
 			}
 
-			tolerations, err := resolveValidateTolerations(cmd, resolved)
-			if err != nil {
-				return err
-			}
-			nodeSelector, err := resolveValidateNodeSelector(cmd, resolved)
-			if err != nil {
-				return err
-			}
-
 			// Validate that requested phases are defined in the recipe.
 			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
 				return err
 			}
 
-			noCleanup := boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup)
-			if noCleanup {
+			if shared.noCleanup {
 				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
-					"namespace", validationNamespace,
+					"namespace", shared.namespace,
 					"binding", "aicr-validator")
 			}
 
@@ -646,12 +659,12 @@ Run validation without failing on check errors (informational mode):
 				output:              cmd.String("output"),
 				outFormat:           serializer.FormatJSON,
 				failOnError:         failOnError,
-				validationNamespace: validationNamespace,
-				cleanup:             !noCleanup,
-				imagePullSecrets:    stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
+				validationNamespace: shared.namespace,
+				cleanup:             !shared.noCleanup,
+				imagePullSecrets:    shared.imagePullSecrets,
 				noCluster:           noCluster,
-				nodeSelector:        nodeSelector,
-				tolerations:         tolerations,
+				nodeSelector:        shared.nodeSelector,
+				tolerations:         shared.tolerations,
 				evidenceDir:         evidenceDir,
 			})
 		},
