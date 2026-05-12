@@ -558,7 +558,7 @@ Run validation without failing on check errors (informational mode):
 				return err
 			}
 
-			if initErr := initDataProvider(cmd, nil); initErr != nil {
+			if initErr := initDataProvider(cmd, cfg); initErr != nil {
 				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", initErr)
 			}
 

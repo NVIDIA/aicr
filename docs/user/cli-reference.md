@@ -725,8 +725,8 @@ under `spec.validate`. CLI flags always override values loaded from `--config`;
 override events are logged at INFO so users can see which input won.
 
 Evidence-related flags (`--evidence-dir`, `--cncf-submission`, `--feature`) are
-currently CLI-only. They will move under a dedicated evidence section in a
-future release alongside the recipe-attestation work.
+CLI-only and not sourced from `--config` (tracked in
+[#754](https://github.com/NVIDIA/aicr/issues/754)).
 
 **Supported schema:**
 
