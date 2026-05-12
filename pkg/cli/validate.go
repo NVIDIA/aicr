@@ -152,21 +152,28 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 // parseValidationPhases parses phase strings into Phase values, accepting
 // the canonical vocabulary in validator.PhaseNames. The validator.PhaseAll
 // wildcard collapses the whole selection to nil (= run every phase),
-// matching the documented "Default: all phases" behavior.
+// matching the documented "Default: all phases" behavior. PhaseAll is
+// exclusive: combining it with any specific phase is a hard error rather
+// than silently treating the selection as wildcard, so a typo like
+// `--phase deployment --phase all` does not mask the user's mistake.
+//
+// Every entry is parsed before the wildcard collapse, so an invalid
+// phase name surfaces an error even when "all" is also present.
 func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	if len(phaseStrs) == 0 {
 		return nil, nil // nil = all phases
 	}
 
+	var (
+		sawAll bool
+		phases []validator.Phase
+		seen   = make(map[validator.Phase]bool)
+	)
 	for _, s := range phaseStrs {
 		if s == validator.PhaseAll {
-			return nil, nil
+			sawAll = true
+			continue
 		}
-	}
-
-	seen := make(map[validator.Phase]bool)
-	var phases []validator.Phase
-	for _, s := range phaseStrs {
 		p, ok := validator.ParsePhase(s)
 		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -179,6 +186,13 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 		}
 	}
 
+	if sawAll && len(phases) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("phase %q cannot be combined with other phases", validator.PhaseAll))
+	}
+	if sawAll {
+		return nil, nil
+	}
 	return phases, nil
 }
 

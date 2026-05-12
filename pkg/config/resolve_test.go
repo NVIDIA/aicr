@@ -709,7 +709,8 @@ func TestValidateResolve_DefensiveCloneOfNodeSelector(t *testing.T) {
 }
 
 func TestValidateResolve_NilVsExplicitlyEmpty(t *testing.T) {
-	// Tolerations nil → resolved nil.
+	// Tolerations nil → resolved nil. Downstream uses nil as the "no
+	// override" sentinel so the inner validator's default policy applies.
 	v1 := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{}}
 	got1, err := v1.Resolve()
 	if err != nil {
@@ -718,11 +719,20 @@ func TestValidateResolve_NilVsExplicitlyEmpty(t *testing.T) {
 	if got1.Tolerations != nil {
 		t.Errorf("nil source → expected nil Tolerations, got %v", got1.Tolerations)
 	}
-	// Tolerations [] → resolved value follows snapshotter.ParseTolerations'
-	// empty-input contract (may return DefaultTolerations() or nil). What
-	// this test pins is that resolution does not error.
+	// Tolerations [] → resolved non-nil empty slice. This is the
+	// explicit-clear case: the operator wrote `tolerations: []` to drop
+	// the tolerate-all default, and Resolve must NOT collapse that into
+	// DefaultTolerations() the way snapshotter.ParseTolerations would on
+	// an empty input. Distinguishable from the nil case above.
 	v2 := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{Tolerations: []string{}}}
-	if _, err := v2.Resolve(); err != nil {
+	got2, err := v2.Resolve()
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if got2.Tolerations == nil {
+		t.Error("explicit [] source → expected non-nil empty Tolerations, got nil")
+	}
+	if len(got2.Tolerations) != 0 {
+		t.Errorf("explicit [] source → expected len 0, got %v", got2.Tolerations)
 	}
 }

@@ -335,12 +335,22 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 		out.ImagePullSecrets = slices.Clone(v.Agent.ImagePullSecrets)
 		out.NodeSelector = maps.Clone(v.Agent.NodeSelector)
 		if v.Agent.Tolerations != nil {
-			tols, err := snapshotter.ParseTolerations(v.Agent.Tolerations)
-			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-					"invalid spec.validate.agent.tolerations", err)
+			if len(v.Agent.Tolerations) == 0 {
+				// Preserve the explicit-clear intent: `tolerations: []`
+				// means "drop the default tolerate-all," not "use it."
+				// snapshotter.ParseTolerations would otherwise normalize
+				// an empty input to DefaultTolerations() (a single bare
+				// Exists entry that matches every taint), collapsing
+				// "operator opted out" into "operator opted in."
+				out.Tolerations = []corev1.Toleration{}
+			} else {
+				tols, err := snapshotter.ParseTolerations(v.Agent.Tolerations)
+				if err != nil {
+					return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+						"invalid spec.validate.agent.tolerations", err)
+				}
+				out.Tolerations = tols
 			}
-			out.Tolerations = tols
 		}
 	}
 
