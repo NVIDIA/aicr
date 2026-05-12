@@ -189,10 +189,14 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 
 	for _, name := range manifestNames {
 		content := manifests[name]
-		safeName := filepath.Base(name)
+		safeName := filepath.Clean(name)
 		filePath, joinErr := deployer.SafeJoin(templatesDir, safeName)
 		if joinErr != nil {
 			return false, joinErr
+		}
+		if err := os.MkdirAll(filepath.Dir(filePath), 0750); err != nil {
+			return false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to create manifest subdirectory for %s/%s", compName, safeName), err)
 		}
 		if err := os.WriteFile(filePath, content, 0600); err != nil {
 			return false, errors.Wrap(errors.ErrCodeInternal,

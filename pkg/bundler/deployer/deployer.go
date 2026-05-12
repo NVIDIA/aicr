@@ -14,13 +14,13 @@
 
 // Package deployer defines the shared interface and types for bundle deployers.
 //
-// Each deployer (helm, argocd, argocdhelm, flux) produces deployment artifacts from
+// Each deployer (helm, argocd, argocd-helm, flux) produces deployment artifacts from
 // a configured recipe. Deployers are configured as structs with all required
 // data, then Generate is called to produce the output.
 //
 // The Deployer interface enables mockability in bundler tests and provides a
 // consistent contract across deployer implementations. All four deployers
-// (helm, argocd, argocdhelm, flux) implement this interface.
+// (helm, argocd, argocd-helm, flux) implement this interface.
 package deployer
 
 import (

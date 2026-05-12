@@ -1383,7 +1383,7 @@ bundles/
 
 The `--deployer flux` bundle uses Flux's native `spec.valuesFrom` to reference ConfigMaps containing dynamic values. Dynamic paths are removed from the inline `spec.values` and placed into a ConfigMap per component. Flux merges `valuesFrom` first, then inline values on top — since dynamic paths are stripped from inline values, the ConfigMap values take effect without conflicts.
 
-```
+```text
 bundles/
 ├── gpu-operator/
 │   ├── helmrelease.yaml            # HelmRelease with valuesFrom + inline values

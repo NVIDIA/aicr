@@ -150,7 +150,7 @@ func (g *Generator) resolveRepoURL() string {
 func writeTemplate(output *deployer.Output, tmpl string, data any, dir, filename, errMsg string) error {
 	path, size, err := deployer.GenerateFromTemplate(tmpl, data, dir, filename)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, errMsg, err)
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, errMsg)
 	}
 	output.Files = append(output.Files, path)
 	output.TotalSize += size
@@ -211,6 +211,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	// Generate per-component resources.
 	for i, ref := range sortedRefs {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during component generation", err)
+		}
 		compResources, compErr := g.generateComponentResources(
 			ref, i, sortedRefs, outputDir, helmSources, gitSources, output)
 		if compErr != nil {
@@ -229,7 +232,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Write README.md.
 	readmeData := ReadmeData{
 		BundlerVersion: deployer.NormalizeVersionWithDefault(g.Version),
-		Components:     buildComponentSummaries(sortedRefs),
+		Components:     buildComponentSummaries(sortedRefs, g.ComponentManifests),
 	}
 	if err := writeTemplate(output, readmeTemplate, readmeData,
 		outputDir, fileReadme, "failed to write README.md"); err != nil {
@@ -449,7 +452,7 @@ func sourceResourcePaths(helmSources map[string]*HelmRepoSourceData, gitSources 
 }
 
 // buildComponentSummaries builds the component summary list for the README.
-func buildComponentSummaries(sortedRefs []recipe.ComponentRef) []ComponentSummary {
+func buildComponentSummaries(sortedRefs []recipe.ComponentRef, manifests map[string]map[string][]byte) []ComponentSummary {
 	summaries := make([]ComponentSummary, 0, len(sortedRefs))
 	for i, ref := range sortedRefs {
 		version := ref.Version
@@ -469,6 +472,18 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef) []ComponentSummar
 			Namespace:    ref.Namespace,
 			DependsOnStr: dependsOnStr,
 		})
+
+		// Mixed components (Helm chart + manifests) produce a post HelmRelease
+		// that depends on the primary. Include it in the README table.
+		isMixed := ref.Chart != "" && ref.Source != "" && len(manifests[ref.Name]) > 0
+		if isMixed {
+			summaries = append(summaries, ComponentSummary{
+				Name:         ref.Name + "-post",
+				Type:         "HelmRelease",
+				Namespace:    ref.Namespace,
+				DependsOnStr: ref.Name,
+			})
+		}
 	}
 	return summaries
 }

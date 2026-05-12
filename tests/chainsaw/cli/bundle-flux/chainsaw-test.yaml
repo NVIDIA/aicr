@@ -125,30 +125,64 @@ spec:
               ($error == null): true
 
     - name: depends-on-ordering
-      description: Components after the first have dependsOn referencing the previous component.
+      description: >
+        First component has no dependsOn; every other component has dependsOn
+        referencing exactly its immediate predecessor in the deployment chain.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-flux"
-              # Collect component directories that have helmrelease.yaml (excludes sources/).
-              comps=()
+              # Build a file mapping each component to its dependsOn target.
+              # Format: "component:dep" (dep is empty for the chain root).
+              MAP=$(mktemp)
+              trap 'rm -f "$MAP"' EXIT
+              no_dep_count=0
+              first_comp=""
+              count=0
               for dir in "${WORK}"/basic/*/; do
-                [ "$(basename "$dir")" = "sources" ] && continue
-                [ -f "${dir}helmrelease.yaml" ] && comps+=("$dir")
+                comp="$(basename "$dir")"
+                [ "$comp" = "sources" ] && continue
+                hr="${dir}helmrelease.yaml"
+                [ -f "$hr" ] || continue
+                count=$((count + 1))
+                dep=$(grep -A1 "dependsOn:" "$hr" 2>/dev/null \
+                  | grep "name:" | awk '{print $NF}' | head -1)
+                echo "${comp}:${dep}" >> "$MAP"
+                if [ -z "$dep" ]; then
+                  no_dep_count=$((no_dep_count + 1))
+                  first_comp="$comp"
+                fi
               done
-              count=${#comps[@]}
               [ "$count" -ge 2 ] \
-                || { echo "need at least 2 components for dependsOn test, got $count" >&2; exit 1; }
-              # First component should NOT have dependsOn.
-              first="${comps[0]}helmrelease.yaml"
-              # The rest should have dependsOn.
-              has_depends=false
-              for ((i=1; i<count; i++)); do
-                hr="${comps[$i]}helmrelease.yaml"
-                grep -q "dependsOn:" "$hr" && { has_depends=true; break; }
-              done
-              [ "$has_depends" = "true" ] \
-                || { echo "no component has dependsOn set" >&2; exit 1; }
+                || { echo "need at least 2 components, got $count" >&2; exit 1; }
+
+              # Exactly one component must have no dependsOn (the chain root).
+              [ "$no_dep_count" -eq 1 ] \
+                || { echo "expected 1 root component, got $no_dep_count" >&2; exit 1; }
+
+              # Every non-root component must depend on an existing component.
+              while IFS=: read -r comp dep; do
+                [ -z "$dep" ] && continue
+                grep -q "^${dep}:" "$MAP" \
+                  || { echo "$comp depends on '$dep' which is not a component" >&2; exit 1; }
+              done < "$MAP"
+
+              # Walk each component back to root — verifies no cycles, no orphans.
+              while IFS=: read -r comp _; do
+                cur="$comp"
+                steps=0
+                while [ "$cur" != "$first_comp" ]; do
+                  dep=$(grep "^${cur}:" "$MAP" | cut -d: -f2)
+                  [ -n "$dep" ] \
+                    || { echo "$cur has no dep and is not root ($first_comp)" >&2; exit 1; }
+                  cur="$dep"
+                  steps=$((steps + 1))
+                  [ "$steps" -le "$count" ] \
+                    || { echo "cycle at $cur" >&2; exit 1; }
+                done
+              done < "$MAP"
+
+              echo "dependsOn chain valid: $count components, root=$first_comp"
             check:
               ($error == null): true
 

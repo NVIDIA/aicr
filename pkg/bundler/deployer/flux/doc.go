@@ -13,7 +13,7 @@
 // limitations under the License.
 
 /*
-Package flux provides Flux manifest generation for Cloud Native Stack recipes.
+Package flux provides Flux manifest generation for AICR recipes.
 
 The flux package generates Flux custom resources from RecipeResult objects,
 enabling GitOps-based deployment of GPU-accelerated infrastructure components
@@ -44,6 +44,11 @@ the same Helm repo) produce a single HelmRepository source CR.
 
 OCI-based Helm repositories (prefixed with oci://) generate HelmRepository CRs
 with spec.type set to "oci". HTTPS repositories use the default type.
+
+# Component Type Support
+
+Only Helm components (type "helm") are currently supported. Kustomize
+components produce an ErrCodeInvalidRequest error at generation time.
 
 # Usage
 
