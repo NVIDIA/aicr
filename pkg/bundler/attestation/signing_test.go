@@ -88,30 +88,41 @@ func TestExtractSignerClaims_NilBundle(t *testing.T) {
 	}
 }
 
-func TestExtractRekorLogIndex_PullsFirstEntry(t *testing.T) {
-	bundle := &protobundle.Bundle{
-		VerificationMaterial: &protobundle.VerificationMaterial{
-			TlogEntries: []*rekorv1.TransparencyLogEntry{
-				{LogIndex: 42},
-				{LogIndex: 999},
+func TestExtractRekorLogIndex(t *testing.T) {
+	tests := []struct {
+		name   string
+		bundle *protobundle.Bundle
+		want   int64
+	}{
+		{
+			name: "first entry returned when multiple present",
+			bundle: &protobundle.Bundle{
+				VerificationMaterial: &protobundle.VerificationMaterial{
+					TlogEntries: []*rekorv1.TransparencyLogEntry{
+						{LogIndex: 42},
+						{LogIndex: 999},
+					},
+				},
 			},
+			want: 42,
+		},
+		{
+			name:   "no entries",
+			bundle: &protobundle.Bundle{VerificationMaterial: &protobundle.VerificationMaterial{}},
+			want:   0,
+		},
+		{
+			name:   "nil VerificationMaterial",
+			bundle: &protobundle.Bundle{},
+			want:   0,
 		},
 	}
-	if got := extractRekorLogIndex(bundle); got != 42 {
-		t.Errorf("LogIndex = %d, want 42", got)
-	}
-}
-
-func TestExtractRekorLogIndex_NoEntries(t *testing.T) {
-	bundle := &protobundle.Bundle{VerificationMaterial: &protobundle.VerificationMaterial{}}
-	if got := extractRekorLogIndex(bundle); got != 0 {
-		t.Errorf("LogIndex = %d, want 0", got)
-	}
-}
-
-func TestExtractRekorLogIndex_NilVerificationMaterial(t *testing.T) {
-	if got := extractRekorLogIndex(&protobundle.Bundle{}); got != 0 {
-		t.Errorf("LogIndex = %d, want 0", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractRekorLogIndex(tc.bundle); got != tc.want {
+				t.Errorf("LogIndex = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -130,10 +141,7 @@ func bundleWithEmailCert(t *testing.T, email, oidcIssuer string) *protobundle.Bu
 		EmailAddresses: []string{email},
 	}
 	if oidcIssuer != "" {
-		template.ExtraExtensions = []pkix.Extension{{
-			Id:    asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8},
-			Value: []byte(oidcIssuer),
-		}}
+		template.ExtraExtensions = []pkix.Extension{fulcioIssuerExt(t, oidcIssuer)}
 	}
 	return bundleFromTemplate(t, template)
 }
@@ -151,12 +159,24 @@ func bundleWithURICert(t *testing.T, u *url.URL, oidcIssuer string) *protobundle
 		URIs:         []*url.URL{u},
 	}
 	if oidcIssuer != "" {
-		template.ExtraExtensions = []pkix.Extension{{
-			Id:    asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8},
-			Value: []byte(oidcIssuer),
-		}}
+		template.ExtraExtensions = []pkix.Extension{fulcioIssuerExt(t, oidcIssuer)}
 	}
 	return bundleFromTemplate(t, template)
+}
+
+// fulcioIssuerExt encodes the OIDC issuer for the current Fulcio
+// extension (OID 1.3.6.1.4.1.57264.1.8) as a DER-encoded ASN.1 UTF8String,
+// matching how Fulcio itself stamps the value into real signing certs.
+func fulcioIssuerExt(t *testing.T, oidcIssuer string) pkix.Extension {
+	t.Helper()
+	encoded, err := asn1.Marshal(oidcIssuer)
+	if err != nil {
+		t.Fatalf("marshal issuer ASN.1: %v", err)
+	}
+	return pkix.Extension{
+		Id:    asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8},
+		Value: encoded,
+	}
 }
 
 func bundleFromTemplate(t *testing.T, template *x509.Certificate) *protobundle.Bundle {

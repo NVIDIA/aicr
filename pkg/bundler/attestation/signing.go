@@ -17,6 +17,7 @@ package attestation
 import (
 	"context"
 	"crypto/x509"
+	"encoding/asn1"
 	"log/slog"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
@@ -186,13 +187,29 @@ func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 	return identity, issuer
 }
 
+// extractIssuerExtension reads the Fulcio OIDC-issuer claim from the
+// signing certificate. Two extensions encode it:
+//   - Legacy OID 1.3.6.1.4.1.57264.1.1: raw UTF-8 bytes.
+//   - Current OID 1.3.6.1.4.1.57264.1.8: DER-encoded ASN.1 UTF8String
+//     (per https://github.com/sigstore/fulcio/blob/main/docs/oid-info.md).
+//
+// Treating both as raw bytes corrupts current-OID values by leaving the
+// ASN.1 tag/length prefix in the returned string.
 func extractIssuerExtension(cert *x509.Certificate) string {
 	const (
 		legacy  = "1.3.6.1.4.1.57264.1.1"
 		current = "1.3.6.1.4.1.57264.1.8"
 	)
 	for _, ext := range cert.Extensions {
-		if ext.Id.String() == current || ext.Id.String() == legacy {
+		switch ext.Id.String() {
+		case current:
+			var decoded string
+			if _, err := asn1.Unmarshal(ext.Value, &decoded); err != nil {
+				slog.Debug("failed to ASN.1-decode Fulcio issuer extension", "oid", current, "error", err)
+				return ""
+			}
+			return decoded
+		case legacy:
 			return string(ext.Value)
 		}
 	}
