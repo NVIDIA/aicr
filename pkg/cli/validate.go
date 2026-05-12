@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +36,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -306,100 +308,42 @@ type validationConfig struct {
 }
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
-// The Action populates RecipeYAML / SnapshotYAML before runValidation;
-// flags + spec.validate.evidence.attestation supply everything else.
+// Flag values + spec.validate.evidence.attestation supply every field;
+// recipe + snapshot YAML are marshaled lazily inside emitRecipeEvidence
+// so a misconfigured run (missing --bom, conflicting --push-logs) fails
+// before paying the cost of marshaling a multi-MB snapshot.
 type recipeEvidenceConfig struct {
-	OutDir       string
-	BOMPath      string
-	IncludeLogs  bool
-	Push         string
-	PushLogs     bool
-	PlainHTTP    bool
-	InsecureTLS  bool
-	RecipeYAML   []byte
-	SnapshotYAML []byte
+	OutDir      string
+	BOMPath     string
+	IncludeLogs bool
+	Push        string
+	PushLogs    bool
+	PlainHTTP   bool
+	InsecureTLS bool
 }
 
 // buildRecipeEvidenceConfig parses the --emit-attestation flag family with
-// CLI > config precedence. Returns (nil, nil) when neither the flag nor
+// CLI > config precedence. Returns nil when neither the flag nor
 // spec.validate.evidence.attestation.out is set, signaling the validate
 // run should not produce a recipe-evidence bundle.
-//
-//nolint:nilnil // (nil, nil) is the documented "feature disabled" signal.
-func buildRecipeEvidenceConfig(
-	cmd *cli.Command,
-	resolved *config.ValidateResolved,
-	rec *recipe.RecipeResult,
-	snap *snapshotter.Snapshot,
-) (*recipeEvidenceConfig, error) {
-
+func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolved) *recipeEvidenceConfig {
 	att := resolved.EvidenceAttestation
-	out := stringFlagOrConfig(cmd, "emit-attestation", evidenceAttString(att, func(a *config.EvidenceAttestationResolved) string { return a.Out }))
+	if att == nil {
+		att = &config.EvidenceAttestationResolved{}
+	}
+	out := stringFlagOrConfig(cmd, "emit-attestation", att.Out)
 	if out == "" {
-		return nil, nil
-	}
-	recipeYAML, err := yaml.Marshal(rec)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
-	}
-	snapshotYAML, err := yaml.Marshal(snap)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal snapshot for evidence", err)
-	}
-	return &recipeEvidenceConfig{
-		OutDir:       out,
-		BOMPath:      stringFlagOrConfig(cmd, "bom", evidenceAttString(att, func(a *config.EvidenceAttestationResolved) string { return a.BOM })),
-		IncludeLogs:  boolFlagOrConfig(cmd, "include-logs", evidenceAttBool(att, func(a *config.EvidenceAttestationResolved) *bool { return a.IncludeLogs })),
-		Push:         stringFlagOrConfig(cmd, "push", evidenceAttString(att, func(a *config.EvidenceAttestationResolved) string { return a.Push })),
-		PushLogs:     boolFlagOrConfig(cmd, "push-logs", evidenceAttBool(att, func(a *config.EvidenceAttestationResolved) *bool { return a.PushLogs })),
-		PlainHTTP:    boolFlagOrConfig(cmd, "plain-http", evidenceAttBool(att, func(a *config.EvidenceAttestationResolved) *bool { return a.PlainHTTP })),
-		InsecureTLS:  boolFlagOrConfig(cmd, "insecure-tls", evidenceAttBool(att, func(a *config.EvidenceAttestationResolved) *bool { return a.InsecureTLS })),
-		RecipeYAML:   recipeYAML,
-		SnapshotYAML: snapshotYAML,
-	}, nil
-}
-
-// evidenceAttString / evidenceAttBool dereference the nil-tolerant
-// EvidenceAttestationResolved getters so the stringFlagOrConfig /
-// boolFlagOrConfig helpers receive a non-nil fallback. Pulling out the
-// helpers keeps the buildRecipeEvidenceConfig builder linear instead of
-// repeating the nil check seven times.
-func evidenceAttString(a *config.EvidenceAttestationResolved, get func(*config.EvidenceAttestationResolved) string) string {
-	if a == nil {
-		return ""
-	}
-	return get(a)
-}
-
-func evidenceAttBool(a *config.EvidenceAttestationResolved, get func(*config.EvidenceAttestationResolved) *bool) bool {
-	if a == nil {
-		return false
-	}
-	return derefBoolOr(get(a), false)
-}
-
-// evidenceCNCFString / evidenceCNCFBool / evidenceCNCFFeatures mirror the
-// EvidenceAttestation helpers above for the CNCF kind, dereferencing
-// nil-tolerant EvidenceCNCFResolved getters.
-func evidenceCNCFString(c *config.EvidenceCNCFResolved, get func(*config.EvidenceCNCFResolved) string) string {
-	if c == nil {
-		return ""
-	}
-	return get(c)
-}
-
-func evidenceCNCFBool(c *config.EvidenceCNCFResolved, get func(*config.EvidenceCNCFResolved) *bool) bool {
-	if c == nil {
-		return false
-	}
-	return derefBoolOr(get(c), false)
-}
-
-func evidenceCNCFFeatures(c *config.EvidenceCNCFResolved) []string {
-	if c == nil {
 		return nil
 	}
-	return c.Features
+	return &recipeEvidenceConfig{
+		OutDir:      out,
+		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
+		IncludeLogs: boolFlagOrConfig(cmd, "include-logs", att.IncludeLogs),
+		Push:        stringFlagOrConfig(cmd, "push", att.Push),
+		PushLogs:    boolFlagOrConfig(cmd, "push-logs", att.PushLogs),
+		PlainHTTP:   boolFlagOrConfig(cmd, "plain-http", att.PlainHTTP),
+		InsecureTLS: boolFlagOrConfig(cmd, "insecure-tls", att.InsecureTLS),
+	}
 }
 
 // runValidation runs validation using the container-per-validator engine.
@@ -505,6 +449,14 @@ func runValidation(
 	return nil
 }
 
+// signPushOutcome carries the artifacts the pointer file needs from the
+// optional sign+push leg. All fields are nil when --push is absent.
+type signPushOutcome struct {
+	Sign    *attestation.SignResult
+	Summary *attestation.PushResult
+	Logs    *attestation.PushResult
+}
+
 // emitRecipeEvidence builds, optionally signs, and optionally pushes a
 // recipe-evidence v1 bundle. The pointer file is always written so the
 // contributor can copy it into recipes/evidence/<recipe>.yaml.
@@ -532,25 +484,44 @@ func emitRecipeEvidence(
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--push-logs requires --include-logs (no logs are bundled without --include-logs)")
 	}
+	// Validate the push reference up front so a malformed --push doesn't
+	// waste a Fulcio cert + Rekor inclusion proof on a sign that the push
+	// will reject seconds later.
+	if cfg.Push != "" {
+		if _, err := oci.ParseOutputTarget(cfg.Push); err != nil {
+			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --push reference", err)
+		}
+	}
 
 	bomBody, err := os.ReadFile(cfg.BOMPath)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
 	}
 
-	if mkErr := os.MkdirAll(cfg.OutDir, 0o755); mkErr != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create evidence output dir", mkErr)
+	// Marshal rec/snap only after the cheap precondition checks pass —
+	// the snapshot is typically the largest in-memory object in a
+	// validate run and a misconfigured --emit-attestation should fail
+	// before we pay that cost.
+	recipeYAML, err := yaml.Marshal(rec)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
+	}
+	snapshotYAML, err := yaml.Marshal(snap)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal snapshot for evidence", err)
 	}
 
 	buildCtx, buildCancel := context.WithTimeout(ctx, defaults.EvidenceBundleBuildTimeout)
 	defer buildCancel()
 
+	// attestation.Build creates the output dir tree itself, including
+	// any missing parents — no explicit MkdirAll needed here.
 	bundle, err := attestation.Build(buildCtx, attestation.BuildOptions{
 		OutputDir:    cfg.OutDir,
 		Recipe:       rec,
-		RecipeYAML:   cfg.RecipeYAML,
+		RecipeYAML:   recipeYAML,
 		Snapshot:     snap,
-		SnapshotYAML: cfg.SnapshotYAML,
+		SnapshotYAML: snapshotYAML,
 		BOM:          attestation.BOMInputs{Body: bomBody, CycloneDXVersion: attestation.DefaultCycloneDXVersion},
 		PhaseResults: results,
 		IncludeLogs:  cfg.IncludeLogs,
@@ -565,12 +536,12 @@ func emitRecipeEvidence(
 		"recipe", bundle.RecipeName,
 		"subjectDigest", bundle.SubjectDigest)
 
-	signRes, summaryPush, logsPush, err := signAndPushBundle(ctx, bundle, cfg)
+	out, err := signAndPushBundle(ctx, bundle, cfg)
 	if err != nil {
 		return err
 	}
 
-	pointer, err := attestation.BuildPointer(buildPointerInputs(bundle, signRes, summaryPush, logsPush))
+	pointer, err := attestation.BuildPointer(buildPointerInputs(bundle, out))
 	if err != nil {
 		return err
 	}
@@ -583,61 +554,75 @@ func emitRecipeEvidence(
 		"path", pointerPath,
 		"copyTo", "recipes/evidence/"+bundle.RecipeName+".yaml")
 
-	if summaryPush != nil {
+	if out.Summary != nil {
 		slog.Info("evidence bundle pushed",
-			"reference", summaryPush.Reference,
-			"digest", summaryPush.Digest)
+			"reference", out.Summary.Reference,
+			"digest", out.Summary.Digest)
 	}
-	if logsPush != nil {
+	if out.Logs != nil {
 		slog.Info("evidence logs pushed",
-			"reference", logsPush.Reference,
-			"digest", logsPush.Digest)
+			"reference", out.Logs.Reference,
+			"digest", out.Logs.Digest)
 	}
 
 	return nil
 }
 
 // signAndPushBundle handles the optional sign+push pipeline. When --push
-// is absent, returns empty results so the caller writes a pre-publish
-// pointer.
+// is absent, returns a zero-valued outcome so the caller writes a
+// pre-publish pointer. When both --push and --push-logs are set the
+// summary and logs uploads run concurrently — they are independent
+// OCI artifacts sharing only the cancellation deadline.
 func signAndPushBundle(
 	ctx context.Context,
 	bundle *attestation.Bundle,
 	cfg *recipeEvidenceConfig,
-) (*attestation.SignResult, *attestation.PushResult, *attestation.PushResult, error) {
+) (signPushOutcome, error) {
 
 	if cfg.Push == "" {
-		return &attestation.SignResult{}, nil, nil, nil
+		return signPushOutcome{Sign: &attestation.SignResult{}}, nil
 	}
 
-	oidcToken := os.Getenv("SIGSTORE_ID_TOKEN")
+	oidcToken := os.Getenv(attestation.SigstoreIDTokenEnv)
 	if oidcToken == "" {
-		return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest,
-			"--push requires SIGSTORE_ID_TOKEN env var (cosign keyless OIDC token); see docs/spec/recipe-evidence-v1.md")
+		return signPushOutcome{}, errors.New(errors.ErrCodeInvalidRequest,
+			"--push requires "+attestation.SigstoreIDTokenEnv+" env var (cosign keyless OIDC token); see docs/spec/recipe-evidence-v1.md")
 	}
 
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer signCancel()
 	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(oidcToken))
 	if err != nil {
-		return nil, nil, nil, err
+		return signPushOutcome{}, err
 	}
 
 	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer pushCancel()
-	summaryPush, err := pushArtifact(pushCtx, bundle.SummaryDir, cfg.Push, cfg)
-	if err != nil {
-		return nil, nil, nil, err
-	}
 
-	var logsPush *attestation.PushResult
-	if cfg.PushLogs && bundle.LogsDir != "" {
-		logsPush, err = pushArtifact(pushCtx, bundle.LogsDir, cfg.Push+"-logs", cfg)
+	out := signPushOutcome{Sign: signRes}
+	g, gctx := errgroup.WithContext(pushCtx)
+	g.Go(func() error {
+		res, err := pushArtifact(gctx, bundle.SummaryDir, cfg.Push, cfg)
 		if err != nil {
-			return nil, nil, nil, err
+			return err
 		}
+		out.Summary = res
+		return nil
+	})
+	if cfg.PushLogs && bundle.LogsDir != "" {
+		g.Go(func() error {
+			res, err := pushArtifact(gctx, bundle.LogsDir, cfg.Push+"-logs", cfg)
+			if err != nil {
+				return err
+			}
+			out.Logs = res
+			return nil
+		})
 	}
-	return signRes, summaryPush, logsPush, nil
+	if err := g.Wait(); err != nil {
+		return signPushOutcome{}, err
+	}
+	return out, nil
 }
 
 func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenceConfig) (*attestation.PushResult, error) {
@@ -650,28 +635,23 @@ func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenc
 	})
 }
 
-func buildPointerInputs(
-	bundle *attestation.Bundle,
-	signRes *attestation.SignResult,
-	summaryPush, logsPush *attestation.PushResult,
-) attestation.PointerInputs {
-
+func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attestation.PointerInputs {
 	in := attestation.PointerInputs{Bundle: bundle}
-	if summaryPush != nil {
-		in.BundleOCI = attestation.CleanOCIRef(summaryPush.Reference)
-		in.BundleHash = summaryPush.Digest
+	if out.Summary != nil {
+		in.BundleOCI = attestation.CleanOCIRef(out.Summary.Reference)
+		in.BundleHash = out.Summary.Digest
 	}
-	if signRes != nil {
+	if out.Sign != nil {
 		in.Signer = attestation.PointerSigner{
-			Identity:      signRes.Identity,
-			Issuer:        signRes.Issuer,
-			RekorLogIndex: signRes.RekorLogIndex,
+			Identity:      out.Sign.Identity,
+			Issuer:        out.Sign.Issuer,
+			RekorLogIndex: out.Sign.RekorLogIndex,
 		}
 	}
-	if logsPush != nil {
+	if out.Logs != nil {
 		in.LogsBundle = &attestation.PointerLogsBundle{
-			OCI:    attestation.CleanOCIRef(logsPush.Reference),
-			Digest: logsPush.Digest,
+			OCI:    attestation.CleanOCIRef(out.Logs.Reference),
+			Digest: out.Logs.Digest,
 		}
 	}
 	return in
@@ -888,9 +868,12 @@ Run validation without failing on check errors (informational mode):
 			}
 
 			cncfCfg := resolved.EvidenceCNCF
-			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", evidenceCNCFString(cncfCfg, func(c *config.EvidenceCNCFResolved) string { return c.Dir }))
-			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", evidenceCNCFBool(cncfCfg, func(c *config.EvidenceCNCFResolved) *bool { return c.CNCFSubmission }))
-			features := stringSliceFlagOrConfig(cmd, "feature", evidenceCNCFFeatures(cncfCfg))
+			if cncfCfg == nil {
+				cncfCfg = &config.EvidenceCNCFResolved{}
+			}
+			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfCfg.Dir)
+			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfCfg.CNCFSubmission)
+			features := stringSliceFlagOrConfig(cmd, "feature", cncfCfg.Features)
 
 			// Validate flag combinations.
 			if cncfSubmission && evidenceDir == "" {
@@ -991,11 +974,6 @@ Run validation without failing on check errors (informational mode):
 					"binding", "aicr-validator")
 			}
 
-			evidenceCfg, evErr := buildRecipeEvidenceConfig(cmd, resolved, rec, snap)
-			if evErr != nil {
-				return evErr
-			}
-
 			return runValidation(ctx, rec, snap, validationConfig{
 				phases:              phases,
 				output:              cmd.String("output"),
@@ -1008,7 +986,7 @@ Run validation without failing on check errors (informational mode):
 				nodeSelector:        shared.nodeSelector,
 				tolerations:         shared.tolerations,
 				evidenceDir:         evidenceDir,
-				evidence:            evidenceCfg,
+				evidence:            buildRecipeEvidenceConfig(cmd, resolved),
 			})
 		},
 	}

@@ -306,42 +306,26 @@ type ValidateResolved struct {
 }
 
 // EvidenceCNCFResolved is the typed view of spec.validate.evidence.cncf.
+// Bool fields are plain bool because the wire-form spec uses bool with
+// omitempty — YAML/JSON cannot distinguish "absent" from "explicit false"
+// upstream, so a *bool here would have no extra signal to carry.
 type EvidenceCNCFResolved struct {
-	// Dir is spec.validate.evidence.cncf.dir.
-	Dir string
-
-	// CNCFSubmission is a pointer so a config-set false (e.g. user
-	// explicitly turning it off in a shared config) is distinguishable
-	// from "field absent."
-	CNCFSubmission *bool
-
-	// Features is spec.validate.evidence.cncf.features. Nil when unset.
-	Features []string
+	Dir            string
+	CNCFSubmission bool
+	Features       []string
 }
 
 // EvidenceAttestationResolved is the typed view of
-// spec.validate.evidence.attestation.
+// spec.validate.evidence.attestation. Same wire-form rationale as
+// EvidenceCNCFResolved for the plain bool fields.
 type EvidenceAttestationResolved struct {
-	// Out is spec.validate.evidence.attestation.out.
-	Out string
-
-	// BOM is spec.validate.evidence.attestation.bom.
-	BOM string
-
-	// IncludeLogs is a pointer to preserve explicit-false from absent.
-	IncludeLogs *bool
-
-	// Push is spec.validate.evidence.attestation.push (OCI reference).
-	Push string
-
-	// PushLogs is a pointer to preserve explicit-false from absent.
-	PushLogs *bool
-
-	// PlainHTTP is a pointer to preserve explicit-false from absent.
-	PlainHTTP *bool
-
-	// InsecureTLS is a pointer to preserve explicit-false from absent.
-	InsecureTLS *bool
+	Out         string
+	BOM         string
+	IncludeLogs bool
+	Push        string
+	PushLogs    bool
+	PlainHTTP   bool
+	InsecureTLS bool
 }
 
 // validPhasesSet derives the accepted spec.validate.execution.phases
@@ -435,27 +419,22 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 	if v.Evidence != nil {
 		if v.Evidence.CNCF != nil {
 			c := v.Evidence.CNCF
-			submission := c.CNCFSubmission
 			out.EvidenceCNCF = &EvidenceCNCFResolved{
 				Dir:            c.Dir,
-				CNCFSubmission: &submission,
+				CNCFSubmission: c.CNCFSubmission,
 				Features:       slices.Clone(c.Features),
 			}
 		}
 		if v.Evidence.Attestation != nil {
 			a := v.Evidence.Attestation
-			includeLogs := a.IncludeLogs
-			pushLogs := a.PushLogs
-			plainHTTP := a.PlainHTTP
-			insecureTLS := a.InsecureTLS
 			out.EvidenceAttestation = &EvidenceAttestationResolved{
 				Out:         a.Out,
 				BOM:         a.BOM,
-				IncludeLogs: &includeLogs,
+				IncludeLogs: a.IncludeLogs,
 				Push:        a.Push,
-				PushLogs:    &pushLogs,
-				PlainHTTP:   &plainHTTP,
-				InsecureTLS: &insecureTLS,
+				PushLogs:    a.PushLogs,
+				PlainHTTP:   a.PlainHTTP,
+				InsecureTLS: a.InsecureTLS,
 			}
 		}
 	}
