@@ -163,7 +163,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		return nil, errors.Wrap(errors.ErrCodeTimeout, "build canceled", err)
 	}
 
-	recipeName := recipeNameFor(opts.Recipe)
+	recipeName := RecipeNameFor(opts.Recipe)
 	if recipeName == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe has no resolvable name")
 	}
@@ -329,7 +329,12 @@ const defaultRecipeName = "recipe"
 // criteria fields.
 const criteriaWildcard = "any"
 
-func recipeNameFor(r *recipe.RecipeResult) string {
+// RecipeNameFor derives the bundle's recipe identifier from the resolved
+// criteria. Hyphen-joins the non-wildcard accelerator/service/os/intent/
+// platform values; returns "recipe" when every slot is empty or wildcard.
+// Exported so callers building artifacts that need the same name (e.g.,
+// the auto-generated CycloneDX BOM) don't have to reimplement.
+func RecipeNameFor(r *recipe.RecipeResult) string {
 	if r == nil || r.Criteria == nil {
 		return ""
 	}

@@ -280,11 +280,22 @@ func buildAutoBOM(rec *recipe.RecipeResult, version, commit string) ([]byte, err
 	}
 
 	if len(cat.Validators) > 0 {
+		// Catalog lists one entry per validator-check, which often share
+		// container images (the deployment phase's expected-resources
+		// and chainsaw checks ship from the same image). Dedupe so the
+		// BOM doesn't list the same `img:` ref dozens of times under
+		// the validators dependency.
+		seen := make(map[string]struct{}, len(cat.Validators))
 		images := make([]string, 0, len(cat.Validators))
 		for _, v := range cat.Validators {
-			if v.Image != "" {
-				images = append(images, v.Image)
+			if v.Image == "" {
+				continue
 			}
+			if _, dup := seen[v.Image]; dup {
+				continue
+			}
+			seen[v.Image] = struct{}{}
+			images = append(images, v.Image)
 		}
 		results = append(results, bom.ComponentResult{
 			Name:        "validators",
@@ -294,7 +305,10 @@ func buildAutoBOM(rec *recipe.RecipeResult, version, commit string) ([]byte, err
 		})
 	}
 
-	recipeName := recipeBOMName(rec)
+	recipeName := attestation.RecipeNameFor(rec)
+	if recipeName == "" {
+		recipeName = "aicr-recipe"
+	}
 	doc := bom.BuildBOM(bom.Metadata{
 		Name:        recipeName,
 		Version:     version,
@@ -310,19 +324,6 @@ func buildAutoBOM(rec *recipe.RecipeResult, version, commit string) ([]byte, err
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to encode auto-generated BOM", encErr)
 	}
 	return buf.Bytes(), nil
-}
-
-// recipeBOMName returns the BOM root component name. Prefers the
-// recipe's criteria-derived name when available (e.g.
-// "h100-eks-ubuntu-training") so the BOM is greppable; falls back to
-// the generic "aicr-recipe" otherwise.
-func recipeBOMName(rec *recipe.RecipeResult) string {
-	if rec != nil && rec.Criteria != nil {
-		if name := rec.Criteria.String(); name != "" {
-			return name
-		}
-	}
-	return "aicr-recipe"
 }
 
 func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attestation.PointerInputs {

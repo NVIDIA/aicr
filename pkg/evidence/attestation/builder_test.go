@@ -282,16 +282,16 @@ func TestBuild_WritesUnsignedStatement(t *testing.T) {
 }
 
 func TestRecipeNameFor_NilAndEmpty(t *testing.T) {
-	if got := recipeNameFor(nil); got != "" {
+	if got := RecipeNameFor(nil); got != "" {
 		t.Errorf("nil RecipeResult: got %q, want empty", got)
 	}
-	if got := recipeNameFor(&recipe.RecipeResult{}); got != "" {
+	if got := RecipeNameFor(&recipe.RecipeResult{}); got != "" {
 		t.Errorf("nil Criteria: got %q, want empty", got)
 	}
-	if got := recipeNameFor(&recipe.RecipeResult{Criteria: &recipe.Criteria{}}); got != "recipe" {
+	if got := RecipeNameFor(&recipe.RecipeResult{Criteria: &recipe.Criteria{}}); got != "recipe" {
 		t.Errorf("empty Criteria: got %q, want %q", got, "recipe")
 	}
-	if got := recipeNameFor(&recipe.RecipeResult{Criteria: &recipe.Criteria{
+	if got := RecipeNameFor(&recipe.RecipeResult{Criteria: &recipe.Criteria{
 		Service: "any", Accelerator: "any",
 	}}); got != "recipe" {
 		t.Errorf("all-any Criteria: got %q, want %q", got, "recipe")
