@@ -82,6 +82,19 @@ func TestStringFlagOrConfig(t *testing.T) {
 			fallback: "",
 			want:     "",
 		},
+		{
+			// Regression: when config has no value for a field, the
+			// flag's compile-time default must surface — not the empty
+			// string. Found via PR-W e2e: --namespace (Value:
+			// "aicr-validation") collapsed to "" when --config wasn't
+			// passed, and validation crashed trying to create a
+			// namespace named "".
+			name:     "no fallback no flag returns flag default value",
+			args:     []string{},
+			flagDef:  &cli.StringFlag{Name: "x", Value: "default"},
+			fallback: "",
+			want:     "default",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

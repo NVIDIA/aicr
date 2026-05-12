@@ -565,7 +565,7 @@ func TestValidateResolve_EmptySpec(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.RecipePath != "" || got.SnapshotPath != "" || got.Namespace != "" ||
-		got.Timeout != 0 || got.NoCluster || got.NoCleanup || got.RequireGPU ||
+		got.Timeout != nil || got.NoCluster || got.NoCleanup || got.RequireGPU ||
 		got.FailOnError != nil || got.Phases != nil ||
 		got.NodeSelector != nil || got.Tolerations != nil || got.ImagePullSecrets != nil {
 
@@ -628,8 +628,46 @@ func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
 	if !got.NoCluster || !got.NoCleanup {
 		t.Errorf("flags = %+v", got)
 	}
-	if got.Timeout.String() != "5m0s" {
+	if got.Timeout == nil || got.Timeout.String() != "5m0s" {
 		t.Errorf("Timeout = %v", got.Timeout)
+	}
+}
+
+func TestValidateResolve_InvalidPhase(t *testing.T) {
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{
+		Phases: []string{"deployment", "warp-drive"},
+	}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.execution.phases") {
+		t.Fatalf("expected phase-validation error, got %v", err)
+	}
+}
+
+func TestValidateResolve_AllPhaseSpecialValue(t *testing.T) {
+	// "all" is accepted at the config layer; the CLI parser collapses it
+	// into nil (= run every phase). Resolve must not reject it.
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{
+		Phases: []string{"all"},
+	}}
+	if _, err := v.Resolve(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateResolve_ZeroTimeoutPreserved(t *testing.T) {
+	// A config-supplied "0s" must surface as a non-nil zero, distinct from
+	// "field unset" (nil), so callers like durationFlagOrConfig can honor
+	// an intentional disable-timeout setting.
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{Timeout: "0s"}}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Timeout == nil {
+		t.Fatal("expected non-nil Timeout for explicit 0s; got nil")
+	}
+	if *got.Timeout != 0 {
+		t.Errorf("expected *Timeout = 0, got %v", *got.Timeout)
 	}
 }
 
@@ -673,15 +711,18 @@ func TestValidateResolve_DefensiveCloneOfNodeSelector(t *testing.T) {
 func TestValidateResolve_NilVsExplicitlyEmpty(t *testing.T) {
 	// Tolerations nil → resolved nil.
 	v1 := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{}}
-	got1, _ := v1.Resolve()
+	got1, err := v1.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got1.Tolerations != nil {
 		t.Errorf("nil source → expected nil Tolerations, got %v", got1.Tolerations)
 	}
-	// Tolerations [] → resolved nil (empty input produces no parsed entries).
+	// Tolerations [] → resolved value follows snapshotter.ParseTolerations'
+	// empty-input contract (may return DefaultTolerations() or nil). What
+	// this test pins is that resolution does not error.
 	v2 := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{Tolerations: []string{}}}
-	got2, _ := v2.Resolve()
-	// snapshotter.ParseTolerations on empty input may return DefaultTolerations()
-	// or nil — both are acceptable here; what matters is that resolution does
-	// not error. We only assert resolution succeeds.
-	_ = got2
+	if _, err := v2.Resolve(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }

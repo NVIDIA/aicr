@@ -280,9 +280,23 @@ type ValidateResolved struct {
 	// NoCleanup is spec.validate.execution.noCleanup.
 	NoCleanup bool
 
-	// Timeout is the parsed spec.validate.execution.timeout. Zero when
-	// config did not set the field.
-	Timeout time.Duration
+	// Timeout is the parsed spec.validate.execution.timeout. Nil pointer
+	// signals "config did not set the field" so callers can fall through
+	// to the CLI flag's default duration; non-nil preserves an explicit
+	// "0s" / disabled-timeout value distinct from absence.
+	Timeout *time.Duration
+}
+
+// validatePhases is the canonical set of phase strings accepted in
+// spec.validate.execution.phases. Kept local to pkg/config to avoid a
+// pkg/validator import for what is just a string-set check; the CLI
+// layer (parseValidationPhases) re-validates with the same vocabulary
+// when it converts strings to typed validator.Phase values.
+var validPhases = map[string]bool{
+	"deployment":  true,
+	"performance": true,
+	"conformance": true,
+	"all":         true,
 }
 
 // Resolve converts a ValidateSpec from the wire-string form to a typed
@@ -323,6 +337,12 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 	}
 
 	if v.Execution != nil {
+		for _, p := range v.Execution.Phases {
+			if !validPhases[p] {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid spec.validate.execution.phases entry %q: must be one of: deployment, performance, conformance, all", p))
+			}
+		}
 		out.Phases = slices.Clone(v.Execution.Phases)
 		out.NoCluster = v.Execution.NoCluster
 		out.NoCleanup = v.Execution.NoCleanup
@@ -340,7 +360,7 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 				return nil, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("spec.validate.execution.timeout must be >= 0, got %s", d))
 			}
-			out.Timeout = d
+			out.Timeout = &d
 		}
 	}
 

@@ -106,7 +106,7 @@ func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateReso
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 		}
-		if len(resolved.NodeSelector) > 0 {
+		if resolved.NodeSelector != nil {
 			slog.Info("CLI flag overriding config value", "flag", "node-selector",
 				"config", resolved.NodeSelector, "override", ns)
 		}
