@@ -124,6 +124,26 @@ func TestExtractIssuerExtension(t *testing.T) {
 			exts: []pkix.Extension{{Id: asn1.ObjectIdentifier{2, 5, 29, 17}, Value: []byte("san placeholder")}},
 			want: "",
 		},
+		{
+			// Precedence is order-independent: current OID wins even when
+			// the legacy OID appears earlier in the extension list. Pins
+			// the two-pass scan against a regression to single-pass
+			// switch-and-return, which would silently pick whichever
+			// extension Fulcio happened to stamp first.
+			name: "current OID takes precedence over legacy regardless of cert order",
+			exts: []pkix.Extension{
+				{Id: legacyOID, Value: []byte("legacy-only")},
+				{Id: currentOID, Value: asn1Encoded},
+			},
+			want: issuerURL,
+		},
+		{
+			// Symmetric: when only the legacy OID is present, the legacy
+			// branch supplies the value.
+			name: "legacy OID used when current OID is absent",
+			exts: []pkix.Extension{{Id: legacyOID, Value: []byte("legacy-only")}},
+			want: "legacy-only",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

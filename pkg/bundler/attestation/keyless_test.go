@@ -97,55 +97,55 @@ func buildTestBundle(certDER []byte) *protobundle.Bundle {
 	}
 }
 
-func TestExtractSignerIdentity_Email(t *testing.T) {
+func TestExtractSignerClaims_Email(t *testing.T) {
 	certDER := createTestCert(t, []string{"jdoe@company.com"}, nil)
 	bundle := buildTestBundle(certDER)
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != "jdoe@company.com" {
-		t.Errorf("extractSignerIdentity() = %q, want %q", got, "jdoe@company.com")
+		t.Errorf("extractSignerClaims() identity = %q, want %q", got, "jdoe@company.com")
 	}
 }
 
-func TestExtractSignerIdentity_URI(t *testing.T) {
+func TestExtractSignerClaims_URI(t *testing.T) {
 	u, _ := url.Parse("https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0")
 	certDER := createTestCert(t, nil, []*url.URL{u})
 	bundle := buildTestBundle(certDER)
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != u.String() {
-		t.Errorf("extractSignerIdentity() = %q, want %q", got, u.String())
+		t.Errorf("extractSignerClaims() identity = %q, want %q", got, u.String())
 	}
 }
 
-func TestExtractSignerIdentity_NilBundle(t *testing.T) {
-	got := extractSignerIdentity(nil)
+func TestExtractSignerClaims_NilBundlePointer(t *testing.T) {
+	got, _ := extractSignerClaims(nil)
 	if got != "" {
-		t.Errorf("extractSignerIdentity(nil) = %q, want empty", got)
+		t.Errorf("extractSignerClaims(nil) identity = %q, want empty", got)
 	}
 }
 
-func TestExtractSignerIdentity_NoCert(t *testing.T) {
+func TestExtractSignerClaims_NoCert(t *testing.T) {
 	bundle := &protobundle.Bundle{
 		VerificationMaterial: &protobundle.VerificationMaterial{},
 	}
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != "" {
-		t.Errorf("extractSignerIdentity() with no cert = %q, want empty", got)
+		t.Errorf("extractSignerClaims() with no cert identity = %q, want empty", got)
 	}
 }
 
-func TestExtractSignerIdentity_InvalidCertDER(t *testing.T) {
+func TestExtractSignerClaims_InvalidCertDER(t *testing.T) {
 	bundle := buildTestBundle([]byte("not a certificate"))
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != "" {
-		t.Errorf("extractSignerIdentity() with invalid cert = %q, want empty", got)
+		t.Errorf("extractSignerClaims() with invalid cert identity = %q, want empty", got)
 	}
 }
 
-func TestExtractSignerIdentity_CertChain(t *testing.T) {
+func TestExtractSignerClaims_CertChain(t *testing.T) {
 	// Test the X509CertificateChain path (instead of single Certificate)
 	certDER := createTestCert(t, []string{"chain@company.com"}, nil)
 	bundle := &protobundle.Bundle{
@@ -160,13 +160,13 @@ func TestExtractSignerIdentity_CertChain(t *testing.T) {
 		},
 	}
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != "chain@company.com" {
-		t.Errorf("extractSignerIdentity() from chain = %q, want %q", got, "chain@company.com")
+		t.Errorf("extractSignerClaims() from chain identity = %q, want %q", got, "chain@company.com")
 	}
 }
 
-func TestExtractSignerIdentity_EmptyCertChain(t *testing.T) {
+func TestExtractSignerClaims_EmptyCertChain(t *testing.T) {
 	bundle := &protobundle.Bundle{
 		VerificationMaterial: &protobundle.VerificationMaterial{
 			Content: &protobundle.VerificationMaterial_X509CertificateChain{
@@ -177,19 +177,19 @@ func TestExtractSignerIdentity_EmptyCertChain(t *testing.T) {
 		},
 	}
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != "" {
-		t.Errorf("extractSignerIdentity() with empty chain = %q, want empty", got)
+		t.Errorf("extractSignerClaims() with empty chain identity = %q, want empty", got)
 	}
 }
 
-func TestExtractSignerIdentity_NoSAN(t *testing.T) {
+func TestExtractSignerClaims_NoSAN(t *testing.T) {
 	// Cert with no email or URI SANs
 	certDER := createTestCert(t, nil, nil)
 	bundle := buildTestBundle(certDER)
 
-	got := extractSignerIdentity(bundle)
+	got, _ := extractSignerClaims(bundle)
 	if got != "" {
-		t.Errorf("extractSignerIdentity() with no SAN = %q, want empty", got)
+		t.Errorf("extractSignerClaims() with no SAN identity = %q, want empty", got)
 	}
 }

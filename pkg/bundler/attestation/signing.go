@@ -57,7 +57,8 @@ type SignedAttestation struct {
 
 	// Identity is the SAN claim from the Fulcio cert (email for
 	// interactive OIDC, URI for workload OIDC). Empty if extraction
-	// failed.
+	// failed or the cert has no email/URI SAN — callers must not treat
+	// empty as an error signal.
 	Identity string
 
 	// Issuer is the OIDC issuer URL recorded in the Fulcio cert
@@ -193,7 +194,8 @@ func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 	}
 
 	// Fulcio embeds the OIDC issuer in extension OID 1.3.6.1.4.1.57264.1.1
-	// (legacy) and 1.3.6.1.4.1.57264.1.8 (current). Try both.
+	// (legacy) and 1.3.6.1.4.1.57264.1.8 (current); extractIssuerExtension
+	// prefers the current OID and falls back to legacy.
 	issuer = extractIssuerExtension(parsed)
 	return identity, issuer
 }
@@ -206,21 +208,30 @@ func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
 //
 // Treating both as raw bytes corrupts current-OID values by leaving the
 // ASN.1 tag/length prefix in the returned string.
+//
+// The current OID takes precedence: scan for it first and fall back to
+// the legacy OID only if it is absent. A single-pass switch would make
+// the result depend on X.509 extension ordering — in practice Fulcio
+// stamps one or the other, but transitional certs that carry both (with
+// any encoding divergence) would otherwise resolve silently and
+// non-deterministically.
 func extractIssuerExtension(cert *x509.Certificate) string {
 	const (
 		legacy  = "1.3.6.1.4.1.57264.1.1"
 		current = "1.3.6.1.4.1.57264.1.8"
 	)
 	for _, ext := range cert.Extensions {
-		switch ext.Id.String() {
-		case current:
+		if ext.Id.String() == current {
 			var decoded string
 			if _, err := asn1.Unmarshal(ext.Value, &decoded); err != nil {
 				slog.Debug("failed to ASN.1-decode Fulcio issuer extension", "oid", current, "error", err)
 				return ""
 			}
 			return decoded
-		case legacy:
+		}
+	}
+	for _, ext := range cert.Extensions {
+		if ext.Id.String() == legacy {
 			return string(ext.Value)
 		}
 	}

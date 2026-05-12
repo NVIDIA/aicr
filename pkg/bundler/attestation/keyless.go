@@ -18,8 +18,6 @@ import (
 	"context"
 	"log/slog"
 
-	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
-
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -74,7 +72,11 @@ func (k *KeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]
 	}
 
 	k.identity = res.Identity
-	slog.Info("bundle attestation signed successfully", "identity", k.identity)
+	// Identity is PII for interactive OIDC; surface it at Debug only,
+	// matching the SignStatement contract. Callers that need the value
+	// for audit logs read it back via Identity().
+	slog.Info("bundle attestation signed successfully")
+	slog.Debug("bundle attestation signer", "identity", k.identity)
 	return res.BundleJSON, nil
 }
 
@@ -89,14 +91,4 @@ func (k *KeylessAttester) Identity() string {
 // Rekor transparency log entry.
 func (k *KeylessAttester) HasRekorEntry() bool {
 	return true
-}
-
-// extractSignerIdentity parses the Fulcio signing certificate from a
-// Sigstore bundle protobuf and returns the SubjectAlternativeName
-// (email or URI). Returns empty string when the certificate cannot be
-// extracted. Thin wrapper around extractSignerClaims preserved for
-// the existing tests that pin this function's contract.
-func extractSignerIdentity(bundle *protobundle.Bundle) string {
-	identity, _ := extractSignerClaims(bundle)
-	return identity
 }
