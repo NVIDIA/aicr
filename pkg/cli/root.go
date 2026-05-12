@@ -186,6 +186,7 @@ func newRootCmd() *cli.Command {
 			bundleCmd(),
 			bundleVerifyCmd(),
 			validateCmd(),
+			diffCmd(),
 			trustCmd(),
 			skillCmd(),
 		},

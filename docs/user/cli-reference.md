@@ -836,6 +836,68 @@ Results are output in CTRF (Common Test Report Format) — an industry-standard 
 
 ---
 
+### aicr diff
+
+Compare two snapshots field-by-field to surface configuration drift between cluster states. Reports added, removed, and modified readings across every measurement type (K8s, GPU, OS, SystemD, NodeTopology).
+
+**Synopsis:**
+```shell
+aicr diff --baseline <path|cm://...> --target <path|cm://...> [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--baseline` | `-b` | string | | Baseline snapshot (file path or ConfigMap URI). **Required.** |
+| `--target` | | string | | Target snapshot (file path or ConfigMap URI). **Required.** |
+| `--fail-on-drift` | | bool | false | Exit with non-zero status (`ErrCodeConflict`) if any drift is detected. Useful for CI/CD gating. |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. **Note:** ConfigMap destinations are rejected for `--format table` (a structured format is required for ConfigMap storage). |
+| `--format` | `-t` | string | yaml | Output format: `json`, `yaml`, or `table`. |
+| `--kubeconfig` | `-k` | string | ~/.kube/config | Path to kubeconfig (used only when `--baseline` or `--target` is a ConfigMap URI). |
+
+**Inputs:**
+- File paths (`./baseline.yaml`, `/tmp/snap.json`)
+- ConfigMap URIs (`cm://gpu-operator/aicr-snapshot`)
+- Both inputs may mix freely; e.g., a local baseline file vs. a live ConfigMap target.
+
+**Output Semantics:**
+- A nil reading is rendered as the literal `<nil>` so it cannot be confused with an empty-string value (`""`). Both forms surface as drift when one side is nil and the other is a concrete value.
+- Changes are emitted in deterministic order (sorted by `Path`) so the diff is reproducible across runs and machines.
+- The `Result` envelope includes `baselineSource` and `targetSource` (the supplied paths), a `changes` array, and a `summary` with `added`, `removed`, `modified`, and `total` counts.
+
+**Examples:**
+
+```shell
+# Local-file diff in default YAML
+aicr diff --baseline before.yaml --target after.yaml
+
+# Human-readable table to stdout
+aicr diff -b before.yaml --target after.yaml --format table
+
+# CI/CD gate: non-zero exit on drift, JSON to a file
+aicr diff -b before.yaml --target after.yaml \
+  --format json --output drift.json --fail-on-drift
+
+# Compare two ConfigMaps in the cluster
+aicr diff \
+  --baseline cm://gpu-operator/aicr-snapshot-baseline \
+  --target   cm://gpu-operator/aicr-snapshot
+
+# Mix file + ConfigMap (golden baseline vs live cluster)
+aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
+```
+
+**Exit Codes:**
+
+| Code | Description |
+|------|-------------|
+| `0` | Diff completed; no drift, or `--fail-on-drift` not set |
+| `2` | Invalid input (missing flags, bad format, ConfigMap output for `--format table`) **or** drift detected with `--fail-on-drift` (mapped from `ErrCodeConflict`) |
+
+> **Note on CI gating:** A non-zero exit identifies *that* drift was detected, but doesn't by itself distinguish drift from malformed input — both map to exit `2`. To differentiate without relying on stderr format (text by default; JSON only with `--log-json`), inspect the diff payload directly: write the result with `--output drift.json --format json` and branch on the presence of the file plus its `summary.total` field. That signal is format-stable regardless of logging mode.
+
+---
+
 ### aicr bundle
 
 Generate deployment-ready bundles from recipes containing Helm values, manifests, scripts, and documentation.
