@@ -28,7 +28,7 @@ import (
 
 func main() {
 	validators.Run(map[string]validators.CheckFunc{
-		"nccl-all-reduce-bw":      checkNCCLAllReduceBW,
+		checkNameNCCLAllReduceBW:  checkNCCLAllReduceBW,
 		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
 		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
 		"inference-perf":          checkInferencePerf,

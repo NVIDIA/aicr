@@ -1,4 +1,4 @@
-# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,18 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert the ConfigMap exists with correct metadata and structure.
-# Chainsaw retries this assertion until the timeout (120s).
-#
-# The snapshot.yaml *content* is validated separately in Step 6 using
-# `chainsaw assert --resource` on the extracted YAML document.
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: aicr-e2e-snapshot
-  namespace: default
-  labels:
-    app.kubernetes.io/component: Snapshot
-    app.kubernetes.io/name: aicr
-data:
-  format: yaml
+apiVersion: v2
+name: {{ .Name }}
+description: Generated wrapper chart vendoring {{ .ChartName }}@{{ .ChartVersion }} for {{ .Parent }}.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  # Empty repository tells Helm to resolve the subchart from the
+  # adjacent charts/<name>-<version>.tgz file at install time. No
+  # `helm dependency update` needed.
+  - name: {{ .ChartName }}
+    version: {{ .ChartVersion }}
+    repository: ""

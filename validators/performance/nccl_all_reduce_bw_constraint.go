@@ -66,13 +66,13 @@ const (
 var (
 	trainJobGVR = schema.GroupVersionResource{
 		Group:    "trainer.kubeflow.org",
-		Version:  "v1alpha1",
+		Version:  versionV1alpha1,
 		Resource: "trainjobs",
 	}
 
 	trainingRuntimeGVR = schema.GroupVersionResource{
 		Group:    "trainer.kubeflow.org",
-		Version:  "v1alpha1",
+		Version:  versionV1alpha1,
 		Resource: "trainingruntimes",
 	}
 
@@ -677,7 +677,7 @@ func buildComputeDomain(namespace string) *unstructured.Unstructured {
 		"apiVersion": "resource.nvidia.com/v1beta1",
 		"kind":       "ComputeDomain",
 		"metadata": map[string]interface{}{
-			"name":      ncclComputeDomainName,
+			keyName:     ncclComputeDomainName,
 			"namespace": namespace,
 		},
 		"spec": map[string]interface{}{

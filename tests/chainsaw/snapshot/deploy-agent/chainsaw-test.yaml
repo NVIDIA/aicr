@@ -19,66 +19,72 @@ metadata:
   name: snapshot-deploy-agent
 spec:
   description: |
-    Deploys the aicr snapshot agent as a Job, then asserts on the K8s
-    resources it creates (Job completion, ConfigMap metadata, snapshot content).
-    Requires: Kind cluster with fake nvidia-smi, default namespace,
-    aicr image at localhost:5001/aicr:local.
+    Invokes `aicr snapshot -o cm://...` against a local Kind cluster.
+    The CLI deploys the snapshot agent Job using pkg/k8s/agent.Deployer,
+    waits for completion, writes the snapshot to a ConfigMap, and cleans
+    up the Job + RBAC. The test asserts only the surviving ConfigMap's
+    snapshot content; Job/RBAC creation are exercised by the CLI exit
+    code, not by separate apply/assert steps.
+
+    Requires:
+      - Kind cluster with fake nvidia-smi injected into worker nodes
+      - aicr image pushed to localhost:5001/aicr:local
+      - aicr binary on PATH (make build writes it to dist/...)
+      - KUBECONFIG pointing at the Kind cluster
     Run with: chainsaw test --test-dir tests/chainsaw/snapshot/deploy-agent
   timeouts:
     apply: 30s
     assert: 120s
     delete: 30s
+    exec: 10m
   steps:
     - name: cleanup-previous
-      description: Ensure clean state by removing leftover resources from prior runs.
+      description: Remove any leftover ConfigMap from a prior run.
       try:
         - script:
             content: |
-              kubectl delete job aicr-e2e-snapshot -n default --ignore-not-found=true
               kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true
 
-    - name: setup-rbac
-      description: Create ServiceAccount, ClusterRole, and ClusterRoleBinding for the snapshot agent.
-      try:
-        - apply:
-            file: rbac.yaml
-
-    - name: deploy-snapshot-job
-      description: Deploy the snapshot agent Job to the default namespace.
-      try:
-        - apply:
-            file: snapshot-job.yaml
-
-    - name: assert-job-completed
-      description: Wait for the snapshot Job to complete (retries until 120s timeout).
-      try:
-        - assert:
-            file: assert-job-complete.yaml
-
-    - name: assert-configmap-metadata
-      description: Verify ConfigMap has correct labels and format key.
-      try:
-        - assert:
-            file: assert-configmap.yaml
-
-    - name: assert-snapshot-content
-      description: Extract snapshot.yaml from ConfigMap and validate document structure.
+    - name: run-snapshot
+      description: |
+        Invoke the host aicr binary against the Kind cluster. The CLI
+        creates RBAC, deploys the agent Job with the correct pod shape,
+        streams agent logs to stderr, waits for Job completion, writes
+        the snapshot to the named ConfigMap, and cleans up the Job +
+        RBAC (default --no-cleanup=false).
       try:
         - script:
             content: |
-              WORK="/tmp/chainsaw-snapshot-deploy"
-              mkdir -p "${WORK}"
+              aicr snapshot \
+                --image localhost:5001/aicr:local \
+                -o cm://default/aicr-e2e-snapshot
+
+    - name: assert-deployer-cleanup
+      description: Verify the deployer cleaned up its Job, RBAC, and ClusterRole resources.
+      try:
+        - script:
+            content: |
+              LEAKED=$(kubectl get job/aicr sa/aicr role/aicr rolebinding/aicr -n default -o name 2>/dev/null || true)
+              LEAKED="${LEAKED}$(kubectl get clusterrole/aicr-node-reader clusterrolebinding/aicr-node-reader -o name 2>/dev/null || true)"
+              if [ -n "$LEAKED" ]; then
+                echo "::error::Deployer resources not cleaned up:"
+                echo "$LEAKED"
+                exit 1
+              fi
+
+    - name: assert-snapshot-content
+      description: Extract the snapshot YAML from the surviving ConfigMap and assert its structure.
+      try:
+        - script:
+            content: |
+              WORK="$(mktemp -d -t chainsaw-snapshot-deploy.XXXXXX)"
+              trap 'rm -rf "${WORK}"' EXIT
               kubectl get cm aicr-e2e-snapshot -n default \
                 -o jsonpath='{.data.snapshot\.yaml}' > "${WORK}/snapshot.yaml"
               chainsaw assert --resource "${WORK}/snapshot.yaml" \
                 --file ./assert-snapshot-content.yaml \
                 --no-color --timeout 5s
-      # cleanup runs after the entire test completes, regardless of step success/failure.
       cleanup:
         - script:
             content: |
-              kubectl delete job aicr-e2e-snapshot -n default --ignore-not-found=true
               kubectl delete cm aicr-e2e-snapshot -n default --ignore-not-found=true
-              rm -rf /tmp/chainsaw-snapshot-deploy
-        - delete:
-            file: rbac.yaml

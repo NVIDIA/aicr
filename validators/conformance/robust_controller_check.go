@@ -33,11 +33,11 @@ import (
 const robustTestPrefix = "robust-test-"
 
 var dgdGVR = schema.GroupVersionResource{
-	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamographdeployments",
+	Group: apiGroupNVIDIA, Version: versionV1alpha1, Resource: "dynamographdeployments",
 }
 
 var dcdGVR = schema.GroupVersionResource{
-	Group: "nvidia.com", Version: "v1alpha1", Resource: "dynamocomponentdeployments",
+	Group: apiGroupNVIDIA, Version: versionV1alpha1, Resource: "dynamocomponentdeployments",
 }
 
 var trainJobGVR = schema.GroupVersionResource{
@@ -179,7 +179,7 @@ func checkRobustKubeflowTrainer(ctx *validators.Context) error {
 		return err
 	}
 	crdGVR := schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 	crdObj, err := dynClient.Resource(crdGVR).Get(ctx.Ctx, "trainjobs.trainer.kubeflow.org", metav1.GetOptions{})
 	if err != nil {
@@ -222,17 +222,17 @@ func validateKubeflowWebhookRejects(ctx *validators.Context) (*webhookRejectionR
 	// the webhook is actively validating, not just schema validation.
 	tj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "trainer.kubeflow.org/v1alpha1",
-			"kind":       "TrainJob",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": "default",
+			keyAPIVersion: "trainer.kubeflow.org/v1alpha1",
+			keyKind:       "TrainJob",
+			keyMetadata: map[string]interface{}{
+				keyName:      name,
+				keyNamespace: "default",
 			},
-			"spec": map[string]interface{}{
+			keySpec: map[string]interface{}{
 				"runtimeRef": map[string]interface{}{
-					"name":     robustTestPrefix + "nonexistent-runtime",
+					keyName:    robustTestPrefix + "nonexistent-runtime",
 					"apiGroup": "trainer.kubeflow.org",
-					"kind":     "ClusterTrainingRuntime",
+					keyKind:    "ClusterTrainingRuntime",
 				},
 			},
 		},
@@ -251,7 +251,7 @@ func validateKubeflowWebhookRejects(ctx *validators.Context) (*webhookRejectionR
 	report := &webhookRejectionReport{
 		ResourceName: name,
 		Namespace:    "default",
-		Reason:       "unknown",
+		Reason:       statusUnknown,
 		Message:      createErr.Error(),
 	}
 
@@ -367,7 +367,7 @@ func checkRobustDynamo(ctx *validators.Context) error {
 		return err
 	}
 	crdGVR := schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 	crdObj, err := dynClient.Resource(crdGVR).Get(ctx.Ctx,
 		"dynamographdeployments.nvidia.com", metav1.GetOptions{})
@@ -450,23 +450,23 @@ func validateDynamoWebhookRejects(ctx *validators.Context) (*webhookRejectionRep
 
 	dgd := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "nvidia.com/v1alpha1",
-			"kind":       "DynamoGraphDeployment",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": "dynamo-system",
+			keyAPIVersion: "nvidia.com/v1alpha1",
+			keyKind:       "DynamoGraphDeployment",
+			keyMetadata: map[string]interface{}{
+				keyName:      name,
+				keyNamespace: namespaceDynamoSystem,
 			},
-			"spec": map[string]interface{}{
+			keySpec: map[string]interface{}{
 				"services": map[string]interface{}{},
 			},
 		},
 	}
 
-	_, createErr := dynClient.Resource(dgdGVR).Namespace("dynamo-system").Create(
+	_, createErr := dynClient.Resource(dgdGVR).Namespace(namespaceDynamoSystem).Create(
 		ctx.Ctx, dgd, metav1.CreateOptions{})
 
 	if createErr == nil {
-		_ = dynClient.Resource(dgdGVR).Namespace("dynamo-system").Delete(
+		_ = dynClient.Resource(dgdGVR).Namespace(namespaceDynamoSystem).Delete(
 			ctx.Ctx, name, metav1.DeleteOptions{})
 		return nil, errors.New(errors.ErrCodeInternal,
 			"validating webhook did not reject invalid DynamoGraphDeployment")
@@ -475,7 +475,7 @@ func validateDynamoWebhookRejects(ctx *validators.Context) (*webhookRejectionRep
 	report := &webhookRejectionReport{
 		ResourceName: name,
 		Namespace:    "dynamo-system",
-		Reason:       "unknown",
+		Reason:       statusUnknown,
 		Message:      createErr.Error(),
 	}
 

@@ -114,7 +114,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		}
 		server.WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
 			"Invalid request body", false, map[string]any{
-				"error": err.Error(),
+				keyError: err.Error(),
 			})
 		return
 	}
@@ -165,12 +165,13 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 			config.WithEstimatedNodeCount(params.estimatedNodeCount),
 			config.WithDeployer(params.deployer),
 			config.WithRepoURL(params.repoURL),
+			config.WithVendorCharts(params.vendorCharts),
 		)),
 	)
 	if err != nil {
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
 			"Failed to create bundler", true, map[string]any{
-				"error": err.Error(),
+				keyError: err.Error(),
 			})
 		return
 	}
@@ -188,7 +189,7 @@ func (b *DefaultBundler) HandleBundles(w http.ResponseWriter, r *http.Request) {
 		for _, be := range output.Errors {
 			errorDetails = append(errorDetails, map[string]any{
 				"bundler": be.BundlerType,
-				"error":   be.Error,
+				keyError:  be.Error,
 			})
 		}
 		server.WriteError(w, r, http.StatusInternalServerError, aicrerrors.ErrCodeInternal,
@@ -291,6 +292,7 @@ type bundleParams struct {
 	estimatedNodeCount         int
 	deployer                   config.DeployerType
 	repoURL                    string
+	vendorCharts               bool
 }
 
 // parseQueryParams extracts and validates all query parameters from the request
@@ -372,6 +374,16 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "nodes must be a non-negative integer")
 		}
 		params.estimatedNodeCount = n
+	}
+
+	// Parse vendor-charts (opt-in air-gap vendoring)
+	if v := query.Get("vendor-charts"); v != "" {
+		b, parseErr := strconv.ParseBool(v)
+		if parseErr != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+				"vendor-charts must be a boolean (true/false)", parseErr)
+		}
+		params.vendorCharts = b
 	}
 
 	return params, nil

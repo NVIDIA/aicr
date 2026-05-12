@@ -77,7 +77,7 @@ type trainerResourceRef struct {
 // isTrainerInstalled returns true when the Kubeflow Trainer CRD is present in the cluster.
 func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (bool, error) {
 	crdGVR := schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 	_, err := dynamicClient.Resource(crdGVR).Get(ctx, trainerCRDName, metav1.GetOptions{})
 	if err != nil {
@@ -277,7 +277,7 @@ func waitForTrainerControllerReady(ctx context.Context, dynamicClient dynamic.In
 // immediately without starting a watch.
 func waitForCRDEstablished(ctx context.Context, dynamicClient dynamic.Interface, crdName string) error {
 	crdGVR := schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 
 	existing, err := dynamicClient.Resource(crdGVR).Get(ctx, crdName, metav1.GetOptions{})

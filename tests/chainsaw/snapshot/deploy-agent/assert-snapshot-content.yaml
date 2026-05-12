@@ -16,37 +16,32 @@
 #
 # Used with: chainsaw assert --resource /tmp/snapshot.yaml --file assert-snapshot-content.yaml
 #
-# Chainsaw does partial matching on maps -- we specify the fields we care about
-# and Chainsaw verifies they exist with the expected values. For arrays,
-# Chainsaw requires exact length so we list all items.
+# Chainsaw's positional-list matching is too brittle here: collector
+# completion order is non-deterministic (errgroup), and adding a new
+# collector would silently break unrelated tests. We use JMESPath
+# expressions instead so the assertion is order-independent at both
+# the measurement-type level and the per-type subtype level.
+#
+# Pinned:
+#   - exactly 5 measurements
+#   - the set of measurement types (sorted)
+#   - per-type, the set of subtype names (sorted)
+#   - metadata.source-node and metadata.version
+#
+# Per-subtype `data` is intentionally not pinned for GPU: the deployer's
+# pod spec does not mount the host's fake nvidia-smi into the container,
+# so the smi collector runs but cannot parse GPU details. The subtype
+# names alone verify that every collector ran.
 kind: Snapshot
 apiVersion: aicr.nvidia.com/v1alpha1
 metadata:
   source-node: aicr-worker
   version: dev
 measurements:
-  - type: OS
-    subtypes:
-      - subtype: grub
-      - subtype: sysctl
-      - subtype: kmod
-      - subtype: release
-  - type: SystemD
-    subtypes:
-      - subtype: containerd.service
-      - subtype: docker.service
-      - subtype: kubelet.service
-  - type: GPU
-    subtypes:
-      - subtype: smi
-        data:
-          gpu.model: NVIDIA B200
-          driver: "560.35.03"
-          gpu-count: 8
-          gpu.product-architecture: Blackwell
-  - type: K8s
-    subtypes:
-      - subtype: server
-      - subtype: image
-      - subtype: policy
-      - subtype: node
+  (length(@)): 5
+  (sort([*].type)): [GPU, K8s, NodeTopology, OS, SystemD]
+  (@[?type == 'GPU'] | [0].subtypes | sort([*].subtype)): [hardware, smi]
+  (@[?type == 'OS'] | [0].subtypes | sort([*].subtype)): [grub, kmod, release, sysctl]
+  (@[?type == 'NodeTopology'] | [0].subtypes | sort([*].subtype)): [label, summary, taint]
+  (@[?type == 'K8s'] | [0].subtypes | sort([*].subtype)): [image, node, policy, server]
+  (@[?type == 'SystemD'] | [0].subtypes | sort([*].subtype)): [containerd.service, docker.service, kubelet.service]

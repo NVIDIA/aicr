@@ -91,6 +91,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+// yamlStringTag is the YAML resolved-tag for explicit scalar strings, used
+// when emitting nodes that must serialize as quoted strings (e.g. Helm
+// template placeholders that would otherwise be misparsed).
+const yamlStringTag = "!!str"
+
 // compile-time interface check
 var _ deployer.Deployer = (*Generator)(nil)
 
@@ -117,6 +122,11 @@ type Generator struct {
 	// layout. Without this, the delegated argocd output would silently skip
 	// manifestFiles (today's broken behavior for manifest-only components).
 	ComponentManifests map[string]map[string][]byte
+
+	// VendorCharts pulls upstream Helm chart bytes into the bundle at
+	// bundle time so the resulting artifact is air-gap deployable.
+	// Forwarded to the delegated argocd.Generator. Off by default.
+	VendorCharts bool
 }
 
 // Generate creates a Helm chart app-of-apps by:
@@ -161,6 +171,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		// dynamic paths removed; argocdhelm surfaces those paths at the
 		// parent chart level via writeStaticValuesAndBuildStubs.
 		AllowDynamicValueSplit: true,
+		VendorCharts:           g.VendorCharts,
 	}
 
 	if _, genErr := argocdGen.Generate(ctx, tmpDir); genErr != nil {
@@ -642,13 +653,13 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 	// which would corrupt Helm's parsing of the template.
 	source["repoURL"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
-		Tag:   "!!str",
+		Tag:   yamlStringTag,
 		Style: yaml.SingleQuotedStyle,
 		Value: `{{ required "repoURL is required: pass --set repoURL=<published bundle URL> (e.g., oci://<registry>/<path>/aicr-bundle)" .Values.repoURL }}`,
 	}
 	source["targetRevision"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
-		Tag:   "!!str",
+		Tag:   yamlStringTag,
 		Style: yaml.SingleQuotedStyle,
 		Value: `{{ .Values.targetRevision | default .Chart.Version }}`,
 	}
@@ -668,7 +679,7 @@ func injectValuesIntoSingleSource(app map[string]any, overrideKey string) error 
 	}
 	helm["values"] = &yaml.Node{
 		Kind:  yaml.ScalarNode,
-		Tag:   "!!str",
+		Tag:   yamlStringTag,
 		Style: yaml.LiteralStyle,
 		Value: valuesTmpl,
 	}
@@ -866,7 +877,7 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 		"helm": map[string]any{
 			"values": &yaml.Node{
 				Kind:  yaml.ScalarNode,
-				Tag:   "!!str",
+				Tag:   yamlStringTag,
 				Style: yaml.LiteralStyle,
 				Value: valuesTmpl,
 			},

@@ -81,6 +81,25 @@ func TestConfigStorageClass(t *testing.T) {
 	})
 }
 
+func TestConfigVendorCharts(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  *Config
+		want bool
+	}{
+		{"default false", NewConfig(), false},
+		{"enabled true", NewConfig(WithVendorCharts(true)), true},
+		{"explicit false", NewConfig(WithVendorCharts(false)), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.VendorCharts(); got != tt.want {
+				t.Errorf("VendorCharts() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

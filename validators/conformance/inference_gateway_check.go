@@ -27,7 +27,7 @@ import (
 )
 
 var httpRouteGVR = schema.GroupVersionResource{
-	Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes",
+	Group: apiGroupGateway, Version: "v1", Resource: "httproutes",
 }
 
 type gatewayDataPlaneReport struct {
@@ -57,7 +57,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 
 	// 1. GatewayClass "kgateway" accepted
 	gcGVR := schema.GroupVersionResource{
-		Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses",
+		Group: apiGroupGateway, Version: "v1", Resource: "gatewayclasses",
 	}
 	gc, err := dynClient.Resource(gcGVR).Get(ctx.Ctx, "kgateway", metav1.GetOptions{})
 	if err != nil {
@@ -80,7 +80,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 
 	// 2. Gateway "inference-gateway" programmed
 	gwGVR := schema.GroupVersionResource{
-		Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways",
+		Group: apiGroupGateway, Version: "v1", Resource: "gateways",
 	}
 	gw, err := dynClient.Resource(gwGVR).Namespace("kgateway-system").Get(
 		ctx.Ctx, "inference-gateway", metav1.GetOptions{})
@@ -110,7 +110,7 @@ func CheckInferenceGateway(ctx *validators.Context) error {
 
 	// 3. Required CRDs exist
 	crdGVR := schema.GroupVersionResource{
-		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions",
+		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 	requiredCRDs := []string{
 		"gateways.gateway.networking.k8s.io",
@@ -157,7 +157,7 @@ func validateGatewayDataPlane(ctx *validators.Context) (*gatewayDataPlaneReport,
 
 	// 1. Listener status (informational): log attached routes count.
 	gwGVR := schema.GroupVersionResource{
-		Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways",
+		Group: apiGroupGateway, Version: "v1", Resource: "gateways",
 	}
 	gw, gwErr := dynClient.Resource(gwGVR).Namespace("kgateway-system").Get(
 		ctx.Ctx, "inference-gateway", metav1.GetOptions{})

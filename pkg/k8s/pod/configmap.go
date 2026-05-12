@@ -28,7 +28,7 @@ func ParseConfigMapURI(uri string) (namespace, name string, err error) {
 	const prefix = "cm://"
 	if !strings.HasPrefix(uri, prefix) {
 		return "", "", errors.NewWithContext(errors.ErrCodeInvalidRequest, "invalid configmap URI", map[string]interface{}{
-			"uri":             uri,
+			keyURI:            uri,
 			"expected_format": "cm://namespace/name",
 		})
 	}
@@ -36,7 +36,7 @@ func ParseConfigMapURI(uri string) (namespace, name string, err error) {
 	parts := strings.SplitN(strings.TrimPrefix(uri, prefix), "/", 2)
 	if len(parts) != 2 {
 		return "", "", errors.NewWithContext(errors.ErrCodeInvalidRequest, "invalid configmap URI format", map[string]interface{}{
-			"uri":             uri,
+			keyURI:            uri,
 			"expected_format": "cm://namespace/name",
 		})
 	}
@@ -46,7 +46,7 @@ func ParseConfigMapURI(uri string) (namespace, name string, err error) {
 
 	if namespace == "" || name == "" {
 		return "", "", errors.NewWithContext(errors.ErrCodeInvalidRequest, "namespace and name cannot be empty", map[string]interface{}{
-			"uri": uri,
+			keyURI: uri,
 		})
 	}
 

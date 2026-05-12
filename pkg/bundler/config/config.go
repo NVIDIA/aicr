@@ -134,6 +134,12 @@ type Config struct {
 	// storageClass is the Kubernetes StorageClass name to inject into components at bundle time.
 	// When non-empty, it overrides the storageClassName at all registry-declared storageClassPaths.
 	storageClass string
+
+	// vendorCharts pulls upstream Helm chart bytes into the bundle at bundle
+	// time so the resulting artifact is self-contained and air-gap
+	// deployable. Off by default — non-vendored bundles preserve the
+	// CVE-yank fail-loud signal and avoid bundle-time network egress.
+	vendorCharts bool
 }
 
 // Getter methods for read-only access
@@ -292,6 +298,13 @@ func (c *Config) HasDynamicValues() bool {
 // StorageClass returns the Kubernetes StorageClass name to inject at bundle time, or empty string if unset.
 func (c *Config) StorageClass() string {
 	return c.storageClass
+}
+
+// VendorCharts reports whether upstream Helm chart bytes should be pulled
+// into the bundle at bundle time. Off by default; opt-in via
+// --vendor-charts on the CLI or vendor-charts=true on the API.
+func (c *Config) VendorCharts() bool {
+	return c.vendorCharts
 }
 
 // Validate checks if the Config has valid settings.
@@ -486,6 +499,18 @@ func WithDynamicValues(dynamicValues map[string][]string) Option {
 func WithStorageClass(storageClass string) Option {
 	return func(c *Config) {
 		c.storageClass = storageClass
+	}
+}
+
+// WithVendorCharts enables bundle-time vendoring of upstream Helm chart
+// bytes. When set, every Helm component becomes a local chart inside the
+// generated bundle and the resulting artifact is fully air-gap
+// deployable. Trades the CVE-yank fail-loud signal of registry-referencing
+// bundles for offline deployability; vendored bundles silently install a
+// frozen chart version even after upstream yank.
+func WithVendorCharts(enabled bool) Option {
+	return func(c *Config) {
+		c.vendorCharts = enabled
 	}
 }
 

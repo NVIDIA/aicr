@@ -53,11 +53,11 @@ func constraintNameForVariant(variant ncclVariant) string {
 	case variantNVLS:
 		return "nccl-all-reduce-bw-nvls"
 	case variantDefault:
-		return "nccl-all-reduce-bw"
+		return checkNameNCCLAllReduceBW
 	default:
 		// Unknown values fall back to the legacy constraint name so existing
 		// recipes keep validating after variant rollout.
-		return "nccl-all-reduce-bw"
+		return checkNameNCCLAllReduceBW
 	}
 }
 

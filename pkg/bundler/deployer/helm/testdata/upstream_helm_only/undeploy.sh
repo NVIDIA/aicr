@@ -254,6 +254,10 @@ skip_preflight_for_release() {
 }
 
 # Run `kubectl ... -o json` while keeping stdout parseable for jq.
+# Closes kubectl's stdin so a broken kubeconfig (missing user / expired creds)
+# cannot leak its "Please enter Username:" prompt — kubectl writes the prompt
+# to *stdout* before detecting non-TTY stdin, which would otherwise land in
+# the captured value and resurface in WARNING messages (see issue #684).
 capture_kubectl_json() {
   local out_var="$1"
   shift
@@ -264,7 +268,7 @@ capture_kubectl_json() {
     return 1
   fi
 
-  if ! output=$(kubectl "$@" 2>"${stderr_file}"); then
+  if ! output=$(kubectl "$@" 2>"${stderr_file}" </dev/null); then
     kubectl_err=$(cat "${stderr_file}" 2>/dev/null || true)
     rm -f "${stderr_file}"
     printf -v "${out_var}" '%s' "${kubectl_err}"
@@ -562,7 +566,17 @@ delete_orphaned_webhooks_for_ns "cert-manager"
 
 postflight_issues=false
 
-TERMINATING=$(kubectl get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{" "}{end}' 2>/dev/null || true)
+TERMINATING=""
+postflight_ns_json=""
+if capture_kubectl_json postflight_ns_json get namespaces -o json; then
+  TERMINATING=$(echo "${postflight_ns_json}" \
+    | jq -r '.items[] | select(.status.phase=="Terminating") | .metadata.name' 2>/dev/null \
+    | tr '\n' ' ')
+  TERMINATING="${TERMINATING% }"
+else
+  echo "Warning: failed to list namespaces for post-flight terminating check; kubectl output: ${postflight_ns_json}" >&2
+  postflight_issues=true
+fi
 if [[ -n "${TERMINATING}" ]]; then
   echo "WARNING: namespaces still terminating: ${TERMINATING}"
   echo "  A subsequent deploy.sh may fail. Wait or force-finalize these namespaces."

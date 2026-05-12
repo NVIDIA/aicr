@@ -127,7 +127,7 @@ const (
 var (
 	dynamoDeploymentGVR = schema.GroupVersionResource{
 		Group:    "nvidia.com",
-		Version:  "v1alpha1",
+		Version:  versionV1alpha1,
 		Resource: "dynamographdeployments",
 	}
 
@@ -308,9 +308,9 @@ func hasDynamoPlatform(ctx *validators.Context) bool {
 // rather than being collapsed into a benign "not installed" skip.
 func dynamoCRDInstalled(ctx *validators.Context) (bool, error) {
 	crdGVR := schema.GroupVersionResource{
-		Group:    "apiextensions.k8s.io",
+		Group:    apiGroupAPIExtensions,
 		Version:  "v1",
-		Resource: "customresourcedefinitions",
+		Resource: resourceCRDs,
 	}
 	getCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -665,7 +665,7 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 	// Bind the worker pod to the DRA ResourceClaimTemplate.
 	claimBindings := []interface{}{
 		map[string]interface{}{
-			"name":                      "gpu",
+			keyName:                     "gpu",
 			"resourceClaimTemplateName": inferenceClaimTemplateName,
 		},
 	}

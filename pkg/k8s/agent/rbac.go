@@ -103,13 +103,13 @@ func (d *Deployer) ensureRole(ctx context.Context) error {
 		Rules: []rbacv1.PolicyRule{
 			{
 				APIGroups: []string{""},
-				Resources: []string{"configmaps"},
-				Verbs:     []string{"create", "get", "update", "patch"},
+				Resources: []string{resourceCM},
+				Verbs:     []string{verbCreate, verbGet, "update", "patch"},
 			},
 			{
 				APIGroups: []string{""},
 				Resources: []string{"pods"},
-				Verbs:     []string{"get", "list"},
+				Verbs:     []string{"get", verbList},
 			},
 		},
 	}
@@ -169,17 +169,17 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 		{
 			APIGroups: []string{""},
 			Resources: []string{"nodes"},
-			Verbs:     []string{"get", "list"},
+			Verbs:     []string{verbGet, verbList},
 		},
 		{
 			APIGroups: []string{""},
 			Resources: []string{"pods"},
-			Verbs:     []string{"get", "list"},
+			Verbs:     []string{verbGet, verbList},
 		},
 		{
 			APIGroups: []string{"nvidia.com"},
 			Resources: []string{"clusterpolicies"},
-			Verbs:     []string{"get", "list"},
+			Verbs:     []string{verbGet, verbList},
 		},
 	}
 

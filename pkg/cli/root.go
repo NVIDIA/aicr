@@ -67,10 +67,10 @@ var (
 
 	outputFlag = func() cli.Flag {
 		return &cli.StringFlag{
-			Name:     "output",
+			Name:     flagOutput,
 			Aliases:  []string{"o"},
 			Usage:    fmt.Sprintf("output destination: file path, ConfigMap URI (%snamespace/name), or stdout (default)", serializer.ConfigMapURIScheme),
-			Category: "Output",
+			Category: catOutput,
 		}
 	}
 
@@ -80,7 +80,7 @@ var (
 			Aliases:  []string{"t"},
 			Value:    string(serializer.FormatYAML),
 			Usage:    fmt.Sprintf("output format (%s)", strings.Join(serializer.SupportedFormats(), ", ")),
-			Category: "Output",
+			Category: catOutput,
 		}, serializer.SupportedFormats)
 	}
 
@@ -89,7 +89,7 @@ var (
 			Name:     "kubeconfig",
 			Aliases:  []string{"k"},
 			Usage:    "Path to kubeconfig file (overrides KUBECONFIG env and default ~/.kube/config)",
-			Category: "Input",
+			Category: catInput,
 		}
 	}
 
@@ -101,7 +101,7 @@ var (
 	validator catalog entries are merged with embedded (external takes precedence
 	by name). All other files (base.yaml, overlays, component values) fully
 	replace embedded files or add new ones.`,
-			Category: "Input",
+			Category: catInput,
 		}
 	}
 
@@ -115,7 +115,7 @@ var (
 			Usage: `Path or HTTP(S) URL to an AICRConfig file (YAML or JSON) populating
 	defaults for this command. Individual CLI flags always override config file
 	values. See docs/user/cli-reference.md for the file schema.`,
-			Category: "Input",
+			Category: catInput,
 		}
 	}
 )

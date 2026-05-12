@@ -43,6 +43,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
+// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
+const digestAlgoSHA256 = "sha256"
+
+// keyError is the map key used in structured-error context payloads.
+const keyError = "error"
+
 // DefaultBundler generates Helm per-component bundles from recipes.
 //
 // The per-component approach produces a directory per component, each with its
@@ -321,6 +327,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DynamicValues:      dynamicValues,
 			DataFiles:          dataFiles,
 			ComponentManifests: componentManifests,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -346,6 +353,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			IncludeChecksums:   b.Config.IncludeChecksums(),
 			DataFiles:          dataFiles,
 			ComponentManifests: componentManifests,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerHelm:
@@ -366,6 +374,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			ComponentManifests: componentManifests,
 			DataFiles:          dataFiles,
 			DynamicValues:      dynamicValues,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	default:
@@ -847,7 +856,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 
 	subject := attestation.AttestSubject{
 		Name:     checksum.ChecksumFileName,
-		Digest:   map[string]string{"sha256": digest},
+		Digest:   map[string]string{digestAlgoSHA256: digest},
 		Metadata: metadata,
 	}
 
@@ -858,7 +867,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 		if digestErr == nil {
 			subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
 				URI:    fmt.Sprintf("file://%s", binaryPath),
-				Digest: map[string]string{"sha256": binaryDigest},
+				Digest: map[string]string{digestAlgoSHA256: binaryDigest},
 			})
 		}
 	}
@@ -873,7 +882,7 @@ func (b *DefaultBundler) attestBundle(ctx context.Context, dir string, dataFiles
 		if digestErr == nil {
 			subject.ResolvedDependencies = append(subject.ResolvedDependencies, attestation.Dependency{
 				URI:    fmt.Sprintf("file://%s", dataFile),
-				Digest: map[string]string{"sha256": dataDigest},
+				Digest: map[string]string{digestAlgoSHA256: dataDigest},
 			})
 		}
 	}

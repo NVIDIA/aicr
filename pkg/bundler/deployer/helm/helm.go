@@ -88,6 +88,19 @@ type Generator struct {
 	// DynamicValues maps component names to their dynamic value paths.
 	// These paths are removed from values.yaml and written to cluster-values.yaml.
 	DynamicValues map[string][]string
+
+	// VendorCharts pulls upstream Helm chart bytes into the bundle at
+	// bundle time so the resulting artifact is air-gap deployable.
+	// Off by default. See pkg/bundler/deployer/localformat for the
+	// vendoring shape (single wrapped folder per Helm component, with
+	// charts/<chart>-<version>.tgz adjacent to a wrapper Chart.yaml).
+	VendorCharts bool
+
+	// vendorRecords is populated by Generate when VendorCharts is on.
+	// Captured here so generateProvenanceFile can write provenance.yaml
+	// without re-threading the slice through every helper call. The
+	// field is unset (nil) when VendorCharts is off.
+	vendorRecords []localformat.VendorRecord
 }
 
 // Generate creates a per-component Helm bundle from the configured generator fields.
@@ -121,16 +134,18 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// localformat owns: folder naming, values.yaml/cluster-values.yaml split,
 	// Chart.yaml, templates/*, install.sh. The helm deployer just orchestrates.
 	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues)
-	folders, err := localformat.Write(ctx, localformat.Options{
+	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:          outputDir,
 		Components:         lfComponents,
 		ComponentManifests: g.ComponentManifests,
+		VendorCharts:       g.VendorCharts,
 	})
 	if err != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.
 		return nil, err
 	}
-	for _, f := range folders {
+	g.vendorRecords = writeResult.VendoredCharts
+	for _, f := range writeResult.Folders {
 		// localformat returns paths relative to outputDir. Downstream consumers
 		// (checksum.WriteChecksums, output.TotalSize, deployment reporting) all
 		// expect absolute paths, so resolve each entry via SafeJoin before
@@ -178,6 +193,18 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Include external data files in the file list (for checksums)
 	if err := output.AddDataFiles(outputDir, g.DataFiles); err != nil {
 		return nil, err
+	}
+
+	// Generate provenance.yaml for vendored bundles. Written before
+	// checksums.txt so the audit file is itself checksummed.
+	if len(g.vendorRecords) > 0 {
+		provPath, provSize, provErr := localformat.WriteProvenance(ctx, outputDir, g.vendorRecords)
+		if provErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to generate provenance.yaml", provErr)
+		}
+		output.Files = append(output.Files, provPath)
+		output.TotalSize += provSize
 	}
 
 	// Generate checksums.txt if requested

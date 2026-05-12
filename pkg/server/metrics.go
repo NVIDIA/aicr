@@ -30,7 +30,7 @@ var (
 			Name: "aicr_http_requests_total",
 			Help: "Total number of HTTP requests",
 		},
-		[]string{"method", "path", "status"},
+		[]string{keyMethod, "path", "status"},
 	)
 
 	httpRequestDuration = promauto.NewHistogramVec(
@@ -39,7 +39,7 @@ var (
 			Help:    "HTTP request latency in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"method", "path"},
+		[]string{keyMethod, "path"},
 	)
 
 	httpRequestsInFlight = promauto.NewGauge(
