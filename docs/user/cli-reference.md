@@ -573,8 +573,9 @@ aicr validate [flags]
 **Flags:**
 | Flag | Short | Type | Default | Description |
 |------|-------|------|---------|-------------|
-| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints |
+| `--recipe` | `-r` | string | (required) | Path/URI to recipe file containing constraints (or via `spec.validate.input.recipe` in `--config`) |
 | `--snapshot` | `-s` | string | | Path/URI to snapshot file containing measurements (omit to capture live) |
+| `--config` | | string | | Path or HTTP/HTTPS URL to an AICRConfig file (YAML/JSON). CLI flags override values from this file. See [Validate Config File Mode](#validate-config-file-mode). |
 | `--phase` | | string[] | all | Validation phase to run: deployment, performance, conformance, all (repeatable) |
 | `--fail-on-error` | | bool | true | Exit with non-zero status if any constraint fails |
 | `--output` | `-o` | string | stdout | Output destination (file or stdout) |
@@ -715,6 +716,62 @@ aicr validate \
   --recipe recipe.yaml \
   --node-selector gpu-type=h100 \
   --toleration gpu-type=h100:NoSchedule
+```
+
+#### Validate Config File Mode
+
+`aicr validate --config <path>` reads inputs from an AICRConfig YAML/JSON file
+under `spec.validate`. CLI flags always override values loaded from `--config`;
+override events are logged at INFO so users can see which input won.
+
+Evidence-related flags (`--evidence-dir`, `--cncf-submission`, `--feature`) are
+CLI-only and not sourced from `--config` (tracked in
+[#754](https://github.com/NVIDIA/aicr/issues/754)).
+
+**Supported schema:**
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.nvidia.com/v1alpha1
+metadata:
+  name: prod-validate
+spec:
+  validate:
+    input:
+      recipe: ./recipe.yaml
+      snapshot: ./snapshot.yaml          # optional; omit to capture live
+    agent:                               # only used when input.snapshot is empty
+      namespace: aicr-validation
+      image: ghcr.io/nvidia/aicr:v0.1.0
+      imagePullSecrets: [registry-secret]
+      jobName: aicr-validate
+      serviceAccountName: aicr
+      nodeSelector:
+        my-org/gpu-pool: "true"
+      tolerations:
+        - "gpu-type=h100:NoSchedule"
+      requireGpu: true
+    execution:
+      phases: [deployment, conformance]
+      failOnError: true                  # default true; set false to report only
+      noCluster: false
+      noCleanup: false
+      timeout: 10m
+```
+
+**Examples:**
+
+```shell
+# Use a config file
+aicr validate --config validate.yaml
+
+# Override a single config value from the CLI
+aicr validate --config validate.yaml --phase deployment
+
+# Validate the same recipe across two clusters using two different agent
+# configs (config-bound) without retyping flags
+aicr validate --config validate-cluster-a.yaml
+aicr validate --config validate-cluster-b.yaml
 ```
 
 #### Workload Scheduling

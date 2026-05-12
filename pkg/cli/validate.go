@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
@@ -54,72 +55,130 @@ type validateAgentConfig struct {
 	requireGPU         bool
 }
 
-// parseValidateAgentConfig parses agent deployment flags from the command.
-func parseValidateAgentConfig(cmd *cli.Command) (*validateAgentConfig, error) {
-	nodeSelector, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
-	}
-
-	// Preserve the "no --toleration flag" signal for downstream validators:
-	// snapshotter.ParseTolerations returns DefaultTolerations() (a single
-	// bare Exists entry that matches every taint) when its input is empty,
-	// which collapses the implicit default and an explicit `--toleration '*'`
-	// into the same in-memory value. Validators like inference-perf that
-	// want to mirror the target node's taints by default must be able to
-	// tell "operator opted into tolerate-all" from "operator said nothing".
-	// Passing nil here when no flag was provided keeps the env var unset,
-	// so the inner validator context sees nil unambiguously.
-	tolerationArgs := cmd.StringSlice("toleration")
-	var tolerations []corev1.Toleration
-	if len(tolerationArgs) > 0 {
-		tolerations, err = snapshotter.ParseTolerations(tolerationArgs)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
-		}
-	}
+// parseValidateAgentConfig builds the snapshot-capture agent's deployment
+// config. Shared inputs (nodeSelector, tolerations, imagePullSecrets,
+// namespace, cleanup) are resolved once by the caller and passed in; this
+// keeps any CLI-overrides-config slog.Info from firing twice when both
+// the agent and the downstream validator job want the same value.
+func parseValidateAgentConfig(
+	cmd *cli.Command,
+	resolved *config.ValidateResolved,
+	shared validateSharedResolved,
+) *validateAgentConfig {
 
 	return &validateAgentConfig{
 		kubeconfig:         cmd.String("kubeconfig"),
-		namespace:          cmd.String("namespace"),
-		image:              cmd.String("image"),
-		imagePullSecrets:   cmd.StringSlice("image-pull-secret"),
-		jobName:            cmd.String("job-name"),
-		serviceAccountName: cmd.String("service-account-name"),
-		nodeSelector:       nodeSelector,
-		tolerations:        tolerations,
-		timeout:            cmd.Duration("timeout"),
-		cleanup:            !cmd.Bool("no-cleanup"),
+		namespace:          shared.namespace,
+		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
+		imagePullSecrets:   shared.imagePullSecrets,
+		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
+		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		nodeSelector:       shared.nodeSelector,
+		tolerations:        shared.tolerations,
+		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
+		cleanup:            !shared.noCleanup,
 		debug:              cmd.Bool("debug"),
-		requireGPU:         cmd.Bool("require-gpu"),
-	}, nil
+		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU),
+	}
 }
 
-// parseValidationPhases parses phase strings into Phase values.
+// validateSharedResolved holds the validate-command fields that get
+// consumed by both the snapshot-capture agent path AND the validator Job
+// path. Resolving them once and threading through avoids duplicate
+// CLI-overrides-config log lines that would otherwise fire from
+// every helper call site.
+type validateSharedResolved struct {
+	namespace        string
+	imagePullSecrets []string
+	nodeSelector     map[string]string
+	tolerations      []corev1.Toleration
+	noCleanup        bool
+}
+
+// derefBoolOr returns *p when p is non-nil, otherwise fallback. Used to
+// turn the *bool config-presence signal (nil = field unset) into the bool
+// fallback that boolFlagOrConfig expects: when config did not set the
+// field, the CLI flag's default value flows through.
+func derefBoolOr(p *bool, fallback bool) bool {
+	if p == nil {
+		return fallback
+	}
+	return *p
+}
+
+// resolveValidateNodeSelector resolves the validation node selector with
+// CLI-overrides-config precedence. The CLI flag is a repeated string in
+// key=value form; the config value is already a typed map. Either source
+// can be empty; the result preserves the same nil-vs-empty semantics.
+func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateResolved) (map[string]string, error) {
+	if cmd.IsSet("node-selector") {
+		ns, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
+		}
+		if resolved.NodeSelector != nil {
+			slog.Info("CLI flag overriding config value", "flag", "node-selector",
+				"config", resolved.NodeSelector, "override", ns)
+		}
+		return ns, nil
+	}
+	return resolved.NodeSelector, nil
+}
+
+// resolveValidateTolerations resolves the validation toleration list,
+// preserving the "no --toleration flag" sentinel: snapshotter.ParseTolerations
+// returns DefaultTolerations() (a single bare Exists entry that matches every
+// taint) when its input is empty, which collapses the implicit default and an
+// explicit `--toleration '*'` into the same in-memory value. Validators like
+// inference-perf that want to mirror the target node's taints by default
+// must distinguish "operator opted into tolerate-all" from "operator said
+// nothing". Returning nil here when neither CLI nor config set the field
+// keeps the env var unset, so the inner validator context sees nil.
+func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResolved) ([]corev1.Toleration, error) {
+	if cmd.IsSet("toleration") {
+		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
+		}
+		if resolved.Tolerations != nil {
+			slog.Info("CLI flag overriding config value", "flag", "toleration",
+				"config", resolved.Tolerations, "override", tols)
+		}
+		return tols, nil
+	}
+	return resolved.Tolerations, nil
+}
+
+// parseValidationPhases parses phase strings into Phase values, accepting
+// the canonical vocabulary in validator.PhaseNames. The validator.PhaseAll
+// wildcard collapses the whole selection to nil (= run every phase),
+// matching the documented "Default: all phases" behavior. PhaseAll is
+// exclusive: combining it with any specific phase is a hard error rather
+// than silently treating the selection as wildcard, so a typo like
+// `--phase deployment --phase all` does not mask the user's mistake.
+//
+// Every entry is parsed before the wildcard collapse, so an invalid
+// phase name surfaces an error even when "all" is also present.
 func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 	if len(phaseStrs) == 0 {
 		return nil, nil // nil = all phases
 	}
 
+	var (
+		sawAll bool
+		phases []validator.Phase
+		seen   = make(map[validator.Phase]bool)
+	)
 	for _, s := range phaseStrs {
-		if s == "all" {
-			return nil, nil
+		if s == validator.PhaseAll {
+			sawAll = true
+			continue
 		}
-	}
-
-	validPhases := map[string]validator.Phase{
-		"deployment":  validator.PhaseDeployment,
-		"performance": validator.PhasePerformance,
-		"conformance": validator.PhaseConformance,
-	}
-
-	seen := make(map[validator.Phase]bool)
-	var phases []validator.Phase
-	for _, s := range phaseStrs {
-		p, ok := validPhases[s]
+		p, ok := validator.ParsePhase(s)
 		if !ok {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("invalid phase %q: must be one of: deployment, performance, conformance, all", s))
+				fmt.Sprintf("invalid phase %q: must be one of: %s",
+					s, strings.Join(validator.PhaseNames, ", ")))
 		}
 		if !seen[p] {
 			phases = append(phases, p)
@@ -127,6 +186,13 @@ func parseValidationPhases(phaseStrs []string) ([]validator.Phase, error) {
 		}
 	}
 
+	if sawAll && len(phases) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("phase %q cannot be combined with other phases", validator.PhaseAll))
+	}
+	if sawAll {
+		return nil, nil
+	}
 	return phases, nil
 }
 
@@ -437,6 +503,7 @@ func validateCmdFlags() []cli.Flag {
 				"Options: " + strings.Join(cncf.ValidFeatures, ", "),
 			Category: catEvidence,
 		},
+		configFlag(),
 		dataFlag(),
 		outputFlag(),
 		kubeconfigFlag(),
@@ -478,14 +545,26 @@ Run validation without failing on check errors (informational mode):
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data"); err != nil {
 				return err
 			}
 
-			if err := initDataProvider(cmd, nil); err != nil {
-				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", err)
+			cfg, err := loadCmdConfig(ctx, cmd)
+			if err != nil {
+				return err
+			}
+			resolved, err := cfg.Validation().Resolve()
+			if err != nil {
+				return err
 			}
 
+			if initErr := initDataProvider(cmd, cfg); initErr != nil {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to initialize data provider", initErr)
+			}
+
+			// Evidence flags (--evidence-dir, --cncf-submission, --feature) are
+			// not yet sourced from --config: the evidence schema lands as a
+			// single umbrella under #754 with both CNCF and attestation kinds.
 			evidenceDir := cmd.String("evidence-dir")
 			cncfSubmission := cmd.Bool("cncf-submission")
 			features := cmd.StringSlice("feature")
@@ -504,22 +583,42 @@ Run validation without failing on check errors (informational mode):
 				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"))
 			}
 
-			phases, err := parseValidationPhases(cmd.StringSlice("phase"))
+			phases, err := parseValidationPhases(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
 			if err != nil {
 				return err
 			}
 
-			recipeFilePath := cmd.String("recipe")
-			snapshotFilePath := cmd.String("snapshot")
+			recipeFilePath := stringFlagOrConfig(cmd, "recipe", resolved.RecipePath)
+			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", resolved.SnapshotPath)
 			kubeconfig := cmd.String("kubeconfig")
 
-			validationNamespace := cmd.String("namespace")
-
 			if recipeFilePath == "" {
-				return errors.New(errors.ErrCodeInvalidRequest, "--recipe is required")
+				return errors.New(errors.ErrCodeInvalidRequest,
+					"--recipe is required (or set spec.validate.input.recipe in --config)")
 			}
 
-			failOnError := cmd.Bool("fail-on-error")
+			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(resolved.FailOnError, true))
+			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
+
+			// Resolve shared fields once, before the snapshot/agent split, so
+			// CLI-overrides-config log lines fire exactly once per field even
+			// when both the agent-deploy path and the validator Job want the
+			// same value.
+			tolerations, err := resolveValidateTolerations(cmd, resolved)
+			if err != nil {
+				return err
+			}
+			nodeSelector, err := resolveValidateNodeSelector(cmd, resolved)
+			if err != nil {
+				return err
+			}
+			shared := validateSharedResolved{
+				namespace:        stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
+				imagePullSecrets: stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
+				nodeSelector:     nodeSelector,
+				tolerations:      tolerations,
+				noCleanup:        boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
+			}
 
 			slog.Info("loading recipe", "uri", recipeFilePath)
 
@@ -535,9 +634,9 @@ Run validation without failing on check errors (informational mode):
 			// snapshot from the live API), so a snapshot file is the only valid
 			// data source in that mode. Placed after recipe.LoadFromFile so
 			// recipe kind-check and auto-hydration still run for CLI coverage.
-			if snapshotFilePath == "" && cmd.Bool("no-cluster") {
+			if snapshotFilePath == "" && noCluster {
 				return errors.New(errors.ErrCodeInvalidRequest,
-					"--no-cluster requires --snapshot (cannot deploy the snapshot-capture agent without cluster access)")
+					"--no-cluster requires --snapshot (or set spec.validate.input.snapshot in --config); cannot deploy the snapshot-capture agent without cluster access")
 			}
 
 			if snapshotFilePath != "" {
@@ -549,10 +648,7 @@ Run validation without failing on check errors (informational mode):
 			} else {
 				slog.Info("deploying agent to capture snapshot")
 
-				agentCfg, cfgErr := parseValidateAgentConfig(cmd)
-				if cfgErr != nil {
-					return cfgErr
-				}
+				agentCfg := parseValidateAgentConfig(cmd, resolved, shared)
 
 				var deployErr error
 				snap, _, deployErr = deployAgentForValidation(ctx, agentCfg)
@@ -561,33 +657,14 @@ Run validation without failing on check errors (informational mode):
 				}
 			}
 
-			// See validateAgentConfig builder for why we gate on flag presence:
-			// preserve the "no flag" signal so inner validators can distinguish
-			// operator-opted tolerate-all (--toleration '*') from silence.
-			tolerationArgs := cmd.StringSlice("toleration")
-			var tolerations []corev1.Toleration
-			if len(tolerationArgs) > 0 {
-				var tolErr error
-				tolerations, tolErr = snapshotter.ParseTolerations(tolerationArgs)
-				if tolErr != nil {
-					return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", tolErr)
-				}
-			}
-
-			nodeSelector, nsErr := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
-			if nsErr != nil {
-				return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", nsErr)
-			}
-
 			// Validate that requested phases are defined in the recipe.
 			if err := validatePhasesAgainstRecipe(phases, rec); err != nil {
 				return err
 			}
 
-			noCleanup := cmd.Bool("no-cleanup")
-			if noCleanup {
+			if shared.noCleanup {
 				slog.Warn("--no-cleanup: cluster-admin ClusterRoleBinding will remain active after validation",
-					"namespace", validationNamespace,
+					"namespace", shared.namespace,
 					"binding", "aicr-validator")
 			}
 
@@ -596,12 +673,12 @@ Run validation without failing on check errors (informational mode):
 				output:              cmd.String("output"),
 				outFormat:           serializer.FormatJSON,
 				failOnError:         failOnError,
-				validationNamespace: validationNamespace,
-				cleanup:             !noCleanup,
-				imagePullSecrets:    cmd.StringSlice("image-pull-secret"),
-				noCluster:           cmd.Bool("no-cluster"),
-				nodeSelector:        nodeSelector,
-				tolerations:         tolerations,
+				validationNamespace: shared.namespace,
+				cleanup:             !shared.noCleanup,
+				imagePullSecrets:    shared.imagePullSecrets,
+				noCluster:           noCluster,
+				nodeSelector:        shared.nodeSelector,
+				tolerations:         shared.tolerations,
 				evidenceDir:         evidenceDir,
 			})
 		},

@@ -545,3 +545,194 @@ func TestBundleResolve_DefensiveCloneOfMaps(t *testing.T) {
 		t.Errorf("Resolve must defensively clone maps; source was mutated to %q", src["k"])
 	}
 }
+
+// === ValidateSpec.Resolve ===
+
+func TestValidateResolve_NilReceiver(t *testing.T) {
+	var v *config.ValidateSpec
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("nil ValidateResolved")
+	}
+}
+
+func TestValidateResolve_EmptySpec(t *testing.T) {
+	got, err := (&config.ValidateSpec{}).Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.RecipePath != "" || got.SnapshotPath != "" || got.Namespace != "" ||
+		got.Timeout != nil || got.NoCluster || got.NoCleanup || got.RequireGPU ||
+		got.FailOnError != nil || got.Phases != nil ||
+		got.NodeSelector != nil || got.Tolerations != nil || got.ImagePullSecrets != nil {
+
+		t.Errorf("expected all zero, got %+v", got)
+	}
+}
+
+func TestValidateResolve_AllFieldsPopulated(t *testing.T) {
+	tr := true
+	v := &config.ValidateSpec{
+		Input: &config.ValidateInputSpec{
+			Recipe:   "r.yaml",
+			Snapshot: "s.yaml",
+		},
+		Agent: &config.ValidateAgentSpec{
+			Namespace:          "ns",
+			Image:              "img:1",
+			ImagePullSecrets:   []string{"secret-a", "secret-b"},
+			JobName:            "j",
+			ServiceAccountName: "sa",
+			NodeSelector:       map[string]string{"k": "v"},
+			Tolerations:        []string{"foo=bar:NoSchedule"},
+			RequireGPU:         true,
+		},
+		Execution: &config.ValidateExecutionSpec{
+			Phases:      []string{"deployment", "conformance"},
+			FailOnError: &tr,
+			NoCluster:   true,
+			NoCleanup:   true,
+			Timeout:     "5m",
+		},
+	}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.RecipePath != "r.yaml" || got.SnapshotPath != "s.yaml" {
+		t.Errorf("input mismatch: %+v", got)
+	}
+	if got.Namespace != "ns" || got.Image != "img:1" || got.JobName != "j" ||
+		got.ServiceAccountName != "sa" || !got.RequireGPU {
+
+		t.Errorf("agent mismatch: %+v", got)
+	}
+	if !reflect.DeepEqual(got.ImagePullSecrets, []string{"secret-a", "secret-b"}) {
+		t.Errorf("ImagePullSecrets = %v", got.ImagePullSecrets)
+	}
+	if !reflect.DeepEqual(got.NodeSelector, map[string]string{"k": "v"}) {
+		t.Errorf("NodeSelector = %v", got.NodeSelector)
+	}
+	if len(got.Tolerations) != 1 || got.Tolerations[0].Key != "foo" {
+		t.Errorf("Tolerations = %+v", got.Tolerations)
+	}
+	if !reflect.DeepEqual(got.Phases, []string{"deployment", "conformance"}) {
+		t.Errorf("Phases = %v", got.Phases)
+	}
+	if got.FailOnError == nil || !*got.FailOnError {
+		t.Errorf("FailOnError = %v", got.FailOnError)
+	}
+	if !got.NoCluster || !got.NoCleanup {
+		t.Errorf("flags = %+v", got)
+	}
+	if got.Timeout == nil || got.Timeout.String() != "5m0s" {
+		t.Errorf("Timeout = %v", got.Timeout)
+	}
+}
+
+func TestValidateResolve_InvalidPhase(t *testing.T) {
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{
+		Phases: []string{"deployment", "warp-drive"},
+	}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.execution.phases") {
+		t.Fatalf("expected phase-validation error, got %v", err)
+	}
+}
+
+func TestValidateResolve_AllPhaseSpecialValue(t *testing.T) {
+	// "all" is accepted at the config layer; the CLI parser collapses it
+	// into nil (= run every phase). Resolve must not reject it.
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{
+		Phases: []string{"all"},
+	}}
+	if _, err := v.Resolve(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateResolve_ZeroTimeoutPreserved(t *testing.T) {
+	// A config-supplied "0s" must surface as a non-nil zero, distinct from
+	// "field unset" (nil), so callers like durationFlagOrConfig can honor
+	// an intentional disable-timeout setting.
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{Timeout: "0s"}}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.Timeout == nil {
+		t.Fatal("expected non-nil Timeout for explicit 0s; got nil")
+	}
+	if *got.Timeout != 0 {
+		t.Errorf("expected *Timeout = 0, got %v", *got.Timeout)
+	}
+}
+
+func TestValidateResolve_InvalidTimeout(t *testing.T) {
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{Timeout: "abc"}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.execution.timeout") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
+func TestValidateResolve_NegativeTimeout(t *testing.T) {
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{Timeout: "-5s"}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), ">= 0") {
+		t.Fatalf("expected negative-timeout error, got %v", err)
+	}
+}
+
+func TestValidateResolve_InvalidToleration(t *testing.T) {
+	v := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{Tolerations: []string{"garbage"}}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.agent.tolerations") {
+		t.Fatalf("expected tolerations error, got %v", err)
+	}
+}
+
+func TestValidateResolve_DefensiveCloneOfNodeSelector(t *testing.T) {
+	src := map[string]string{"k": "v"}
+	v := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{NodeSelector: src}}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got.NodeSelector["k"] = "mutated"
+	if src["k"] != "v" {
+		t.Errorf("Resolve must defensively clone NodeSelector; source mutated to %q", src["k"])
+	}
+}
+
+func TestValidateResolve_NilVsExplicitlyEmpty(t *testing.T) {
+	// Tolerations nil → resolved nil. Downstream uses nil as the "no
+	// override" sentinel so the inner validator's default policy applies.
+	v1 := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{}}
+	got1, err := v1.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got1.Tolerations != nil {
+		t.Errorf("nil source → expected nil Tolerations, got %v", got1.Tolerations)
+	}
+	// Tolerations [] → resolved non-nil empty slice. This is the
+	// explicit-clear case: the operator wrote `tolerations: []` to drop
+	// the tolerate-all default, and Resolve must NOT collapse that into
+	// DefaultTolerations() the way snapshotter.ParseTolerations would on
+	// an empty input. Distinguishable from the nil case above.
+	v2 := &config.ValidateSpec{Agent: &config.ValidateAgentSpec{Tolerations: []string{}}}
+	got2, err := v2.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got2.Tolerations == nil {
+		t.Error("explicit [] source → expected non-nil empty Tolerations, got nil")
+	}
+	if len(got2.Tolerations) != 0 {
+		t.Errorf("explicit [] source → expected len 0, got %v", got2.Tolerations)
+	}
+}

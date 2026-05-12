@@ -76,13 +76,25 @@ func TestParseValidationPhases(t *testing.T) {
 			},
 		},
 		{
-			name:       "all with other phases returns nil",
-			phaseStrs:  []string{"deployment", "all", "conformance"},
+			name:       "all repeated returns nil",
+			phaseStrs:  []string{"all", "all"},
 			wantPhases: nil,
+		},
+		{
+			name:       "all combined with specific phase is rejected",
+			phaseStrs:  []string{"deployment", "all", "conformance"},
+			wantErr:    true,
+			errContain: "cannot be combined",
 		},
 		{
 			name:       "invalid phase",
 			phaseStrs:  []string{"invalid"},
+			wantErr:    true,
+			errContain: "invalid phase",
+		},
+		{
+			name:       "invalid phase is caught even when all is also present",
+			phaseStrs:  []string{"all", "garbage"},
 			wantErr:    true,
 			errContain: "invalid phase",
 		},

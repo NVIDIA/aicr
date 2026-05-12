@@ -40,14 +40,17 @@ func (c *AICRConfig) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid apiVersion %q: expected %q", c.APIVersion, APIVersion))
 	}
-	if c.Spec.Recipe == nil && c.Spec.Bundle == nil {
+	if c.Spec.Recipe == nil && c.Spec.Bundle == nil && c.Spec.Validate == nil {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			"config has neither spec.recipe nor spec.bundle; at least one is required")
+			"config has none of spec.recipe, spec.bundle, spec.validate; at least one is required")
 	}
 	if err := c.Spec.Recipe.validate(); err != nil {
 		return err
 	}
 	if err := c.Spec.Bundle.validate(); err != nil {
+		return err
+	}
+	if err := c.Spec.Validate.validate(); err != nil {
 		return err
 	}
 	if err := c.Spec.validateRecipeBundleHandoff(); err != nil {
@@ -112,6 +115,16 @@ func (b *BundleSpec) validate() error {
 		return nil
 	}
 	if _, err := b.Resolve(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (v *ValidateSpec) validate() error {
+	if v == nil {
+		return nil
+	}
+	if _, err := v.Resolve(); err != nil {
 		return err
 	}
 	return nil

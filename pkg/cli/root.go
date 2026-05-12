@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -418,13 +419,24 @@ func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, e
 	return config.Load(ctx, src)
 }
 
-// stringFlagOrConfig returns the CLI flag value when explicitly set on the
-// command line (or via env-var Source binding); otherwise the fallback.
-// Default flag values do NOT count as "set" and yield the fallback.
-// Logs an INFO line when the CLI value differs from a non-empty fallback.
+// stringFlagOrConfig returns the resolved value for a string CLI flag with
+// CLI-overrides-config-overrides-default precedence:
+//
+//   - Explicit CLI flag (cmd.IsSet) → CLI value, with an INFO log if it
+//     differs from a non-empty config fallback.
+//   - No CLI flag, non-empty config fallback → fallback.
+//   - No CLI flag, empty config fallback → cmd.String(flagName), which
+//     surfaces the flag's compile-time Value: default when one is set.
+//
+// The third case matters when a flag declares Value: "..." in its
+// definition (e.g., `--namespace` defaults to "aicr-validation"): an
+// unset config field must not collapse that default to the empty string.
 func stringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
 	if !cmd.IsSet(flagName) {
-		return fallback
+		if fallback != "" {
+			return fallback
+		}
+		return cmd.String(flagName)
 	}
 	v := cmd.String(flagName)
 	if fallback != "" && fallback != v {
@@ -445,6 +457,25 @@ func intFlagOrConfig(cmd *cli.Command, flagName string, fallback int) int {
 	v := cmd.Int(flagName)
 	if fallback != v {
 		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
+}
+
+// durationFlagOrConfig returns the CLI flag value when explicitly set;
+// otherwise the fallback. A nil fallback signals "config did not set the
+// field" — in that case the CLI flag's default duration flows through,
+// distinct from a fallback of *0 which preserves an explicit zero-timeout
+// (e.g. "disable timeout") value from config.
+func durationFlagOrConfig(cmd *cli.Command, flagName string, fallback *time.Duration) time.Duration {
+	if !cmd.IsSet(flagName) {
+		if fallback != nil {
+			return *fallback
+		}
+		return cmd.Duration(flagName)
+	}
+	v := cmd.Duration(flagName)
+	if fallback != nil && *fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", *fallback, "override", v)
 	}
 	return v
 }

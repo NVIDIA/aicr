@@ -184,18 +184,14 @@ func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
 	return stringFlagOrConfig(cmd, "output", cfg.Recipe().OutputPath())
 }
 
-// parseRecipeOutputFormat reads --format with a fallback to spec.recipe.output.format
-// and validates the result.
-//
-// The flag has a "yaml" Value default; cmd.String("format") returns it even
-// when the user did not pass --format, which would otherwise mask any
-// config-supplied value. stringFlagOrConfig uses cmd.IsSet so a missing
-// flag still falls through to the config fallback.
+// parseRecipeOutputFormat reads --format with precedence
+// CLI > spec.recipe.output.format > flag default ("yaml"), and validates
+// the result. stringFlagOrConfig handles all three sources: it prefers a
+// non-empty config value over the flag's Value: default, and falls
+// through to cmd.String(flag) (which surfaces the Value: default) only
+// when both CLI and config are empty.
 func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
 	raw := stringFlagOrConfig(cmd, "format", cfg.Recipe().OutputFormat())
-	if raw == "" {
-		raw = string(serializer.FormatYAML)
-	}
 	out := serializer.Format(raw)
 	if out.IsUnknown() {
 		return "", errors.New(errors.ErrCodeInvalidRequest,

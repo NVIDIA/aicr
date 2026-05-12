@@ -21,7 +21,7 @@ const Kind = "AICRConfig"
 const APIVersion = "aicr.nvidia.com/v1alpha1"
 
 // AICRConfig is the top-level schema for the --config file accepted by
-// the aicr CLI's recipe and bundle commands.
+// the aicr CLI's recipe, bundle, and validate commands.
 type AICRConfig struct {
 	Kind       string   `yaml:"kind" json:"kind"`
 	APIVersion string   `yaml:"apiVersion" json:"apiVersion"`
@@ -38,10 +38,11 @@ type Metadata struct {
 //
 // Each section is optional: a config file used only with `aicr recipe` may
 // populate just Recipe; one used only with `aicr bundle` may populate just
-// Bundle. A single file may populate both for end-to-end workflows.
+// Bundle. A single file may populate any combination for end-to-end workflows.
 type Spec struct {
-	Recipe *RecipeSpec `yaml:"recipe,omitempty" json:"recipe,omitempty"`
-	Bundle *BundleSpec `yaml:"bundle,omitempty" json:"bundle,omitempty"`
+	Recipe   *RecipeSpec   `yaml:"recipe,omitempty" json:"recipe,omitempty"`
+	Bundle   *BundleSpec   `yaml:"bundle,omitempty" json:"bundle,omitempty"`
+	Validate *ValidateSpec `yaml:"validate,omitempty" json:"validate,omitempty"`
 }
 
 // RecipeSpec captures the inputs to `aicr recipe`.
@@ -141,4 +142,56 @@ type AttestationSpec struct {
 type RegistrySpec struct {
 	InsecureTLS bool `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
 	PlainHTTP   bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
+}
+
+// ValidateSpec captures the inputs to `aicr validate`.
+//
+// Evidence-related flags (--evidence-dir, --cncf-submission, --feature) are
+// intentionally not in this schema yet: the recipe-test-attestation work
+// under #754 introduces an Evidence umbrella that rehomes CNCF alongside
+// the new attestation kind, and landing the umbrella with both members at
+// once avoids a churn window where a one-member umbrella would have to be
+// reshaped on the second member's arrival.
+type ValidateSpec struct {
+	Input     *ValidateInputSpec     `yaml:"input,omitempty" json:"input,omitempty"`
+	Agent     *ValidateAgentSpec     `yaml:"agent,omitempty" json:"agent,omitempty"`
+	Execution *ValidateExecutionSpec `yaml:"execution,omitempty" json:"execution,omitempty"`
+}
+
+// ValidateInputSpec captures the recipe + snapshot inputs to validation.
+type ValidateInputSpec struct {
+	Recipe   string `yaml:"recipe,omitempty" json:"recipe,omitempty"`
+	Snapshot string `yaml:"snapshot,omitempty" json:"snapshot,omitempty"`
+}
+
+// ValidateAgentSpec configures the in-cluster snapshot-capture and
+// validation-job pods. Empty fields use the validator's compiled-in
+// defaults; selectors/tolerations omitted entirely (nil) inherit, while an
+// explicit empty map/list (`{}` / `[]`) clears the default.
+type ValidateAgentSpec struct {
+	Namespace          string            `yaml:"namespace,omitempty" json:"namespace,omitempty"`
+	Image              string            `yaml:"image,omitempty" json:"image,omitempty"`
+	ImagePullSecrets   []string          `yaml:"imagePullSecrets,omitempty" json:"imagePullSecrets,omitempty"`
+	JobName            string            `yaml:"jobName,omitempty" json:"jobName,omitempty"`
+	ServiceAccountName string            `yaml:"serviceAccountName,omitempty" json:"serviceAccountName,omitempty"`
+	NodeSelector       map[string]string `yaml:"nodeSelector,omitempty" json:"nodeSelector,omitempty"`
+	Tolerations        []string          `yaml:"tolerations,omitempty" json:"tolerations,omitempty"`
+	RequireGPU         bool              `yaml:"requireGpu,omitempty" json:"requireGpu,omitempty"`
+}
+
+// ValidateExecutionSpec controls validation behavior independent of where
+// the agent runs.
+//
+// FailOnError is a pointer because the CLI flag defaults to true. A nil
+// value means "config did not set this slot," letting CLI defaults flow
+// through; *false means "config explicitly opted out of fail-on-error."
+//
+// Timeout is the wire-string form (e.g. "5m"); Resolve parses it to a
+// time.Duration with errors attributed to spec.validate.execution.timeout.
+type ValidateExecutionSpec struct {
+	Phases      []string `yaml:"phases,omitempty" json:"phases,omitempty"`
+	FailOnError *bool    `yaml:"failOnError,omitempty" json:"failOnError,omitempty"`
+	NoCluster   bool     `yaml:"noCluster,omitempty" json:"noCluster,omitempty"`
+	NoCleanup   bool     `yaml:"noCleanup,omitempty" json:"noCleanup,omitempty"`
+	Timeout     string   `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }

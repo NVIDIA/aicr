@@ -17,6 +17,9 @@ package config
 import (
 	"fmt"
 	"maps"
+	"slices"
+	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -25,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/validator"
 )
 
 // BundleResolved is the typed-domain projection of BundleSpec produced by
@@ -222,6 +226,161 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 	if b.Registry != nil {
 		out.InsecureTLS = b.Registry.InsecureTLS
 		out.PlainHTTP = b.Registry.PlainHTTP
+	}
+
+	return out, nil
+}
+
+// ValidateResolved is the typed-domain projection of ValidateSpec produced
+// by (*ValidateSpec).Resolve. Conversion from the wire form happens
+// exactly once at this boundary; CLI consumers layer flag overrides on
+// top of these values rather than re-parsing the spec strings.
+//
+// Zero values mean "config did not set this field." Maps and slices
+// preserve nil-vs-explicitly-empty from the wire spec — callers can
+// detect whether a user wrote `nodeSelector: {}` to clear an inherited
+// default vs. omitted the field entirely.
+type ValidateResolved struct {
+	// RecipePath is spec.validate.input.recipe.
+	RecipePath string
+
+	// SnapshotPath is spec.validate.input.snapshot.
+	SnapshotPath string
+
+	// Namespace is spec.validate.agent.namespace.
+	Namespace string
+
+	// Image is spec.validate.agent.image.
+	Image string
+
+	// ImagePullSecrets is spec.validate.agent.imagePullSecrets. Nil if
+	// config did not set the field.
+	ImagePullSecrets []string
+
+	// JobName is spec.validate.agent.jobName.
+	JobName string
+
+	// ServiceAccountName is spec.validate.agent.serviceAccountName.
+	ServiceAccountName string
+
+	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
+	// non-nil empty if `{}` was explicit.
+	NodeSelector map[string]string
+
+	// Tolerations is the parsed spec.validate.agent.tolerations slice.
+	// Nil if config did not set the field.
+	Tolerations []corev1.Toleration
+
+	// RequireGPU is spec.validate.agent.requireGpu.
+	RequireGPU bool
+
+	// Phases is spec.validate.execution.phases. Nil if unset.
+	Phases []string
+
+	// FailOnError is spec.validate.execution.failOnError. Nil pointer
+	// signals "config did not set the field" so the caller can defer to
+	// the CLI flag's default.
+	FailOnError *bool
+
+	// NoCluster is spec.validate.execution.noCluster.
+	NoCluster bool
+
+	// NoCleanup is spec.validate.execution.noCleanup.
+	NoCleanup bool
+
+	// Timeout is the parsed spec.validate.execution.timeout. Nil pointer
+	// signals "config did not set the field" so callers can fall through
+	// to the CLI flag's default duration; non-nil preserves an explicit
+	// "0s" / disabled-timeout value distinct from absence.
+	Timeout *time.Duration
+}
+
+// validPhasesSet derives the accepted spec.validate.execution.phases
+// vocabulary from validator.PhaseNames so it cannot drift from the CLI
+// parser when phases are added or removed. Recomputed once at package
+// init from the canonical slice.
+var validPhasesSet = func() map[string]struct{} {
+	m := make(map[string]struct{}, len(validator.PhaseNames))
+	for _, p := range validator.PhaseNames {
+		m[p] = struct{}{}
+	}
+	return m
+}()
+
+// Resolve converts a ValidateSpec from the wire-string form to a typed
+// ValidateResolved. It is nil-receiver tolerant and never returns a nil
+// pointer — callers reach into fields, so nil would just relocate the
+// nil-pointer dereference.
+//
+// Errors are attributed to their source spec path (for example,
+// "spec.validate.agent.tolerations") so callers can surface the location
+// of invalid input without reconstructing the path themselves.
+func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
+	out := &ValidateResolved{}
+	if v == nil {
+		return out, nil
+	}
+
+	if v.Input != nil {
+		out.RecipePath = v.Input.Recipe
+		out.SnapshotPath = v.Input.Snapshot
+	}
+
+	if v.Agent != nil {
+		out.Namespace = v.Agent.Namespace
+		out.Image = v.Agent.Image
+		out.JobName = v.Agent.JobName
+		out.ServiceAccountName = v.Agent.ServiceAccountName
+		out.RequireGPU = v.Agent.RequireGPU
+		out.ImagePullSecrets = slices.Clone(v.Agent.ImagePullSecrets)
+		out.NodeSelector = maps.Clone(v.Agent.NodeSelector)
+		if v.Agent.Tolerations != nil {
+			if len(v.Agent.Tolerations) == 0 {
+				// Preserve the explicit-clear intent: `tolerations: []`
+				// means "drop the default tolerate-all," not "use it."
+				// snapshotter.ParseTolerations would otherwise normalize
+				// an empty input to DefaultTolerations() (a single bare
+				// Exists entry that matches every taint), collapsing
+				// "operator opted out" into "operator opted in."
+				out.Tolerations = []corev1.Toleration{}
+			} else {
+				tols, err := snapshotter.ParseTolerations(v.Agent.Tolerations)
+				if err != nil {
+					return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+						"invalid spec.validate.agent.tolerations", err)
+				}
+				out.Tolerations = tols
+			}
+		}
+	}
+
+	if v.Execution != nil {
+		for _, p := range v.Execution.Phases {
+			if _, ok := validPhasesSet[p]; !ok {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("invalid spec.validate.execution.phases entry %q: must be one of: %s",
+						p, strings.Join(validator.PhaseNames, ", ")))
+			}
+		}
+		out.Phases = slices.Clone(v.Execution.Phases)
+		out.NoCluster = v.Execution.NoCluster
+		out.NoCleanup = v.Execution.NoCleanup
+		if v.Execution.FailOnError != nil {
+			b := *v.Execution.FailOnError
+			out.FailOnError = &b
+		}
+		if v.Execution.Timeout != "" {
+			d, err := time.ParseDuration(v.Execution.Timeout)
+			if err != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					"invalid spec.validate.execution.timeout", err)
+			}
+			if d < 0 {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("spec.validate.execution.timeout must be >= 0, got %s", d))
+			}
+			out.Timeout = &d
+		}
 	}
 
 	return out, nil
