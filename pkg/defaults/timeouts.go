@@ -541,6 +541,20 @@ const (
 	MaxSigstoreBundleSize = 10 * 1024 * 1024 // 10 MiB
 )
 
+// Helm chart-pull timeouts for the bundle-time --vendor-charts path.
+// Sized for one chart pull from a remote Helm or OCI registry, including
+// repo index fetch (HTTPS) or registry resolution (OCI), tarball download,
+// and SHA256 hashing. Applies to whichever puller implementation backs
+// localformat.ChartPuller — today the CLI shim, later the in-process
+// Helm SDK if/when licensing clears.
+const (
+	// HelmChartPullTimeout bounds a single upstream chart fetch. Charts are
+	// typically 0.5–5 MB, but slow or geographically distant registries plus
+	// repo-index downloads on cold starts can extend the wall time well
+	// beyond the default HTTPClientTimeout.
+	HelmChartPullTimeout = 5 * time.Minute
+)
+
 // OCI registry push tuning. Bounds individual oras.Copy attempts and the
 // retry policy applied around them. Push attempts can take minutes for
 // large bundles over slow links, so the per-attempt timeout is generous.

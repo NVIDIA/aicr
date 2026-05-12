@@ -26,8 +26,36 @@ import (
 	apperrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// uriScheme is the URI scheme for OCI registry output (e.g., "oci://ghcr.io/org/repo:tag").
-const uriScheme = "oci://"
+// URIScheme is the URI scheme for OCI registry references
+// (e.g., "oci://ghcr.io/org/repo:tag"). Exported so other packages can
+// build references without re-declaring the literal.
+const URIScheme = "oci://"
+
+// uriScheme is the unexported alias retained for legacy in-package use.
+const uriScheme = URIScheme
+
+// EnsureScheme returns ref with the oci:// prefix added when missing.
+// Used by callers that accept user input in either form.
+//
+// Refs that already carry a different URI scheme (e.g., "https://...")
+// are returned unchanged so callers don't accidentally build
+// "oci://https://..." when handed a non-oci URL by mistake.
+func EnsureScheme(ref string) string {
+	if strings.HasPrefix(ref, URIScheme) {
+		return ref
+	}
+	if strings.Contains(ref, "://") {
+		return ref
+	}
+	return URIScheme + ref
+}
+
+// TrimScheme returns ref with any oci:// prefix removed. Useful when
+// emitting a registry/repo:tag form for cosign or for human-readable
+// pointers that don't carry the URI scheme.
+func TrimScheme(ref string) string {
+	return strings.TrimPrefix(ref, URIScheme)
+}
 
 // Reference represents a parsed output target, which can be either an OCI registry
 // reference or a local directory path.

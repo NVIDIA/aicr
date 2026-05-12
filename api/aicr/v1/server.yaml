@@ -888,6 +888,25 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: vendor-charts
+          in: query
+          required: false
+          description: >
+            Pull upstream Helm chart bytes into the bundle at bundle time so
+            the resulting artifact is fully self-contained and air-gap deployable.
+            Each vendored chart is recorded in provenance.yaml with name, version,
+            source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal
+            for offline deployability — vendored bundles silently install a
+            frozen chart version even after upstream yank.
+            Requires the `helm` binary on the API server's PATH and valid
+            registry credentials for any private upstream repos (Helm
+            `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` env vars for
+            HTTP(S); docker config for OCI). When either prerequisite is
+            missing the request fails with 500 and a structured error code
+            (`UNAVAILABLE` for missing helm, `UNAUTHORIZED` for credentials).
+          schema:
+            type: boolean
+            default: false
       requestBody:
         required: true
         description: The recipe (RecipeResult) to generate bundles from

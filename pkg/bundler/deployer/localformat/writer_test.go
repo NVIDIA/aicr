@@ -34,7 +34,7 @@ var update = flag.Bool("update", false, "update golden files")
 func TestWrite_UpstreamHelmOnly(t *testing.T) {
 	outDir := t.TempDir()
 
-	folders, err := localformat.Write(context.Background(), localformat.Options{
+	res, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: outDir,
 		Components: []localformat.Component{{
 			Name:       "nfd",
@@ -45,6 +45,7 @@ func TestWrite_UpstreamHelmOnly(t *testing.T) {
 			Values:     map[string]any{"image": map[string]any{"tag": "v0.16.1"}},
 		}},
 	})
+	folders := res.Folders
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -78,7 +79,7 @@ func TestWrite_UpstreamHelmOnly(t *testing.T) {
 func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 	outDir := t.TempDir()
 
-	folders, err := localformat.Write(context.Background(), localformat.Options{
+	res, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: outDir,
 		Components: []localformat.Component{{
 			Name:       "skyhook-customizations",
@@ -111,6 +112,7 @@ metadata:
 			},
 		},
 	})
+	folders := res.Folders
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -136,7 +138,7 @@ metadata:
 func TestWrite_Mixed(t *testing.T) {
 	outDir := t.TempDir()
 
-	folders, err := localformat.Write(context.Background(), localformat.Options{
+	res, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: outDir,
 		Components: []localformat.Component{{
 			Name:       "gpu-operator",
@@ -170,6 +172,7 @@ metadata:
 			},
 		},
 	})
+	folders := res.Folders
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -221,7 +224,7 @@ func TestWrite_Ordering(t *testing.T) {
 	}
 
 	// b is mixed: helm repo set + manifests → emits b primary + b-post injected
-	folders, err := localformat.Write(context.Background(), localformat.Options{
+	res, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: outDir,
 		Components: []localformat.Component{
 			mk("a", "https://a.example"),
@@ -252,6 +255,7 @@ metadata:
 			},
 		},
 	})
+	folders := res.Folders
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -293,7 +297,7 @@ func TestWrite_Kustomize(t *testing.T) {
 		t.Fatalf("abs path: %v", err)
 	}
 
-	folders, err := localformat.Write(context.Background(), localformat.Options{
+	res, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: outDir,
 		Components: []localformat.Component{{
 			Name:      "my-kustomize",
@@ -304,6 +308,7 @@ func TestWrite_Kustomize(t *testing.T) {
 			Path: kustomizePath,
 		}},
 	})
+	folders := res.Folders
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}

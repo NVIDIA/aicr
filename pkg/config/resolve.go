@@ -108,6 +108,11 @@ type BundleResolved struct {
 
 	// PlainHTTP is spec.bundle.registry.plainHTTP.
 	PlainHTTP bool
+
+	// VendorCharts is spec.bundle.deployment.vendorCharts. When true,
+	// upstream Helm chart bytes are pulled into the bundle at bundle time
+	// so the resulting artifact is air-gap deployable. Off by default.
+	VendorCharts bool
 }
 
 // Resolve converts a BundleSpec from the wire-string form to a typed
@@ -167,6 +172,7 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 			}
 			out.DynamicValues = paths
 		}
+		out.VendorCharts = b.Deployment.VendorCharts
 	}
 
 	if b.Scheduling != nil {
