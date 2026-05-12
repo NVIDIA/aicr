@@ -22,6 +22,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/urfave/cli/v3"
 
@@ -443,6 +444,23 @@ func intFlagOrConfig(cmd *cli.Command, flagName string, fallback int) int {
 	}
 	v := cmd.Int(flagName)
 	if fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
+}
+
+// durationFlagOrConfig returns the CLI flag value when explicitly set;
+// otherwise the fallback. A zero fallback means "config did not set the
+// field" — in that case the CLI flag's default duration flows through.
+func durationFlagOrConfig(cmd *cli.Command, flagName string, fallback time.Duration) time.Duration {
+	if !cmd.IsSet(flagName) {
+		if fallback != 0 {
+			return fallback
+		}
+		return cmd.Duration(flagName)
+	}
+	v := cmd.Duration(flagName)
+	if fallback != 0 && fallback != v {
 		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
 	}
 	return v

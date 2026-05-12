@@ -28,6 +28,9 @@ func TestAccessors_NilTolerant(t *testing.T) {
 	if got := nilCfg.Bundle(); got != nil {
 		t.Errorf("nil cfg Bundle() = %v, want nil", got)
 	}
+	if got := nilCfg.Validation(); got != nil {
+		t.Errorf("nil cfg Validation() = %v, want nil", got)
+	}
 
 	var nilRecipe *config.RecipeSpec
 	if got := nilRecipe.SnapshotPath(); got != "" {
@@ -89,5 +92,25 @@ func TestAccessors_PopulatedReturnsValues(t *testing.T) {
 	}
 	if cfg.Bundle() == nil {
 		t.Fatal("Bundle() = nil")
+	}
+}
+
+func TestAccessors_Validation(t *testing.T) {
+	// Nil cfg → nil.
+	var nilCfg *config.AICRConfig
+	if got := nilCfg.Validation(); got != nil {
+		t.Errorf("nil cfg Validation() = %v, want nil", got)
+	}
+	// Spec.Validate unset → nil.
+	cfg := &config.AICRConfig{}
+	if got := cfg.Validation(); got != nil {
+		t.Errorf("unset Validation() = %v, want nil", got)
+	}
+	// Spec.Validate populated → returns the spec.
+	v := &config.ValidateSpec{Input: &config.ValidateInputSpec{Recipe: "r.yaml"}}
+	cfg2 := &config.AICRConfig{Spec: config.Spec{Validate: v}}
+	got := cfg2.Validation()
+	if got != v {
+		t.Errorf("Validation() did not return spec.validate; got %p, want %p", got, v)
 	}
 }

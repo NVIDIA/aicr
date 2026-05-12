@@ -73,6 +73,44 @@ func TestValidate_BundleOnly(t *testing.T) {
 	}
 }
 
+func TestValidate_ValidateOnly(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Validate: &config.ValidateSpec{
+				Input: &config.ValidateInputSpec{
+					Recipe:   "./recipe.yaml",
+					Snapshot: "./snapshot.yaml",
+				},
+				Execution: &config.ValidateExecutionSpec{
+					Timeout: "10m",
+					Phases:  []string{"deployment", "conformance"},
+				},
+			},
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestValidate_InvalidValidateTimeout(t *testing.T) {
+	cfg := &config.AICRConfig{
+		Kind:       config.Kind,
+		APIVersion: config.APIVersion,
+		Spec: config.Spec{
+			Validate: &config.ValidateSpec{
+				Execution: &config.ValidateExecutionSpec{Timeout: "abc"},
+			},
+		},
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.execution.timeout") {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+}
+
 func TestValidate_Errors(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -94,12 +132,13 @@ func TestValidate_Errors(t *testing.T) {
 			wantSub: "invalid apiVersion",
 		},
 		{
-			name: "no recipe and no bundle",
+			name: "no recipe, no bundle, and no validate",
 			mutate: func(c *config.AICRConfig) {
 				c.Spec.Recipe = nil
 				c.Spec.Bundle = nil
+				c.Spec.Validate = nil
 			},
-			wantSub: "neither spec.recipe nor spec.bundle",
+			wantSub: "none of spec.recipe, spec.bundle, spec.validate",
 		},
 		{
 			name: "criteria and snapshot mutually exclusive",

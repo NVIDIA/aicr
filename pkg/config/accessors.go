@@ -39,6 +39,16 @@ func (c *AICRConfig) Bundle() *BundleSpec {
 	return c.Spec.Bundle
 }
 
+// Validation returns the validate section, or nil if cfg or the section is
+// unset. Named Validation (not Validate) to avoid colliding with
+// (*AICRConfig).Validate, which checks well-formedness of the whole config.
+func (c *AICRConfig) Validation() *ValidateSpec {
+	if c == nil {
+		return nil
+	}
+	return c.Spec.Validate
+}
+
 // SnapshotPath returns spec.recipe.input.snapshot, or "" when unset.
 func (r *RecipeSpec) SnapshotPath() string {
 	if r == nil || r.Input == nil {
