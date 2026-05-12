@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -311,6 +312,58 @@ func TestWrite_PreFolderInstallOmitsCreateNamespace(t *testing.T) {
 // pass type checks but blow up at `helm install` time with an opaque
 // "namespace not found" error because the chart creates one namespace
 // while the release targets another.
+// TestWrite_FolderLimit_CountsEmissionsNotComponents pins the
+// folder-prefix-exhaustion guard. The check budgets against the actual
+// number of NNN-* directories the bundle will emit (pre + primary +
+// post, per the same conditions the main loop applies) instead of a
+// worst-case 3*len(Components) multiplier. Without this, a recipe of
+// 400 pure upstream-Helm components — which produce 400 directories —
+// would be rejected before any work happens. The deploy/undeploy
+// templates only glob three-digit prefixes, so the cap remains 999.
+func TestWrite_FolderLimit_CountsEmissionsNotComponents(t *testing.T) {
+	// Helper: build n primary-only upstream-Helm components.
+	makeComponents := func(n int) []localformat.Component {
+		out := make([]localformat.Component, n)
+		for i := 0; i < n; i++ {
+			name := fmt.Sprintf("c%04d", i)
+			out[i] = localformat.Component{
+				Name:       name,
+				Namespace:  name,
+				Repository: "https://example.invalid/charts",
+				ChartName:  name,
+				Version:    "v1.0.0",
+			}
+		}
+		return out
+	}
+
+	t.Run("400 primary-only components stay under the cap", func(t *testing.T) {
+		// Under the old 3x multiplier, 400 components would be rejected
+		// (3*400 = 1200 > 999). With per-emission counting, 400 primary
+		// folders is well under the limit.
+		_, err := localformat.Write(context.Background(), localformat.Options{
+			OutputDir:  t.TempDir(),
+			Components: makeComponents(400),
+		})
+		if err != nil {
+			t.Fatalf("400 primary-only components should fit under cap, got: %v", err)
+		}
+	})
+
+	t.Run("1000 primary-only components exceed the cap", func(t *testing.T) {
+		_, err := localformat.Write(context.Background(), localformat.Options{
+			OutputDir:  t.TempDir(),
+			Components: makeComponents(1000),
+		})
+		if err == nil {
+			t.Fatal("1000 primary folders must exceed the 999-prefix cap")
+		}
+		if !strings.Contains(err.Error(), "too many emitted folders") {
+			t.Errorf("error should mention emitted folder count; got: %v", err)
+		}
+	})
+}
+
 func TestWrite_PreManifestNamespaceDrift(t *testing.T) {
 	_, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: t.TempDir(),

@@ -201,17 +201,31 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 	}
 	// Fail fast if the layout's three-digit prefix can't accommodate the
-	// component count. Each non-vendored component may emit up to three
-	// folders (pre + primary + post), so the upper bound is
-	// 3*len(Components). Vendored mode collapses mixed into one folder
-	// per Helm component; we still budget for 3x because pre folders
-	// are independent of the primary path. The deploy/undeploy templates
-	// glob [0-9][0-9][0-9]-*/, so a 4-digit prefix would be silently
-	// skipped.
-	if 3*len(opts.Components) > 999 {
+	// number of NNN-* folders this bundle will actually emit. Compute
+	// the count using the same pre/primary/post emission rules the main
+	// loop below applies — a worst-case 3x bound would reject valid
+	// 500-component bundles whose components emit only their primary
+	// folder. The deploy/undeploy templates glob [0-9][0-9][0-9]-*/, so
+	// a 4-digit prefix would be silently skipped at install time.
+	folderCount := 0
+	for _, c := range opts.Components {
+		if len(opts.ComponentPreManifests[c.Name]) > 0 {
+			folderCount++ // <name>-pre
+		}
+		folderCount++ // primary
+		// Post-injection conditions mirror the per-component branch
+		// below: skipped under VendorCharts (mixed collapses into the
+		// primary), and only meaningful for mixed components (helm
+		// repository + raw manifests). Manifest-only and kustomize
+		// primaries never inject a -post folder.
+		if !opts.VendorCharts && c.Repository != "" && len(opts.ComponentPostManifests[c.Name]) > 0 {
+			folderCount++ // <name>-post
+		}
+	}
+	if folderCount > 999 {
 		return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("too many components (%d): NNN- folder prefix supports at most 999 entries",
-				len(opts.Components)))
+			fmt.Sprintf("too many emitted folders (%d) from %d components: NNN- folder prefix supports at most 999 entries",
+				folderCount, len(opts.Components)))
 	}
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeInternal, "create output dir", err)
