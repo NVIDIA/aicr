@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package evidence
+package cncf
 
 // Feature names exposed via `--feature` and used as map keys for evidence
 // requirements, script section mapping, and alias resolution. Declared here
