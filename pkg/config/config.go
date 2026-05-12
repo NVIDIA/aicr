@@ -156,6 +156,70 @@ type ValidateSpec struct {
 	Input     *ValidateInputSpec     `yaml:"input,omitempty" json:"input,omitempty"`
 	Agent     *ValidateAgentSpec     `yaml:"agent,omitempty" json:"agent,omitempty"`
 	Execution *ValidateExecutionSpec `yaml:"execution,omitempty" json:"execution,omitempty"`
+	Evidence  *EvidenceSpec          `yaml:"evidence,omitempty" json:"evidence,omitempty"`
+}
+
+// EvidenceSpec is the umbrella for the two evidence kinds `aicr validate`
+// can emit: CNCF AI Conformance markdown (CNCF) and the recipe-evidence v1
+// bundle (Attestation). Either or both may be populated; an unset section
+// means the corresponding kind is CLI-only.
+type EvidenceSpec struct {
+	CNCF        *EvidenceCNCFSpec        `yaml:"cncf,omitempty" json:"cncf,omitempty"`
+	Attestation *EvidenceAttestationSpec `yaml:"attestation,omitempty" json:"attestation,omitempty"`
+}
+
+// EvidenceCNCFSpec configures the CNCF AI Conformance evidence path
+// (--evidence-dir / --cncf-submission / --feature).
+type EvidenceCNCFSpec struct {
+	// Dir is the output directory for conformance evidence (--evidence-dir).
+	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
+
+	// CNCFSubmission, when true, switches into the detailed CNCF
+	// submission collector (--cncf-submission). Requires Dir.
+	CNCFSubmission bool `yaml:"cncfSubmission,omitempty" json:"cncfSubmission,omitempty"`
+
+	// Features narrows which CNCF feature areas to collect (--feature,
+	// repeatable). Empty = all features. Only honored when
+	// CNCFSubmission is true.
+	Features []string `yaml:"features,omitempty" json:"features,omitempty"`
+}
+
+// EvidenceAttestationSpec configures the recipe-evidence v1 bundle path
+// (--emit-attestation / --bom / --include-logs / --push / --push-logs /
+// --plain-http / --insecure-tls). Bundle format is documented in
+// docs/spec/recipe-evidence-v1.md.
+//
+// IdentityToken is intentionally absent: the SIGSTORE_ID_TOKEN env var
+// supplies it. Tokens are short-lived secrets and must not be embedded
+// in version-controlled configuration.
+type EvidenceAttestationSpec struct {
+	// Out is the output directory for the bundle (--emit-attestation).
+	// Setting this enables the attestation path; an empty value leaves it
+	// off even if other fields are populated.
+	Out string `yaml:"out,omitempty" json:"out,omitempty"`
+
+	// BOM is the path to a CycloneDX BOM (--bom). Required when Out is
+	// set; produce one with `make bom`.
+	BOM string `yaml:"bom,omitempty" json:"bom,omitempty"`
+
+	// IncludeLogs embeds per-check logs in the bundle (--include-logs).
+	IncludeLogs bool `yaml:"includeLogs,omitempty" json:"includeLogs,omitempty"`
+
+	// Push is the OCI reference to publish the signed bundle to
+	// (--push). Requires SIGSTORE_ID_TOKEN.
+	Push string `yaml:"push,omitempty" json:"push,omitempty"`
+
+	// PushLogs pushes the logs bundle as a sibling OCI artifact
+	// (--push-logs). Requires both IncludeLogs and Push.
+	PushLogs bool `yaml:"pushLogs,omitempty" json:"pushLogs,omitempty"`
+
+	// PlainHTTP uses HTTP instead of HTTPS on push (--plain-http,
+	// local registry tests).
+	PlainHTTP bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
+
+	// InsecureTLS skips TLS verification on push (--insecure-tls,
+	// self-signed registries).
+	InsecureTLS bool `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
 }
 
 // ValidateInputSpec captures the recipe + snapshot inputs to validation.
