@@ -141,8 +141,8 @@ func TestWrite_VendorCharts_Mixed(t *testing.T) {
 			Version:    "1.2.3",
 		}},
 		ComponentPostManifests: manifests,
-		VendorCharts:       true,
-		Puller:             &fakePuller{},
+		VendorCharts:           true,
+		Puller:                 &fakePuller{},
 	})
 	folders := res.Folders
 	recs := res.VendoredCharts
