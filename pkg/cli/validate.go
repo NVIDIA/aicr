@@ -130,7 +130,7 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 		}
-		if len(resolved.Tolerations) > 0 {
+		if resolved.Tolerations != nil {
 			slog.Info("CLI flag overriding config value", "flag", "toleration",
 				"config", resolved.Tolerations, "override", tols)
 		}
