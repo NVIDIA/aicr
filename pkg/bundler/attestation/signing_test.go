@@ -120,6 +120,15 @@ func TestExtractIssuerExtension(t *testing.T) {
 			want: "",
 		},
 		{
+			// Trailing bytes after a well-formed UTF8String must be
+			// rejected: a tag-stuffed extension that decodes cleanly
+			// for the first value but carries appended data should
+			// not silently pass through.
+			name: "current OID with trailing bytes after valid UTF8String returns empty",
+			exts: []pkix.Extension{{Id: currentOID, Value: append(append([]byte{}, asn1Encoded...), 0x42, 0x43)}},
+			want: "",
+		},
+		{
 			name: "no Fulcio issuer extension returns empty",
 			exts: []pkix.Extension{{Id: asn1.ObjectIdentifier{2, 5, 29, 17}, Value: []byte("san placeholder")}},
 			want: "",

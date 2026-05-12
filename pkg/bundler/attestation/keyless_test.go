@@ -97,99 +97,100 @@ func buildTestBundle(certDER []byte) *protobundle.Bundle {
 	}
 }
 
-func TestExtractSignerClaims_Email(t *testing.T) {
-	certDER := createTestCert(t, []string{"jdoe@company.com"}, nil)
-	bundle := buildTestBundle(certDER)
+// TestExtractSignerClaims_Identity covers identity extraction across every
+// shape of bundle VerificationMaterial the function has to handle: single
+// Certificate vs X509CertificateChain, nil/missing/malformed certs, and the
+// two production SAN forms (email for interactive OIDC, URI for workload
+// OIDC). The companion TestExtractSignerClaims_PullsIssuerFromExtension in
+// signing_test.go covers the issuer side.
+func TestExtractSignerClaims_Identity(t *testing.T) {
+	workloadURI, _ := url.Parse("https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0")
 
-	got, _ := extractSignerClaims(bundle)
-	if got != "jdoe@company.com" {
-		t.Errorf("extractSignerClaims() identity = %q, want %q", got, "jdoe@company.com")
-	}
-}
-
-func TestExtractSignerClaims_URI(t *testing.T) {
-	u, _ := url.Parse("https://github.com/NVIDIA/aicr/.github/workflows/on-tag.yaml@refs/tags/v1.0.0")
-	certDER := createTestCert(t, nil, []*url.URL{u})
-	bundle := buildTestBundle(certDER)
-
-	got, _ := extractSignerClaims(bundle)
-	if got != u.String() {
-		t.Errorf("extractSignerClaims() identity = %q, want %q", got, u.String())
-	}
-}
-
-func TestExtractSignerClaims_NilBundlePointer(t *testing.T) {
-	got, _ := extractSignerClaims(nil)
-	if got != "" {
-		t.Errorf("extractSignerClaims(nil) identity = %q, want empty", got)
-	}
-}
-
-func TestExtractSignerClaims_NoCert(t *testing.T) {
-	bundle := &protobundle.Bundle{
-		VerificationMaterial: &protobundle.VerificationMaterial{},
-	}
-
-	got, _ := extractSignerClaims(bundle)
-	if got != "" {
-		t.Errorf("extractSignerClaims() with no cert identity = %q, want empty", got)
-	}
-}
-
-func TestExtractSignerClaims_InvalidCertDER(t *testing.T) {
-	bundle := buildTestBundle([]byte("not a certificate"))
-
-	got, _ := extractSignerClaims(bundle)
-	if got != "" {
-		t.Errorf("extractSignerClaims() with invalid cert identity = %q, want empty", got)
-	}
-}
-
-func TestExtractSignerClaims_CertChain(t *testing.T) {
-	// Test the X509CertificateChain path (instead of single Certificate)
-	certDER := createTestCert(t, []string{"chain@company.com"}, nil)
-	bundle := &protobundle.Bundle{
-		VerificationMaterial: &protobundle.VerificationMaterial{
-			Content: &protobundle.VerificationMaterial_X509CertificateChain{
-				X509CertificateChain: &protocommon.X509CertificateChain{
-					Certificates: []*protocommon.X509Certificate{
-						{RawBytes: certDER},
+	tests := []struct {
+		name   string
+		bundle func(t *testing.T) *protobundle.Bundle
+		want   string
+	}{
+		{
+			name: "email SAN (interactive OIDC)",
+			bundle: func(t *testing.T) *protobundle.Bundle {
+				return buildTestBundle(createTestCert(t, []string{"jdoe@company.com"}, nil))
+			},
+			want: "jdoe@company.com",
+		},
+		{
+			name: "URI SAN (workload OIDC)",
+			bundle: func(t *testing.T) *protobundle.Bundle {
+				return buildTestBundle(createTestCert(t, nil, []*url.URL{workloadURI}))
+			},
+			want: workloadURI.String(),
+		},
+		{
+			name:   "nil bundle pointer",
+			bundle: func(_ *testing.T) *protobundle.Bundle { return nil },
+			want:   "",
+		},
+		{
+			name: "verification material without cert",
+			bundle: func(_ *testing.T) *protobundle.Bundle {
+				return &protobundle.Bundle{
+					VerificationMaterial: &protobundle.VerificationMaterial{},
+				}
+			},
+			want: "",
+		},
+		{
+			name: "invalid cert DER",
+			bundle: func(_ *testing.T) *protobundle.Bundle {
+				return buildTestBundle([]byte("not a certificate"))
+			},
+			want: "",
+		},
+		{
+			name: "X509CertificateChain with one cert",
+			bundle: func(t *testing.T) *protobundle.Bundle {
+				certDER := createTestCert(t, []string{"chain@company.com"}, nil)
+				return &protobundle.Bundle{
+					VerificationMaterial: &protobundle.VerificationMaterial{
+						Content: &protobundle.VerificationMaterial_X509CertificateChain{
+							X509CertificateChain: &protocommon.X509CertificateChain{
+								Certificates: []*protocommon.X509Certificate{{RawBytes: certDER}},
+							},
+						},
 					},
-				},
+				}
 			},
+			want: "chain@company.com",
+		},
+		{
+			name: "X509CertificateChain with empty cert list",
+			bundle: func(_ *testing.T) *protobundle.Bundle {
+				return &protobundle.Bundle{
+					VerificationMaterial: &protobundle.VerificationMaterial{
+						Content: &protobundle.VerificationMaterial_X509CertificateChain{
+							X509CertificateChain: &protocommon.X509CertificateChain{
+								Certificates: []*protocommon.X509Certificate{},
+							},
+						},
+					},
+				}
+			},
+			want: "",
+		},
+		{
+			name: "cert with no email or URI SAN",
+			bundle: func(t *testing.T) *protobundle.Bundle {
+				return buildTestBundle(createTestCert(t, nil, nil))
+			},
+			want: "",
 		},
 	}
-
-	got, _ := extractSignerClaims(bundle)
-	if got != "chain@company.com" {
-		t.Errorf("extractSignerClaims() from chain identity = %q, want %q", got, "chain@company.com")
-	}
-}
-
-func TestExtractSignerClaims_EmptyCertChain(t *testing.T) {
-	bundle := &protobundle.Bundle{
-		VerificationMaterial: &protobundle.VerificationMaterial{
-			Content: &protobundle.VerificationMaterial_X509CertificateChain{
-				X509CertificateChain: &protocommon.X509CertificateChain{
-					Certificates: []*protocommon.X509Certificate{},
-				},
-			},
-		},
-	}
-
-	got, _ := extractSignerClaims(bundle)
-	if got != "" {
-		t.Errorf("extractSignerClaims() with empty chain identity = %q, want empty", got)
-	}
-}
-
-func TestExtractSignerClaims_NoSAN(t *testing.T) {
-	// Cert with no email or URI SANs
-	certDER := createTestCert(t, nil, nil)
-	bundle := buildTestBundle(certDER)
-
-	got, _ := extractSignerClaims(bundle)
-	if got != "" {
-		t.Errorf("extractSignerClaims() with no SAN identity = %q, want empty", got)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, _ := extractSignerClaims(tc.bundle(t))
+			if got != tc.want {
+				t.Errorf("identity = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

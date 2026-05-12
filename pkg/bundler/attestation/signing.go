@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/asn1"
+	stderrors "errors"
 	"log/slog"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
@@ -132,6 +133,14 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 		Context: signCtx,
 	})
 	if err != nil {
+		// Distinguish a SigstoreSignTimeout deadline from a generic
+		// network/server failure. ErrCodeTimeout maps to a 504 at the
+		// API boundary and tells the caller the signing flow took too
+		// long; ErrCodeUnavailable (502) is for everything else
+		// (Fulcio refused, Rekor 5xx, transient network error).
+		if stderrors.Is(err, context.DeadlineExceeded) {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "sigstore signing timed out", err)
+		}
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, "sigstore signing failed", err)
 	}
 
@@ -223,8 +232,18 @@ func extractIssuerExtension(cert *x509.Certificate) string {
 	for _, ext := range cert.Extensions {
 		if ext.Id.String() == current {
 			var decoded string
-			if _, err := asn1.Unmarshal(ext.Value, &decoded); err != nil {
+			rest, err := asn1.Unmarshal(ext.Value, &decoded)
+			if err != nil {
 				slog.Debug("failed to ASN.1-decode Fulcio issuer extension", "oid", current, "error", err)
+				return ""
+			}
+			// A well-formed Fulcio extension contains exactly one
+			// ASN.1 UTF8String; trailing bytes mean the value was
+			// either truncated or carries appended data we don't
+			// understand. Reject rather than silently honor the
+			// first part.
+			if len(rest) != 0 {
+				slog.Debug("Fulcio issuer extension has trailing bytes", "oid", current, "trailing", len(rest))
 				return ""
 			}
 			return decoded
