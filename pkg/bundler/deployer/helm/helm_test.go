@@ -2010,7 +2010,7 @@ func TestBundleGolden_MixedGPUOperator(t *testing.T) {
 		},
 		ComponentPreManifests: map[string]map[string][]byte{
 			"gpu-operator": {
-				"components/gpu-operator/talos/namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+				"components/gpu-operator/manifests/talos-namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
 apiVersion: v1
 kind: Namespace
@@ -2109,7 +2109,7 @@ func TestBundleGolden_MixedWithPre(t *testing.T) {
 		ComponentValues: map[string]map[string]any{"foo": {}},
 		ComponentPreManifests: map[string]map[string][]byte{
 			"foo": {
-				"components/foo/talos/namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+				"components/foo/manifests/talos-namespace.yaml": []byte(`# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
 
 apiVersion: v1
 kind: Namespace

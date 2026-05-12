@@ -1379,7 +1379,7 @@ func TestBundleGolden_MixedWithPre(t *testing.T) {
 		TargetRevision: "main",
 		ComponentPreManifests: map[string]map[string][]byte{
 			"gpu-operator": {
-				"components/gpu-operator/talos/namespace.yaml": []byte("apiVersion: v1\n" +
+				"components/gpu-operator/manifests/talos-namespace.yaml": []byte("apiVersion: v1\n" +
 					"kind: Namespace\n" +
 					"metadata:\n" +
 					"  name: privileged-gpu-operator\n" +
@@ -1410,7 +1410,7 @@ func TestBundleGolden_MixedWithPre(t *testing.T) {
 		"001-gpu-operator-pre/application.yaml",
 		"001-gpu-operator-pre/Chart.yaml",
 		"001-gpu-operator-pre/values.yaml",
-		"001-gpu-operator-pre/templates/namespace.yaml",
+		"001-gpu-operator-pre/templates/talos-namespace.yaml",
 		// Primary: multi-source upstream-helm
 		"002-gpu-operator/application.yaml",
 		"002-gpu-operator/values.yaml",

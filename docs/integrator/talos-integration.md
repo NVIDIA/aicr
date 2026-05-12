@@ -32,7 +32,7 @@ When `aicr bundle` resolves that recipe, the `os-talos` mixin:
 
 1. Overrides the install namespace of five components to
    `privileged-<component>`.
-2. Attaches a per-component `talos/namespace.yaml` manifest (a
+2. Attaches a per-component `manifests/talos-namespace.yaml` manifest (a
    Namespace resource with PSA-privileged labels) via the
    `preManifestFiles` field — so the bundler emits a `-pre` folder
    at sync-wave N-1 ahead of the corresponding chart at wave N.
@@ -47,11 +47,11 @@ the right order.
 
 | Component | Namespace | Manifest source |
 |-----------|-----------|-----------------|
-| gpu-operator | `privileged-gpu-operator` | `recipes/components/gpu-operator/talos/namespace.yaml` |
-| network-operator | `privileged-network-operator` | `recipes/components/network-operator/talos/namespace.yaml` |
-| nvsentinel | `privileged-nvsentinel` | `recipes/components/nvsentinel/talos/namespace.yaml` |
-| nvidia-dra-driver-gpu | `privileged-nvidia-dra-driver-gpu` | `recipes/components/nvidia-dra-driver-gpu/talos/namespace.yaml` |
-| nodewright-operator | `privileged-nodewright-operator` | `recipes/components/nodewright-operator/talos/namespace.yaml` |
+| gpu-operator | `privileged-gpu-operator` | `recipes/components/gpu-operator/manifests/talos-namespace.yaml` |
+| network-operator | `privileged-network-operator` | `recipes/components/network-operator/manifests/talos-namespace.yaml` |
+| nvsentinel | `privileged-nvsentinel` | `recipes/components/nvsentinel/manifests/talos-namespace.yaml` |
+| nvidia-dra-driver-gpu | `privileged-nvidia-dra-driver-gpu` | `recipes/components/nvidia-dra-driver-gpu/manifests/talos-namespace.yaml` |
+| nodewright-operator | `privileged-nodewright-operator` | `recipes/components/nodewright-operator/manifests/talos-namespace.yaml` |
 
 ## Why these components run privileged
 

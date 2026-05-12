@@ -691,7 +691,7 @@ func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 // TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests is an e2e
 // check that the os-talos mixin (shipping in recipes/mixins/os-talos.yaml)
 // correctly redirects each affected component to its privileged-<name>
-// namespace and attaches the per-component talos/namespace.yaml under
+// namespace and attaches the per-component manifests/talos-namespace.yaml under
 // PreManifestFiles when applied to a recipe whose inheritance chain
 // already declares those components.
 //
@@ -716,11 +716,11 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		manifestPath string
 	}
 	wants := map[string]want{
-		"gpu-operator":          {"privileged-gpu-operator", "components/gpu-operator/talos/namespace.yaml"},
-		"network-operator":      {"privileged-network-operator", "components/network-operator/talos/namespace.yaml"},
-		"nvsentinel":            {"privileged-nvsentinel", "components/nvsentinel/talos/namespace.yaml"},
-		"nvidia-dra-driver-gpu": {"privileged-nvidia-dra-driver-gpu", "components/nvidia-dra-driver-gpu/talos/namespace.yaml"},
-		"nodewright-operator":   {"privileged-nodewright-operator", "components/nodewright-operator/talos/namespace.yaml"},
+		"gpu-operator":          {"privileged-gpu-operator", "components/gpu-operator/manifests/talos-namespace.yaml"},
+		"network-operator":      {"privileged-network-operator", "components/network-operator/manifests/talos-namespace.yaml"},
+		"nvsentinel":            {"privileged-nvsentinel", "components/nvsentinel/manifests/talos-namespace.yaml"},
+		"nvidia-dra-driver-gpu": {"privileged-nvidia-dra-driver-gpu", "components/nvidia-dra-driver-gpu/manifests/talos-namespace.yaml"},
+		"nodewright-operator":   {"privileged-nodewright-operator", "components/nodewright-operator/manifests/talos-namespace.yaml"},
 	}
 
 	// Simulate an inheritance chain that already declared each of the five
@@ -801,7 +801,7 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			name: "preManifestFiles-only is safe",
 			ref: ComponentRef{
 				Name:             "gpu-operator",
-				PreManifestFiles: []string{"components/gpu-operator/talos/namespace.yaml"},
+				PreManifestFiles: []string{"components/gpu-operator/manifests/talos-namespace.yaml"},
 			},
 			wantSafe: true,
 		},
@@ -818,7 +818,7 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			ref: ComponentRef{
 				Name:             "gpu-operator",
 				Namespace:        "privileged-gpu-operator",
-				PreManifestFiles: []string{"components/gpu-operator/talos/namespace.yaml"},
+				PreManifestFiles: []string{"components/gpu-operator/manifests/talos-namespace.yaml"},
 				ManifestFiles:    []string{"components/gpu-operator/manifests/extra.yaml"},
 			},
 			wantSafe: true,

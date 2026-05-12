@@ -33,24 +33,24 @@ spec:
     - name: gpu-operator
       namespace: privileged-gpu-operator
       preManifestFiles:
-        - components/gpu-operator/talos/namespace.yaml
+        - components/gpu-operator/manifests/talos-namespace.yaml
 
     - name: network-operator
       namespace: privileged-network-operator
       preManifestFiles:
-        - components/network-operator/talos/namespace.yaml
+        - components/network-operator/manifests/talos-namespace.yaml
 
     - name: nvsentinel
       namespace: privileged-nvsentinel
       preManifestFiles:
-        - components/nvsentinel/talos/namespace.yaml
+        - components/nvsentinel/manifests/talos-namespace.yaml
 
     - name: nvidia-dra-driver-gpu
       namespace: privileged-nvidia-dra-driver-gpu
       preManifestFiles:
-        - components/nvidia-dra-driver-gpu/talos/namespace.yaml
+        - components/nvidia-dra-driver-gpu/manifests/talos-namespace.yaml
 
     - name: nodewright-operator
       namespace: privileged-nodewright-operator
       preManifestFiles:
-        - components/nodewright-operator/talos/namespace.yaml
+        - components/nodewright-operator/manifests/talos-namespace.yaml
