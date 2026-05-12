@@ -341,10 +341,24 @@ func (s *MetadataStore) filterToMaximalLeaves(matches []*RecipeMetadata) []*Reci
 
 // mergeMixins resolves and merges mixin fragments referenced by spec.mixins.
 // Mixins are merged after the inheritance chain, contributing only constraints
-// and componentRefs. Detects conflicts: duplicate constraint names or component
-// names between a mixin and the already-merged spec are rejected.
-// The Mixins field is cleared from the result afterward.
-// Returns the set of mixin-contributed constraint names for post-compose evaluation.
+// and componentRefs.
+//
+// Constraint semantics: a mixin constraint whose name already exists in the
+// inheritance chain (or another mixin) is rejected — constraints don't have a
+// merge semantic, so a name collision is unambiguously a conflict.
+//
+// ComponentRef semantics: a mixin componentRef whose name already exists is
+// allowed ONLY when the mixin entry sets nothing beyond the safe additive
+// field set ({Namespace, ManifestFiles, PreManifestFiles}). Identity /
+// sourcing fields (Chart, Type, Source, Version, Tag, Path, ValuesFile,
+// Overrides, Patches, DependencyRefs, Cleanup, ExpectedResources,
+// HealthCheckAsserts) STILL conflict — this preserves ADR-005's "no silent
+// chart identity override" mitigation while letting OS-conditional mixins
+// like os-talos contribute namespace + preManifestFiles overrides to
+// components already declared upstream.
+//
+// The Mixins field is cleared from the result afterward. Returns the set of
+// mixin-contributed constraint names for post-compose evaluation.
 func (s *MetadataStore) mergeMixins(mergedSpec *RecipeMetadataSpec) (map[string]bool, error) {
 	mixinConstraintNames := make(map[string]bool)
 	if len(mergedSpec.Mixins) == 0 {
@@ -368,23 +382,30 @@ func (s *MetadataStore) mergeMixins(mergedSpec *RecipeMetadataSpec) (map[string]
 				fmt.Sprintf("mixin %q not found in recipes/mixins/", mixinName))
 		}
 
-		// Detect conflicts: mixin constraint/component names vs inheritance chain
-		// and previously applied mixins (existingConstraints/existingComponents
-		// are updated after each mixin merge)
+		// Constraint conflict: a mixin constraint with the same name as one
+		// already in scope is unambiguously a conflict because constraints
+		// don't compose.
 		for _, c := range mixin.Spec.Constraints {
 			if existingConstraints[c.Name] {
 				return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 					fmt.Sprintf("mixin %q constraint %q conflicts with inheritance chain or another mixin", mixinName, c.Name))
 			}
 		}
+
+		// ComponentRef collision: allowed only when the mixin entry sets
+		// only safe additive fields. See mixinComponentRefSafeForMerge.
 		for _, c := range mixin.Spec.ComponentRefs {
-			if existingComponents[c.Name] {
+			if !existingComponents[c.Name] {
+				continue
+			}
+			if offending, ok := mixinComponentRefSafeForMerge(c); !ok {
 				return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("mixin %q component %q conflicts with inheritance chain or another mixin", mixinName, c.Name))
+					fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, or PreManifestFiles to an existing component", mixinName, c.Name, offending))
 			}
 		}
 
-		// Merge mixin content
+		// Merge mixin content. Componentrefs with names matching existing
+		// entries are merged via mergeComponentRef (see RecipeMetadataSpec.Merge).
 		mixinSpec := RecipeMetadataSpec{
 			Constraints:   mixin.Spec.Constraints,
 			ComponentRefs: mixin.Spec.ComponentRefs,
@@ -852,6 +873,52 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 	}
 
 	return allPassed, warnings
+}
+
+// mixinComponentRefSafeForMerge reports whether a mixin's componentRef sets
+// only fields that are safe to merge into an existing component (Name,
+// Namespace, ManifestFiles, PreManifestFiles). Identity / sourcing fields
+// (Chart, Type, Source, Version, Tag, Path, ValuesFile, Overrides, Patches,
+// DependencyRefs, Cleanup, ExpectedResources, HealthCheckAsserts) silently
+// override the chain's chosen chart and so a mixin must NOT set them — see
+// ADR-005's "Silent constraint override" mitigation. Returns the first
+// offending field name so the resolver's error message names the violation
+// rather than handing the recipe author a generic "conflict" message.
+//
+// The check is symmetric with the merge semantics in mergeComponentRef: the
+// safe set is exactly the set of fields the merge handles additively or as
+// pure namespace remap. Any new ComponentRef field that joins the additive
+// set must also be added here.
+func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
+	switch {
+	case c.Chart != "":
+		return "chart", false
+	case c.Type != "":
+		return "type", false
+	case c.Source != "":
+		return "source", false
+	case c.Version != "":
+		return "version", false
+	case c.Tag != "":
+		return "tag", false
+	case c.Path != "":
+		return "path", false
+	case c.ValuesFile != "":
+		return "valuesFile", false
+	case len(c.Overrides) > 0:
+		return "overrides", false
+	case len(c.Patches) > 0:
+		return "patches", false
+	case len(c.DependencyRefs) > 0:
+		return "dependencyRefs", false
+	case c.Cleanup:
+		return "cleanup", false
+	case len(c.ExpectedResources) > 0:
+		return "expectedResources", false
+	case c.HealthCheckAsserts != "":
+		return "healthCheckAsserts", false
+	}
+	return "", true
 }
 
 // applyRegistryDefaults fills in ComponentRef fields from ComponentConfig defaults.
