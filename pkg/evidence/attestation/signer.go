@@ -16,25 +16,21 @@ package attestation
 
 import (
 	"context"
-	"crypto/x509"
-	"log/slog"
 	"os"
 	"path/filepath"
 
-	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
-	"github.com/sigstore/sigstore-go/pkg/sign"
-	"google.golang.org/protobuf/encoding/protojson"
-
+	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// Sigstore public-good instance URLs. Mirrored from
-// pkg/bundler/attestation; intentionally duplicated to keep this
-// package independent of the Helm-bundle attestation surface (the two
-// have different predicate types and may evolve independently).
+// Sigstore public-good instance URLs. Re-stated here so callers that
+// only depend on pkg/evidence/attestation do not need to import the
+// bundler package to construct a KeylessSigner; the values are
+// identical to bundler/attestation.DefaultFulcioURL/DefaultRekorURL,
+// which is the single signing primitive both packages call into.
 const (
-	DefaultFulcioURL = "https://fulcio.sigstore.dev"
-	DefaultRekorURL  = "https://rekor.sigstore.dev"
+	DefaultFulcioURL = bundleattest.DefaultFulcioURL
+	DefaultRekorURL  = bundleattest.DefaultRekorURL
 )
 
 // SignResult describes a successful sign() call.
@@ -71,6 +67,11 @@ type Signer interface {
 
 // KeylessSigner signs via Fulcio + Rekor with the supplied OIDC token.
 // Token discovery is the caller's responsibility (env, ambient, etc.).
+//
+// The actual DSSE/Fulcio/Rekor plumbing lives in
+// pkg/bundler/attestation.SignStatement — the predicate-agnostic
+// signing primitive that this package and `aicr bundle --attest`
+// both delegate to.
 type KeylessSigner struct {
 	OIDCToken string
 	FulcioURL string
@@ -86,58 +87,26 @@ func NewKeylessSigner(oidcToken string) *KeylessSigner {
 	}
 }
 
-// Sign DSSE-wraps and signs the statement.
+// Sign DSSE-wraps and signs the statement by calling the shared
+// pkg/bundler/attestation primitive. Errors are propagated as-is so
+// the underlying ErrCodeTimeout (504) vs ErrCodeUnavailable (502)
+// classification reaches the CLI/API boundary.
 //
 //nolint:unparam // *SignResult is part of the Signer interface; tests exercise error paths only.
 func (k *KeylessSigner) Sign(ctx context.Context, statementJSON []byte) (*SignResult, error) {
-	if len(statementJSON) == 0 {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "empty statement")
-	}
-	if k.OIDCToken == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "OIDC token is required for keyless signing")
-	}
-
-	content := &sign.DSSEData{
-		Data:        statementJSON,
-		PayloadType: "application/vnd.in-toto+json",
-	}
-
-	keypair, err := sign.NewEphemeralKeypair(nil)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create ephemeral keypair", err)
-	}
-
-	slog.Debug("signing recipe-evidence attestation", "fulcio", k.FulcioURL, "rekor", k.RekorURL)
-
-	bundle, err := sign.Bundle(content, keypair, sign.BundleOptions{
-		CertificateProvider: sign.NewFulcio(&sign.FulcioOptions{BaseURL: k.FulcioURL}),
-		CertificateProviderOptions: &sign.CertificateProviderOptions{
-			IDToken: k.OIDCToken,
-		},
-		TransparencyLogs: []sign.Transparency{
-			sign.NewRekor(&sign.RekorOptions{BaseURL: k.RekorURL}),
-		},
-		Context: ctx,
+	res, err := bundleattest.SignStatement(ctx, statementJSON, bundleattest.SignOptions{
+		OIDCToken: k.OIDCToken,
+		FulcioURL: k.FulcioURL,
+		RekorURL:  k.RekorURL,
 	})
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeUnavailable, "sigstore signing failed", err)
+		return nil, err
 	}
-
-	identity, issuer := extractSignerClaims(bundle)
-	bundleJSON, err := protojson.Marshal(bundle)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal sigstore bundle", err)
-	}
-
-	rekorIndex := extractRekorLogIndex(bundle)
-
-	slog.Info("recipe evidence signed", "identity", identity, "rekorLogIndex", rekorIndex)
-
 	return &SignResult{
-		BundleJSON:    bundleJSON,
-		Identity:      identity,
-		Issuer:        issuer,
-		RekorLogIndex: rekorIndex,
+		BundleJSON:    res.BundleJSON,
+		Identity:      res.Identity,
+		Issuer:        res.Issuer,
+		RekorLogIndex: res.RekorLogIndex,
 	}, nil
 }
 
@@ -182,70 +151,4 @@ func SignBundle(ctx context.Context, b *Bundle, s Signer) (*SignResult, error) {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write signed attestation", err)
 	}
 	return res, nil
-}
-
-// extractSignerClaims parses the Fulcio cert and returns the SAN
-// identity (email or URI) plus the OIDC issuer URL claim.
-// Returns empty strings when the certificate or claims are not present.
-func extractSignerClaims(bundle *protobundle.Bundle) (identity, issuer string) {
-	if bundle.GetVerificationMaterial() == nil {
-		return "", ""
-	}
-
-	var certDER []byte
-	if cert := bundle.GetVerificationMaterial().GetCertificate(); cert != nil {
-		certDER = cert.GetRawBytes()
-	} else if chain := bundle.GetVerificationMaterial().GetX509CertificateChain(); chain != nil {
-		certs := chain.GetCertificates()
-		if len(certs) > 0 {
-			certDER = certs[0].GetRawBytes()
-		}
-	}
-	if len(certDER) == 0 {
-		return "", ""
-	}
-
-	parsed, err := x509.ParseCertificate(certDER)
-	if err != nil {
-		slog.Debug("failed to parse signing certificate for identity extraction", "error", err)
-		return "", ""
-	}
-
-	if len(parsed.EmailAddresses) > 0 {
-		identity = parsed.EmailAddresses[0]
-	} else if len(parsed.URIs) > 0 {
-		identity = parsed.URIs[0].String()
-	}
-
-	// Fulcio embeds the OIDC issuer in extension OID 1.3.6.1.4.1.57264.1.1
-	// (legacy) and 1.3.6.1.4.1.57264.1.8 (current). We try both.
-	issuer = extractIssuerExtension(parsed)
-	return identity, issuer
-}
-
-func extractIssuerExtension(cert *x509.Certificate) string {
-	const (
-		legacy  = "1.3.6.1.4.1.57264.1.1"
-		current = "1.3.6.1.4.1.57264.1.8"
-	)
-	for _, ext := range cert.Extensions {
-		if ext.Id.String() == current || ext.Id.String() == legacy {
-			return string(ext.Value)
-		}
-	}
-	return ""
-}
-
-// extractRekorLogIndex returns the first Rekor transparency-log
-// entry's LogIndex from a Sigstore bundle, or 0 if none.
-func extractRekorLogIndex(bundle *protobundle.Bundle) int64 {
-	vm := bundle.GetVerificationMaterial()
-	if vm == nil {
-		return 0
-	}
-	entries := vm.GetTlogEntries()
-	if len(entries) == 0 {
-		return 0
-	}
-	return entries[0].GetLogIndex()
 }
