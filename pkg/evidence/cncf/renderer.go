@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package evidence renders CNCF AI Conformance evidence markdown from CTRF reports.
+// Package cncf renders CNCF AI Conformance evidence markdown from CTRF reports.
 package cncf
 
 import (
