@@ -594,6 +594,13 @@ aicr validate [flags]
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
 | `--feature` | `-f` | string[] | | Feature flags for validation (repeatable) |
+| `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [Recipe Evidence Bundle v1](../spec/recipe-evidence-v1.md). |
+| `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`). Required with `--emit-attestation`. Run `make bom`. |
+| `--include-logs` | | bool | false | Embed validator logs in `logs-bundle/` alongside the summary bundle. Per-file hashes are pre-committed in the manifest regardless. |
+| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Requires `SIGSTORE_ID_TOKEN` env var. |
+| `--push-logs` | | bool | false | Also push the logs bundle to `<push>-logs` as a separate OCI artifact. Requires `--include-logs` and `--push`. |
+| `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
+| `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--data` | | string | | External data directory to overlay on embedded data |
 
 **Input Sources:**
@@ -704,6 +711,22 @@ aicr validate \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --kubeconfig ~/.kube/prod-cluster
 
+# Write a recipe-evidence v1 attestation bundle (unsigned, on disk)
+make bom                                              # produces dist/bom/bom.cdx.json
+aicr validate \
+  --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out --bom dist/bom/bom.cdx.json
+# Writes ./out/summary-bundle/ and ./out/pointer.yaml.
+
+# Sign and push a recipe-evidence bundle to OCI (cosign keyless via Sigstore public-good)
+export SIGSTORE_ID_TOKEN=$(your-oidc-fetcher)         # e.g. gh actions oidc
+aicr validate \
+  --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out \
+  --bom dist/bom/bom.cdx.json \
+  --push ghcr.io/myorg/aicr-evidence
+# After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
+
 # Validate on a cluster with custom GPU node labels (non-standard labels that AICR doesn't
 # recognize by default, e.g., using a custom node pool label instead of cloud-provider defaults)
 aicr validate \
@@ -722,11 +745,9 @@ aicr validate \
 
 `aicr validate --config <path>` reads inputs from an AICRConfig YAML/JSON file
 under `spec.validate`. CLI flags always override values loaded from `--config`;
-override events are logged at INFO so users can see which input won.
-
-Evidence-related flags (`--evidence-dir`, `--cncf-submission`, `--feature`) are
-CLI-only and not sourced from `--config` (tracked in
-[#754](https://github.com/NVIDIA/aicr/issues/754)).
+override events are logged at INFO so users can see which input won. The
+`SIGSTORE_ID_TOKEN` secret stays out of the schema by design (short-lived
+tokens must not be committed); the CLI reads it from env at sign time.
 
 **Supported schema:**
 
@@ -757,6 +778,19 @@ spec:
       noCluster: false
       noCleanup: false
       timeout: 10m
+    evidence:
+      cncf:                              # --evidence-dir / --cncf-submission / --feature
+        dir: ./out/cncf
+        cncfSubmission: false
+        features: []                     # empty = all features
+      attestation:                       # --emit-attestation / --bom / --include-logs / --push / ...
+        out: ./out/attestation
+        bom: dist/bom/bom.cdx.json
+        includeLogs: true
+        push: ghcr.io/myorg/aicr-evidence
+        pushLogs: false
+        plainHTTP: false
+        insecureTLS: false
 ```
 
 **Examples:**
