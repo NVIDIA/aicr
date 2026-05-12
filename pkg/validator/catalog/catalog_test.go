@@ -15,13 +15,16 @@
 package catalog
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -30,11 +33,14 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
 	}
-	if catalog.APIVersion != expectedAPIVersion {
-		t.Errorf("APIVersion = %q, want %q", catalog.APIVersion, expectedAPIVersion)
+	if catalog.APIVersion != v1.CatalogAPIVersion {
+		t.Errorf("APIVersion = %q, want %q", catalog.APIVersion, v1.CatalogAPIVersion)
 	}
-	if catalog.Kind != expectedKind {
-		t.Errorf("Kind = %q, want %q", catalog.Kind, expectedKind)
+	if catalog.Kind != v1.CatalogKind {
+		t.Errorf("Kind = %q, want %q", catalog.Kind, v1.CatalogKind)
+	}
+	if catalog.Metadata == nil {
+		t.Fatal("Metadata is nil")
 	}
 	if catalog.Metadata.Version != "1.0.0" {
 		t.Errorf("Metadata.Version = %q, want %q", catalog.Metadata.Version, "1.0.0")
@@ -49,7 +55,7 @@ func TestLoadEmbeddedCatalog(t *testing.T) {
 
 func TestParseValidCatalog(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test-catalog
@@ -112,7 +118,7 @@ validators:
 
 func TestForPhase(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -185,7 +191,7 @@ validators: []
 
 func TestParseInvalidKind(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: WrongKind
 metadata:
   name: test
@@ -200,7 +206,7 @@ validators: []
 
 func TestParseDuplicateNames(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -221,7 +227,7 @@ validators:
 
 func TestParseEmptyName(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -239,7 +245,7 @@ validators:
 
 func TestParseInvalidPhase(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -257,7 +263,7 @@ validators:
 
 func TestParseEmptyImage(t *testing.T) {
 	data := []byte(`
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: test
@@ -374,7 +380,7 @@ func TestLoadWithExternalCatalog(t *testing.T) {
 	// Create external data directory with registry.yaml (required) and catalog
 	tmpDir := t.TempDir()
 
-	registryContent := `apiVersion: aicr.nvidia.com/v1alpha1
+	registryContent := `apiVersion: validator.nvidia.com/v1alpha1alpha1
 kind: ComponentRegistry
 components: []
 `
@@ -387,7 +393,7 @@ components: []
 		t.Fatalf("failed to create validators dir: %v", err)
 	}
 
-	externalCatalog := `apiVersion: aicr.nvidia.com/v1
+	externalCatalog := `apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: external-validators
@@ -845,5 +851,126 @@ func TestImagePullPolicy(t *testing.T) {
 				t.Errorf("ImagePullPolicy(%q) = %q, want %q", tt.image, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCatalogOmitEmpty(t *testing.T) {
+	// Catalog without optional fields - should serialize cleanly
+	catalog := &ValidatorCatalog{
+		Validators: []ValidatorEntry{
+			{
+				Name:        "test-validator",
+				Phase:       "deployment",
+				Description: "Test validator",
+				Image:       "test:latest",
+				Timeout:     2 * time.Minute,
+			},
+		},
+	}
+
+	// Test YAML marshaling
+	yamlData, err := yaml.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() failed: %v", err)
+	}
+
+	yamlStr := string(yamlData)
+	// Verify optional fields are omitted
+	if strings.Contains(yamlStr, "apiVersion:") {
+		t.Error("YAML should not contain apiVersion when empty")
+	}
+	if strings.Contains(yamlStr, "kind:") {
+		t.Error("YAML should not contain kind when empty")
+	}
+	if strings.Contains(yamlStr, "metadata:") {
+		t.Error("YAML should not contain metadata when nil")
+	}
+
+	// But required field should be present
+	if !strings.Contains(yamlStr, "validators:") {
+		t.Error("YAML should contain validators")
+	}
+
+	// Test JSON marshaling
+	jsonData, err := json.Marshal(catalog)
+	if err != nil {
+		t.Fatalf("json.Marshal() failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	// Verify optional fields are omitted in JSON
+	if strings.Contains(jsonStr, "apiVersion") {
+		t.Error("JSON should not contain apiVersion when empty")
+	}
+	if strings.Contains(jsonStr, "kind") {
+		t.Error("JSON should not contain kind when empty")
+	}
+	if strings.Contains(jsonStr, "metadata") {
+		t.Error("JSON should not contain metadata when nil")
+	}
+
+	// But required field should be present
+	if !strings.Contains(jsonStr, "validators") {
+		t.Error("JSON should contain validators")
+	}
+}
+
+func TestCatalogEmbedding(t *testing.T) {
+	// Simulate embedding in a CR spec
+	type ValidatorCatalogSpec struct {
+		Catalog ValidatorCatalog `json:"catalog" yaml:"catalog"`
+		Enabled bool             `json:"enabled" yaml:"enabled"`
+	}
+
+	spec := ValidatorCatalogSpec{
+		Catalog: ValidatorCatalog{
+			// No APIVersion/Kind/Metadata - clean embedding
+			Validators: []ValidatorEntry{
+				{
+					Name:        "gpu-operator-health",
+					Phase:       "deployment",
+					Description: "Check GPU operator",
+					Image:       "test:latest",
+					Timeout:     2 * time.Minute,
+				},
+			},
+		},
+		Enabled: true,
+	}
+
+	// Test YAML marshaling
+	yamlData, err := yaml.Marshal(spec)
+	if err != nil {
+		t.Fatalf("yaml.Marshal() failed: %v", err)
+	}
+
+	yamlStr := string(yamlData)
+	// Verify clean embedding without resource metadata
+	if strings.Contains(yamlStr, "apiVersion:") {
+		t.Error("Embedded catalog should not contain apiVersion")
+	}
+	if strings.Contains(yamlStr, "kind:") {
+		t.Error("Embedded catalog should not contain kind")
+	}
+	if strings.Contains(yamlStr, "metadata:") {
+		t.Error("Embedded catalog should not contain metadata")
+	}
+
+	// Test JSON marshaling
+	jsonData, err := json.Marshal(spec)
+	if err != nil {
+		t.Fatalf("json.Marshal() failed: %v", err)
+	}
+
+	jsonStr := string(jsonData)
+	// Verify clean embedding without resource metadata in JSON
+	if strings.Contains(jsonStr, "apiVersion") {
+		t.Error("Embedded catalog should not contain apiVersion in JSON")
+	}
+	if strings.Contains(jsonStr, "kind") {
+		t.Error("Embedded catalog should not contain kind in JSON")
+	}
+	if strings.Contains(jsonStr, "metadata") {
+		t.Error("Embedded catalog should not contain metadata in JSON")
 	}
 }

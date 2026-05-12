@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-apiVersion: aicr.nvidia.com/v1
+apiVersion: validator.nvidia.com/v1alpha1
 kind: ValidatorCatalog
 metadata:
   name: aicr-validators

@@ -22,76 +22,22 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 )
 
-const (
-	// expectedAPIVersion is the supported catalog API version.
-	expectedAPIVersion = "aicr.nvidia.com/v1"
-
-	// expectedKind is the supported catalog kind.
-	expectedKind = "ValidatorCatalog"
+// Re-exported types from pkg/api/validator/v1 for backward compatibility.
+type (
+	ValidatorCatalog     = v1.ValidatorCatalog
+	CatalogMetadata      = v1.CatalogMetadata
+	ValidatorEntry       = v1.ValidatorEntry
+	ResourceRequirements = v1.ResourceRequirements
+	EnvVar               = v1.EnvVar
 )
-
-// ValidatorCatalog is the top-level catalog document.
-type ValidatorCatalog struct {
-	APIVersion string           `yaml:"apiVersion"`
-	Kind       string           `yaml:"kind"`
-	Metadata   CatalogMetadata  `yaml:"metadata"`
-	Validators []ValidatorEntry `yaml:"validators"`
-}
-
-// CatalogMetadata contains catalog-level metadata.
-type CatalogMetadata struct {
-	Name    string `yaml:"name"`
-	Version string `yaml:"version"` // SemVer
-}
-
-// ValidatorEntry defines a single validator container.
-type ValidatorEntry struct {
-	// Name is the unique identifier for this validator, used in Job names.
-	Name string `yaml:"name"`
-
-	// Phase is the validation phase: "deployment", "performance", or "conformance".
-	Phase string `yaml:"phase"`
-
-	// Description is a human-readable description of what this validator checks.
-	Description string `yaml:"description"`
-
-	// Image is the OCI image reference for the validator container.
-	Image string `yaml:"image"`
-
-	// Timeout is the maximum execution time for this validator.
-	// Maps to Job activeDeadlineSeconds.
-	Timeout time.Duration `yaml:"timeout"`
-
-	// Args are the container arguments.
-	Args []string `yaml:"args"`
-
-	// Env are environment variables to set in the container.
-	Env []EnvVar `yaml:"env"`
-
-	// Resources specifies container resource requests/limits.
-	// If nil, defaults from pkg/defaults are used.
-	Resources *ResourceRequirements `yaml:"resources,omitempty"`
-}
-
-// ResourceRequirements defines CPU and memory for a validator container.
-type ResourceRequirements struct {
-	CPU    string `yaml:"cpu,omitempty"`
-	Memory string `yaml:"memory,omitempty"`
-}
-
-// EnvVar is a name/value pair for container environment variables.
-type EnvVar struct {
-	Name  string `yaml:"name"`
-	Value string `yaml:"value"`
-}
 
 // Load reads and parses the validator catalog from the global DataProvider.
 // When the --data flag provides an external directory containing
@@ -302,26 +248,20 @@ func Parse(data []byte) (*ValidatorCatalog, error) {
 	return &catalog, nil
 }
 
-// ForPhase returns validators filtered by phase name.
-func (c *ValidatorCatalog) ForPhase(phase string) []ValidatorEntry {
-	var result []ValidatorEntry
-	for _, v := range c.Validators {
-		if v.Phase == phase {
-			result = append(result, v)
-		}
-	}
-	return result
-}
-
 // validate checks the catalog for structural correctness.
+// When Metadata is nil (embedded usage), APIVersion and Kind are optional.
+// When Metadata is present (standalone file), APIVersion and Kind are required.
 func validate(c *ValidatorCatalog) error {
-	if c.APIVersion != expectedAPIVersion {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("unsupported apiVersion %q, expected %q", c.APIVersion, expectedAPIVersion))
-	}
-	if c.Kind != expectedKind {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("unsupported kind %q, expected %q", c.Kind, expectedKind))
+	// Standalone file usage requires APIVersion and Kind
+	if c.Metadata != nil {
+		if c.APIVersion != v1.CatalogAPIVersion {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unsupported apiVersion %q, expected %q", c.APIVersion, v1.CatalogAPIVersion))
+		}
+		if c.Kind != v1.CatalogKind {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("unsupported kind %q, expected %q", c.Kind, v1.CatalogKind))
+		}
 	}
 
 	validPhases := map[string]bool{
