@@ -88,6 +88,53 @@ func TestExtractSignerClaims_NilBundle(t *testing.T) {
 	}
 }
 
+func TestExtractIssuerExtension(t *testing.T) {
+	const issuerURL = "https://accounts.example.com"
+	// asn1Encoded is the DER-encoded UTF8String form Fulcio uses for the
+	// current OID; this matches the production wire format.
+	asn1Encoded, err := asn1.Marshal(issuerURL)
+	if err != nil {
+		t.Fatalf("asn1.Marshal: %v", err)
+	}
+	currentOID := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 8}
+	legacyOID := asn1.ObjectIdentifier{1, 3, 6, 1, 4, 1, 57264, 1, 1}
+
+	tests := []struct {
+		name string
+		exts []pkix.Extension
+		want string
+	}{
+		{
+			name: "current OID with proper ASN.1 UTF8String",
+			exts: []pkix.Extension{{Id: currentOID, Value: asn1Encoded}},
+			want: issuerURL,
+		},
+		{
+			name: "legacy OID with raw UTF-8 bytes",
+			exts: []pkix.Extension{{Id: legacyOID, Value: []byte(issuerURL)}},
+			want: issuerURL,
+		},
+		{
+			name: "current OID with malformed ASN.1 returns empty",
+			exts: []pkix.Extension{{Id: currentOID, Value: []byte("\xffnot valid asn1")}},
+			want: "",
+		},
+		{
+			name: "no Fulcio issuer extension returns empty",
+			exts: []pkix.Extension{{Id: asn1.ObjectIdentifier{2, 5, 29, 17}, Value: []byte("san placeholder")}},
+			want: "",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cert := &x509.Certificate{Extensions: tc.exts}
+			if got := extractIssuerExtension(cert); got != tc.want {
+				t.Errorf("extractIssuerExtension = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExtractRekorLogIndex(t *testing.T) {
 	tests := []struct {
 		name   string

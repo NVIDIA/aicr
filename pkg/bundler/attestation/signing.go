@@ -24,6 +24,7 @@ import (
 	"github.com/sigstore/sigstore-go/pkg/sign"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -114,6 +115,11 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 
 	slog.Debug("signing in-toto statement", "fulcio", fulcioURL, "rekor", rekorURL)
 
+	// Bound the Fulcio + Rekor calls so a hung peer cannot block the CLI
+	// indefinitely. Honors any tighter deadline the caller already attached.
+	signCtx, cancel := context.WithTimeout(ctx, defaults.SigstoreSignTimeout)
+	defer cancel()
+
 	bundle, err := sign.Bundle(content, keypair, sign.BundleOptions{
 		CertificateProvider: sign.NewFulcio(&sign.FulcioOptions{BaseURL: fulcioURL}),
 		CertificateProviderOptions: &sign.CertificateProviderOptions{
@@ -122,7 +128,7 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 		TransparencyLogs: []sign.Transparency{
 			sign.NewRekor(&sign.RekorOptions{BaseURL: rekorURL}),
 		},
-		Context: ctx,
+		Context: signCtx,
 	})
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeUnavailable, "sigstore signing failed", err)
@@ -136,7 +142,12 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 	identity, issuer := extractSignerClaims(bundle)
 	rekorIndex := extractRekorLogIndex(bundle)
 
-	slog.Info("in-toto statement signed", "identity", identity, "rekorLogIndex", rekorIndex)
+	// Identity (Fulcio SAN) is user PII for interactive OIDC — keep it off the
+	// INFO log. Rekor inclusion proofs are public by design, so the log index
+	// is safe to surface. Callers that need the identity for auditing get it
+	// via the returned SignedAttestation.
+	slog.Info("in-toto statement signed", "rekorLogIndex", rekorIndex)
+	slog.Debug("sigstore signer claims", "identity", identity, "issuer", issuer)
 
 	return &SignedAttestation{
 		BundleJSON:    bundleJSON,

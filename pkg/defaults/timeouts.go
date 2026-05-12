@@ -155,6 +155,15 @@ const (
 	// per-flow if a future tuning need (e.g., longer device-code window
 	// for typing the user code) makes the shared ceiling cramped.
 	OIDCAuthTimeout = 5 * time.Minute
+
+	// SigstoreSignTimeout bounds the non-interactive Sigstore signing flow:
+	// Fulcio certificate issuance (token-exchange + cert mint) plus Rekor
+	// transparency-log submission. Two HTTP round-trips against public-good
+	// infrastructure; 2 minutes leaves comfortable headroom over typical
+	// p99 latency without letting a hung peer block a CLI invocation
+	// indefinitely. Distinct from OIDCAuthTimeout, which covers the
+	// interactive user-driven step that precedes this flow.
+	SigstoreSignTimeout = 2 * time.Minute
 )
 
 // Validation phase timeouts for validation phase operations.
