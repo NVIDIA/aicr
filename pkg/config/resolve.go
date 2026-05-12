@@ -321,9 +321,7 @@ type EvidenceCNCFResolved struct {
 type EvidenceAttestationResolved struct {
 	Out         string
 	BOM         string
-	IncludeLogs bool
 	Push        string
-	PushLogs    bool
 	PlainHTTP   bool
 	InsecureTLS bool
 }
@@ -430,9 +428,7 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 			out.EvidenceAttestation = &EvidenceAttestationResolved{
 				Out:         a.Out,
 				BOM:         a.BOM,
-				IncludeLogs: a.IncludeLogs,
 				Push:        a.Push,
-				PushLogs:    a.PushLogs,
 				PlainHTTP:   a.PlainHTTP,
 				InsecureTLS: a.InsecureTLS,
 			}

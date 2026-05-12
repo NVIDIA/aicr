@@ -536,20 +536,10 @@ func validateCmdFlags() []cli.Flag {
 	BOM (e.g., produced by 'make bom').`,
 			Category: catEvidence,
 		},
-		&cli.BoolFlag{
-			Name:     "include-logs",
-			Usage:    "Embed validator logs in logs-bundle/ alongside the summary bundle. Per-file hashes are pre-committed in the manifest regardless.",
-			Category: catEvidence,
-		},
 		&cli.StringFlag{
 			Name: "push",
 			Usage: `OCI registry reference (e.g. ghcr.io/myorg/aicr-evidence) to push the signed summary bundle to.
 	Requires SIGSTORE_ID_TOKEN env var for cosign keyless OIDC signing.`,
-			Category: catEvidence,
-		},
-		&cli.BoolFlag{
-			Name:     "push-logs",
-			Usage:    "Also push the logs bundle to <push>-logs as a separate OCI artifact. Requires --include-logs and --push.",
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{

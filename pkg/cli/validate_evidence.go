@@ -22,7 +22,6 @@ import (
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/urfave/cli/v3"
-	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
@@ -40,14 +39,12 @@ import (
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
 // Flag values + spec.validate.evidence.attestation supply every field;
 // recipe + snapshot YAML are marshaled lazily inside emitRecipeEvidence
-// so a misconfigured run (missing --bom, conflicting --push-logs) fails
-// before paying the cost of marshaling a multi-MB snapshot.
+// so a misconfigured run (e.g., invalid --push reference) fails before
+// paying the cost of marshaling a multi-MB snapshot.
 type recipeEvidenceConfig struct {
 	OutDir      string
 	BOMPath     string
-	IncludeLogs bool
 	Push        string
-	PushLogs    bool
 	PlainHTTP   bool
 	InsecureTLS bool
 
@@ -77,9 +74,7 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 	return &recipeEvidenceConfig{
 		OutDir:      out,
 		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
-		IncludeLogs: boolFlagOrConfig(cmd, "include-logs", att.IncludeLogs),
 		Push:        stringFlagOrConfig(cmd, "push", att.Push),
-		PushLogs:    boolFlagOrConfig(cmd, "push-logs", att.PushLogs),
 		PlainHTTP:   boolFlagOrConfig(cmd, "plain-http", att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, "insecure-tls", att.InsecureTLS),
 	}
@@ -90,7 +85,6 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 type signPushOutcome struct {
 	Sign    *attestation.SignResult
 	Summary *attestation.PushResult
-	Logs    *attestation.PushResult
 }
 
 // emitRecipeEvidence builds, optionally signs, and optionally pushes a
@@ -102,8 +96,6 @@ type signPushOutcome struct {
 //	--push absent          → unsigned bundle on disk; pointer carries empty bundle.{oci,digest}.
 //	--push set, no OIDC    → error: keyless signing requires SIGSTORE_ID_TOKEN.
 //	--push set, OIDC       → sign with cosign keyless, push summary to OCI, populate pointer.
-//	--push-logs without --include-logs → error: nothing to push.
-//	--push-logs with --include-logs    → also pushes the logs bundle as a sibling OCI artifact.
 func emitRecipeEvidence(
 	ctx context.Context,
 	rec *recipe.RecipeResult,
@@ -112,10 +104,6 @@ func emitRecipeEvidence(
 	cfg *recipeEvidenceConfig,
 ) error {
 
-	if cfg.PushLogs && !cfg.IncludeLogs {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"--push-logs requires --include-logs (no logs are bundled without --include-logs)")
-	}
 	// Validate the push reference up front so a malformed --push doesn't
 	// waste a Fulcio cert + Rekor inclusion proof on a sign that the push
 	// will reject seconds later.
@@ -156,7 +144,6 @@ func emitRecipeEvidence(
 		SnapshotYAML: snapshotYAML,
 		BOM:          attestation.BOMInputs{Body: bomBody, CycloneDXVersion: attestation.DefaultCycloneDXVersion},
 		PhaseResults: results,
-		IncludeLogs:  cfg.IncludeLogs,
 		AICRVersion:  version,
 	})
 	if err != nil {
@@ -191,20 +178,13 @@ func emitRecipeEvidence(
 			"reference", out.Summary.Reference,
 			"digest", out.Summary.Digest)
 	}
-	if out.Logs != nil {
-		slog.Info("evidence logs pushed",
-			"reference", out.Logs.Reference,
-			"digest", out.Logs.Digest)
-	}
 
 	return nil
 }
 
 // signAndPushBundle handles the optional sign+push pipeline. When --push
 // is absent, returns a zero-valued outcome so the caller writes a
-// pre-publish pointer. When both --push and --push-logs are set the
-// summary and logs uploads run concurrently — they are independent
-// OCI artifacts sharing only the cancellation deadline.
+// pre-publish pointer.
 //
 // cfg.OIDCToken is populated by the Action body via
 // bundleattest.ResolveOIDCToken so token acquisition (which may prompt
@@ -229,31 +209,11 @@ func signAndPushBundle(
 
 	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
 	defer pushCancel()
-
-	out := signPushOutcome{Sign: signRes}
-	g, gctx := errgroup.WithContext(pushCtx)
-	g.Go(func() error {
-		res, err := pushArtifact(gctx, bundle.SummaryDir, cfg.Push, cfg)
-		if err != nil {
-			return err
-		}
-		out.Summary = res
-		return nil
-	})
-	if cfg.PushLogs && bundle.LogsDir != "" {
-		g.Go(func() error {
-			res, err := pushArtifact(gctx, bundle.LogsDir, cfg.Push+"-logs", cfg)
-			if err != nil {
-				return err
-			}
-			out.Logs = res
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
+	summary, err := pushArtifact(pushCtx, bundle.SummaryDir, cfg.Push, cfg)
+	if err != nil {
 		return signPushOutcome{}, err
 	}
-	return out, nil
+	return signPushOutcome{Sign: signRes, Summary: summary}, nil
 }
 
 func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenceConfig) (*attestation.PushResult, error) {
@@ -376,12 +336,6 @@ func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attesta
 			Identity:      out.Sign.Identity,
 			Issuer:        out.Sign.Issuer,
 			RekorLogIndex: out.Sign.RekorLogIndex,
-		}
-	}
-	if out.Logs != nil {
-		in.LogsBundle = &attestation.PointerLogsBundle{
-			OCI:    attestation.CleanOCIRef(out.Logs.Reference),
-			Digest: out.Logs.Digest,
 		}
 	}
 	return in

@@ -185,9 +185,9 @@ type EvidenceCNCFSpec struct {
 }
 
 // EvidenceAttestationSpec configures the recipe-evidence v1 bundle path
-// (--emit-attestation / --bom / --include-logs / --push / --push-logs /
-// --plain-http / --insecure-tls). Bundle format is documented in
-// ADR-007 (docs/design/007-recipe-evidence.md).
+// (--emit-attestation / --bom / --push / --plain-http / --insecure-tls).
+// Bundle format is documented in ADR-007
+// (docs/design/007-recipe-evidence.md).
 //
 // The OIDC identity token used by --push is intentionally absent: the
 // CLI resolves it at sign time through the same precedence chain
@@ -199,20 +199,13 @@ type EvidenceAttestationSpec struct {
 	// off even if other fields are populated.
 	Out string `yaml:"out,omitempty" json:"out,omitempty"`
 
-	// BOM is the path to a CycloneDX BOM (--bom). Required when Out is
-	// set; produce one with `make bom`.
+	// BOM is the path to a CycloneDX BOM (--bom). Optional; when empty,
+	// aicr auto-generates a recipe-bound BOM at evidence-build time.
 	BOM string `yaml:"bom,omitempty" json:"bom,omitempty"`
 
-	// IncludeLogs embeds per-check logs in the bundle (--include-logs).
-	IncludeLogs bool `yaml:"includeLogs,omitempty" json:"includeLogs,omitempty"`
-
 	// Push is the OCI reference to publish the signed bundle to
-	// (--push). Requires SIGSTORE_ID_TOKEN.
+	// (--push). Triggers Sigstore keyless signing.
 	Push string `yaml:"push,omitempty" json:"push,omitempty"`
-
-	// PushLogs pushes the logs bundle as a sibling OCI artifact
-	// (--push-logs). Requires both IncludeLogs and Push.
-	PushLogs bool `yaml:"pushLogs,omitempty" json:"pushLogs,omitempty"`
 
 	// PlainHTTP uses HTTP instead of HTTPS on push (--plain-http,
 	// local registry tests).

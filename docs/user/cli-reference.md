@@ -596,9 +596,7 @@ aicr validate [flags]
 | `--feature` | `-f` | string[] | | Feature flags for validation (repeatable) |
 | `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [ADR-007](../design/007-recipe-evidence.md). |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
-| `--include-logs` | | bool | false | Embed validator logs in `logs-bundle/` alongside the summary bundle. Per-file hashes are pre-committed in the manifest regardless. |
 | `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
-| `--push-logs` | | bool | false | Also push the logs bundle to `<push>-logs` as a separate OCI artifact. Requires `--include-logs` and `--push`. |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
 | `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
@@ -792,12 +790,10 @@ spec:
         dir: ./out/cncf
         cncfSubmission: false
         features: []                     # empty = all features
-      attestation:                       # --emit-attestation / --bom / --include-logs / --push / ...
+      attestation:                       # --emit-attestation / --bom / --push / ...
         out: ./out/attestation
-        bom: dist/bom/bom.cdx.json
-        includeLogs: true
+        bom: dist/bom/bom.cdx.json       # optional; auto-generated from recipe + validators when absent
         push: ghcr.io/myorg/aicr-evidence
-        pushLogs: false
         plainHTTP: false
         insecureTLS: false
 ```
