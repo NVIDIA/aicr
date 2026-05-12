@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/urfave/cli/v3"
-	"golang.org/x/sync/errgroup"
-	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -34,10 +32,8 @@ import (
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -308,54 +304,6 @@ type validationConfig struct {
 	evidence *recipeEvidenceConfig
 }
 
-// recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
-// Flag values + spec.validate.evidence.attestation supply every field;
-// recipe + snapshot YAML are marshaled lazily inside emitRecipeEvidence
-// so a misconfigured run (missing --bom, conflicting --push-logs) fails
-// before paying the cost of marshaling a multi-MB snapshot.
-type recipeEvidenceConfig struct {
-	OutDir      string
-	BOMPath     string
-	IncludeLogs bool
-	Push        string
-	PushLogs    bool
-	PlainHTTP   bool
-	InsecureTLS bool
-
-	// OIDCToken is the resolved Sigstore identity token for keyless
-	// signing. Populated by the Action body via
-	// bundleattest.ResolveOIDCToken before runValidation starts; empty
-	// when Push is unset (no signing needed). Carried on the config
-	// struct rather than re-resolved at sign time so an interactive or
-	// device-code flow prompts the operator up front, before validation
-	// work begins.
-	OIDCToken string
-}
-
-// buildRecipeEvidenceConfig parses the --emit-attestation flag family with
-// CLI > config precedence. Returns nil when neither the flag nor
-// spec.validate.evidence.attestation.out is set, signaling the validate
-// run should not produce a recipe-evidence bundle.
-func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolved) *recipeEvidenceConfig {
-	att := resolved.EvidenceAttestation
-	if att == nil {
-		att = &config.EvidenceAttestationResolved{}
-	}
-	out := stringFlagOrConfig(cmd, "emit-attestation", att.Out)
-	if out == "" {
-		return nil
-	}
-	return &recipeEvidenceConfig{
-		OutDir:      out,
-		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
-		IncludeLogs: boolFlagOrConfig(cmd, "include-logs", att.IncludeLogs),
-		Push:        stringFlagOrConfig(cmd, "push", att.Push),
-		PushLogs:    boolFlagOrConfig(cmd, "push-logs", att.PushLogs),
-		PlainHTTP:   boolFlagOrConfig(cmd, "plain-http", att.PlainHTTP),
-		InsecureTLS: boolFlagOrConfig(cmd, "insecure-tls", att.InsecureTLS),
-	}
-}
-
 // runValidation runs validation using the container-per-validator engine.
 func runValidation(
 	ctx context.Context,
@@ -457,213 +405,6 @@ func runValidation(
 	}
 
 	return nil
-}
-
-// signPushOutcome carries the artifacts the pointer file needs from the
-// optional sign+push leg. All fields are nil when --push is absent.
-type signPushOutcome struct {
-	Sign    *attestation.SignResult
-	Summary *attestation.PushResult
-	Logs    *attestation.PushResult
-}
-
-// emitRecipeEvidence builds, optionally signs, and optionally pushes a
-// recipe-evidence v1 bundle. The pointer file is always written so the
-// contributor can copy it into recipes/evidence/<recipe>.yaml.
-//
-// Behavior matrix:
-//
-//	--push absent          → unsigned bundle on disk; pointer carries empty bundle.{oci,digest}.
-//	--push set, no OIDC    → error: keyless signing requires SIGSTORE_ID_TOKEN.
-//	--push set, OIDC       → sign with cosign keyless, push summary to OCI, populate pointer.
-//	--push-logs without --include-logs → error: nothing to push.
-//	--push-logs with --include-logs    → also pushes the logs bundle as a sibling OCI artifact.
-func emitRecipeEvidence(
-	ctx context.Context,
-	rec *recipe.RecipeResult,
-	snap *snapshotter.Snapshot,
-	results []*validator.PhaseResult,
-	cfg *recipeEvidenceConfig,
-) error {
-
-	if cfg.BOMPath == "" {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"--emit-attestation requires --bom (CycloneDX BOM path; run `make bom` to produce dist/bom/bom.cdx.json)")
-	}
-	if cfg.PushLogs && !cfg.IncludeLogs {
-		return errors.New(errors.ErrCodeInvalidRequest,
-			"--push-logs requires --include-logs (no logs are bundled without --include-logs)")
-	}
-	// Validate the push reference up front so a malformed --push doesn't
-	// waste a Fulcio cert + Rekor inclusion proof on a sign that the push
-	// will reject seconds later.
-	if cfg.Push != "" {
-		if _, err := oci.ParseOutputTarget(cfg.Push); err != nil {
-			return errors.Wrap(errors.ErrCodeInvalidRequest, "invalid --push reference", err)
-		}
-	}
-
-	bomBody, err := os.ReadFile(cfg.BOMPath)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
-	}
-
-	// Marshal rec/snap only after the cheap precondition checks pass —
-	// the snapshot is typically the largest in-memory object in a
-	// validate run and a misconfigured --emit-attestation should fail
-	// before we pay that cost.
-	recipeYAML, err := yaml.Marshal(rec)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
-	}
-	snapshotYAML, err := yaml.Marshal(snap)
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to marshal snapshot for evidence", err)
-	}
-
-	buildCtx, buildCancel := context.WithTimeout(ctx, defaults.EvidenceBundleBuildTimeout)
-	defer buildCancel()
-
-	// attestation.Build creates the output dir tree itself, including
-	// any missing parents — no explicit MkdirAll needed here.
-	bundle, err := attestation.Build(buildCtx, attestation.BuildOptions{
-		OutputDir:    cfg.OutDir,
-		Recipe:       rec,
-		RecipeYAML:   recipeYAML,
-		Snapshot:     snap,
-		SnapshotYAML: snapshotYAML,
-		BOM:          attestation.BOMInputs{Body: bomBody, CycloneDXVersion: attestation.DefaultCycloneDXVersion},
-		PhaseResults: results,
-		IncludeLogs:  cfg.IncludeLogs,
-		AICRVersion:  version,
-	})
-	if err != nil {
-		return err
-	}
-
-	slog.Info("evidence bundle built",
-		"summaryDir", bundle.SummaryDir,
-		"recipe", bundle.RecipeName,
-		"subjectDigest", bundle.SubjectDigest)
-
-	out, err := signAndPushBundle(ctx, bundle, cfg)
-	if err != nil {
-		return err
-	}
-
-	pointer, err := attestation.BuildPointer(buildPointerInputs(bundle, out))
-	if err != nil {
-		return err
-	}
-	pointerPath, err := attestation.WritePointer(cfg.OutDir, pointer)
-	if err != nil {
-		return err
-	}
-
-	slog.Info("evidence pointer written",
-		"path", pointerPath,
-		"copyTo", "recipes/evidence/"+bundle.RecipeName+".yaml")
-
-	if out.Summary != nil {
-		slog.Info("evidence bundle pushed",
-			"reference", out.Summary.Reference,
-			"digest", out.Summary.Digest)
-	}
-	if out.Logs != nil {
-		slog.Info("evidence logs pushed",
-			"reference", out.Logs.Reference,
-			"digest", out.Logs.Digest)
-	}
-
-	return nil
-}
-
-// signAndPushBundle handles the optional sign+push pipeline. When --push
-// is absent, returns a zero-valued outcome so the caller writes a
-// pre-publish pointer. When both --push and --push-logs are set the
-// summary and logs uploads run concurrently — they are independent
-// OCI artifacts sharing only the cancellation deadline.
-//
-// cfg.OIDCToken is populated by the Action body via
-// bundleattest.ResolveOIDCToken so token acquisition (which may prompt
-// a browser or device-code flow) happens up front, not after validation
-// already ran.
-func signAndPushBundle(
-	ctx context.Context,
-	bundle *attestation.Bundle,
-	cfg *recipeEvidenceConfig,
-) (signPushOutcome, error) {
-
-	if cfg.Push == "" {
-		return signPushOutcome{Sign: &attestation.SignResult{}}, nil
-	}
-
-	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
-	defer signCancel()
-	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(cfg.OIDCToken))
-	if err != nil {
-		return signPushOutcome{}, err
-	}
-
-	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
-	defer pushCancel()
-
-	out := signPushOutcome{Sign: signRes}
-	g, gctx := errgroup.WithContext(pushCtx)
-	g.Go(func() error {
-		res, err := pushArtifact(gctx, bundle.SummaryDir, cfg.Push, cfg)
-		if err != nil {
-			return err
-		}
-		out.Summary = res
-		return nil
-	})
-	if cfg.PushLogs && bundle.LogsDir != "" {
-		g.Go(func() error {
-			res, err := pushArtifact(gctx, bundle.LogsDir, cfg.Push+"-logs", cfg)
-			if err != nil {
-				return err
-			}
-			out.Logs = res
-			return nil
-		})
-	}
-	if err := g.Wait(); err != nil {
-		return signPushOutcome{}, err
-	}
-	return out, nil
-}
-
-func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenceConfig) (*attestation.PushResult, error) {
-	return attestation.Push(ctx, attestation.PushOptions{
-		SourceDir:   sourceDir,
-		Reference:   ref,
-		AICRVersion: version,
-		PlainHTTP:   cfg.PlainHTTP,
-		InsecureTLS: cfg.InsecureTLS,
-	})
-}
-
-func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attestation.PointerInputs {
-	in := attestation.PointerInputs{Bundle: bundle}
-	if out.Summary != nil {
-		in.BundleOCI = attestation.CleanOCIRef(out.Summary.Reference)
-		in.BundleHash = out.Summary.Digest
-	}
-	if out.Sign != nil {
-		in.Signer = attestation.PointerSigner{
-			Identity:      out.Sign.Identity,
-			Issuer:        out.Sign.Issuer,
-			RekorLogIndex: out.Sign.RekorLogIndex,
-		}
-	}
-	if out.Logs != nil {
-		in.LogsBundle = &attestation.PointerLogsBundle{
-			OCI:    attestation.CleanOCIRef(out.Logs.Reference),
-			Digest: out.Logs.Digest,
-		}
-	}
-	return in
 }
 
 func validateCmdFlags() []cli.Flag {
@@ -783,12 +524,16 @@ func validateCmdFlags() []cli.Flag {
 			Name: "emit-attestation",
 			Usage: `Directory to write a recipe-evidence v1 attestation bundle (signed when --push is set).
 	Produces summary-bundle/, optionally logs-bundle/, and pointer.yaml suitable for copying to recipes/evidence/<recipe>.yaml.
-	See docs/spec/recipe-evidence-v1.md.`,
+	See ADR-007 (docs/design/007-recipe-evidence.md).`,
 			Category: catEvidence,
 		},
 		&cli.StringFlag{
-			Name:     "bom",
-			Usage:    "Path to a CycloneDX BOM (bom.cdx.json). Required with --emit-attestation; run `make bom` to produce one.",
+			Name: "bom",
+			Usage: `Path to a CycloneDX BOM (bom.cdx.json) to embed in the evidence bundle.
+	Optional with --emit-attestation: when omitted, aicr synthesizes a
+	recipe-bound BOM from the recipe's component refs + the validator
+	catalog images that ran. Pass an explicit path for an exhaustive
+	BOM (e.g., produced by 'make bom').`,
 			Category: catEvidence,
 		},
 		&cli.BoolFlag{

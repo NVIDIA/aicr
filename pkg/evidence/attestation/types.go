@@ -20,8 +20,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
-// Public stability constants. These match docs/spec/recipe-evidence-v1.md
-// and are part of the V1 stability boundary.
+// Public stability constants. These match the V1 schema documented in
+// ADR-007 (docs/design/007-recipe-evidence.md) and are part of the V1
+// stability boundary.
 const (
 	// PredicateTypeV1 is the in-toto predicateType URI for recipe evidence.
 	PredicateTypeV1 = "https://aicr.nvidia.com/recipe-evidence/v1"

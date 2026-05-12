@@ -105,13 +105,6 @@ export default withMermaid(
             ],
           },
           {
-            text: 'Specifications',
-            collapsed: true,
-            items: [
-              { text: 'Recipe Evidence Bundle v1', link: '/docs/spec/recipe-evidence-v1' },
-            ],
-          },
-          {
             text: 'Conformance',
             collapsed: true,
             items: [

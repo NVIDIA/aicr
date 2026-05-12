@@ -187,11 +187,12 @@ type EvidenceCNCFSpec struct {
 // EvidenceAttestationSpec configures the recipe-evidence v1 bundle path
 // (--emit-attestation / --bom / --include-logs / --push / --push-logs /
 // --plain-http / --insecure-tls). Bundle format is documented in
-// docs/spec/recipe-evidence-v1.md.
+// ADR-007 (docs/design/007-recipe-evidence.md).
 //
-// IdentityToken is intentionally absent: the SIGSTORE_ID_TOKEN env var
-// supplies it. Tokens are short-lived secrets and must not be embedded
-// in version-controlled configuration.
+// The OIDC identity token used by --push is intentionally absent: the
+// CLI resolves it at sign time through the same precedence chain
+// `aicr bundle --attest` uses. Tokens are short-lived secrets and must
+// not be embedded in version-controlled configuration.
 type EvidenceAttestationSpec struct {
 	// Out is the output directory for the bundle (--emit-attestation).
 	// Setting this enables the attestation path; an empty value leaves it

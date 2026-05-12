@@ -594,8 +594,8 @@ aicr validate [flags]
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
 | `--feature` | `-f` | string[] | | Feature flags for validation (repeatable) |
-| `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [Recipe Evidence Bundle v1](../spec/recipe-evidence-v1.md). |
-| `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`). Required with `--emit-attestation`. Run `make bom`. |
+| `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [ADR-007](../design/007-recipe-evidence.md). |
+| `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--include-logs` | | bool | false | Embed validator logs in `logs-bundle/` alongside the summary bundle. Per-file hashes are pre-committed in the manifest regardless. |
 | `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
 | `--push-logs` | | bool | false | Also push the logs bundle to `<push>-logs` as a separate OCI artifact. Requires `--include-logs` and `--push`. |
@@ -713,12 +713,18 @@ aicr validate \
   --snapshot cm://gpu-operator/aicr-snapshot \
   --kubeconfig ~/.kube/prod-cluster
 
-# Write a recipe-evidence v1 attestation bundle (unsigned, on disk)
-make bom                                              # produces dist/bom/bom.cdx.json
+# Write a recipe-evidence v1 attestation bundle (unsigned, on disk).
+# --bom is optional: when omitted, aicr synthesizes a recipe-bound BOM from
+# the recipe's component refs and validator catalog images.
+aicr validate \
+  --recipe recipe.yaml --snapshot snapshot.yaml \
+  --emit-attestation ./out
+# Writes ./out/summary-bundle/ and ./out/pointer.yaml.
+
+# Use an exhaustive BOM (e.g., `make bom`-produced) instead of the auto-generated one
 aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out --bom dist/bom/bom.cdx.json
-# Writes ./out/summary-bundle/ and ./out/pointer.yaml.
 
 # Sign and push a recipe-evidence bundle to OCI (cosign keyless via Sigstore public-good).
 # Token acquisition follows the same precedence chain as `aicr bundle --attest`:
@@ -726,7 +732,6 @@ aicr validate \
 aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out \
-  --bom dist/bom/bom.cdx.json \
   --push ghcr.io/myorg/aicr-evidence
 # After this, copy ./out/pointer.yaml to recipes/evidence/<recipe>.yaml
 

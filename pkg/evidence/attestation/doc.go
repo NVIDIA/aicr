@@ -13,7 +13,7 @@
 // limitations under the License.
 
 // Package attestation implements the recipe-test-attestation evidence
-// kind defined in ADR-007 and docs/spec/recipe-evidence-v1.md.
+// kind defined in ADR-007 (docs/design/007-recipe-evidence.md).
 //
 // A recipe-test-attestation bundle is a signed, content-addressed
 // artifact that ties an AICR recipe to an `aicr validate` run on real
