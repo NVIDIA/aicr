@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
+	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -113,7 +114,7 @@ func emitRecipeEvidence(
 		}
 	}
 
-	bomBody, err := loadOrGenerateBOM(cfg.BOMPath, rec, version, commit)
+	bomBody, err := loadOrGenerateBOM(cfg.BOMPath, rec, snap, version, commit)
 	if err != nil {
 		return err
 	}
@@ -230,13 +231,16 @@ func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenc
 // evidence bundle. When the operator passes --bom, the path wins (so
 // `make bom`-produced exhaustive BOMs continue to be authoritative).
 // When --bom is empty, aicr synthesizes a recipe-bound BOM enumerating
-// the recipe's component refs and the validator catalog images that
-// ran during this session. The auto-generated BOM does not render
-// individual container images inside helm charts — that requires the
-// helm binary which the validate hot path deliberately avoids
-// depending on; auditors who need that detail can resolve each chart
-// ref via standard tooling or supply `make bom` via --bom.
-func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, version, commit string) ([]byte, error) {
+// the recipe's component refs, the validator catalog images that ran
+// this session, and any container images observed running on the
+// snapshot's cluster (pkg/collector/k8s/image.go captures these).
+//
+// Helm charts are not rendered at validate time — that would require
+// the helm binary and a 60s+ rendering budget. Observed snapshot
+// images give the same information for the typical post-deployment
+// validate flow; when the snapshot is empty or pre-deployment, the
+// BOM falls back to chart refs + validator images only.
+func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, version, commit string) ([]byte, error) {
 	if bomPath != "" {
 		body, err := os.ReadFile(bomPath)
 		if err != nil {
@@ -244,19 +248,26 @@ func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, version, commit
 		}
 		return body, nil
 	}
-	return buildAutoBOM(rec, version, commit)
+	return buildAutoBOM(rec, snap, version, commit)
 }
 
 // buildAutoBOM synthesizes a CycloneDX 1.6 BOM from:
 //   - The recipe's enabled component refs (chart-level metadata: repo,
-//     chart, version, namespace; images intentionally not enumerated —
-//     see loadOrGenerateBOM rationale).
-//   - The validator catalog images, surfaced as a single synthetic
-//     "validators" component holding every container the catalog ships
-//     for the session's compiled-in version/commit.
+//     chart, version, namespace).
+//   - The validator catalog images, surfaced as a synthetic "validators"
+//     component holding every container the catalog ships for the
+//     session's compiled-in version/commit.
+//   - Container images observed running on the cluster snapshot, when
+//     present, as a synthetic "observed-images" component. These come
+//     from the K8s.image.* measurements pkg/collector/k8s populates;
+//     refs are registry-stripped (`gpu-operator:v25.10.1` rather than
+//     `nvcr.io/nvidia/cloud-native/gpu-operator:v25.10.1`) because the
+//     constraint-evaluation collector deliberately strips for
+//     registry-mirror stability. A more authoritative full-ref BOM
+//     still requires `make bom` via --bom.
 //
 // Returns the JSON bytes ready to embed in BOMInputs.Body.
-func buildAutoBOM(rec *recipe.RecipeResult, version, commit string) ([]byte, error) {
+func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, version, commit string) ([]byte, error) {
 	cat, err := catalog.Load(version, commit)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for auto BOM", err)
@@ -305,6 +316,15 @@ func buildAutoBOM(rec *recipe.RecipeResult, version, commit string) ([]byte, err
 		})
 	}
 
+	if observed := observedImagesFromSnapshot(snap); len(observed) > 0 {
+		results = append(results, bom.ComponentResult{
+			Name:        "observed-images",
+			DisplayName: "Cluster-observed container images",
+			Type:        "snapshot",
+			Images:      observed,
+		})
+	}
+
 	recipeName := attestation.RecipeNameFor(rec)
 	if recipeName == "" {
 		recipeName = "aicr-recipe"
@@ -324,6 +344,47 @@ func buildAutoBOM(rec *recipe.RecipeResult, version, commit string) ([]byte, err
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to encode auto-generated BOM", encErr)
 	}
 	return buf.Bytes(), nil
+}
+
+// observedImagesFromSnapshot returns the cluster-observed image refs
+// in "<name>:<tag>" form, drawn from the K8s/image measurement that
+// pkg/collector/k8s populates. Returns nil when no such measurement is
+// present (e.g., --no-cluster runs or pre-deployment snapshots).
+//
+// The collector registry-strips refs for measurement-key stability
+// across registry mirrors (a constraint-evaluation requirement), so
+// the output here also lacks registries. An operator wanting fully
+// qualified refs ships their own BOM via --bom.
+func observedImagesFromSnapshot(snap *snapshotter.Snapshot) []string {
+	if snap == nil {
+		return nil
+	}
+	var (
+		seen   = map[string]struct{}{}
+		images []string
+	)
+	for _, m := range snap.Measurements {
+		if m == nil || m.Type != measurement.TypeK8s {
+			continue
+		}
+		for _, st := range m.Subtypes {
+			if st.Name != "image" {
+				continue
+			}
+			for name, reading := range st.Data {
+				if name == "" || reading == nil {
+					continue
+				}
+				ref := name + ":" + reading.String()
+				if _, dup := seen[ref]; dup {
+					continue
+				}
+				seen[ref] = struct{}{}
+				images = append(images, ref)
+			}
+		}
+	}
+	return images
 }
 
 func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attestation.PointerInputs {
