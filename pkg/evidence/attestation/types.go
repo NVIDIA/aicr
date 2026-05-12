@@ -107,15 +107,6 @@ const (
 // builders to iterate deterministically.
 var AllPhases = []Phase{PhaseDeployment, PhasePerformance, PhaseConformance}
 
-// SigstoreIDTokenEnv is the environment variable cosign / Sigstore look
-// for an ambient OIDC ID token (GitHub Actions, ambient gcloud, etc.)
-// when minting a Fulcio certificate. Centralized here so the CLI flag
-// help, push-time check, and any future audit pathway share one source
-// of truth for the contract name.
-//
-//nolint:gosec // env var name, not a credential value.
-const SigstoreIDTokenEnv = "SIGSTORE_ID_TOKEN"
-
 // Predicate is the body of the signed in-toto Statement. It serializes
 // to JSON for the on-the-wire predicate and to YAML for human-readable
 // embedding in spec docs.

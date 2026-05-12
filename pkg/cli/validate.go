@@ -32,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
+	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
@@ -320,6 +321,15 @@ type recipeEvidenceConfig struct {
 	PushLogs    bool
 	PlainHTTP   bool
 	InsecureTLS bool
+
+	// OIDCToken is the resolved Sigstore identity token for keyless
+	// signing. Populated by the Action body via
+	// bundleattest.ResolveOIDCToken before runValidation starts; empty
+	// when Push is unset (no signing needed). Carried on the config
+	// struct rather than re-resolved at sign time so an interactive or
+	// device-code flow prompts the operator up front, before validation
+	// work begins.
+	OIDCToken string
 }
 
 // buildRecipeEvidenceConfig parses the --emit-attestation flag family with
@@ -573,6 +583,11 @@ func emitRecipeEvidence(
 // pre-publish pointer. When both --push and --push-logs are set the
 // summary and logs uploads run concurrently — they are independent
 // OCI artifacts sharing only the cancellation deadline.
+//
+// cfg.OIDCToken is populated by the Action body via
+// bundleattest.ResolveOIDCToken so token acquisition (which may prompt
+// a browser or device-code flow) happens up front, not after validation
+// already ran.
 func signAndPushBundle(
 	ctx context.Context,
 	bundle *attestation.Bundle,
@@ -583,15 +598,9 @@ func signAndPushBundle(
 		return signPushOutcome{Sign: &attestation.SignResult{}}, nil
 	}
 
-	oidcToken := os.Getenv(attestation.SigstoreIDTokenEnv)
-	if oidcToken == "" {
-		return signPushOutcome{}, errors.New(errors.ErrCodeInvalidRequest,
-			"--push requires "+attestation.SigstoreIDTokenEnv+" env var (cosign keyless OIDC token); see docs/spec/recipe-evidence-v1.md")
-	}
-
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer signCancel()
-	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(oidcToken))
+	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(cfg.OIDCToken))
 	if err != nil {
 		return signPushOutcome{}, err
 	}
@@ -808,6 +817,18 @@ func validateCmdFlags() []cli.Flag {
 			Usage:    "Skip TLS verification when pushing the evidence OCI artifact (self-signed registries).",
 			Category: catEvidence,
 		},
+		&cli.StringFlag{
+			Name:     "identity-token",
+			Usage:    "Pre-fetched OIDC identity token for --push keyless signing. Skips ambient/browser/device-code flows. Prefer COSIGN_IDENTITY_TOKEN on shared hosts; flag values are visible in process listings (ps, /proc/<pid>/cmdline).",
+			Sources:  cli.EnvVars("COSIGN_IDENTITY_TOKEN"),
+			Category: catEvidence,
+		},
+		&cli.BoolFlag{
+			Name:     "oidc-device-flow",
+			Usage:    "Use the OAuth 2.0 device authorization grant for --push OIDC instead of opening a browser callback. Useful on headless hosts when --identity-token / COSIGN_IDENTITY_TOKEN and ambient GitHub Actions OIDC are both unavailable.",
+			Sources:  cli.EnvVars("AICR_OIDC_DEVICE_FLOW"),
+			Category: catEvidence,
+		},
 		configFlag(),
 		dataFlag(),
 		outputFlag(),
@@ -850,7 +871,7 @@ Run validation without failing on check errors (informational mode):
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "push"); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "push", "identity-token"); err != nil {
 				return err
 			}
 
@@ -974,6 +995,27 @@ Run validation without failing on check errors (informational mode):
 					"binding", "aicr-validator")
 			}
 
+			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
+			// Resolve the Sigstore identity token up front (only when push
+			// is requested) so an interactive browser or device-code flow
+			// prompts the operator before the long-running validation
+			// begins. Uses the same precedence chain as `aicr bundle
+			// --attest`: --identity-token > ambient GitHub Actions >
+			// --oidc-device-flow > interactive browser.
+			if evidenceCfg != nil && evidenceCfg.Push != "" {
+				token, tokenErr := bundleattest.ResolveOIDCToken(ctx, bundleattest.ResolveOptions{
+					IdentityToken: cmd.String("identity-token"),
+					AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+					AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+					DeviceFlow:    cmd.Bool("oidc-device-flow"),
+					PromptWriter:  os.Stderr,
+				})
+				if tokenErr != nil {
+					return tokenErr
+				}
+				evidenceCfg.OIDCToken = token
+			}
+
 			return runValidation(ctx, rec, snap, validationConfig{
 				phases:              phases,
 				output:              cmd.String("output"),
@@ -986,7 +1028,7 @@ Run validation without failing on check errors (informational mode):
 				nodeSelector:        shared.nodeSelector,
 				tolerations:         shared.tolerations,
 				evidenceDir:         evidenceDir,
-				evidence:            buildRecipeEvidenceConfig(cmd, resolved),
+				evidence:            evidenceCfg,
 			})
 		},
 	}

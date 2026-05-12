@@ -597,10 +597,12 @@ aicr validate [flags]
 | `--emit-attestation` | | string | | Directory to write a recipe-evidence v1 attestation bundle (signed when `--push` is set). See [Recipe Evidence Bundle v1](../spec/recipe-evidence-v1.md). |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`). Required with `--emit-attestation`. Run `make bom`. |
 | `--include-logs` | | bool | false | Embed validator logs in `logs-bundle/` alongside the summary bundle. Per-file hashes are pre-committed in the manifest regardless. |
-| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Requires `SIGSTORE_ID_TOKEN` env var. |
+| `--push` | | string | | OCI registry reference (e.g. `ghcr.io/myorg/aicr-evidence`) to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. |
 | `--push-logs` | | bool | false | Also push the logs bundle to `<push>-logs` as a separate OCI artifact. Requires `--include-logs` and `--push`. |
 | `--plain-http` | | bool | false | Use HTTP instead of HTTPS for evidence push (local registry tests). |
 | `--insecure-tls` | | bool | false | Skip TLS verification for evidence push (self-signed registries). |
+| `--identity-token` | | string | | Pre-fetched OIDC identity token for `--push` keyless signing. Skips ambient/browser/device-code flows. Reads `COSIGN_IDENTITY_TOKEN` from env. Same precedence chain as `aicr bundle --attest`. |
+| `--oidc-device-flow` | | bool | false | Use the OAuth 2.0 device authorization grant for `--push` OIDC instead of opening a browser callback. Reads `AICR_OIDC_DEVICE_FLOW`. |
 | `--data` | | string | | External data directory to overlay on embedded data |
 
 **Input Sources:**
@@ -718,8 +720,9 @@ aicr validate \
   --emit-attestation ./out --bom dist/bom/bom.cdx.json
 # Writes ./out/summary-bundle/ and ./out/pointer.yaml.
 
-# Sign and push a recipe-evidence bundle to OCI (cosign keyless via Sigstore public-good)
-export SIGSTORE_ID_TOKEN=$(your-oidc-fetcher)         # e.g. gh actions oidc
+# Sign and push a recipe-evidence bundle to OCI (cosign keyless via Sigstore public-good).
+# Token acquisition follows the same precedence chain as `aicr bundle --attest`:
+# pre-fetched COSIGN_IDENTITY_TOKEN > ambient GitHub Actions OIDC > --oidc-device-flow > interactive browser.
 aicr validate \
   --recipe recipe.yaml --snapshot snapshot.yaml \
   --emit-attestation ./out \
@@ -745,9 +748,10 @@ aicr validate \
 
 `aicr validate --config <path>` reads inputs from an AICRConfig YAML/JSON file
 under `spec.validate`. CLI flags always override values loaded from `--config`;
-override events are logged at INFO so users can see which input won. The
-`SIGSTORE_ID_TOKEN` secret stays out of the schema by design (short-lived
-tokens must not be committed); the CLI reads it from env at sign time.
+override events are logged at INFO so users can see which input won. The OIDC
+identity token used for `--push` signing stays out of the schema by design
+(short-lived tokens must not be committed); the CLI resolves it at sign time
+through the precedence chain described on `--identity-token`.
 
 **Supported schema:**
 

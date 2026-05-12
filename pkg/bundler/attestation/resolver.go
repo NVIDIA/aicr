@@ -53,50 +53,53 @@ type ResolveOptions struct {
 	PromptWriter io.Writer
 }
 
-// ResolveAttester returns the Attester implementation selected by opts.
+// ResolveOIDCToken walks the OIDC source precedence chain and returns the
+// resulting identity token string. Suitable for callers (such as the
+// recipe-evidence pipeline) that build their own signer around a raw token
+// and do not want the bundler's Attester abstraction.
 //
-// OIDC source precedence (highest first):
+// Precedence (highest first):
 //  1. IdentityToken — explicit pre-fetched token.
 //  2. AmbientURL+AmbientToken — GitHub Actions ambient OIDC.
 //  3. DeviceFlow — RFC 8628 device-code flow.
 //  4. Interactive browser flow (default).
 //
 // Errors from the OIDC helpers are returned as-is to preserve their
-// pkg/errors classification (timeout / unavailable / internal).
-func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error) {
-	if !opts.Attest {
-		return NewNoOpAttester(), nil
-	}
-
+// pkg/errors classification (timeout / unavailable / internal). The
+// function does not read the runtime environment itself — callers
+// populate ResolveOptions from their own surface (flags, env vars).
+func ResolveOIDCToken(ctx context.Context, opts ResolveOptions) (string, error) {
 	// 1. Pre-fetched identity token.
 	if opts.IdentityToken != "" {
-		slog.Info("using pre-fetched OIDC identity token for attestation")
-		return NewKeylessAttester(opts.IdentityToken), nil
+		slog.Info("using pre-fetched OIDC identity token")
+		return opts.IdentityToken, nil
 	}
 
 	// 2. Ambient OIDC (GitHub Actions).
 	if opts.AmbientURL != "" && opts.AmbientToken != "" {
-		oidcToken, err := FetchAmbientOIDCToken(ctx, opts.AmbientURL, opts.AmbientToken)
-		if err != nil {
-			return nil, err
-		}
-		return NewKeylessAttester(oidcToken), nil
+		return FetchAmbientOIDCToken(ctx, opts.AmbientURL, opts.AmbientToken)
 	}
 
 	// 3. Device-code flow — works on headless hosts.
 	if opts.DeviceFlow {
-		oidcToken, err := FetchDeviceCodeOIDCToken(ctx, opts.PromptWriter)
-		if err != nil {
-			return nil, err
-		}
-		return NewKeylessAttester(oidcToken), nil
+		return FetchDeviceCodeOIDCToken(ctx, opts.PromptWriter)
 	}
 
 	// 4. Interactive browser flow (default).
 	slog.Info("no ambient OIDC token, attempting interactive authentication")
-	oidcToken, err := FetchInteractiveOIDCToken(ctx, opts.PromptWriter)
+	return FetchInteractiveOIDCToken(ctx, opts.PromptWriter)
+}
+
+// ResolveAttester returns the Attester implementation selected by opts.
+// Wraps ResolveOIDCToken with the NoOpAttester short-circuit for
+// callers that gate attestation behind opts.Attest.
+func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error) {
+	if !opts.Attest {
+		return NewNoOpAttester(), nil
+	}
+	token, err := ResolveOIDCToken(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
-	return NewKeylessAttester(oidcToken), nil
+	return NewKeylessAttester(token), nil
 }
