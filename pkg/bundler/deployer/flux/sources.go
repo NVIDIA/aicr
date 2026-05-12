@@ -45,10 +45,15 @@ func gitSourceName(sourceURL string, sources map[string]*GitRepoSourceData) stri
 }
 
 // collectHelmSources collects unique HelmRepository sources from components.
-func collectHelmSources(refs []recipe.ComponentRef) map[string]*HelmRepoSourceData {
+// When vendorCharts is true, components that will be vendored are skipped
+// because their HelmRelease CRs reference GitRepository instead.
+func collectHelmSources(refs []recipe.ComponentRef, vendorCharts bool) map[string]*HelmRepoSourceData {
 	sources := make(map[string]*HelmRepoSourceData)
 	for _, ref := range refs {
 		if ref.Type != recipe.ComponentTypeHelm || ref.Source == "" {
+			continue
+		}
+		if vendorCharts && isVendorable(ref) {
 			continue
 		}
 		if _, exists := sources[ref.Source]; exists {

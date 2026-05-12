@@ -15,6 +15,7 @@
 package flux
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 	k8syaml "sigs.k8s.io/yaml"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -268,6 +270,133 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 		return false, err
 	}
 	return wroteConfigMap, nil
+}
+
+// generateVendoredHelmComponent writes a vendored wrapper chart folder for a
+// Helm component and generates a HelmRelease CR pointing to it via
+// GitRepository. For mixed components (Helm + manifests), manifest templates
+// are included in the wrapper with post-install hook annotations so they
+// install after the subchart's resources.
+// Returns (wroteConfigMap, vendorRecord, error).
+func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recipe.ComponentRef,
+	compDir string, dependsOn []DependsOnRef,
+	gitSources map[string]*GitRepoSourceData,
+	puller localformat.ChartPuller,
+	output *deployer.Output) (bool, localformat.VendorRecord, error) {
+
+	chartName := ref.Chart
+	if chartName == "" {
+		chartName = ref.Name
+	}
+
+	// Build localformat.Component for the puller.
+	lfc := localformat.Component{
+		Name:       ref.Name,
+		Repository: ref.Source,
+		ChartName:  chartName,
+		Version:    ref.Version,
+		IsOCI:      strings.HasPrefix(ref.Source, "oci://"),
+	}
+
+	// Pull upstream chart tarball.
+	tgz, rec, tarball, pullErr := puller.Pull(ctx, lfc)
+	if pullErr != nil {
+		return false, localformat.VendorRecord{}, errors.PropagateOrWrap(
+			pullErr, errors.ErrCodeInternal,
+			fmt.Sprintf("pull vendored chart for component %q", ref.Name))
+	}
+
+	// Write charts/<tarball>.tgz.
+	chartsDir, err := deployer.SafeJoin(compDir, "charts")
+	if err != nil {
+		return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"charts dir path unsafe", err)
+	}
+	if err = os.MkdirAll(chartsDir, 0750); err != nil {
+		return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("create charts dir for %s", ref.Name), err)
+	}
+	tarballPath, err := deployer.SafeJoin(chartsDir, tarball)
+	if err != nil {
+		return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("tarball path unsafe: %s", tarball), err)
+	}
+	if err = os.WriteFile(tarballPath, tgz, 0600); err != nil {
+		return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("write tarball for %s", ref.Name), err)
+	}
+	output.Files = append(output.Files, tarballPath)
+	output.TotalSize += int64(len(tgz))
+
+	// Write wrapper Chart.yaml declaring the upstream as a dependency.
+	version := deployer.NormalizeVersionWithDefault(ref.Version)
+	wrapperYAML, err := localformat.RenderWrapperChartYAML(ref.Name, ref.Name, chartName, version)
+	if err != nil {
+		return false, localformat.VendorRecord{}, err
+	}
+	chartPath, err := deployer.SafeJoin(compDir, fileChart)
+	if err != nil {
+		return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInvalidRequest,
+			"Chart.yaml path unsafe", err)
+	}
+	if err = os.WriteFile(chartPath, wrapperYAML, 0600); err != nil {
+		return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("write Chart.yaml for %s", ref.Name), err)
+	}
+	output.Files = append(output.Files, chartPath)
+	output.TotalSize += int64(len(wrapperYAML))
+
+	// Build values nested under the subchart name so the wrapper chart
+	// forwards them to the vendored dependency at install time.
+	values := g.ComponentValues[ref.Name]
+	dynamicPaths := g.DynamicValues[ref.Name]
+
+	var valuesFrom []ValuesFromRef
+	var wroteConfigMap bool
+
+	if len(dynamicPaths) > 0 {
+		split := splitDynamicPaths(values, dynamicPaths)
+		values = split.static
+
+		wrappedDynamic := localformat.NestUnderSubchart(split.dynamic, chartName)
+		cmName, cmErr := writeConfigMap(ref.Name, wrappedDynamic, compDir, output)
+		if cmErr != nil {
+			return false, localformat.VendorRecord{}, cmErr
+		}
+		valuesFrom = []ValuesFromRef{{Name: cmName}}
+		wroteConfigMap = true
+	}
+
+	var valuesYAML string
+	nestedValues := localformat.NestUnderSubchart(values, chartName)
+	if len(nestedValues) > 0 {
+		yamlBytes, marshalErr := k8syaml.Marshal(nestedValues)
+		if marshalErr != nil {
+			return false, localformat.VendorRecord{}, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to marshal values for %s", ref.Name), marshalErr)
+		}
+		valuesYAML = "    " + strings.ReplaceAll(strings.TrimRight(string(yamlBytes), "\n"), "\n", "\n    ")
+	}
+
+	// Write HelmRelease referencing GitRepository (vendored chart is local).
+	sName := gitSourceName(g.resolveRepoURL(), gitSources)
+	data := HelmReleaseData{
+		Name:            ref.Name,
+		TargetNamespace: ref.Namespace,
+		Chart:           "./" + ref.Name,
+		SourceKind:      "GitRepository",
+		SourceName:      sName,
+		DependsOn:       dependsOn,
+		ValuesFrom:      valuesFrom,
+		ValuesYAML:      valuesYAML,
+	}
+
+	if err := writeTemplate(output, helmReleaseTemplate, data, compDir, fileHelmRelease,
+		fmt.Sprintf("failed to write %s for %s", fileHelmRelease, ref.Name)); err != nil {
+		return false, localformat.VendorRecord{}, err
+	}
+
+	return wroteConfigMap, rec, nil
 }
 
 // writeConfigMap writes a ConfigMap YAML file containing the given dynamic

@@ -398,6 +398,7 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			DataFiles:          dataFiles,
 			ComponentManifests: componentManifests,
 			DynamicValues:      dynamicValues,
+			VendorCharts:       b.Config.VendorCharts(),
 		}, nil
 
 	default:

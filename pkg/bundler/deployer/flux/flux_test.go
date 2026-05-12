@@ -16,7 +16,10 @@ package flux
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,6 +27,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -1033,15 +1037,22 @@ func TestBuildDependsOn(t *testing.T) {
 
 func TestCollectHelmSources(t *testing.T) {
 	refs := []recipe.ComponentRef{
-		{Name: "a", Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io"},
-		{Name: "b", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"},
-		{Name: "c", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia"}, // duplicate
+		{Name: "a", Type: recipe.ComponentTypeHelm, Source: "https://charts.jetstack.io", Chart: "a", Version: "v1.0.0"},
+		{Name: "b", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "b", Version: "v1.0.0"},
+		{Name: "c", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Chart: "c", Version: "v1.0.0"}, // duplicate
 		{Name: "d", Type: recipe.ComponentTypeKustomize, Source: "https://github.com/example/repo.git"},
 	}
 
-	sources := collectHelmSources(refs)
+	// Without vendoring: all Helm sources collected.
+	sources := collectHelmSources(refs, false)
 	if len(sources) != 2 {
-		t.Errorf("collectHelmSources() returned %d sources, want 2", len(sources))
+		t.Errorf("collectHelmSources(vendorCharts=false) returned %d sources, want 2", len(sources))
+	}
+
+	// With vendoring: vendorable Helm components skip HelmRepository sources.
+	sources = collectHelmSources(refs, true)
+	if len(sources) != 0 {
+		t.Errorf("collectHelmSources(vendorCharts=true) returned %d sources, want 0 (all vendorable)", len(sources))
 	}
 }
 
@@ -1175,6 +1186,366 @@ func listFilesWithPrefix(t *testing.T, dir, prefix string) []string {
 		}
 	}
 	return files
+}
+
+// ---------- vendor-charts tests ----------
+
+// stubChartPuller returns a deterministic .tgz payload for any Pull call.
+type stubChartPuller struct{}
+
+var _ localformat.ChartPuller = (*stubChartPuller)(nil)
+
+func (s *stubChartPuller) Pull(_ context.Context, c localformat.Component) ([]byte, localformat.VendorRecord, string, error) {
+	chartName := c.ChartName
+	if chartName == "" {
+		chartName = c.Name
+	}
+	tgz := []byte(fmt.Sprintf("fake-tgz-%s-%s", chartName, c.Version))
+	sum := sha256.Sum256(tgz)
+	tarball := fmt.Sprintf("%s-%s.tgz", chartName, c.Version)
+	rec := localformat.VendorRecord{
+		Name:          c.Name,
+		Chart:         chartName,
+		Version:       c.Version,
+		Repository:    c.Repository,
+		SHA256:        hex.EncodeToString(sum[:]),
+		TarballName:   tarball,
+		PullerVersion: "stub v0.0.0",
+	}
+	return tgz, rec, tarball, nil
+}
+
+func TestGenerate_VendorCharts_BasicHelm(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+		},
+		Version:      "v0.9.0",
+		RepoURL:      "https://github.com/my-org/gitops.git",
+		VendorCharts: true,
+		Puller:       &stubChartPuller{},
+	}
+
+	output, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify wrapper Chart.yaml exists with dependencies.
+	for _, comp := range []string{"cert-manager", "gpu-operator"} {
+		chartPath := filepath.Join(outputDir, comp, "Chart.yaml")
+		content := readFile(t, chartPath)
+		if !strings.Contains(content, "dependencies:") {
+			t.Errorf("%s Chart.yaml should contain dependencies section", comp)
+		}
+	}
+
+	// Verify chart tarballs exist.
+	for _, comp := range []string{"cert-manager", "gpu-operator"} {
+		chartsDir := filepath.Join(outputDir, comp, "charts")
+		entries, err := os.ReadDir(chartsDir)
+		if err != nil {
+			t.Fatalf("read charts dir for %s: %v", comp, err)
+		}
+		found := false
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".tgz") {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("%s should have a .tgz file in charts/", comp)
+		}
+	}
+
+	// Verify HelmReleases reference GitRepository, not HelmRepository.
+	for _, comp := range []string{"cert-manager", "gpu-operator"} {
+		hr := readFile(t, filepath.Join(outputDir, comp, "helmrelease.yaml"))
+		if !strings.Contains(hr, "kind: GitRepository") {
+			t.Errorf("%s HelmRelease should reference GitRepository", comp)
+		}
+		if strings.Contains(hr, "kind: HelmRepository") {
+			t.Errorf("%s HelmRelease should NOT reference HelmRepository", comp)
+		}
+		if !strings.Contains(hr, "chart: ./"+comp) {
+			t.Errorf("%s HelmRelease should have chart: ./%s", comp, comp)
+		}
+	}
+
+	// Verify NO HelmRepository source files exist (all vendored).
+	helmRepoFiles := listFilesWithPrefix(t, filepath.Join(outputDir, "sources"), "helmrepo-")
+	if len(helmRepoFiles) != 0 {
+		t.Errorf("expected 0 helmrepo source files when all components are vendored, got %d", len(helmRepoFiles))
+	}
+
+	// Verify provenance.yaml exists.
+	provPath := filepath.Join(outputDir, "provenance.yaml")
+	if _, statErr := os.Stat(provPath); os.IsNotExist(statErr) {
+		t.Error("expected provenance.yaml to exist when vendor-charts is on")
+	}
+	provContent := readFile(t, provPath)
+	if !strings.Contains(provContent, "kind: BundleProvenance") {
+		t.Error("provenance.yaml should contain kind: BundleProvenance")
+	}
+	if !strings.Contains(provContent, "cert-manager") {
+		t.Error("provenance.yaml should contain cert-manager record")
+	}
+	if !strings.Contains(provContent, "gpu-operator") {
+		t.Error("provenance.yaml should contain gpu-operator record")
+	}
+
+	// Verify deployment notes mention vendored charts.
+	foundNote := false
+	for _, note := range output.DeploymentNotes {
+		if strings.Contains(note, "vendored") {
+			foundNote = true
+			break
+		}
+	}
+	if !foundNote {
+		t.Error("deployment notes should mention vendored charts")
+	}
+
+	// Verify values are nested under the subchart name.
+	gpuHR := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(gpuHR, "gpu-operator:") {
+		t.Error("vendored HelmRelease values should be nested under subchart name")
+	}
+}
+
+func TestGenerate_VendorCharts_MixedComponent(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	manifests := map[string]map[string][]byte{
+		"gpu-operator": {
+			"dcgm-exporter.yaml": []byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: dcgm-exporter"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentValues:    map[string]map[string]any{"gpu-operator": {"driver": map[string]any{"enabled": true}}},
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		RepoURL:            "https://github.com/my-org/gitops.git",
+		VendorCharts:       true,
+		Puller:             &stubChartPuller{},
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify wrapper Chart.yaml + charts/ tarball exist for vendored chart.
+	chartPath := filepath.Join(outputDir, "gpu-operator", "Chart.yaml")
+	if _, statErr := os.Stat(chartPath); os.IsNotExist(statErr) {
+		t.Error("expected wrapper Chart.yaml")
+	}
+	chartContent := readFile(t, chartPath)
+	if !strings.Contains(chartContent, "dependencies:") {
+		t.Error("wrapper Chart.yaml should contain dependencies section")
+	}
+
+	// Verify primary HelmRelease references GitRepository (vendored).
+	hr := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(hr, "kind: GitRepository") {
+		t.Error("vendored mixed HelmRelease should reference GitRepository")
+	}
+
+	// Verify -post directory still exists for manifests (same as non-vendored).
+	postDir := filepath.Join(outputDir, "gpu-operator-post")
+	if _, statErr := os.Stat(postDir); os.IsNotExist(statErr) {
+		t.Error("expected gpu-operator-post/ directory for manifests")
+	}
+
+	// Verify post Chart.yaml and templates/ exist.
+	postChart := filepath.Join(postDir, "Chart.yaml")
+	if _, statErr := os.Stat(postChart); os.IsNotExist(statErr) {
+		t.Error("expected gpu-operator-post/Chart.yaml")
+	}
+	postTemplates := filepath.Join(postDir, "templates", "dcgm-exporter.yaml")
+	if _, statErr := os.Stat(postTemplates); os.IsNotExist(statErr) {
+		t.Error("expected gpu-operator-post/templates/dcgm-exporter.yaml")
+	}
+
+	// Verify post HelmRelease depends on the primary.
+	postHR := readFile(t, filepath.Join(postDir, "helmrelease.yaml"))
+	if !strings.Contains(postHR, "name: gpu-operator") {
+		t.Error("post HelmRelease should depend on gpu-operator")
+	}
+	if !strings.Contains(postHR, "kind: GitRepository") {
+		t.Error("post HelmRelease should reference GitRepository source")
+	}
+
+	// Verify kustomization.yaml references both primary and -post.
+	kustomization := readFile(t, filepath.Join(outputDir, "kustomization.yaml"))
+	if !strings.Contains(kustomization, "gpu-operator/helmrelease.yaml") {
+		t.Error("kustomization.yaml should reference gpu-operator/helmrelease.yaml")
+	}
+	if !strings.Contains(kustomization, "gpu-operator-post/helmrelease.yaml") {
+		t.Error("kustomization.yaml should reference gpu-operator-post/helmrelease.yaml")
+	}
+}
+
+func TestGenerate_VendorCharts_WithDynamic(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {
+				"driver": map[string]any{
+					"enabled": true,
+					"version": "570.86.16",
+				},
+				"toolkit": map[string]any{"enabled": true},
+			},
+		},
+		DynamicValues: map[string][]string{
+			"gpu-operator": {"driver.version"},
+		},
+		Version:      "v0.9.0",
+		RepoURL:      "https://github.com/my-org/gitops.git",
+		VendorCharts: true,
+		Puller:       &stubChartPuller{},
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Verify ConfigMap exists and values are nested under subchart name.
+	cmPath := filepath.Join(outputDir, "gpu-operator", "configmap-values.yaml")
+	if _, statErr := os.Stat(cmPath); os.IsNotExist(statErr) {
+		t.Fatal("expected ConfigMap file for dynamic values")
+	}
+	cmContent := readFile(t, cmPath)
+	if !strings.Contains(cmContent, "gpu-operator") {
+		t.Error("ConfigMap values should be nested under subchart name 'gpu-operator'")
+	}
+
+	// Verify HelmRelease has valuesFrom.
+	hr := readFile(t, filepath.Join(outputDir, "gpu-operator", "helmrelease.yaml"))
+	if !strings.Contains(hr, "valuesFrom") {
+		t.Error("vendored HelmRelease with dynamic values should have valuesFrom")
+	}
+
+	// Verify inline values do NOT contain the dynamic value.
+	if strings.Contains(hr, "570.86.16") {
+		t.Error("inline values should NOT contain the dynamic driver.version value")
+	}
+}
+
+func TestGenerate_VendorCharts_ManifestOnlyUnaffected(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "custom-manifests",
+			Namespace: "default",
+			Type:      recipe.ComponentTypeHelm,
+			// No Chart, no Source — manifest-only
+		},
+	}
+
+	manifests := map[string]map[string][]byte{
+		"custom-manifests": {
+			"configmap.yaml": []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test"),
+		},
+	}
+
+	g := &Generator{
+		RecipeResult:       recipeResult,
+		ComponentManifests: manifests,
+		Version:            "v0.9.0",
+		RepoURL:            "https://github.com/my-org/gitops.git",
+		VendorCharts:       true,
+		Puller:             &stubChartPuller{},
+	}
+
+	_, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	// Manifest-only component should NOT have a charts/ directory.
+	chartsDir := filepath.Join(outputDir, "custom-manifests", "charts")
+	if _, statErr := os.Stat(chartsDir); !os.IsNotExist(statErr) {
+		t.Error("manifest-only component should NOT have charts/ directory even with VendorCharts=true")
+	}
+
+	// Should still use the manifest-only path (templates/ + Chart.yaml).
+	templatesDir := filepath.Join(outputDir, "custom-manifests", "templates")
+	if _, statErr := os.Stat(templatesDir); os.IsNotExist(statErr) {
+		t.Error("manifest-only component should still have templates/")
+	}
+
+	// No provenance.yaml (nothing was vendored).
+	provPath := filepath.Join(outputDir, "provenance.yaml")
+	if _, statErr := os.Stat(provPath); !os.IsNotExist(statErr) {
+		t.Error("provenance.yaml should NOT exist when no charts are vendored")
+	}
 }
 
 func extractSourceName(t *testing.T, yamlContent string) string {

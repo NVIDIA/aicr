@@ -54,6 +54,13 @@ var wrapperChartTmpl = template.Must(
 	template.ParseFS(wrapperChartTemplates, "templates/wrapper-chart.yaml.tmpl"),
 )
 
+// RenderWrapperChartYAML produces the wrapper Chart.yaml content for a
+// vendored component. Exported for deployers that build their own
+// vendored folder layout (e.g., flux).
+func RenderWrapperChartYAML(name, parent, chartName, chartVersion string) ([]byte, error) {
+	return renderWrapperChartYAML(name, parent, chartName, chartVersion)
+}
+
 // renderWrapperChartYAML produces the wrapper Chart.yaml content for a
 // vendored component. Name is the wrapper chart name (== folder name
 // without the NNN- prefix); ChartName/ChartVersion identify the vendored
@@ -76,6 +83,13 @@ func renderWrapperChartYAML(name, parent, chartName, chartVersion string) ([]byt
 		return nil, errors.Wrap(errors.ErrCodeInternal, "render wrapper Chart.yaml", err)
 	}
 	return buf.Bytes(), nil
+}
+
+// NestUnderSubchart wraps values under a single key so Helm forwards
+// them to the named subchart at install time. Exported for deployers
+// that build vendored folders with a wrapper chart (e.g., flux).
+func NestUnderSubchart(values map[string]any, subchart string) map[string]any {
+	return nestUnderSubchart(values, subchart)
 }
 
 // nestUnderSubchart wraps values under a single key so Helm forwards
@@ -107,6 +121,14 @@ func nestUnderSubchart(values map[string]any, subchart string) map[string]any {
 // future need to inject a "very early" or "very late" wrapper-level
 // hook (negative weight, or weight > base+N) has room.
 const postInstallHookWeightBase = 100
+
+// InjectPostInstallHooks rewrites a multi-document YAML stream to add
+// post-install hook annotations. Exported for deployers that build
+// vendored mixed-component folders outside of localformat.Write()
+// (e.g., flux).
+func InjectPostInstallHooks(in []byte) ([]byte, error) {
+	return injectPostInstallHooks(in)
+}
 
 // injectPostInstallHooks rewrites a multi-document YAML stream to add
 // `helm.sh/hook: post-install` and a stable per-document hook-weight on

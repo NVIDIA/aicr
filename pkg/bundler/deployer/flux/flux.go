@@ -30,6 +30,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -128,6 +129,24 @@ type Generator struct {
 	// When non-empty, dynamic paths are split from inline values into a
 	// ConfigMap and referenced via spec.valuesFrom in the HelmRelease.
 	DynamicValues map[string][]string
+
+	// VendorCharts pulls upstream Helm chart bytes into the bundle at
+	// bundle time so the resulting artifact is air-gap deployable.
+	// Off by default. With the flag set, vendorable Helm-typed components
+	// emit a local wrapper chart (Chart.yaml + charts/<chart>-<ver>.tgz)
+	// and HelmRelease CRs reference the GitRepository source instead of
+	// HelmRepository.
+	VendorCharts bool
+
+	// Puller fetches upstream chart bytes when VendorCharts is set. nil
+	// resolves to a default *CLIChartPuller; tests inject a stub here
+	// without touching package state. Ignored when VendorCharts is false.
+	Puller localformat.ChartPuller
+
+	// vendorRecords is populated by Generate when VendorCharts is on.
+	// Captured here so provenance.yaml can be written after component
+	// generation without re-threading the slice through every helper.
+	vendorRecords []localformat.VendorRecord
 }
 
 // resolveTargetRevision returns the effective target revision, defaulting to "main".
@@ -192,8 +211,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create sources directory", err)
 	}
 
-	// Collect and deduplicate sources.
-	helmSources := collectHelmSources(sortedRefs)
+	// Resolve the chart puller for vendored bundles.
+	puller := g.Puller
+	if g.VendorCharts && puller == nil {
+		puller = &localformat.CLIChartPuller{}
+	}
+
+	// Collect and deduplicate sources. When vendoring, skip HelmRepository
+	// sources for components that will reference vendored local charts.
+	helmSources := collectHelmSources(sortedRefs, g.VendorCharts)
 	gitSources := collectGitSources(g.resolveRepoURL(), g.resolveTargetRevision())
 
 	// Write source CRs.
@@ -215,7 +241,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled during component generation", err)
 		}
 		compResources, compErr := g.generateComponentResources(
-			ref, i, sortedRefs, outputDir, helmSources, gitSources, output)
+			ctx, ref, i, sortedRefs, outputDir, helmSources, gitSources, puller, output)
 		if compErr != nil {
 			return nil, compErr
 		}
@@ -237,6 +263,18 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	if err := writeTemplate(output, readmeTemplate, readmeData,
 		outputDir, fileReadme, "failed to write README.md"); err != nil {
 		return nil, err
+	}
+
+	// Emit provenance.yaml for vendored bundles. Written before
+	// checksums so the audit file is itself checksummed.
+	if len(g.vendorRecords) > 0 {
+		provPath, provSize, provErr := localformat.WriteProvenance(ctx, outputDir, g.vendorRecords)
+		if provErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to generate provenance.yaml", provErr)
+		}
+		output.Files = append(output.Files, provPath)
+		output.TotalSize += provSize
 	}
 
 	// Add data files to output.
@@ -266,6 +304,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		notes = append(notes,
 			"ConfigMaps with dynamic values have been generated. Edit them before applying to customize per-cluster settings.")
 	}
+	if len(g.vendorRecords) > 0 {
+		notes = append(notes,
+			"This bundle contains vendored Helm charts. No upstream registry access is required at deploy time. See provenance.yaml for chart provenance details.")
+	}
 	output.DeploymentNotes = notes
 
 	slog.Debug("flux bundle generated",
@@ -280,9 +322,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 // generateComponentResources generates all Flux resources for a single component
 // and returns the resource paths to include in the root kustomization.yaml.
-func (g *Generator) generateComponentResources(ref recipe.ComponentRef, index int,
+func (g *Generator) generateComponentResources(ctx context.Context, ref recipe.ComponentRef, index int,
 	sortedRefs []recipe.ComponentRef, outputDir string,
 	helmSources map[string]*HelmRepoSourceData, gitSources map[string]*GitRepoSourceData,
+	puller localformat.ChartPuller,
 	output *deployer.Output) ([]string, error) {
 
 	compDir, err := deployer.SafeJoin(outputDir, ref.Name)
@@ -315,18 +358,39 @@ func (g *Generator) generateComponentResources(ref recipe.ComponentRef, index in
 			return res, nil
 		}
 
-		wroteCM, helmErr := g.generateHelmComponent(ref, compDir, dependsOn, helmSources, output)
-		if helmErr != nil {
-			return nil, helmErr
-		}
-		resources = append(resources, filepath.Join(ref.Name, fileHelmRelease))
-		if wroteCM {
-			resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
+		// Vendored Helm component: pull chart tarball, write wrapper,
+		// reference GitRepository instead of HelmRepository. Mixed
+		// components still produce a separate -post inline chart for
+		// manifests (the existing flow handles them correctly).
+		if g.VendorCharts && isVendorable(ref) {
+			wroteCM, rec, vendErr := g.generateVendoredHelmComponent(
+				ctx, ref, compDir, dependsOn, gitSources, puller, output)
+			if vendErr != nil {
+				return nil, vendErr
+			}
+			g.vendorRecords = append(g.vendorRecords, rec)
+			resources = append(resources, filepath.Join(ref.Name, fileHelmRelease))
+			if wroteCM {
+				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
+			}
+			slog.Info("wrote vendored chart for flux",
+				"component", ref.Name,
+				"chart", rec.Chart, "version", rec.Version, "sha256", rec.SHA256)
+		} else {
+			wroteCM, helmErr := g.generateHelmComponent(ref, compDir, dependsOn, helmSources, output)
+			if helmErr != nil {
+				return nil, helmErr
+			}
+			resources = append(resources, filepath.Join(ref.Name, fileHelmRelease))
+			if wroteCM {
+				resources = append(resources, filepath.Join(ref.Name, fileConfigMap))
+			}
 		}
 
 		// Handle mixed components (Helm + manifests).
 		// Post-manifests are packaged as a local Helm chart with dependsOn
-		// referencing the primary HelmRelease.
+		// referencing the primary HelmRelease — same for both vendored and
+		// non-vendored paths.
 		if hasManifests {
 			postName := ref.Name + "-post"
 			postDir, postErr := deployer.SafeJoin(outputDir, postName)
@@ -356,6 +420,16 @@ func (g *Generator) generateComponentResources(ref recipe.ComponentRef, index in
 	}
 
 	return resources, nil
+}
+
+// isVendorable maps a ComponentRef to the localformat.ShouldVendor predicate.
+func isVendorable(ref recipe.ComponentRef) bool {
+	return localformat.ShouldVendor(localformat.Component{
+		Name:       ref.Name,
+		Repository: ref.Source,
+		Tag:        ref.Tag,
+		Path:       ref.Path,
+	})
 }
 
 // writeSources writes HelmRepository and GitRepository source CRs to the sources directory.
@@ -474,7 +548,7 @@ func buildComponentSummaries(sortedRefs []recipe.ComponentRef, manifests map[str
 		})
 
 		// Mixed components (Helm chart + manifests) produce a post HelmRelease
-		// that depends on the primary. Include it in the README table.
+		// that depends on the primary.
 		isMixed := ref.Chart != "" && ref.Source != "" && len(manifests[ref.Name]) > 0
 		if isMixed {
 			summaries = append(summaries, ComponentSummary{
