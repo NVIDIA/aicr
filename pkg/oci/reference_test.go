@@ -241,3 +241,102 @@ func TestReference_WithTag(t *testing.T) {
 		})
 	}
 }
+
+func TestEnsureScheme(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"already prefixed", "oci://ghcr.io/x/y", "oci://ghcr.io/x/y"},
+		{"already prefixed with tag", "oci://ghcr.io/x/y:v1", "oci://ghcr.io/x/y:v1"},
+		{"unprefixed registry/repo", "ghcr.io/x/y", "oci://ghcr.io/x/y"},
+		{"unprefixed with tag", "ghcr.io/x/y:v1", "oci://ghcr.io/x/y:v1"},
+		{"unprefixed with port", "localhost:5000/x/y", "oci://localhost:5000/x/y"},
+		{"empty string gets prefix", "", "oci://"},
+		{"https url left alone", "https://ghcr.io/v2/x/y", "https://ghcr.io/v2/x/y"},
+		{"http url left alone", "http://localhost:5000/x/y", "http://localhost:5000/x/y"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := EnsureScheme(tt.in); got != tt.want {
+				t.Errorf("EnsureScheme(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnsureScheme_Idempotent(t *testing.T) {
+	t.Parallel()
+	a := EnsureScheme("ghcr.io/x/y")
+	b := EnsureScheme(a)
+	if a != b {
+		t.Errorf("EnsureScheme not idempotent: first=%q second=%q", a, b)
+	}
+}
+
+func TestTrimScheme(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"strip prefix", "oci://ghcr.io/x/y", "ghcr.io/x/y"},
+		{"strip prefix with tag", "oci://ghcr.io/x/y:v1", "ghcr.io/x/y:v1"},
+		{"already trimmed passthrough", "ghcr.io/x/y", "ghcr.io/x/y"},
+		{"already trimmed with tag", "ghcr.io/x/y:v1", "ghcr.io/x/y:v1"},
+		{"empty string", "", ""},
+		{"only scheme", "oci://", ""},
+		// TrimPrefix is exact-match: a non-oci scheme is left intact (caller's intent unclear).
+		{"different scheme left alone", "https://ghcr.io/x/y", "https://ghcr.io/x/y"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := TrimScheme(tt.in); got != tt.want {
+				t.Errorf("TrimScheme(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTrimScheme_Idempotent(t *testing.T) {
+	t.Parallel()
+	a := TrimScheme("oci://ghcr.io/x/y")
+	b := TrimScheme(a)
+	if a != b {
+		t.Errorf("TrimScheme not idempotent: first=%q second=%q", a, b)
+	}
+}
+
+func TestEnsureTrimRoundTrip(t *testing.T) {
+	t.Parallel()
+	originals := []string{
+		"ghcr.io/x/y",
+		"ghcr.io/x/y:v1",
+		"localhost:5000/foo/bar:tag",
+	}
+	for _, ref := range originals {
+		t.Run(ref, func(t *testing.T) {
+			t.Parallel()
+			if got := TrimScheme(EnsureScheme(ref)); got != ref {
+				t.Errorf("round-trip mismatch: TrimScheme(EnsureScheme(%q)) = %q", ref, got)
+			}
+		})
+	}
+}
+
+func TestURIScheme_Constant(t *testing.T) {
+	t.Parallel()
+	if URIScheme != "oci://" {
+		t.Errorf("URIScheme = %q, want %q", URIScheme, "oci://")
+	}
+	if uriScheme != URIScheme {
+		t.Errorf("legacy uriScheme alias drifted from URIScheme: %q vs %q", uriScheme, URIScheme)
+	}
+}
