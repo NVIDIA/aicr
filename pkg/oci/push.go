@@ -657,6 +657,15 @@ func preparePushDir(sourceDir, subDir string) (string, func(), error) {
 	srcPath := sourceDir
 	dstPath := tempDir
 	if subDir != "" {
+		// Reject non-local paths (absolute, parent-traversing, or
+		// containing reserved Windows names) so filepath.Join can't
+		// produce a hardlink target outside the temp dir or a source
+		// outside the caller's sourceDir.
+		if !filepath.IsLocal(subDir) {
+			cleanup()
+			return "", nil, apperrors.New(apperrors.ErrCodeInvalidRequest,
+				"subDir must be a local relative path: "+subDir)
+		}
 		srcPath = filepath.Join(sourceDir, subDir)
 		dstPath = filepath.Join(tempDir, subDir)
 	}

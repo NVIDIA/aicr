@@ -79,7 +79,7 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 
 	ref, err := oci.ParseOutputTarget(oci.EnsureScheme(opts.Reference))
 	if err != nil {
-		return nil, err
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid reference")
 	}
 	if !ref.IsOCI {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference must be an OCI registry reference")
@@ -113,7 +113,7 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 
 	res, err := oci.PackageAndPush(ctx, cfg)
 	if err != nil {
-		return nil, err
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "package and push failed")
 	}
 
 	return &PushResult{
@@ -144,7 +144,7 @@ func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOpti
 
 	ref, err := oci.ParseOutputTarget(oci.EnsureScheme(opts.Reference))
 	if err != nil {
-		return nil, err
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid reference")
 	}
 	if !ref.IsOCI {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference must be an OCI registry reference")
@@ -169,7 +169,7 @@ func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOpti
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "push referrer failed")
 	}
 	return &PushResult{
 		Reference: res.Reference,

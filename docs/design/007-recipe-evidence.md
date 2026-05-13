@@ -168,7 +168,7 @@ and introduces kind-scoped flag names for the new attestation kind:
 | Kind | Production flags on `aicr validate` |
 |---|---|
 | `cncf-conformance` | `--evidence-dir <path>` (existing), `--cncf-submission`, `--feature <name>` |
-| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--include-logs`, `--push <oci-ref>`, `--push-logs` |
+| `recipe-test-attestation` | `--emit-attestation <path>` (NEW), `--push <oci-ref>`; `--include-logs` and `--push-logs` are deferred (log capture not implemented in V1) |
 
 Both kinds may run from a single `aicr validate` invocation (each
 flag set produces its own output tree) — they are independent
@@ -224,8 +224,9 @@ surface item 1 below for the full schema).
          attestation:                          # recipe-test-attestation kind
            out: ./out                          # equivalent to --emit-attestation
            push: oci://ghcr.io/myorg/aicr-evidence  # optional; OCI push target
-           includeLogs: true                   # equivalent to --include-logs
-           pushLogs: false                     # equivalent to --push-logs
+           # includeLogs and pushLogs are deferred — log capture is not
+           # implemented in V1, so the corresponding flags and config
+           # fields are not active.
            signing:                            # reuses pkg/config.AttestationSpec
              enabled: true
              certificateIdentityRegexp: ^https://github\.com/myorg/.*$
@@ -245,9 +246,10 @@ surface item 1 below for the full schema).
 
    `aicr validate --config aicr.yaml` is the supported invocation;
    the CLI flag form (`--recipe`, `--snapshot`, `--emit-attestation`,
-   `--push`, `--include-logs`, `--push-logs`, plus existing
-   `--evidence-dir` / `--cncf-submission` / `--feature` for the CNCF
-   kind) is the expanded equivalent and overrides config values.
+   `--push`, plus existing `--evidence-dir` / `--cncf-submission` /
+   `--feature` for the CNCF kind) is the expanded equivalent and
+   overrides config values. (`--include-logs` and `--push-logs` are
+   deferred — log capture is not implemented in V1.)
    `aicr.yaml` flows the same contributor through `aicr recipe` →
    `aicr validate --emit-attestation` → `aicr bundle` without re-typing
    inputs.
@@ -258,8 +260,8 @@ surface item 1 below for the full schema).
    aicr validate --recipe r.yaml --snapshot s.yaml --emit-attestation ./out
    # writes:
    #   ./out/summary-bundle/   (recipe, snapshot, BOM, CTRF, manifest, attestation)
-   #   ./out/logs-bundle/      (optional; when --include-logs)
    #   ./out/pointer.yaml      (ready to copy to recipes/evidence/<recipe>.yaml)
+   # logs-bundle/ output is deferred — log capture is not implemented in V1.
    ```
 
    With an optional `--push <oci-registry>` that closes the loop:
@@ -267,11 +269,10 @@ surface item 1 below for the full schema).
    ```bash
    aicr validate --recipe r.yaml --snapshot s.yaml \
      --emit-attestation ./out \
-     --push ghcr.io/myorg/aicr-evidence \
-     [--push-logs]
+     --push ghcr.io/myorg/aicr-evidence
    # pushes summary OCI artifact, runs cosign attest, populates
-   # pointer.yaml's bundle.oci and bundle.digest fields
-   # pushes logs OCI if --push-logs (else logs stay local)
+   # pointer.yaml's bundle.oci and bundle.digest fields.
+   # --push-logs is deferred — log capture is not implemented in V1.
    ```
 
    The pointer is bundle-derived; mismatches between pointer and
@@ -584,8 +585,10 @@ attestations:
 The pointer is a **locator**, not a denormalized cache of the signed
 predicate body. A reviewer who wants to know fingerprint dimensions,
 criteria-match status, or per-phase pass/fail counts fetches the
-bundle from `bundle.oci` and reads `predicate.json` — duplicating
-those fields here would create two sources of truth, and reviewers
+bundle from `bundle.oci` and reads the predicate body nested inside
+`statement.intoto.json` (the in-toto Statement; the predicate is the
+`predicate` field on the Statement object). Duplicating those fields
+in the pointer would create two sources of truth, and reviewers
 would have no good answer for which one to trust on mismatch.
 
 `attestations` is a **list** from day one (length 1 in V1). When
@@ -851,7 +854,8 @@ generate GBs per validator phase), and frequently sensitive (cluster
 identifiers, internal endpoints). A single bundle forces every
 publication to ship logs, raises registry costs, and leaks operational
 detail into every public attestation. The split design lets logs stay
-local until the contributor opts in via `--push-logs`, while the
+local until the contributor opts in to pushing them (the `--push-logs`
+flag is deferred — log capture is not implemented in V1), while the
 manifest pre-commit binding still gives forensic recoverability.
 
 ### KMS-backed signing vs. cosign keyless (deferred, not rejected)

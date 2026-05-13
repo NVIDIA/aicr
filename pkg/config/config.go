@@ -173,8 +173,10 @@ type EvidenceSpec struct {
 type EvidenceCNCFSpec struct {
 	Dir string `yaml:"dir,omitempty" json:"dir,omitempty"`
 
-	// Requires Dir.
-	CNCFSubmission bool `yaml:"cncfSubmission,omitempty" json:"cncfSubmission,omitempty"`
+	// Requires Dir. Pointer so the spec layer can distinguish nil
+	// (absent in YAML/JSON) from &false (explicit opt-out); the
+	// resolved layer flattens to plain bool — see EvidenceCNCFResolved.
+	CNCFSubmission *bool `yaml:"cncfSubmission,omitempty" json:"cncfSubmission,omitempty"`
 
 	// Empty = all features. Only honored when CNCFSubmission is true.
 	Features []string `yaml:"features,omitempty" json:"features,omitempty"`
@@ -192,10 +194,14 @@ type EvidenceAttestationSpec struct {
 	// even if other fields are populated.
 	Out string `yaml:"out,omitempty" json:"out,omitempty"`
 
-	BOM         string `yaml:"bom,omitempty" json:"bom,omitempty"`
-	Push        string `yaml:"push,omitempty" json:"push,omitempty"`
-	PlainHTTP   bool   `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
-	InsecureTLS bool   `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
+	BOM  string `yaml:"bom,omitempty" json:"bom,omitempty"`
+	Push string `yaml:"push,omitempty" json:"push,omitempty"`
+
+	// Pointer fields so the spec layer can distinguish nil (absent in
+	// YAML/JSON) from &false (explicit opt-out). The resolved layer
+	// flattens to plain bool — see EvidenceAttestationResolved.
+	PlainHTTP   *bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
+	InsecureTLS *bool `yaml:"insecureTLS,omitempty" json:"insecureTLS,omitempty"`
 }
 
 // ValidateInputSpec captures the recipe + snapshot inputs to validation.

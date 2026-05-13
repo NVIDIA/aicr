@@ -302,9 +302,10 @@ type ValidateResolved struct {
 }
 
 // EvidenceCNCFResolved is the typed view of spec.validate.evidence.cncf.
-// Bool fields are plain bool because the wire-form uses `bool,omitempty`
-// — YAML/JSON cannot distinguish "absent" from "explicit false" upstream,
-// so a *bool here would carry no extra signal.
+// Bool fields flatten the spec layer's *bool to plain bool: nil
+// (absent in YAML/JSON) becomes false, and downstream consumers do
+// not need to distinguish nil from &false for these specific feature
+// toggles (default is false in both cases).
 type EvidenceCNCFResolved struct {
 	Dir            string
 	CNCFSubmission bool
@@ -313,7 +314,7 @@ type EvidenceCNCFResolved struct {
 
 // EvidenceAttestationResolved is the typed view of
 // spec.validate.evidence.attestation. See EvidenceCNCFResolved for the
-// plain-bool rationale.
+// nil-flatten rationale.
 type EvidenceAttestationResolved struct {
 	Out         string
 	BOM         string
@@ -415,7 +416,7 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 			c := v.Evidence.CNCF
 			out.EvidenceCNCF = &EvidenceCNCFResolved{
 				Dir:            c.Dir,
-				CNCFSubmission: c.CNCFSubmission,
+				CNCFSubmission: boolPtrOrFalse(c.CNCFSubmission),
 				Features:       slices.Clone(c.Features),
 			}
 		}
@@ -425,8 +426,8 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 				Out:         a.Out,
 				BOM:         a.BOM,
 				Push:        a.Push,
-				PlainHTTP:   a.PlainHTTP,
-				InsecureTLS: a.InsecureTLS,
+				PlainHTTP:   boolPtrOrFalse(a.PlainHTTP),
+				InsecureTLS: boolPtrOrFalse(a.InsecureTLS),
 			}
 		}
 	}
@@ -494,4 +495,11 @@ func (r *RecipeSpec) ResolveCriteria() (*recipe.Criteria, error) {
 	}
 	out.Nodes = c.Nodes
 	return out, nil
+}
+
+// boolPtrOrFalse dereferences a *bool, treating nil (absent in
+// YAML/JSON) as false. Used at the spec → resolved boundary so the
+// resolved layer can stay plain bool for downstream consumers.
+func boolPtrOrFalse(p *bool) bool {
+	return p != nil && *p
 }
