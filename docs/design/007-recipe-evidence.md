@@ -574,26 +574,19 @@ attestations:
       oci: ghcr.io/<owner>/aicr-evidence:<digest>
       digest: sha256:abc123...
       predicateType: https://aicr.nvidia.com/recipe-evidence/v1
-    signer:
+    signer:                 # optional; absent for unsigned bundles
       identity: <oidc-subject>
       issuer: <oidc-issuer-url>
-      rekorLogIndex: 91234567
+      rekorLogIndex: 91234567   # optional; absent for --no-rekor signing
     attestedAt: 2026-05-08T10:23:11Z
-    fingerprint:
-      service: eks
-      accelerator: h100
-      os: ubuntu
-      k8sVersion: "1.33.4"
-    criteriaMatch:
-      matched: true
-    phaseSummary:
-      deployment: { passed: 12, failed: 0 }
-      performance: { passed: 3, failed: 0 }
-      conformance: { passed: 9, failed: 0 }
-    logsBundle:           # optional; absent when contributor doesn't publish
-      oci: ghcr.io/<owner>/aicr-evidence-logs:<digest>
-      digest: sha256:def456...
 ```
+
+The pointer is a **locator**, not a denormalized cache of the signed
+predicate body. A reviewer who wants to know fingerprint dimensions,
+criteria-match status, or per-phase pass/fail counts fetches the
+bundle from `bundle.oci` and reads `predicate.json` — duplicating
+those fields here would create two sources of truth, and reviewers
+would have no good answer for which one to trust on mismatch.
 
 `attestations` is a **list** from day one (length 1 in V1). When
 multi-instance arrives, additional entries append; the schema 2.0
@@ -605,7 +598,7 @@ The pointer is bundle-derived; `aicr validate --emit-attestation`
 regenerates it from the OCI artifact (or the locally-emitted bundle
 directory, before push). Mismatches between pointer and bundle are
 **integrity-chain failures**, not clerical errors — the bundle is
-authoritative; the pointer is a denormalized cache.
+authoritative; the pointer points at it.
 
 ### Verifier steps (proposed)
 
@@ -652,8 +645,10 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
       hard-fail surface. (V2 may promote individual chain mismatches
       to hard-fail signals once the slice-set has stabilized.)
 7. **Per-dimension fingerprint match.** Run `Fingerprint.Match(recipe.criteria)`
-   from #752; confirm `criteriaMatch.matched: true`; render per-dimension
-   diff in Markdown so reviewers see exactly which dimensions matched.
+   from #752; confirm `predicate.criteriaMatch.matched: true` (the
+   predicate is the source of truth; the pointer does not carry this
+   field); render per-dimension diff in Markdown so reviewers see
+   exactly which dimensions matched.
 8. **Inline constraint replay.** Run the snapshot through the recipe's
    inline constraints (the `aicr validate --no-cluster` deterministic
    path) and confirm the recorded pass/fail matches what the bundle
@@ -666,10 +661,13 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
     count chart-default sub-images for the disclosure
     ("BOM contains N chart-default sub-images NOT covered by this
     attestation; admission-time policy required for full coverage").
-11. **(Optional) Logs bundle verification.** If `pointer.attestations[*].logsBundle`
-    is present, pull, recompute per-file hashes, confirm match against
-    summary's manifest pre-commit. Logs bundle absence is **not** a
-    failure.
+11. **(Optional) Logs bundle verification.** When validator log
+    capture is wired in (deferred from V1; see commit `0277fece`),
+    the pointer will gain an optional `logsBundle: {oci, digest}`
+    field; the verifier will pull it, recompute per-file hashes, and
+    confirm match against the summary manifest's pre-commit. Logs
+    bundle absence is **not** a failure. V1 pointers omit the field
+    entirely.
 12. **Render Markdown summary.** Includes signer identity, per-phase
     results, per-dimension fingerprint match, BOM disclosure, and
     sub-image count.

@@ -82,11 +82,38 @@ func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 	if att.Signer.RekorLogIndex == nil || *att.Signer.RekorLogIndex != 42 {
 		t.Errorf("RekorLogIndex = %v, want *int64(42)", att.Signer.RekorLogIndex)
 	}
-	if att.Fingerprint.Accelerator != "h100" {
-		t.Errorf("denormalized accelerator missing: %q", att.Fingerprint.Accelerator)
+}
+
+func TestBuildPointer_OmitsDenormalizedFields(t *testing.T) {
+	// The pointer is a locator, not a denormalized cache of the
+	// predicate. Reviewers fetch the bundle from PointerBundle.OCI to
+	// read fingerprint / criteriaMatch / phaseSummary — duplicating
+	// those at pointer level creates two sources of truth.
+	bundle := &Bundle{
+		RecipeName: "x",
+		Predicate: &Predicate{
+			AttestedAt:    time.Date(2026, 5, 8, 10, 23, 11, 0, time.UTC),
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
+			Phases: map[Phase]PhaseSummary{
+				PhaseDeployment: {Passed: 12, Failed: 0, Skipped: 1},
+			},
+			Fingerprint: fingerprint.Fingerprint{
+				Accelerator: fingerprint.Dimension{Value: "h100"},
+			},
+		},
 	}
-	if !att.CriteriaMatch.Matched {
-		t.Errorf("expected matched=true denormalized")
+	p, err := BuildPointer(PointerInputs{Bundle: bundle})
+	if err != nil {
+		t.Fatalf("BuildPointer: %v", err)
+	}
+	body, err := MarshalPointer(p)
+	if err != nil {
+		t.Fatalf("MarshalPointer: %v", err)
+	}
+	for _, banned := range []string{"fingerprint", "criteriaMatch", "phaseSummary", "logsBundle"} {
+		if contains(body, banned+":") {
+			t.Errorf("pointer YAML must omit %q field; got:\n%s", banned, body)
+		}
 	}
 }
 
@@ -101,12 +128,8 @@ func TestPointer_RoundTripsYAML(t *testing.T) {
 					Digest:        "sha256:abc",
 					PredicateType: PredicateTypeV1,
 				},
-				Signer:        &PointerSigner{Identity: "u@x", Issuer: "iss", RekorLogIndex: ptrInt64(7)},
-				AttestedAt:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
-				CriteriaMatch: PointerCriteriaMatch{Matched: true},
-				PhaseSummary: map[Phase]PointerPhaseStat{
-					PhaseDeployment: {Passed: 1},
-				},
+				Signer:     &PointerSigner{Identity: "u@x", Issuer: "iss", RekorLogIndex: ptrInt64(7)},
+				AttestedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 			},
 		},
 	}
@@ -228,56 +251,5 @@ func TestWritePointer_WritesValidYAML(t *testing.T) {
 	body := mustReadFile(t, path)
 	if len(body) == 0 {
 		t.Errorf("written pointer is empty")
-	}
-}
-
-func TestPointerLogsBundle_PopulatesWhenSet(t *testing.T) {
-	bundle := &Bundle{
-		RecipeName: "x",
-		Predicate: &Predicate{
-			AttestedAt:    time.Now(),
-			CriteriaMatch: fingerprint.MatchResult{Matched: true},
-		},
-	}
-	p, err := BuildPointer(PointerInputs{
-		Bundle: bundle,
-		LogsBundle: &PointerLogsBundle{
-			OCI:    "ghcr.io/x/y-logs:1",
-			Digest: "sha256:def",
-		},
-	})
-	if err != nil {
-		t.Fatalf("BuildPointer: %v", err)
-	}
-	att := p.Attestations[0]
-	if att.LogsBundle == nil || att.LogsBundle.OCI != "ghcr.io/x/y-logs:1" {
-		t.Errorf("LogsBundle pointer field not populated correctly; got %+v", att.LogsBundle)
-	}
-}
-
-func TestPointer_FullFingerprintRoundTrip(t *testing.T) {
-	bundle := &Bundle{
-		RecipeName: "x",
-		Predicate: &Predicate{
-			AttestedAt:    time.Now(),
-			CriteriaMatch: fingerprint.MatchResult{Matched: true},
-			Fingerprint: fingerprint.Fingerprint{
-				Service:     fingerprint.Dimension{Value: "eks"},
-				Accelerator: fingerprint.Dimension{Value: "h100"},
-				OS:          fingerprint.OSDimension{Value: "ubuntu", Version: "22.04"},
-				K8sVersion:  fingerprint.Dimension{Value: "1.33.4"},
-				Region:      fingerprint.Dimension{Value: "us-west-2"},
-			},
-		},
-	}
-	p, err := BuildPointer(PointerInputs{Bundle: bundle})
-	if err != nil {
-		t.Fatalf("BuildPointer: %v", err)
-	}
-	fp := p.Attestations[0].Fingerprint
-	if fp.Service != "eks" || fp.Accelerator != "h100" || fp.OS != "ubuntu" ||
-		fp.K8sVersion != "1.33.4" || fp.Region != "us-west-2" {
-
-		t.Errorf("fingerprint denormalization mismatch: %+v", fp)
 	}
 }

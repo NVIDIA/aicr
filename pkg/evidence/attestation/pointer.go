@@ -22,7 +22,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
 // PointerInputs carries everything the pointer file needs that is not
@@ -35,7 +34,6 @@ type PointerInputs struct {
 	BundleOCI  string
 	BundleHash string
 	Signer     *PointerSigner
-	LogsBundle *PointerLogsBundle
 }
 
 // BuildPointer assembles the pointer YAML schema 1.0 from a built
@@ -48,19 +46,14 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle and predicate are required")
 	}
 
-	pred := in.Bundle.Predicate
 	att := PointerAttestation{
 		Bundle: PointerBundle{
 			OCI:           in.BundleOCI,
 			Digest:        in.BundleHash,
 			PredicateType: PredicateTypeV1,
 		},
-		Signer:        in.Signer,
-		AttestedAt:    pred.AttestedAt.UTC().Truncate(time.Second),
-		Fingerprint:   pointerFingerprintFrom(pred.Fingerprint),
-		CriteriaMatch: PointerCriteriaMatch{Matched: pred.CriteriaMatch.Matched},
-		PhaseSummary:  pointerPhaseSummaryFrom(pred.Phases),
-		LogsBundle:    in.LogsBundle,
+		Signer:     in.Signer,
+		AttestedAt: in.Bundle.Predicate.AttestedAt.UTC().Truncate(time.Second),
 	}
 
 	return &Pointer{
@@ -96,22 +89,4 @@ func WritePointer(outputDir string, p *Pointer) (string, error) {
 		return "", errors.Wrap(errors.ErrCodeInternal, "failed to write pointer file", err)
 	}
 	return out, nil
-}
-
-func pointerFingerprintFrom(fp fingerprint.Fingerprint) PointerFingerprint {
-	return PointerFingerprint{
-		Service:     fp.Service.Value,
-		Accelerator: fp.Accelerator.Value,
-		OS:          fp.OS.Value,
-		K8sVersion:  fp.K8sVersion.Value,
-		Region:      fp.Region.Value,
-	}
-}
-
-func pointerPhaseSummaryFrom(phases map[Phase]PhaseSummary) map[Phase]PointerPhaseStat {
-	out := map[Phase]PointerPhaseStat{}
-	for p, s := range phases {
-		out[p] = PointerPhaseStat{Passed: s.Passed, Failed: s.Failed}
-	}
-	return out
 }

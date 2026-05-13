@@ -189,6 +189,14 @@ type Pointer struct {
 
 // PointerAttestation is one entry in the pointer's attestations list.
 // V1 always emits exactly one entry; schema 2.0 will support multiple.
+//
+// The pointer is a *locator*, not a denormalized cache of the signed
+// predicate body. Everything needed to find, fetch, and identify the
+// signed bundle lives here; everything else (fingerprint, criteria
+// match, per-phase counts) is reachable by pulling the bundle from
+// PointerBundle.OCI and reading predicate.json — duplicating those
+// fields here would create two sources of truth, and reviewers would
+// have no good answer for which one to trust on mismatch.
 type PointerAttestation struct {
 	Bundle PointerBundle `json:"bundle" yaml:"bundle"`
 
@@ -199,11 +207,7 @@ type PointerAttestation struct {
 	// log position the first-ever entry occupies).
 	Signer *PointerSigner `json:"signer,omitempty" yaml:"signer,omitempty"`
 
-	AttestedAt    time.Time                  `json:"attestedAt" yaml:"attestedAt"`
-	Fingerprint   PointerFingerprint         `json:"fingerprint" yaml:"fingerprint"`
-	CriteriaMatch PointerCriteriaMatch       `json:"criteriaMatch" yaml:"criteriaMatch"`
-	PhaseSummary  map[Phase]PointerPhaseStat `json:"phaseSummary" yaml:"phaseSummary"`
-	LogsBundle    *PointerLogsBundle         `json:"logsBundle,omitempty" yaml:"logsBundle,omitempty"`
+	AttestedAt time.Time `json:"attestedAt" yaml:"attestedAt"`
 }
 
 // PointerBundle references the OCI artifact carrying the signed bundle.
@@ -225,37 +229,4 @@ type PointerSigner struct {
 	Identity      string `json:"identity" yaml:"identity"`
 	Issuer        string `json:"issuer" yaml:"issuer"`
 	RekorLogIndex *int64 `json:"rekorLogIndex,omitempty" yaml:"rekorLogIndex,omitempty"`
-}
-
-// PointerFingerprint is a denormalized fingerprint for fast pointer
-// reads. The bundle's predicate is authoritative; this is a cache.
-// Mirrors the dimensions fingerprint.Fingerprint captures (intent and
-// platform are recipe-author choices, not cluster facts; they surface
-// in CriteriaMatch instead).
-type PointerFingerprint struct {
-	Service     string `json:"service,omitempty" yaml:"service,omitempty"`
-	Accelerator string `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
-	OS          string `json:"os,omitempty" yaml:"os,omitempty"`
-	K8sVersion  string `json:"k8sVersion,omitempty" yaml:"k8sVersion,omitempty"`
-	Region      string `json:"region,omitempty" yaml:"region,omitempty"`
-}
-
-// PointerCriteriaMatch is the denormalized matched/unmatched flag for
-// PR sidebar display.
-type PointerCriteriaMatch struct {
-	Matched bool `json:"matched" yaml:"matched"`
-}
-
-// PointerPhaseStat is the denormalized per-phase pass/fail counts for
-// the pointer. Skipped/error counts live in the bundle's CTRF.
-type PointerPhaseStat struct {
-	Passed int `json:"passed" yaml:"passed"`
-	Failed int `json:"failed" yaml:"failed"`
-}
-
-// PointerLogsBundle is present in the pointer when the contributor
-// pushed the optional logs bundle as a separate OCI artifact.
-type PointerLogsBundle struct {
-	OCI    string `json:"oci" yaml:"oci"`
-	Digest string `json:"digest" yaml:"digest"`
 }
