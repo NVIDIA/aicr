@@ -1238,7 +1238,7 @@ func TestBundleGolden_HelmAndManifestOnly(t *testing.T) {
 		Version:        "v0.0.0-golden",
 		RepoURL:        "https://github.com/example/aicr-bundles.git",
 		TargetRevision: "main",
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"nodewright-customizations": {
 				"tuning.yaml": []byte("apiVersion: skyhook.nvidia.com/v1alpha1\n" +
 					"kind: Skyhook\n" +
@@ -1307,7 +1307,7 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 		TargetRevision: "main",
 		// gpu-operator carries an additional rendered manifest — this turns
 		// it into a mixed component, triggering the primary + -post split.
-		ComponentManifests: map[string]map[string][]byte{
+		ComponentPostManifests: map[string]map[string][]byte{
 			"gpu-operator": {
 				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
 					"kind: ConfigMap\n" +
@@ -1336,6 +1336,91 @@ func TestBundleGolden_MixedComponent(t *testing.T) {
 		"002-gpu-operator-post/templates/dcgm-exporter.yaml",
 	} {
 		assertGolden(t, outputDir, "testdata/mixed_component", rel)
+	}
+}
+
+// TestBundleGolden_MixedWithPre freezes the bundle output for a mixed
+// component with BOTH pre and post manifests. localformat emits three
+// folders — pre (NNN-<name>-pre/) before the primary, primary
+// (NNN+1)-<name>/), and post ((NNN+2)-<name>-post/) after — and the
+// argocd deployer assigns sync-waves 0/1/2 from the folder index, so
+// pre's namespace lands before the primary chart's pods need it.
+//
+// Regenerate goldens after changes to argocd / helm / localformat
+// (run with -update). See deployer/helm/testdata/README.md for the
+// pattern.
+//
+//	go test ./pkg/bundler/deployer/argocd/... -run TestBundleGolden -args -update
+func TestBundleGolden_MixedWithPre(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "privileged-gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-golden",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/talos-namespace.yaml": []byte("apiVersion: v1\n" +
+					"kind: Namespace\n" +
+					"metadata:\n" +
+					"  name: privileged-gpu-operator\n" +
+					"  labels:\n" +
+					"    pod-security.kubernetes.io/enforce: privileged\n"),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: v1\n" +
+					"kind: ConfigMap\n" +
+					"metadata:\n" +
+					"  name: dcgm-exporter-config\n" +
+					"  namespace: {{ .Release.Namespace }}\n" +
+					"data:\n" +
+					"  config.yaml: |\n" +
+					"    metrics: enabled\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	for _, rel := range []string{
+		// Pre: path-based single-source wrapping rendered Namespace
+		"001-gpu-operator-pre/application.yaml",
+		"001-gpu-operator-pre/Chart.yaml",
+		"001-gpu-operator-pre/values.yaml",
+		"001-gpu-operator-pre/templates/talos-namespace.yaml",
+		// Primary: multi-source upstream-helm
+		"002-gpu-operator/application.yaml",
+		"002-gpu-operator/values.yaml",
+		// Post: path-based single-source wrapping rendered manifests
+		"003-gpu-operator-post/application.yaml",
+		"003-gpu-operator-post/Chart.yaml",
+		"003-gpu-operator-post/values.yaml",
+		"003-gpu-operator-post/templates/dcgm-exporter.yaml",
+	} {
+		assertGolden(t, outputDir, "testdata/mixed_with_pre", rel)
 	}
 }
 

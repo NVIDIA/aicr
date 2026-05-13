@@ -103,6 +103,19 @@ type ComponentRef struct {
 	// Example: ["components/gpu-operator/manifests/dcgm-exporter.yaml"]
 	ManifestFiles []string `json:"manifestFiles,omitempty" yaml:"manifestFiles,omitempty"`
 
+	// PreManifestFiles lists manifest files that must be bundled and applied
+	// BEFORE the component's primary chart. Paths are relative to the data
+	// directory; ".." segments are rejected at load time (external data
+	// directories enforce a path-traversal check during file registration,
+	// and embed.FS refuses any read that resolves outside its root), so a
+	// recipe cannot read arbitrary files outside the embedded/external data
+	// root. Used for resources the chart depends on (e.g. a Namespace with
+	// PSS labels that the chart's pods need to land in). Bundler emits
+	// these as a "<name>-pre" local-helm folder at sync-wave N-1 (Argo) or
+	// install step N-1 (Helm); the primary chart lands at wave N; existing
+	// ManifestFiles still land at wave N+1 as before.
+	PreManifestFiles []string `json:"preManifestFiles,omitempty" yaml:"preManifestFiles,omitempty"`
+
 	// Path is the path within the repository to the kustomization (for Kustomize).
 	Path string `json:"path,omitempty" yaml:"path,omitempty"`
 
@@ -557,6 +570,20 @@ func mergeComponentRef(base, overlay ComponentRef) ComponentRef {
 		for _, f := range overlay.ManifestFiles {
 			if !seen[f] {
 				result.ManifestFiles = append(result.ManifestFiles, f)
+				seen[f] = true
+			}
+		}
+	}
+
+	// PreManifestFiles: additive merge (base + overlay, deduplicated)
+	if len(overlay.PreManifestFiles) > 0 {
+		seen := make(map[string]bool)
+		for _, f := range result.PreManifestFiles {
+			seen[f] = true
+		}
+		for _, f := range overlay.PreManifestFiles {
+			if !seen[f] {
+				result.PreManifestFiles = append(result.PreManifestFiles, f)
 				seen[f] = true
 			}
 		}

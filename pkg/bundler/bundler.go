@@ -308,26 +308,28 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			slog.Warn("--repo is ignored with --deployer argocd-helm; supply the URL at install time via `helm install --set repoURL=...`",
 				"repo", b.Config.RepoURL())
 		}
-		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
-		if manifestErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
+		}
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
 		}
 		return &argocdhelm.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			RepoURL:            b.Config.RepoURL(),
-			TargetRevision:     b.Config.TargetRevision(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			DynamicValues:      dynamicValues,
-			DataFiles:          dataFiles,
-			ComponentManifests: componentManifests,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			RepoURL:                b.Config.RepoURL(),
+			TargetRevision:         b.Config.TargetRevision(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			DynamicValues:          dynamicValues,
+			DataFiles:              dataFiles,
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			VendorCharts:           b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerArgoCD:
@@ -335,46 +337,50 @@ func (b *DefaultBundler) buildDeployer(ctx context.Context, recipeResult *recipe
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"dynamic declarations are not supported with deployer \"argocd\"; use deployer \"argocd-helm\" instead")
 		}
-		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
-		if manifestErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
+		}
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
 		}
 		return &argocd.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			RepoURL:            b.Config.RepoURL(),
-			TargetRevision:     b.Config.TargetRevision(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			DataFiles:          dataFiles,
-			ComponentManifests: componentManifests,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			RepoURL:                b.Config.RepoURL(),
+			TargetRevision:         b.Config.TargetRevision(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			DataFiles:              dataFiles,
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			VendorCharts:           b.Config.VendorCharts(),
 		}, nil
 
 	case config.DeployerHelm:
-		componentManifests, manifestErr := b.collectComponentManifests(ctx, recipeResult)
-		if manifestErr != nil {
-			var se *errors.StructuredError
-			if stderrors.As(manifestErr, &se) {
-				return nil, manifestErr
-			}
-			return nil, errors.Wrap(errors.ErrCodeInternal,
-				"failed to collect component manifests", manifestErr)
+		componentPreManifests, err := b.collectComponentPreManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component pre-manifests")
+		}
+		componentPostManifests, err := b.collectComponentManifests(ctx, recipeResult)
+		if err != nil {
+			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+				"failed to collect component post-manifests")
 		}
 		return &helm.Generator{
-			RecipeResult:       recipeResult,
-			ComponentValues:    componentValues,
-			Version:            b.Config.Version(),
-			IncludeChecksums:   b.Config.IncludeChecksums(),
-			ComponentManifests: componentManifests,
-			DataFiles:          dataFiles,
-			DynamicValues:      dynamicValues,
-			VendorCharts:       b.Config.VendorCharts(),
+			RecipeResult:           recipeResult,
+			ComponentValues:        componentValues,
+			Version:                b.Config.Version(),
+			IncludeChecksums:       b.Config.IncludeChecksums(),
+			ComponentPreManifests:  componentPreManifests,
+			ComponentPostManifests: componentPostManifests,
+			DataFiles:              dataFiles,
+			DynamicValues:          dynamicValues,
+			VendorCharts:           b.Config.VendorCharts(),
 		}, nil
 
 	default:
@@ -1042,25 +1048,61 @@ func removeHyphens(s string) string {
 	return strings.ReplaceAll(s, "-", "")
 }
 
-// collectComponentManifests gathers manifest file contents from all components,
-// keyed by component name then manifest path.
-func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+// manifestPhase selects which slice of ComponentRef.{Pre,}ManifestFiles
+// the collector reads. Pre- and post-phase share one collector body so
+// any future change to manifest loading (auth, caching, validation,
+// path normalization) lands in exactly one place.
+//
+// phasePostManifests is intentionally the iota zero value: a zero-value
+// or unspecified manifestPhase falls through to the legacy
+// post-manifests behavior, never the newer pre-manifests path.
+type manifestPhase int
+
+const (
+	phasePostManifests manifestPhase = iota
+	phasePreManifests
+)
+
+// collectComponentManifestsByPhase gathers manifest file contents from
+// all components for the requested phase, keyed by component name then
+// manifest path. The body is shared between phases via the manifestPhase
+// switch; per-call-site behavior is identical except for which slice is
+// read off each ComponentRef.
+func (b *DefaultBundler) collectComponentManifestsByPhase(
+	ctx context.Context,
+	recipeResult *recipe.RecipeResult,
+	phase manifestPhase,
+) (map[string]map[string][]byte, error) {
+
 	result := make(map[string]map[string][]byte)
 
 	for _, ref := range recipeResult.ComponentRefs {
 		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled while collecting component manifests", err)
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
+				"context cancelled while collecting component manifests", err)
 		}
 
-		if len(ref.ManifestFiles) == 0 {
+		var paths []string
+		switch phase {
+		case phasePreManifests:
+			paths = ref.PreManifestFiles
+		case phasePostManifests:
+			paths = ref.ManifestFiles
+		default:
+			return nil, errors.New(errors.ErrCodeInternal,
+				fmt.Sprintf("unknown manifest phase %d", phase))
+		}
+		if len(paths) == 0 {
 			continue
 		}
 
-		componentManifests := make(map[string][]byte, len(ref.ManifestFiles))
-		for _, manifestPath := range ref.ManifestFiles {
+		componentManifests := make(map[string][]byte, len(paths))
+		for _, manifestPath := range paths {
 			content, err := recipe.GetManifestContent(manifestPath)
 			if err != nil {
-				return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("failed to load manifest %s for component %s", manifestPath, ref.Name), err)
+				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+					fmt.Sprintf("failed to load manifest %s for component %s",
+						manifestPath, ref.Name))
 			}
 			componentManifests[manifestPath] = content
 		}
@@ -1068,4 +1110,18 @@ func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeRe
 	}
 
 	return result, nil
+}
+
+// collectComponentManifests preserves the original entry point used by
+// existing call sites — equivalent to the post-phase call.
+func (b *DefaultBundler) collectComponentManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+	return b.collectComponentManifestsByPhase(ctx, recipeResult, phasePostManifests)
+}
+
+// collectComponentPreManifests gathers the pre-phase manifests (those
+// the bundler will emit BEFORE each component's primary chart). Wired
+// into each deployer call site in buildDeployer alongside the
+// post-phase collector.
+func (b *DefaultBundler) collectComponentPreManifests(ctx context.Context, recipeResult *recipe.RecipeResult) (map[string]map[string][]byte, error) {
+	return b.collectComponentManifestsByPhase(ctx, recipeResult, phasePreManifests)
 }

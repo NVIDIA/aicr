@@ -77,9 +77,17 @@ type Generator struct {
 	// IncludeChecksums indicates whether to generate a checksums.txt file.
 	IncludeChecksums bool
 
-	// ComponentManifests maps component name → manifest path → content.
+	// ComponentPreManifests maps component name → manifest path → content
+	// for manifests that apply BEFORE each component's primary chart.
+	// Forwarded to localformat.Options.ComponentPreManifests. Populated
+	// from ComponentRef.PreManifestFiles.
+	ComponentPreManifests map[string]map[string][]byte
+
+	// ComponentPostManifests maps component name → manifest path → content
+	// for manifests that apply AFTER each component's primary chart.
 	// Each component's manifests are placed in its own manifests/ subdirectory.
-	ComponentManifests map[string]map[string][]byte
+	// Populated from ComponentRef.ManifestFiles.
+	ComponentPostManifests map[string]map[string][]byte
 
 	// DataFiles lists additional file paths (relative to output dir) to include
 	// in checksum generation. Used for external data files copied into the bundle.
@@ -135,10 +143,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Chart.yaml, templates/*, install.sh. The helm deployer just orchestrates.
 	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues)
 	writeResult, err := localformat.Write(ctx, localformat.Options{
-		OutputDir:          outputDir,
-		Components:         lfComponents,
-		ComponentManifests: g.ComponentManifests,
-		VendorCharts:       g.VendorCharts,
+		OutputDir:              outputDir,
+		Components:             lfComponents,
+		ComponentPreManifests:  g.ComponentPreManifests,
+		ComponentPostManifests: g.ComponentPostManifests,
+		VendorCharts:           g.VendorCharts,
 	})
 	if err != nil {
 		// localformat.Write returns StructuredErrors; propagate as-is.

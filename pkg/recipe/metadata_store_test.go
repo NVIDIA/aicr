@@ -688,6 +688,237 @@ func TestEvaluatorFailingLeafExcludesCandidate(t *testing.T) {
 	}
 }
 
+// TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests is an e2e
+// check that the os-talos mixin (shipping in recipes/mixins/os-talos.yaml)
+// correctly redirects each affected component to its privileged-<name>
+// namespace and attaches the per-component manifests/talos-namespace.yaml under
+// PreManifestFiles when applied to a recipe whose inheritance chain
+// already declares those components.
+//
+// Exercises the ADR-005 carve-out for additive-field mixin merges
+// (Namespace + PreManifestFiles only); identity/sourcing fields are
+// covered by TestMixinComponentRefSafeForMerge.
+func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("loadMetadataStore: %v", err)
+	}
+
+	if _, ok := store.Mixins["os-talos"]; !ok {
+		t.Fatalf("os-talos mixin not present in metadata store; check recipes/mixins/os-talos.yaml")
+	}
+
+	// Components the os-talos mixin overrides. Each maps to its expected
+	// privileged namespace and the per-component namespace manifest path.
+	type want struct {
+		namespace    string
+		manifestPath string
+	}
+	wants := map[string]want{
+		"gpu-operator":          {"privileged-gpu-operator", "components/gpu-operator/manifests/talos-namespace.yaml"},
+		"network-operator":      {"privileged-network-operator", "components/network-operator/manifests/talos-namespace.yaml"},
+		"nvsentinel":            {"privileged-nvsentinel", "components/nvsentinel/manifests/talos-namespace.yaml"},
+		"nvidia-dra-driver-gpu": {"privileged-nvidia-dra-driver-gpu", "components/nvidia-dra-driver-gpu/manifests/talos-namespace.yaml"},
+		"nodewright-operator":   {"privileged-nodewright-operator", "components/nodewright-operator/manifests/talos-namespace.yaml"},
+	}
+
+	// Simulate an inheritance chain that already declared each of the five
+	// components with concrete identity fields. The mixin must merge into
+	// these (additive-field-only) without conflicting.
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"os-talos"},
+		ComponentRefs: []ComponentRef{
+			{Name: "gpu-operator", Chart: "gpu-operator", Version: "v25.3.3", Source: "https://helm.ngc.nvidia.com/nvidia", Type: ComponentTypeHelm, Namespace: "gpu-operator"},
+			{Name: "network-operator", Chart: "network-operator", Version: "v24.7.0", Source: "https://helm.ngc.nvidia.com/nvidia", Type: ComponentTypeHelm, Namespace: "nvidia-network-operator"},
+			{Name: "nvsentinel", Chart: "nvsentinel", Version: "v0.1.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel"},
+			{Name: "nvidia-dra-driver-gpu", Chart: "nvidia-dra-driver-gpu", Version: "v25.3.0", Source: "https://helm.ngc.nvidia.com/nvidia", Type: ComponentTypeHelm, Namespace: "nvidia-dra-driver-gpu"},
+			{Name: "nodewright-operator", Chart: "nodewright-operator", Version: "v0.1.0", Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nodewright"},
+		},
+	}
+
+	if _, err := store.mergeMixins(&spec); err != nil {
+		t.Fatalf("mergeMixins: %v", err)
+	}
+
+	got := make(map[string]ComponentRef, len(spec.ComponentRefs))
+	for _, c := range spec.ComponentRefs {
+		got[c.Name] = c
+	}
+
+	for name, w := range wants {
+		c, ok := got[name]
+		if !ok {
+			t.Errorf("component %q missing from merged spec", name)
+			continue
+		}
+		if c.Namespace != w.namespace {
+			t.Errorf("%s: Namespace = %q, want %q", name, c.Namespace, w.namespace)
+		}
+		foundManifest := false
+		for _, p := range c.PreManifestFiles {
+			if p == w.manifestPath {
+				foundManifest = true
+				break
+			}
+		}
+		if !foundManifest {
+			t.Errorf("%s: PreManifestFiles = %v, want to contain %q", name, c.PreManifestFiles, w.manifestPath)
+		}
+	}
+
+	// Mixins field must be stripped from the materialized spec.
+	if len(spec.Mixins) != 0 {
+		t.Errorf("Mixins not stripped after merge: %v", spec.Mixins)
+	}
+}
+
+// TestMixinComponentRefSafeForMerge pins the field-scoped relaxation of
+// ADR-005's "no duplicate component names" rule: a mixin componentRef whose
+// name collides with the inheritance chain is allowed if and only if the
+// mixin sets only the safe additive fields (Name, Namespace, ManifestFiles,
+// PreManifestFiles). Identity / sourcing fields must still trigger a
+// conflict so a mixin cannot silently re-point a chart's chart, version,
+// source, values, etc.
+func TestMixinComponentRefSafeForMerge(t *testing.T) {
+	tests := []struct {
+		name          string
+		ref           ComponentRef
+		wantSafe      bool
+		wantOffending string
+	}{
+		{
+			name:     "empty ref (Name only) is safe",
+			ref:      ComponentRef{Name: "gpu-operator"},
+			wantSafe: true,
+		},
+		{
+			name:     "namespace-only override is safe",
+			ref:      ComponentRef{Name: "gpu-operator", Namespace: "privileged-gpu-operator"},
+			wantSafe: true,
+		},
+		{
+			name: "preManifestFiles-only is safe",
+			ref: ComponentRef{
+				Name:             "gpu-operator",
+				PreManifestFiles: []string{"components/gpu-operator/manifests/talos-namespace.yaml"},
+			},
+			wantSafe: true,
+		},
+		{
+			name: "manifestFiles-only is safe",
+			ref: ComponentRef{
+				Name:          "gpu-operator",
+				ManifestFiles: []string{"components/gpu-operator/manifests/extra.yaml"},
+			},
+			wantSafe: true,
+		},
+		{
+			name: "namespace + pre + post combined is safe",
+			ref: ComponentRef{
+				Name:             "gpu-operator",
+				Namespace:        "privileged-gpu-operator",
+				PreManifestFiles: []string{"components/gpu-operator/manifests/talos-namespace.yaml"},
+				ManifestFiles:    []string{"components/gpu-operator/manifests/extra.yaml"},
+			},
+			wantSafe: true,
+		},
+		{
+			name:          "chart set -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", Chart: "something-else"},
+			wantSafe:      false,
+			wantOffending: "chart",
+		},
+		{
+			name:          "source set -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", Source: "https://example.com/charts"},
+			wantSafe:      false,
+			wantOffending: "source",
+		},
+		{
+			name:          "version set -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", Version: "v99"},
+			wantSafe:      false,
+			wantOffending: "version",
+		},
+		{
+			name:          "type set -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", Type: ComponentTypeHelm},
+			wantSafe:      false,
+			wantOffending: "type",
+		},
+		{
+			name:          "valuesFile set -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", ValuesFile: "components/gpu-operator/values.yaml"},
+			wantSafe:      false,
+			wantOffending: "valuesFile",
+		},
+		{
+			name: "overrides set -> conflict",
+			ref: ComponentRef{
+				Name:      "gpu-operator",
+				Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
+			},
+			wantSafe:      false,
+			wantOffending: "overrides",
+		},
+		{
+			name: "dependencyRefs set -> conflict",
+			ref: ComponentRef{
+				Name:           "gpu-operator",
+				DependencyRefs: []string{"cert-manager"},
+			},
+			wantSafe:      false,
+			wantOffending: "dependencyRefs",
+		},
+		{
+			name:          "cleanup=true -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", Cleanup: true},
+			wantSafe:      false,
+			wantOffending: "cleanup",
+		},
+		{
+			name:          "healthCheckAsserts set -> conflict",
+			ref:           ComponentRef{Name: "gpu-operator", HealthCheckAsserts: "apiVersion: v1"},
+			wantSafe:      false,
+			wantOffending: "healthCheckAsserts",
+		},
+		{
+			name:          "tag set -> conflict (Kustomize identity)",
+			ref:           ComponentRef{Name: "kustomize-app", Tag: "v1.0.0"},
+			wantSafe:      false,
+			wantOffending: "tag",
+		},
+		{
+			name:          "path set -> conflict (Kustomize identity)",
+			ref:           ComponentRef{Name: "kustomize-app", Path: "deploy/production"},
+			wantSafe:      false,
+			wantOffending: "path",
+		},
+		{
+			name: "patches set -> conflict",
+			ref: ComponentRef{
+				Name:    "kustomize-app",
+				Patches: []string{"patches/namespace.yaml"},
+			},
+			wantSafe:      false,
+			wantOffending: "patches",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			offending, ok := mixinComponentRefSafeForMerge(tt.ref)
+			if ok != tt.wantSafe {
+				t.Errorf("safe = %v, want %v (offending=%q)", ok, tt.wantSafe, offending)
+			}
+			if offending != tt.wantOffending {
+				t.Errorf("offending = %q, want %q", offending, tt.wantOffending)
+			}
+		})
+	}
+}
+
 // TestMixinConstraintFailureExcludesCandidate verifies that when a mixin-contributed
 // constraint fails evaluation (e.g., os-ubuntu kernel constraint against a snapshot
 // with kernel < 6.8), the composed candidate is excluded and the result falls back

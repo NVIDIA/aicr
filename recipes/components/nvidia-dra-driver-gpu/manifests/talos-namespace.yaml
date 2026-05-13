@@ -1,0 +1,36 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Privileged namespace for nvidia-dra-driver-gpu on Talos. Attached to the
+# nvidia-dra-driver-gpu componentRef by the os-talos mixin via preManifestFiles,
+# so the bundler emits it at sync-wave N-1 (Argo) or install step N-1
+# (Helm), ahead of the nvidia-dra-driver-gpu chart at wave N.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: privileged-nvidia-dra-driver-gpu
+  labels:
+    # Pod Security Admission: privileged at all three modes so audit
+    # logs and API-server warnings stay consistent with enforcement.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/warn-version: latest
+    # AICR-managed selectors so an operator can audit which
+    # privileged namespaces in the cluster came from this tool.
+    app.kubernetes.io/managed-by: aicr
+    app.kubernetes.io/component: nvidia-dra-driver-gpu
+    aicr.nvidia.com/os: talos

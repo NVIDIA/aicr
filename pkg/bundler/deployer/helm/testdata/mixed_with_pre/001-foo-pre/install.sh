@@ -16,14 +16,8 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
-# shellcheck source=/dev/null
-source ./upstream.env
 
-# CHART carries the full OCI URI for OCI charts and just the chart name for
-# HTTP/HTTPS charts. REPO is non-empty only for HTTP/HTTPS charts; the
-# ${REPO:+--repo "${REPO}"} expansion adds --repo iff REPO is set.
-helm upgrade --install gpu-operator "${CHART}" \
-  ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
-  --namespace gpu-operator --create-namespace \
+helm upgrade --install foo-pre ./ \
+  --namespace privileged-foo \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}

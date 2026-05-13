@@ -146,10 +146,15 @@ func writeVendoredHelmFolder(
 	}
 
 	// 6. install.sh — reuse the same template as #662's local-helm wrappers.
+	// Vendored Helm folders are always primary (pre-injection still flows
+	// through writeLocalHelmFolder) and the upstream chart's own templates
+	// do not declare a Namespace by recipe convention, so --create-namespace
+	// is safe.
 	installData := struct {
-		Name      string
-		Namespace string
-	}{c.Name, c.Namespace}
+		Name            string
+		Namespace       string
+		CreateNamespace bool
+	}{c.Name, c.Namespace, true}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, VendorRecord{}, err
 	}

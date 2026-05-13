@@ -115,6 +115,8 @@ spec:
 
 Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/data.md#mixin-composition) for details.
 
+When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins are mutually exclusive — combining `os-ubuntu` and `os-talos` in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
+
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
 ```yaml

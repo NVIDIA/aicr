@@ -18,9 +18,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"text/template"
+
+	stderrors "errors"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/component"
@@ -67,9 +72,20 @@ type WriteResult struct {
 
 // Options configures Write.
 type Options struct {
-	OutputDir          string
-	Components         []Component                  // ordered per DeploymentOrder
-	ComponentManifests map[string]map[string][]byte // name → path → rendered bytes
+	OutputDir  string
+	Components []Component // ordered per DeploymentOrder
+	// ComponentPreManifests maps component name → manifest path → rendered
+	// bytes for manifests that should apply BEFORE each component's primary
+	// chart. Populated from ComponentRef.PreManifestFiles. The writer does
+	// not yet emit pre-phase folders — Task 4 wires the pre-injection
+	// branch; for now the map is threaded through but unread.
+	ComponentPreManifests map[string]map[string][]byte
+	// ComponentPostManifests maps component name → manifest path → rendered
+	// bytes for manifests that should apply AFTER each component's primary
+	// chart. Populated from ComponentRef.ManifestFiles. Drives the existing
+	// -post injection for mixed components and the template contents for
+	// manifest-only wrapped charts.
+	ComponentPostManifests map[string]map[string][]byte
 
 	// VendorCharts pulls upstream Helm chart bytes into each Helm-typed
 	// component's folder at bundle time. When set, every Helm component
@@ -88,10 +104,11 @@ type Options struct {
 }
 
 // renderInputFor builds the per-component manifest.RenderInput. The Helm
-// templates inside ComponentManifests reference ".Values[componentName]" and
-// ".Release.Namespace" / ".Chart.{Name,Version}" — those all derive from the
-// Component itself, so we construct it here rather than asking callers to
-// pre-build N separate RenderInputs in lockstep with Components.
+// templates inside ComponentPreManifests/ComponentPostManifests reference
+// ".Values[componentName]" and ".Release.Namespace" / ".Chart.{Name,Version}"
+// — those all derive from the Component itself, so we construct it here
+// rather than asking callers to pre-build N separate RenderInputs in
+// lockstep with Components.
 func renderInputFor(c Component) manifest.RenderInput {
 	chart := c.ChartName
 	if chart == "" {
@@ -104,6 +121,65 @@ func renderInputFor(c Component) manifest.RenderInput {
 		ChartVersion:  deployer.NormalizeVersionWithDefault(c.Version),
 		Values:        c.Values,
 	}
+}
+
+// injectionPhase selects whether injectAuxiliaryFolder reads pre- or
+// post-phase manifests from Options. Pre folders apply before the
+// primary chart (sync-wave N-1 in Argo CD / install step N-1 in Helm),
+// post folders apply after (sync-wave N+1 / step N+1). Both phases
+// share a single emission path so any future change to wrapped-chart
+// shape lands in one place.
+//
+// Typed as string (not int-iota like the sibling manifestPhase in
+// pkg/bundler/bundler.go) so the value embeds directly into the
+// "<name>-<phase>" folder/release name and into %q error messages
+// without a separate String() method.
+type injectionPhase string
+
+const (
+	phasePre  injectionPhase = "pre"
+	phasePost injectionPhase = "post"
+)
+
+// injectAuxiliaryFolder wraps the per-phase manifest list for component
+// c into a local-helm folder named "<name>-<phase>" at the given index.
+// Returns (nil, nil) when there are no manifests for the requested
+// phase — the caller treats that as a no-op (do not increment idx).
+// Both pre- and post-phase share this path so naming, render input,
+// error handling, and writeLocalHelmFolder invocation stay in one
+// place.
+func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injectionPhase) (*Folder, error) {
+	var manifests map[string][]byte
+	switch phase {
+	case phasePre:
+		manifests = opts.ComponentPreManifests[c.Name]
+	case phasePost:
+		manifests = opts.ComponentPostManifests[c.Name]
+	default:
+		return nil, errors.New(errors.ErrCodeInternal,
+			fmt.Sprintf("unknown injection phase %q", phase))
+	}
+	if len(manifests) == 0 {
+		return nil, nil //nolint:nilnil // (nil, nil) is the documented no-op contract: callers treat it as "no folder for this phase, do not increment idx".
+	}
+	auxName := c.Name + "-" + string(phase)
+	auxDir := fmt.Sprintf("%03d-%s", idx, auxName)
+	// Pre-phase folders carry a Namespace manifest by design (the
+	// privileged-namespace template), so install.sh must not pass
+	// --create-namespace: Helm 3 refuses to import a pre-existing
+	// namespace into the release. Post-phase folders never contain a
+	// Namespace template; --create-namespace is a no-op there since the
+	// primary release has already created it.
+	createNamespace := phase != phasePre
+	f, err := writeLocalHelmFolder(
+		opts.OutputDir, auxDir, idx, c,
+		manifests, renderInputFor(c),
+		auxName, c.Name, createNamespace,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 // Write emits the numbered folder layout. Deterministic and idempotent.
@@ -125,17 +201,31 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
 	}
 	// Fail fast if the layout's three-digit prefix can't accommodate the
-	// component count. Non-vendored mixed components can inject a second
-	// folder per component (primary + injected -post wrapper); vendored
-	// mode collapses every component into a single folder.
-	maxFolders := len(opts.Components)
-	if !opts.VendorCharts {
-		maxFolders *= 2
+	// number of NNN-* folders this bundle will actually emit. Compute
+	// the count using the same pre/primary/post emission rules the main
+	// loop below applies — a worst-case 3x bound would reject valid
+	// 500-component bundles whose components emit only their primary
+	// folder. The deploy/undeploy templates glob [0-9][0-9][0-9]-*/, so
+	// a 4-digit prefix would be silently skipped at install time.
+	folderCount := 0
+	for _, c := range opts.Components {
+		if len(opts.ComponentPreManifests[c.Name]) > 0 {
+			folderCount++ // <name>-pre
+		}
+		folderCount++ // primary
+		// Post-injection conditions mirror the per-component branch
+		// below: skipped under VendorCharts (mixed collapses into the
+		// primary), and only meaningful for mixed components (helm
+		// repository + raw manifests). Manifest-only and kustomize
+		// primaries never inject a -post folder.
+		if !opts.VendorCharts && c.Repository != "" && len(opts.ComponentPostManifests[c.Name]) > 0 {
+			folderCount++ // <name>-post
+		}
 	}
-	if maxFolders > 999 {
+	if folderCount > 999 {
 		return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("too many components (%d): NNN- folder prefix supports at most 999 entries",
-				len(opts.Components)))
+			fmt.Sprintf("too many emitted folders (%d) from %d components: NNN- folder prefix supports at most 999 entries",
+				folderCount, len(opts.Components)))
 	}
 	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
 		return WriteResult{}, errors.Wrap(errors.ErrCodeInternal, "create output dir", err)
@@ -149,29 +239,56 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		puller = &CLIChartPuller{}
 	}
 
-	// Detect <name>-post collisions up front for the non-vendored path:
-	// if a recipe declares both a mixed component "foo" (Helm + manifests)
-	// and a separate component "foo-post", the injection rule would
-	// synthesize a second "foo-post" folder/release that collides with
-	// the explicitly-declared one. Vendored mode collapses mixed into
-	// one folder and never injects -post, so the check is skipped there.
-	if !opts.VendorCharts {
-		declared := make(map[string]struct{}, len(opts.Components))
-		for _, c := range opts.Components {
-			declared[c.Name] = struct{}{}
-		}
-		for _, c := range opts.Components {
-			if len(opts.ComponentManifests[c.Name]) == 0 {
-				continue
-			}
-			if c.Repository == "" {
-				continue // manifest-only doesn't inject; already a single local-helm folder
-			}
-			if _, clash := declared[c.Name+"-post"]; clash {
+	// Detect <name>-pre and <name>-post collisions up front: if a recipe
+	// declares both a component "foo" with pre/post manifests and a
+	// separate component "foo-pre" or "foo-post", the injection rule
+	// would synthesize a second folder/release that collides with the
+	// explicitly-declared one. The post check is skipped under
+	// VendorCharts because vendored mode collapses mixed components
+	// into a single folder and never injects -post; pre injection still
+	// runs in vendored mode (pre folders are independent of the chart).
+	declared := make(map[string]struct{}, len(opts.Components))
+	for _, c := range opts.Components {
+		declared[c.Name] = struct{}{}
+	}
+	for _, c := range opts.Components {
+		// <name>-pre collision: any component with preManifestFiles would
+		// inject a "<name>-pre" folder/release. Unlike the post check
+		// below, no Repository-guard: pre injection runs regardless of
+		// primary kind (upstream-helm, local-helm, or kustomize).
+		if len(opts.ComponentPreManifests[c.Name]) > 0 {
+			if _, clash := declared[c.Name+"-pre"]; clash {
 				return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+					fmt.Sprintf("component %q has preManifestFiles and would inject %q-pre, but a component named %q-pre is already declared in the recipe — rename one to avoid collision",
 						c.Name, c.Name, c.Name))
 			}
+			// Drift guard: any Namespace doc in a pre-manifest must
+			// target ComponentRef.Namespace. The pre folder's
+			// install.sh deliberately omits --create-namespace (the
+			// chart's Namespace template is what creates it); if the
+			// rendered Namespace metadata.name disagrees with the
+			// release's --namespace, helm creates one namespace and
+			// looks for the release in another, and install fails
+			// with an opaque "namespace not found" downstream.
+			// Catch the mismatch at bundle time with the offending
+			// path so a recipe author can fix the YAML directly.
+			if err := validatePreManifestNamespace(c.Name, c.Namespace, opts.ComponentPreManifests[c.Name]); err != nil {
+				return WriteResult{}, err
+			}
+		}
+		if opts.VendorCharts {
+			continue // post-injection skipped under VendorCharts
+		}
+		if len(opts.ComponentPostManifests[c.Name]) == 0 {
+			continue
+		}
+		if c.Repository == "" {
+			continue // manifest-only doesn't inject; already a single local-helm folder
+		}
+		if _, clash := declared[c.Name+"-post"]; clash {
+			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q is mixed (helm + manifests) and would inject %q-post, but a component named %q-post is already declared in the recipe — rename one to avoid collision",
+					c.Name, c.Name, c.Name))
 		}
 	}
 
@@ -190,9 +307,24 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		// Reject kustomize + raw manifests: each recipe component must declare
 		// EITHER kustomize (Tag/Path) OR raw manifests, not both. The bundle
 		// shape can only wrap one primary source into the local chart.
-		if (c.Tag != "" || c.Path != "") && len(opts.ComponentManifests[c.Name]) > 0 {
+		if (c.Tag != "" || c.Path != "") && len(opts.ComponentPostManifests[c.Name]) > 0 {
 			return WriteResult{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("component %q has both kustomize (Tag/Path) and raw manifests; use one", c.Name))
+		}
+
+		// Pre-injection: applies before the primary chart so resources
+		// like a PSS-privileged Namespace exist by the time the chart's
+		// pods schedule. Runs regardless of vendored/non-vendored mode
+		// and regardless of primary kind (upstream-helm, local-helm, or
+		// kustomize).
+		if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePre); err != nil {
+			return WriteResult{}, err
+		} else if pf != nil {
+			folders = append(folders, *pf)
+			slog.Info("wrote local chart folder",
+				"index", idx, "dir", pf.Dir,
+				"kind", KindLocalHelm.String(), "parent", c.Name)
+			idx++
 		}
 
 		dir := fmt.Sprintf("%03d-%s", idx, c.Name)
@@ -204,7 +336,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 		if opts.VendorCharts && shouldVendor(c) {
 			f, rec, err := writeVendoredHelmFolder(
 				ctx, opts.OutputDir, dir, idx, c,
-				opts.ComponentManifests[c.Name], puller,
+				opts.ComponentPostManifests[c.Name], puller,
 			)
 			if err != nil {
 				return WriteResult{}, err
@@ -218,7 +350,7 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			continue
 		}
 
-		kind := classify(c, opts.ComponentManifests[c.Name])
+		kind := classify(c, opts.ComponentPostManifests[c.Name])
 
 		switch kind {
 		case KindUpstreamHelm:
@@ -230,27 +362,23 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 			slog.Info("wrote local chart folder", "index", idx, "dir", dir, "kind", kind.String(), "parent", c.Name)
 			idx++
 
-			// Mixed component: upstream chart + raw manifests.
-			// Emit an injected -post wrapped chart immediately after the primary so
-			// raw manifests apply post-install (after helm has registered the chart's CRDs).
-			// The "mixed" concept lives only here at the bundle layer — no recipe metadata involved.
-			if manifests := opts.ComponentManifests[c.Name]; len(manifests) > 0 {
-				postName := c.Name + "-post"
-				postDir := fmt.Sprintf("%03d-%s", idx, postName)
-				postFolder, postErr := writeLocalHelmFolder(
-					opts.OutputDir, postDir, idx, c,
-					manifests, renderInputFor(c),
-					postName, c.Name,
-				)
-				if postErr != nil {
-					return WriteResult{}, postErr
-				}
-				folders = append(folders, postFolder)
-				slog.Info("wrote local chart folder", "index", idx, "dir", postDir, "kind", KindLocalHelm.String(), "parent", c.Name)
+			// Post-injection: wrapped manifests apply after the primary chart.
+			// Mixed component (upstream chart + raw manifests): emit an injected
+			// "-post" wrapped chart immediately after the primary so raw manifests
+			// apply post-install (after helm has registered the chart's CRDs).
+			// The "mixed" concept lives only here at the bundle layer — no recipe
+			// metadata involved.
+			if pf, err := opts.injectAuxiliaryFolder(idx, c, phasePost); err != nil {
+				return WriteResult{}, err
+			} else if pf != nil {
+				folders = append(folders, *pf)
+				slog.Info("wrote local chart folder",
+					"index", idx, "dir", pf.Dir,
+					"kind", KindLocalHelm.String(), "parent", c.Name)
 				idx++
 			}
 		case KindLocalHelm:
-			manifests := opts.ComponentManifests[c.Name]
+			manifests := opts.ComponentPostManifests[c.Name]
 			if c.Tag != "" || c.Path != "" {
 				// Kustomize-typed: materialize the overlay output to a single
 				// templates/manifest.yaml inside the wrapped chart.
@@ -285,9 +413,14 @@ func Write(ctx context.Context, opts Options) (WriteResult, error) {
 				}
 				manifests = map[string][]byte{"manifest.yaml": rendered}
 			}
+			// Primary local-helm folders never contain a Namespace
+			// template (recipe convention: Namespace lives in the pre
+			// folder). Pass createNamespace=true so install.sh can spin
+			// up the namespace for manifest-only / kustomize components
+			// that aren't preceded by a pre folder.
 			f, err := writeLocalHelmFolder(opts.OutputDir, dir, idx, c,
 				manifests, renderInputFor(c),
-				c.Name, c.Name)
+				c.Name, c.Name, true)
 			if err != nil {
 				return WriteResult{}, err
 			}
@@ -441,6 +574,68 @@ func writeFile(path string, contents []byte, mode os.FileMode) error {
 	}
 	if closeErr != nil {
 		return errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf("close %s", path), closeErr)
+	}
+	return nil
+}
+
+// validatePreManifestNamespace scans each pre-manifest doc for kind:
+// Namespace entries and requires metadata.name to equal expectedNS.
+// Pre-folder install.sh deliberately omits --create-namespace so the
+// chart's own Namespace template is the sole namespace-creator; if its
+// metadata.name drifts from ComponentRef.Namespace, helm creates one
+// namespace and looks for the release in another, and install fails
+// downstream with an opaque error. Catch the mismatch at bundle time
+// with the offending file path so a recipe author can fix the YAML
+// directly.
+//
+// Non-Namespace documents and documents whose kind/metadata.name are
+// templated (helm {{ }} placeholders that fail YAML parsing) are
+// skipped: a literal name vs c.Namespace comparison is meaningful
+// only for static manifests, which is the os-talos mixin's contract
+// and the only shape we want to guard against silent drift for.
+//
+// Decode-error behavior: a YAML parse failure stops processing further
+// docs in that file (the inner decode loop breaks). This is acceptable
+// under the os-talos mixin contract — one static Namespace per
+// pre-manifest file — and intentional for templated docs, where Helm's
+// own renderer is the authoritative parser. A pre-manifest file that
+// hides a static Namespace after a templated/invalid doc would
+// silently bypass this guard; if that pattern becomes valid, swap the
+// `break` for `continue` so subsequent docs are still validated.
+func validatePreManifestNamespace(componentName, expectedNS string, manifests map[string][]byte) error {
+	for path, body := range manifests {
+		dec := yaml.NewDecoder(bytes.NewReader(body))
+		for {
+			var doc map[string]any
+			err := dec.Decode(&doc)
+			if stderrors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				// Templated docs (e.g. metadata.name: {{ .Release.Namespace }})
+				// fail YAML parsing. Don't fail the bundle here — the chart's
+				// own renderer will reject genuinely malformed YAML; we're only
+				// guarding the static-mixin shape.
+				break
+			}
+			if len(doc) == 0 {
+				continue
+			}
+			kind, _ := doc["kind"].(string)
+			if kind != "Namespace" {
+				continue
+			}
+			meta, _ := doc["metadata"].(map[string]any)
+			name, _ := meta["name"].(string)
+			if name == "" {
+				continue
+			}
+			if name != expectedNS {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("component %q: pre-manifest %s declares Namespace/%q but componentRef.namespace is %q — the pre folder's chart creates the Namespace, so the release namespace (%q) and the chart's metadata.name (%q) must match",
+						componentName, path, name, expectedNS, expectedNS, name))
+			}
+		}
 	}
 	return nil
 }
