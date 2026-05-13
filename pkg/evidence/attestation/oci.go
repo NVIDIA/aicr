@@ -141,6 +141,9 @@ func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOpti
 	if opts.MainArtifact.MediaType == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "MainArtifact.MediaType is required")
 	}
+	if opts.MainArtifact.Size <= 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "MainArtifact.Size is required")
+	}
 
 	ref, err := oci.ParseOutputTarget(oci.EnsureScheme(opts.Reference))
 	if err != nil {

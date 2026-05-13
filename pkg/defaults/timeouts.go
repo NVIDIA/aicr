@@ -426,6 +426,14 @@ const (
 	// Derived from MaxBundlePOSTBytes (the largest legitimate body) so the
 	// fallback cannot drift if the bundle limit is ever retuned.
 	ServerMaxBodyBytes = MaxBundlePOSTBytes
+
+	// MaxBOMBytes caps the size of an operator-supplied CycloneDX BOM file
+	// (the --bom path on `aicr validate --emit-attestation`). Real BOMs for
+	// the typical cluster are a few hundred KiB; 8 MiB covers the largest
+	// observed surfaces with headroom while bounding an attacker-influenced
+	// path (e.g., /proc symlink, NFS mount) before os.ReadFile would
+	// allocate the whole file into memory.
+	MaxBOMBytes int64 = 8 * 1024 * 1024 // 8 MiB
 )
 
 // Server-wide handler defaults.

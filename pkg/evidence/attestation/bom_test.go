@@ -23,6 +23,7 @@ import (
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
@@ -123,10 +124,11 @@ func TestValidatorImagesForPredicate(t *testing.T) {
 
 // TestObservedImagesFromSnapshot is a contract test for the snapshot →
 // BOM coupling. It pins the collector constants the function depends on
-// (measurement.TypeK8s and k8scollector.SubtypeImage) and exercises the
-// dedupe + non-matching-subtype paths. A rename of either constant would
-// silently produce an empty observed-images section in the BOM without
-// this gate.
+// (measurement.TypeK8s and k8scollector.SubtypeImage), exercises the
+// dedupe + non-matching-subtype paths, and asserts that the output order
+// is deterministic (sorted by name). Order matters because the auto-BOM
+// is signed via the predicate's bom.digest — non-deterministic iteration
+// would break reproducible-build invariants.
 func TestObservedImagesFromSnapshot(t *testing.T) {
 	mkSubtype := func(name string, data map[string]string) measurement.Subtype {
 		readings := make(map[string]measurement.Reading, len(data))
@@ -137,13 +139,12 @@ func TestObservedImagesFromSnapshot(t *testing.T) {
 	}
 
 	tests := []struct {
-		name      string
-		snap      *snapshotter.Snapshot
-		wantCount int
-		wantSet   map[string]bool // ref → expected presence; checked when non-nil
+		name string
+		snap *snapshotter.Snapshot
+		want []string // expected ordered output
 	}{
-		{name: "nil snapshot", snap: nil, wantCount: 0},
-		{name: "no measurements", snap: &snapshotter.Snapshot{}, wantCount: 0},
+		{name: "nil snapshot", snap: nil, want: nil},
+		{name: "no measurements", snap: &snapshotter.Snapshot{}, want: nil},
 		{
 			name: "non-K8s measurement ignored",
 			snap: &snapshotter.Snapshot{Measurements: []*measurement.Measurement{
@@ -151,7 +152,7 @@ func TestObservedImagesFromSnapshot(t *testing.T) {
 					mkSubtype(k8scollector.SubtypeImage, map[string]string{"alpine": "3.20"}),
 				}},
 			}},
-			wantCount: 0,
+			want: nil,
 		},
 		{
 			name: "non-image subtype ignored",
@@ -160,10 +161,10 @@ func TestObservedImagesFromSnapshot(t *testing.T) {
 					mkSubtype("server", map[string]string{"version": "v1.34.0"}),
 				}},
 			}},
-			wantCount: 0,
+			want: nil,
 		},
 		{
-			name: "K8s image subtype collects refs with registry-stripped name:tag form",
+			name: "K8s image subtype emits sorted, registry-stripped name:tag refs",
 			snap: &snapshotter.Snapshot{Measurements: []*measurement.Measurement{
 				{Type: measurement.TypeK8s, Subtypes: []measurement.Subtype{
 					mkSubtype(k8scollector.SubtypeImage, map[string]string{
@@ -173,11 +174,10 @@ func TestObservedImagesFromSnapshot(t *testing.T) {
 					}),
 				}},
 			}},
-			wantCount: 3,
-			wantSet: map[string]bool{
-				"coredns:v1.11":      true,
-				"kube-proxy:v1.34.0": true,
-				"aws-ebs-csi:v1.59":  true,
+			want: []string{
+				"aws-ebs-csi:v1.59",
+				"coredns:v1.11",
+				"kube-proxy:v1.34.0",
 			},
 		},
 		{
@@ -188,26 +188,18 @@ func TestObservedImagesFromSnapshot(t *testing.T) {
 					mkSubtype(k8scollector.SubtypeImage, map[string]string{"coredns": "v1.11"}),
 				}},
 			}},
-			wantCount: 1,
-			wantSet:   map[string]bool{"coredns:v1.11": true},
+			want: []string{"coredns:v1.11"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ObservedImagesFromSnapshot(tt.snap)
-			if len(got) != tt.wantCount {
-				t.Errorf("got %d images, want %d (got=%v)", len(got), tt.wantCount, got)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d (got=%v)", len(got), len(tt.want), got)
 			}
-			if tt.wantSet == nil {
-				return
-			}
-			gotSet := map[string]bool{}
-			for _, ref := range got {
-				gotSet[ref] = true
-			}
-			for ref := range tt.wantSet {
-				if !gotSet[ref] {
-					t.Errorf("missing expected ref %q in %v", ref, got)
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("[%d] = %q, want %q (full=%v)", i, got[i], tt.want[i], got)
 				}
 			}
 		})
@@ -234,6 +226,22 @@ func TestLoadOrGenerateBOM_PathNotFound(t *testing.T) {
 	_, err := LoadOrGenerateBOM("/nonexistent/path/bom.json", nil, nil, nil, "v0")
 	if err == nil {
 		t.Fatalf("expected error reading missing path")
+	}
+}
+
+// TestLoadOrGenerateBOM_RejectsOversizedFile pins the os.Open +
+// io.LimitReader bound: an operator-supplied path that exceeds
+// defaults.MaxBOMBytes must be rejected before the body is materialized
+// in memory.
+func TestLoadOrGenerateBOM_RejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "huge.bom.json")
+	body := make([]byte, defaults.MaxBOMBytes+1)
+	if err := os.WriteFile(p, body, 0o600); err != nil {
+		t.Fatalf("setup write: %v", err)
+	}
+	if _, err := LoadOrGenerateBOM(p, nil, nil, nil, "v0"); err == nil {
+		t.Fatalf("expected error for oversized BOM file")
 	}
 }
 

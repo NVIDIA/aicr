@@ -18,6 +18,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync"
 )
 
 // ResolveOptions selects an OIDC token source for keyless signing. Callers
@@ -129,8 +130,16 @@ func ResolveAttesterLazy(_ context.Context, opts ResolveOptions) (Attester, erro
 // call. The underlying KeylessAttester is created on first use and cached
 // for subsequent calls so a single attester produces consistent identity
 // across the run.
+//
+// mu serializes lazy initialization (and the Identity() read) so the
+// attester is safe to share across goroutines — bundler.Make does not
+// invoke Attest concurrently today, but the Attester interface is held
+// long enough across other call sites that defensive locking is cheaper
+// than the next data-race bug.
 type LazyKeylessAttester struct {
-	opts  ResolveOptions
+	opts ResolveOptions
+
+	mu    sync.Mutex
 	inner *KeylessAttester
 }
 
@@ -145,19 +154,25 @@ func NewLazyKeylessAttester(opts ResolveOptions) *LazyKeylessAttester {
 // errors propagate as-is so the pkg/errors classification reaches the
 // caller.
 func (l *LazyKeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]byte, error) {
+	l.mu.Lock()
 	if l.inner == nil {
 		token, err := ResolveOIDCToken(ctx, l.opts)
 		if err != nil {
+			l.mu.Unlock()
 			return nil, err
 		}
 		l.inner = NewKeylessAttester(token)
 	}
-	return l.inner.Attest(ctx, subject)
+	inner := l.inner
+	l.mu.Unlock()
+	return inner.Attest(ctx, subject)
 }
 
 // Identity returns the cached KeylessAttester's identity after the first
 // successful Attest() call; empty string before that.
 func (l *LazyKeylessAttester) Identity() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.inner == nil {
 		return ""
 	}

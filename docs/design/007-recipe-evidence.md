@@ -444,7 +444,7 @@ Summary bundle (always published):
 ```text
 oci://ghcr.io/<owner>/aicr-evidence:<digest>
 └── (OCI artifact whose layers contain:)
-    ├── attestation.intoto.json     # DSSE-wrapped, cosign keyless signed
+    ├── attestation.intoto.jsonl    # DSSE-wrapped, cosign keyless signed
     ├── recipe.yaml                 # post-resolution canonical YAML
     ├── snapshot.yaml               # cluster snapshot at validate-time
     ├── bom.cdx.json                # CycloneDX BOM (per #739)
@@ -586,10 +586,11 @@ The pointer is a **locator**, not a denormalized cache of the signed
 predicate body. A reviewer who wants to know fingerprint dimensions,
 criteria-match status, or per-phase pass/fail counts fetches the
 bundle from `bundle.oci` and reads the predicate body nested inside
-`statement.intoto.json` (the in-toto Statement; the predicate is the
-`predicate` field on the Statement object). Duplicating those fields
-in the pointer would create two sources of truth, and reviewers
-would have no good answer for which one to trust on mismatch.
+`attestation.intoto.jsonl` (the DSSE envelope wraps an in-toto
+Statement; the predicate is the `predicate` field on the inner
+Statement object). Duplicating those fields in the pointer would
+create two sources of truth, and reviewers would have no good answer
+for which one to trust on mismatch.
 
 `attestations` is a **list** from day one (length 1 in V1). When
 multi-instance arrives, additional entries append; the schema 2.0

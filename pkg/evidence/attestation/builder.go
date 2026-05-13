@@ -139,6 +139,9 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 	}
 	phaseSummaries := map[Phase]PhaseSummary{}
 	for _, pr := range opts.PhaseResults {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeUnavailable, "build canceled", ctxErr)
+		}
 		if pr == nil || pr.Report == nil {
 			continue
 		}

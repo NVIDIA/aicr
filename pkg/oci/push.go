@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	stderrors "errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -28,6 +29,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/distribution/reference"
@@ -670,6 +672,20 @@ func preparePushDir(sourceDir, subDir string) (string, func(), error) {
 		dstPath = filepath.Join(tempDir, subDir)
 	}
 	if err := hardLinkDir(srcPath, dstPath); err != nil {
+		// $TMPDIR is often on a different filesystem from sourceDir
+		// (tmpfs, overlayfs in containers, NFS-mounted workspaces),
+		// in which case os.Link returns EXDEV. Fall back to a full
+		// recursive copy so the push still succeeds — the temp dir
+		// still gives the oras file store its own root so the
+		// "annotation as filename" leak the no-shortcut refactor was
+		// meant to prevent is still avoided.
+		if stderrors.Is(err, syscall.EXDEV) {
+			if copyErr := copyDir(srcPath, dstPath); copyErr != nil {
+				cleanup()
+				return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy files across filesystems", copyErr)
+			}
+			return tempDir, cleanup, nil
+		}
 		cleanup()
 		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard links", err)
 	}
@@ -757,5 +773,73 @@ func hardLinkDir(src, dst string) error {
 		}
 	}
 
+	return nil
+}
+
+// copyDir is the cross-filesystem fallback for hardLinkDir. Hard links
+// require src and dst to share an inode space (same filesystem); when
+// $TMPDIR is on a different mount (tmpfs, overlay, NFS), os.Link
+// returns EXDEV and we fall back to a full byte copy. Streams via
+// io.Copy so multi-GB bundles don't materialize in memory.
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
+	}
+
+	if mkdirErr := os.MkdirAll(dst, srcInfo.Mode()); mkdirErr != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination directory", mkdirErr)
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to read source directory", err)
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// copyFile streams src → dst, preserving the source mode and capturing
+// close errors on the writable handle so flush failures aren't lost.
+func copyFile(src, dst string) (retErr error) {
+	info, err := os.Stat(src)
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source file", err)
+	}
+
+	in, err := os.Open(filepath.Clean(src)) //nolint:gosec // src is bundle content under the caller's directory
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to open source file", err)
+	}
+	defer func() { _ = in.Close() }()
+
+	out, err := os.OpenFile(filepath.Clean(dst), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode()) //nolint:gosec // dst is package-controlled tempdir
+	if err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create destination file", err)
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && retErr == nil {
+			retErr = apperrors.Wrap(apperrors.ErrCodeInternal, "failed to close destination file", closeErr)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy file content", err)
+	}
 	return nil
 }

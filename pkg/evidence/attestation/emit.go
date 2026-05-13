@@ -19,13 +19,12 @@ import (
 	"log/slog"
 	"strings"
 
-	"gopkg.in/yaml.v3"
-
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
@@ -103,11 +102,17 @@ func Emit(ctx context.Context, opts EmitOptions) (*EmitResult, error) {
 		return nil, err
 	}
 
-	recipeYAML, err := yaml.Marshal(opts.Recipe)
+	// Use the deterministic marshaller: snapshot.yaml is written into the
+	// bundle as-is and its hash feeds the signed manifest digest, so
+	// yaml.v3's randomized map iteration would otherwise produce a
+	// different manifest digest on every run for the same inputs. The
+	// recipe is canonicalized further down by Build, but using the same
+	// helper here keeps the contract uniform across both fields.
+	recipeYAML, err := serializer.MarshalYAMLDeterministic(opts.Recipe)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal recipe for evidence", err)
 	}
-	snapshotYAML, err := yaml.Marshal(opts.Snapshot)
+	snapshotYAML, err := serializer.MarshalYAMLDeterministic(opts.Snapshot)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal snapshot for evidence", err)
 	}

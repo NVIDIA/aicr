@@ -144,14 +144,11 @@ type RegistrySpec struct {
 	PlainHTTP   bool `yaml:"plainHTTP,omitempty" json:"plainHTTP,omitempty"`
 }
 
-// ValidateSpec captures the inputs to `aicr validate`.
-//
-// Evidence-related flags (--evidence-dir, --cncf-submission, --feature) are
-// intentionally not in this schema yet: the recipe-test-attestation work
-// under #754 introduces an Evidence umbrella that rehomes CNCF alongside
-// the new attestation kind, and landing the umbrella with both members at
-// once avoids a churn window where a one-member umbrella would have to be
-// reshaped on the second member's arrival.
+// ValidateSpec captures the inputs to `aicr validate`. Evidence emission
+// (both CNCF AI Conformance markdown and the recipe-evidence v1 bundle)
+// is configured via the Evidence umbrella (EvidenceSpec) — see that type
+// for the per-kind shape and the corresponding `aicr validate --…` flag
+// surface.
 type ValidateSpec struct {
 	Input     *ValidateInputSpec     `yaml:"input,omitempty" json:"input,omitempty"`
 	Agent     *ValidateAgentSpec     `yaml:"agent,omitempty" json:"agent,omitempty"`

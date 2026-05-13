@@ -1370,6 +1370,46 @@ func TestIsTransientPushError(t *testing.T) {
 	}
 }
 
+// TestCopyDir_RecursiveContentAndModes verifies the EXDEV fallback path.
+// preparePushDir uses copyDir when hard links fail (e.g., $TMPDIR is on a
+// different filesystem from sourceDir, common in containers with tmpfs
+// /tmp). The fallback must reproduce the directory tree, file content,
+// and mode bits — anything less leaves the oras push pointing at an
+// incomplete bundle.
+func TestCopyDir_RecursiveContentAndModes(t *testing.T) {
+	src := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "out")
+
+	// Tree: src/{a.txt, sub/b.txt}
+	if err := os.WriteFile(filepath.Join(src, "a.txt"), []byte("alpha"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(src, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "sub", "b.txt"), []byte("beta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyDir(src, dst); err != nil {
+		t.Fatalf("copyDir: %v", err)
+	}
+
+	for path, want := range map[string]string{
+		filepath.Join(dst, "a.txt"):        "alpha",
+		filepath.Join(dst, "sub", "b.txt"): "beta",
+	} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		if string(body) != want {
+			t.Errorf("%s = %q, want %q", path, body, want)
+		}
+	}
+}
+
 func TestJitterDuration(t *testing.T) {
 	t.Run("zero returns zero", func(t *testing.T) {
 		if got := jitterDuration(0); got != 0 {

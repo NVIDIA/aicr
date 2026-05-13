@@ -16,12 +16,15 @@ package attestation
 
 import (
 	"bytes"
+	"io"
 	"os"
+	"sort"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -36,13 +39,29 @@ import (
 // cover the same information for the typical post-deployment flow.
 func LoadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
 	if bomPath != "" {
-		body, err := os.ReadFile(bomPath)
-		if err != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
-		}
-		return body, nil
+		return readBOMFile(bomPath)
 	}
 	return BuildAutoBOM(rec, snap, cat, version)
+}
+
+// readBOMFile reads bomPath into memory, bounded by defaults.MaxBOMBytes
+// so an attacker-influenced path (e.g., /proc symlink, NFS mount) can't
+// OOM the process before the body is parsed.
+func readBOMFile(bomPath string) ([]byte, error) {
+	f, err := os.Open(bomPath) //nolint:gosec // bomPath is operator-supplied (CLI flag or config)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(f, defaults.MaxBOMBytes+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read BOM", err)
+	}
+	if int64(len(body)) > defaults.MaxBOMBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "BOM exceeds maximum size")
+	}
+	return body, nil
 }
 
 // BuildAutoBOM synthesizes a CycloneDX 1.6 BOM from the recipe's enabled
@@ -151,10 +170,16 @@ func ValidatorImagesForPredicate(cat *catalog.ValidatorCatalog) []ValidatorImage
 }
 
 // ObservedImagesFromSnapshot returns cluster-observed image refs in
-// "<name>:<tag>" form. Refs lack a registry because the collector strips
-// registries for measurement-key stability across mirrors; auditors
-// comparing the BOM against a specific registry should ship an explicit
-// --bom path instead.
+// "<name>:<tag>" form, deduplicated and sorted by name for deterministic
+// output. Refs lack a registry because the collector strips registries
+// for measurement-key stability across mirrors; auditors comparing the
+// BOM against a specific registry should ship an explicit --bom path
+// instead.
+//
+// Deterministic order matters: the auto-BOM bytes are signed via the
+// predicate's bom.digest, so non-deterministic map iteration would break
+// reproducible-build invariants (same recipe + same snapshot → same
+// signed digest).
 func ObservedImagesFromSnapshot(snap *snapshotter.Snapshot) []string {
 	if snap == nil {
 		return nil
@@ -171,7 +196,13 @@ func ObservedImagesFromSnapshot(snap *snapshotter.Snapshot) []string {
 			if st.Name != k8scollector.SubtypeImage {
 				continue
 			}
-			for name, reading := range st.Data {
+			names := make([]string, 0, len(st.Data))
+			for name := range st.Data {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				reading := st.Data[name]
 				if name == "" || reading == nil {
 					continue
 				}
