@@ -116,3 +116,96 @@ func TestSubjectName_PrefixesRecipe(t *testing.T) {
 		t.Errorf("SubjectName = %q, want recipe:foo", got)
 	}
 }
+
+func TestBuildArtifactStatement_SubjectIsArtifactDigest(t *testing.T) {
+	pred := BuildPredicate(PredicateInputs{
+		AttestedAt:  time.Date(2026, 5, 8, 10, 23, 11, 0, time.UTC),
+		AICRVersion: "v0.13.0",
+		Recipe: RecipeRef{
+			Name:   "h100-eks-ubuntu-training",
+			Digest: strings.Repeat("c", 64),
+		},
+	})
+	artifactDigest := strings.Repeat("b", 64)
+	stmt, err := BuildArtifactStatement("ghcr.io/example/aicr-evidence", artifactDigest, pred)
+	if err != nil {
+		t.Fatalf("BuildArtifactStatement: %v", err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(stmt, &parsed); err != nil {
+		t.Fatalf("statement is not JSON: %v", err)
+	}
+	if parsed["predicateType"] != PredicateTypeV1 {
+		t.Errorf("predicateType = %v, want %v", parsed["predicateType"], PredicateTypeV1)
+	}
+	subj, ok := parsed["subject"].([]any)
+	if !ok || len(subj) != 1 {
+		t.Fatalf("expected single subject, got %v", parsed["subject"])
+	}
+	first, ok := subj[0].(map[string]any)
+	if !ok {
+		t.Fatalf("subject[0] not an object")
+	}
+	if first["name"] != "ghcr.io/example/aicr-evidence" {
+		t.Errorf("subject.name = %v, want OCI ref form (no scheme, no tag)", first["name"])
+	}
+	digestMap, ok := first["digest"].(map[string]any)
+	if !ok {
+		t.Fatalf("subject.digest not an object: %v", first["digest"])
+	}
+	if digestMap["sha256"] != artifactDigest {
+		t.Errorf("subject.digest.sha256 = %v, want %v (artifact digest, NOT recipe digest)", digestMap["sha256"], artifactDigest)
+	}
+	// Recipe identity must remain reachable from the signed payload.
+	predBody, ok := parsed["predicate"].(map[string]any)
+	if !ok {
+		t.Fatalf("predicate not an object: %v", parsed["predicate"])
+	}
+	recipeBlock, ok := predBody["recipe"].(map[string]any)
+	if !ok {
+		t.Fatalf("predicate.recipe missing: %v", predBody)
+	}
+	if recipeBlock["name"] != "h100-eks-ubuntu-training" {
+		t.Errorf("predicate.recipe.name = %v, want h100-eks-ubuntu-training", recipeBlock["name"])
+	}
+	if recipeBlock["digest"] != strings.Repeat("c", 64) {
+		t.Errorf("predicate.recipe.digest = %v, want the canonicalized recipe digest", recipeBlock["digest"])
+	}
+}
+
+func TestBuildArtifactStatement_RejectsBadInputs(t *testing.T) {
+	goodPred := &Predicate{
+		Recipe: RecipeRef{Name: "x", Digest: strings.Repeat("a", 64)},
+	}
+	tests := []struct {
+		name           string
+		ociRef         string
+		artifactDigest string
+		pred           *Predicate
+		wantContains   string
+	}{
+		{"empty ref", "", strings.Repeat("a", 64), goodPred, "OCI reference is required"},
+		{"empty digest", "ghcr.io/x/y", "", goodPred, "artifact digest is required"},
+		{"short digest", "ghcr.io/x/y", "abc", goodPred, "artifact digest must be 64 hex"},
+		{"nil predicate", "ghcr.io/x/y", strings.Repeat("a", 64), nil, "predicate is required"},
+		{"missing recipe name",
+			"ghcr.io/x/y", strings.Repeat("a", 64),
+			&Predicate{Recipe: RecipeRef{Digest: strings.Repeat("a", 64)}},
+			"predicate.recipe.{name,digest} must be populated"},
+		{"missing recipe digest",
+			"ghcr.io/x/y", strings.Repeat("a", 64),
+			&Predicate{Recipe: RecipeRef{Name: "x"}},
+			"predicate.recipe.{name,digest} must be populated"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildArtifactStatement(tt.ociRef, tt.artifactDigest, tt.pred)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantContains)
+			}
+			if !strings.Contains(err.Error(), tt.wantContains) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tt.wantContains)
+			}
+		})
+	}
+}

@@ -122,9 +122,12 @@ func (NoOpSigner) Sign(_ context.Context, _ []byte) (*SignResult, error) {
 	return &SignResult{}, nil
 }
 
-// SignBundle signs the bundle's StatementJSON, writes
-// attestation.intoto.jsonl into the summary directory, and returns
-// the SignResult so callers can populate the pointer's signer block.
+// SignBundle signs the bundle's StatementJSON (recipe-subject form)
+// and writes attestation.intoto.jsonl into the summary directory.
+// Used for the local-only path where the in-bundle Statement is the
+// portable form; the --push path uses BuildArtifactStatement +
+// KeylessSigner.Sign + WriteSignedAttestation directly so the signed
+// subject matches the pushed artifact's digest.
 //
 // When the signer is a NoOpSigner, the attestation file is not
 // written; the bundle ships with the unsigned statement available as
@@ -143,12 +146,25 @@ func SignBundle(ctx context.Context, b *Bundle, s Signer) (*SignResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(res.BundleJSON) == 0 {
-		return res, nil
-	}
-	out := filepath.Join(b.SummaryDir, AttestationFilename)
-	if err := os.WriteFile(out, res.BundleJSON, 0o600); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write signed attestation", err)
+	if err := WriteSignedAttestation(b, res.BundleJSON); err != nil {
+		return nil, err
 	}
 	return res, nil
+}
+
+// WriteSignedAttestation writes the Sigstore Bundle bytes into the
+// summary directory as attestation.intoto.jsonl. A no-op for empty
+// input (which is what NoOpSigner produces).
+func WriteSignedAttestation(b *Bundle, bundleJSON []byte) error {
+	if b == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "bundle is required")
+	}
+	if len(bundleJSON) == 0 {
+		return nil
+	}
+	out := filepath.Join(b.SummaryDir, AttestationFilename)
+	if err := os.WriteFile(out, bundleJSON, 0o600); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write signed attestation", err)
+	}
+	return nil
 }

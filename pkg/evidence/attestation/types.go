@@ -121,11 +121,23 @@ type Predicate struct {
 	AICRVersion             string                  `json:"aicrVersion" yaml:"aicrVersion"`
 	ValidatorCatalogVersion string                  `json:"validatorCatalogVersion" yaml:"validatorCatalogVersion"`
 	ValidatorImages         []ValidatorImage        `json:"validatorImages" yaml:"validatorImages"`
+	Recipe                  RecipeRef               `json:"recipe" yaml:"recipe"`
 	Fingerprint             fingerprint.Fingerprint `json:"fingerprint" yaml:"fingerprint"`
 	CriteriaMatch           fingerprint.MatchResult `json:"criteriaMatch" yaml:"criteriaMatch"`
 	Phases                  map[Phase]PhaseSummary  `json:"phases" yaml:"phases"`
 	BOM                     BOMRef                  `json:"bom" yaml:"bom"`
 	Manifest                ManifestRef             `json:"manifest" yaml:"manifest"`
+}
+
+// RecipeRef records the recipe the predicate attests to. Carried in
+// the predicate body — not just in the in-toto Statement subject —
+// because pushed bundles use the OCI artifact digest as the subject
+// so cosign can discover the signature via the Referrers API; the
+// recipe identity therefore needs a stable home in the signed
+// payload. Digest is sha256(canonicalize(recipe.yaml)) hex.
+type RecipeRef struct {
+	Name   string `json:"name" yaml:"name"`
+	Digest string `json:"digest" yaml:"digest"`
 }
 
 // ValidatorImage records one validator image that ran during the

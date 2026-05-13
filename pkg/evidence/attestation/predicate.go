@@ -35,6 +35,7 @@ type PredicateInputs struct {
 	AICRVersion             string
 	ValidatorCatalogVersion string
 	ValidatorImages         []ValidatorImage
+	Recipe                  RecipeRef
 	Fingerprint             fingerprint.Fingerprint
 	CriteriaMatch           fingerprint.MatchResult
 	Phases                  map[Phase]PhaseSummary
@@ -66,6 +67,7 @@ func BuildPredicate(in PredicateInputs) *Predicate {
 		AICRVersion:             in.AICRVersion,
 		ValidatorCatalogVersion: in.ValidatorCatalogVersion,
 		ValidatorImages:         images,
+		Recipe:                  in.Recipe,
 		Fingerprint:             in.Fingerprint,
 		CriteriaMatch:           in.CriteriaMatch,
 		Phases:                  phases,
@@ -120,6 +122,63 @@ func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]
 	out, err := protojson.Marshal(stmt)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal in-toto statement", err)
+	}
+	return out, nil
+}
+
+// BuildArtifactStatement constructs the in-toto Statement carrying our
+// v1 predicate against an OCI artifact subject. Used for the --push
+// path: cosign's Referrers-API discovery anchors on the artifact's
+// digest, so the signed Statement's subject must match. The recipe
+// identity is preserved in predicate.recipe.{name, digest} so the
+// chain back to the recipe content is still verifiable from the
+// signed payload alone.
+//
+//   - ociRef: the canonical "registry/repository" form without scheme
+//     or tag (e.g., "ghcr.io/example/aicr-evidence"). Used as
+//     subject[0].name.
+//   - artifactDigest: hex sha256 of the OCI artifact manifest (64 chars).
+//   - pred: must have Recipe.Name and Recipe.Digest populated.
+func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]byte, error) {
+	if ociRef == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "OCI reference is required")
+	}
+	if artifactDigest == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "artifact digest is required")
+	}
+	if len(artifactDigest) != 64 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "artifact digest must be 64 hex characters")
+	}
+	if pred == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate is required")
+	}
+	if pred.Recipe.Name == "" || pred.Recipe.Digest == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate.recipe.{name,digest} must be populated for artifact-subject statement")
+	}
+
+	predicate, err := predicateAsStruct(pred)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to convert predicate to struct", err)
+	}
+
+	stmt := &intoto.Statement{
+		Type: intoto.StatementTypeUri,
+		Subject: []*intoto.ResourceDescriptor{
+			{
+				Name:   ociRef,
+				Digest: map[string]string{"sha256": artifactDigest},
+			},
+		},
+		PredicateType: PredicateTypeV1,
+		Predicate:     predicate,
+	}
+	if vErr := stmt.Validate(); vErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "in-toto artifact statement failed validation", vErr)
+	}
+
+	out, err := protojson.Marshal(stmt)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to marshal in-toto artifact statement", err)
 	}
 	return out, nil
 }

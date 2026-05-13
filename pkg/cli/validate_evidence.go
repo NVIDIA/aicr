@@ -19,6 +19,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 
 	cdx "github.com/CycloneDX/cyclonedx-go"
 	"github.com/urfave/cli/v3"
@@ -217,13 +218,24 @@ func emitRecipeEvidence(
 // is absent, returns a zero-valued outcome so the caller writes a
 // pre-publish pointer.
 //
-// The OIDC token is resolved here, adjacent to SignBundle, rather than
-// at command entry. Fulcio binds the token to a fresh nonce at issue
-// time; resolving up front and then running 3+ minutes of validation
-// invalidates the token before sign attempts to use it. The deferred
-// resolution also means an interactive browser or device-code prompt
-// arrives at sign time (after validation completes); the log line
-// below softens the surprise.
+// Sequence (--push set):
+//  1. Push the bundle directory as an OCI artifact → artifactDigest.
+//  2. Build an artifact-subject in-toto Statement
+//     (subject.digest = artifactDigest) carrying the same predicate
+//     body; recipe identity stays verifiable via predicate.recipe.
+//  3. Resolve the OIDC token adjacent to signing — Fulcio binds the
+//     token to a fresh nonce at issue and a multi-minute validation
+//     run before sign invalidates a pre-resolved token.
+//  4. Sign the artifact-subject Statement → Sigstore Bundle JSON.
+//  5. Attach the Sigstore Bundle as an OCI Referrer of the main
+//     artifact so cosign's /v2/<name>/referrers/<digest> discovery
+//     finds the signature without a separate pull.
+//
+// The signed bytes are also written into the local summary-bundle as
+// attestation.intoto.jsonl so the on-disk directory remains
+// inspectable; the pushed artifact never contained the file (it was
+// signed after push), but locally it's the standard place to find
+// the signature.
 func signAndPushBundle(
 	ctx context.Context,
 	bundle *attestation.Bundle,
@@ -232,6 +244,23 @@ func signAndPushBundle(
 
 	if cfg.Push == "" {
 		return signPushOutcome{}, nil
+	}
+
+	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+	defer pushCancel()
+	summary, err := pushArtifact(pushCtx, bundle.SummaryDir, cfg.Push, cfg)
+	if err != nil {
+		return signPushOutcome{}, err
+	}
+
+	artifactDigestHex := strings.TrimPrefix(summary.Digest, "sha256:")
+	artifactStmt, err := attestation.BuildArtifactStatement(
+		attestation.CleanOCIRef(summary.Reference),
+		artifactDigestHex,
+		bundle.Predicate,
+	)
+	if err != nil {
+		return signPushOutcome{}, err
 	}
 
 	// Log at Info only when an interactive prompt is about to fire;
@@ -261,17 +290,40 @@ func signAndPushBundle(
 
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer signCancel()
-	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(token))
+	signRes, err := attestation.NewKeylessSigner(token).Sign(signCtx, artifactStmt)
 	if err != nil {
 		return signPushOutcome{}, err
 	}
 
-	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
-	defer pushCancel()
-	summary, err := pushArtifact(pushCtx, bundle.SummaryDir, cfg.Push, cfg)
-	if err != nil {
+	// Write the signed bytes into the local bundle dir for inspection.
+	// The pushed OCI artifact does not carry attestation.intoto.jsonl —
+	// it was already pushed before signing — so the canonical signature
+	// reference is the OCI Referrer attached below, addressable via the
+	// pointer file's bundle.{oci,digest}.
+	if err := attestation.WriteSignedAttestation(bundle, signRes.BundleJSON); err != nil {
 		return signPushOutcome{}, err
 	}
+
+	attachCtx, attachCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+	defer attachCancel()
+	referrer, attachErr := attestation.AttachSigstoreBundleAsReferrer(attachCtx, attestation.AttachReferrerOptions{
+		Reference:  cfg.Push,
+		BundleJSON: signRes.BundleJSON,
+		MainArtifact: attestation.MainArtifactDescriptor{
+			Digest:    summary.Digest,
+			MediaType: summary.MediaType,
+			Size:      summary.Size,
+		},
+		PlainHTTP:   cfg.PlainHTTP,
+		InsecureTLS: cfg.InsecureTLS,
+	})
+	if attachErr != nil {
+		return signPushOutcome{}, attachErr
+	}
+	slog.Info("Sigstore Bundle attached as OCI Referrer",
+		"referrerDigest", referrer.Digest,
+		"mainArtifactDigest", summary.Digest)
+
 	return signPushOutcome{Sign: signRes, Summary: summary}, nil
 }
 

@@ -170,6 +170,11 @@ type OutputConfig struct {
 type PackageAndPushResult struct {
 	// Digest is the SHA256 digest of the pushed artifact.
 	Digest string
+	// MediaType is the manifest media type.
+	MediaType string
+	// Size is the manifest's byte length. Surfaced for OCI Referrers
+	// attachment, which needs a full subject descriptor.
+	Size int64
 	// Reference is the full image reference (registry/repository:tag).
 	Reference string
 	// StorePath is the path to the local OCI Image Layout directory.
@@ -262,6 +267,8 @@ func PackageAndPush(ctx context.Context, cfg OutputConfig) (*PackageAndPushResul
 
 	return &PackageAndPushResult{
 		Digest:    pushResult.Digest,
+		MediaType: pushResult.MediaType,
+		Size:      pushResult.Size,
 		Reference: pushResult.Reference,
 		StorePath: packageResult.StorePath,
 	}, nil

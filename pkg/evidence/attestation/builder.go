@@ -263,6 +263,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		AICRVersion:             opts.AICRVersion,
 		ValidatorCatalogVersion: opts.ValidatorCatalogVersion,
 		ValidatorImages:         opts.ValidatorImages,
+		Recipe:                  RecipeRef{Name: recipeName, Digest: subjectDigest},
 		Fingerprint:             *fp,
 		CriteriaMatch:           cm,
 		Phases:                  phaseSummaries,

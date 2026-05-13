@@ -18,9 +18,18 @@ import (
 	"context"
 	"os"
 
+	digestpkg "github.com/opencontainers/go-digest"
+	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 )
+
+// SigstoreBundleMediaType identifies the Sigstore Bundle JSON
+// (DSSE envelope + Fulcio cert + Rekor inclusion proof) attached as
+// the OCI Referrer. cosign discovers signatures with this media type
+// via the OCI 1.1 Referrers API.
+const SigstoreBundleMediaType = "application/vnd.dev.sigstore.bundle.v0.3+json"
 
 // PushOptions controls OCI publication of a bundle directory.
 type PushOptions struct {
@@ -50,6 +59,13 @@ type PushResult struct {
 
 	// Digest is the OCI content digest, e.g., "sha256:abc...".
 	Digest string
+
+	// MediaType is the manifest media type.
+	MediaType string
+
+	// Size is the manifest's byte length, needed when constructing a
+	// subject descriptor for OCI Referrers attachment.
+	Size int64
 }
 
 // Push packages a bundle directory as an OCI artifact and pushes it.
@@ -107,7 +123,102 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 	return &PushResult{
 		Reference: res.Reference,
 		Digest:    res.Digest,
+		MediaType: res.MediaType,
+		Size:      res.Size,
 	}, nil
+}
+
+// AttachSigstoreBundleAsReferrer pushes a Sigstore Bundle blob as an
+// OCI Referrer of the main artifact, so cosign's OCI 1.1 Referrers
+// discovery (/v2/<name>/referrers/<artifactDigest>) finds it. The
+// referrer manifest's Subject points at mainArtifact.{digest, mediaType,
+// size}; the artifactType for both the manifest and its single layer
+// is the Sigstore Bundle media type so the referrer is self-describing.
+//
+// reference is the same OCI reference used for the main push (e.g.,
+// "ghcr.io/foo/aicr-evidence:1h"); the registry/repository components
+// are extracted from it. The tag is irrelevant — Referrers are
+// addressed by digest, not by tag.
+func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOptions) (*PushResult, error) {
+	if opts.Reference == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference is required")
+	}
+	if len(opts.BundleJSON) == 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "BundleJSON is required")
+	}
+	if opts.MainArtifact.Digest == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "MainArtifact.Digest is required")
+	}
+	if opts.MainArtifact.MediaType == "" {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "MainArtifact.MediaType is required")
+	}
+
+	ref, err := oci.ParseOutputTarget(oci.EnsureScheme(opts.Reference))
+	if err != nil {
+		return nil, err
+	}
+	if !ref.IsOCI {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "Reference must be an OCI registry reference")
+	}
+
+	subjectDesc := ociv1.Descriptor{
+		MediaType: opts.MainArtifact.MediaType,
+		Digest:    digestpkg.Digest(opts.MainArtifact.Digest),
+		Size:      opts.MainArtifact.Size,
+	}
+
+	res, err := oci.PushReferrer(ctx, oci.ReferrerOptions{
+		Registry:     ref.Registry,
+		Repository:   ref.Repository,
+		PlainHTTP:    opts.PlainHTTP,
+		InsecureTLS:  opts.InsecureTLS,
+		ArtifactType: SigstoreBundleMediaType,
+		LayerContent: opts.BundleJSON,
+		Subject:      subjectDesc,
+		Annotations: map[string]string{
+			"org.opencontainers.image.vendor": "NVIDIA",
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &PushResult{
+		Reference: res.Reference,
+		Digest:    res.Digest,
+		MediaType: res.MediaType,
+		Size:      res.Size,
+	}, nil
+}
+
+// AttachReferrerOptions configures AttachSigstoreBundleAsReferrer.
+type AttachReferrerOptions struct {
+	// Reference is the OCI reference of the main artifact (any tag).
+	// Used only to identify the registry+repository.
+	Reference string
+
+	// BundleJSON is the Sigstore Bundle bytes (.sigstore.json /
+	// attestation.intoto.jsonl equivalent) to attach.
+	BundleJSON []byte
+
+	// MainArtifact describes the artifact this referrer points at.
+	// All three fields are required: cosign matches on Digest, the
+	// registry validates MediaType, and the size completes the
+	// subject descriptor per the OCI 1.1 spec.
+	MainArtifact MainArtifactDescriptor
+
+	// PlainHTTP forces HTTP (local registry tests only).
+	PlainHTTP bool
+
+	// InsecureTLS disables TLS verification (self-signed registries).
+	InsecureTLS bool
+}
+
+// MainArtifactDescriptor is the subset of an OCI descriptor needed to
+// reference an existing artifact as the subject of a Referrer manifest.
+type MainArtifactDescriptor struct {
+	Digest    string
+	MediaType string
+	Size      int64
 }
 
 // CleanOCIRef returns the registry/repository:tag form (no oci:// scheme,

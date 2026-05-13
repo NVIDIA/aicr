@@ -89,6 +89,13 @@ type PackageOptions struct {
 type PackageResult struct {
 	// Digest is the SHA256 digest of the packaged artifact.
 	Digest string
+	// MediaType is the manifest media type
+	// (typically application/vnd.oci.image.manifest.v1+json).
+	MediaType string
+	// Size is the manifest's byte length. Surfaced so callers can
+	// construct an OCI subject descriptor for the Referrers API
+	// without re-fetching the manifest from the registry.
+	Size int64
 	// Reference is the full image reference (registry/repository:tag).
 	Reference string
 	// StorePath is the path to the OCI Image Layout directory.
@@ -115,6 +122,12 @@ type PushOptions struct {
 type PushResult struct {
 	// Digest is the SHA256 digest of the pushed artifact.
 	Digest string
+	// MediaType is the manifest media type.
+	MediaType string
+	// Size is the manifest's byte length. Surfaced so the caller can
+	// build a subject descriptor for OCI Referrers attachment without
+	// re-fetching the manifest.
+	Size int64
 	// Reference is the full image reference (registry/repository:tag).
 	Reference string
 }
@@ -266,6 +279,8 @@ func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult
 
 	return &PackageResult{
 		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
 		Reference: refString,
 		StorePath: ociStorePath,
 	}, nil
@@ -329,8 +344,164 @@ func PushFromStore(ctx context.Context, storePath string, opts PushOptions) (*Pu
 
 	return &PushResult{
 		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
 		Reference: refString,
 	}, nil
+}
+
+// ReferrerOptions configures a single-blob OCI manifest attached via
+// the OCI 1.1 Referrers API. Used by Sigstore Bundle attachment and
+// similar "annotation manifest" patterns where the *referring* manifest
+// is the artifact and the subject points at what it refers to.
+type ReferrerOptions struct {
+	// Registry is the OCI registry host (e.g., "ghcr.io").
+	Registry string
+	// Repository is the same repository the subject artifact lives in.
+	Repository string
+	// PlainHTTP forces HTTP (used for local registry tests).
+	PlainHTTP bool
+	// InsecureTLS disables TLS verification for self-signed registries.
+	InsecureTLS bool
+
+	// ArtifactType identifies the referrer manifest's purpose, e.g.
+	// "application/vnd.dev.sigstore.bundle.v0.3+json". The same value
+	// is used as the layer media type so a referrer with one blob is
+	// self-describing.
+	ArtifactType string
+	// LayerContent is the single blob the referrer wraps.
+	LayerContent []byte
+
+	// Subject is the descriptor of the artifact this referrer points
+	// at. cosign's /v2/<name>/referrers/<digest> discovery uses
+	// Subject.Digest to match.
+	Subject ociv1.Descriptor
+
+	// Annotations apply to the referrer manifest.
+	Annotations map[string]string
+}
+
+// PushReferrer pushes a single-layer OCI manifest with a Subject set,
+// attaching it as a Referrer of the subject artifact. cosign discovers
+// signatures attached this way via the OCI Distribution 1.1 Referrers
+// API. The tag is derived from the referrer manifest digest so multiple
+// referrers can coexist without colliding on a fixed tag.
+func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error) {
+	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
+		return nil, err
+	}
+	fs, tmpDir, manifestDesc, tag, err := packReferrer(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = fs.Close()
+		if rmErr := os.RemoveAll(tmpDir); rmErr != nil {
+			slog.Warn("failed to remove referrer temp dir", "path", tmpDir, "error", rmErr)
+		}
+	}()
+
+	registryHost := stripProtocol(opts.Registry)
+	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", registryHost, opts.Repository))
+	if err != nil {
+		return nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to initialize remote repository", err)
+	}
+	repo.PlainHTTP = opts.PlainHTTP
+
+	authClient, err := createAuthClientForHost(registryHost, opts.PlainHTTP, opts.InsecureTLS)
+	if err != nil {
+		slog.Warn("failed to initialize credential store; continuing without auth", "error", err)
+	}
+	repo.Client = authClient
+
+	copyOpts := oras.DefaultCopyOptions
+	copyOpts.Concurrency = defaults.OCIPushConcurrency
+	desc, err := copyWithRetry(ctx, fs, tag, repo, tag, copyOpts, oras.Copy)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = manifestDesc // tag and desc.Digest are equivalent post-copy
+	return &PushResult{
+		Digest:    desc.Digest.String(),
+		MediaType: desc.MediaType,
+		Size:      desc.Size,
+		Reference: fmt.Sprintf("%s/%s@%s", registryHost, opts.Repository, desc.Digest.String()),
+	}, nil
+}
+
+// packReferrer builds the referrer manifest in a local file store and
+// returns the store, temp dir path, manifest descriptor, and the
+// digest-derived tag. Split from PushReferrer so unit tests can
+// inspect the packed manifest's Subject field without a registry.
+//
+// The caller owns lifecycle: defer closing fs and removing tmpDir.
+func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, string, ociv1.Descriptor, string, error) {
+	if opts.ArtifactType == "" {
+		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
+	}
+	if len(opts.LayerContent) == 0 {
+		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "LayerContent must be non-empty")
+	}
+	if opts.Subject.Digest == "" {
+		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "Subject.Digest is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "oras-referrer-*")
+	if err != nil {
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp dir", err)
+	}
+
+	const layerFilename = "payload"
+	layerPath := filepath.Join(tmpDir, layerFilename)
+	if writeErr := os.WriteFile(layerPath, opts.LayerContent, 0o600); writeErr != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stage referrer layer", writeErr)
+	}
+
+	fs, err := file.New(tmpDir)
+	if err != nil {
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create referrer file store", err)
+	}
+	fs.TarReproducible = true
+
+	layerDesc, err := fs.Add(ctx, layerFilename, opts.ArtifactType, layerPath)
+	if err != nil {
+		_ = fs.Close()
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add referrer layer", err)
+	}
+
+	subject := opts.Subject
+	packOpts := oras.PackManifestOptions{
+		Layers:  []ociv1.Descriptor{layerDesc},
+		Subject: &subject,
+	}
+	packOpts.ManifestAnnotations = make(map[string]string, len(opts.Annotations)+1)
+	for k, v := range opts.Annotations {
+		packOpts.ManifestAnnotations[k] = v
+	}
+	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
+
+	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1, opts.ArtifactType, packOpts)
+	if err != nil {
+		_ = fs.Close()
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack referrer manifest", err)
+	}
+
+	tag := strings.TrimPrefix(manifestDesc.Digest.String(), "sha256:")
+	if tagErr := fs.Tag(ctx, manifestDesc, tag); tagErr != nil {
+		_ = fs.Close()
+		_ = os.RemoveAll(tmpDir)
+		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag referrer manifest", tagErr)
+	}
+
+	return fs, tmpDir, manifestDesc, tag, nil
 }
 
 // copyFunc matches the signature of oras.Copy and is injected into
