@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"gopkg.in/yaml.v3"
 )
 
 func TestToValidationInput(t *testing.T) {
@@ -93,4 +94,88 @@ func TestToValidationInputNil(t *testing.T) {
 	if validation != nil {
 		t.Errorf("ToValidationInput(nil) = %v, want nil", validation)
 	}
+}
+
+// TestToValidationInputYAMLRoundTrip is the regression guard for the
+// orchestrator/validator wire-shape mismatch that silently dropped phase
+// constraints (issue #874). The validator runtime deserializes the
+// ConfigMap payload into *ValidationInput and looks up phase constraints
+// under ctx.ValidationInput.Config.Performance / Config.Deployment.
+//
+// This test exercises the exact path: recipe.RecipeResult →
+// ToValidationInput → yaml.Marshal → yaml.Unmarshal → constraint lookup,
+// and asserts both a performance and a deployment constraint survive the
+// round trip. A regression to marshaling recipe.Validation directly (which
+// inlines ValidationConfig) would land the phase fields at the YAML root
+// and fail this test.
+func TestToValidationInputYAMLRoundTrip(t *testing.T) {
+	rec := &recipe.RecipeResult{
+		APIVersion: "aicr.nvidia.com/v1",
+		Kind:       "RecipeResult",
+		Constraints: []recipe.Constraint{
+			{Name: "K8s.server.version", Value: ">= 1.32.4"},
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gpu-operator"},
+		},
+		Validation: &recipe.ValidationConfig{
+			Deployment: &recipe.ValidationPhase{
+				Constraints: []recipe.Constraint{
+					{Name: "Deployment.gpu-operator.version", Value: "580.126.20"},
+				},
+				Checks: []string{"gpu-operator-version"},
+			},
+			Performance: &recipe.ValidationPhase{
+				Constraints: []recipe.Constraint{
+					{Name: "nccl-all-reduce-bw-net", Value: ">= 300"},
+					{Name: "nccl-all-reduce-bw-nvls", Value: ">= 800"},
+				},
+				Checks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
+			},
+		},
+	}
+
+	data, err := yaml.Marshal(ToValidationInput(rec))
+	if err != nil {
+		t.Fatalf("yaml.Marshal() failed: %v", err)
+	}
+
+	var got ValidationInput
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("yaml.Unmarshal() failed: %v\npayload:\n%s", err, data)
+	}
+
+	// Deployment constraint must survive the round trip — the bug surfaced
+	// here as gpu-operator-version silently passing.
+	deploy := findConstraint(got.Config.Deployment, "Deployment.gpu-operator.version")
+	if deploy == nil {
+		t.Errorf("Deployment.gpu-operator.version constraint lost after YAML round trip\npayload:\n%s", data)
+	} else if deploy.Value != "580.126.20" {
+		t.Errorf("Deployment constraint value = %q, want %q", deploy.Value, "580.126.20")
+	}
+
+	// Performance constraints must survive — the bug surfaced here as
+	// nccl-all-reduce-bw-{net,nvls} silently skipping with "no
+	// <name> constraint in recipe".
+	for _, name := range []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"} {
+		c := findConstraint(got.Config.Performance, name)
+		if c == nil {
+			t.Errorf("%s constraint lost after YAML round trip\npayload:\n%s", name, data)
+		}
+	}
+}
+
+// findConstraint mirrors how validator runtime helpers look up phase
+// constraints — see validators/performance/nccl_all_reduce_bw.go and
+// validators/deployment/gpu_operator_version.go.
+func findConstraint(phase *ValidationPhase, name string) *recipe.Constraint {
+	if phase == nil {
+		return nil
+	}
+	for i := range phase.Constraints {
+		if phase.Constraints[i].Name == name {
+			return &phase.Constraints[i]
+		}
+	}
+	return nil
 }
