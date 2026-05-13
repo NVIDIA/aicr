@@ -21,6 +21,7 @@ import (
 	digestpkg "github.com/opencontainers/go-digest"
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
 )
@@ -111,7 +112,14 @@ func Push(ctx context.Context, opts PushOptions) (*PushResult, error) {
 		},
 	}
 
-	res, err := oci.PackageAndPush(ctx, cfg)
+	// Encode the network-bound contract on the public function itself
+	// (rather than trusting every caller to bound). EvidenceBundlePushTimeout
+	// matches the cap the current call site already imposes, so existing
+	// behavior is unchanged — but future callers that pass a longer-lived
+	// ctx still get an opinionated upper bound on the registry round-trip.
+	pushCtx, pushCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+	defer pushCancel()
+	res, err := oci.PackageAndPush(pushCtx, cfg)
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "package and push failed")
 	}
@@ -159,7 +167,11 @@ func AttachSigstoreBundleAsReferrer(ctx context.Context, opts AttachReferrerOpti
 		Size:      opts.MainArtifact.Size,
 	}
 
-	res, err := oci.PushReferrer(ctx, oci.ReferrerOptions{
+	// Self-bound for the same reason as Push above: encode the contract
+	// on the public function instead of trusting callers.
+	attachCtx, attachCancel := context.WithTimeout(ctx, defaults.EvidenceBundlePushTimeout)
+	defer attachCancel()
+	res, err := oci.PushReferrer(attachCtx, oci.ReferrerOptions{
 		Registry:     ref.Registry,
 		Repository:   ref.Repository,
 		PlainHTTP:    opts.PlainHTTP,
