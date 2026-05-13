@@ -49,12 +49,12 @@ func CheckAIServiceMetrics(ctx *validators.Context) error {
 // kube-prometheus-stack component namespace in the recipe and discovering
 // the Prometheus service via label selector. No hardcoded service names.
 func discoverPrometheusURL(ctx *validators.Context) (string, error) {
-	if ctx.Recipe == nil {
-		return "", errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
+	if ctx.ValidationInput == nil {
+		return "", errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
 
 	var namespace string
-	for _, ref := range ctx.Recipe.ComponentRefs {
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
 		if ref.Name == prometheusComponentName {
 			namespace = ref.Namespace
 			break

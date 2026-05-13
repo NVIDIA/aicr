@@ -191,14 +191,14 @@ func (d *Deployer) buildApplyConfig() *applybatchv1.JobApplyConfiguration {
 						WithTerminationMessagePolicy(corev1.TerminationMessageReadFile).
 						WithVolumeMounts(
 							applycorev1.VolumeMount().WithName("snapshot").WithMountPath("/data/snapshot").WithReadOnly(true),
-							applycorev1.VolumeMount().WithName("recipe").WithMountPath("/data/recipe").WithReadOnly(true),
+							applycorev1.VolumeMount().WithName("validation").WithMountPath("/data/validation").WithReadOnly(true),
 						),
 					).
 					WithVolumes(
 						applycorev1.Volume().WithName("snapshot").
 							WithConfigMap(applycorev1.ConfigMapVolumeSource().WithName(fmt.Sprintf("aicr-snapshot-%s", d.runID))),
-						applycorev1.Volume().WithName("recipe").
-							WithConfigMap(applycorev1.ConfigMapVolumeSource().WithName(fmt.Sprintf("aicr-recipe-%s", d.runID))),
+						applycorev1.Volume().WithName("validation").
+							WithConfigMap(applycorev1.ConfigMapVolumeSource().WithName(fmt.Sprintf("aicr-validation-%s", d.runID))),
 					),
 				),
 			),
@@ -220,7 +220,7 @@ func (d *Deployer) buildEnvApply() []*applycorev1.EnvVarApplyConfiguration {
 	env := make([]*applycorev1.EnvVarApplyConfiguration, 0, orchestratorEnvMax+len(d.entry.Env))
 	env = append(env,
 		applycorev1.EnvVar().WithName("AICR_SNAPSHOT_PATH").WithValue("/data/snapshot/snapshot.yaml"),
-		applycorev1.EnvVar().WithName("AICR_RECIPE_PATH").WithValue("/data/recipe/recipe.yaml"),
+		applycorev1.EnvVar().WithName("AICR_VALIDATION_PATH").WithValue("/data/validation/validation.yaml"),
 		applycorev1.EnvVar().WithName("AICR_VALIDATOR_NAME").WithValue(d.entry.Name),
 		applycorev1.EnvVar().WithName("AICR_VALIDATOR_PHASE").WithValue(d.entry.Phase),
 		applycorev1.EnvVar().WithName("AICR_RUN_ID").WithValue(d.runID),

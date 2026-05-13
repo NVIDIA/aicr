@@ -320,7 +320,10 @@ func runValidation(
 		validator.WithNodeSelector(cfg.nodeSelector),
 	)
 
-	results, err := v.ValidatePhases(ctx, cfg.phases, rec, snap)
+	// Convert recipe to validation for validators
+	validation := recipe.ToValidation(rec)
+
+	results, err := v.ValidatePhases(ctx, cfg.phases, validation, snap)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "validation failed", err)
 	}

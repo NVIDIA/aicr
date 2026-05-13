@@ -67,10 +67,10 @@ var (
 )
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
-// in the recipe's componentRefs exist and are healthy in the live cluster.
+// in the validation's componentRefs exist and are healthy in the live cluster.
 func checkExpectedResources(ctx *validators.Context) error {
-	if ctx.Recipe == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
+	if ctx.ValidationInput == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
@@ -78,7 +78,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 
 	var chainsawAsserts []chainsaw.ComponentAssert
 	var failures []string
-	enabledRefs := enabledComponentRefs(ctx.Recipe.ComponentRefs)
+	enabledRefs := enabledComponentRefs(ctx.ValidationInput.ComponentRefs)
 
 	failures = append(failures, verifyNamespacesActive(ctx, enabledRefs)...)
 

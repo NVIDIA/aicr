@@ -170,14 +170,14 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint, variant ncclVariant) (string, bool, error) {
 	slog.Info("Starting NCCL All Reduce bandwidth validation", "variant", string(variant))
 
-	// Skip unless the recipe targets a supported service + accelerator combination.
-	if ctx.Recipe == nil || ctx.Recipe.Criteria == nil {
-		slog.Info("Skipping NCCL All Reduce bandwidth validation: no recipe criteria")
+	// Skip unless the validation targets a supported service + accelerator combination.
+	if ctx.ValidationInput == nil {
+		slog.Info("Skipping NCCL All Reduce bandwidth validation: no validation")
 		return "skipped - requires Service + Accelerator", true, nil
 	}
 
-	service := ctx.Recipe.Criteria.Service
-	accelerator := ctx.Recipe.Criteria.Accelerator
+	service := ctx.ValidationInput.Criteria.Service
+	accelerator := ctx.ValidationInput.Criteria.Accelerator
 
 	supported := false
 	if byService, ok := supportedNCCLCombinations[variant]; ok {

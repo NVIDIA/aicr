@@ -32,15 +32,15 @@ func CheckPlatformHealth(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
-	if ctx.Recipe == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "recipe is not available")
+	if ctx.ValidationInput == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
 	}
 
 	var failures []string
 
 	// 1. Verify all expected namespaces are Active
 	seen := make(map[string]bool)
-	for _, ref := range ctx.Recipe.ComponentRefs {
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
 		if ref.Namespace != "" && !seen[ref.Namespace] {
 			seen[ref.Namespace] = true
 			ns, err := ctx.Clientset.CoreV1().Namespaces().Get(
@@ -57,7 +57,7 @@ func CheckPlatformHealth(ctx *validators.Context) error {
 	}
 
 	// 2. Verify all expectedResources are healthy
-	for _, ref := range ctx.Recipe.ComponentRefs {
+	for _, ref := range ctx.ValidationInput.ComponentRefs {
 		for _, er := range ref.ExpectedResources {
 			if err := helper.VerifyResource(ctx.Ctx, ctx.Clientset, er); err != nil {
 				failures = append(failures, fmt.Sprintf("%s %s/%s (%s): %s",

@@ -42,16 +42,16 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 )
 
-// checkReadiness evaluates top-level recipe constraints against the snapshot.
+// checkReadiness evaluates top-level validation constraints against the snapshot.
 // Returns an error if any constraint fails, nil if all pass or no constraints exist.
-func checkReadiness(rec *recipe.RecipeResult, snap *snapshotter.Snapshot) error {
-	if rec == nil || snap == nil || len(rec.Constraints) == 0 {
+func checkReadiness(validation *recipe.Validation, snap *snapshotter.Snapshot) error {
+	if validation == nil || snap == nil || len(validation.Constraints) == 0 {
 		return nil
 	}
 
-	slog.Info("readiness pre-flight", "constraints", len(rec.Constraints))
+	slog.Info("readiness pre-flight", "constraints", len(validation.Constraints))
 
-	for _, c := range rec.Constraints {
+	for _, c := range validation.Constraints {
 		result := constraints.Evaluate(c, snap)
 		if result.Error != nil {
 			slog.Warn("readiness constraint skipped", "name", c.Name, "error", result.Error)
@@ -93,7 +93,7 @@ type clusterState struct {
 // The caller must close stopCh and handle cleanup deferrals.
 func (v *Validator) prepareCluster(
 	ctx context.Context,
-	recipeResult *recipe.RecipeResult,
+	validation *recipe.Validation,
 	snap *snapshotter.Snapshot,
 ) (*clusterState, error) {
 
@@ -110,7 +110,7 @@ func (v *Validator) prepareCluster(
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to ensure RBAC", rbacErr)
 	}
 
-	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, recipeResult); cmErr != nil {
+	if cmErr := v.ensureDataConfigMaps(ctx, clientset, snap, validation); cmErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create data ConfigMaps", cmErr)
 	}
 
@@ -149,7 +149,7 @@ func (v *Validator) deferClusterCleanup(clientset kubernetes.Interface) {
 func (v *Validator) ValidatePhases(
 	ctx context.Context,
 	phases []Phase,
-	recipeResult *recipe.RecipeResult,
+	validation *recipe.Validation,
 	snap *snapshotter.Snapshot,
 ) ([]*PhaseResult, error) {
 
@@ -159,9 +159,9 @@ func (v *Validator) ValidatePhases(
 
 	slog.Info("running validation phases", "runID", v.RunID, "phases", phases)
 
-	// Pre-flight: evaluate top-level recipe constraints against snapshot.
+	// Pre-flight: evaluate top-level validation constraints against snapshot.
 	// Fails fast before deploying any Jobs if prerequisites aren't met.
-	if err := checkReadiness(recipeResult, snap); err != nil {
+	if err := checkReadiness(validation, snap); err != nil {
 		return nil, err
 	}
 
@@ -175,7 +175,7 @@ func (v *Validator) ValidatePhases(
 		return v.phasesSkipped(cat, phases, "skipped - no-cluster mode"), nil
 	}
 
-	cs, err := v.prepareCluster(ctx, recipeResult, snap)
+	cs, err := v.prepareCluster(ctx, validation, snap)
 	if err != nil {
 		return nil, err
 	}
@@ -200,7 +200,7 @@ func (v *Validator) ValidatePhases(
 			continue
 		}
 
-		pr, phaseErr := v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, recipeResult)
+		pr, phaseErr := v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validation)
 		if phaseErr != nil {
 			return results, phaseErr
 		}
@@ -219,7 +219,7 @@ func (v *Validator) ValidatePhases(
 func (v *Validator) ValidatePhase(
 	ctx context.Context,
 	phase Phase,
-	recipeResult *recipe.RecipeResult,
+	validation *recipe.Validation,
 	snap *snapshotter.Snapshot,
 ) (*PhaseResult, error) {
 
@@ -232,38 +232,38 @@ func (v *Validator) ValidatePhase(
 		return v.phaseSkipped(cat, phase, "skipped - no-cluster mode"), nil
 	}
 
-	cs, err := v.prepareCluster(ctx, recipeResult, snap)
+	cs, err := v.prepareCluster(ctx, validation, snap)
 	if err != nil {
 		return nil, err
 	}
 	defer close(cs.stopCh)
 	defer v.deferClusterCleanup(cs.clientset) //nolint:contextcheck // cleanup uses fresh context
 
-	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, recipeResult)
+	return v.runPhase(ctx, cs.clientset, cs.factory, cat, phase, validation)
 }
 
-// filterEntriesByRecipe returns only catalog entries that the recipe declares
-// for the given phase. If the recipe has no validation section or the phase
+// filterEntriesByValidation returns only catalog entries that the validation declares
+// for the given phase. If the validation has no phase configuration or the phase
 // has no checks declared, no entries are returned (skip the phase).
-// The recipe is the source of truth — only explicitly declared checks run.
-func filterEntriesByRecipe(entries []catalog.ValidatorEntry, phase Phase, recipeResult *recipe.RecipeResult) []catalog.ValidatorEntry {
-	if recipeResult == nil || recipeResult.Validation == nil {
+// The validation is the source of truth — only explicitly declared checks run.
+func filterEntriesByValidation(entries []catalog.ValidatorEntry, phase Phase, validation *recipe.Validation) []catalog.ValidatorEntry {
+	if validation == nil {
 		return nil
 	}
 
 	var phaseChecks []string
 	switch phase {
 	case PhaseDeployment:
-		if recipeResult.Validation.Deployment != nil {
-			phaseChecks = recipeResult.Validation.Deployment.Checks
+		if validation.Deployment != nil {
+			phaseChecks = validation.Deployment.Checks
 		}
 	case PhasePerformance:
-		if recipeResult.Validation.Performance != nil {
-			phaseChecks = recipeResult.Validation.Performance.Checks
+		if validation.Performance != nil {
+			phaseChecks = validation.Performance.Checks
 		}
 	case PhaseConformance:
-		if recipeResult.Validation.Conformance != nil {
-			phaseChecks = recipeResult.Validation.Conformance.Checks
+		if validation.Conformance != nil {
+			phaseChecks = validation.Conformance.Checks
 		}
 	}
 
@@ -297,16 +297,16 @@ func (v *Validator) runPhase(
 	factory informers.SharedInformerFactory,
 	cat *catalog.ValidatorCatalog,
 	phase Phase,
-	recipeResult *recipe.RecipeResult,
+	validation *recipe.Validation,
 ) (*PhaseResult, error) {
 
 	start := time.Now()
 	allEntries := cat.ForPhase(string(phase))
 
-	// Filter catalog entries by what the recipe declares.
-	// If the recipe has checks for this phase, only run those.
+	// Filter catalog entries by what the validation declares.
+	// If the validation has checks for this phase, only run those.
 	// If no checks are declared, run all catalog entries for the phase.
-	entries := filterEntriesByRecipe(allEntries, phase, recipeResult)
+	entries := filterEntriesByValidation(allEntries, phase, validation)
 	slog.Info("running validation phase", "phase", phase,
 		"catalog", len(allEntries), "selected", len(entries))
 
@@ -461,12 +461,12 @@ func (v *Validator) phaseSkipped(cat *catalog.ValidatorCatalog, phase Phase, rea
 	}
 }
 
-// ensureDataConfigMaps creates snapshot and recipe ConfigMaps for this run.
+// ensureDataConfigMaps creates snapshot and validation ConfigMaps for this run.
 func (v *Validator) ensureDataConfigMaps(
 	ctx context.Context,
 	clientset kubernetes.Interface,
 	snap *snapshotter.Snapshot,
-	recipeResult *recipe.RecipeResult,
+	validation *recipe.Validation,
 ) error {
 
 	snapshotYAML, err := yaml.Marshal(snap)
@@ -474,13 +474,13 @@ func (v *Validator) ensureDataConfigMaps(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot", err)
 	}
 
-	recipeYAML, err := yaml.Marshal(recipeResult)
+	validationYAML, err := yaml.Marshal(validation)
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize recipe", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize validation", err)
 	}
 
 	snapshotCMName := fmt.Sprintf("aicr-snapshot-%s", v.RunID)
-	recipeCMName := fmt.Sprintf("aicr-recipe-%s", v.RunID)
+	validationCMName := fmt.Sprintf("aicr-validation-%s", v.RunID)
 
 	for _, cm := range []struct {
 		name string
@@ -488,7 +488,7 @@ func (v *Validator) ensureDataConfigMaps(
 		data string
 	}{
 		{snapshotCMName, "snapshot.yaml", string(snapshotYAML)},
-		{recipeCMName, "recipe.yaml", string(recipeYAML)},
+		{validationCMName, "validation.yaml", string(validationYAML)},
 	} {
 		configMap := &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
@@ -522,11 +522,11 @@ func (v *Validator) ensureDataConfigMaps(
 	return nil
 }
 
-// cleanupDataConfigMaps removes snapshot and recipe ConfigMaps for this run.
+// cleanupDataConfigMaps removes snapshot and validation ConfigMaps for this run.
 func (v *Validator) cleanupDataConfigMaps(ctx context.Context, clientset kubernetes.Interface) {
 	for _, name := range []string{
 		fmt.Sprintf("aicr-snapshot-%s", v.RunID),
-		fmt.Sprintf("aicr-recipe-%s", v.RunID),
+		fmt.Sprintf("aicr-validation-%s", v.RunID),
 	} {
 		err := clientset.CoreV1().ConfigMaps(v.Namespace).Delete(ctx, name, metav1.DeleteOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {

@@ -241,8 +241,8 @@ func TestDeployJobEnvVars(t *testing.T) {
 	if envMap["AICR_SNAPSHOT_PATH"].Value != "/data/snapshot/snapshot.yaml" {
 		t.Errorf("AICR_SNAPSHOT_PATH = %q", envMap["AICR_SNAPSHOT_PATH"].Value)
 	}
-	if envMap["AICR_RECIPE_PATH"].Value != "/data/recipe/recipe.yaml" {
-		t.Errorf("AICR_RECIPE_PATH = %q", envMap["AICR_RECIPE_PATH"].Value)
+	if envMap["AICR_VALIDATION_PATH"].Value != "/data/validation/validation.yaml" {
+		t.Errorf("AICR_VALIDATION_PATH = %q", envMap["AICR_VALIDATION_PATH"].Value)
 	}
 	if envMap["AICR_VALIDATOR_NAME"].Value != "gpu-operator-health" {
 		t.Errorf("AICR_VALIDATOR_NAME = %q", envMap["AICR_VALIDATOR_NAME"].Value)
@@ -402,8 +402,8 @@ func TestDeployJobVolumes(t *testing.T) {
 	if volumes[0].Name != "snapshot" || volumes[0].ConfigMap.Name != "aicr-snapshot-run1" {
 		t.Errorf("snapshot volume = %v", volumes[0])
 	}
-	if volumes[1].Name != "recipe" || volumes[1].ConfigMap.Name != "aicr-recipe-run1" {
-		t.Errorf("recipe volume = %v", volumes[1])
+	if volumes[1].Name != "validation" || volumes[1].ConfigMap.Name != "aicr-validation-run1" {
+		t.Errorf("validation volume = %v", volumes[1])
 	}
 
 	mounts := job.Spec.Template.Spec.Containers[0].VolumeMounts

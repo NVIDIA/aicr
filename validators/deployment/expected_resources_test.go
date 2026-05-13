@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	appsv1 "k8s.io/api/apps/v1"
@@ -840,13 +841,15 @@ func newDeploymentTestContextWithDiscovery(
 	configureFakeDiscovery(t, clientset, dynamicObjects, extraRegistered, unregistered)
 	dynClient := newFakeDynamicClient(dynamicObjects, unregistered...)
 
+	rec := &recipe.RecipeResult{
+		ComponentRefs: refs,
+	}
+
 	return &validators.Context{
-		Ctx:           context.Background(),
-		Clientset:     clientset,
-		DynamicClient: dynClient,
-		Recipe: &recipe.RecipeResult{
-			ComponentRefs: refs,
-		},
+		Ctx:             context.Background(),
+		Clientset:       clientset,
+		DynamicClient:   dynClient,
+		ValidationInput: v1.ToValidationInput(rec),
 	}
 }
 

@@ -22,10 +22,10 @@ import (
 	"strings"
 	"time"
 
+	v1 "github.com/NVIDIA/aicr/pkg/api/validator/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	corev1 "k8s.io/api/core/v1"
@@ -54,8 +54,8 @@ type Context struct {
 	// Snapshot is the captured cluster state.
 	Snapshot *snapshotter.Snapshot
 
-	// Recipe is the recipe with validation configuration.
-	Recipe *recipe.RecipeResult
+	// ValidationInput is the validation specification (config + context).
+	ValidationInput *v1.ValidationInput
 
 	// Namespace is the validation namespace.
 	Namespace string
@@ -124,15 +124,12 @@ func LoadContext() (*Context, error) {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load snapshot", err)
 	}
 
-	// Load recipe
-	recipePath := envOrDefault("AICR_RECIPE_PATH", "/data/recipe/recipe.yaml")
-	var rec *recipe.RecipeResult
-	if _, statErr := os.Stat(recipePath); statErr == nil {
-		rec, err = serializer.FromFile[recipe.RecipeResult](recipePath)
-		if err != nil {
-			cancel()
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load recipe", err)
-		}
+	// Load validation
+	validationPath := envOrDefault("AICR_VALIDATION_PATH", "/data/validation/validation.yaml")
+	validation, err := serializer.FromFile[v1.ValidationInput](validationPath)
+	if err != nil {
+		cancel()
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validation", err)
 	}
 
 	// Parse optional scheduling overrides for inner workloads.
@@ -148,16 +145,16 @@ func LoadContext() (*Context, error) {
 	}
 
 	return &Context{
-		Ctx:           ctx,
-		Cancel:        cancel,
-		Clientset:     clientset,
-		RESTConfig:    config,
-		DynamicClient: dynClient,
-		Snapshot:      snap,
-		Recipe:        rec,
-		Namespace:     namespace,
-		NodeSelector:  nodeSelector,
-		Tolerations:   tolerations,
+		Ctx:             ctx,
+		Cancel:          cancel,
+		Clientset:       clientset,
+		RESTConfig:      config,
+		DynamicClient:   dynClient,
+		Snapshot:        snap,
+		ValidationInput: validation,
+		Namespace:       namespace,
+		NodeSelector:    nodeSelector,
+		Tolerations:     tolerations,
 	}, nil
 }
 

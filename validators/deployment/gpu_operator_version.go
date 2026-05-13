@@ -65,12 +65,12 @@ func checkGPUOperatorVersion(ctx *validators.Context) error {
 	return nil
 }
 
-// findDeploymentConstraint looks up a constraint by name in the recipe's deployment phase.
+// findDeploymentConstraint looks up a constraint by name in the validation's deployment phase.
 func findDeploymentConstraint(ctx *validators.Context, name string) (string, bool) {
-	if ctx.Recipe == nil || ctx.Recipe.Validation == nil || ctx.Recipe.Validation.Deployment == nil {
+	if ctx.ValidationInput == nil || ctx.ValidationInput.Config.Deployment == nil {
 		return "", false
 	}
-	for _, c := range ctx.Recipe.Validation.Deployment.Constraints {
+	for _, c := range ctx.ValidationInput.Config.Deployment.Constraints {
 		if c.Name == name {
 			return c.Value, true
 		}
