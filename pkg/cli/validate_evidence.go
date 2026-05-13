@@ -25,6 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
+	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -49,14 +50,26 @@ type recipeEvidenceConfig struct {
 	PlainHTTP   bool
 	InsecureTLS bool
 
-	// OIDCToken is the resolved Sigstore identity token for keyless
-	// signing. Populated by the Action body via
-	// bundleattest.ResolveOIDCToken before runValidation starts; empty
-	// when Push is unset (no signing needed). Carried on the config
-	// struct rather than re-resolved at sign time so an interactive or
-	// device-code flow prompts the operator up front, before validation
-	// work begins.
-	OIDCToken string
+	// OIDCResolve carries the resolve-time inputs (flag values and
+	// ambient env captures) needed to obtain a Sigstore identity token
+	// at sign time. The token itself is resolved adjacent to SignBundle
+	// — not up front — because Fulcio binds the token to a fresh nonce
+	// at issue, and a 3+ minute validation run between resolve and sign
+	// invalidates a pre-resolved token. The CI fail-fast story is
+	// preserved by validating Push reachability up front in
+	// emitRecipeEvidence; only the OIDC handshake is deferred.
+	OIDCResolve OIDCResolveInputs
+}
+
+// OIDCResolveInputs is the resolve-time slice of recipeEvidenceConfig.
+// Captured into cfg by buildRecipeEvidenceConfig from the urfave/cli
+// command + the process env so the deferred resolution at sign time
+// doesn't need to re-touch the cli object.
+type OIDCResolveInputs struct {
+	IdentityToken string
+	AmbientURL    string
+	AmbientToken  string
+	DeviceFlow    bool
 }
 
 // buildRecipeEvidenceConfig parses the --emit-attestation flag family with
@@ -78,6 +91,12 @@ func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolv
 		Push:        stringFlagOrConfig(cmd, "push", att.Push),
 		PlainHTTP:   boolFlagOrConfig(cmd, "plain-http", att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, "insecure-tls", att.InsecureTLS),
+		OIDCResolve: OIDCResolveInputs{
+			IdentityToken: cmd.String("identity-token"),
+			AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
+			AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
+			DeviceFlow:    cmd.Bool("oidc-device-flow"),
+		},
 	}
 }
 
@@ -198,10 +217,13 @@ func emitRecipeEvidence(
 // is absent, returns a zero-valued outcome so the caller writes a
 // pre-publish pointer.
 //
-// cfg.OIDCToken is populated by the Action body via
-// bundleattest.ResolveOIDCToken so token acquisition (which may prompt
-// a browser or device-code flow) happens up front, not after validation
-// already ran.
+// The OIDC token is resolved here, adjacent to SignBundle, rather than
+// at command entry. Fulcio binds the token to a fresh nonce at issue
+// time; resolving up front and then running 3+ minutes of validation
+// invalidates the token before sign attempts to use it. The deferred
+// resolution also means an interactive browser or device-code prompt
+// arrives at sign time (after validation completes); the log line
+// below softens the surprise.
 func signAndPushBundle(
 	ctx context.Context,
 	bundle *attestation.Bundle,
@@ -212,9 +234,24 @@ func signAndPushBundle(
 		return signPushOutcome{}, nil
 	}
 
+	slog.Info("resolving OIDC token for cosign keyless signing (may prompt)",
+		"identityTokenSet", cfg.OIDCResolve.IdentityToken != "",
+		"ambient", cfg.OIDCResolve.AmbientURL != "",
+		"deviceFlow", cfg.OIDCResolve.DeviceFlow)
+	token, tokenErr := bundleattest.ResolveOIDCToken(ctx, bundleattest.ResolveOptions{
+		IdentityToken: cfg.OIDCResolve.IdentityToken,
+		AmbientURL:    cfg.OIDCResolve.AmbientURL,
+		AmbientToken:  cfg.OIDCResolve.AmbientToken,
+		DeviceFlow:    cfg.OIDCResolve.DeviceFlow,
+		PromptWriter:  os.Stderr,
+	})
+	if tokenErr != nil {
+		return signPushOutcome{}, tokenErr
+	}
+
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
 	defer signCancel()
-	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(cfg.OIDCToken))
+	signRes, err := attestation.SignBundle(signCtx, bundle, attestation.NewKeylessSigner(token))
 	if err != nil {
 		return signPushOutcome{}, err
 	}

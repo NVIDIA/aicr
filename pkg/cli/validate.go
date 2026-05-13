@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/evidence/cncf"
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
@@ -731,25 +729,14 @@ Run validation without failing on check errors (informational mode):
 			}
 
 			evidenceCfg := buildRecipeEvidenceConfig(cmd, resolved)
-			// Resolve the Sigstore identity token up front (only when push
-			// is requested) so an interactive browser or device-code flow
-			// prompts the operator before the long-running validation
-			// begins. Uses the same precedence chain as `aicr bundle
-			// --attest`: --identity-token > ambient GitHub Actions >
-			// --oidc-device-flow > interactive browser.
-			if evidenceCfg != nil && evidenceCfg.Push != "" {
-				token, tokenErr := bundleattest.ResolveOIDCToken(ctx, bundleattest.ResolveOptions{
-					IdentityToken: cmd.String("identity-token"),
-					AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),
-					AmbientToken:  os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN"),
-					DeviceFlow:    cmd.Bool("oidc-device-flow"),
-					PromptWriter:  os.Stderr,
-				})
-				if tokenErr != nil {
-					return tokenErr
-				}
-				evidenceCfg.OIDCToken = token
-			}
+			// The OIDC identity token is *not* resolved here. Fulcio binds
+			// the token to a fresh nonce at issue time and a multi-minute
+			// validation run between resolve and sign invalidates it
+			// (manifests as Fulcio 400 'error processing the identity
+			// token'). The token is fetched adjacent to SignBundle in
+			// signAndPushBundle instead; evidenceCfg.OIDCResolve captures
+			// the resolve-time *inputs* (flag values, ambient env) so the
+			// deferred call has everything it needs.
 
 			return runValidation(ctx, rec, snap, validationConfig{
 				phases:              phases,
