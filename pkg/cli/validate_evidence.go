@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bom"
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -423,7 +424,7 @@ func observedImagesFromSnapshot(snap *snapshotter.Snapshot) []string {
 			continue
 		}
 		for _, st := range m.Subtypes {
-			if st.Name != "image" {
+			if st.Name != k8scollector.SubtypeImage {
 				continue
 			}
 			for name, reading := range st.Data {

@@ -34,7 +34,7 @@ import (
 )
 
 const (
-	imageSubtypeName = "image"
+	imageSubtypeName = SubtypeImage
 	testNodeName     = "test-node"
 )
 
