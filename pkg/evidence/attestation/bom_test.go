@@ -276,6 +276,12 @@ func TestLoadOrGenerateBOM_AutoFromRecipe(t *testing.T) {
 	}
 }
 
+func TestBuildAutoBOM_NilRecipeReturnsError(t *testing.T) {
+	if _, err := BuildAutoBOM(nil, nil, nil, "v0"); err == nil {
+		t.Fatalf("expected error for nil recipe")
+	}
+}
+
 func TestBuildAutoBOM_IncludesRecipeAndValidatorComponents(t *testing.T) {
 	rec := &recipe.RecipeResult{
 		Criteria: &recipe.Criteria{

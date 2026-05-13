@@ -220,7 +220,14 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts EmitOptions) (emitOut
 	}
 
 	logOIDCResolveMode(opts.OIDCResolve)
-	token, tokenErr := bundleattest.ResolveOIDCToken(ctx, opts.OIDCResolve)
+	// OIDCAuthTimeout caps interactive browser / device-code flows so a
+	// stalled user does not hold the parent (sign) context open
+	// indefinitely; pre-fetched and ambient paths complete well below this
+	// bound, so the cap only kicks in on the genuinely interactive paths
+	// that match defaults.OIDCAuthTimeout's intent.
+	resolveCtx, resolveCancel := context.WithTimeout(ctx, defaults.OIDCAuthTimeout)
+	token, tokenErr := bundleattest.ResolveOIDCToken(resolveCtx, opts.OIDCResolve)
+	resolveCancel()
 	if tokenErr != nil {
 		return emitOutcome{}, tokenErr
 	}

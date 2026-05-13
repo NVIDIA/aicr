@@ -172,7 +172,7 @@ func Package(ctx context.Context, opts PackageOptions) (retResult *PackageResult
 	}
 
 	// Determine the directory to package from
-	packageFromDir, cleanup, err := preparePushDir(opts.SourceDir, opts.SubDir)
+	packageFromDir, cleanup, err := preparePushDir(ctx, opts.SourceDir, opts.SubDir)
 	if err != nil {
 		return nil, err
 	}
@@ -641,8 +641,10 @@ func jitterDuration(d time.Duration) time.Duration {
 // resulting OCI artifact preserves the same path structure.
 //
 // Returns the directory to push from and a cleanup function (always
-// non-nil now that the no-temp-dir shortcut is gone).
-func preparePushDir(sourceDir, subDir string) (string, func(), error) {
+// non-nil now that the no-temp-dir shortcut is gone). ctx cancels the
+// directory walk so a parent timeout (push timeout, server shutdown)
+// terminates staging work without orphaning the temp dir.
+func preparePushDir(ctx context.Context, sourceDir, subDir string) (string, func(), error) {
 	tempDir, err := os.MkdirTemp("", "oras-push-*")
 	if err != nil {
 		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp directory", err)
@@ -671,7 +673,7 @@ func preparePushDir(sourceDir, subDir string) (string, func(), error) {
 		srcPath = filepath.Join(sourceDir, subDir)
 		dstPath = filepath.Join(tempDir, subDir)
 	}
-	if err := hardLinkDir(srcPath, dstPath); err != nil {
+	if err := hardLinkDir(ctx, srcPath, dstPath); err != nil {
 		// $TMPDIR is often on a different filesystem from sourceDir
 		// (tmpfs, overlayfs in containers, NFS-mounted workspaces),
 		// in which case os.Link returns EXDEV. Fall back to a full
@@ -680,7 +682,7 @@ func preparePushDir(sourceDir, subDir string) (string, func(), error) {
 		// "annotation as filename" leak the no-shortcut refactor was
 		// meant to prevent is still avoided.
 		if stderrors.Is(err, syscall.EXDEV) {
-			if copyErr := copyDir(srcPath, dstPath); copyErr != nil {
+			if copyErr := copyDir(ctx, srcPath, dstPath); copyErr != nil {
 				cleanup()
 				return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to copy files across filesystems", copyErr)
 			}
@@ -742,8 +744,12 @@ func createAuthClientForHost(host string, plainHTTP, insecureTLS bool) (*auth.Cl
 //
 // Note: Hard links may not work on Windows for files on different volumes
 // or filesystems that don't support them. This function is primarily
-// intended for Linux/container environments.
-func hardLinkDir(src, dst string) error {
+// intended for Linux/container environments. ctx is checked on entry
+// and per directory entry so a large tree's walk respects cancellation.
+func hardLinkDir(ctx context.Context, src, dst string) error {
+	if err := ctx.Err(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "hard link walk canceled", err)
+	}
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
@@ -759,11 +765,14 @@ func hardLinkDir(src, dst string) error {
 	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return apperrors.Wrap(apperrors.ErrCodeUnavailable, "hard link walk canceled", err)
+		}
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
 		if entry.IsDir() {
-			if err := hardLinkDir(srcPath, dstPath); err != nil {
+			if err := hardLinkDir(ctx, srcPath, dstPath); err != nil {
 				return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to hard link subdirectory", err)
 			}
 		} else {
@@ -780,8 +789,14 @@ func hardLinkDir(src, dst string) error {
 // require src and dst to share an inode space (same filesystem); when
 // $TMPDIR is on a different mount (tmpfs, overlay, NFS), os.Link
 // returns EXDEV and we fall back to a full byte copy. Streams via
-// io.Copy so multi-GB bundles don't materialize in memory.
-func copyDir(src, dst string) error {
+// io.Copy so multi-GB bundles don't materialize in memory. ctx is
+// checked per directory entry; a canceled walk returns
+// ErrCodeUnavailable so a parent timeout can short-circuit a large
+// fallback copy.
+func copyDir(ctx context.Context, src, dst string) error {
+	if err := ctx.Err(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy walk canceled", err)
+	}
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source directory", err)
@@ -797,16 +812,19 @@ func copyDir(src, dst string) error {
 	}
 
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy walk canceled", err)
+		}
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
 		if entry.IsDir() {
-			if err := copyDir(srcPath, dstPath); err != nil {
+			if err := copyDir(ctx, srcPath, dstPath); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := copyFile(srcPath, dstPath); err != nil {
+		if err := copyFile(ctx, srcPath, dstPath); err != nil {
 			return err
 		}
 	}
@@ -816,7 +834,13 @@ func copyDir(src, dst string) error {
 
 // copyFile streams src → dst, preserving the source mode and capturing
 // close errors on the writable handle so flush failures aren't lost.
-func copyFile(src, dst string) (retErr error) {
+// ctx is checked on entry only; in-flight io.Copy does not poll the
+// context — a single file's copy is bounded by its own size, not by
+// the walk duration.
+func copyFile(ctx context.Context, src, dst string) (retErr error) {
+	if err := ctx.Err(); err != nil {
+		return apperrors.Wrap(apperrors.ErrCodeUnavailable, "copy canceled", err)
+	}
 	info, err := os.Stat(src)
 	if err != nil {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stat source file", err)

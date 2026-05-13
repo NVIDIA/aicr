@@ -70,6 +70,9 @@ func readBOMFile(bomPath string) ([]byte, error) {
 // collector strips them for mirror stability; a full-ref BOM still
 // requires the --bom path.
 func BuildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
+	if rec == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "recipe is required for auto BOM")
+	}
 	results := make([]bom.ComponentResult, 0, len(rec.ComponentRefs)+1)
 	for _, c := range rec.ComponentRefs {
 		if !c.IsEnabled() {
