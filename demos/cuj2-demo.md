@@ -42,8 +42,8 @@
   │    ├── gpu-operator/             (GPU driver, device-plugin, DCGM)     │
   │    ├── nvidia-dra-driver-gpu/    (Dynamic Resource Allocation)         │
   │    ├── kai-scheduler/            (gang scheduling)                     │
-  │    ├── kgateway-crds/            (Gateway API + inference CRDs)        │
-  │    ├── kgateway/                 (inference gateway controller)        │
+  │    ├── agentgateway-crds/        (Gateway API + inference CRDs)        │
+  │    ├── agentgateway/             (inference gateway controller)        │
   │    ├── nvsentinel/               (security/compliance)                 │
   │    ├── nodewright-operator/         (node configuration)                  │
   │    ├── nodewright-customizations/   (H100 tuning)                         │
@@ -60,13 +60,13 @@
   │  $ cd bundle && ./deploy.sh                                            │
   │                                                                        │
   │  cert-manager ──▶ kube-prometheus-stack ──▶ gpu-operator ──▶           │
-  │  kai-scheduler ──▶ kgateway ──▶ nvidia-dra-driver ──▶                  │
+  │  kai-scheduler ──▶ agentgateway ──▶ nvidia-dra-driver ──▶              │
   │  dynamo-platform ──▶ nodewright ──▶ nvsentinel ──▶ ...                 │
   │                                                                        │
   │  Result: Fully configured GPU cluster                                  │
   │    • 8x H100 GPUs advertised via DRA                                   │
   │    • Gang scheduling (KAI Scheduler)                                   │
-  │    • Inference gateway (kgateway)                                      │
+  │    • Inference gateway (agentgateway)                                  │
   │    • GPU metrics (DCGM → Prometheus → HPA)                             │
   │    • Dynamo inference platform                                         │
   └────────────────────────────────────────────────────────────────────────┘
@@ -114,8 +114,8 @@
 │  └── aws-efa                        │  └── aws-efa                        │
 │      │                              │      │                              │
 │  eks-training.yaml                  │  eks-inference.yaml                 │
-│  (no new components)                │  ├── kgateway-crds          ◀── NEW │
-│      │                              │  └── kgateway               ◀── NEW │
+│  (no new components)                │  ├── agentgateway-crds      ◀── NEW │
+│      │                              │  └── agentgateway           ◀── NEW │
 │      │                              │      │                              │
 │  h100-eks-training.yaml             │  h100-eks-inference.yaml            │
 │  ├── gpu-operator (CDI, gdrcopy)    │  └── nodewright-customizations         │
@@ -130,7 +130,8 @@
 │                                     │  └── dynamo-platform         ◀─ NEW │
 │                                     │                                     │
 ├─────────────────────────────────────┼─────────────────────────────────────┤
-│  Unique: kubeflow-trainer           │  Unique: kgateway-crds, kgateway,   │
+│  Unique: kubeflow-trainer           │  Unique: agentgateway-crds,         │
+│                                     │          agentgateway,              │
 │                                     │    dynamo-crds, dynamo-platform     │
 ├─────────────────────────────────────┴─────────────────────────────────────┤
 │  Shared (base + eks): cert-manager, kube-prometheus-stack, gpu-operator,  │
@@ -253,7 +254,7 @@ http://127.0.0.1:9090/chat.html
 │   │                            │   toolkit, DCGM, validator)              │         │
 │ 4 │ accelerator_metrics        │ gpu-operator (DCGM exporter)             │ base    │
 │ 5 │ ai_service_metrics         │ kube-prometheus-stack, prometheus-adapter│ base    │
-│ 6 │ ai_inference               │ kgateway-crds, kgateway                  │ eks-inf │
+│ 6 │ ai_inference               │ agentgateway-crds, agentgateway          │ eks-inf │
 │ 7 │ robust_controller          │ dynamo-crds, dynamo-platform             │ dynamo  │
 │ 8 │ pod_autoscaling            │ prometheus-adapter + HPA                 │ base    │
 │ 9 │ cluster_autoscaling        │ EKS Auto Scaling Group (ASG)             │ infra   │
@@ -263,7 +264,7 @@ http://127.0.0.1:9090/chat.html
 │    DRA, gang scheduling, secure access, accelerator metrics,                        │
 │    AI service metrics, pod autoscaling                                              │
 │                                                                                     │
-│  eks-inference layer (+1):  inference gateway (kgateway)                            │
+│  eks-inference layer (+1):  inference gateway (agentgateway)                        │
 │  dynamo layer (+1):         robust controller (Dynamo operator)                     │
 │  infra layer (+1):          cluster autoscaling (EKS ASG)                           │
 │                                                                                     │

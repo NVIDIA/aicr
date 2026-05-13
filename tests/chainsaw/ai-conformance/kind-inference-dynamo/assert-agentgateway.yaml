@@ -12,22 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# kgateway Helm values
-# Gateway API and Inference Gateway v1.0.0 conformant implementation.
-# Satisfies CNCF AI Conformance Advanced Ingress for AI/ML Inference requirement.
-# Provides model-aware routing, weighted traffic splitting, and header-based routing.
-
-# Override release name prefix to avoid aicr-stack- prefix
-fullnameOverride: kgateway
-
-resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 256Mi
-
-# Enable Gateway API Inference Extension for model-aware routing
-inferenceExtension:
-  enabled: true
+# Assert agentgateway controller is available on the kind inference + Dynamo stack.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentgateway
+  namespace: agentgateway-system
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-gateway
+  namespace: agentgateway-system
+status:
+  (conditions[?type == 'Available']):
+    - status: "True"

@@ -12,16 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Assert kgateway controller is available.
-# fullnameOverride: kgateway (from values.yaml)
-# Chart: kgateway v2.0.0 (oci://cr.kgateway.dev/kgateway-dev/charts)
+# Assert agentgateway controller is available.
+# fullnameOverride: agentgateway (from values.yaml)
+# Chart: agentgateway v2.2.1 (oci://cr.agentgateway.dev/charts)
 # Satisfies CNCF AI Conformance Advanced Ingress for AI/ML Inference.
-# Implements Gateway API + Inference Extension for model-aware routing.
+# Implements Gateway API + Inference Extension for InferencePool routing.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: kgateway
-  namespace: kgateway-system
+  name: agentgateway
+  namespace: agentgateway-system
 status:
   (conditions[?type == 'Available']):
     - status: "True"
@@ -31,7 +31,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: inference-gateway
-  namespace: kgateway-system
+  namespace: agentgateway-system
 status:
   (conditions[?type == 'Available']):
     - status: "True"

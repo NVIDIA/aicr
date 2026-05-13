@@ -14,9 +14,9 @@
 
 # Gateway API Inference Extension CRDs (v1.3.0)
 # Source: https://github.com/kubernetes-sigs/gateway-api-inference-extension/releases/download/v1.3.0/manifests.yaml
-# Required by kgateway for InferencePool and InferenceModel resources.
+# Required by agentgateway for InferencePool and InferenceObjective resources.
 #
-# These CRDs are not included in the kgateway Helm chart and must
+# These CRDs are not included in the agentgateway-crds Helm chart and must
 # be installed separately. Vendored here for fully automated deployment.
 #
 # aicr/skip-hook-validation: "true"

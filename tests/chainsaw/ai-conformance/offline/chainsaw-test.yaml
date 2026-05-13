@@ -90,7 +90,7 @@ spec:
                 aws-efa cert-manager \
                 dynamo-platform grove gpu-operator \
                 k8s-ephemeral-storage-metrics kai-scheduler \
-                kgateway kgateway-crds kube-prometheus-stack \
+                agentgateway agentgateway-crds kube-prometheus-stack \
                 nvidia-dra-driver-gpu nvsentinel prometheus-adapter \
                 nodewright-customizations nodewright-operator; do
                 match=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-"${component}" 2>/dev/null | head -1)

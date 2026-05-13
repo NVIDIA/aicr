@@ -40,7 +40,7 @@ spec:
 
     # ── CRDs ───────────────────────────────────────────────────────────
     - name: assert-crds
-      description: Verify critical CRDs are installed (kgateway, dynamo, GPU operator, cert-manager).
+      description: Verify critical CRDs are installed (agentgateway, dynamo, GPU operator, cert-manager).
       timeouts:
         assert: 120s
       try:
@@ -70,12 +70,12 @@ spec:
         - assert:
             file: ../kind-common/assert-monitoring.yaml
 
-    # ── kgateway ───────────────────────────────────────────────────────
-    - name: assert-kgateway
-      description: Verify kgateway controller is available.
+    # ── agentgateway ───────────────────────────────────────────────────
+    - name: assert-agentgateway
+      description: Verify agentgateway controller is available.
       try:
         - assert:
-            file: assert-kgateway.yaml
+            file: assert-agentgateway.yaml
 
     # ── Skyhook ────────────────────────────────────────────────────────
     - name: assert-skyhook

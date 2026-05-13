@@ -59,7 +59,7 @@ var requirements = map[string]requirementMeta{
 	},
 	featureInferenceGateway: {
 		RequirementID: "ai_inference",
-		Title:         "Inference API Gateway (kgateway)",
+		Title:         "Inference API Gateway (agentgateway)",
 		Description:   "Demonstrates that the cluster supports Kubernetes Gateway API for AI/ML inference routing with an operational GatewayClass and Gateway.",
 		File:          "inference-gateway.md",
 	},

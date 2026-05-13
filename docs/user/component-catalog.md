@@ -27,8 +27,8 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **kai-scheduler** | DRA-aware gang scheduler with hierarchical queues and topology-aware placement. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
 | **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with prefix-cache-aware routing and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
-| **kgateway-crds** | Custom Resource Definitions for kgateway (Kubernetes Gateway API implementation). | [kgateway](https://github.com/kgateway-dev/kgateway) |
-| **kgateway** | Kubernetes Gateway API implementation. Provides model-aware ingress routing for inference workloads. | [kgateway](https://github.com/kgateway-dev/kgateway) |
+| **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
+| **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 | **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
@@ -41,7 +41,7 @@ Not every component appears in every recipe. The recipe engine selects component
 
 - **Base components** (cert-manager, kube-prometheus-stack) appear in most recipes.
 - **Cloud-specific components** (aws-efa, aws-ebs-csi-driver) are added when the service matches.
-- **Intent-specific components** (kgateway, kgateway-crds) are added based on workload intent (e.g., inference recipes include the inference gateway).
+- **Intent-specific components** (agentgateway, agentgateway-crds) are added based on workload intent (e.g., inference recipes include the inference gateway).
 - **Platform-specific components** (slinky-slurm-operator, kubeflow-trainer, dynamo-platform) are added when the recipe selects a matching `--platform`.
 - **Accelerator/OS-specific tuning** (nodewright-customizations, nvidia-dra-driver-gpu) varies by hardware and OS combination.
 

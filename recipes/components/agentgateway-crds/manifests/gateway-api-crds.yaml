@@ -1,8 +1,8 @@
 # Standard Kubernetes Gateway API CRDs (v1.2.1)
 # Source: https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml
-# Required by kgateway for Gateway, HTTPRoute, and GRPCRoute resources.
+# Required by agentgateway for Gateway, HTTPRoute, and GRPCRoute resources.
 #
-# These CRDs are not included in the kgateway-crds Helm chart and must
+# These CRDs are not included in the agentgateway-crds Helm chart and must
 # be installed separately. Vendored here for fully automated deployment.
 #
 # aicr/skip-hook-validation: "true"

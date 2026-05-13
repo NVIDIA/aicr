@@ -16,7 +16,7 @@
 #
 # Validates that `aicr recipe --service eks --accelerator h100 --intent inference
 # --os ubuntu --platform dynamo` produces a valid recipe with correct criteria,
-# inference-specific components (kgateway, DRA driver, KAI scheduler, Dynamo),
+# inference-specific components (agentgateway, DRA driver, KAI scheduler, Dynamo),
 # and standard GPU stack components.
 kind: RecipeResult
 apiVersion: aicr.nvidia.com/v1alpha1
@@ -36,6 +36,8 @@ constraints:
   - name: OS.sysctl./proc/sys/kernel/osrelease
     value: '>= 6.8'
 componentRefs: ## alphabetically sorted
+  - name: agentgateway
+  - name: agentgateway-crds
   - name: aws-ebs-csi-driver
   - name: aws-efa
   - name: cert-manager
@@ -44,8 +46,6 @@ componentRefs: ## alphabetically sorted
   - name: grove
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler
-  - name: kgateway
-  - name: kgateway-crds
   - name: kube-prometheus-stack
   - name: nfd
   - name: nodewright-customizations
@@ -54,12 +54,12 @@ componentRefs: ## alphabetically sorted
   - name: nvsentinel
   - name: prometheus-adapter
 deploymentOrder:
+  - agentgateway-crds
   - aws-ebs-csi-driver
   - aws-efa
   - cert-manager
+  - agentgateway
   - grove
-  - kgateway-crds
-  - kgateway
   - kube-prometheus-stack
   - k8s-ephemeral-storage-metrics
   - nfd

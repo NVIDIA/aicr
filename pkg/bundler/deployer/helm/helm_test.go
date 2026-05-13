@@ -1428,14 +1428,14 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 			}{Version: "v0.1.0"},
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "cert-manager", Namespace: "cert-manager", Chart: "cert-manager", Version: "v1.17.2", Source: "https://charts.jetstack.io"},
-				{Name: "kgateway", Namespace: "kgateway-system", Chart: "kgateway", Version: "v0.1.0", Source: "https://example.invalid/charts"},
+				{Name: "agentgateway", Namespace: "agentgateway-system", Chart: "agentgateway", Version: "v0.1.0", Source: "https://example.invalid/charts"},
 				{Name: "nodewright-operator", Namespace: "skyhook", Chart: "nodewright-operator", Version: "v0.1.0", Source: "https://example.invalid/charts"},
 			},
-			DeploymentOrder: []string{"cert-manager", "kgateway", "nodewright-operator"},
+			DeploymentOrder: []string{"cert-manager", "agentgateway", "nodewright-operator"},
 		},
 		ComponentValues: map[string]map[string]any{
 			"cert-manager":        {},
-			"kgateway":            {},
+			"agentgateway":        {},
 			"nodewright-operator": {},
 		},
 		Version: "v1.0.0",
@@ -1449,7 +1449,7 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
         snippet=$(sed -n '/^skip_preflight_for_release()/,/^}/p' "$UNDEPLOY")
         eval "$snippet"
         skip_preflight_for_release "nodewright-operator" && echo "skip:nodewright-operator"
-        skip_preflight_for_release "kgateway" && echo "skip:kgateway"
+        skip_preflight_for_release "agentgateway" && echo "skip:agentgateway"
         if skip_preflight_for_release "cert-manager"; then
             echo "unexpected:cert-manager"
             exit 1
@@ -1470,7 +1470,7 @@ func TestUndeployScript_PreflightSkipListCoversManifestDeletedReleases(t *testin
 	}
 
 	out := stdout.String()
-	for _, want := range []string{"skip:nodewright-operator", "skip:kgateway", "check:cert-manager"} {
+	for _, want := range []string{"skip:nodewright-operator", "skip:agentgateway", "check:cert-manager"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in output; stdout=%q stderr=%q", want, out, stderr.String())
 		}

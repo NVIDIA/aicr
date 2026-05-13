@@ -109,7 +109,7 @@ validators:
     env: []
   - name: inference-gateway
     phase: conformance
-    description: "Verify inference gateway (kgateway) is operational"
+    description: "Verify inference gateway (agentgateway) is operational"
     image: ghcr.io/nvidia/aicr-validators/conformance:latest
     timeout: 5m
     args: ["inference-gateway"]

@@ -248,7 +248,7 @@ extra_crds_for_release() {
 # deleted from manifests before the controller is uninstalled.
 skip_preflight_for_release() {
   case "$1" in
-    nodewright-operator|kgateway) return 0 ;;
+    nodewright-operator|agentgateway) return 0 ;;
     *) return 1 ;;
   esac
 }

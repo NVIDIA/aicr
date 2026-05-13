@@ -9,7 +9,7 @@ Chainsaw suites validating AI conformance flows across environments:
 - `common/` — assertions shared by `cluster/` and both Kind GPU suites
 - `kind-common/` — assertions shared only by Kind GPU suites
 
-The `cluster/` suite validates the NVIDIA AI-conformance inference stack: KAI Scheduler (GPU scheduling), kgateway with Gateway API Inference Extension (inference routing), and the NVIDIA Dynamo serving platform.
+The `cluster/` suite validates the NVIDIA AI-conformance inference stack: KAI Scheduler (GPU scheduling), agentgateway with Gateway API Inference Extension (inference routing), and the NVIDIA Dynamo serving platform.
 
 ## Cluster Inference Recipe
 
@@ -56,8 +56,8 @@ The Kind GPU workflows use these leaf recipes instead:
 | prometheus-adapter | monitoring | Helm | Deployment |
 | aws-ebs-csi-driver | kube-system | Helm | **Disabled by default** (EKS managed addon) |
 | aws-efa | kube-system | Helm | Device plugin DaemonSet |
-| kgateway-crds | kgateway-system | Helm | CRDs only (Gateway API + Inference Extension) |
-| kgateway | kgateway-system | Helm | Controller Deployment |
+| agentgateway-crds | agentgateway-system | Helm | CRDs only (Gateway API + Inference Extension) |
+| agentgateway | agentgateway-system | Helm | Controller Deployment |
 | nodewright-customizations | skyhook | Manifest | No workloads (NodeConfiguration CRs) |
 | nvidia-dra-driver-gpu | nvidia-dra-driver | Helm | Controller Deployment, kubelet-plugin DaemonSet |
 | kai-scheduler | kai-scheduler | Helm | Scheduler Deployment |
@@ -84,7 +84,7 @@ tests/chainsaw/ai-conformance/
 │   ├── chainsaw-test.yaml               # Inference leaf health check orchestration
 │   ├── assert-crds.yaml                 # Inference-specific CRDs installed
 │   ├── assert-dynamo.yaml               # Dynamo platform healthy on kind
-│   ├── assert-kgateway.yaml             # kgateway healthy on kind
+│   ├── assert-agentgateway.yaml        # agentgateway healthy on kind
 │   └── assert-namespaces.yaml           # Inference-specific namespaces exist
 ├── kind-training-kubeflow/              # Kind + H100 + training + kubeflow leaf suite
 │   ├── chainsaw-test.yaml               # Training leaf health check orchestration
@@ -100,7 +100,7 @@ tests/chainsaw/ai-conformance/
     ├── assert-crds.yaml                 # Critical CRDs installed
     ├── assert-gpu-operator.yaml         # GPU operator + DaemonSets healthy
     ├── assert-kube-system.yaml          # AWS EFA healthy
-    ├── assert-kgateway.yaml             # kgateway healthy
+    ├── assert-agentgateway.yaml        # agentgateway healthy
     ├── assert-nvsentinel.yaml           # NVSentinel healthy
     └── assert-dynamo.yaml               # Dynamo platform healthy
 ```
@@ -159,7 +159,7 @@ chainsaw test \
 | Component Group | Timeout | Reason |
 |-----------------|---------|--------|
 | Namespaces, CRDs | 2m | Should exist immediately after deployment |
-| cert-manager, kgateway, skyhook, monitoring, kai-scheduler | 5m | Standard Deployment rollout |
+| cert-manager, agentgateway, skyhook, monitoring, kai-scheduler | 5m | Standard Deployment rollout |
 | gpu-operator, nvidia-dra-driver-gpu | 10m | GPU driver compilation on nodes is slow |
 | dynamo-platform | 5m | Operator + etcd + NATS startup |
 

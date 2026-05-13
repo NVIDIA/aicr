@@ -359,8 +359,8 @@ Bundler names correspond to component names in [`recipes/registry.yaml`](https:/
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
 | `grove` | Dynamo pod lifecycle management |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
-| `kgateway-crds` | Kubernetes Gateway API CRDs |
-| `kgateway` | Kubernetes Gateway API implementation |
+| `agentgateway-crds` | Kubernetes Gateway API CRDs for AI/ML inference (Gateway API + Inference Extension) |
+| `agentgateway` | Kubernetes Gateway API implementation for AI/ML inference (InferencePool routing) |
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |

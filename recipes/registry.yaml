@@ -425,27 +425,27 @@ components:
         tolerationPaths:
           - dynamo-operator.controllerManager.tolerations
 
-  - name: kgateway-crds
-    displayName: kgateway-crds
+  - name: agentgateway-crds
+    displayName: agentgateway-crds
     valueOverrideKeys:
-      - kgatewaycrds
+      - agentgatewaycrds
     helm:
-      defaultRepository: oci://cr.kgateway.dev/kgateway-dev/charts
-      defaultChart: kgateway-crds
-      defaultVersion: v2.0.0
-      defaultNamespace: kgateway-system
+      defaultRepository: oci://cr.agentgateway.dev/charts
+      defaultChart: agentgateway-crds
+      defaultVersion: v2.2.1
+      defaultNamespace: agentgateway-system
 
-  - name: kgateway
-    displayName: kgateway
+  - name: agentgateway
+    displayName: agentgateway
     valueOverrideKeys:
-      - kgateway
+      - agentgateway
     healthCheck:
-      assertFile: checks/kgateway/health-check.yaml
+      assertFile: checks/agentgateway/health-check.yaml
     helm:
-      defaultRepository: oci://cr.kgateway.dev/kgateway-dev/charts
-      defaultChart: kgateway
-      defaultVersion: v2.0.0
-      defaultNamespace: kgateway-system
+      defaultRepository: oci://cr.agentgateway.dev/charts
+      defaultChart: agentgateway
+      defaultVersion: v2.2.1
+      defaultNamespace: agentgateway-system
     nodeScheduling:
       system:
         nodeSelectorPaths:

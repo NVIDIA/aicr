@@ -1302,13 +1302,13 @@ collect_gateway() {
     EVIDENCE_FILE="${EVIDENCE_DIR}/inference-gateway.md"
     log_info "Collecting Inference API Gateway evidence → ${EVIDENCE_FILE}"
 
-    # Skip if kgateway is not installed (training clusters don't have inference gateway)
-    if ! kubectl get deploy -n kgateway-system --no-headers 2>/dev/null | grep -q .; then
-        log_info "Inference gateway evidence collection skipped — kgateway not installed."
+    # Skip if agentgateway is not installed (training clusters don't have inference gateway)
+    if ! kubectl get deploy -n agentgateway-system --no-headers 2>/dev/null | grep -q .; then
+        log_info "Inference gateway evidence collection skipped — agentgateway not installed."
         return
     fi
 
-    write_section_header "Inference API Gateway (kgateway)"
+    write_section_header "Inference API Gateway (agentgateway)"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 Demonstrates CNCF AI Conformance requirement for Kubernetes Gateway API support
@@ -1316,19 +1316,19 @@ with an implementation for advanced traffic management for inference services.
 
 ## Summary
 
-1. **kgateway controller** — Running in `kgateway-system`
+1. **agentgateway controller** — Running in `agentgateway-system`
 2. **inference-gateway deployment** — Running (the inference extension controller)
 3. **Gateway API CRDs** — All present (GatewayClass, Gateway, HTTPRoute, GRPCRoute, ReferenceGrant)
-4. **Active Gateway** — `inference-gateway` with class `kgateway`, programmed with an AWS ELB address
-5. **Inference Extension CRDs** — InferencePool, InferenceModelRewrite, InferenceObjective installed
+4. **Active Gateway** — `inference-gateway` with class `agentgateway`, programmed with a load balancer address
+5. **Inference Extension CRDs** — InferencePool, InferenceObjective, InferenceModelRewrite installed
 6. **Result: PASS**
 
 ---
 
-## kgateway Controller
+## agentgateway Controller
 EOF
-    capture "kgateway deployments" kubectl get deploy -n kgateway-system
-    capture "kgateway pods" kubectl get pods -n kgateway-system
+    capture "agentgateway deployments" kubectl get deploy -n agentgateway-system
+    capture "agentgateway pods" kubectl get pods -n agentgateway-system
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
@@ -1352,7 +1352,7 @@ EOF
 ## Active Gateway
 EOF
     capture "Gateways" kubectl get gateways -A
-    capture "Gateway details" kubectl get gateway inference-gateway -n kgateway-system -o yaml
+    capture "Gateway details" kubectl get gateway inference-gateway -n agentgateway-system -o yaml
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
 
@@ -1364,14 +1364,14 @@ EOF
     echo "" >> "${EVIDENCE_FILE}"
     echo "**GatewayClass conditions**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
-    kubectl get gatewayclass kgateway -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
+    kubectl get gatewayclass agentgateway -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
     echo '```' >> "${EVIDENCE_FILE}"
 
     # Check Gateway Programmed condition
     echo "" >> "${EVIDENCE_FILE}"
     echo "**Gateway conditions**" >> "${EVIDENCE_FILE}"
     echo '```' >> "${EVIDENCE_FILE}"
-    kubectl get gateway inference-gateway -n kgateway-system -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
+    kubectl get gateway inference-gateway -n agentgateway-system -o jsonpath='{range .status.conditions[*]}{.type}: {.status} ({.reason}){"\n"}{end}' >> "${EVIDENCE_FILE}" 2>&1
     echo '```' >> "${EVIDENCE_FILE}"
 
     cat >> "${EVIDENCE_FILE}" <<'EOF'
@@ -1388,10 +1388,10 @@ EOF
     # Verdict — check both GatewayClass Accepted and Gateway Programmed
     echo "" >> "${EVIDENCE_FILE}"
     local gw_accepted gw_programmed
-    gw_accepted=$(kubectl get gatewayclass kgateway -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
-    gw_programmed=$(kubectl get gateway inference-gateway -n kgateway-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
+    gw_accepted=$(kubectl get gatewayclass agentgateway -o jsonpath='{.status.conditions[?(@.type=="Accepted")].status}' 2>/dev/null)
+    gw_programmed=$(kubectl get gateway inference-gateway -n agentgateway-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null)
     if [ "${gw_accepted}" = "True" ] && [ "${gw_programmed}" = "True" ]; then
-        echo "**Result: PASS** — kgateway controller running, GatewayClass Accepted, Gateway Programmed, inference CRDs installed." >> "${EVIDENCE_FILE}"
+        echo "**Result: PASS** — agentgateway controller running, GatewayClass Accepted, Gateway Programmed, inference CRDs installed." >> "${EVIDENCE_FILE}"
     else
         echo "**Result: FAIL** — No active Gateway found." >> "${EVIDENCE_FILE}"
     fi
