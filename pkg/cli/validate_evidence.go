@@ -234,10 +234,20 @@ func signAndPushBundle(
 		return signPushOutcome{}, nil
 	}
 
-	slog.Info("resolving OIDC token for cosign keyless signing (may prompt)",
-		"identityTokenSet", cfg.OIDCResolve.IdentityToken != "",
-		"ambient", cfg.OIDCResolve.AmbientURL != "",
-		"deviceFlow", cfg.OIDCResolve.DeviceFlow)
+	// Log at Info only when an interactive prompt is about to fire;
+	// CI/programmatic paths (identity-token, ambient OIDC) stay quiet
+	// at Info so they don't pollute build logs with a misleading
+	// "may prompt" line that never actually prompts.
+	switch {
+	case cfg.OIDCResolve.IdentityToken != "":
+		slog.Debug("resolving OIDC token", "mode", "identity-token")
+	case cfg.OIDCResolve.AmbientURL != "" && cfg.OIDCResolve.AmbientToken != "":
+		slog.Debug("resolving OIDC token", "mode", "ambient-github-actions")
+	case cfg.OIDCResolve.DeviceFlow:
+		slog.Info("resolving OIDC token via device-code flow (will print a code to enter at the URL shown)")
+	default:
+		slog.Info("resolving OIDC token via browser flow (will open a local browser)")
+	}
 	token, tokenErr := bundleattest.ResolveOIDCToken(ctx, bundleattest.ResolveOptions{
 		IdentityToken: cfg.OIDCResolve.IdentityToken,
 		AmbientURL:    cfg.OIDCResolve.AmbientURL,
