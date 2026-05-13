@@ -142,7 +142,7 @@ components:
     helm:
       defaultRepository: https://aws.github.io/eks-charts
       defaultChart: aws-efa-k8s-device-plugin
-      defaultVersion: v0.5.3
+      defaultVersion: v0.5.26
       defaultNamespace: kube-system
     nodeScheduling:
       accelerated:

@@ -39,14 +39,109 @@
 
 image:
   repository: 602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin
-  tag: v0.5.3
+  tag: v0.5.18
 
+# AICR aws-efa securityContext — intentional divergence from upstream.
+#
+# What this daemon does
+# ---------------------
+# The aws-efa device-plugin DaemonSet runs on every EFA-capable node in
+# an AICR EKS bundle. It enumerates EFA hardware via read-only `open()`
+# on `/dev/infiniband/uverbs*`, advertises the count as
+# `vpc.amazonaws.com/efa: <N>` to kubelet over a Unix socket under
+# `/var/lib/kubelet/device-plugins/`, and then idles. It does NOT handle
+# data-plane traffic — RDMA flows directly from workload pods through
+# libfabric to the hardware. The daemon's privilege footprint does not
+# affect workload performance or correctness.
+#
+# Upstream default (chart v0.5.4+)
+# --------------------------------
+#   privileged: true        # all Linux capabilities, seccomp off
+#   runAsUser: 0            # root inside the container
+#   allowPrivilegeEscalation: true
+#   runAsNonRoot: false
+# "Maximum permission" — a CVE in the plugin image or any dependency
+# escapes to host root with one container break-out. AWS chose this so
+# the chart works across the full matrix they ship: Bottlerocket, AL2023,
+# multiple Ubuntu LTS, GovCloud, China, multiple EFA driver versions,
+# multiple kernel series. Rather than maintain a capability matrix
+# across that surface, they made the daemon fully privileged.
+#
+# AICR override (below)
+# ---------------------
+# AICR ships a narrower OS surface and validates each combination before
+# adding a recipe. On AICR's validated targets the daemon's two host
+# operations (read-only `open()` and kubelet-socket write) work with no
+# Linux capabilities, no privileged mode, and no privilege escalation.
+# Trading "works everywhere" for a meaningfully smaller blast radius is
+# the right call for the OS surface AICR actually ships.
+#
+# Field-by-field
+# --------------
+#   privileged: false
+#     Explicit override. Helm deep-merges this map onto chart values,
+#     so omitting the field silently inherits upstream's `true`.
+#
+#   runAsUser: null
+#     Explicit unset of the chart's `0`. Lets the image's own USER
+#     directive apply (still root today, but inherits any future
+#     hardening upstream may add).
+#
+#   allowPrivilegeEscalation: false
+#     Defense-in-depth against setuid escalation. The daemon doesn't
+#     exec anything, but blocks a class of supply-chain attacks.
+#
+#   capabilities.drop: [ALL]
+#     Drops every capability the container would otherwise inherit.
+#     Verified that enumeration + kubelet registration still work
+#     with the empty capability set.
+#
+#   runAsNonRoot: false
+#     Matches upstream. The daemon must open root-owned InfiniBand
+#     device nodes on the host. Combined with the drops above, this
+#     gives the loosest definition of "root" (UID 0 with zero caps)
+#     rather than the strictest. Forcing non-root would require either
+#     a relaxed-permissions hostPath mount or a rebuilt image —
+#     not worth the complexity for the residual risk.
+#
+# Revisit triggers
+# ----------------
+# This override is validated only for the OS/kernel/hardware
+# combinations AICR currently ships recipes for. Re-test and either
+# confirm the override still works or accept upstream's `privileged:
+# true` default when ANY of the following happens:
+#
+#   1. Plugin logs return `operation not permitted` on a host syscall
+#      after a chart bump. Likely cause: a new EFA driver version
+#      exercises a kernel surface the narrow caps don't grant.
+#
+#   2. AICR adds a recipe for an OS we haven't validated here (AL2023,
+#      Bottlerocket, RHEL, etc.). Each has its own kernel build,
+#      LSM (AppArmor/SELinux) defaults, and EFA driver packaging.
+#      "Works on Ubuntu" does not transfer.
+#
+#   3. AICR adds a recipe for next-gen EFA hardware (B200, GB200,
+#      B300). Newer EFA generations use newer libfabric providers
+#      that may exercise different kernel surfaces.
+#
+#   4. AWS rewrites the device-plugin to enumerate via a different
+#      mechanism (NRI plugin, DRA driver, kernel uAPI change). Treat
+#      as a behavioral re-validation, not a version bump.
+#
+# Safe fallback
+# -------------
+# If the override breaks in production, dropping this entire
+# securityContext block lets Helm inherit the chart's `privileged:
+# true` default — restoring upstream's "works everywhere" posture
+# at the cost of full host blast radius for any plugin-image CVE.
 securityContext:
   allowPrivilegeEscalation: false
+  privileged: false
   capabilities:
     drop:
       - ALL
   runAsNonRoot: false
+  runAsUser: null
 
 supportedInstanceLabels:
   keys:
