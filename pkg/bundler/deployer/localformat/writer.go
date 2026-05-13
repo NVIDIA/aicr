@@ -164,17 +164,16 @@ func (opts *Options) injectAuxiliaryFolder(idx int, c Component, phase injection
 	}
 	auxName := c.Name + "-" + string(phase)
 	auxDir := fmt.Sprintf("%03d-%s", idx, auxName)
-	// Pre-phase folders carry a Namespace manifest by design (the
-	// privileged-namespace template), so install.sh must not pass
-	// --create-namespace: Helm 3 refuses to import a pre-existing
-	// namespace into the release. Post-phase folders never contain a
-	// Namespace template; --create-namespace is a no-op there since the
-	// primary release has already created it.
-	createNamespace := phase != phasePre
+	// Both pre- and post-phase folders request createNamespace=true;
+	// writeLocalHelmFolder downgrades to false automatically when the
+	// rendered templates contain a Namespace resource (Talos
+	// privileged-namespace pattern). Otherwise the target namespace may
+	// not yet exist when the pre-phase runs — the primary chart hasn't
+	// executed --create-namespace yet — so install.sh must create it.
 	f, err := writeLocalHelmFolder(
 		opts.OutputDir, auxDir, idx, c,
 		manifests, renderInputFor(c),
-		auxName, c.Name, createNamespace,
+		auxName, c.Name, true,
 	)
 	if err != nil {
 		return nil, err

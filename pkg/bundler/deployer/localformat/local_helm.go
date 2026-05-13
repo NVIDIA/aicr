@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -28,6 +29,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 )
+
+// kindNamespaceRE matches a top-level YAML "kind: Namespace" line. Used to
+// detect whether a local-helm folder ships its own Namespace template, in
+// which case install.sh must omit --create-namespace: Helm 3 refuses to
+// import a namespace it created out-of-band via --create-namespace because
+// that namespace lacks the release's ownership annotations.
+var kindNamespaceRE = regexp.MustCompile(`(?m)^kind:\s+Namespace\s*$`)
 
 // hasYAMLObjects returns true if content contains at least one YAML object
 // (a non-comment, non-blank, non-separator line). Used to skip writing
@@ -65,13 +73,23 @@ var (
 // templates/ directory).
 //
 // createNamespace controls whether the rendered install.sh passes
-// --create-namespace to helm. Set false when this folder's chart contains
-// a Namespace template targeting c.Namespace — Helm 3 refuses to import
-// an existing namespace lacking app.kubernetes.io/managed-by=Helm and
-// meta.helm.sh/release-name annotations, so --create-namespace creating
-// the namespace ahead of the chart's own Namespace template collides.
-// Pre-injection folders carry the privileged-Namespace manifest by
-// design and therefore pass false; primary and post folders pass true.
+// --create-namespace to helm. Callers express intent ("yes, the chart
+// expects to land in a namespace that may not exist yet"); the function
+// downgrades the flag to false automatically when any rendered manifest
+// defines its own Namespace resource — Helm 3 refuses to import a
+// namespace it created out-of-band via --create-namespace because that
+// namespace lacks the release's ownership annotations.
+//
+// The detection covers two real call shapes:
+//   - Talos pre-injection folder: ships a privileged Namespace template.
+//     Caller asks for createNamespace=true; detection downgrades to false
+//     so the chart's own Namespace template owns the resource.
+//   - Bare-resource pre-injection folder (e.g., a ConfigMap consumed by
+//     the primary chart's reconcile): no Namespace template. Caller asks
+//     for createNamespace=true; detection leaves it true so install.sh
+//     creates the target namespace before applying the ConfigMap. The
+//     primary chart's later `helm install --create-namespace` is a no-op
+//     against the existing namespace.
 //
 // Returns the Folder manifest with Files listed in deterministic order.
 func writeLocalHelmFolder(
@@ -121,6 +139,10 @@ func writeLocalHelmFolder(
 
 	seen := make(map[string]string, len(sortedPaths))
 	templateRelPaths := make([]string, 0, len(sortedPaths))
+	// hasNamespaceTemplate is set when any rendered manifest declares a
+	// top-level Namespace resource. When true, install.sh below suppresses
+	// --create-namespace to avoid the Helm 3 ownership collision.
+	hasNamespaceTemplate := false
 	for _, p := range sortedPaths {
 		baseName := filepath.Base(p)
 		if prev, ok := seen[baseName]; ok {
@@ -155,6 +177,9 @@ func writeLocalHelmFolder(
 				"component", c.Name, "manifest", baseName)
 			continue
 		}
+		if !hasNamespaceTemplate && kindNamespaceRE.Match(rendered) {
+			hasNamespaceTemplate = true
+		}
 		outPath, jerr := deployer.SafeJoin(templatesDir, baseName)
 		if jerr != nil {
 			return Folder{}, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -166,12 +191,15 @@ func writeLocalHelmFolder(
 		templateRelPaths = append(templateRelPaths, filepath.Join(dir, "templates", baseName))
 	}
 
-	// install.sh
+	// install.sh — suppress --create-namespace if a chart template owns the
+	// target namespace (see createNamespace doc comment for the full
+	// rationale and call shapes).
+	effectiveCreateNamespace := createNamespace && !hasNamespaceTemplate
 	installData := struct {
 		Name            string
 		Namespace       string
 		CreateNamespace bool
-	}{name, c.Namespace, createNamespace}
+	}{name, c.Namespace, effectiveCreateNamespace}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}
