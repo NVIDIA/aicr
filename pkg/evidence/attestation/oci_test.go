@@ -17,16 +17,9 @@ package attestation
 import (
 	"context"
 	"testing"
-)
 
-func TestCleanOCIRef(t *testing.T) {
-	if got := CleanOCIRef("oci://ghcr.io/x/y:tag"); got != "ghcr.io/x/y:tag" {
-		t.Errorf("CleanOCIRef stripped wrong: %q", got)
-	}
-	if got := CleanOCIRef("ghcr.io/x/y:tag"); got != "ghcr.io/x/y:tag" {
-		t.Errorf("CleanOCIRef without prefix should pass through: %q", got)
-	}
-}
+	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
+)
 
 func TestPush_RejectsEmptyOpts(t *testing.T) {
 	cases := []struct {
@@ -51,16 +44,16 @@ func TestNewKeylessSigner_DefaultURLs(t *testing.T) {
 	if s.OIDCToken != "token" {
 		t.Errorf("OIDCToken not set")
 	}
-	if s.FulcioURL != DefaultFulcioURL {
+	if s.FulcioURL != bundleattest.DefaultFulcioURL {
 		t.Errorf("FulcioURL = %q", s.FulcioURL)
 	}
-	if s.RekorURL != DefaultRekorURL {
+	if s.RekorURL != bundleattest.DefaultRekorURL {
 		t.Errorf("RekorURL = %q", s.RekorURL)
 	}
 }
 
 func TestKeylessSigner_RejectsEmptyToken(t *testing.T) {
-	s := &KeylessSigner{FulcioURL: DefaultFulcioURL, RekorURL: DefaultRekorURL}
+	s := &KeylessSigner{FulcioURL: bundleattest.DefaultFulcioURL, RekorURL: bundleattest.DefaultRekorURL}
 	if _, err := s.Sign(context.Background(), []byte("statement")); err == nil {
 		t.Errorf("expected error on empty OIDC token")
 	}

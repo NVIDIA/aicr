@@ -23,32 +23,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// Sigstore public-good instance URLs. Re-exported so callers that only
-// import pkg/evidence/attestation don't need to pull in the bundler
-// package to construct a KeylessSigner.
-const (
-	DefaultFulcioURL = bundleattest.DefaultFulcioURL
-	DefaultRekorURL  = bundleattest.DefaultRekorURL
-)
-
-// SignResult describes a successful sign() call.
-type SignResult struct {
-	// BundleJSON is the serialized Sigstore bundle (.sigstore.json),
-	// equivalent to a DSSE-wrapped in-toto Statement plus verification
-	// material (Fulcio cert, Rekor inclusion proof).
-	BundleJSON []byte
-
-	// Identity is the OIDC subject claim from the Fulcio cert
-	// (e.g., contributor email or GitHub Actions workflow URI).
-	Identity string
-
-	// Issuer is the OIDC issuer URL recorded in the Fulcio cert.
-	Issuer string
-
-	// RekorLogIndex is the Rekor inclusion-proof log index, or 0 when
-	// no Rekor entry was created (NoOpSigner).
-	RekorLogIndex int64
-}
+// SignResult describes a successful sign() call. Aliased to the
+// bundler primitive's result type so callers don't translate fields.
+type SignResult = bundleattest.SignedAttestation
 
 // Signer signs the in-toto Statement carrying the v1 recipe-evidence
 // predicate. statementJSON is the unsigned bytes from BuildStatement; the
@@ -69,8 +46,8 @@ type KeylessSigner struct {
 func NewKeylessSigner(oidcToken string) *KeylessSigner {
 	return &KeylessSigner{
 		OIDCToken: oidcToken,
-		FulcioURL: DefaultFulcioURL,
-		RekorURL:  DefaultRekorURL,
+		FulcioURL: bundleattest.DefaultFulcioURL,
+		RekorURL:  bundleattest.DefaultRekorURL,
 	}
 }
 
@@ -81,20 +58,11 @@ func NewKeylessSigner(oidcToken string) *KeylessSigner {
 //
 //nolint:unparam // *SignResult is part of the Signer interface; tests exercise error paths only.
 func (k *KeylessSigner) Sign(ctx context.Context, statementJSON []byte) (*SignResult, error) {
-	res, err := bundleattest.SignStatement(ctx, statementJSON, bundleattest.SignOptions{
+	return bundleattest.SignStatement(ctx, statementJSON, bundleattest.SignOptions{
 		OIDCToken: k.OIDCToken,
 		FulcioURL: k.FulcioURL,
 		RekorURL:  k.RekorURL,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &SignResult{
-		BundleJSON:    res.BundleJSON,
-		Identity:      res.Identity,
-		Issuer:        res.Issuer,
-		RekorLogIndex: res.RekorLogIndex,
-	}, nil
 }
 
 // NoOpSigner returns BundleJSON=nil. Leaves the bundle's unsigned

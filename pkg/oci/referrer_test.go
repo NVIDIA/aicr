@@ -52,7 +52,7 @@ func TestPackReferrer_ManifestHasSubject(t *testing.T) {
 		Size:      mainSize,
 	}
 
-	fs, tmpDir, manifestDesc, tag, err := packReferrer(context.Background(), ReferrerOptions{
+	fs, tmpDir, tag, err := packReferrer(context.Background(), ReferrerOptions{
 		Registry:     "ghcr.io",
 		Repository:   "example/repo",
 		ArtifactType: "application/vnd.dev.sigstore.bundle.v0.3+json",
@@ -67,6 +67,10 @@ func TestPackReferrer_ManifestHasSubject(t *testing.T) {
 		_ = os.RemoveAll(tmpDir)
 	}()
 
+	manifestDesc, err := fs.Resolve(context.Background(), tag)
+	if err != nil {
+		t.Fatalf("resolve manifest by tag: %v", err)
+	}
 	if manifestDesc.Digest == "" {
 		t.Fatal("manifest descriptor missing digest")
 	}
@@ -154,7 +158,7 @@ func TestPackReferrer_RejectsMissingFields(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, _, _, err := packReferrer(context.Background(), tt.opts)
+			_, _, _, err := packReferrer(context.Background(), tt.opts)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
 			}

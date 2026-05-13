@@ -209,9 +209,3 @@ type MainArtifactDescriptor struct {
 	MediaType string
 	Size      int64
 }
-
-// CleanOCIRef returns the registry/repository:tag form (no oci:// scheme,
-// no leading slash) that cosign tooling expects.
-func CleanOCIRef(ref string) string {
-	return oci.TrimScheme(ref)
-}

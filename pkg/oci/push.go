@@ -390,7 +390,7 @@ func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error
 	if err := validateRegistryReference(opts.Registry, opts.Repository); err != nil {
 		return nil, err
 	}
-	fs, tmpDir, manifestDesc, tag, err := packReferrer(ctx, opts)
+	fs, tmpDir, tag, err := packReferrer(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +421,6 @@ func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error
 		return nil, err
 	}
 
-	_ = manifestDesc // tag and desc.Digest are equivalent post-copy
 	return &PushResult{
 		Digest:    desc.Digest.String(),
 		MediaType: desc.MediaType,
@@ -431,38 +430,38 @@ func PushReferrer(ctx context.Context, opts ReferrerOptions) (*PushResult, error
 }
 
 // packReferrer builds the referrer manifest in a local file store and
-// returns the store, temp dir path, manifest descriptor, and the
-// digest-derived tag. The caller defers closing fs and removing tmpDir.
-func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, string, ociv1.Descriptor, string, error) {
+// returns the store, temp dir path, and the digest-derived tag. The
+// caller defers closing fs and removing tmpDir.
+func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, string, string, error) {
 	if opts.ArtifactType == "" {
-		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
+		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "ArtifactType is required")
 	}
 	if len(opts.LayerContent) == 0 {
-		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "LayerContent must be non-empty")
+		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "LayerContent must be non-empty")
 	}
 	if opts.Subject.Digest == "" {
-		return nil, "", ociv1.Descriptor{}, "", apperrors.New(apperrors.ErrCodeInvalidRequest, "Subject.Digest is required")
+		return nil, "", "", apperrors.New(apperrors.ErrCodeInvalidRequest, "Subject.Digest is required")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", err)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeUnavailable, "operation canceled", err)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "oras-referrer-*")
 	if err != nil {
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp dir", err)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp dir", err)
 	}
 
 	const layerFilename = "payload"
 	layerPath := filepath.Join(tmpDir, layerFilename)
 	if writeErr := os.WriteFile(layerPath, opts.LayerContent, 0o600); writeErr != nil {
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stage referrer layer", writeErr)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to stage referrer layer", writeErr)
 	}
 
 	fs, err := file.New(tmpDir)
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create referrer file store", err)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create referrer file store", err)
 	}
 	fs.TarReproducible = true
 
@@ -470,7 +469,7 @@ func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, strin
 	if err != nil {
 		_ = fs.Close()
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add referrer layer", err)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to add referrer layer", err)
 	}
 
 	subject := opts.Subject
@@ -488,17 +487,17 @@ func packReferrer(ctx context.Context, opts ReferrerOptions) (*file.Store, strin
 	if err != nil {
 		_ = fs.Close()
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack referrer manifest", err)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to pack referrer manifest", err)
 	}
 
 	tag := strings.TrimPrefix(manifestDesc.Digest.String(), "sha256:")
 	if tagErr := fs.Tag(ctx, manifestDesc, tag); tagErr != nil {
 		_ = fs.Close()
 		_ = os.RemoveAll(tmpDir)
-		return nil, "", ociv1.Descriptor{}, "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag referrer manifest", tagErr)
+		return nil, "", "", apperrors.Wrap(apperrors.ErrCodeInternal, "failed to tag referrer manifest", tagErr)
 	}
 
-	return fs, tmpDir, manifestDesc, tag, nil
+	return fs, tmpDir, tag, nil
 }
 
 // copyFunc matches the signature of oras.Copy and is injected into

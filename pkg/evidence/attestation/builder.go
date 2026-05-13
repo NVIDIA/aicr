@@ -118,7 +118,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "build canceled", err)
+		return nil, errors.Wrap(errors.ErrCodeUnavailable, "build canceled", err)
 	}
 
 	recipeName := RecipeNameFor(opts.Recipe)
