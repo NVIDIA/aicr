@@ -662,12 +662,13 @@ auto-detected input form — OCI ref, tarball, unpacked directory):
     ("BOM contains N chart-default sub-images NOT covered by this
     attestation; admission-time policy required for full coverage").
 11. **(Optional) Logs bundle verification.** When validator log
-    capture is wired in (deferred from V1; see commit `0277fece`),
-    the pointer will gain an optional `logsBundle: {oci, digest}`
-    field; the verifier will pull it, recompute per-file hashes, and
-    confirm match against the summary manifest's pre-commit. Logs
-    bundle absence is **not** a failure. V1 pointers omit the field
-    entirely.
+    capture is wired in (deferred from V1 — the `--include-logs` /
+    `--push-logs` flags were dropped until the validator side can
+    capture logs), the pointer will gain an optional
+    `logsBundle: {oci, digest}` field; the verifier will pull it,
+    recompute per-file hashes, and confirm match against the summary
+    manifest's pre-commit. Logs bundle absence is **not** a failure.
+    V1 pointers omit the field entirely.
 12. **Render Markdown summary.** Includes signer identity, per-phase
     results, per-dimension fingerprint match, BOM disclosure, and
     sub-image count.
