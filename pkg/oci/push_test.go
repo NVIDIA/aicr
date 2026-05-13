@@ -25,7 +25,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -811,19 +813,71 @@ func TestHardLinkDir(t *testing.T) {
 	})
 }
 
+// snapshotDir returns a sorted list of "name=size" strings for every
+// regular file directly inside dir (non-recursive). Used to assert that
+// a directory's file set is unchanged across an operation.
+func snapshotDir(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir %q: %v", dir, err)
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.Type().IsRegular() {
+			continue
+		}
+		info, statErr := e.Info()
+		if statErr != nil {
+			t.Fatalf("Info %q: %v", e.Name(), statErr)
+		}
+		out = append(out, e.Name()+"="+strconv.FormatInt(info.Size(), 10))
+	}
+	sort.Strings(out)
+	return out
+}
+
 // TestPreparePushDir tests the preparePushDir function.
 func TestPreparePushDir(t *testing.T) {
-	t.Run("no subdir returns source", func(t *testing.T) {
+	t.Run("no subdir hardlinks to temp dir, leaves source untouched", func(t *testing.T) {
+		// Regression: the no-subdir path used to return sourceDir
+		// directly, letting the oras file store write manifest blobs
+		// (named after the OCI title annotation, e.g., "AICR Recipe
+		// Evidence" with spaces) into the caller's bundle directory.
+		// preparePushDir must always return a tempdir so the file
+		// store is never rooted in user space.
 		srcDir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(srcDir, "a.yaml"), []byte("a"), 0o644); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(srcDir, "b.json"), []byte("b"), 0o644); err != nil {
+			t.Fatalf("seed file: %v", err)
+		}
+		before := snapshotDir(t, srcDir)
+
 		result, cleanup, err := preparePushDir(srcDir, "")
 		if err != nil {
 			t.Fatalf("preparePushDir() error = %v", err)
 		}
-		if cleanup != nil {
-			t.Error("cleanup should be nil when no subdir specified")
+		if cleanup == nil {
+			t.Fatal("cleanup must always be non-nil (no shortcut return)")
 		}
-		if result != srcDir {
-			t.Errorf("preparePushDir() = %q, want %q", result, srcDir)
+		defer cleanup()
+
+		if result == srcDir {
+			t.Fatalf("preparePushDir must not return sourceDir directly; got %q == srcDir", result)
+		}
+		// Source dir file set must be unchanged — this is the
+		// invariant the bug violated.
+		after := snapshotDir(t, srcDir)
+		if !reflect.DeepEqual(before, after) {
+			t.Errorf("source directory was modified by preparePushDir; before=%v after=%v", before, after)
+		}
+		// Temp dir must carry the hard-linked content.
+		for _, name := range []string{"a.yaml", "b.json"} {
+			if _, statErr := os.Stat(filepath.Join(result, name)); statErr != nil {
+				t.Errorf("expected %q hard-linked into temp dir, got: %v", name, statErr)
+			}
 		}
 	})
 

@@ -460,30 +460,23 @@ func jitterDuration(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * jitter)
 }
 
-// preparePushDir prepares the directory for pushing.
-// If subDir is specified, creates a temp directory with hard links.
-// Returns the directory to push from and an optional cleanup function.
+// preparePushDir prepares the directory for pushing by hard-linking the
+// source tree into a temp directory. Always uses a temp dir — never the
+// caller's source directory directly — so the oras file store, which
+// can write manifest blobs into its root, never leaves stray files in
+// user space. (The org.opencontainers.image.title annotation has been
+// observed materializing as a literal filename inside the root the
+// file store is constructed against.)
+//
+// When subDir is set, the temp dir mirrors the subdir layout so the
+// resulting OCI artifact preserves the same path structure.
+//
+// Returns the directory to push from and a cleanup function (always
+// non-nil now that the no-temp-dir shortcut is gone).
 func preparePushDir(sourceDir, subDir string) (string, func(), error) {
-	if subDir == "" {
-		return sourceDir, nil, nil
-	}
-
-	// When pushing a subdirectory, preserve its path structure in the image
-	// Create a temp dir and use hard links (fast, no extra disk space)
 	tempDir, err := os.MkdirTemp("", "oras-push-*")
 	if err != nil {
 		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create temp directory", err)
-	}
-
-	srcPath := filepath.Join(sourceDir, subDir)
-	dstPath := filepath.Join(tempDir, subDir)
-	if err := hardLinkDir(srcPath, dstPath); err != nil {
-		if removeErr := os.RemoveAll(tempDir); removeErr != nil {
-			slog.Warn("failed to cleanup temp directory after error",
-				"path", tempDir,
-				"error", removeErr)
-		}
-		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard links", err)
 	}
 
 	cleanup := func() {
@@ -493,6 +486,18 @@ func preparePushDir(sourceDir, subDir string) (string, func(), error) {
 				"error", err)
 		}
 	}
+
+	srcPath := sourceDir
+	dstPath := tempDir
+	if subDir != "" {
+		srcPath = filepath.Join(sourceDir, subDir)
+		dstPath = filepath.Join(tempDir, subDir)
+	}
+	if err := hardLinkDir(srcPath, dstPath); err != nil {
+		cleanup()
+		return "", nil, apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create hard links", err)
+	}
+
 	return tempDir, cleanup, nil
 }
 
