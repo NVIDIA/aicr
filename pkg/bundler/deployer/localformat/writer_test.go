@@ -306,12 +306,6 @@ func TestWrite_PreFolderInstallOmitsCreateNamespace(t *testing.T) {
 	}
 }
 
-// TestWrite_PreManifestNamespaceDrift asserts that the writer rejects
-// a pre-manifest whose Namespace metadata.name disagrees with the
-// component's release namespace. Without this guard, the bundle would
-// pass type checks but blow up at `helm install` time with an opaque
-// "namespace not found" error because the chart creates one namespace
-// while the release targets another.
 // TestWrite_FolderLimit_CountsEmissionsNotComponents pins the
 // folder-prefix-exhaustion guard. The check budgets against the actual
 // number of NNN-* directories the bundle will emit (pre + primary +
@@ -364,6 +358,12 @@ func TestWrite_FolderLimit_CountsEmissionsNotComponents(t *testing.T) {
 	})
 }
 
+// TestWrite_PreManifestNamespaceDrift asserts that the writer rejects
+// a pre-manifest whose Namespace metadata.name disagrees with the
+// component's release namespace. Without this guard, the bundle would
+// pass type checks but blow up at `helm install` time with an opaque
+// "namespace not found" error because the chart creates one namespace
+// while the release targets another.
 func TestWrite_PreManifestNamespaceDrift(t *testing.T) {
 	_, err := localformat.Write(context.Background(), localformat.Options{
 		OutputDir: t.TempDir(),

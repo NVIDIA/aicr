@@ -593,6 +593,15 @@ func writeFile(path string, contents []byte, mode os.FileMode) error {
 // skipped: a literal name vs c.Namespace comparison is meaningful
 // only for static manifests, which is the os-talos mixin's contract
 // and the only shape we want to guard against silent drift for.
+//
+// Decode-error behavior: a YAML parse failure stops processing further
+// docs in that file (the inner decode loop breaks). This is acceptable
+// under the os-talos mixin contract — one static Namespace per
+// pre-manifest file — and intentional for templated docs, where Helm's
+// own renderer is the authoritative parser. A pre-manifest file that
+// hides a static Namespace after a templated/invalid doc would
+// silently bypass this guard; if that pattern becomes valid, swap the
+// `break` for `continue` so subsequent docs are still validated.
 func validatePreManifestNamespace(componentName, expectedNS string, manifests map[string][]byte) error {
 	for path, body := range manifests {
 		dec := yaml.NewDecoder(bytes.NewReader(body))
