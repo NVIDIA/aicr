@@ -84,12 +84,18 @@ type BuildOptions struct {
 	// AICRVersion identifies the aicr binary that emitted the bundle.
 	AICRVersion string
 
-	// ValidatorCatalogVersion identifies the validator catalog
-	// version used. Empty until #660 lands.
+	// ValidatorCatalogVersion identifies the validator catalog version
+	// used. Sourced from CatalogMetadata.Version when the catalog
+	// carries metadata; legacy catalogs without metadata produce an
+	// empty string here.
 	ValidatorCatalogVersion string
 
-	// ValidatorImages enumerates the container images that ran. The
-	// builder sorts the slice by image for determinism.
+	// ValidatorImages enumerates the validator container images that
+	// shipped with the catalog used this session. The builder sorts
+	// the slice by image for determinism. Digest fields are blank
+	// today — the catalog tracks refs by tag, not digest; resolving
+	// each tag to a digest would require a registry round-trip per
+	// image, which validate's hot path deliberately avoids.
 	ValidatorImages []ValidatorImage
 
 	// AttestedAt overrides the wall-clock for tests. When zero, the

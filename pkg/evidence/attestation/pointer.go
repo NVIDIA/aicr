@@ -28,12 +28,13 @@ import (
 // PointerInputs carries everything the pointer file needs that is not
 // already in the Bundle. Push results (when available) populate the
 // bundle and signer fields; tests can pass empties to capture the
-// pre-push form.
+// pre-push form. Leave Signer nil for unsigned bundles — BuildPointer
+// emits the attestation entry without a signer block in that case.
 type PointerInputs struct {
 	Bundle     *Bundle
 	BundleOCI  string
 	BundleHash string
-	Signer     PointerSigner
+	Signer     *PointerSigner
 	LogsBundle *PointerLogsBundle
 }
 

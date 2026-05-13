@@ -190,8 +190,15 @@ type Pointer struct {
 // PointerAttestation is one entry in the pointer's attestations list.
 // V1 always emits exactly one entry; schema 2.0 will support multiple.
 type PointerAttestation struct {
-	Bundle        PointerBundle              `json:"bundle" yaml:"bundle"`
-	Signer        PointerSigner              `json:"signer" yaml:"signer"`
+	Bundle PointerBundle `json:"bundle" yaml:"bundle"`
+
+	// Signer is nil for unsigned bundles. When set, Identity and Issuer
+	// are always populated; RekorLogIndex remains nil when the bundle
+	// was signed with --no-rekor so a consumer can distinguish "no
+	// Rekor entry" from "Rekor entry at index 0" (which is a legitimate
+	// log position the first-ever entry occupies).
+	Signer *PointerSigner `json:"signer,omitempty" yaml:"signer,omitempty"`
+
 	AttestedAt    time.Time                  `json:"attestedAt" yaml:"attestedAt"`
 	Fingerprint   PointerFingerprint         `json:"fingerprint" yaml:"fingerprint"`
 	CriteriaMatch PointerCriteriaMatch       `json:"criteriaMatch" yaml:"criteriaMatch"`
@@ -209,12 +216,15 @@ type PointerBundle struct {
 }
 
 // PointerSigner records OIDC identity claims for the attestation
-// signer. RekorLogIndex is 0 when no Rekor entry was created
-// (e.g., signed with --no-rekor).
+// signer. Present only on signed bundles (see PointerAttestation.Signer
+// for the unsigned case). RekorLogIndex is nil when no Rekor entry was
+// created (e.g., signed with --no-rekor); a nil pointer distinguishes
+// that case from a legitimate Rekor index 0 — the first-ever Rekor
+// entry occupies that position.
 type PointerSigner struct {
 	Identity      string `json:"identity" yaml:"identity"`
 	Issuer        string `json:"issuer" yaml:"issuer"`
-	RekorLogIndex int64  `json:"rekorLogIndex" yaml:"rekorLogIndex"`
+	RekorLogIndex *int64 `json:"rekorLogIndex,omitempty" yaml:"rekorLogIndex,omitempty"`
 }
 
 // PointerFingerprint is a denormalized fingerprint for fast pointer

@@ -114,7 +114,16 @@ func emitRecipeEvidence(
 		}
 	}
 
-	bomBody, err := loadOrGenerateBOM(cfg.BOMPath, rec, snap, version, commit)
+	// Load the catalog once and feed it to both the BOM (when --bom is
+	// absent and the auto-generator runs) and the predicate's
+	// ValidatorCatalogVersion + ValidatorImages fields. The catalog is
+	// compiled in via go:embed, so Load is a parse, not I/O.
+	cat, err := catalog.Load(version, commit)
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for evidence", err)
+	}
+
+	bomBody, err := loadOrGenerateBOM(cfg.BOMPath, rec, snap, cat, version)
 	if err != nil {
 		return err
 	}
@@ -138,14 +147,16 @@ func emitRecipeEvidence(
 	// attestation.Build creates the output dir tree itself, including
 	// any missing parents — no explicit MkdirAll needed here.
 	bundle, err := attestation.Build(buildCtx, attestation.BuildOptions{
-		OutputDir:    cfg.OutDir,
-		Recipe:       rec,
-		RecipeYAML:   recipeYAML,
-		Snapshot:     snap,
-		SnapshotYAML: snapshotYAML,
-		BOM:          attestation.BOMInputs{Body: bomBody, CycloneDXVersion: attestation.DefaultCycloneDXVersion},
-		PhaseResults: results,
-		AICRVersion:  version,
+		OutputDir:               cfg.OutDir,
+		Recipe:                  rec,
+		RecipeYAML:              recipeYAML,
+		Snapshot:                snap,
+		SnapshotYAML:            snapshotYAML,
+		BOM:                     attestation.BOMInputs{Body: bomBody, CycloneDXVersion: attestation.DefaultCycloneDXVersion},
+		PhaseResults:            results,
+		AICRVersion:             version,
+		ValidatorCatalogVersion: catalogVersion(cat),
+		ValidatorImages:         validatorImagesForPredicate(cat),
 	})
 	if err != nil {
 		return err
@@ -198,7 +209,7 @@ func signAndPushBundle(
 ) (signPushOutcome, error) {
 
 	if cfg.Push == "" {
-		return signPushOutcome{Sign: &attestation.SignResult{}}, nil
+		return signPushOutcome{}, nil
 	}
 
 	signCtx, signCancel := context.WithTimeout(ctx, defaults.EvidenceBundleSignTimeout)
@@ -240,7 +251,7 @@ func pushArtifact(ctx context.Context, sourceDir, ref string, cfg *recipeEvidenc
 // images give the same information for the typical post-deployment
 // validate flow; when the snapshot is empty or pre-deployment, the
 // BOM falls back to chart refs + validator images only.
-func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, version, commit string) ([]byte, error) {
+func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
 	if bomPath != "" {
 		body, err := os.ReadFile(bomPath)
 		if err != nil {
@@ -248,7 +259,7 @@ func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshott
 		}
 		return body, nil
 	}
-	return buildAutoBOM(rec, snap, version, commit)
+	return buildAutoBOM(rec, snap, cat, version)
 }
 
 // buildAutoBOM synthesizes a CycloneDX 1.6 BOM from:
@@ -267,12 +278,7 @@ func loadOrGenerateBOM(bomPath string, rec *recipe.RecipeResult, snap *snapshott
 //     still requires `make bom` via --bom.
 //
 // Returns the JSON bytes ready to embed in BOMInputs.Body.
-func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, version, commit string) ([]byte, error) {
-	cat, err := catalog.Load(version, commit)
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load validator catalog for auto BOM", err)
-	}
-
+func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, cat *catalog.ValidatorCatalog, version string) ([]byte, error) {
 	results := make([]bom.ComponentResult, 0, len(rec.ComponentRefs)+1)
 	for _, c := range rec.ComponentRefs {
 		if !c.IsEnabled() {
@@ -290,24 +296,7 @@ func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, version,
 		})
 	}
 
-	if len(cat.Validators) > 0 {
-		// Catalog lists one entry per validator-check, which often share
-		// container images (the deployment phase's expected-resources
-		// and chainsaw checks ship from the same image). Dedupe so the
-		// BOM doesn't list the same `img:` ref dozens of times under
-		// the validators dependency.
-		seen := make(map[string]struct{}, len(cat.Validators))
-		images := make([]string, 0, len(cat.Validators))
-		for _, v := range cat.Validators {
-			if v.Image == "" {
-				continue
-			}
-			if _, dup := seen[v.Image]; dup {
-				continue
-			}
-			seen[v.Image] = struct{}{}
-			images = append(images, v.Image)
-		}
+	if images := dedupValidatorImages(cat); len(images) > 0 {
 		results = append(results, bom.ComponentResult{
 			Name:        "validators",
 			DisplayName: "AICR validators",
@@ -344,6 +333,62 @@ func buildAutoBOM(rec *recipe.RecipeResult, snap *snapshotter.Snapshot, version,
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to encode auto-generated BOM", encErr)
 	}
 	return buf.Bytes(), nil
+}
+
+// dedupValidatorImages returns the validator catalog's container image
+// refs deduplicated by image string, preserving discovery order. The
+// catalog lists one entry per validator-check, and the deployment
+// phase's expected-resources + chainsaw checks frequently share an
+// image, so this collapse is required to keep both the BOM and the
+// predicate's ValidatorImages list from repeating the same `img:` ref.
+//
+// Returns nil for a catalog with no validators.
+func dedupValidatorImages(cat *catalog.ValidatorCatalog) []string {
+	if cat == nil || len(cat.Validators) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(cat.Validators))
+	out := make([]string, 0, len(cat.Validators))
+	for _, v := range cat.Validators {
+		if v.Image == "" {
+			continue
+		}
+		if _, dup := seen[v.Image]; dup {
+			continue
+		}
+		seen[v.Image] = struct{}{}
+		out = append(out, v.Image)
+	}
+	return out
+}
+
+// catalogVersion returns the catalog's metadata version, or "" when
+// the catalog has no metadata block (legacy catalogs predating the
+// metadata field). Acts as the predicate.ValidatorCatalogVersion source.
+func catalogVersion(cat *catalog.ValidatorCatalog) string {
+	if cat == nil || cat.Metadata == nil {
+		return ""
+	}
+	return cat.Metadata.Version
+}
+
+// validatorImagesForPredicate adapts the dedup'd image list to the
+// attestation.ValidatorImage slice the predicate carries. The Digest
+// field stays empty — the catalog records image refs by tag, not by
+// digest; resolving image refs to digests would require a registry
+// round-trip per image, which validate's hot path deliberately avoids.
+// Operators wanting digest pinning can supply an exhaustive BOM via
+// --bom; see audit item #10 for the longer-term resolver path.
+func validatorImagesForPredicate(cat *catalog.ValidatorCatalog) []attestation.ValidatorImage {
+	images := dedupValidatorImages(cat)
+	if len(images) == 0 {
+		return nil
+	}
+	out := make([]attestation.ValidatorImage, 0, len(images))
+	for _, img := range images {
+		out = append(out, attestation.ValidatorImage{Image: img})
+	}
+	return out
 }
 
 // observedImagesFromSnapshot returns the cluster-observed image refs
@@ -394,11 +439,22 @@ func buildPointerInputs(bundle *attestation.Bundle, out signPushOutcome) attesta
 		in.BundleHash = out.Summary.Digest
 	}
 	if out.Sign != nil {
-		in.Signer = attestation.PointerSigner{
-			Identity:      out.Sign.Identity,
-			Issuer:        out.Sign.Issuer,
-			RekorLogIndex: out.Sign.RekorLogIndex,
+		signer := &attestation.PointerSigner{
+			Identity: out.Sign.Identity,
+			Issuer:   out.Sign.Issuer,
 		}
+		// --no-rekor signing returns RekorLogIndex == 0 with no Rekor
+		// entry actually created; the SignResult struct has no separate
+		// "did we hit Rekor?" boolean. Treat zero as "no Rekor entry"
+		// at the pointer-emit boundary. (Rekor index 0 is a legitimate
+		// position, but the signer call path that produces it always
+		// also sets a non-empty UUID — when we wire UUID through we can
+		// distinguish; today, zero from a SignResult means absent.)
+		if out.Sign.RekorLogIndex > 0 {
+			idx := out.Sign.RekorLogIndex
+			signer.RekorLogIndex = &idx
+		}
+		in.Signer = signer
 	}
 	return in
 }

@@ -23,6 +23,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/fingerprint"
 )
 
+func ptrInt64(v int64) *int64 { return &v }
+
 func TestBuildPointer_RequiresBundle(t *testing.T) {
 	if _, err := BuildPointer(PointerInputs{}); err == nil {
 		t.Errorf("expected error when bundle is nil")
@@ -44,14 +46,15 @@ func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 			},
 		},
 	}
+	rekorIdx := int64(42)
 	p, err := BuildPointer(PointerInputs{
 		Bundle:     bundle,
 		BundleOCI:  "ghcr.io/foo/aicr-evidence:abc",
 		BundleHash: "sha256:abc",
-		Signer: PointerSigner{
+		Signer: &PointerSigner{
 			Identity:      "test@example.com",
 			Issuer:        "https://oauth.example.com",
-			RekorLogIndex: 42,
+			RekorLogIndex: &rekorIdx,
 		},
 	})
 	if err != nil {
@@ -73,8 +76,11 @@ func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 	if att.Bundle.OCI != "ghcr.io/foo/aicr-evidence:abc" {
 		t.Errorf("OCI mismatch: %q", att.Bundle.OCI)
 	}
-	if att.Signer.RekorLogIndex != 42 {
-		t.Errorf("RekorLogIndex = %d", att.Signer.RekorLogIndex)
+	if att.Signer == nil {
+		t.Fatalf("Signer should be non-nil for signed bundle")
+	}
+	if att.Signer.RekorLogIndex == nil || *att.Signer.RekorLogIndex != 42 {
+		t.Errorf("RekorLogIndex = %v, want *int64(42)", att.Signer.RekorLogIndex)
 	}
 	if att.Fingerprint.Accelerator != "h100" {
 		t.Errorf("denormalized accelerator missing: %q", att.Fingerprint.Accelerator)
@@ -95,7 +101,7 @@ func TestPointer_RoundTripsYAML(t *testing.T) {
 					Digest:        "sha256:abc",
 					PredicateType: PredicateTypeV1,
 				},
-				Signer:        PointerSigner{Identity: "u@x", Issuer: "iss", RekorLogIndex: 7},
+				Signer:        &PointerSigner{Identity: "u@x", Issuer: "iss", RekorLogIndex: ptrInt64(7)},
 				AttestedAt:    time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 				CriteriaMatch: PointerCriteriaMatch{Matched: true},
 				PhaseSummary: map[Phase]PointerPhaseStat{
@@ -118,6 +124,63 @@ func TestPointer_RoundTripsYAML(t *testing.T) {
 		got.Attestations[0].Bundle.OCI != "ghcr.io/x/aicr-evidence:1" {
 
 		t.Errorf("round-trip mismatch: %+v", got)
+	}
+}
+
+func TestBuildPointer_UnsignedOmitsSigner(t *testing.T) {
+	bundle := &Bundle{
+		RecipeName: "x",
+		Predicate: &Predicate{
+			AttestedAt:    time.Now(),
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
+		},
+	}
+	p, err := BuildPointer(PointerInputs{Bundle: bundle})
+	if err != nil {
+		t.Fatalf("BuildPointer: %v", err)
+	}
+	if att := p.Attestations[0]; att.Signer != nil {
+		t.Errorf("unsigned bundle should leave Signer nil; got %+v", att.Signer)
+	}
+
+	body, err := MarshalPointer(p)
+	if err != nil {
+		t.Fatalf("MarshalPointer: %v", err)
+	}
+	if contains(body, "signer:") {
+		t.Errorf("unsigned pointer YAML must omit signer block; got:\n%s", body)
+	}
+}
+
+func TestBuildPointer_SignedWithoutRekorOmitsLogIndex(t *testing.T) {
+	bundle := &Bundle{
+		RecipeName: "x",
+		Predicate: &Predicate{
+			AttestedAt:    time.Now(),
+			CriteriaMatch: fingerprint.MatchResult{Matched: true},
+		},
+	}
+	p, err := BuildPointer(PointerInputs{
+		Bundle: bundle,
+		Signer: &PointerSigner{Identity: "u@x", Issuer: "https://oauth.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("BuildPointer: %v", err)
+	}
+	att := p.Attestations[0]
+	if att.Signer == nil {
+		t.Fatalf("expected non-nil Signer for signed bundle")
+	}
+	if att.Signer.RekorLogIndex != nil {
+		t.Errorf("RekorLogIndex should be nil when --no-rekor; got *%d", *att.Signer.RekorLogIndex)
+	}
+
+	body, err := MarshalPointer(p)
+	if err != nil {
+		t.Fatalf("MarshalPointer: %v", err)
+	}
+	if contains(body, "rekorLogIndex") {
+		t.Errorf("signed-without-rekor pointer must omit rekorLogIndex; got:\n%s", body)
 	}
 }
 
