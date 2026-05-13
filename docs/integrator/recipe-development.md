@@ -486,7 +486,7 @@ aicr bundle --recipe recipe.yaml \
 helm install ... --set image.repository=602401143452.dkr.ecr.eu-west-1.amazonaws.com/eks/aws-efa-k8s-device-plugin
 ```
 
-`--dynamic` is supported with `helm` and `argocd-helm` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
+`--dynamic` is supported with `helm`, `argocd-helm`, and `flux` deployers; `argocd` does not support it (use `argocd-helm` instead). See [Dynamic Install-Time Values](../user/cli-reference.md#dynamic-install-time-values) for the broader pattern.
 
 **Partition-aware variants.** Standard AWS uses account ID `602401143452`. GovCloud and China use different accounts and URI suffixes:
 

@@ -174,7 +174,7 @@ The component registry (`recipes/registry.yaml`) supports these fields:
 
 **Note:**
 - Values are written directly to `values.yaml`, not via templates
-- Deployment documentation (README) is generated at the deployer level (helm, argocd)
+- Deployment documentation (README) is generated at the deployer level (helm, argocd, flux)
 - The `pkg/component` package provides helper utilities if custom bundler logic is needed
 
 ## Best Practices

@@ -323,15 +323,15 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of bundler types to execute |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. |
-| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm` and `deployer=argocd-helm`. |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, and `deployer=flux`. |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH` and registry credentials configured for any private upstream repos (`HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` for HTTP(S); docker config for OCI). If prerequisites are missing the request fails with HTTP 500 and a structured error code (`UNAVAILABLE` for missing helm, `UNAUTHORIZED` for credentials). |
-| `deployer` | string | helm | Deployment method: `helm`, `argocd`, or `argocd-helm` |
-| `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=argocd-helm`) |
+| `deployer` | string | helm | Deployment method: `helm`, `argocd`, `argocd-helm`, or `flux` |
+| `repo` | string | | Git repository URL for GitOps deployments (used with `deployer=argocd` and `deployer=flux`; ignored by `deployer=argocd-helm`) |
 
 **Request Body:**
 

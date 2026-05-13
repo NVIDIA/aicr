@@ -365,10 +365,17 @@ func validateForPull(c Component) error {
 	return nil
 }
 
-// shouldVendor reports whether c should be routed through the vendor
+// ShouldVendor reports whether c should be routed through the vendor
 // path when --vendor-charts is on. Returns false (without error) for
 // shapes that are already local after #662 (Kustomize, manifest-only)
 // — callers fall through to the existing classify() path for those.
+// Exported for deployers that build their own vendored folder layout
+// (e.g., flux) and need the same predicate without duplicating it.
+func ShouldVendor(c Component) bool {
+	return shouldVendor(c)
+}
+
+// shouldVendor is the unexported implementation used by Write().
 func shouldVendor(c Component) bool {
 	if c.Repository == "" {
 		return false

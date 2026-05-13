@@ -839,17 +839,17 @@ paths:
           required: false
           description: >
             Deployment method for generated components.
-            Supported values: helm (default), argocd, argocd-helm.
+            Supported values: helm (default), argocd, argocd-helm, flux.
           schema:
             type: string
-            enum: [helm, argocd, argocd-helm]
+            enum: [helm, argocd, argocd-helm, flux]
             default: helm
         - name: repo
           in: query
           required: false
           description: >
-            Git repository URL for GitOps deployments (used with deployer=argocd).
-            Sets the repository URL in the generated app-of-apps.yaml manifest.
+            Git repository URL for GitOps deployments (used with deployer=argocd and deployer=flux).
+            Sets the repository URL in the generated app-of-apps.yaml or GitRepository source manifests.
             If not provided, a placeholder URL is used that must be updated manually.
           schema:
             type: string
