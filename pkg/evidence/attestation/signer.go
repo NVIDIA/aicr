@@ -23,63 +23,34 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// SignResult describes a successful sign() call. Aliased to the
-// bundler primitive's result type so callers don't translate fields.
-type SignResult = bundleattest.SignedAttestation
-
 // Signer signs the in-toto Statement carrying the v1 recipe-evidence
 // predicate. statementJSON is the unsigned bytes from BuildStatement; the
 // signer DSSE-wraps it and produces a Sigstore bundle.
-type Signer interface {
-	Sign(ctx context.Context, statementJSON []byte) (*SignResult, error)
-}
-
-// KeylessSigner signs via Fulcio + Rekor with the supplied OIDC token.
-// Token discovery is the caller's responsibility.
-type KeylessSigner struct {
-	OIDCToken string
-	FulcioURL string
-	RekorURL  string
-}
-
-// NewKeylessSigner returns a signer wired to Sigstore public-good URLs.
-func NewKeylessSigner(oidcToken string) *KeylessSigner {
-	return &KeylessSigner{
-		OIDCToken: oidcToken,
-		FulcioURL: bundleattest.DefaultFulcioURL,
-		RekorURL:  bundleattest.DefaultRekorURL,
-	}
-}
-
-// Sign DSSE-wraps and signs the statement by calling the shared
-// pkg/bundler/attestation primitive. Errors are propagated as-is so
-// the underlying ErrCodeTimeout (504) vs ErrCodeUnavailable (502)
-// classification reaches the CLI/API boundary.
 //
-//nolint:unparam // *SignResult is part of the Signer interface; tests exercise error paths only.
-func (k *KeylessSigner) Sign(ctx context.Context, statementJSON []byte) (*SignResult, error) {
-	return bundleattest.SignStatement(ctx, statementJSON, bundleattest.SignOptions{
-		OIDCToken: k.OIDCToken,
-		FulcioURL: k.FulcioURL,
-		RekorURL:  k.RekorURL,
-	})
+// The keyless implementation lives in pkg/bundler/attestation as
+// SignStatement; callers that need keyless signing invoke it directly
+// (the validate-emit path resolves an OIDC token adjacent to the call so
+// Fulcio's nonce-binding window is respected). This interface exists for
+// the offline NoOpSigner path and for test seams.
+type Signer interface {
+	Sign(ctx context.Context, statementJSON []byte) (*bundleattest.SignedAttestation, error)
 }
 
 // NoOpSigner returns BundleJSON=nil. Leaves the bundle's unsigned
 // Statement on disk so a follow-up `cosign attest` can sign it.
 type NoOpSigner struct{}
 
-// Sign returns an empty SignResult; WriteSignedAttestation no-ops on it.
-func (NoOpSigner) Sign(_ context.Context, _ []byte) (*SignResult, error) {
-	return &SignResult{}, nil
+// Sign returns an empty SignedAttestation; WriteSignedAttestation no-ops on it.
+func (NoOpSigner) Sign(_ context.Context, _ []byte) (*bundleattest.SignedAttestation, error) {
+	return &bundleattest.SignedAttestation{}, nil
 }
 
 // SignBundle signs the bundle's StatementJSON (recipe-subject form) and
 // writes attestation.intoto.jsonl into the summary directory. A
 // NoOpSigner skips the write.
 //
-//nolint:unparam // *SignResult feeds the pointer file's signer block; tests exercise only error paths.
-func SignBundle(ctx context.Context, b *Bundle, s Signer) (*SignResult, error) {
+//nolint:unparam // *SignedAttestation feeds the pointer file's signer block; tests exercise only error paths.
+func SignBundle(ctx context.Context, b *Bundle, s Signer) (*bundleattest.SignedAttestation, error) {
 	if b == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle is required")
 	}

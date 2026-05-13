@@ -86,10 +86,13 @@ func TestBundleCmd(t *testing.T) {
 }
 
 // TestSelectAttester_WiresEnvAndFlags is a thin smoke test for the CLI shim
-// over attestation.ResolveAttester. The OIDC source-precedence logic itself
-// is exhaustively covered in the attestation package's resolver_test.go;
-// here we only verify that selectAttester forwards CLI flags and the two
-// ACTIONS_ID_TOKEN_REQUEST_* env vars into the resolver correctly.
+// over attestation.ResolveAttesterLazy. The OIDC source-precedence logic
+// itself is exhaustively covered in the attestation package's
+// resolver_test.go; here we only verify that selectAttester forwards CLI
+// flags and the two ACTIONS_ID_TOKEN_REQUEST_* env vars into the
+// resolver correctly, and that --attest=true produces the lazy attester
+// (so the OIDC token is resolved at first Attest() rather than at
+// bundler construction).
 func TestSelectAttester_WiresEnvAndFlags(t *testing.T) {
 	// Disabled path: shim must short-circuit without inspecting env or flags.
 	t.Setenv("ACTIONS_ID_TOKEN_REQUEST_URL", "https://example.invalid")
@@ -103,8 +106,9 @@ func TestSelectAttester_WiresEnvAndFlags(t *testing.T) {
 		t.Fatalf("expected *NoOpAttester when attest=false, got %T", att)
 	}
 
-	// Identity-token flag: the shim must pass identityToken through; resolver
-	// returns a KeylessAttester synchronously without any network call.
+	// Identity-token flag: the shim must pass identityToken through; the
+	// lazy resolver returns a *LazyKeylessAttester synchronously without
+	// any network call.
 	att, err = selectAttester(context.Background(), &bundleCmdOptions{
 		attest:        true,
 		identityToken: "pre-fetched-token",
@@ -112,7 +116,7 @@ func TestSelectAttester_WiresEnvAndFlags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("selectAttester returned error: %v", err)
 	}
-	if _, ok := att.(*attestation.KeylessAttester); !ok {
-		t.Errorf("expected *KeylessAttester, got %T", att)
+	if _, ok := att.(*attestation.LazyKeylessAttester); !ok {
+		t.Errorf("expected *LazyKeylessAttester (deferred token resolution), got %T", att)
 	}
 }

@@ -67,20 +67,11 @@ const (
 	// SummaryBundleDirName is the local-output directory for the summary bundle.
 	SummaryBundleDirName = "summary-bundle"
 
-	// LogsBundleDirName is the local-output directory for the optional logs bundle.
-	LogsBundleDirName = "logs-bundle"
-
 	// PointerFilename is the local-output filename for the pointer YAML.
 	PointerFilename = "pointer.yaml"
 
 	// ctrfDirName is the bundle subdirectory that holds per-phase CTRF reports.
 	ctrfDirName = "ctrf"
-
-	// phasesDirName is the logs-bundle subdirectory grouping per-phase logs.
-	phasesDirName = "phases"
-
-	// logsDirName is the inner directory under each phase that holds log files.
-	logsDirName = "logs"
 
 	// DefaultCycloneDXVersion is the BOM spec version we record when callers
 	// don't override it. Mirrors what `make bom` produces today.
@@ -158,6 +149,13 @@ type PhaseSummary struct {
 }
 
 // BOMRef records the CycloneDX BOM bundled alongside the predicate.
+//
+// When the BOM was auto-generated (no --bom path provided), the
+// cluster-observed images section lists refs in registry-stripped
+// "<name>:<tag>" form — the constraint-evaluation collector strips
+// registries for measurement-key stability across mirrors. Auditors
+// comparing the BOM against a specific registry should require operators
+// to ship an explicit --bom path, which carries fully-qualified refs.
 type BOMRef struct {
 	Format     string `json:"format" yaml:"format"`
 	Version    string `json:"version" yaml:"version"`

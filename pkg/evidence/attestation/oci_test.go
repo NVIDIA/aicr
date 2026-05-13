@@ -17,8 +17,6 @@ package attestation
 import (
 	"context"
 	"testing"
-
-	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
 )
 
 func TestPush_RejectsEmptyOpts(t *testing.T) {
@@ -36,33 +34,6 @@ func TestPush_RejectsEmptyOpts(t *testing.T) {
 				t.Errorf("expected error for %s", tt.name)
 			}
 		})
-	}
-}
-
-func TestNewKeylessSigner_DefaultURLs(t *testing.T) {
-	s := NewKeylessSigner("token")
-	if s.OIDCToken != "token" {
-		t.Errorf("OIDCToken not set")
-	}
-	if s.FulcioURL != bundleattest.DefaultFulcioURL {
-		t.Errorf("FulcioURL = %q", s.FulcioURL)
-	}
-	if s.RekorURL != bundleattest.DefaultRekorURL {
-		t.Errorf("RekorURL = %q", s.RekorURL)
-	}
-}
-
-func TestKeylessSigner_RejectsEmptyToken(t *testing.T) {
-	s := &KeylessSigner{FulcioURL: bundleattest.DefaultFulcioURL, RekorURL: bundleattest.DefaultRekorURL}
-	if _, err := s.Sign(context.Background(), []byte("statement")); err == nil {
-		t.Errorf("expected error on empty OIDC token")
-	}
-}
-
-func TestKeylessSigner_RejectsEmptyStatement(t *testing.T) {
-	s := NewKeylessSigner("dummy")
-	if _, err := s.Sign(context.Background(), nil); err == nil {
-		t.Errorf("expected error on empty statement")
 	}
 }
 

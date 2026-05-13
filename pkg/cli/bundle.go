@@ -590,16 +590,24 @@ func runBundleCmd(ctx context.Context, cmd *cli.Command) error {
 
 // selectAttester wires CLI flags and runtime environment into the
 // attestation package's source-precedence resolver. All token-acquisition
-// and precedence logic lives in attestation.ResolveAttester; this function
-// only translates pkg/cli surface (flags + env vars + stderr) into a
-// ResolveOptions value.
+// and precedence logic lives in attestation.ResolveAttesterLazy; this
+// function only translates pkg/cli surface (flags + env vars + stderr)
+// into a ResolveOptions value.
+//
+// Uses ResolveAttesterLazy so the OIDC token is resolved at first
+// Attest() call (which fires during bundler.Make), not at attester
+// construction. Fulcio binds the certificate to a fresh nonce at
+// token-issue time; resolving early-and-holding can exceed Fulcio's
+// tolerance for long bundle runs and fail with "error processing the
+// identity token". Matches the deferred-resolve pattern used by
+// aicr validate --emit-attestation --push.
 //
 // On failure it surfaces the "remove --attest to skip" remediation hint via
 // slog so headless users who hit a 5-minute device-flow timeout know the
 // escape hatch — the underlying error is propagated unchanged so its
 // pkg/errors classification (and the resulting CLI exit code) is preserved.
 func selectAttester(ctx context.Context, opts *bundleCmdOptions) (attestation.Attester, error) {
-	att, err := attestation.ResolveAttester(ctx, attestation.ResolveOptions{
+	att, err := attestation.ResolveAttesterLazy(ctx, attestation.ResolveOptions{
 		Attest:        opts.attest,
 		IdentityToken: opts.identityToken,
 		AmbientURL:    os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL"),

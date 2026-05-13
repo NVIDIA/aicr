@@ -17,11 +17,9 @@ package attestation
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -51,12 +49,6 @@ type BuildOptions struct {
 
 	PhaseResults []*validator.PhaseResult
 
-	// Per-file sha256s are always pre-committed in the manifest;
-	// IncludeLogs only controls whether the logs bundle directory is
-	// emitted alongside the summary bundle.
-	PhaseLogs   map[Phase][]LogFile
-	IncludeLogs bool
-
 	AICRVersion             string
 	ValidatorCatalogVersion string
 
@@ -76,22 +68,10 @@ type BOMInputs struct {
 	CycloneDXVersion string
 }
 
-// LogFile describes one log file under a phase. The builder copies it
-// into logs-bundle/phases/<phase>/logs/<basename>.
-type LogFile struct {
-	SourcePath string
-
-	// Basename defaults to filepath.Base(SourcePath) when empty.
-	Basename string
-}
-
 // Bundle is what the builder returns: a description of the on-disk
 // artifacts and the in-memory predicate ready to be signed.
 type Bundle struct {
 	SummaryDir string
-
-	// LogsDir is "" when IncludeLogs is false or no logs were supplied.
-	LogsDir string
 
 	RecipeName string
 
@@ -180,18 +160,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		}
 	}
 
-	logsDir := ""
-	if opts.IncludeLogs {
-		logsDir = filepath.Join(opts.OutputDir, LogsBundleDirName)
-		if logErr := writeLogsBundle(logsDir, opts.PhaseLogs); logErr != nil {
-			return nil, logErr
-		}
-	}
-
-	// Manifest pre-commits per-file hashes for any logs the contributor
-	// may publish later, so the integrity chain extends to log content
-	// the bundle doesn't physically carry.
-	manifest, err := buildManifestWithLogPreCommits(summaryDir, opts.PhaseLogs)
+	manifest, err := BuildManifest(summaryDir, ManifestFilename, StatementFilename, AttestationFilename)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +220,6 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 
 	return &Bundle{
 		SummaryDir:    summaryDir,
-		LogsDir:       logsDir,
 		RecipeName:    recipeName,
 		SubjectDigest: subjectDigest,
 		Predicate:     pred,
@@ -317,124 +285,6 @@ func criteriaOf(r *recipe.RecipeResult) *recipe.Criteria {
 		return nil
 	}
 	return r.Criteria
-}
-
-// logBasename resolves the in-bundle filename for a log entry and
-// rejects any value that would escape the per-phase logs directory.
-// f.Basename is operator-controlled, so we treat it as untrusted.
-func logBasename(f LogFile) (string, error) {
-	name := f.Basename
-	if name == "" {
-		name = filepath.Base(f.SourcePath)
-	}
-	cleaned := filepath.Base(filepath.Clean(name))
-	if cleaned != name || cleaned == "." || cleaned == ".." {
-		return "", errors.New(errors.ErrCodeInvalidRequest, "log basename must not contain path separators")
-	}
-	return cleaned, nil
-}
-
-// logRelPath returns the manifest-relative path used to address a log
-// inside (or alongside) the summary bundle. The same path is used for
-// the on-disk logs bundle and for the manifest pre-commit, so a
-// contributor who publishes logs later still hashes against the same
-// entry the signer pre-committed.
-func logRelPath(p Phase, basename string) string {
-	return phasesDirName + "/" + string(p) + "/" + logsDirName + "/" + basename
-}
-
-// writeLogsBundle copies log files into logsDir/phases/<phase>/logs/.
-// Streams bytes so multi-GB logs don't materialize in memory.
-func writeLogsBundle(logsDir string, phaseLogs map[Phase][]LogFile) error {
-	if len(phaseLogs) == 0 {
-		return nil
-	}
-	for _, p := range AllPhases {
-		files, ok := phaseLogs[p]
-		if !ok || len(files) == 0 {
-			continue
-		}
-		dest := filepath.Join(logsDir, phasesDirName, string(p), logsDirName)
-		if err := os.MkdirAll(dest, 0o755); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to create logs phase dir", err)
-		}
-		for _, f := range files {
-			name, nameErr := logBasename(f)
-			if nameErr != nil {
-				return nameErr
-			}
-			if err := streamCopy(f.SourcePath, filepath.Join(dest, name)); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// streamCopy copies src→dst via io.Copy so neither body is held in RAM.
-func streamCopy(src, dst string) (retErr error) {
-	in, err := os.Open(filepath.Clean(src)) //nolint:gosec // src is operator-supplied validator output
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to open source log "+src, err)
-	}
-	defer func() { _ = in.Close() }()
-
-	out, err := os.OpenFile(filepath.Clean(dst), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // dst is package-controlled
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create log in bundle", err)
-	}
-	defer func() {
-		if closeErr := out.Close(); closeErr != nil && retErr == nil {
-			retErr = errors.Wrap(errors.ErrCodeInternal, "failed to close log in bundle", closeErr)
-		}
-	}()
-	if _, err := io.Copy(out, in); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to copy log into bundle", err)
-	}
-	return nil
-}
-
-// buildManifestWithLogPreCommits walks the summary bundle and appends
-// stream-hashed pre-commit entries for every log file in phaseLogs.
-// Pre-committing means the manifest binds the log content even when the
-// contributor publishes it later as a separate logs bundle.
-func buildManifestWithLogPreCommits(summaryDir string, phaseLogs map[Phase][]LogFile) (*Manifest, error) {
-	// Exclude self-referential files: the manifest can't enumerate
-	// itself, and the statement / signed attestation derive from the
-	// manifest digest so they're bound to the signature, not the
-	// manifest.
-	m, err := BuildManifest(summaryDir, ManifestFilename, StatementFilename, AttestationFilename)
-	if err != nil {
-		return nil, err
-	}
-	if len(phaseLogs) == 0 {
-		return m, nil
-	}
-
-	for _, p := range AllPhases {
-		for _, f := range phaseLogs[p] {
-			info, statErr := os.Stat(f.SourcePath)
-			if statErr != nil {
-				return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat log for pre-commit", statErr)
-			}
-			digest, hashErr := HashFileSHA256(f.SourcePath)
-			if hashErr != nil {
-				return nil, hashErr
-			}
-			name, nameErr := logBasename(f)
-			if nameErr != nil {
-				return nil, nameErr
-			}
-			m.Files = append(m.Files, ManifestFile{
-				Path:      logRelPath(p, name),
-				Size:      info.Size(),
-				SHA256:    "sha256:" + digest,
-				MediaType: "text/plain",
-			})
-		}
-	}
-	sort.Slice(m.Files, func(i, j int) bool { return m.Files[i].Path < m.Files[j].Path })
-	return m, nil
 }
 
 // countBOMComponents reports the number of components[] entries in a

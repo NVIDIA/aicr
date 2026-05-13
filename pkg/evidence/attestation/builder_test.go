@@ -150,46 +150,6 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	if bundle.Predicate.BOM.Format != BOMFormat {
 		t.Errorf("BOM format = %q", bundle.Predicate.BOM.Format)
 	}
-
-	if bundle.LogsDir != "" {
-		t.Errorf("LogsDir should be empty when IncludeLogs=false, got %q", bundle.LogsDir)
-	}
-}
-
-func TestBuild_IncludeLogsWritesLogsBundle(t *testing.T) {
-	dir := t.TempDir()
-	srcLog := filepath.Join(dir, "src.log")
-	if err := os.WriteFile(srcLog, []byte("line1\nline2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	rec := &recipe.RecipeResult{
-		Criteria: &recipe.Criteria{Accelerator: recipe.CriteriaAcceleratorH100},
-	}
-	bundle, err := Build(context.Background(), BuildOptions{
-		OutputDir:    dir,
-		Recipe:       rec,
-		RecipeYAML:   []byte("a: b\n"),
-		Snapshot:     &snapshotter.Snapshot{},
-		SnapshotYAML: []byte("a: b\n"),
-		BOM:          BOMInputs{Body: []byte("{}"), CycloneDXVersion: "1.6"},
-		IncludeLogs:  true,
-		PhaseLogs: map[Phase][]LogFile{
-			PhaseDeployment: {{SourcePath: srcLog}},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	if bundle.LogsDir == "" {
-		t.Fatalf("expected LogsDir to be populated")
-	}
-	mustReadFile(t, filepath.Join(bundle.LogsDir, "phases", "deployment", "logs", "src.log"))
-
-	manifest := mustReadFile(t, filepath.Join(bundle.SummaryDir, ManifestFilename))
-	if !contains(manifest, "phases/deployment/logs/src.log") {
-		t.Errorf("manifest did not pre-commit log file hash")
-	}
 }
 
 func TestBuild_RejectsCanceledContext(t *testing.T) {
@@ -294,40 +254,6 @@ func TestCriteriaOf_Nil(t *testing.T) {
 	}
 }
 
-func TestLogBasename_PathTraversal(t *testing.T) {
-	cases := []struct {
-		name    string
-		in      LogFile
-		wantErr bool
-		want    string
-	}{
-		{"empty Basename uses SourcePath", LogFile{SourcePath: "/var/log/foo.log"}, false, "foo.log"},
-		{"explicit Basename", LogFile{SourcePath: "/x/y", Basename: "n.log"}, false, "n.log"},
-		{"slash in Basename rejected", LogFile{Basename: "etc/passwd"}, true, ""},
-		{"dotdot rejected", LogFile{Basename: ".."}, true, ""},
-		{"dot rejected", LogFile{Basename: "."}, true, ""},
-		{"absolute path rejected", LogFile{Basename: "/etc/passwd"}, true, ""},
-	}
-	for _, tt := range cases {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := logBasename(tt.in)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
-			}
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestStreamCopy_MissingSourceErrors(t *testing.T) {
-	dir := t.TempDir()
-	if err := streamCopy(filepath.Join(dir, "no-such-file"), filepath.Join(dir, "out")); err == nil {
-		t.Errorf("expected error on missing source")
-	}
-}
-
 func TestCountBOMComponents_MalformedErrors(t *testing.T) {
 	if _, err := countBOMComponents([]byte("not json")); err == nil {
 		t.Errorf("expected error on malformed BOM JSON")
@@ -356,56 +282,6 @@ func TestBuild_RejectsMalformedBOM(t *testing.T) {
 	})
 	if err == nil {
 		t.Errorf("expected error on malformed BOM")
-	}
-}
-
-func TestBuild_LogPreCommitWithoutIncludeLogs(t *testing.T) {
-	dir := t.TempDir()
-	srcLog := filepath.Join(dir, "src.log")
-	if err := os.WriteFile(srcLog, []byte("body"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	rec := &recipe.RecipeResult{Criteria: &recipe.Criteria{Accelerator: "h100"}}
-	bundle, err := Build(context.Background(), BuildOptions{
-		OutputDir:    dir,
-		Recipe:       rec,
-		RecipeYAML:   []byte("a: b\n"),
-		Snapshot:     &snapshotter.Snapshot{},
-		SnapshotYAML: []byte("a: b\n"),
-		BOM:          BOMInputs{Body: []byte("{}"), CycloneDXVersion: "1.6"},
-		IncludeLogs:  false,
-		PhaseLogs: map[Phase][]LogFile{
-			PhaseDeployment: {{SourcePath: srcLog}},
-		},
-	})
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	if bundle.LogsDir != "" {
-		t.Errorf("LogsDir should be empty when IncludeLogs=false")
-	}
-	manifest := mustReadFile(t, filepath.Join(bundle.SummaryDir, ManifestFilename))
-	if !contains(manifest, "phases/deployment/logs/src.log") {
-		t.Errorf("manifest should pre-commit log even without IncludeLogs")
-	}
-	if _, statErr := os.Stat(filepath.Join(dir, LogsBundleDirName)); !os.IsNotExist(statErr) {
-		t.Errorf("logs-bundle/ should not exist when IncludeLogs=false")
-	}
-}
-
-func TestWriteLogsBundle_RejectsEvilBasename(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "real.log")
-	if err := os.WriteFile(src, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	logsDir := filepath.Join(dir, "logs-bundle")
-	err := writeLogsBundle(logsDir, map[Phase][]LogFile{
-		PhaseDeployment: {{SourcePath: src, Basename: "../escape"}},
-	})
-	if err == nil {
-		t.Errorf("expected error rejecting traversal Basename")
 	}
 }
 

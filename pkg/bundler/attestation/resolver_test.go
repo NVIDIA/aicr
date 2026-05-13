@@ -145,3 +145,46 @@ func TestResolveAttester(t *testing.T) {
 		})
 	}
 }
+
+// TestResolveAttesterLazy_DefersTokenResolution verifies the lazy entry
+// point does not touch the OIDC chain at construction time. Constructing
+// a lazy attester with a pre-canceled context plus a forced device-flow
+// path (which would error immediately if invoked) must succeed; the
+// error surfaces only when Attest is called.
+func TestResolveAttesterLazy_DefersTokenResolution(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	att, err := ResolveAttesterLazy(ctx, ResolveOptions{
+		Attest:       true,
+		DeviceFlow:   true,
+		PromptWriter: io.Discard,
+	})
+	if err != nil {
+		t.Fatalf("ResolveAttesterLazy must not resolve at construction; got error %v", err)
+	}
+	if _, ok := att.(*LazyKeylessAttester); !ok {
+		t.Fatalf("expected *LazyKeylessAttester, got %T", att)
+	}
+	if att.Identity() != "" {
+		t.Errorf("Identity must be empty before first Attest; got %q", att.Identity())
+	}
+
+	// Now exercise the deferred resolve — the pre-canceled context forces
+	// the device-flow helper to fail, surfacing the error at Attest time.
+	if _, err := att.Attest(ctx, AttestSubject{}); err == nil {
+		t.Error("expected Attest to surface resolver error from canceled context")
+	}
+}
+
+// TestResolveAttesterLazy_DisabledShortCircuits mirrors the eager
+// resolver's Attest=false short-circuit so callers can swap entry points.
+func TestResolveAttesterLazy_DisabledShortCircuits(t *testing.T) {
+	att, err := ResolveAttesterLazy(context.Background(), ResolveOptions{Attest: false})
+	if err != nil {
+		t.Fatalf("disabled short-circuit returned error: %v", err)
+	}
+	if _, ok := att.(*NoOpAttester); !ok {
+		t.Errorf("expected *NoOpAttester, got %T", att)
+	}
+}

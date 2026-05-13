@@ -103,3 +103,69 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 	}
 	return NewKeylessAttester(token), nil
 }
+
+// ResolveAttesterLazy is the deferred-token variant of ResolveAttester.
+// When opts.Attest is true the returned Attester resolves the OIDC token
+// on first Attest() call, not at construction. Use this when there is a
+// meaningful gap between attester setup and the first Attest() call:
+// Fulcio binds the certificate to a fresh nonce at token-issue time, so a
+// token resolved minutes ahead of signing can fail with
+// "error processing the identity token" once the gap exceeds Fulcio's
+// tolerance.
+//
+// The disabled (Attest=false) and NoOpAttester branches match
+// ResolveAttester exactly so callers can swap entry points without
+// changing the test surface.
+//
+//nolint:unparam // error return mirrors ResolveAttester so callers can swap entry points; reserved for future construction-time validation.
+func ResolveAttesterLazy(_ context.Context, opts ResolveOptions) (Attester, error) {
+	if !opts.Attest {
+		return NewNoOpAttester(), nil
+	}
+	return NewLazyKeylessAttester(opts), nil
+}
+
+// LazyKeylessAttester defers OIDC token resolution to the first Attest()
+// call. The underlying KeylessAttester is created on first use and cached
+// for subsequent calls so a single attester produces consistent identity
+// across the run.
+type LazyKeylessAttester struct {
+	opts  ResolveOptions
+	inner *KeylessAttester
+}
+
+// NewLazyKeylessAttester returns an Attester that resolves the OIDC token
+// via the ResolveOIDCToken precedence chain on first Attest() call.
+func NewLazyKeylessAttester(opts ResolveOptions) *LazyKeylessAttester {
+	return &LazyKeylessAttester{opts: opts}
+}
+
+// Attest resolves the OIDC token on first call, then delegates to the
+// cached KeylessAttester for this and every subsequent call. Resolver
+// errors propagate as-is so the pkg/errors classification reaches the
+// caller.
+func (l *LazyKeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]byte, error) {
+	if l.inner == nil {
+		token, err := ResolveOIDCToken(ctx, l.opts)
+		if err != nil {
+			return nil, err
+		}
+		l.inner = NewKeylessAttester(token)
+	}
+	return l.inner.Attest(ctx, subject)
+}
+
+// Identity returns the cached KeylessAttester's identity after the first
+// successful Attest() call; empty string before that.
+func (l *LazyKeylessAttester) Identity() string {
+	if l.inner == nil {
+		return ""
+	}
+	return l.inner.Identity()
+}
+
+// HasRekorEntry mirrors the eager attester: keyless signing always
+// records a Rekor transparency log entry.
+func (l *LazyKeylessAttester) HasRekorEntry() bool {
+	return true
+}
